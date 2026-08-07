@@ -8,6 +8,18 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `bridge-status` and `purge-bridge` removed (breaking, no aliases)
+
+The public `rebar bridge-status` and `rebar purge-bridge` commands, their help pages,
+and the `bridge_status` output schema are removed. Both command names now follow the
+standard unknown-subcommand path and exit non-zero; no deprecation or compatibility
+alias is provided.
+
+Agents must stop invoking either command. Unresolved bridge alerts continue to appear
+in the supported ticket read surfaces with neutral guidance, so they remain visible
+without `bridge-status`. There is no replacement purge command. This removal does not
+change persisted ticket data, and rollback is a straight revert of the removal change.
+
 ## `transition --force-close` renamed to `transition --force` (breaking, no alias)
 
 `rebar transition` now has ONE escape hatch, `--force[=<reason>]`, spelled exactly as

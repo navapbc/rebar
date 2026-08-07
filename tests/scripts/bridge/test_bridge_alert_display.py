@@ -65,6 +65,7 @@ _BRIDGE_ENV_ID = "cccccccc-0000-4000-8000-000000000003"
 _UUID_CREATE = "aaaaaaaa-0000-4000-8000-000000000001"
 _UUID_ALERT = "bbbbbbbb-0000-4000-8000-000000000002"
 _UUID_RESOLVE = "cccccccc-0000-4000-8000-000000000004"
+_NEUTRAL_ALERT_GUIDANCE = "Inspect unresolved bridge alerts for details."
 
 
 def _write_event(
@@ -289,6 +290,7 @@ def test_ticket_show_outputs_health_warning_when_unresolved_alerts(
     combined_output = captured.out + captured.err
 
     assert rc == 0, f"show returned {rc}; stderr: {captured.err!r}"
+    assert _NEUTRAL_ALERT_GUIDANCE in captured.err
     # The output (stdout JSON or stderr warning) must contain some indication of bridge alerts
     assert any(
         indicator in combined_output
@@ -347,6 +349,7 @@ def test_ticket_list_includes_bridge_alerts_in_output(
     combined_output = captured.out + captured.err
 
     assert rc == 0, f"list returned {rc}; stderr: {captured.err!r}"
+    assert _NEUTRAL_ALERT_GUIDANCE in captured.err
     # The list output must surface bridge_alerts for the ticket
     assert any(
         indicator in combined_output

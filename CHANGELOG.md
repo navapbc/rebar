@@ -10,6 +10,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING — the `bridge-status` and `purge-bridge` CLI commands are removed with no
+  compatibility aliases.** Invoking either name now follows the standard unknown-subcommand
+  path and exits non-zero. No persisted data format changes with their removal.
+
 ### Changed
 
 - **BREAKING — `rebar transition --force-close=<reason>` is now `rebar transition

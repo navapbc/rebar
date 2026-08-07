@@ -6,7 +6,7 @@ The `rebar` CLI has two command families. **Help-backed subcommands** are the di
 
 ## Help-backed subcommands
 
-The 53 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 51 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
@@ -31,12 +31,6 @@ Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]
 
 ```
 Usage: rebar bridge-probe   (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN; optional JIRA_PROJECT)
-```
-
-### `bridge-status`
-
-```
-Usage: rebar bridge-status [--output json]
 ```
 
 ### `check-ac`
@@ -319,12 +313,6 @@ Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]   (r
 
 ```
 Usage: rebar next-batch <epic_id> [--output json]
-```
-
-### `purge-bridge`
-
-```
-Usage: rebar purge-bridge --keep=<PROJECT_KEY> [--dry-run]
 ```
 
 ### `quality-check`
