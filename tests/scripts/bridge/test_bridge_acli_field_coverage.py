@@ -346,9 +346,10 @@ class TestAcliClientUpdateFieldExtraction:
         )
         assert result == {"key": "TEST-1"}
 
-        # Priority must be routed to update_priority via REST.
-        # acli_cmd comes from the fixture's AcliClient (acli_cmd=["echo"])
-        mock_priority.assert_called_once_with("TEST-1", "High", acli_cmd=["echo"])
+        # Priority must be routed to update_priority via REST. No acli_cmd is
+        # forwarded: that path spawns no ACLI subprocess, so the client's ACLI argv
+        # prefix (the fixture's ["echo"]) is inapplicable to it (bug c9c6).
+        mock_priority.assert_called_once_with("TEST-1", "High")
 
     def test_acli_update_sends_description(self, acli_mod: Any, acli_capture: Any) -> None:
         """AcliClient.update_issue() should support sending description updates."""
