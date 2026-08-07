@@ -17,6 +17,9 @@ matched EXPLICITLY and rejected loudly.
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from rebar._commands._seam import CommandError
@@ -131,3 +134,84 @@ def test_truncations_are_not_abbreviation_matched() -> None:
     """
     assert _force_reason(["--force-c"]) is None
     assert _force_reason(["--forc"]) is None
+
+
+# ── The retired spelling is gone from the TREE, not just from the parser ─────────
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Every tracked file allowed to still carry the retired spelling, each for a reason that
+# does NOT generalise. Deliberately exact paths, never directory prefixes: a NEW file —
+# including a new frozen corpus under the same directory — must fail this test and force a
+# conscious decision rather than inheriting an exemption it was never weighed for.
+EXEMPT = {
+    # Frozen LLM-experiment corpora. Their content is recorded experiment INPUT; rewriting
+    # them would corrupt the record the experiments' conclusions rest on.
+    "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
+    "docs/experiments/plan-review-gate/runs/exp2_agentic.jsonl",
+    "docs/experiments/plan-review-gate/runs/operator_attested_ac_corpus.jsonl",
+    # Historical records that must name the OLD spelling to describe the break itself.
+    "CHANGELOG.md",
+    "docs/release-notes.md",
+    # This file's module docstring, which explains what was retired and why.
+    "tests/unit/test_transition_force_flag_24f7.py",
+}
+
+
+def _tracked_files() -> list[str]:
+    """Repo-relative POSIX paths of every git-TRACKED file.
+
+    Derived from git rather than from a hand-maintained list of directories to search.
+    That is the load-bearing choice: this guard exists because a file (
+    ``scripts/dependency_audit.py``) landed minutes AFTER the rename was verified by a
+    one-time manual command, carrying a fresh use of the dead flag that nothing re-checked.
+    Anything anyone commits is in scope the moment it lands — no denylist to update, and no
+    way for a new directory to be silently out of view (the same lesson as bug ``d5ae``,
+    where a denylist over an open filesystem was itself the defect).
+    """
+    out = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [p for p in out.split("\0") if p]
+
+
+def test_retired_spelling_is_absent_from_every_tracked_file() -> None:
+    """No tracked file outside ``EXEMPT`` may contain the retired flag string.
+
+    The parser tests above prove a stale caller FAILS LOUDLY. They cannot prove there is no
+    stale caller — that is a property of the tree, so it needs a tree-wide assertion, and it
+    has to live in the suite rather than in a command someone ran once. ``rebar`` ships
+    scripts that build ``rebar`` argv (the canary bridges, the dependency-advisory canary);
+    a dead flag in one of those is a latent runtime failure on a path that only executes in
+    production, where nothing type-checks the argv.
+    """
+    needle = RETIRED.encode()
+    offenders = []
+    for rel in _tracked_files():
+        path = REPO_ROOT / rel
+        if rel in EXEMPT or not path.is_file():
+            continue
+        if needle in path.read_bytes():
+            offenders.append(rel)
+    assert offenders == [], (
+        f"tracked file(s) still use the retired {RETIRED} flag: {offenders}. "
+        f'It was renamed to --force[=<reason>] (ticket 24f7) — emit --force="<reason>".'
+    )
+
+
+def test_every_exemption_is_still_earned() -> None:
+    """An exemption that no longer applies must be DELETED, not left to rot.
+
+    A stale entry silently widens the guard's blind spot — exactly the failure mode being
+    fixed here — so each exempt path must exist and must actually still contain the string.
+    """
+    needle = RETIRED.encode()
+    stale = [
+        rel
+        for rel in sorted(EXEMPT)
+        if not (REPO_ROOT / rel).is_file() or needle not in (REPO_ROOT / rel).read_bytes()
+    ]
+    assert stale == [], f"exemptions no longer needed — remove them: {stale}"
