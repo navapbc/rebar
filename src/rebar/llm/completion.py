@@ -218,6 +218,71 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     return blocking, uncertified
 
 
+def _uncertified_child_ids(uncertified: list[dict]) -> list[str]:
+    """The child ids carried in ``uncertified`` findings from :func:`child_closure_findings`.
+
+    Each per-child finding's ``criterion`` is ``f"direct child {cid} has a certified closure"``;
+    the read-error marker (``"direct children of … could not be certified"``) carries no id and is
+    skipped — but that path also makes :func:`build_child_closure_evidence` return ``""`` (its own
+    enumeration fails identically), so no id is ever needed from it."""
+    ids: list[str] = []
+    for f in uncertified:
+        parts = str(f.get("criterion", "")).split()
+        if len(parts) >= 3 and parts[0] == "direct" and parts[1] == "child":
+            ids.append(parts[2])
+    return ids
+
+
+def build_child_closure_evidence(ticket_id: str, repo_root, uncertified: list[dict]) -> str:
+    """A compact, deterministic child-closure evidence block for the completion verifier (6ec8).
+
+    :func:`child_closure_findings` already proves, deterministically, whether every DIRECT child of
+    ``ticket_id`` is closed AND carries a certified completion-verifier signature. That proof is
+    used for the gate short-circuit but never reaches the verifier's prompt, so an epic AC like
+    "every child story is closed" is judged with ZERO evidence. This surfaces the SAME result as a
+    few lines of evidence (counts + ids of any closed-but-uncertified children), so such a criterion
+    resolves WITHOUT a tool call.
+
+    Reuses the same child enumeration as :func:`child_closure_findings` so the counts stay
+    consistent, and derives the uncertified ids from the passed-in ``uncertified`` (never
+    re-derived). Returns
+    ``""`` when the ticket has no direct children (a childless ticket gets no block — no noise) or
+    when enumeration fails. Callers inject the string into the fenced (untrusted) context; the
+    caveat governing how the verifier TREATS it lives in the trusted verifier prompt.
+
+    Note: on the caller's LLM path ``blocking`` is necessarily empty (a non-empty ``blocking``
+    short-circuited earlier), so only closure+certification is reported here."""
+    from rebar import _reads
+
+    try:
+        children = _reads.list_tickets(parent=ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — mirror child_closure_findings: an unreadable child set yields no block
+        return ""
+    total = len(children)
+    if total == 0:
+        return ""
+    unc_ids = _uncertified_child_ids(uncertified)
+    lines = [
+        "## Deterministic child-closure evidence (computed by the close gate, not the LLM)",
+        f"This ticket has {total} direct child ticket(s).",
+    ]
+    if not unc_ids:
+        lines.append(
+            f"All {total} direct child ticket(s) are CLOSED and carry a certified "
+            "completion-verifier signature (deterministically proven)."
+        )
+    else:
+        lines.append(
+            f"{total - len(unc_ids)} of {total} direct child ticket(s) are closed AND certified; "
+            f"the following {len(unc_ids)} are closed but NOT certified: {', '.join(unc_ids)}."
+        )
+    lines.append(
+        "NOTE: whether each child's change is 'Verified +1' on Gerrit is NOT observable from "
+        "repository tools; only closure and certification are proven above."
+    )
+    return "\n".join(lines)
+
+
 # Enforced screen ceiling for the epic-close bug screen (ticket 4b54): at most this many
 # candidates are LLM-evaluated per close — linked-to-subtree candidates first, then by created
 # timestamp descending — and the remainder is recorded as an unevaluated-overflow count in the

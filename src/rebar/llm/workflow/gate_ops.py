@@ -178,6 +178,18 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
         )
         if screen["block"]:
             context = f"{context}\n\n{screen['block']}"
+    # Ticket 6ec8: surface the deterministic child-closure/certification proof (already computed
+    # above via child_closure_findings) as EVIDENCE inside the fence — counts + the ids of any
+    # closed-but-uncertified children — so an "every child is closed/certified" criterion resolves
+    # WITHOUT a tool call. Emits "" (no block) for a childless ticket. `blocking` is necessarily
+    # empty here (a non-empty `blocking` short-circuited earlier), so only certification is
+    # reported; the Gerrit `Verified +1` half is flagged out-of-reach in the block and governed by
+    # the trusted verifier prompt.
+    from rebar.llm.completion import build_child_closure_evidence
+
+    child_evidence = build_child_closure_evidence(canonical, ctx.repo_root, uncertified)
+    if child_evidence:
+        context = f"{context}\n\n{child_evidence}"
     fenced = f"<untrusted_ticket_context>\n{context}\n</untrusted_ticket_context>"
     return {
         "run_verify": True,
