@@ -44,6 +44,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "codeql.yml": "CodeQL SAST",
     "reconcile-bridge.yml": "Reconcile Bridge",
     "reconcile-bridge-canary.yml": "Reconciler Heartbeat Canary",
+    "dependency-advisory-canary.yml": "Dependency Advisory Canary",
     "jira-dc-capability-map.yml": "Jira DC Capability Map",
     "structured-output-baseline.yml": "Structured-Output Baseline",
 }

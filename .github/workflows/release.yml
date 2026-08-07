@@ -99,6 +99,21 @@ jobs:
           gh api "/repos/${GH_REPO}/environments/pypi/deployment-branch-policies" > branch-policies.json
           python scripts/release_guards.py env-preflight \
             --response env.json --branch-policies branch-policies.json
+      # (5) Dependency advisories — a release NEVER ships on a known-vulnerable pin
+      # (bug 63e8). This is the one place a red dependency-advisory scan on `main` is
+      # load-bearing: it blocks releases, not merges and not Gerrit submit. Runs in
+      # `authorize`, which every publishing job descends from via `needs:`, so a blocking
+      # advisory stops the release before anything is built or published.
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Guard — no outstanding CRITICAL/HIGH dependency advisory
+        run: |
+          set -uo pipefail
+          uv sync --locked --extra dev
+          uv pip install pip-audit
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          PATH="$PWD/.venv/bin:$PATH" python scripts/dependency_audit.py gate --lane release
 
   evidence_shapin:
     name: Record pinned action SHAs (evidence)
