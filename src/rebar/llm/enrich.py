@@ -79,7 +79,7 @@ def enrich(
     # the digest ran `cfg.model` and ignored the class table — and because the write path builds its
     # own config from the environment and passes none in, a caller-side fix would have missed
     # exactly the path that matters most. Every route into enrich() inherits this one.
-    cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS))
+    cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS, cfg.repo_path))
 
     if text is not None:
         source = text

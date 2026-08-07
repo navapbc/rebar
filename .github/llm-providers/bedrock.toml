@@ -28,6 +28,14 @@
 # tests called `model=anthropic:claude-opus-4-8` on the bedrock and openai arms and failed with
 # "Could not resolve authentication method", because those arms deliberately blank
 # ANTHROPIC_API_KEY.
+#
+# THAT BLANKING IS SCOPED TO THIS PROVIDER MATRIX AND NOTHING ELSE. It exists so an arm named
+# `bedrock` cannot silently be served by direct Anthropic and score as a green Bedrock run — an
+# isolation property of the MATRIX. It is NOT a statement that direct Anthropic is unwanted in
+# normal local/CI operation: there, the direct-Anthropic arm is an APPROVED fallback and
+# `ANTHROPIC_API_KEY` is expected to be present and VALID (operator decision, 2026-08-07, on
+# [rebar:2876-7958-8dee-4882]). Read this comment as "blanked HERE", never as "blanked
+# everywhere"; the project config `rebar.toml` configures the fallback arm accordingly.
 [llm]
 model = "bedrock:us.anthropic.claude-opus-4-8"
 

@@ -343,7 +343,22 @@ def _read_llm_file_table(repo_root=None) -> dict:
     break an LLM op — but the ``REBAR_LLM_CONFIG_FILE`` pointer is layered OUTSIDE that
     degrade, so an environment that explicitly named a config file is never silently
     ignored (it deep-merges per key over the discovered table; see
-    :func:`rebar.config.layer_llm_config_file`)."""
+    :func:`rebar.config.layer_llm_config_file`).
+
+    A running gate PINS its code read-root (``use_code_root``, an attested snapshot), and
+    ``gate_source.gate_read_root`` states the invariant that EVERY config rebuilt deep in the
+    gate reads that root. Discovery below runs through ``rebar.config``, whose ``repo_root()``
+    only knows ``explicit > REBAR_ROOT > git toplevel of CWD`` — so a caller threading no root
+    resolved against the AMBIENT cwd and, when that missed the project's ``[tool.rebar.llm]``
+    table, silently handed :func:`rebar.llm.model_classes.parse_class_slots` ``{}``, routing a
+    Bedrock-configured project at the built-in DIRECT-ANTHROPIC class defaults (bug 2876).
+    Defaulting to the active gate root fixes every such reader at once — the model-class table
+    and the scalar ``LLMConfig.from_env().model`` alike — because both land here. An EXPLICIT
+    ``repo_root`` still wins, so threading a root never becomes a no-op, and outside a gate
+    ``current_code_root()`` is ``None`` and ambient discovery is unchanged.
+    """
+    if repo_root is None:
+        repo_root = current_code_root()
     try:
         discovered = _root_config.read_reserved_section("llm", repo_root)
     except _root_config.ConfigError:
