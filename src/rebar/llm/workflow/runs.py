@@ -132,7 +132,15 @@ class RunnerAgentStep(_ex.AgentStepRunner):
     (e.g. FakeRunner) is the offline/parallel-diff seam; otherwise the config-selected
     runner is used (pydantic_ai; a missing extra/key fails cleanly via get_runner)."""
 
-    def __init__(self, *, runner=None, repo_root: str | None = None, config=None) -> None:
+    def __init__(
+        self,
+        *,
+        runner=None,
+        repo_root: str | None = None,
+        config=None,
+        extra_tools=None,
+        extra_context: str | None = None,
+    ) -> None:
         self._runner = runner
         self._repo_root = repo_root
         # An optional pre-tuned LLMConfig base (the gate-cutover seam, story B5): the
@@ -140,6 +148,14 @@ class RunnerAgentStep(_ex.AgentStepRunner):
         # completion workflow, and threads it here so RunRequest.config carries that
         # tuning instead of a fresh `from_env` that would drop it. None → from_env.
         self._config = config
+        # Per-run extra toolset threaded into RunRequest.extra_tools (story 2948): the
+        # completion verifier's PRIMARY run carries a `record_criterion_verdict` tool so it
+        # banks verdicts incrementally. DEFAULTED None so every other agent step is unchanged.
+        self._extra_tools = extra_tools
+        # Volatile per-run text appended to the rendered `ticket_context` (story 2948): the
+        # primary verifier's criterion-id manifest, so a run carrying the banking tool knows
+        # which `criterion_id`s to record. None → context unchanged (every other step).
+        self._extra_context = extra_context
 
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         from dataclasses import replace as _replace
@@ -206,7 +222,8 @@ class RunnerAgentStep(_ex.AgentStepRunner):
             "ticket_id": ticket_id,
             "ticket_context": str(
                 ctx.inputs.get("context") or ctx.inputs.get("ticket_context") or ""
-            ),
+            )
+            + (self._extra_context or ""),
             "repo_path": cfg.repo_path or "",
         }
         # A prompt step may declare the template variables it needs via `with:` — e.g. the
@@ -269,6 +286,7 @@ class RunnerAgentStep(_ex.AgentStepRunner):
                 instructions=instructions,
                 langfuse_prompt=langfuse_prompt,
                 ticket_id=ticket_id,
+                extra_tools=self._extra_tools,
             )
             outs.append(runner.run(req))
         return _ex.StepResult(outputs=_merge_chunked_outputs(outs))
@@ -283,6 +301,7 @@ def build_agent_request(
     instructions: str,
     langfuse_prompt,
     ticket_id: str,
+    extra_tools=None,
 ):
     """Build the :class:`RunRequest` for an agent step (story 4b2f) — the single,
     testable place the execution_mode → mode/output_schema dispatch lives.
@@ -335,6 +354,7 @@ def build_agent_request(
         output_schema=output_schema,
         execution_mode=em,
         cache_prefix=cache_prefix,
+        extra_tools=extra_tools,
     )
 
 
