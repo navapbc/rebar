@@ -39,6 +39,9 @@ _USAGE = (
     "       ticket transition <ticket_id> <target_status> [--class=<value>] [--reason=<text>] "
     "[--force[=<reason>]]  (auto-detects current status)\n"
     "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
+    "  --reason=<text>          Meaningful only with --force: supplies the gate-bypass "
+    "audit note when no --force=<reason> is given. On a plain (non-force) transition it is "
+    "refused. To record rationale on a ticket, use `rebar comment <id>`.\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
@@ -544,6 +547,13 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         # arms the close-gate bypass, defaulting a bare `--force` to the same placeholder
         # `claim --force` uses so the two commands behave identically.
         force = force_reason is not None
+        if reason and not force:
+            raise CommandError(
+                "Error: --reason is only meaningful with --force. A plain transition "
+                'discards it. Use --force="<reason>" to record a gate-bypass audit note, '
+                "or `rebar comment <id>` to record rationale on the ticket.",
+                returncode=1,
+            )
         result = transition_compute(
             ticket_id,
             current_status,
