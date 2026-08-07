@@ -43,6 +43,48 @@ SCHEMA_SCREEN = "epic_bug_screen_v1"
 # EXPLICIT operator prune — the write path never invokes it (see `prune`).
 RETAIN_PER_TICKET = 10
 
+# Write-lock contention (``LockTimeout``, ticket ab54) is a TRANSIENT, retryable failure — a
+# concurrent writer held the store lock, not a permanent error. A single re-attempt lets a
+# brief contention window clear so the record LANDS instead of being silently dropped. This is
+# the total number of append attempts (one retry).
+_SIDECAR_WRITE_ATTEMPTS = 2
+
+
+def _is_lock_timeout_error(exc: Exception) -> bool:
+    """Whether ``exc`` is a write-lock contention (``LockTimeout``) — directly, or wrapped.
+
+    ``_seam.append_event`` converts a store-lock ``LockTimeout`` into a ``CommandError``
+    (``returncode`` 1, message ``"flock: could not acquire lock after Ns"``) on the normal
+    write path, so a caller retrying on contention must recognise BOTH forms."""
+    from rebar._store.lock import LockTimeout
+
+    if isinstance(exc, LockTimeout):
+        return True
+    return getattr(exc, "returncode", None) == 1 and str(exc).startswith("flock:")
+
+
+def _append_sidecar_retrying(ticket_id: str, payload: dict[str, Any], tracker, repo_root) -> None:
+    """Append a ``COMPLETION_VERDICT`` event, RETRYING once on write-lock contention.
+
+    A ``LockTimeout`` (raw, or wrapped by ``append_event`` into a ``CommandError``) is
+    retried up to :data:`_SIDECAR_WRITE_ATTEMPTS` total attempts; any other exception, or a
+    contention that persists across every attempt, propagates to the caller (which logs it
+    and returns ``False`` — best-effort). This is the ab54 fix: a transient lock timeout no
+    longer drops the record on the first hit."""
+    from rebar._commands._seam import append_event
+
+    last_exc: Exception | None = None
+    for _ in range(_SIDECAR_WRITE_ATTEMPTS):
+        try:
+            append_event(ticket_id, EVENT_TYPE, payload, tracker, repo_root=repo_root)
+            return
+        except Exception as exc:
+            if not _is_lock_timeout_error(exc):
+                raise
+            last_exc = exc
+    assert last_exc is not None  # loop ran at least once and only continues on a caught exc
+    raise last_exc
+
 
 def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None) -> bool:
     """Append a ``COMPLETION_VERDICT`` sidecar event from a completion FAIL verdict.
@@ -50,14 +92,17 @@ def emit(verdict: dict[str, Any], *, material: str | None = None, repo_root=None
     reconverge by union (store invariant I1) — bounding growth is :func:`prune`, invoked
     explicitly by an operator. Returns True on success, False on any failure (the
     sidecar is observability — a failed persist must NEVER fail the close itself, and the
-    FAIL that triggered it still raises regardless). Best-effort."""
+    FAIL that triggered it still raises regardless). Best-effort.
+
+    A ``LockTimeout`` (transient write-lock contention) is RETRIED once before giving up
+    (ticket ab54), so a brief contention window no longer silently loses the record; only a
+    contention that persists across every attempt returns ``False``."""
     from rebar import config as _config
-    from rebar._commands._seam import append_event
 
     try:
         tracker = _config.tracker_dir(repo_root)
         payload = build_payload(verdict, material=material)
-        append_event(payload["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
+        _append_sidecar_retrying(payload["ticket_id"], payload, tracker, repo_root)
     except Exception:
         # Observability floor: the sidecar is best-effort — a failed emit must never fail
         # the close, but the failure itself is a real signal worth a stderr diagnostic.
