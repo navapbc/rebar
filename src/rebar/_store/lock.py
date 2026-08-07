@@ -42,6 +42,13 @@ contains **no colon**: an older rebar parsing it with the legacy
 ``host, sep, pid = stamp.partition(":")`` finds no separator and declines to act,
 rather than mis-deriving "this host + a dead pid" (forward compatibility).
 
+That stamp is also what a timed-out waiter REPORTS: :class:`LockTimeout` renders it via
+:func:`describe_lock_holder`, so ``flock: could not acquire lock after 60s`` now names
+the host, pid, start time, hold age and pid liveness of whoever is holding the lock (bug
+7084 — before this, a starved writer could only infer the holder from the tracker's
+commit timeline). Reporting reuses the EXISTING v2 fields; it adds none, and it never
+influences reclamation.
+
 Refusal-without-proof (bug ``yaw-gravel-linen``) is unchanged and deliberate: a stamp
 from a *different* host identity is still never reclaimed. See
 :func:`_mkdir_lock_is_stale` for the full decision table and :func:`_acquire_mkdir`
@@ -95,13 +102,30 @@ _MKDIR_LOCK_STALE_CEILING_S = 3600
 
 class LockTimeout(Exception):
     """Could not acquire the write lock within the budget (bash exit 1, stderr
-    ``flock: could not acquire lock after Ns``)."""
+    ``flock: could not acquire lock after Ns``).
+
+    The message names the HOLDER when one can be read (bug 7084)::
+
+        flock: could not acquire lock after 60s
+            (holder: host=name-h pid=4321 start=93117 held=48s pid=live)
+
+    That suffix is :func:`describe_lock_holder`'s rendering of the ownership stamp the
+    mkdir leg ALREADY writes — no new machinery, and no new fields. Before it, a starved
+    writer could not say what had blocked it: the 48s ``compact-on-close`` holder on 7084
+    was identified afterwards by inferring from the tracker's commit timeline. The
+    bash-parity prefix is unchanged, so anything keyed on it still matches, and a stamp
+    that is absent / unreadable / in a shape the reader declines yields an explicit
+    ``unknown (<why>)`` rather than a guess or a half-filled line."""
 
     returncode = 1
 
-    def __init__(self, total_wait: int) -> None:
+    def __init__(self, total_wait: int, holder: str | None = None) -> None:
         self.total_wait = total_wait
-        super().__init__(f"flock: could not acquire lock after {total_wait}s")
+        self.holder = holder
+        message = f"flock: could not acquire lock after {total_wait}s"
+        if holder:
+            message += f" (holder: {holder})"
+        super().__init__(message)
 
 
 class RebaseGuard(Exception):
@@ -292,6 +316,77 @@ def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:
     if not {"host", "ns", "pid", "start"} <= fields.keys():
         return {}
     return fields
+
+
+def describe_lock_holder(tracker: str | os.PathLike) -> str:
+    """Describe whoever currently holds *tracker*'s write lock, for a
+    :class:`LockTimeout` message (bug 7084 / remediation R5).
+
+    Reads the ownership stamp the mkdir leg ALREADY writes (:func:`_owner_stamp`) and
+    renders its existing fields — ``host``, ``pid``, ``start`` — plus the lock dir's age
+    and a liveness verdict for the stamped pid. Together those answer the two questions a
+    starved writer actually has: WHICH process is holding it, and is that process still
+    alive (a live holder ⇒ wait or investigate that operation; a dead one ⇒ a stale stamp
+    the reclamation path will clear). No new stamp fields and no new mechanism: this only
+    surfaces what was already recorded and then thrown away.
+
+    ALWAYS returns a phrase and NEVER raises — a failure to name the holder must not
+    become a second failure on top of the timeout being reported, and the lock dir can
+    vanish mid-read at any moment (the holder released). Every case the stamp cannot
+    answer is stated plainly as ``unknown (<why>)`` rather than guessed at or emitted as a
+    partial line:
+
+    * no lock dir / no owner file / unreadable → the fcntl-only (``dual_window=False``)
+      holder, a bash-era lock, or the window between ``mkdir`` and the stamp write;
+    * a shape :func:`_parse_v2_stamp` declines (the forward-compat path a NEWER rebar's
+      stamp would take here) → ``unrecognised``;
+    * a v2 stamp missing required fields (a torn mid-write read) → ``incomplete``.
+    """
+    try:
+        lock_dir = os.path.join(canonical_tracker(tracker), MKDIR_LOCK_NAME)
+        try:
+            with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
+                stamp = fh.read().strip()
+        except OSError:
+            return "unknown (no ownership stamp)"
+        fields = _parse_v2_stamp(stamp)
+        if fields is None:
+            return "unknown (unrecognised ownership stamp)"
+        if not fields:
+            return "unknown (incomplete ownership stamp)"
+        parts = [f"host={fields['host']}", f"pid={fields['pid']}"]
+        if fields["start"] != _STAMP_UNKNOWN:
+            parts.append(f"start={fields['start']}")
+        age = _mkdir_lock_age_s(lock_dir)
+        if age is not None:
+            parts.append(f"held={age:.0f}s")
+        parts.append(f"pid_state={_describe_stamped_pid(fields)}")
+        return " ".join(parts)
+    except Exception:  # noqa: BLE001 — diagnostics are best-effort; never raise
+        return "unknown (ownership stamp could not be read)"
+
+
+def _describe_stamped_pid(fields: dict[str, str]) -> str:
+    """Liveness verdict for a stamp's ``pid``: ``live``, ``not-running``, or
+    ``unprobeable`` — the distinction between "a process really is holding this" and "the
+    stamp is stale".
+
+    Probing is only meaningful under exactly the conditions :func:`_mkdir_lock_is_stale`
+    already requires: the same :func:`_host_identity` AND a comparable pid namespace.
+    Anywhere else the number names a different process, or nothing, so this reports
+    ``unprobeable`` rather than a verdict — mirroring that function's refusal-without-proof
+    rule (bug yaw-gravel-linen) so a message can never suggest a reclaim the lock itself
+    would refuse. This is DESCRIPTIVE ONLY: nothing here feeds a reclamation decision."""
+    if fields["host"] != _host_identity():
+        return "unprobeable (foreign host)"
+    stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
+    if stamped_ns != _read_pid_namespace_id():
+        return "unprobeable (other pid namespace)"
+    try:
+        pid = int(fields["pid"])
+    except ValueError:
+        return "unprobeable (malformed pid)"
+    return "live" if _pid_alive(pid) else "not-running"
 
 
 def _mkdir_lock_age_s(lock_dir: str) -> float | None:
@@ -554,11 +649,14 @@ def acquire(
 
     fd = _acquire_fcntl(lock_path, deadline)
     if fd == -1:
-        raise LockTimeout(total_wait)
+        # Name the holder from the stamp it already wrote (bug 7084) — a timed-out waiter
+        # that cannot say WHO blocked it costs an operator a commit-timeline inference.
+        raise LockTimeout(total_wait, describe_lock_holder(tracker))
     if dual_window:
         if not _acquire_mkdir(lock_dir, deadline):
+            holder = describe_lock_holder(tracker)  # read before releasing our fcntl leg
             os.close(fd)
-            raise LockTimeout(total_wait)
+            raise LockTimeout(total_wait, holder)
         return LockHandle(fd, lock_dir, True)
     return LockHandle(fd, lock_dir, False)
 
