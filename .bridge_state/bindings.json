@@ -20551,10 +20551,24 @@
     },
     "2b4f-b0ca-e5d8-4c3f": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\nThe `rebar-implement` skill (examples/agent-skills/rebar-implement/SKILL.md) carries a \"Model tiering\" section that pins the implementer subagent to strong/standard/cheap model tiers to save tokens. This model-level gradient adds complexity (a tier table, per-dispatch tier-naming rules, a dedicated 4e-bis \"Tier escalation\" ladder, per-leaf tiering session-log requirements) for savings that only materialize on wide epics. We are removing it.\n\nSeparately, Phase 0's preflight hard-stops on any ticket with no children. That is too strict: a `story`/`task` with no children but a recorded file impact is already an executable code leaf \u2014 the file impact is exactly the acceptance the completion-verifier close gate needs. The skill should execute such a ticket as a single leaf instead of refusing it.\n\n## Plan\n\n1. Remove the model-level gradient: delete the \"## Model tiering\" section; strip tiering language\n   from Phase 3 (non-code leaf), 4a, and 4d while PRESERVING the held-out discipline (the\n   implementer stays a separate subagent, which never depended on tiering); rewrite 4e-bis from\n   \"Tier escalation\" to a tier-free \"Escalation \u2014 when re-dispatch isn't enough\"; reground the\n   Phase 5 residual-sweep example.\n2. Allow a childless story/task with a recorded file impact to run as a single leaf: Phase 0\n   recognizes two executable shapes (has children -> tree; childless story/task with non-empty\n   `rebar get-file-impact` -> single leaf) and stops only when neither holds; add a Phase 2\n   callout collapsing Phases 3/5/6 to one change; update the frontmatter description, Phase 0\n   heading, and Reporting stop line.\n\n## Acceptance Criteria\n\n- [ ] No \"Model tiering\" section and no strong/standard/cheap model-tier references remain in\n      SKILL.md. Proof: `! grep -niE 'model tiering|cheap.?tier|standard.?tier|strong.?tier' examples/agent-skills/rebar-implement/SKILL.md`\n- [ ] The held-out separation (a separate implementer subagent) is still stated in Phase 4.\n      Proof: `grep -n 'separate' examples/agent-skills/rebar-implement/SKILL.md`\n- [ ] Phase 0 documents executing a childless story/task with a recorded file impact as a single\n      code leaf, keyed on `rebar get-file-impact`. Proof:\n      `grep -n 'get-file-impact' examples/agent-skills/rebar-implement/SKILL.md`\n- [ ] Frontmatter description, Phase 0 heading, Phase 2, and Reporting are consistent with both\n      changes (checked: manual read of the four sections).\n\n## Testing\n\nDocs-only change to a Markdown skill file; no source code changes, so the CI `Verified` gate (`make lint && make typecheck && make test`) is unaffected and passes unchanged. Verify the acceptance criteria with the grep commands listed above, run from the worktree root.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "rebar-implement: remove model-tiering gradient; run a childless story/task with file impact as a single leaf"
       },
       "created_at": "2026-08-07T22:18:41Z",
@@ -28243,6 +28257,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:09Z"
+    },
+    "3b93-a64e-693d-4f5e": {
+      "created_at": "2026-08-07T22:41:41Z",
+      "jira_id": "4587645",
+      "jira_key": "REB-2643",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:41:44Z"
     },
     "3ba0-9350-8337-429a": {
       "baseline": {
@@ -36109,6 +36130,13 @@
       "jira_key": "REB-481",
       "state": "confirmed",
       "updated_at": "2026-06-27T17:33:35Z"
+    },
+    "4a11-aecf-4d33-45ae": {
+      "created_at": "2026-08-07T22:41:45Z",
+      "jira_id": "4587646",
+      "jira_key": "REB-2644",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:41:48Z"
     },
     "4a40-ea6e-d3f7-4af7": {
       "baseline": {
@@ -86970,6 +86998,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-10T01:11:27Z"
     },
+    "b42a-ffc3-deeb-4491": {
+      "created_at": "2026-08-07T22:41:48Z",
+      "jira_id": "4587647",
+      "jira_key": "REB-2645",
+      "state": "confirmed",
+      "updated_at": "2026-08-07T22:41:51Z"
+    },
     "b44a-6700-c356-490e": {
       "baseline": {
         "assignee": null,
@@ -131260,6 +131295,9 @@
     "REB-2640": "2b4f-b0ca-e5d8-4c3f",
     "REB-2641": "21fc-a459-e298-4c31",
     "REB-2642": "22da-e9a6-63e7-49e5",
+    "REB-2643": "3b93-a64e-693d-4f5e",
+    "REB-2644": "4a11-aecf-4d33-45ae",
+    "REB-2645": "b42a-ffc3-deeb-4491",
     "REB-265": "a79b-f0d1-cb2c-47fa",
     "REB-266": "a83a-fadf-d7f2-43da",
     "REB-267": "a842-e689-a93a-4ff1",
