@@ -41,7 +41,12 @@ from ._processors import (
 )
 from ._replay import replay_events, scan_for_latest_snapshot
 from ._sort import event_sort_key
-from ._state import make_error_dict, make_initial_state
+from ._state import (
+    TERMINAL_STATUSES,
+    is_terminal_status,
+    make_error_dict,
+    make_initial_state,
+)
 from ._version import KNOWN_EVENT_TYPES, SCHEMA_VERSION
 from .llm_format import to_llm
 from .marker import check_marker, remove_marker, write_marker
@@ -50,11 +55,13 @@ from .search import search_states
 __all__ = [
     "KNOWN_EVENT_TYPES",
     "SCHEMA_VERSION",
+    "TERMINAL_STATUSES",
     "apply_ticket_filters",
     "check_marker",
     "compute_dir_hash",
     "event_sort_key",
     "find_inbound_relationships",
+    "is_terminal_status",
     "make_error_dict",
     "make_initial_state",
     "prepare_event_files",

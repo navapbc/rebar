@@ -1,6 +1,28 @@
-"""Ticket state helpers: initial state factory and error-state builder."""
+"""Ticket state helpers: initial state factory, error-state builder, and the
+shared terminal-status predicate."""
 
 from __future__ import annotations
+
+# --- terminal-state predicate (bug e63c) ---
+# THE definition of "this blocker no longer blocks", shared by every reader:
+# `graph/_ready.py`, `graph/_unblock.py`, `graph/_graph.py` and
+# `_engine_support/next_batch.py`. Those four once carried three different
+# memberships, so `next-batch` offered a ticket that `ready` withheld.
+#
+# It lives here rather than in `rebar.types` because that module is GENERATED from
+# the canonical JSON Schemas (`python -m rebar.schemas.gen_types`, CI-enforced), and
+# a predicate is behaviour, not a schema-derived type. All four readers already
+# depend on `rebar.reducer`, so this home adds no new dependency edge -- which is
+# what keeps `_ready.py` dependency-light as its docstring promises.
+#
+# Each member is a terminal state a ticket cannot leave on its own; every member
+# must be a real TicketStatus (pinned by a test against the schema's status enum).
+TERMINAL_STATUSES: frozenset[str] = frozenset({"closed", "archived", "deleted"})
+
+
+def is_terminal_status(status: str) -> bool:
+    """True when ``status`` is terminal, i.e. a blocker in it no longer blocks."""
+    return status in TERMINAL_STATUSES
 
 
 def make_initial_state() -> dict:
