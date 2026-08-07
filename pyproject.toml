@@ -231,7 +231,7 @@ dev = [
     # over-broad/OIDC permissions). Pinned EXACTLY (not a floor) for local↔CI parity: zizmor
     # tightens/adds audits across releases, so an unpinned floor lets findings drift (green
     # here, red in CI). Bump deliberately.
-    "zizmor==1.28.0",
+    "zizmor==1.29.0",
     # Pull the agents and metrics stacks so optional-capability validation tests
     # (provider construction, MCP/Langfuse, and real polyglot lizard parsing)
     # RUN in CI rather than skipping. Self-referential extras stay here, not in
