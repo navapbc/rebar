@@ -112,6 +112,14 @@ requirement rather than intersecting with it, which is precisely what a stale up
 needs. It is a **judicious last resort**, and it is an **approved remedy** here — the
 alternative (waiting for upstream) leaves a known-vulnerable pin shipping.
 
+**First, check whether you need the capping dependency at all.** An override forces an
+untested combination and has to be carried until upstream moves; deleting the capping
+dependency ends the problem outright. That is what happened to the worked example below:
+`inspect-ai` was in the `[eval]` extra but never imported by rebar, so ticket `9fb3` dropped
+the dependency, and with it the cap, the override, and the `[tool.uv] conflicts` entries its
+transitive `boto3` pin had forced. Reach for the override only when the capping dependency is
+genuinely used.
+
 An override must **never be silent**. It forces a combination nobody tested, which is why
 the written justification is the point, not paperwork. In `pyproject.toml`:
 

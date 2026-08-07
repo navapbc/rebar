@@ -176,8 +176,6 @@ base stays light (CI enforces that):
     [pydantic-ai](https://ai.pydantic.dev) runtime (`pydantic-ai-slim[anthropic]`)
     plus [`json-repair`](https://github.com/mangiucugna/json_repair).
 - **Development & authoring extras** — not needed to run or serve rebar:
-  - **`[eval]`** — prompt evaluation (`rebar prompt eval`) with
-    [Inspect AI](https://inspect.aisi.org.uk); an authoring/CI capability.
   - **`[tracing]`** — an [OpenTelemetry](https://opentelemetry.io) OTLP trace sink
     (write-only; never read back into a rebar decision), for diagnostics.
   - **`[dev]`** — the test/lint/type tooling ([pytest](https://docs.pytest.org),
@@ -224,9 +222,8 @@ pipx install nava-rebar              # isolated CLI on PATH: rebar (+ lean workf
 pip  install nava-rebar              # library: import rebar  (runtime deps: pyyaml, jsonschema)
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
 pip  install 'nava-rebar[agents]'    # + LLM agent ops + agentic workflow steps (rebar.llm)
-pip  install 'nava-rebar[eval]'      # + prompt evaluation: `rebar prompt eval` (Inspect AI)
 pip  install 'nava-rebar[tracing]'   # + OTLP trace sink (write-only)
-pip  install 'nava-rebar[agents,eval,tracing]'   # the union, if you want it all
+pip  install 'nava-rebar[agents,tracing]'        # the union, if you want it all
 ```
 
 The base install runs **scripted** workflows (`rebar workflow new/validate/show/run`)

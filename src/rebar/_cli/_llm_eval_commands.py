@@ -19,7 +19,7 @@ def _prompt(argv: list[str]) -> int:
 
     Validates the git-tracked eval spec (offline; grader discipline + at_least(k) +
     coverage) and reports the DIRTY working-tree prompt's content hash (what would be
-    evaluated). The live model run needs the ``eval`` extra + credentials (the eval
+    evaluated). The live model run needs the ``agents`` extra + credentials (the eval
     CI); committing the prompt is required to apply a passing edit (git-canonical)."""
 
     parser = argparse.ArgumentParser(
@@ -90,7 +90,7 @@ def _prompt_eval(args) -> int:
         if dirty_hash:
             sys.stdout.write(f"  dirty prompt sha256: {dirty_hash[:16]}…\n")
         sys.stdout.write(
-            "  → live run needs the `eval` extra + credentials (eval CI); commit the "
+            "  → live run needs the `agents` extra + credentials (eval CI); commit the "
             "prompt to apply a passing edit.\n"
         )
     return 0
@@ -236,7 +236,7 @@ def _llm_setup(args) -> int:
     from rebar.llm import config as _cfg
 
     backends = _cfg.available_backends()
-    extras = {e: _optional.extra_installed(e) for e in ("agents", "eval", "tracing")}
+    extras = {e: _optional.extra_installed(e) for e in ("agents", "tracing")}
 
     # Validate the configuration with an offline FakeRunner dry-run (no tokens):
     # if a trivial agent workflow runs, the engine + config are wired correctly.
@@ -279,10 +279,7 @@ def _llm_setup(args) -> int:
         sys.stdout.write(_json.dumps(report) + "\n")
     else:
         sys.stdout.write("rebar LLM setup\n")
-        sys.stdout.write(
-            f"  extras:   agents={extras['agents']}  eval={extras['eval']}  "
-            f"tracing={extras['tracing']}\n"
-        )
+        sys.stdout.write(f"  extras:   agents={extras['agents']}  tracing={extras['tracing']}\n")
         sys.stdout.write(
             f"  API keys: anthropic={backends['anthropic_api_key']}  "
             f"openai={backends['openai_api_key']}\n"

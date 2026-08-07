@@ -5,7 +5,7 @@ spec parses + passes `validate_eval_spec`, and the labeled datasets carry the th
 case types (recall / false-accept / false-fire) the standing suite requires — including
 the Pass-2 DISCRIMINATION pairs (child acc1) and the ISF recall/justified-descope cases
 (child 681b), seeded from the real observed false-fire taxonomy. The live model run is
-gated behind the `[eval]` extra in the eval CI; the gold subset is human-adjudicated
+gated behind the `[agents]` extra in the eval CI; the gold subset is human-adjudicated
 (these seed labels stand in pending that adjudication — see eval_specs/README.plan-review.md).
 """
 

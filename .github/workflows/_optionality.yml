@@ -82,11 +82,11 @@ jobs:
           from rebar.llm.workflow import lint
           wf = 'schema_version: "1"\nname: x\nsteps:\n  - id: a\n    uses: u\n'
           assert lint.lint_passes(lint.lint_workflow(wf)), "lean-core validate failed"
-          # The heavy [agents]/[eval]/[tracing] stack must NOT be importable here.
+          # The heavy [agents]/[tracing] stack must NOT be importable here.
           # `jira` (pycontribs/jira) is declared ONLY by the [jira-datacenter] extra.
           # Without it here, the epic's "installing rebar without the extra pulls in
           # no new dependency" guarantee had no CI teeth (story J7, epic e369).
-          for mod in ("langchain", "langgraph", "anthropic", "inspect_ai", "opentelemetry", "jira"):
+          for mod in ("langchain", "langgraph", "anthropic", "opentelemetry", "jira"):
               assert u.find_spec(mod) is None, f"{mod} importable in a no-extras install!"
           print("clean-core-wheel OK")
           PY

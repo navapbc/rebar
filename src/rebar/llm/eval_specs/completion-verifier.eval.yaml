@@ -2,7 +2,7 @@
 # Measures recall on INCOMPLETE work (verdict must be FAIL), no false-fail on COMPLETE
 # work (must PASS), and the completion_verdict contract (PASS/FAIL; FAIL<=>findings;
 # each FAIL finding cites a source). Offline: validate_eval_spec(strict=True). Live: the
-# eval CI ([eval] extra + credentials) runs it through the context-injection solver — the
+# eval CI ([agents] extra + credentials) runs it through the context-injection solver — the
 # verifier reads the ticket + repo via tools, so each case is backed by injected
 # `ticket_context` + a fixture repo described in `note` (see the WS-EVAL solver task).
 prompt: completion-verifier

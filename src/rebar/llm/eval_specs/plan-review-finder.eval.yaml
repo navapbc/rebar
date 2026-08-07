@@ -4,7 +4,7 @@
 # tickets) and seeded from REAL observed false-fires
 # (docs/experiments/plan-review-gate/eval/observed-false-positives.md).
 # Validate offline: `rebar prompt eval plan-review-finder`. The live model run needs
-# the [eval] extra + credentials (the eval CI). The gold_set is the human-adjudicated
+# the [agents] extra + credentials (the eval CI). The gold_set is the human-adjudicated
 # subset the llm-judge is aligned to (Cohen's kappa); the labels here are a best-effort
 # seed pending human adjudication — see eval_specs/README.plan-review.md.
 prompt: plan-review-finder

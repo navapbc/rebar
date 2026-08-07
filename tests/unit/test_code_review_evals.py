@@ -5,7 +5,7 @@ spec parses + passes ``validate_eval_spec`` (strict), and the dedicated ``code_r
 scorers are registered and behave. They also exercise the ``eval_solver.run_case``
 code-review arm with a ``FakeRunner`` (offline) to prove it returns the prompt's NATIVE
 structured output ({findings}/{verifications}), never a full-gate verdict. The live
-recall/false-fire SCORING runs in the eval CI ([eval] extra + credentials).
+recall/false-fire SCORING runs in the eval CI ([agents] extra + credentials).
 """
 
 from __future__ import annotations

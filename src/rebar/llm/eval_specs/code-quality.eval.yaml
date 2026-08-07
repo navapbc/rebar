@@ -1,7 +1,7 @@
 # Built-in prompt eval spec (epic a88f / WS-G) for the `code-quality` reviewer.
 # Ships as package data; a repo overrides it at .rebar/evals/code-quality.eval.yaml.
 # Run with `rebar prompt eval code-quality` (validates offline; the live model run
-# needs the [eval] extra + credentials via the eval CI).
+# needs the [agents] extra + credentials via the eval CI).
 prompt: code-quality
 # The model whose output is being evaluated (the generator). The llm-judge grader
 # below must be a DIFFERENT family (no self-grading).

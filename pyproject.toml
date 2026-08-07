@@ -42,7 +42,7 @@ classifiers = [
 
 # Core stays deliberately tiny. Three runtime dependencies, all serving the
 # LEAN-RUNTIME workflow + schema capability (epic a88f) that must work WITHOUT the
-# heavy `[agents]`/`[eval]`/`[tracing]` extras:
+# heavy `[agents]`/`[tracing]` extras:
 #   - pyyaml: the YAML loader for the workflow DSL — loading + running a
 #     `.rebar/workflows/*.yaml` workflow cannot have an optional parser. PyYAML's
 #     SafeLoader is hardened toward YAML 1.2 Core by rebar.llm.workflow.schema
@@ -56,7 +56,7 @@ classifiers = [
 #     declared explicitly because rebar.schemas imports it directly (it is also a
 #     transitive of jsonschema, but we declare what we import).
 # This is consistent with the optionality CI (the import-linter ban-list targets
-# only the heavy ML/telemetry stack: anthropic/inspect_ai/langchain*/langgraph*/
+# only the heavy ML/telemetry stack: anthropic/langchain*/langgraph*/
 # opentelemetry*; pyyaml + jsonschema + referencing are intentionally permitted in core).
 # Everything else — the engine core and the reconciler — remains stdlib-only.
 dependencies = [
@@ -141,13 +141,6 @@ agents = [
 # lazily and raises a named LLMConfigError (naming this extra) if it is absent.
 bedrock = [
     "pydantic-ai-slim[bedrock]>=1,<2",
-]
-#
-# Prompt evaluation (epic a88f / WS-G). Net-new extra: Inspect AI is the eval
-# substrate; promptfoo interop is via the generated JUnit/config (no pip dep).
-# Imported lazily behind `rebar._optional.guard_import(..., extra="eval")`.
-eval = [
-    "inspect-ai>=0.3.221",
 ]
 # Optional est.-cost accounting for `usage_log.summarize` (ticket 41be): pydantic's
 # genai-prices bundles offline price data (cache tiers, historical prices by timestamp)
@@ -248,9 +241,10 @@ dev = [
     # Bedrock Converse `outputConfig` (native structured output) is rejected client-side by
     # botocore < 1.43 (`ParamValidationError` before any network call — E1 measurement on the
     # selection bug ticket); the wire feature needs botocore >= 1.43. Floor botocore/boto3
-    # here so the dev/bedrock resolution carries the fix. The `[tool.uv]` conflicts block below
-    # forks eval (which caps boto3 < 1.40.62 via aiobotocore) away from bedrock/dev, so this
-    # floor applies only where bedrock resolves. Drop once aiobotocore catches up upstream.
+    # here so the dev/bedrock resolution carries the fix. This floor used to need a `[tool.uv]`
+    # conflicts fork, because `[eval]` -> inspect-ai -> aiobotocore capped boto3 < 1.40.62;
+    # dropping the unused inspect-ai dependency (ticket 9fb3) removed the diamond, so dev and
+    # bedrock now resolve together with no declared conflict.
     "botocore>=1.43.0",
     "boto3>=1.43.0",
 ]
@@ -262,30 +256,6 @@ rebar-mcp = "rebar.mcp_server:main"
 # Bake the gate-code commit SHA into the wheel/sdist for non-git installs (epic
 # jira-reb-596). Auto-discovers hatch_build.py at the repo root; writes the generated,
 # git-ignored src/rebar/_build_info.py, force-included in the wheel below.
-[tool.uv]
-# Extras conflicts (ticket ce5d). uv's UNIVERSAL resolution locks every extra jointly, and
-# `[eval]` -> inspect-ai -> aioboto3 -> aiobotocore pins `boto3 < 1.40.62` while
-# `pydantic-ai-slim[bedrock] >= 1.107` (pulled by `[bedrock]` and `[dev]`) needs
-# `boto3 >= 1.42.63`. Without these declarations that diamond silently downgrades
-# pydantic-ai-slim below 1.107 (to the import-broken 1.38 line) for EVERY extra; with the
-# floor above it makes the whole project unresolvable. Declaring the conflict lets uv fork
-# the resolution instead. Minimal set on purpose: `eval`+`agents` stays co-installable (the
-# prompt-eval workflow uses exactly that pair); nothing installs `dev`+`eval` together.
-# Revisit when aiobotocore catches up to boto3 >= 1.42.63 upstream (harmless to keep).
-conflicts = [
-    [{ extra = "eval" }, { extra = "bedrock" }],
-    [{ extra = "eval" }, { extra = "dev" }],
-]
-# click override (PYSEC-2026-2132, command injection in click.edit(), fixed 8.3.3).
-# inspect-ai caps `click < 8.2.2` solely for pallets/click#3084, which upstream fixed
-# in click 8.3.2 (issue closed against that milestone) — the cap is stale. Without the
-# override uv's universal lock holds the WHOLE project (every extra) on vulnerable
-# 8.2.1 and CI's gating pip-audit fails on every change. Drop this override once
-# inspect-ai lifts its cap upstream.
-override-dependencies = [
-    "click>=8.3.3",
-]
-
 [tool.hatch.build.hooks.custom]
 
 [tool.hatch.build.targets.wheel]

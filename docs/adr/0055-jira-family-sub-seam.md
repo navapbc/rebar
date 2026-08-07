@@ -168,7 +168,7 @@ that needs it, never at module top. That preserves the engine's `dependencies = 
 `import rebar` — and importing the DC package itself — stays dependency-free, and a client that
 does not adopt DC pays nothing. The guarantee has CI teeth: `jira` is on the absent-module list
 in `.github/workflows/_optionality.yml`, alongside `langchain`, `langgraph`, `anthropic`,
-`inspect_ai`, and `opentelemetry`.
+and `opentelemetry`.
 
 **Cloud's ACLI path was deliberately not migrated onto `pycontribs/jira`.** The `acli*` cluster
 is live-validated against a production Jira and carries a ~29-test patch surface; rewriting its
