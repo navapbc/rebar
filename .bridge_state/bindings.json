@@ -26472,10 +26472,24 @@
     },
     "3803-8e04-7c32-4b80": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "`rebar transition --help` advertises `[--reason=<text>]` on every transition, but on a plain close the value is parsed, threaded through two call layers, and then discarded. A user closing a ticket with `--reason=\"...\"` reasonably believes the rationale was recorded. It was not.\n\nEvidence:\n\n- `src/rebar/_commands/txn.py:197` \u2014 `transition_core(..., close_reason: str = \"\", ...)`. The name\n  appears three times in the file (`:154` is a different symbol, `:197` and `:199` are signatures)\n  and is **never read in any body**.\n- `src/rebar/_commands/transition.py:130-136` parses `--reason`; `:293-294` shows its only live use\n  on a non-force path is `force_reason = (reason or \"(no reason given)\") if force else \"\"`, i.e. it\n  is meaningful **only** under `--force`. `--force-close=<reason>` carries its own separate value.\n\n## Scope: make the flag honest \u2014 do NOT add persistence\n\nAn earlier framing of this finding proposed persisting the close reason via the existing comment mechanism. That is rejected. `txn.py:253-259` records the governing decision:\n\n> Bug-close CLASS guard (ticket ed13): a bug closing from a non-idea status now REQUIRES a bounded\n> `--class <value>` from the closed vocabulary \u2014 REPLACING the old free-text `--reason` (which was\n> validated then discarded).\n\ned13 deliberately replaced free-text close rationale with the bounded `CLOSE_CLASSES` vocabulary, which IS folded onto the `*->closed` STATUS edge and is single-sourced against `common.schema.json#/$defs/close_class`. Re-introducing free text \u2014 in any form \u2014 reverses a recent, intentional move toward machine-readable close data, and no evidence was found that the decision was wrong. The \"why this specific ticket\" capability is not missing: `rebar comment <id>` already provides it, it simply is not compulsory, and making it compulsory is what ed13 undid.\n\nRelated, already tracked elsewhere \u2014 do not duplicate: `bug_close_reason_ok` (`txn.py:154`) is dead with a docstring falsely claiming two consumers; its deletion is covered by ticket `723f-c5b2-d83b-43cb`.\n\n## Acceptance Criteria\n\n- [ ] `close_reason` is removed from `transition_core`'s signature and every call site that passes it\n- [ ] `--reason` is documented as applying to the force paths only, in `transition.txt` help, the\n      `transition.py` usage string, and any overview/docs line that advertises it more broadly\n- [ ] Passing `--reason` on a plain (non-force) close either has a documented effect or is refused \u2014\n      it must not be silently accepted and dropped\n- [ ] No change to `--class` / `CLOSE_CLASSES` behaviour, and no new free-text field on any event\n- [ ] `--force` and `--force-close=<reason>` behaviour is unchanged",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Make transition --reason honest: drop the discarded close_reason, scope the flag to force paths"
       },
       "created_at": "2026-08-06T22:10:21Z",
@@ -55754,10 +55768,24 @@
     },
     "7084-4e33-e698-42dd": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# compact-on-close holds the store write lock for MINUTES, starving concurrent writers \u2014 and \"isolated\" worktrees share one store\n\n## The two facts together are the defect\n\n### 1. The worktrees are NOT isolated \u2014 they symlink to ONE store\n\n`/Users/joeoakhart/agent-5200-diag/.tickets-tracker` is a **symlink** to `/Users/joeoakhart/rebar/.tickets-tracker`. So is `/Users/joeoakhart/probe-status-e34a/.tickets-tracker`. All three resolve to the same path and to the **same lock inode (420945058)**. `lock.canonical_tracker` (`_store/lock.py:124-127`) realpaths deliberately so that they contend on one lock \u2014 which is correct behaviour for correctness, and means every parallel agent session serialises through a single write lock even though each believes it has its own worktree.\n\nTwo live `rebar transition ... closed` processes were running against this store during the incident (from `agent-5200-diag` and `probe-status-e34a`).\n\n### 2. compact-on-close holds that lock across an entire reduce + retire + git commit\n\n`_commands/compact.py:178` takes the same write lock and holds it across the whole critical section (`compact.py:186` onward), and it is invoked right after every close at `_commands/transition_close.py:92-104`.\n\nMeasured from the tracker's own git log: a **2m17s gap** with nothing landing between `2a8f02ce14 SIGNATURE e39f` (12:28:38) and `b2e28d2273 COMPACT e39f` (12:30:55). The next commit is d582's STATUS at 12:30:56 \u2014 one second after the compaction released.\n\n### The consequence\n\nA concurrent writer's 60s lock budget (`lock.py:73-74`: 30s x 2 attempts) is consumed entirely inside one compaction window. That is what dropped a durable record in [rebar:ab54-f19f-d5bd-422c] \u2014 the close's PASS `COMPLETION_VERDICT` sidecar got its single 60s shot during the gap and lost it.\n\n`flock` is also not FIFO, so a waiter can additionally be starved by a stream of short writers rather than by one long holder.\n\nCorroborating symptom: `2bc7-d77b-641c-42aa` carries **two** PASS sidecars (12:34:22 and 12:36:31) \u2014 a close that had to be retried under the same contention.\n\n### Diagnosability gap found along the way\n\n**The lock records no holder identity that survives contention.** The fcntl leg (`lock.py:552`) records no pid at all, and the only owner stamp lives in `.ticket-write.lock.d/owner` (`lock.py:36`), which is removed on release \u2014 so a timed-out waiter cannot say who blocked it. The holder above was identified by inferring from the commit timeline, not from any recorded pid. A `LockTimeout` that cannot name the holder is expensive to diagnose under fleet load.\n\nAlso observed, separately: `llm/enrich_drain.py:243-251`'s \"cheap gate\" logs `enrich drain gate check took 300-800ms (> 20 ms budget)` on nearly every command against this 3174-ticket store, and `overlap_drain=async` detaches drain CHILD processes that write events (`enrich_drain.py:254-256`), making them additional lock contenders. None committed inside the measured gap, so they are not the holder here.\n\n### Residue\n\nAn untracked `.tickets-tracker/.tmp-event-lpusw0uh` (mtime 10:42) predates this incident and belongs to some other failed or killed write. `event_append.py:470-472` does unlink the staging temp on `LockTimeout`, so this is from a different failure mode \u2014 worth sweeping and worth knowing that something leaves temps behind.\n\n## Acceptance Criteria\n\n- [ ] compaction no longer holds the store write lock across its whole reduce + git-commit section \u2014\n      either it takes the lock only for the final swap, or it yields between phases, measured by the\n      commit-gap shrinking under a concurrent-writer test\n- [ ] a `LockTimeout` names the holder: the lock records an owner (pid + worktree) that a timed-out\n      waiter can read and report, so diagnosis does not require timeline inference\n- [ ] concurrent close from two worktrees sharing one store does not drop a durable record \u2014 asserted\n      by a test that closes from two processes against one tracker\n- [ ] the shared-store-by-symlink topology is documented where agents are told to use a fresh worktree,\n      since \"isolated worktree\" currently implies an isolated store and does not get one\n- [ ] the stray `.tmp-event-*` residue is swept, and its source failure mode is identified or explicitly\n      recorded as unknown\n\n## Testing\n\n    pytest tests/unit -k \"lock or compact or concurren\" -q\n    make lint && make typecheck\n\nA concurrent-writer reproduction is the load-bearing test: two processes closing tickets against one canonical tracker, asserting both closes land every durable record. Without it this is a timing bug that only reappears under fleet load.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "compact-on-close holds the store write lock for minutes, starving concurrent writers; worktrees share one store by symlink"
       },
       "created_at": "2026-08-06T19:05:14Z",
@@ -108309,10 +108337,24 @@
     },
     "df94-66ba-dbf8-4ac1": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# The SIDECAR channel records gate-run limits but not gate-run consumption\n\nDiscovered by the Step-7 sibling sweep while fixing [rebar:aec1-76e7-bb95-4c86]. `aec1` fixed the **usage-log** channel (`.rebar/usage.jsonl`). The **sidecar** channel \u2014 the one an operator reaches with `rebar audit show <ticket>`, and the one that lives in the store \u2014 still has the same defect in three places.\n\n## 1. The sanitization allowlist admits the ceiling and drops the measurement\n\n`src/rebar/llm/failure.py:82-96` \u2014 `_ALLOWED_FIELDS` contains `request_limit` and `tool_calls_limit` but **not** `requests` or `tool_calls`. So a gate error durably records *what the limit was* and never *what was consumed*, which is precisely the half that makes the record actionable. Identical construct to aec1's root cause: a fixed allowlist that admits the ceiling and discards the measurement.\n\nBoth candidate fields are plain integers carrying no prompt, response or argument content, so this is safe on the privacy contract \u2014 but `_ALLOWED_FIELDS` is a **sanitization boundary**, and widening it is a privacy decision that deserves its own review rather than riding in on a telemetry fix. That is why aec1 filed this instead of folding it in.\n\n## 2. Five of six `emit_gate_error` call sites pass no diagnostic at all\n\n`workflow/gate_dispatch.py:122, 180, 351, 467, 518` are all `cause=`-only. Only `workflow/completion_recovery.py:388-395` passes a `diagnostic=`, and that is the completion **bounded-recovery** arm alone (it seeds and allowlists `requests`/`tool_calls`/`tool_calls_limit` at `:255-267`, which is why that one arm works). A plan-review gate error, or a completion *preflight* gate error, therefore persists no counters whatsoever.\n\n## 3. The completion verdict sidecar carries no run metadata at all\n\n`completion_sidecar.py:271-306` \u2014 the payload is verdict/criteria/findings/remediation/runner/model/ `verified_at_sha`/`trace_id`/`material_fingerprint`/`certifiable`. No requests, no tool calls, no duration. By contrast the plan-review sidecar already carries per-call `requests` (`plan_review/sizing.py:292-310`) and a `metrics` block with `det_ms`/`llm_ms`/`total_ms`/ `llm_calls` (`workflow/plan_review_recovery.py:151-177`) \u2014 so the two gates are **asymmetric**, and the completion gate (the one whose step budget was raised five times) is the blind one.\n\n## Why this matters after aec1\n\naec1 makes the numbers exist on disk in `.rebar/usage.jsonl`, which is per-checkout and not shared. The sidecar channel is the one that rides the ticket store and is therefore visible to every agent and every later reader. Until this is closed, \"how much did this ticket's gates cost\" is answerable locally but still not answerable **from the store** \u2014 the exact phrasing of the original complaint.\n\n## Acceptance criteria\n\n- [ ] `requests` and `tool_calls` are admitted by `failure.py:_ALLOWED_FIELDS`, with the privacy\n      rationale recorded next to them (integers only, no content)\n- [ ] every `emit_gate_error` call site passes a diagnostic carrying the consumed counters, or the\n      ticket records per-site why a given site legitimately has none\n- [ ] the completion verdict sidecar carries requests/tool_calls/duration, reaching parity with the\n      plan-review sidecar's existing `metrics` block\n- [ ] a test proves the counters survive to the SIDECAR for a FAILING gate run, not only a passing\n      one (the axis aec1 established must vary here too)\n- [ ] `rebar audit show <ticket>` surfaces them",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "The sidecar channel records gate-run limits but not gate-run consumption"
       },
       "created_at": "2026-08-06T19:11:16Z",
