@@ -1,28 +1,23 @@
 """Single-source read implementation for CLI, library, and MCP (story 23d2-e0f3).
 
-Before this module, CLI reads went ``bash ticket-show.sh/ticket-list.sh ->
-python3 heredoc -> ticket_reducer`` while library/MCP reads went
-``rebar/_reads.py -> ticket_reducer`` in-process, so arg parsing, id-resolution
-dispatch, and error-message STRINGS were written twice and pinned only by a
-parity test. This module collapses the two: it is the ONE implementation of the
-five read commands (show / list / ready / search / deps), consumed by:
+This is the ONE implementation of the five read commands (show / list / ready /
+search / deps), consumed by:
 
-  * the CLI dispatcher arms, via ``ticket-reads.py <sub> ...`` (this module's
-    ``main``), which formats output + emits the historical CLI text/JSON/errors;
+  * the CLI dispatch arms in ``rebar._engine_support.reads_cli`` (via this module's
+    ``main``), which format output + emit the historical CLI text/JSON/errors;
   * ``rebar/_reads.py`` (library + MCP), which calls the ``*_state`` helpers for
     the parsed-object return shapes.
 
-It lives in the engine package dir (alongside ``ticket-ready.py`` /
-``ticket-search.py``) so it is importable both by the engine's bare ``python3``
-(via PYTHONPATH) and by the library (via ``rebar._native``'s sys.path insert) —
-the engine never imports the ``rebar`` package, so the single implementation must
-live here, not in ``rebar/_reads.py``.
+It lives in ``rebar._engine_support`` so the single implementation is a real
+package submodule importable in-process by every interface (no ``sys.path``
+insertion of generic engine-dir names). History (the pre-collapse bash read path):
+``docs/bash-migration.md`` §5.
 
 Read-freshness policy (uniform across interfaces): each read first runs a
 best-effort, throttled (<=1/min) ``git fetch origin tickets`` + reconverge via
-the shared ``ticket-sync.sh`` ``_reconverge_tickets`` (the SAME mechanism and the
-SAME ``/tmp/.ticket-sync-<md5>`` throttle marker the dispatcher's
-``_ensure_initialized`` used) so all three interfaces share one contract. Opt out
+``rebar._store.sync`` (HEAD-based local-ahead detection, merge-as-union,
+lock-guarded reset), throttled by a ``/tmp/.ticket-sync-<md5>`` marker, so all
+three interfaces share one contract. Opt out
 with ``REBAR_SYNC_PULL=off`` (permanent alias ``REBAR_NO_SYNC=1``) or the
 ``--no-pull`` CLI flag.
 """
@@ -196,8 +191,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
     branch with origin/tickets. Shared by CLI/library/MCP so all three observe
     the same freshness contract.
 
-    Reuses the dispatcher's exact mechanism: the ``/tmp/.ticket-sync-<md5>``
-    throttle marker AND the ``_reconverge_tickets`` function in ``ticket-sync.sh``
+    Uses the ``/tmp/.ticket-sync-<md5>`` throttle marker and ``rebar._store.sync``
     (HEAD-based local-ahead detection, merge-as-union, lock-guarded reset) — so
     there is ONE sync implementation, not a reinvented one. Every failure path is
     swallowed: a read must never fail because a fetch could not run.
@@ -217,7 +211,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
         # Branch resolved from the MAIN repo config (parent of the tracker), matching
         # _sync_disabled above; a ConfigError is swallowed by the outer best-effort guard.
         branch = tickets_branch(os.path.dirname(tracker_abs))
-        # Only sync a tracker with a real tickets branch (matches _ensure_initialized).
+        # Only sync a tracker with a real tickets branch.
         r = subprocess.run(
             ["git", "-C", tracker_abs, "rev-parse", "--verify", branch],
             stdout=subprocess.DEVNULL,

@@ -4,7 +4,7 @@ Extracted from :mod:`rebar._commands.transition` (call-graph seam: the ``claim``
 command cluster) so each module stays within the module-size budget. Owns the claim
 arg parsing (``--assignee`` / ``--force``), the plan-review claim-gate precheck
 (epic 5fd2 — a fast LOCAL signature check, no LLM on the claim path), the locked
-claim core call, and the dispatcher-identical CLAIMED / error-envelope output.
+claim core call, and the CLAIMED / error-envelope output.
 ``transition`` re-exports :func:`claim_cli` + :func:`claim_compute` for callers.
 """
 
@@ -48,8 +48,8 @@ def _parse_force(args: list[str]) -> str:
 
 
 def _parse_assignee(args: list[str]) -> str | None:
-    """Parse [--assignee[=]<name>] from claim's args (other tokens skipped),
-    mirroring ticket-claim.sh. Raises :class:`CommandError` on a value-less flag.
+    """Parse [--assignee[=]<name>] from claim's args (other tokens skipped).
+    Raises :class:`CommandError` on a value-less flag.
 
     Returns ``None`` when ``--assignee`` is ABSENT (the "unspecified" sentinel that
     triggers the configured ``ticket.default_assignee`` fallback); returns the given
@@ -274,8 +274,7 @@ def claim_compute(
 
 def claim_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar claim`` entry: parse ``--output`` / ``--assignee``, resolve, run the
-    locked claim core, and emit the dispatcher-identical CLAIMED / error-envelope
-    output."""
+    locked claim core, and emit the CLAIMED / error-envelope output."""
     # Lazy import avoids a transition<->claim import cycle (transition re-exports us).
     from rebar._commands.transition import _resolve_id_or_report
 

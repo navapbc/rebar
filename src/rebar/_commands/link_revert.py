@@ -66,11 +66,10 @@ def link_core(
 
 
 def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) -> int:
-    """In-process ``link --dry-run`` preview (Tier E E6.5a — replaces the
-    ticket-link.sh subprocess). Resolves endpoints, asks the shared hierarchy
-    resolver what WOULD happen, and prints the byte-identical ``[DRY RUN]`` line
-    without writing any event. Missing tickets error like the bash _check_ticket_
-    exists; a resolver failure falls back to the plain "Would create" preview."""
+    """In-process ``link --dry-run`` preview. Resolves endpoints, asks the shared
+    hierarchy resolver what WOULD happen, and prints the ``[DRY RUN]`` line
+    without writing any event. Missing tickets error like ``link`` itself;
+    a resolver failure falls back to the plain "Would create" preview."""
     from rebar.graph._hierarchy import resolve_hierarchy_link
 
     tracker = str(tracker_dir(repo_root))
@@ -84,7 +83,7 @@ def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) 
         return 1
     try:
         res = resolve_hierarchy_link(src_id, tgt_id, tracker, relation)
-    except Exception:  # noqa: BLE001 — resolver unavailable → plain preview (bash parity)
+    except Exception:  # noqa: BLE001 — resolver unavailable → plain preview
         print(f"[DRY RUN] Would create: {src_id} {relation} {tgt_id} (no event written)")
         return 0
     if res.get("is_redundant"):
@@ -102,7 +101,7 @@ def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) 
 
 
 def link_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``link``: parse --dry-run, resolve, delegate."""
+    """CLI route for ``link``: parse --dry-run, resolve, delegate."""
     dry_run = "--dry-run" in argv
     rest = [a for a in argv if a != "--dry-run"]
     if len(rest) < 3:
@@ -130,7 +129,7 @@ _REVERT_USAGE = (
 
 
 def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root=None) -> str:
-    """Append a REVERT event targeting an existing event (mirrors ticket-revert.sh).
+    """Append a REVERT event targeting an existing event.
 
     Resolves the id, ghost-checks, finds the target event by UUID, rejects
     REVERT-of-REVERT, then appends the REVERT event through the seam. Reverting an
@@ -187,7 +186,7 @@ def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root
 
 
 def revert_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``revert``: parse args, print the confirmation."""
+    """CLI route for ``revert``: parse args, print the confirmation."""
     if len(argv) < 2:
         print(_REVERT_USAGE, file=sys.stderr)
         return 1

@@ -1,11 +1,8 @@
-"""The status-transition + claim locked critical section, in-process (Tier E E5c).
+"""The status-transition + claim locked critical section, in-process.
 
 This module IS the lock-holding, committing core for a status transition and for
-an atomic claim. It was relocated from ``_engine/ticket_txn.py`` (the bash-era
-heredoc extraction) into the ``rebar`` package so the CLI/library can call it
-in-process — without putting the engine dir on ``sys.path`` (the ``test_engine_dir``
-guard, a Tier D invariant). The old ``_engine/ticket_txn.py`` is now a thin shim
-that re-exits 10/1/2 for the bash dispatcher leg until E7.
+an atomic claim (history: the bash-era ``_engine/ticket_txn.py`` heredoc extraction,
+relocated here; see ``docs/bash-migration.md`` §7).
 
 Each core runs as ONE critical section in ONE process: acquire the unified write
 lock (``rebar._store.lock`` — fcntl + mkdir dual leg, the ``stiff-mop-lane`` fix),
@@ -80,8 +77,8 @@ def _stamp_session(status_data: dict) -> None:
 
 def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
     """Acquire the unified write lock (fcntl + mkdir dual leg, 30s) for a txn
-    critical section — mutually exclusive with bash leaf-writes on every platform
-    class (the ``stiff-mop-lane`` fix). ``attempts=1`` preserves ticket_txn's 30s
+    critical section — mutually exclusive with every other writer on every platform
+    class (the ``stiff-mop-lane`` fix). ``attempts=1`` bounds the wait to the 30s
     budget. Held across the whole re-read → write → commit section."""
     try:
         return lock.acquire(tracker_dir, timeout=30, attempts=1, dual_window=True)

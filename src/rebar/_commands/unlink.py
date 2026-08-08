@@ -2,8 +2,8 @@
 
 ``unlink`` removes a net-active LINK between the ordered pair by writing an UNLINK
 event carrying that LINK's uuid. With no relation it is pair-scoped — it removes
-the most-recently-created net-active LINK between the pair, mirroring
-ticket-link.sh's unlink path. With an explicit relation (bug e39f) removal is
+the most-recently-created net-active LINK between the pair. With an explicit
+relation (bug e39f) removal is
 RELATION-SCOPED: exactly the named relation's net-active link is removed, leaving
 any other relation the pair holds untouched — symmetric with the write side,
 where ``graph/_links.add_dependency`` keys idempotency on ``(target_id,
@@ -47,7 +47,7 @@ def _get_link_info(
     Replays LINK/UNLINK events chronologically (UNLINK.data.link_uuid cancels the
     LINK with that uuid), returning the most recent net-active link for target;
     falls back to a SNAPSHOT compiled_state.deps[] entry (compacted links), minus
-    any cancelled uuids. Mirrors ticket-link.sh's ``_get_link_info``.
+    any cancelled uuids.
 
     ``relation`` narrows the search to exactly that relation (bug e39f): links are
     written keyed on ``(target_id, relation)``, so a pair can hold several
@@ -145,7 +145,7 @@ def _write_unlink(
 def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo_root=None) -> None:
     """Remove the net-active link id1→id2 (+ reciprocal for relates_to).
 
-    With ``relation=None``, mirrors ticket-link.sh's unlink case: resolve both ids,
+    With ``relation=None``, the pair-scoped unlink case: resolve both ids,
     unlink the most-recent id1→id2 link, and for a relates_to link also unlink the
     reciprocal id2→id1 (warning if it is an orphaned one-sided link). With an
     explicit ``relation`` (bug e39f), removes exactly that relation's net-active
@@ -184,7 +184,7 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
 
 
 def unlink_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``unlink``."""
+    """CLI route for ``unlink``."""
     if len(argv) < 2:
         print(_USAGE, file=sys.stderr)
         return 1

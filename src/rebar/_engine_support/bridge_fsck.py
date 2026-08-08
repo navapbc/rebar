@@ -1,14 +1,13 @@
-"""Bridge-specific fsck audit (in-process; Tier E E6.5a canonical home).
+"""Bridge-specific fsck audit (in-process; canonical home).
 
-The engine ``ticket-bridge-fsck.py`` is now a thin bootstrap shim re-exporting
-this module. Scans .tickets-tracker/ for bridge mapping anomalies:
+Scans .tickets-tracker/ for bridge mapping anomalies:
   - Orphaned jira_key mappings (SYNC event exists but no CREATE event)
   - Duplicate Jira mappings (multiple tickets share the same jira_key)
   - Stale SYNC events (most recent SYNC > 30 days old, no BRIDGE_ALERT activity)
   - Unresolved BRIDGE_ALERT counts
 
 Reached in-process via ``rebar.bridge_fsck()`` and the ``rebar bridge-fsck`` CLI
-arm; ``main()`` preserves the dispatcher arm's byte output (text / --output json).
+arm; ``main()`` renders the byte-pinned CLI output (text / --output json).
 
 Module interface:
     audit_bridge_mappings(tickets_tracker: Path) -> dict

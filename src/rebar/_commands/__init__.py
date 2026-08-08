@@ -29,14 +29,14 @@ class _Cmd(NamedTuple):
     func: Callable[..., None]
     min_args: int
     usage: str
-    # Max positional args; None = unbounded. The bash leaf functions guard arity
-    # with `[ $# -lt N ]` (extra args ignored) except archive's `[ $# -ne 1 ]`
-    # (extra args are a usage error). max_args pins that difference.
+    # Max positional args; None = unbounded. Most leaf commands ignore extra args
+    # (a too-few-args guard only); archive is exactly-one, so a surplus positional
+    # is a usage error. max_args pins that difference.
     max_args: int | None = None
 
 
-# Registry of ported Tier B commands, keyed by the dispatcher subcommand name.
-# min_args / usage mirror the bash `[ $# -lt N ]` guards in ticket-lib-api.sh.
+# Registry of leaf-write commands, keyed by subcommand name.
+# min_args / usage pin each command's arity guard.
 _REGISTRY: dict[str, _Cmd] = {
     "comment": _Cmd(leaf.comment, 2, "Usage: rebar comment <ticket_id> <body>"),
     "set-verify-commands": _Cmd(
@@ -172,11 +172,10 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
 
 
 def main(argv: list[str]) -> int:
-    """CLI entry for the bash dispatcher's Python leaf-write route.
+    """CLI entry for the leaf-write route.
 
     ``argv`` is ``[<command>, <args>...]``. Returns the process exit code; a
-    :class:`CommandError` prints its message to stderr and yields its return code
-    (mirroring the bash functions' stderr + exit contract).
+    :class:`CommandError` prints its message to stderr and yields its return code.
     """
     if not argv:
         print("Usage: ticket-commands.py <command> [args...]", file=sys.stderr)

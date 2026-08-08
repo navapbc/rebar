@@ -6,10 +6,12 @@ it in-process through ``_seam.append_event`` → ``rebar._store.event_append.wri
 validation order, error strings, exit codes, and the event envelope — is pinned by the
 interface-contract tests.
 
-Ported so far: ``comment`` (COMMENT), ``set_file_impact`` (FILE_IMPACT),
-``set_verify_commands`` (VERIFY_COMMANDS) — the pure single-event appends. The
-state-reading leaf writes (tag/untag, archive) and the larger event-composers
-(create/edit/link/unlink/revert) are tracked as child tickets of the Tier B story.
+This module implements the leaf-write commands: the pure single-event appends
+``comment`` (COMMENT), ``set_file_impact`` (FILE_IMPACT), ``set_verify_commands``
+(VERIFY_COMMANDS), the state-reading leaf writes ``tag`` / ``untag`` (TAG/UNTAG)
+and ``archive`` (ARCHIVE), plus ``declare_no_file_impact``. The larger
+event-composers (create/edit/link/unlink/revert) live in sibling modules
+(``composer.py`` / ``link_revert.py``).
 """
 
 from __future__ import annotations

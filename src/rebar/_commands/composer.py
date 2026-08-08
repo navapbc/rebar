@@ -1,13 +1,13 @@
-"""Tier B event-composer commands (docs/bash-migration.md §4): create (+ edit/link/
-unlink/revert as they land).
+"""Tier B event-composer commands (docs/bash-migration.md §4): create + edit
+(link / unlink / revert live in ``link_revert.py``).
 
 These are the heavier leaf writes — multi-flag arg parsing, validation with
 ``--output json`` error envelopes, alias generation, and structured output. Each
 splits into a ``*_core`` (validation + event compose + append through the seam,
 returning structured data) shared by the library, and a ``*_cli`` (output-format
-parsing + text/json formatting) used by the bash dispatcher's Python route. The
-core reuses the same Python helpers the bash already delegated to (alias compute,
-the shared reducer, ``rebar._engine_support.output``) so behaviour matches.
+parsing + text/json formatting) invoked by the argparse CLI. The core and CLI
+share the same Python helpers (alias compute, the shared reducer,
+``rebar._engine_support.output``) so library and CLI behaviour match.
 """
 
 from __future__ import annotations
@@ -223,7 +223,7 @@ def create_core(
 
 
 def create_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``create``: parse --output + flags, format output.
+    """CLI route for ``create``: parse --output + flags, format output.
 
     Returns the process exit code; reproduces the bash text/json output and the
     json error envelope on validation failure.
@@ -531,7 +531,7 @@ _TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
 
 
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
-    """Dispatcher Python route for ``edit``: parse ticket_id + --field pairs +
+    """CLI route for ``edit``: parse ticket_id + --field pairs +
     tag-delta flags (--add-tag / --remove-tag / --set-tags)."""
     if len(argv) < 2:
         print(_EDIT_USAGE, file=sys.stderr)

@@ -108,7 +108,7 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
 def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
     """Parse [--reason[=]] [--class[=]] [--force[=]] [--caused-by[=]] [--ref[=]] from the args
     AFTER <current> <target>. Returns (reason, force_reason, close_class, caused_by, ref).
-    Mirrors ticket-transition.sh's flag loop (unknown tokens are silently skipped).
+    Unknown tokens are silently skipped.
 
     ``--force`` / ``--force=<reason>`` (ticket 24f7) is THE single escape hatch, spelled
     exactly as ``claim --force[=<reason>]``. ``force_reason`` is ``None`` when the flag is
@@ -422,10 +422,10 @@ def _cascade_open_parent(
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
     """The ``archived → open`` un-archive seam: REVERT the latest live ARCHIVED
-    event IN-PROCESS via :func:`rebar._commands.composer.revert_core` (Tier E
-    E6.5a — replacing the ticket-revert.sh subprocess). Same REVERT event +
-    ``.archived`` marker clear + ``Reverted event …`` confirmation the bash
-    ``exec`` produced; ``--output`` and the UNBLOCKED block are skipped here."""
+    event IN-PROCESS via :func:`rebar._commands.composer.revert_core`. Writes the
+    REVERT event, clears the ``.archived`` marker, and prints the
+    ``Reverted event …`` confirmation; ``--output`` and the UNBLOCKED block are
+    skipped here."""
     if target_status != "open":
         sys.stderr.write(
             "Error: from 'archived' the only valid transition is to 'open' "
@@ -454,8 +454,7 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
 
 
 def _latest_live_archived_uuid(ticket_dir: str) -> str:
-    """UUID of the most recent ARCHIVED event not undone by a REVERT (mirrors the
-    inline heredoc in ticket-transition.sh)."""
+    """UUID of the most recent ARCHIVED event not undone by a REVERT."""
     archived: dict[str, int] = {}
     reverted: set[str] = set()
     try:
@@ -603,7 +602,7 @@ from rebar._commands.claim import claim_cli, claim_compute  # noqa: E402,F401
 
 def reopen_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar reopen <id>`` → ``transition <id> closed open`` (uses only the first
-    positional, like the dispatcher arm)."""
+    positional)."""
     try:
         fmt, rest = parse_output(argv, "report")
     except OutputFormatError as exc:

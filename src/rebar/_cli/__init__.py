@@ -36,8 +36,8 @@ from rebar._cli._llm_commands import (
 from rebar._cli._workflow_commands import _workflow
 
 # Commands EXCLUDED from the central best-effort store-mount gate (bug ad9f): `init`
-# IS init (it must not pre-mount) and `scratch` is filesystem-only (the dispatcher
-# gives it no init). Everything else passes through the gate, which silently no-ops
+# IS init (it must not pre-mount) and `scratch` is filesystem-only (it gets no
+# init). Everything else passes through the gate, which silently no-ops
 # when there is no attachable store, so no-store reads keep working store-less.
 _NO_AUTO_MOUNT = frozenset({"init", "scratch"})
 # Every pure-intercept subcommand `_main_dispatch` routes ABOVE the set-based arms. The
@@ -98,15 +98,15 @@ def _store_mount_eligible(argv: list[str]) -> bool:
 _READS_INIT_ONLY = frozenset(
     {"show", "list", "next-batch", "deps", "ready", "search", "session-logs"}
 )
-# Read-compute arm the dispatcher ran with NO _ensure_initialized (self-manages).
+# Read-compute arm that runs with NO auto-init (self-manages).
 _READS_NO_INIT = frozenset({"validate"})
-# Field-read arms the dispatcher ran with FULL _ensure_initialized (ticket-lib-api.sh).
+# Field-read arms that run with FULL auto-init.
 _FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
-# Resolution/display arms the dispatcher ran with FULL _ensure_initialized.
+# Resolution/display arms that run with FULL auto-init.
 _LOOKUPS = frozenset({"exists", "resolve", "format"})
-# Graph-traversal arm the dispatcher ran with FULL _ensure_initialized.
+# Graph-traversal arm that runs with FULL auto-init.
 _DESCENDANTS = frozenset({"list-descendants"})
-# Per-ticket gate arms the dispatcher ran with NO _ensure_initialized (they read
+# Per-ticket gate arms that run with NO auto-init (they read
 # transitively via `ticket show`, so the gate CLI itself does no auto-init).
 _GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
 # Signature arms (native, no bash counterpart): `sign` is a write, `verify-signature`
@@ -167,9 +167,9 @@ def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -
 
     Launches the genuine python probe (``jira-capability-probe.py``) under
     ``sys.executable`` with ``engine_env`` (so the engine's
-    ``rebar_reconciler.adapters.jira.acli`` transport resolves) — replacing the bash-dispatcher
-    passthrough (Tier E E6.5a). Talks only to Jira (creates + deletes a throwaway
-    issue); needs no local tracker, so NO auto-init (matches the dispatcher arm).
+    ``rebar_reconciler.adapters.jira.acli`` transport resolves). Talks only to
+    Jira (creates + deletes a throwaway
+    issue); needs no local tracker, so NO auto-init.
     Output streams inherit so the operator sees the PROBE_PASS/FAIL lines directly.
 
     ``extra_env`` overlays additional variables onto ``engine_env()`` before launch,
@@ -233,10 +233,10 @@ def _grounding_info(argv: list[str]) -> int:
 
 
 def _emit_subcommand_help(sub: str) -> int:
-    """Print ``sub``'s usage (``_print_subcommand_help`` parity).
+    """Print ``sub``'s usage.
 
     Known subcommand → stdout, exit 0. Unknown → error + blank + overview all to
-    stderr, exit 1 (the dispatcher's ``*)`` arm).
+    stderr, exit 1.
     """
     text = _help.subcommand_help(sub)
     if text is not None:
@@ -272,7 +272,7 @@ def _dispatch_primary(sub: str, rest: list[str]) -> int:
 
         return _init_cmd.init_cli(rest)
     if sub == "scratch":
-        # Filesystem-only per-ticket store — NO auto-init (matches the dispatcher).
+        # Filesystem-only per-ticket store — NO auto-init.
         from rebar._commands import scratch
 
         return scratch.scratch_cli(rest)
@@ -343,7 +343,7 @@ def _dispatch_middle(sub: str, rest: list[str]) -> int:
         return _fsck.fsck_cli(rest)
     if sub == "fsck-recover":
         # The recover path resolves its own tracker (honors REBAR_TRACKER_DIR /
-        # --tracker-dir); the dispatcher only auto-inits when
+        # --tracker-dir); it only auto-inits when
         # no tracker is injected.
         from rebar import config
 
@@ -428,8 +428,8 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     """rebar CLI entry. Returns the process exit code.
 
-    Control flow mirrors the bash dispatcher's help-interception-before-dispatch
-    order so no command is executed on a help request and the streams/exit codes
+    Control flow intercepts help before dispatch
+    so no command is executed on a help request and the streams/exit codes
     match the pinned goldens.
     """
     # Observability floor: install a stderr handler on the ``rebar`` root logger so
@@ -499,11 +499,11 @@ def _main_dispatch(argv: list[str]) -> int:
     if _store_mount_eligible(argv):
         ensure_store_mounted_best_effort()
 
-    # reconcile intercept (the dispatcher has no reconcile arm).
+    # reconcile intercept (a native rebar op, not a per-ticket command arm).
     if argv and argv[0] == "reconcile":
         return _reconcile(argv[1:])
 
-    # review intercept (native rebar.llm op; not a dispatcher arm, like reconcile).
+    # review intercept (native rebar.llm op, like reconcile).
     if argv and argv[0] == "review":
         return _review(argv[1:])
 
@@ -623,7 +623,7 @@ def _main_dispatch(argv: list[str]) -> int:
 
         return show_config.config_cli(argv[1:])
 
-    # No subcommand: overview to stdout, exit 1 (the dispatcher's _usage).
+    # No subcommand: overview to stdout, exit 1.
     if not argv:
         sys.stdout.write(_help.overview())
         return 1

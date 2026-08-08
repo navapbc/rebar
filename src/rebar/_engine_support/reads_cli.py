@@ -30,6 +30,20 @@ from rebar._engine_support.ticket_query import TicketQuery
 from rebar.reducer.llm_format import to_llm
 
 
+def _reject_unknown_option(arg: str, usage: str) -> int:
+    """Emit the standard unknown-option usage error and return exit 2.
+
+    An unrecognized option is a usage error (exit 2), not a runtime error (1) —
+    the canonical show/list/deps/ready/search contract (exit-codes.md). Rejecting
+    rather than silently dropping also catches removed legacy flags (e.g. the old
+    ``--json``, now ``--output json``). ``usage`` is the command's own usage/help
+    text, printed to stderr after the error line.
+    """
+    print(f"Error: unknown option '{arg}'", file=sys.stderr)
+    print(usage, file=sys.stderr)
+    return 2
+
+
 def _bridge_alert_warning(states: list[dict]) -> str | None:
     alerted = sum(
         1 for t in states if any(not a.get("resolved", False) for a in t.get("bridge_alerts", []))
@@ -125,11 +139,7 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         elif arg == "--include-provenance":
             include_provenance = True
         elif arg.startswith("-"):
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print(usage, file=sys.stderr)
-            # Unrecognized option is a usage error (2), not a runtime error (1) —
-            # matching deps/ready/search (the canonical contract in exit-codes.md).
-            return 2
+            return _reject_unknown_option(arg, usage)
         else:
             ids.append(arg)
     if not ids:
@@ -279,16 +289,12 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
             print(usage, file=sys.stderr)
             return 0
         else:
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print(
+            return _reject_unknown_option(
+                arg,
                 "Valid filters: --type --status --priority --parent --has-tag "
                 "--without-tag --min-children --unblocked --blocked --with-children-count "
                 "--full --sort --include-archived --exclude-deleted --output llm",
-                file=sys.stderr,
             )
-            # Unrecognized option is a usage error (2), not a runtime error (1) —
-            # matching deps/ready/search (the canonical contract in exit-codes.md).
-            return 2
 
     if not sort_key_valid(opts["sort"]):
         print(
@@ -372,9 +378,7 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
             print(usage, file=sys.stderr)
             return 0
         else:
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print(usage, file=sys.stderr)
-            return 2
+            return _reject_unknown_option(arg, usage)
 
     if not os.path.isdir(tracker):
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
@@ -393,11 +397,9 @@ def _cmd_deps(argv: list[str], tracker: str) -> int:
     include_archived = "--include-archived" in argv
     for arg in argv:
         if arg.startswith("-") and arg != "--include-archived":
-            # Reject unknown options instead of silently dropping them
-            # (matching list/show/ready/search).
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print("Usage: ticket deps <ticket_id> [--include-archived]", file=sys.stderr)
-            return 2
+            return _reject_unknown_option(
+                arg, "Usage: ticket deps <ticket_id> [--include-archived]"
+            )
     pos = [a for a in argv if not a.startswith("-")]
     if not pos:
         print("Usage: ticket deps <ticket_id>", file=sys.stderr)
@@ -440,15 +442,11 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
             i += 1
             continue
         if arg.startswith("-"):
-            # Reject unknown options, including the removed legacy `--json`
-            # (use `--output json`). Mirrors the old ready arm's exit 2.
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print(
+            return _reject_unknown_option(
+                arg,
                 "Usage: ticket ready [--output json|llm] [--epic <id>] "
                 "[--sort=<priority|created|updated|id|status>]",
-                file=sys.stderr,
             )
-            return 2
         i += 1
     if not sort_key_valid(sort):
         print(
@@ -489,17 +487,12 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
         elif arg == "--include-archived":
             include_archived = True
         elif arg.startswith("-"):
-            # Reject unknown options (e.g. the removed legacy `--json`) instead
-            # of silently ignoring them — matching list/show/ready. The old shim
-            # tolerated them; post-collapse there is no reason to.
-            print(f"Error: unknown option '{arg}'", file=sys.stderr)
-            print(
+            return _reject_unknown_option(
+                arg,
                 "Usage: ticket search <query> [--status=S] [--type=T] "
                 "[--has-tag=TAG] [--include-archived] "
                 "[--sort=<priority|created|updated|id|status>]",
-                file=sys.stderr,
             )
-            return 2
         elif query is None:
             query = arg
     if query is None:

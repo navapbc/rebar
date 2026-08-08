@@ -1,13 +1,11 @@
-"""In-process ``get-file-impact`` / ``get-verify-commands`` (Tier E E2).
+"""In-process ``get-file-impact`` / ``get-verify-commands``.
 
-Ports the two field-read commands the bash dispatcher reached via
-``_ticketlib_dispatch ticket_get_file_impact`` / ``ticket_get_verify_commands``
-(``ticket-lib-api.sh``). Both resolve an id and read one array off the reduced
+The two field-read commands. Both resolve an id and read one array off the reduced
 ticket — reusing the single reducer (bug f026), the shared resolver, and the
 canonical ``--output`` / error-envelope layer — so the library and the argparse
 CLI share one implementation.
 
-Byte-parity with the bash arms (verified empirically against the dispatcher):
+Output contract (byte-pinned by the interface-contract tests):
 
 * ``get-file-impact`` — spaced ``json.dumps`` (default separators), reducer
   insertion order; **silent ``[]`` on a resolve/dir miss**, exit 0; arity →
@@ -53,7 +51,7 @@ def verify_commands(ticket_id: str, tracker: str) -> list:
     return state.get("verify_commands") or []
 
 
-# ── CLI arms (byte-parity with the dispatcher) ────────────────────────────────
+# ── CLI arms ──────────────────────────────────────────────────────────────
 def file_impact_cli(argv: list[str], tracker: str) -> int:
     if len(argv) < 1:
         sys.stderr.write("Usage: ticket get-file-impact <ticket_id>\n")
@@ -83,7 +81,7 @@ def verify_commands_cli(argv: list[str], tracker: str) -> int:
         vc = verify_commands(ticket_id, tracker)
     except ReadError:
         # Miss: the schema envelope goes to stdout in json mode; the text error
-        # goes to stderr in BOTH modes (matches the dispatcher's _emit_error_envelope).
+        # goes to stderr in BOTH modes (the canonical error-envelope contract).
         if fmt == "json":
             env = error_envelope(
                 "ticket_not_found", ticket_id, f"Ticket '{ticket_id}' not found", 1

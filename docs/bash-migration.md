@@ -395,6 +395,21 @@ implementation). Help / usage / error output is byte-pinned by goldens anchored 
 End state reached (the story's AC): one implementation + three facades; zero
 standalone shell tests; no embedded heredocs; no `_engine/*.sh`.
 
+### Post-cutover: where "byte-parity" lives now
+
+The ported command arms (`rebar._commands.*`, `rebar._cli.*`,
+`rebar._engine_support.*`, `rebar._io.*`) were originally written to reproduce the
+bash dispatcher's stdout/stderr/exit-code output byte-for-byte. The dispatcher and
+its `*.sh` scripts are gone (this section), so that output contract is no longer
+"parity with a live second impl" — it is simply **the CLI's contract**, pinned by
+the interface-contract / golden tests under `tests/` (help/usage goldens anchored
+in `rebar._cli/_help`; per-command stdout/stderr/exit fixtures). Module docstrings
+across those four subtrees historically narrated the port ("Ports `ticket-X.sh`",
+"byte-parity with the dispatcher", "Tier E cutover", "until E7"); those citations
+were collapsed to point here during ticket `4fc1` since the artifact they named no
+longer exists. Read this section for the migration history; the tests are the live
+contract.
+
 ## 8. Sequencing, tickets, and rollback
 
 ```

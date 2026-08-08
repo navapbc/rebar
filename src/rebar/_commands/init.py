@@ -9,9 +9,9 @@ cannot split ticket history. A 30-second mkdir lock serializes concurrent inits.
 
 init resolves the repo from the git toplevel of ``repo_root`` (or cwd) — it
 deliberately ignores an inherited repo-root override (it must initialize the
-target repo, not a shim's project root), matching the bash script's repo-root unset.
+target repo, not a shim's project root).
 
-Byte-parity pinned by ``tests/interfaces/test_e4_init.py``.
+Output contract pinned by ``tests/interfaces/store/test_e4_init.py``.
 """
 
 from __future__ import annotations

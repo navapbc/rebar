@@ -1,8 +1,7 @@
-"""In-process ``list-descendants`` (Tier E E2).
+"""In-process ``list-descendants``.
 
-BFS walk from a root ticket, bucketed by type — ported verbatim from the engine's
-``ticket-list-descendants.py`` (which imported the ``ticket_reducer`` compat shim),
-now reusing ``rebar.reducer.reduce_all_tickets`` and the shared resolver. CLI-only.
+BFS walk from a root ticket, bucketed by type, reusing
+``rebar.reducer.reduce_all_tickets`` and the shared resolver. CLI-only.
 
 Output (always valid, empty arrays when the root has no descendants / is absent):
 ``{epics, stories, tasks, bugs, parents_with_children}``.

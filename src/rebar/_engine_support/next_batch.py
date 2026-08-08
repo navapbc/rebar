@@ -443,8 +443,7 @@ _USAGE = "rebar next-batch <epic-id> [--limit=N|unlimited] [--output json]"
 
 
 def run(argv: list[str], tracker: str) -> int:
-    """CLI handler for ``next-batch`` (text/json, exit codes 0/1/2). Mirrors the
-    bash dispatcher arm byte-for-byte."""
+    """CLI handler for ``next-batch`` (text/json, exit codes 0/1/2)."""
     epic_id = ""
     limit = 0
     limit_zero = False

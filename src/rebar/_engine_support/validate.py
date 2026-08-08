@@ -192,10 +192,8 @@ def normalize_issues(tickets: list[dict]) -> list[dict]:
 
 
 # ───────────────────────────── checks + scoring ──────────────────────────────
-# Each bash check calls get_shared_issues_json, whose "Fetching..." verbose line
-# re-emits per call (its cache lives in a pipe-subshell and never persists). The
-# port fetches once, so to keep verbose byte-parity we splice this line in after
-# each check's opening "Checking..." verbose finding.
+# The shared "Reading..." verbose line is emitted once per check's opening
+# "Checking..." verbose finding, so the verbose output lists it before every check.
 _FETCHING = _checks.Finding("verbose", "Reading local tickets (in-process)...")
 
 

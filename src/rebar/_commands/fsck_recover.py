@@ -1,6 +1,6 @@
-"""In-process ``fsck-recover`` — destructive tracker recovery (Tier E E4).
+"""In-process ``fsck-recover`` — destructive tracker recovery (bug 637b).
 
-Ports ticket-fsck-recover.sh (bug 637b). Detects a paused rebase/merge in the
+Detects a paused rebase/merge in the
 tracker worktree (rebase-merge / rebase-apply / REBASE_HEAD / MERGE_HEAD), tries
 ``git rebase --continue`` (with timeout), and on failure aborts + cherry-picks
 dangling ``ticket: <EVENT> <id>`` commits in chronological order.
@@ -8,8 +8,7 @@ dangling ``ticket: <EVENT> <id>`` commits in chronological order.
 DESTRUCTIVE: modifies tracker git state (unlike fsck). Flags: --tracker-dir,
 --detect-only, --recover-dangling, --timeout, --help. Exit 0 = nothing to do /
 recovered; 1 = attempted but nothing recovered; 2 = fatal (no tracker / bad args);
-3 = stale detected with --detect-only. Byte-parity pinned by
-``tests/interfaces/test_e4_fsck_recover.py``.
+3 = stale detected with --detect-only.
 """
 
 from __future__ import annotations

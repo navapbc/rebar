@@ -1,6 +1,6 @@
-"""In-process ``fsck`` — non-destructive store integrity validator (Tier E E4).
+"""In-process ``fsck`` — non-destructive store integrity validator.
 
-Ports ticket-fsck.sh. Runs five checks over the tracker:
+Runs five checks over the tracker:
   1. JSON validity of event files
   2. CREATE event presence (via the reducer)
   3. Stale ``.git/index.lock`` cleanup (>5min; the ONLY mutation, suppressed by
@@ -11,9 +11,8 @@ Ports ticket-fsck.sh. Runs five checks over the tracker:
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the
-SAME text via the dispatcher's regex transform (kept identical for byte-parity).
-Exit 0 = no issues, 1 = issues found. Byte-parity pinned by
-``tests/interfaces/test_e4_fsck.py``.
+SAME text via a regex transform (kept identical so text and JSON never drift).
+Exit 0 = no issues, 1 = issues found.
 """
 
 from __future__ import annotations
@@ -85,8 +84,8 @@ def _scan(
                 issue_count += 1
 
     # ── Check 2: CREATE event presence ───────────────────────────────────────
-    # The reducer warns to stderr on corrupt events; the dispatcher ran it with
-    # 2>/dev/null, so silence its stderr here for byte-parity.
+    # The reducer warns to stderr on corrupt events; those warnings are noise here
+    # (not part of the fsck output contract), so silence its stderr.
     import contextlib
     import io
 
@@ -436,7 +435,8 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
 
 
 def _transform_json(text: str, compat_error: dict | None = None) -> str:
-    """Port of the dispatcher's text→json transform (ticket-fsck.sh lines 37-69). Story
+    """Derive the ``--output json`` shape from the text output (kept identical so
+    text and JSON never drift). Story
     21dd: attach a ``{"kind","detail"}`` ``compat_error`` (incompatible/corrupt store) so
     ``jq -e '.compat_error.kind'`` detects it WITHOUT the read being blocked."""
     issues, fixed = [], []

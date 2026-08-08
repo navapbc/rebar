@@ -1,14 +1,11 @@
-"""In-process quality gates: clarity-check / check-ac / quality-check / summary (Tier E E2).
+"""In-process quality gates: clarity-check / check-ac / quality-check / summary.
 
-Ports the four per-ticket gate scripts (ticket-clarity-check.sh,
-check-acceptance-criteria.sh, issue-quality-check.sh, issue-summary.sh) to
-in-process Python, reusing the single reducer via ``reads.show_state`` /
+Reuses the single reducer via ``reads.show_state`` /
 ``reads.deps_state``. Each ``_compute`` returns the structured result the gate's
 ``--output json`` emits (so the library shares it); the ``*_cli`` wrappers add the
-text rendering + exit code for byte-parity with the dispatcher.
+text rendering + exit code.
 
-The scoring/counting heuristics replicate the bash regex/awk/grep-count semantics
-exactly (rule order included), since the gates are byte-pinned contracts.
+The scoring/counting heuristics are byte-pinned contracts (rule order included).
 """
 
 from __future__ import annotations

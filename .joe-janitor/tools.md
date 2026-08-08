@@ -113,3 +113,65 @@ deliberately KEPT VERBATIM (disposition DO_NOT_MOVE). `path:line` is approximate
   (FALSE — `select_backend` fully implemented, imported by 12 modules / 38 sites); `_backend.py`
   "routing … is S4, config-driven selection is S3" (both landed); `adapters/jira/backend.py`
   "No core call site is rewired here (that is S4)" (rewired via `select_backend`).
+
+## 4fc1 commands/CLI/engine_support/io do_not_move
+
+Load-bearing blocks in `src/rebar/_commands/**`, `src/rebar/_cli/**`,
+`src/rebar/_engine_support/**`, `src/rebar/_io/**` retained verbatim during the 4fc1
+comment triage (path — one-line why):
+
+### Lint / type-checker pragmas (removing any breaks `make lint`/`make typecheck`, uncaught by tests)
+
+- ALL `# noqa: …` across the four subtrees — **83 lines total** (grep count), dominated by
+  `# noqa: BLE001` on fail-open/fail-closed `except Exception` handlers (transition_close.py,
+  close_precheck.py, verify_opcert.py, verify_authorship.py, identity.py, txn.py, delete.py,
+  metrics.py, gates.py, reads.py, next_batch.py, bridge_fsck.py, import_ndjson.py, …),
+  `# noqa: F401` re-export seams (transition_close.py:34, composer.py:631, transition.py:601,
+  claim import, fsck.py:35, _llm_commands.py:21), `# noqa: E402` deferred-import cycles
+  (composer.py:631, transition.py:601), the `# noqa: T201` CLI-`print` allowances in
+  `_io/_cli.py` (8 lines), and `# noqa: SIM115` in export_ndjson.py:151. DO_NOT_MOVE, verbatim.
+- `# pragma: no cover` — `_cli/_workflow_commands.py:301` (guards a broken template). DO_NOT_MOVE.
+- `# tickets-boundary-ok` — `_engine_support/bridge_fsck.py:580` (boundary-lint pragma). DO_NOT_MOVE.
+
+### Test-pinned user-facing output strings (changing them breaks golden/contract tests)
+
+- `_commands/fsck_recover.py` `_USAGE` (`ticket-fsck-recover.sh …`) — printed to stderr on
+  `--help`/usage error; the string IS the CLI contract, not stale narration. DO_NOT_MOVE.
+- `_commands/compact.py:50` `Usage: ticket-compact.sh <ticket_id> …` — printed usage. DO_NOT_MOVE.
+- `_commands/scratch.py:190` `"reason":"Usage: ticket-scratch-clear.sh …"` — emitted JSON
+  envelope. DO_NOT_MOVE.
+- `_commands/__init__.py` `main()` `Usage: ticket-commands.py <command> …` — printed usage.
+  DO_NOT_MOVE.
+
+### Measured external-API facts / live invariants (retained in place, lightly de-narrated only)
+
+- `_commands/txn.py` **Byte-parity contract** paragraph — the canonical-serialization invariant
+  (`rebar._store.canonical.canonical_str`, sorted keys, compact separators, `ensure_ascii=False`,
+  byte-identical to every live writer) + the "do NOT split the commit out" anti-refactor warning.
+  DO_NOT_MOVE (current invariant).
+- `_engine_support/field_reads.py` output-contract bullets (spaced vs compact `json.dumps`,
+  silent `[]` on miss, exact error strings + streams + exit codes) — measured external-API facts.
+  Kept; only the "byte-parity with the dispatcher" framing was reworded to "byte-pinned by tests".
+- `_engine_support/reads.py` the `/tmp/.ticket-sync-<md5>` throttle-marker description — documents
+  CURRENT runtime behavior (the code builds that exact path). Kept; only the dead `ticket-sync.sh`/
+  `_ensure_initialized` citations were corrected to `rebar._store.sync`.
+- `_commands/leaf.py` module docstring "option-looking token / surplus positional is a loud usage
+  error; `--` ends option parsing" — live arg-parsing invariant. Kept (CORRECT-IN-PLACE elsewhere).
+
+### Notes on dispositions applied (provenance, not do_not_move)
+
+- RELOCATE→citation (`docs/bash-migration.md` §7, new subsection "Post-cutover: where 'byte-parity'
+  lives now"): the ~16 module-docstring bash-port narrations across the four subtrees.
+- CORRECT-IN-PLACE (verified-stale): `_commands/txn.py` (dead `_engine/ticket_txn.py` shim "until
+  E7"); `_engine_support/reads.py` (false engine-dir location reason); `_commands/leaf.py`
+  (tag/untag/archive "tracked as child tickets" — all three defined in-file); `_engine_support/
+  __init__.py` (non-existent `rebar/_engine/` compat shims); `_io/__init__.py` (import side "lands
+  in a later sub-task" — already imported 6 lines above); `_cli/_help.py` (docstring truncated
+  mid-clause by commit 3a53e202a7, completed); `_commands/init.py` (stale test path
+  `tests/interfaces/test_e4_init.py` → `tests/interfaces/store/test_e4_init.py`).
+- DELETE (referenced-artifact-gone): the dead byte-parity test pins
+  `tests/interfaces/test_e4_fsck.py` and `tests/interfaces/test_e4_fsck_recover.py` (no such files
+  exist anywhere in the tree) removed from fsck.py / fsck_recover.py module docstrings.
+- CODE (behavior-preserving): `_engine_support/reads_cli.py` — extracted `_reject_unknown_option`
+  and called it from the six unknown-option arms (show/list/session-logs/deps/ready/search),
+  removing the repeated explanatory comment; observable output unchanged (verified by the CLI tests).

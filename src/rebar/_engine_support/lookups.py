@@ -1,9 +1,8 @@
-"""In-process ``exists`` / ``resolve`` / ``format`` (Tier E E2).
+"""In-process ``exists`` / ``resolve`` / ``format``.
 
-Ports the three resolution/display arms the dispatcher reached via
-``ticket-exists.sh`` (exists) and ``ticket-lib.sh`` ``resolve_ticket_id`` /
-``format_ticket_id`` (resolve / format). All three reuse the shared resolver; the
-library never exposed them, so this is CLI-only, byte-parity with the dispatcher.
+The three resolution/display arms (``exists``; ``resolve`` / ``format`` via
+``resolve_ticket_id`` / ``format_ticket_id``). All three reuse the shared resolver;
+the library never exposed them, so this is CLI-only.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ def _has_ticket_events(ticket_dir: str) -> bool:
 def _create_data(ticket_dir: str) -> dict:
     """``data`` of the first CREATE event in ``ticket_dir`` ({} if none/unreadable).
 
-    Matches the dispatcher's format/auto/alias paths, which read ``data.alias`` /
+    The format/auto/alias paths read ``data.alias`` /
     ``data.jira_key`` from the CREATE event directly (not the reduced state, so a
     bridge-added jira_key post-CREATE is intentionally not reflected here).
     """
@@ -75,7 +74,7 @@ def _display_mode(repo_root: str | None) -> str:
         return "auto"
 
 
-# ── CLI arms (byte-parity with the dispatcher) ────────────────────────────────
+# ── CLI arms ──────────────────────────────────────────────────────────────
 def exists_cli(argv: list[str], tracker: str) -> int:
     if not argv or not argv[0]:
         sys.stderr.write("Usage: ticket exists <ticket_id>\n")

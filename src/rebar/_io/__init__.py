@@ -11,7 +11,7 @@ backup). Two consumers:
 
 The export side lives in :mod:`export_ndjson` (streaming, one full ticket object
 per line); ``--strip-external`` provider-neutral stripping in :mod:`_strip`. The
-import side (:mod:`import_ndjson`) lands in a later sub-task.
+import side is :mod:`import_ndjson` (re-exported below).
 """
 
 from __future__ import annotations

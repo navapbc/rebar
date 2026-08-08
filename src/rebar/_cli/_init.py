@@ -41,9 +41,9 @@ def _git_toplevel() -> str | None:
 
 
 def _resolve_repo_root() -> str:
-    """Repo root with the dispatcher's precedence: REBAR_ROOT, git.
+    """Repo root with precedence REBAR_ROOT, then git.
 
-    Exits 1 with the dispatcher's exact message when none resolves.
+    Exits 1 with the canonical message when none resolves.
     """
     # Same precedence as config.repo_root (REBAR_ROOT > git) so the
     # gate inspects the SAME repo the commands operate on and init writes to.
@@ -174,7 +174,7 @@ def ensure_initialized(*, init_only: bool) -> None:
     (see :func:`_create_tracker`).
     """
     # Explicit tracker injected → the caller manages init/freshness (do not
-    # auto-init the cwd repo's tracker). Matches the dispatcher's first guard.
+    # auto-init the cwd repo's tracker).
     from rebar import config
 
     if config.tracker_dir_override():
@@ -234,7 +234,7 @@ def ensure_store_mounted_best_effort() -> None:
         return
 
     try:
-        # Resolve the repo root with the dispatcher's precedence. Unlike
+        # Resolve the repo root with the REBAR_ROOT > git precedence. Unlike
         # ensure_initialized this must not raise when there is no repo — a no-store
         # command (e.g. `rebar explain`) may run outside any git repo.
         root = os.environ.get("REBAR_ROOT") or _git_toplevel()
