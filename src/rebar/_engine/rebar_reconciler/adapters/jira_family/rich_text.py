@@ -24,7 +24,7 @@ This module holds the Protocol and the Data Center implementation
 (``WikiTextCodec``) only. The Cloud implementation (``AdfCodec``) lives on the
 Cloud side, in ``adapters/jira/rich_text_codec.py`` — this package imports
 NOTHING from ``adapters/jira/`` (see ``adapters/jira_family/__init__.py``'s
-module docstring and ``docs/adr/0035-reconciler-vendor-adapter-seam.md``).
+module docstring and ``docs/adr/0083-reconciler-vendor-adapter-seam.md``).
 """
 
 from __future__ import annotations

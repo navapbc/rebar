@@ -110,7 +110,7 @@ workflow + `produce_code_review_verdict` are WS3/WS4 (they do not change the ker
 
 Code review converges across patchsets/sessions the way plan-review converges across re-reviews
 (ADR 0008), REUSING the kernel novelty primitives unchanged and adding only gate-specific
-orchestration — full rationale in **[ADR 0037](adr/0037-code-review-novelty-convergence.md)**. The
+orchestration — full rationale in **[ADR 0037](adr/0088-code-review-novelty-convergence.md)**. The
 behavior a reviewer/author sees:
 
 - **Region-gated drop.** On re-review, a NOVEL + low-priority advisory finding is DROPPED **only if

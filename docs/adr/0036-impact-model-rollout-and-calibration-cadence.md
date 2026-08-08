@@ -1,5 +1,7 @@
 # ADR 0036 — Impact-model permissive rollout + version-segmented calibration cadence
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0036 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0036; the others were reassigned to 0084 (was `0036-acli-429-rate-limit-backoff.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic foliaged-merry-collie — review-gate impact redesign / story raptorial-galloping-dragon)
 **Date:** 2026-07-08
 

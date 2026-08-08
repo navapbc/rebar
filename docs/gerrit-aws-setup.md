@@ -599,6 +599,14 @@ placeholders — none of the committed artifacts carry a real secret:
 | The seven secret **values** | populate the SSM SecureString params out-of-band — never in a committed file |
 | Blocking-severity threshold, vote values | review-bot `config.py` env (`BLOCKING_SEVERITIES`, `LLM_REVIEW_MAX_VALUE`, `LLM_REVIEW_BLOCK_VALUE`) |
 
-Read the ADRs (`docs/adr/0007`–`0014`) for the rationale behind each decision before
-you adapt them — several are load-bearing (e.g. ADR-0010's
+Read the relevant ADRs for the rationale behind each decision before you adapt them:
+[0007 review-bot receiver](adr/0007-review-bot-receiver.md),
+[0008 SSM secrets](adr/0008-secrets-source-ssm.md),
+[0009 review-bot pipe](adr/0009-review-bot-pipe.md),
+[0010 Gerrit↔GitHub replication](adr/0010-gerrit-github-replication.md),
+[0011 GitHub mirror lock](adr/0011-github-mirror-lock.md),
+[0012 IaC foundations](adr/0012-iac-foundations.md),
+[0013 LLM-Review label](adr/0013-llm-review-label.md), and
+[0014 inbound webhook auth](adr/0014-inbound-webhook-auth.md) —
+several are load-bearing (e.g. ADR-0010's
 `replicatePermissions = false` is what keeps ADR-0014's webhook token off GitHub).

@@ -1,5 +1,7 @@
 # ADR 0031 — Reconciler ref-lock: a bare-ref CAS lock for the pass-lock / phase-gate
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0031 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0031; the others were reassigned to 0080 (was `0031-schema-derived-typeddicts.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic 6c9c — dust-troth-naval / task 524d — pony-ditch-armor, C1)
 **Date:** 2026-07-04
 **Extended by:** C2 (lease + heartbeat + steal), C3 (reconciler cutover), C4 (retire the band-aids)

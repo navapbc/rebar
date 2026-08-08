@@ -1,5 +1,7 @@
 # ADR 0015: Project-supplied review criteria — a `.rebar/` routing overlay over one shared registry
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0015 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0015; the others were reassigned to 0077 (was `0015-code-review-voter-four-pass-rewire.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted (the `stale-regver` claim-gate check **amended by ADR 0053** — a
   registry-version mismatch is now grandfathered and reported, not blocking; the `regver`
   stamp, its overlay-awareness, and `disabled: true` all stand)

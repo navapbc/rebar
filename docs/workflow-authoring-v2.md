@@ -104,7 +104,7 @@ paths each surface a clear error, never silent corruption: an invalid/empty id, 
 > design proposal (schema-name picker + write-time resolve-check, the
 > `prompt_override_drift` interaction, the breaking-change UX, and the
 > scripted-op-contract-in-code boundary — ops stay code-only and read-only). See
-> [adr/0007-editing-prompt-contracts-from-the-editor.md](adr/0007-editing-prompt-contracts-from-the-editor.md).
+> [adr/0071-editing-prompt-contracts-from-the-editor.md](adr/0071-editing-prompt-contracts-from-the-editor.md).
 
 ---
 

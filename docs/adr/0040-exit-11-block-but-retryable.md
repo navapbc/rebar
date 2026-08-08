@@ -1,5 +1,7 @@
 # ADR 0040 — Exit code 11: block-but-retryable for LLM gate degrades
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0040 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0040; the others were reassigned to 0090 (was `0040-main-fast-forward-only-submit.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted (story `authorial-hated-blackbear`, epic jira-reb-687)
 - **Date:** 2026-07-10
 

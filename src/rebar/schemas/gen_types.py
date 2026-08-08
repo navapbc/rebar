@@ -6,7 +6,7 @@ translates the schema-backed subset of the facade's return shapes into
 ``TypedDict``s so library consumers get named keys + type-checker support, with
 **zero runtime change** (returns stay plain dicts).
 
-Design (see the story + the ADR ``docs/adr/0031-schema-derived-typeddicts.md``):
+Design (see the story + the ADR ``docs/adr/0080-schema-derived-typeddicts.md``):
 
 - **Open schemas → closed TypedDicts of the documented contract.** Every public
   output schema is ``additionalProperties: true`` (the event-sourced shape may

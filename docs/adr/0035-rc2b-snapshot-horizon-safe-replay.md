@@ -1,5 +1,7 @@
 # ADR 0035 — Snapshot-horizon-safe replay: conservative fold horizon + rebuild-on-stray (RC2b)
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0035 was shared by 3 ADRs (a collision). This ADR is the earliest-landed and retains 0035; the others were reassigned to 0082 (was `0035-code-review-two-lane-tier-tagged-impact.md`), 0083 (was `0035-reconciler-vendor-adapter-seam.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic adept-hedge-stain / 36d1 — RC2b, the f193 store-corruption follow-ups)
 **Date:** 2026-07-07
 

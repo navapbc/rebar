@@ -799,7 +799,7 @@ attestation instead of re-reviewing.
 A re-review of an **edited** plan used to be at risk of not converging: each remediation
 round could surface *new*, lower-stakes findings in previously-clean criteria, expanding
 scope every run and never going green. The **rising-floor remediation re-review** (epic
-`7d43`; ADR [0008](adr/0008-convergent-plan-edit-re-review.md)) makes it converge while
+`7d43`; ADR [0008](adr/0072-convergent-plan-edit-re-review.md)) makes it converge while
 preserving full recall.
 
 It runs the **full criteria set every time** (no skipping, no Pass-1 anchoring → high-stakes

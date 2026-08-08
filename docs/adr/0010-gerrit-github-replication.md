@@ -1,5 +1,7 @@
 # ADR 0010 — One-way Gerrit -> GitHub replication (NON-force, mirror-off, deploy-key identity)
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0010 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0010; the others were reassigned to 0074 (was `0010-code-review-overlay-escalation.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic d251 / story S5)
 **Date:** 2026-06-29
 

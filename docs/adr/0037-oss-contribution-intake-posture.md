@@ -1,5 +1,7 @@
 # ADR 0037 — GitHub PR posture: keep PRs enabled + welcome-bot redirect
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0037 was shared by 5 ADRs (a collision). This ADR is the earliest-landed and retains 0037; the others were reassigned to 0085 (was `0037-reconciler-live-validation-harness.md`), 0086 (was `0037-cross-ticket-overlap.md`), 0087 (was `0037-transport-retry.md`), 0088 (was `0037-code-review-novelty-convergence.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic breaded-ammonitic-elephant — OSS v1.0.0 front door)
 **Date:** 2026-07-09
 

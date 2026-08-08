@@ -1,5 +1,7 @@
 # ADR 0007: The review-bot is a thin FastAPI webhook receiver, not MCP-over-HTTP
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0007 was shared by 3 ADRs (a collision). This ADR is the earliest-landed and retains 0007; the others were reassigned to 0070 (was `0007-jira-onboard-config-write.md`), 0071 (was `0007-editing-prompt-contracts-from-the-editor.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted
 - **Context:** Epic *stand up AWS-hosted Gerrit + rebar review-bot (PoC)* (`d251`),
   story *S2 — app config / deploy* (this story owns the docker-compose stack, the
