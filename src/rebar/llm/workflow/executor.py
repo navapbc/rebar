@@ -15,15 +15,15 @@ scheduler. The run state is modeled as an immutable, copy-on-write
 :class:`RunState` (a Burr-style ``State``) so that adopting Burr later is a swap,
 not a rewrite.
 
-Burr-adoption trigger list (adopt the framework only when one is TRUE — until then
-this hand-rolled executor is correct and cheaper):
-  1. Steps need durable PAUSE/RESUME across processes (human-in-the-loop holds that
-     outlive the run), beyond our crash-recovery replay.
-  2. Non-linear control flow lands: data-dependent branching/looping/fan-out the
-     static DAG can't express.
-  3. Parallel step execution becomes a hard requirement (concurrent independent
-     steps), making a single linear pass the bottleneck.
-  4. We need Burr's telemetry/UI as a product surface rather than our event log.
+Burr-adoption trigger list (full rationale + the withdrawn alternatives: ADR 0065). Adopt
+the framework only when one is TRUE — until then this hand-rolled executor is correct and
+cheaper:
+  1. durable cross-process PAUSE/RESUME (human-in-the-loop holds that outlive the run),
+     beyond our crash-recovery replay;
+  2. non-linear control flow the static DAG can't express (data-dependent branching/looping/
+     fan-out);
+  3. parallel step execution becomes a hard requirement (concurrent independent steps);
+  4. Burr's telemetry/UI wanted as a product surface rather than our event log.
 None hold today, so the tripwire stays armed.
 
 Persistence (WORKFLOW_RUN/WORKFLOW_STEP events) goes through a :class:`RunRecorder`
@@ -329,13 +329,12 @@ def shallow_contract_check(source: dict, target: dict) -> str:
 
 
 # The agent + batch runner SEAMS live in `runners.py` (imported above and re-exported via
-# __all__) so this module stays under the module-size cap. They are constructed at call time
+# __all__). They are constructed at call time
 # in `run_workflow` (FakeAgentRunner / DefaultBatchRunner defaults).
 
 
 # ── Run recorder seam (WS-C3 supplies the event-backed, idempotent one) ───────
-# The recorder classes live in recorder.py (extracted along this call-graph seam to
-# keep executor.py under the module-size cap); re-exported here so existing
+# The recorder classes live in recorder.py; re-exported here so existing
 # executor.RunRecorder / MemoryRecorder / TicketEventRecorder references keep working.
 from .recorder import MemoryRecorder, RunRecorder, TicketEventRecorder  # noqa: E402
 
@@ -489,8 +488,8 @@ def _guard_passes(step: Mapping[str, Any], state: RunState, secrets: Mapping[str
 
 # ── The v2 worklist interpreter ───────────────────────────────────────────────
 # The recursive frame walk (branch/loop/map + the frame-scoped resolver + _RunCtx)
-# lives in :mod:`rebar.llm.workflow.interpreter` (kept under the module-size cap and
-# scanned by the same Burr tripwire). ``run_workflow`` imports it lazily below to
+# lives in :mod:`rebar.llm.workflow.interpreter` (scanned by the same Burr tripwire).
+# ``run_workflow`` imports it lazily below to
 # avoid an import cycle (interpreter imports the step interfaces from here).
 
 

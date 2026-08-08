@@ -22,7 +22,8 @@ Key design points it embodies:
 * **D4 — budget.** The per-plan cap is computed inside ``run_pass1`` (via
   ``sizing.plan_budget_cap``); ``req.usd_budget`` is meant to override it. There is no
   clean override seam in today's ``pass1``/``sizing`` API (see :meth:`run`), so the
-  requested override is journaled and the computed cap is used — a documented follow-up.
+  requested override is journaled and the computed cap is used — a documented follow-up
+  (ticket ``e907-8dbd-7627-4725``).
 * **D5 — prompt-id IS the registry id.** Each ``criteria`` entry's ``prompt`` is its
   registry criterion id; the runner resolves descriptors via ``registry.by_id()`` and
   splits single/agent by ``registry.exec_tier`` (NOT ``route_criteria`` — ``req.criteria``
@@ -136,7 +137,8 @@ class ProductionBatchRunner(BatchRunner):
         # or (b) adding a cap-override parameter to shed_to_budget/run_pass1, which is gate
         # code outside this thin adapter. Rather than hack it, we JOURNAL the requested
         # override and fall back to the computed cap.
-        # FOLLOW-UP: thread an explicit `cap_override` through run_pass1 → shed_to_budget.
+        # FOLLOW-UP (ticket e907-8dbd-7627-4725): thread an explicit `cap_override` through
+        # run_pass1 → shed_to_budget.
         if req.usd_budget is not None:
             coverage["requested_usd_budget"] = req.usd_budget
             coverage["budget_override_applied"] = False
@@ -260,7 +262,8 @@ def _project_criteria(ctx, exclude: set[str]) -> tuple[list[dict], list[dict]]:
     did. Built-ins are intentionally NOT taken from here — they come from ``req.criteria`` so the
     interpreter's per-criterion ``when``/probe gating is preserved.
 
-    Caveat (documented follow-up): under PROBE MODE (drift-refresh) the built-in set is the tiny
+    Caveat (documented follow-up, ticket 5623-9208-3d3b-4c31): under PROBE MODE (drift-refresh)
+    the built-in set is the tiny
     probe allowlist, but route_criteria has no probe notion, so an activated project criterion is
     also evaluated during a probe. Harmless (the drift comparison keys off E4/G1G2), but a future
     change should thread the probe allowlist here to suppress it.

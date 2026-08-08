@@ -10,7 +10,7 @@ is now the SOLE plan-review gate (the bespoke ``orchestrator.run_review`` driver
 mirrored was retired in story B-RETIRE). The workflow shape (mirrors the B3 completion
 gate):
 
-    plan_review_precheck (uses)            # DET floor P1-P9
+    plan_review_precheck (uses)            # DET floor P1-P11
       └─ branch on `run_llm`:
            then: plan_review_assemble_criteria (uses)   # route_criteria → inclusion booleans
                  → batch <plan-review-finder>           # Pass-1 (ProductionBatchRunner)
@@ -68,10 +68,11 @@ _OUTPUT_SCHEMA = "plan_review_verdict"
     input_schema="plan_review_precheck_input",
     output_schema="plan_review_precheck_output",
     description=(
-        "The deterministic Layer-1 floor (P1-P9) of the plan-review gate. Emits `run_llm` "
+        "The deterministic Layer-1 floor (P1-P11) of the plan-review gate. Emits `run_llm` "
         "(true → the four-pass LLM review should run) and, when it should NOT (an exempt "
-        "ticket type, or a P1/P5/P8 DET block), the terminal short-circuit plan_review_verdict "
-        "so the billable LLM passes never run. Wraps rebar.llm.plan_review without duplicating it."
+        "ticket type, or a P1/P5-cycle/P8/P10/P11 DET block), the terminal short-circuit "
+        "plan_review_verdict so the billable LLM passes never run. Wraps rebar.llm.plan_review "
+        "without duplicating it."
     ),
 )
 def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:

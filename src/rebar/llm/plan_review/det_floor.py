@@ -625,7 +625,7 @@ def p8_reviewability(ctx: PlanContext) -> DetResult:
     even at one-criterion-per-call (minimal rubric + full content). That is "too
     big to review in full; reduce/decompose it" (the extreme of P4 / G5). Content
     is never chunked, so when it cannot fit even alone the only sound outcome is to
-    require the author to reduce it."""
+    require the author to reduce it (gate context is never elided — ADR 0066)."""
     budget = int(ctx.largest_window_tokens * P8_HEADROOM) - P8_OUTPUT_RESERVE_TOKENS
     plan_tokens = est_tokens(ctx.plan_text)
     cov: dict[str, Any] = {"ran": True, "plan_tokens": plan_tokens, "budget_tokens": budget}

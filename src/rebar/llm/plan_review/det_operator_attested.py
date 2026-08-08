@@ -9,7 +9,7 @@ surfaces that at PLAN time. It is ADVISORY — surfaced through ``p6_ac_quality`
 (:mod:`.det_floor`), which never blocks — and is self-gated by the deterministic lexicon
 precision/recall eval in docs/experiments/plan-review-gate/ (see docs/plan-review-gate.md).
 
-Extracted from ``det_floor`` (which owns the P1-P9 static floor) so that grandfathered,
+Extracted from ``det_floor`` (which owns the P1-P11 static floor) so that grandfathered,
 size-ceilinged module does not grow; ``det_floor.p6_ac_quality`` imports and surfaces this
 lint. This module is a pure leaf (stdlib ``re`` only) — it imports nothing from ``det_floor``,
 so ``det_floor``'s import of it is cycle-free, and :data:`_OPERATOR_ATTESTED_TAG_RE` is the

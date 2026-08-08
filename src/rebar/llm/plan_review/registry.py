@@ -37,7 +37,7 @@ The merged descriptor (per criterion)::
       "default_posture": "advisory"|"blocking", "block_threshold": float
     }
 
-The DET floor (P1–P9) is NOT in this file — it is the ``exec=DET`` tier in
+The DET floor (P1–P11) is NOT in this file — it is the ``exec=DET`` tier in
 :mod:`.det_floor`. This registry owns the LLM tiers (1-TURN / 2-STEP / AGENT). See
 ``docs/reuse-surface.md`` §3 for the prompt-library contract this builds on.
 """

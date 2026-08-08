@@ -229,3 +229,56 @@ warning, or a load-bearing live-field decision. `path:line` is approximate (post
   `tests/unit/test_structured.py` (the PromptedOutput-vs-NativeOutput assertions). Corrected the
   stale blanket-400 claim only where it CONTRADICTED current runtime; the measured/asserted
   content stays.
+
+## ad16 plan_review/workflow — do_not_move
+
+Scope: `src/rebar/llm/plan_review/**` + `src/rebar/llm/workflow/**`. The following comment
+units are preserved VERBATIM (or corrected-in-place only to match current runtime) — they are
+byte-pins, test-introspected prose, measured facts, fail-open/fail-closed contracts, pragmas,
+or anti-refactor/withdrawn-alternative warnings. Do NOT relocate/delete.
+
+- **BYTE-PIN (bug 96d1) — verbatim, DO_NOT_MOVE.** The byte-exact legacy-recomputation
+  grandfather rationale in `plan_review/attest.py` (`_legacy_material_ok`, ~L645-660) AND the
+  `json.dumps(basis, sort_keys=True, ensure_ascii=False)` + `normalize_checkboxes=False`
+  pre-330c/pre-2be7 recompute rationale in `plan_review/pass1.py` (~L749-772). A signed hash
+  must byte-exactly match the legacy recompute or LIVE attestations invalidate. NOT to be
+  merged/converged/reworded.
+- **Story 9374 warm-gate measured bytes.** `plan_review/pass1.py` `_prefix_tokens` docstring
+  (~L57-60) — "the bytes the warm gate must measure (story 9374)"; a MEASURED-fact note,
+  separate concern from bug 96d1. Keep.
+- **Executor Burr tripwire prose (test-pinned).** `workflow/executor.py` MUST literally contain
+  `"burr"` AND a four-item `1.`/`2.`/`3.`/`4.` numbered trigger list —
+  `tests/unit/workflow/test_executor_tripwire.py::test_executor_documents_the_burr_adoption_path`
+  asserts it (tolerant of rewording, not an exact-phrase pin). The list was compressed and its
+  full rationale relocated to ADR 0065, but the `"burr"` token + 1.-4. list REMAIN.
+- **map_fanout "rationale" word (test-pinned).** `workflow/map_fanout.py` must contain
+  `"rationale"` (asserted by `test_map_fanout_is_the_sole_concurrency_module`). The RECORDED
+  RATIONALE block (why bounded-concurrent map fan-out is the sole tripwire relaxation) is an
+  anti-refactor/rejected-alternative justification — kept verbatim.
+- **P1-P9 seam boundaries (KEEP, not stale).** `plan_review/det_floor.py:501` ("so the DET floor
+  stays P1-P9 (this extends p6, adds no check)") and `plan_review/det_lint.py:40` ("the DET floor
+  (P1–P9) runs BEFORE the LLM tier ... NOT a DET_CHECKS entry") deliberately name the pre-clarity
+  STATIC floor as a seam boundary — KEPT (not corrected to P1-P11).
+- **DET blocking-set authority.** `plan_review/det_floor.py` `DetResult` docstring (L103) and
+  `det_blocking_findings` docstring (L733): the blocking set is `P1/P5-cycle/P8/P10/P11` — the
+  authoritative source other sites were corrected against. Measured/contract — keep.
+- **Fail-open contracts.** `plan_review/reuse.py::_type_changed` "FAILS OPEN by design"; the P1-P11
+  floor "fail-open per check" (`det_floor.run_det_floor` docstring); the ISF/session-log
+  best-effort skip notes in `pass1.py`; the DET-floor abstain-is-pass semantics
+  (`DetResult` docstring). These document CURRENT fail-open behavior — CORRECT-IN-PLACE only.
+- **Gate-context-never-elided invariants (CURRENT).** `orchestrator.py:8` ("content is ALWAYS
+  whole; never truncated, never content-chunked"), `det_floor.PlanContext` docstring ("content is
+  ALWAYS whole"), `p8_reviewability` ("Content is never chunked ... any review would see a partial
+  plan"), `pass1.py` ("The plan is never summarized"), `det_floor.py:149` ("must never reach a
+  clean PASS on a plan whose hierarchy context is known-incomplete"). Current safety invariants —
+  KEPT; ADR 0066 is their durable fuller home (withdrawn signed-false-PASS alternative recorded
+  there), source keeps the invariant + light citation.
+- **Additive-only / unversioned manifest invariants (CURRENT).** `plan_review/manifest.py` per-line
+  "Additive ... byte-identical ... older verifier ignores" notes (~L40-43, L133, L409-410) — each
+  states a current byte-compat invariant; KEPT. ADR 0064 is the durable contract home.
+- **Adversarial / attacker-writable notes.** `attest.py` opcert "unspoofable marker ... NOT the
+  attacker-writable `algorithm` field"; `sidecar.py` "recovery never normalizes attacker-controlled
+  input"; `det_gate_rules.py` "VERBATIM from the adversarial false-negative audit (ticket 696a)";
+  `manifest.py` "Raising would let a cosmetic ..." fail-open. Keep verbatim.
+- **Pragmas.** All `# noqa: ...` (e.g. `sizing.py:521,548` BLE001 with their measured explanatory
+  tails, `executor.py` E402, `pass1.py`/manifest F401) and `# type: ignore` markers — verbatim.

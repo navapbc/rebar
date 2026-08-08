@@ -1,7 +1,7 @@
 """Plan-time project DET-invariant checks (story 7f0d) — the dynamic second phase of the
 deterministic floor.
 
-The static floor (P1–P9, :mod:`.det_floor`) is a frozen, built-in, polyglot readiness floor.
+The static floor (P1–P11, :mod:`.det_floor`) is a frozen, built-in, polyglot readiness floor.
 This module adds the OPEN, project-supplied half: an activated ``exec: "DET"`` criterion from the
 ``.rebar/criteria_routing.json`` overlay (epic 3156 / ADR 0015) is a pattern-rule invariant — its
 "rubric" is a grounding **detector** (Engine B), not an LLM prompt. At plan time we run that

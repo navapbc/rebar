@@ -9,6 +9,11 @@ here, so the dependency edge points one way (attest → manifest) with no cycle.
 
 Every public name here is re-exported from ``attest`` so existing import paths
 (``rebar.llm.plan_review.attest.build_manifest`` etc.) keep working unchanged.
+
+The manifest is UNVERSIONED and ADDITIVE-ONLY (new line kinds are appended and emitted only
+when non-empty; readers ignore unknown lines), which is what keeps the signed byte-image stable
+for live attestations — the per-field "additive / byte-identical / older verifier ignores"
+notes below are that contract in situ; its fuller durable home is ADR 0064.
 """
 
 from __future__ import annotations

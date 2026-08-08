@@ -34,7 +34,8 @@ def _type_changed(stored_type: Any, ctx) -> bool:
     """True when the ticket's type has changed since the stored verdict was computed.
 
     Type is NOT cosmetic to a review: it selects which criteria apply at all
-    (``orchestrator.py:364`` and ``:642``, ``workflow_ops.py:167`` and ``:183``), so a
+    (``orchestrator.route_criteria`` via the ``registry.applies`` ``suppress_types`` axis,
+    and ``workflow_ops.plan_review_precheck``'s ticket-type exemption/routing), so a
     PASS earned as a ``bug`` — exempt from several criteria — must not be replayed for
     a ``task``, which is not exempt.
 

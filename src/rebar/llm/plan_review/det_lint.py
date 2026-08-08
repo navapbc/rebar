@@ -1,6 +1,6 @@
 """Pure, DetResult-free deterministic helpers for the plan-review DET floor.
 
-Extracted from :mod:`.det_floor` (which owns the P1-P9 static floor and the
+Extracted from :mod:`.det_floor` (which owns the P1-P11 static floor and the
 ``DET_CHECKS`` registry) so that grandfathered, size-ceilinged module does not keep
 growing. This module is a pure leaf: it imports only the stdlib ``re`` and references
 :class:`.det_floor.PlanContext` solely as a type annotation, pulled in under
