@@ -89,7 +89,7 @@ def _get_commit_subject(repo_root, commit_sha: str) -> str:
 
 
 def _apply_outbound_create(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     mut_mod = _load_mutation_module()
     _direction_guard(mutation, mut_mod.MutationDirection.outbound)
@@ -124,7 +124,7 @@ def _apply_outbound_create(
 # than client.update_issue — ACLI edit does not support reparenting
 # (ticket 8b25-ae7a-efc3-47f6).
 def _apply_outbound_update(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Outbound update — delegate to the ONE production applier (batch update_one).
 
@@ -165,7 +165,7 @@ def _apply_outbound_update(
 
 
 def _apply_outbound_delete(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Outbound delete: route through the legacy batch path's delete_one()
     when a client is supplied. Typed-mutation callers can also drive a direct
@@ -187,7 +187,7 @@ def _apply_outbound_delete(
 
 
 def _apply_outbound_probe(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Outbound probe: read-only sanity check via client.get_issue when supplied.
 
@@ -212,7 +212,7 @@ def _apply_outbound_probe(
 
 
 def _apply_outbound_conflict(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Outbound conflict: emit a structured conflict-marker comment on the Jira
     issue when a client is supplied. Conflicts are durable signals — the

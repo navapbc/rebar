@@ -133,7 +133,7 @@ def classify(
     local: Mapping | None,
     jira: JiraObservation,
     binding: Mapping | None,
-    baseline: Mapping | None,
+    _baseline: Mapping | None,
     *,
     grace: int = _DEFAULT_ABSENT_RETIRE_GRACE,
 ) -> Decision:

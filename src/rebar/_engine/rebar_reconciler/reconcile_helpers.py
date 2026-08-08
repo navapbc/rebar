@@ -167,7 +167,7 @@ def preflight_status_mapping(mutations) -> None:
 
 
 def _commit_binding_store_snapshot(
-    binding_store: Any,
+    _binding_store: Any,
     repo_root: Path,
     pass_id: str,
 ) -> bool:
@@ -411,7 +411,7 @@ class _NoOpSyncLogger:
     pass produces no ``sync-log-<pass>.jsonl`` file.
     """
 
-    def log(self, *args, **kwargs) -> None:
+    def log(self, *_args, **_kwargs) -> None:
         return None
 
     def close(self) -> None:

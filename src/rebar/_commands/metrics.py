@@ -99,7 +99,7 @@ def _entry_for(spec, ctx) -> dict:
     }
 
 
-def _render_text(since: str, until: str, entries: dict) -> str:
+def _render_text(_since: str, _until: str, entries: dict) -> str:
     """One line per metric in registry order: ``<id>  [<lens>/<source>]  <value>``."""
     lines: list[str] = []
     for mid, entry in entries.items():
