@@ -25,9 +25,9 @@
 # "Necessary & sufficient"):
 #   * invocation is `rebar reconcile --mode <mode>` (== python -m rebar_reconciler)
 #   * exit 75 = reschedule (next cron retries), exit 3 = pass-in-flight — both benign
-#   * the reconciler writes inbound events as UNCOMMITTED files AND makes its own
-#     binding commit but never pushes — so the commit-back step must push whenever
-#     the worktree is dirty OR the local tickets branch is ahead of origin.
+#   * the reconciler may leave inbound events uncommitted or create its own binding
+#     commit; the final strict core adapter commits when needed and synchronously
+#     pushes either case, keeping the workflow red if delivery cannot converge.
 
 name: Reconcile Bridge
 
