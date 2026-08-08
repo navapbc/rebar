@@ -127,3 +127,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0022 — Adopt gerrit-to-platform for CI, run it IN the Gerrit container](0022-g2p-in-container.md)
 - [0037 — GitHub PR posture: keep PRs enabled + welcome-bot redirect](0037-oss-contribution-intake-posture.md)
 - [0062 — A stalled pager must abort PAST fail-open handlers](0062-pagination-stall-aborts-past-fail-open.md)
+- [0093 — S3 ticket-store backend via `git-remote-s3` (optional, below the git layer)](0093-s3-ticket-store-backend.md)
