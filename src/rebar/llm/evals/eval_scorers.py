@@ -142,7 +142,7 @@ def _expects_high_impact(case: dict) -> bool:
 # ── schema / contract scorers (applicable to every case) ───────────────────────
 
 
-def _schema_review_result(case: dict, out: dict) -> ScoreResult:
+def _schema_review_result(_case: dict, out: dict) -> ScoreResult:
     from rebar.llm.findings import FindingsError, validate_result
 
     try:
@@ -152,7 +152,7 @@ def _schema_review_result(case: dict, out: dict) -> ScoreResult:
         return ScoreResult(True, False, str(exc))
 
 
-def _schema_verdict(case: dict, out: dict) -> ScoreResult:
+def _schema_verdict(_case: dict, out: dict) -> ScoreResult:
     """completion_verdict contract: verdict in {PASS,FAIL}; FAIL<=>findings; every
     FAIL finding carries at least one citation (the source-citation contract)."""
     if not isinstance(out, dict):
@@ -171,7 +171,7 @@ def _schema_verdict(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, True)
 
 
-def _schema_verification(case: dict, out: dict) -> ScoreResult:
+def _schema_verification(_case: dict, out: dict) -> ScoreResult:
     """The verifier must emit a graded validity (so Pass-3 can gate on it)."""
     v = _validity(out)
     if v is None:
@@ -190,7 +190,7 @@ def _schema_verification(case: dict, out: dict) -> ScoreResult:
 # completion-verifier's FAIL/BLOCK-only path.
 
 
-def _schema_code_review_findings(case: dict, out: dict) -> ScoreResult:
+def _schema_code_review_findings(_case: dict, out: dict) -> ScoreResult:
     """A base/overlay code-review output must be a dict carrying a ``findings`` list — the
     native Pass-1 evidence shape. Applicable to every case (a shape check, not a fire check):
     an EMPTY findings list is still valid shape. No `verdict` is expected here — the arm
@@ -202,7 +202,7 @@ def _schema_code_review_findings(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, True)
 
 
-def _verify_emits_verifications(case: dict, out: dict) -> ScoreResult:
+def _verify_emits_verifications(_case: dict, out: dict) -> ScoreResult:
     """The Pass-2 verifier must emit a NON-EMPTY ``verifications`` list (one per finding it
     re-grounds). The T8-advisory contract: verify is scored on PRESENCE of verifications, NOT
     on any FAIL/BLOCK verdict — so this gates on the verifier producing a graded answer set,
@@ -234,7 +234,7 @@ def _no_fire(case: dict, out: dict) -> ScoreResult:
     return ScoreResult(True, not fired, "false fire on a good case" if fired else "")
 
 
-def _cites_real_paths(case: dict, out: dict) -> ScoreResult:
+def _cites_real_paths(_case: dict, out: dict) -> ScoreResult:
     """Every finding cites at least one resolved file path. Citations are resolved
     upstream (findings.resolve_citations downgrades unresolved file citations to
     kind='source'), so a surviving kind='file' citation is a real path:line."""

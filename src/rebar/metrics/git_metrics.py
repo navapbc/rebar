@@ -265,10 +265,10 @@ def register() -> None:
             _scc_analysis,
         ),
         _structural_spec(
-            "complexity_summary", lambda result, ctx: result.complexity, _lizard_analysis
+            "complexity_summary", lambda result, _ctx: result.complexity, _lizard_analysis
         ),
         _structural_spec(
-            "duplication_summary", lambda result, ctx: result.duplication, _jscpd_analysis
+            "duplication_summary", lambda result, _ctx: result.duplication, _jscpd_analysis
         ),
         _git_spec("churn", churn),
         _git_spec("refactor_to_addition_ratio", refactor_to_addition_ratio),

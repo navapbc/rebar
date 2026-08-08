@@ -44,7 +44,7 @@ FIELD_CLASSES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-def resolve_state(local_val: Any, remote_val: Any) -> Any:
+def resolve_state(local_val: Any, _remote_val: Any) -> Any:
     """Local always wins for state fields."""
     return local_val
 
