@@ -45,7 +45,6 @@
     "src/rebar/_mcp_reads.py::register_read_tools": 31,
     "src/rebar/_mcp_writes.py::register_write_tools": 29,
     "src/rebar/_plan_clarity.py::evaluate_plan_clarity": 17,
-    "src/rebar/_store/push.py::push_tickets_branch": 17,
     "src/rebar/graph/_blockers.py::_find_direct_blockers": 18,
     "src/rebar/graph/_graph.py::_get_all_blocked_by": 20,
     "src/rebar/graph/_graph.py::check_cycle_at_level": 16,

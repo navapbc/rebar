@@ -294,10 +294,24 @@ separate push step. `_push_tickets_branch` (`ticket-lib.sh:482`) pushes
 nothing is shared). On a non-fast-forward rejection it **fetches + merges**
 `origin/tickets` (union) and retries (bounded). It refuses to merge through a
 rebase/merge recovery state (`_check_no_rebase_in_progress`, `ticket-lib.sh:217`).
-Push is **best-effort**: a failed push (no network, unresolvable non-fast-forward,
-recovery state) never fails the caller — it warns, leaves local commits intact,
-and the branch stays diverged. `rebar fsck` surfaces that divergence as a
-`PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not silent.
+Push is **best-effort by default**: a failed push (no network, unresolvable
+non-fast-forward, recovery state) never fails existing callers — it warns, leaves
+local commits intact, and the branch stays diverged. `rebar fsck` surfaces that
+divergence as a `PUSH_PENDING` notice (`ticket-fsck.sh`, Check 4.5) so it is not
+silent. Existing callers inherit five push-first recovery cycles and, after a
+clean fifth merge, one final push; they otherwise keep their prior warning/return
+behavior.
+
+`push_tickets_branch(..., strict=True)` is the opt-in delivery contract. It raises
+`PushDeliveryError` rather than writing process output, with a stable `reason`,
+detail, and the current unpushed-commit count. Reasons are: `push-disabled`,
+`async-delivery-unobservable`, `invalid-destination`, `remote-not-found`,
+`push-policy-declined`, `push-transport-failed`, `merge-recovery-blocked`,
+`store-epoch-pre-merge`, `store-epoch-during-recovery`, `final-push-rejected`,
+and `lock-timeout`. Strict delivery rejects the `off` and `async` policies because
+they cannot prove synchronous delivery. The private process boundary
+`python -m rebar._store.push push --tracker <path> [--strict]` catches that error,
+reports it on stderr, and returns a nonzero status.
 
 **Push policy — `REBAR_SYNC_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
 CLI / library / MCP honour it uniformly; case/space-insensitive; default

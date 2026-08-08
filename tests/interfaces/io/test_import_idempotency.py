@@ -16,6 +16,7 @@ from _git_counts import commit_count
 
 import rebar
 from rebar import config
+from rebar._store import push
 
 
 def _commit_count(repo: Path) -> int:
@@ -136,9 +137,19 @@ def test_push_env_deferred_and_restored(tmp_path: Path, monkeypatch) -> None:
         return orig_create(*a, **k)
 
     monkeypatch.setattr(rebar, "create_ticket", _spy_create)
+    push_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        push,
+        "push_tickets_branch",
+        lambda *args, **kwargs: push_calls.append((args, kwargs)),
+    )
     rebar.import_tickets(lines, repo_root=str(dst))
 
     # every write during the import saw push deferred...
     assert seen_during and all(v == "off" for v in seen_during)
     # ...and the caller's value is restored afterward.
     assert os.environ.get("REBAR_SYNC_PUSH") == "always"
+    assert push_calls
+    assert all(kwargs == {} for _args, kwargs in push_calls), (
+        "NDJSON import and its deferred inner writes must retain best-effort delivery"
+    )
