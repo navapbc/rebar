@@ -1,12 +1,10 @@
 """Shared in-memory filter predicates for ``ticket list`` / ``ticket_list``.
 
-Both the standalone script (``ticket-list.sh``) and the in-process library
-(``ticket-lib-api.sh:ticket_list``) reduce the corpus and then narrow it by the
-same criteria, in both their default-JSON and ``--output llm`` output branches —
-four call sites in total. Keeping the predicate chain here, instead of
-copy-pasting it into each inline ``python3 -c`` block, makes cross-implementation
-and cross-format equivalence *structural* rather than something the tests must
-police: a semantics change lands in one place for all four sites.
+Callers reduce the corpus and then narrow it by the same criteria, in both their
+default-JSON and ``--output llm`` output branches. Keeping the predicate chain here,
+instead of copy-pasting it into each call site, makes cross-format equivalence
+*structural* rather than something the tests must police: a semantics change lands
+in one place for all callers.
 
 Semantics (mirrored in ``ticket list --help`` and ticket-cli-reference.md):
 

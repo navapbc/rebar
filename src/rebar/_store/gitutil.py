@@ -1,7 +1,8 @@
 """One shared ``git`` subprocess wrapper.
 
-A leaf helper (stdlib only — ``os``/``subprocess``; imports nothing from
-``rebar.*``) that consolidates the dozen hand-rolled ``_git()`` wrappers that had
+A leaf helper (stdlib only — ``os``/``subprocess``; no module-level ``rebar.*``
+imports, but two deferred in-function imports of ``_resolve_tracker_git_dir`` from
+``rebar._commands.fsck``) that consolidates the dozen hand-rolled ``_git()`` wrappers that had
 drifted into a different signature/return/error contract each. Every wrapper ran
 the identical shape underneath — ``subprocess.run(["git", "-C", cwd, *args],
 capture_output=True, text=True, …)`` — so :func:`run_git` is that shape once, and

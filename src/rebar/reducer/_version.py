@@ -37,33 +37,7 @@ governs only the former.
 from __future__ import annotations
 
 # Bump when the event wire format changes in a way other clones must be aware of.
-# v2 (P2.1): the ``${timestamp}`` filename-prefix is now a single-integer Hybrid
-# Logical Clock value (``max(cache, witnessed max-prefix, time_ns()) + 1``) rather
-# than a raw ``time.time_ns()``. Same width (19 digits until ~2286) and same
-# single-integer encoding, so older clones still string-compare correctly; the only
-# *semantic* change is skew-immune causal ordering. No event-body change, so the
-# unknown-type forward-compat machinery is not engaged.
-# v3 (P2.3): the new ``TAG_DELTA`` event body carries add/remove tag deltas so
-# concurrent tag edits converge (no whole-field clobber). This is the FIRST bump
-# that adds a new event *body* type, so it DOES engage the unknown-type forward-
-# compat path: an older (v2) clone preserves-and-ignores ``TAG_DELTA`` (the file
-# survives, the mutation is invisible until it upgrades). The integer itself is
-# declarative only — forward-compat is governed by ``KNOWN_EVENT_TYPES`` below, not
-# by this value; nothing gates behavior on it.
-# v4 (epic gnu-whale-ichor / e165): the new ``KEY_ADD`` / ``KEY_REVOKE`` event bodies
-# fold an identity's signed key LIFECYCLE (TOFU genesis, signed add/revoke) into an
-# epoch-scoped keyring. Like TAG_DELTA (v3) this adds new event *body* types, so it
-# engages the unknown-type forward-compat path: an older (v3) clone preserves-and-ignores
-# a ``KEY_ADD``/``KEY_REVOKE`` (the file survives, the keyring mutation is invisible until
-# it upgrades). The integer is declarative only — forward-compat is governed by
-# ``KNOWN_EVENT_TYPES`` below.
-# v5 (epic gnu-whale-ichor): the keyring becomes POSITION-based — each record is
-# ``{public_key, added_at, revoked_at}`` where a position is the event's
-# ``{timestamp}-{uuid}`` filename prefix (an immutable anchor a verifier resolves to the
-# introducing tickets-branch commit), replacing the author-assignable ``added_epoch`` /
-# ``revoked_epoch`` ordinal cursor. No new event *body* type (``KEY_ADD``/``KEY_REVOKE`` are
-# unchanged on the wire), so the unknown-type forward-compat path is not engaged; the bump
-# records the projection change so clones agree on the keyring shape.
+# Wire-format changelog: see docs/event-schema.md
 SCHEMA_VERSION = 5
 
 # Types that appear on disk but are intentionally NOT in KNOWN_EVENT_TYPES because

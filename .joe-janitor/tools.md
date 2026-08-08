@@ -282,3 +282,21 @@ or anti-refactor/withdrawn-alternative warnings. Do NOT relocate/delete.
   `manifest.py` "Raising would let a cosmetic ..." fail-open. Keep verbatim.
 - **Pragmas.** All `# noqa: ...` (e.g. `sizing.py:521,548` BLE001 with their measured explanatory
   tails, `executor.py` E402, `pass1.py`/manifest F401) and `# type: ignore` markers — verbatim.
+
+## da4c
+
+Comment units dispositioned DO_NOT_MOVE / KEEP (left verbatim) during ticket da4c:
+
+- `reducer/_processors.py:719-774` — reason: the FOUR SNAPSHOT-restore migration guards document
+  LIVE guards (one explicitly warns it must NOT run unconditionally, else it clobbers a recorded
+  creation-channel with 'unknown'); relocating their rationale would make live guards look like
+  dead defensive code. HARD DO-NOT-TOUCH.
+- `graph/_graph.py:250` — reason: `# noqa: BLE001 — safe broad catch (story lean-sloth-ham
+  verified)...` is a load-bearing lint pragma; KEEP verbatim (the redundant block comment BELOW it
+  was DELETEd as superseded, the pragma itself is untouched).
+- `_store/event_append.py` (whole file) — reason: replay-compat justification comments are
+  load-bearing; not stripped to chase file-size headroom.
+- `reducer/_version.py` KNOWN_EVENT_TYPES / forward-compat inline notes — reason: measured-fact /
+  contract comments describing the current preserve-and-ignore invariant; KEPT (only the wire-format
+  changelog block was collapsed to a docs pointer, its content preserved in docs/event-schema.md).
+- All `# noqa`, `# type:`, `# pragma` markers in the touched files — reason: pragmas, DO_NOT_MOVE.

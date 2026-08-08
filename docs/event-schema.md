@@ -133,7 +133,19 @@ older clones still string-compare correctly — the change is semantic ordering,
 a body change. v3 = P2.3: the new `TAG_DELTA` event body — the **first** bump that
 adds a new event *type*, so it is the first to actually exercise the unknown-type
 forward-compat rule below; the integer is declarative, `KNOWN_EVENT_TYPES` does the
-real gating.) There is **no** VERSION event and no version negotiation —
+real gating. v4 = epic gnu-whale-ichor / e165: the new `KEY_ADD` / `KEY_REVOKE`
+event bodies fold an identity's signed key lifecycle (TOFU genesis, signed
+add/revoke) into an epoch-scoped keyring; like `TAG_DELTA` this adds new event
+*body* types, so it engages the unknown-type forward-compat path — an older (v3)
+clone preserves-and-ignores a `KEY_ADD`/`KEY_REVOKE` (the file survives, the
+keyring mutation is invisible until it upgrades). v5 = epic gnu-whale-ichor: the
+keyring becomes **position-based** — each record is `{public_key, added_at,
+revoked_at}` where a position is the event's `{timestamp}-{uuid}` filename prefix
+(an immutable anchor a verifier resolves to the introducing tickets-branch
+commit), replacing the author-assignable `added_epoch` / `revoked_epoch` ordinal
+cursor; no new event *body* type (`KEY_ADD`/`KEY_REVOKE` are unchanged on the
+wire), so the forward-compat path is not engaged — the bump records the projection
+change so clones agree on the keyring shape.) There is **no** VERSION event and no version negotiation —
 cross-version safety is handled by a single rule:
 
 **Unknown event types are preserved-and-ignored.** `KNOWN_EVENT_TYPES`

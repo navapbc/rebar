@@ -1,4 +1,4 @@
-"""ticket_reducer/llm_format.py
+"""reducer/llm_format.py
 
 LLM formatting logic for ticket state dicts.
 
@@ -25,6 +25,9 @@ Key mapping:
   conflicts   → cf
   inbound_links → ibl (sub-keys: from_id→f, relation→r)
   children    → ch
+  alias       → a
+  signature   → sig
+  attestations → att
 """
 
 from __future__ import annotations

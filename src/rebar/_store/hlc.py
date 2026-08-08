@@ -33,7 +33,7 @@ Do **not** "fix" the global-cache / per-ticket-witness asymmetry by making the
 cache per-ticket: that would weaken the monotonicity the single local lock gives.
 
 **Staging.** The whole clock is behind ``REBAR_HLC`` (default-on; kill-switch
-``REBAR_HLC=0`` reverts to raw ``physical_now()`` for one release). The RMW is
+``REBAR_HLC=0`` reverts to raw ``physical_now()``). The RMW is
 best-effort: any error falls back to ``physical_now()`` so a write never fails on
 the clock. ``REBAR_HLC_NOW`` injects the physical source for the skewed-clock
 tests. The dedicated ``.rebar/hlc.lock`` is acquired and released *inside*
