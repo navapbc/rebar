@@ -134,7 +134,7 @@ def _is_stale_channel_snapshot(ticket_dir: str, snapshot_filename: str) -> bool:
     )
 
 
-def _repair_plan(ticket_dir: str, ticket_id: str) -> dict:
+def _repair_plan(ticket_dir: str, _ticket_id: str) -> dict:
     """Derive a per-ticket repair plan mirroring _check_snapshot's detection.
 
     Returns {"retire": [filenames], "auto_orphans": [(name,type)],
@@ -275,7 +275,7 @@ def _has_remote(tracker: str) -> bool:
     return bool(_git(tracker, "remote").stdout.strip())
 
 
-def _reconciler_pause(repo_root=None) -> bool:
+def _reconciler_pause(_repo_root=None) -> bool:
     """Best-effort: disable the reconcile-bridge GHA schedule for the repair window (the
     leased CAS ``refs/reconciler/lock`` expires, so it is not the pause mechanism). Returns
     True iff we disabled it (→ re-enable in a failsafe); a missing/unauthenticated ``gh``

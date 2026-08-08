@@ -512,7 +512,7 @@ def _resolve_session(tracker: str) -> str:
     return resolve_session_id() or _short_head(tracker) or "unknown"
 
 
-def _short_head(tracker: str) -> str:
+def _short_head(_tracker: str) -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
