@@ -418,6 +418,36 @@ jobs:
           fi
           python scripts/check_complexity_baseline.py --lock
 
+      # ADR-number bijection gate (story 0743): every docs/adr/NNNN-slug.md is paired with
+      # a per-number marker docs/adr/.numbers/NNNN, and every ADR cross-reference resolves.
+      # The check is the CI backstop that asserts, on the merged tree, that ADR numbers are
+      # unique and collision-proof. Definition-vs-tree skew guard: skip with a log line when
+      # the script is absent from the checked-out tree.
+      - name: ADR-number bijection gate
+        shell: bash
+        run: |
+          if [ ! -f scripts/check_adr_numbers.py ]; then
+            echo "scripts/check_adr_numbers.py not in checked-out tree" \
+                 "(change predates the gate) — skipping"
+            exit 0
+          fi
+          python scripts/check_adr_numbers.py
+
+      # ADR-index drift gate (story 0743): docs/adr/README.md and the docs/adr/.numbers/
+      # markers are DERIVED from the ADR files by scripts/gen_adr_index.py and committed.
+      # Regenerate and fail if the working tree now differs — a stale index/markers set means
+      # an ADR was added/renamed without regenerating. Style mirrors the drift gates below.
+      # If-present guard per ticket ee2a: skip when the script predates the gate.
+      - name: ADR-index drift gate
+        shell: bash
+        run: |
+          if [ ! -f scripts/gen_adr_index.py ]; then
+            echo "scripts/gen_adr_index.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/gen_adr_index.py --check
+
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree
       # now differs — a stale index means a prompt's front-matter changed without the

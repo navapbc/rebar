@@ -1,5 +1,7 @@
 # ADR 0008: Secrets are sourced from SSM into an ephemeral 0600 .env each boot
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0008 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0008; the others were reassigned to 0072 (was `0008-convergent-plan-edit-re-review.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted
 - **Context:** Epic *stand up AWS-hosted Gerrit + rebar review-bot (PoC)* (`d251`),
   story *S2 — app config / deploy*. Builds on S1 (ADR-0012), which provisioned the

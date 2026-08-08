@@ -1,11 +1,13 @@
 # ADR 0009 — Review-bot proven pipe: the verdict→LLM-Review seam
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0009 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0009; the others were reassigned to 0073 (was `0009-reopen-invalidation-validity-on-read.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic d251 / story S4b — "the proven pipe")
 **Date:** 2026-06-29
 
 > ADR-number note: 0007 and 0008 each collide twice in `docs/adr/` from a merge
-> (`0007-editing-prompt-contracts-from-the-editor.md` / `0007-jira-onboard-config-write.md`
-> / `0007-review-bot-receiver.md`; `0008-convergent-plan-edit-re-review.md` /
+> (`0071-editing-prompt-contracts-from-the-editor.md` / `0070-jira-onboard-config-write.md`
+> / `0007-review-bot-receiver.md`; `0072-convergent-plan-edit-re-review.md` /
 > `0008-secrets-source-ssm.md`). **0009 was free** (verified: no `0009-*` existed), so
 > this ADR takes 0009.
 

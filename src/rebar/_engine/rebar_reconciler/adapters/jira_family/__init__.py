@@ -25,7 +25,7 @@ What lives here, and why:
 ``adapters/jira/`` or ``adapters/jira_datacenter/`` — no ``adf``, no
 ``comment_limits``, no ``outbound_fields``, no ``acli*``. Concrete backends import
 this package; it never imports them back. See
-``docs/adr/0035-reconciler-vendor-adapter-seam.md``.
+``docs/adr/0083-reconciler-vendor-adapter-seam.md``.
 """
 
 from __future__ import annotations

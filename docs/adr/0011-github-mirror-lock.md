@@ -1,5 +1,7 @@
 # ADR 0011 — GitHub mirror lock (repo-level ruleset, deploy-key-only writes)
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0011 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0011; the others were reassigned to 0075 (was `0011-retire-single-pass-code-review.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted (epic d251 / story S6-pre; applied in S6)
 - **Date:** 2026-06-30
 

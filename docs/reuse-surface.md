@@ -428,7 +428,7 @@ gate** (`code_review/region_gate.py` + `code_review/workflow_ops.py::apply_regio
 which ANDs `rising_floor_drop` with a content-addressed region check so a finding is dropped only
 when its cited code region is unchanged. The novelty PROMPTS are gate-specific too
 (`reviewers/plan_review_novelty.md` vs `reviewers/code_review_novelty.md`). See
-**[ADR 0037](adr/0037-code-review-novelty-convergence.md)** and [review-kernel.md](review-kernel.md)
+**[ADR 0037](adr/0088-code-review-novelty-convergence.md)** and [review-kernel.md](review-kernel.md)
 (§ Code-review novelty convergence).
 
 ## 5. The metrics registry — `rebar.metrics`

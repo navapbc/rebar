@@ -1,5 +1,7 @@
 # ADR 0012: AWS IaC foundations for the Gerrit + rebar review-bot PoC
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0012 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0012; the others were reassigned to 0076 (was `0012-code-review-secrets-security-detectors.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 - **Status:** Accepted
 - **Context:** Epic *stand up AWS-hosted Gerrit + rebar review-bot (PoC)*, story
   *S1 — IaC foundations* (this story owns the Terraform skeleton: state backend,

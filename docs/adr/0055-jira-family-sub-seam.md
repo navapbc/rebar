@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-07-30
-**Relation:** AMENDS [`0035-reconciler-vendor-adapter-seam.md`](0035-reconciler-vendor-adapter-seam.md).
+**Relation:** AMENDS [`0083-reconciler-vendor-adapter-seam.md`](0083-reconciler-vendor-adapter-seam.md).
 That ADR's two-layer model (backend-neutral core + `adapters/<backend>/`), its phasing
 constraints, and its `Backend` port are UNCHANGED and still binding. This ADR adds a third
 layer *inside* the adapter half, records the provenance decision the family forced, and
@@ -11,8 +11,8 @@ narrows one claim 0035 made about what a contract suite proves.
 (not a forked second adapter)*. Story J8 `8c35-1a5e-927b-4644`.
 
 > **Numbering caution.** THREE files in `docs/adr/` carry the number 0035 —
-> `0035-rc2b-snapshot-horizon-safe-replay.md`, `0035-code-review-two-lane-tier-tagged-impact.md`,
-> and `0035-reconciler-vendor-adapter-seam.md`. A bare "ADR 0035" is ambiguous in this repo.
+> `0035-rc2b-snapshot-horizon-safe-replay.md`, `0082-code-review-two-lane-tier-tagged-impact.md`,
+> and `0083-reconciler-vendor-adapter-seam.md`. A bare "ADR 0035" is ambiguous in this repo.
 > Every reference below cites the **filename**.
 
 ## Context
@@ -23,7 +23,7 @@ wiki-markup/plain-text bodies instead of v3 + Atlassian Document Format; Persona
 bearer auth instead of the ACLI subprocess; and name-based user identity instead of Cloud's
 opaque `accountId`.
 
-`0035-reconciler-vendor-adapter-seam.md` provides one seam — neutral core on one side,
+`0083-reconciler-vendor-adapter-seam.md` provides one seam — neutral core on one side,
 `adapters/<backend>/` on the other — and that seam is the right shape for a *different vendor*.
 It says nothing about a second member of the *same* vendor family, and GitHub PR #120 showed
 what happens in that gap: a second adapter package that rode the `Backend` port correctly but
@@ -79,7 +79,7 @@ by a synthetic-violation test, because a tautological graph checker that never f
 every other assertion in the file.
 
 **Sharing is by dependency inversion where the module cannot move.**
-`0035-reconciler-vendor-adapter-seam.md` §(a) pins `adf.py`, `outbound_fields.py`, and
+`0083-reconciler-vendor-adapter-seam.md` §(a) pins `adf.py`, `outbound_fields.py`, and
 `comment_limits.py` as Jira-coupled **and** location-pinned: the file-location dynamic loader
 threads them by filename, so relocating them requires teaching the loader the new sub-package —
 that is 0035's **Phase 2**. Location-pinned means "cannot change path", not "cannot be edited",
@@ -146,7 +146,7 @@ would mean a store migration for no user-visible benefit and would delay the DC 
 **`RemoteRef.instance` was INTENDED design when this ADR was written; it is now built —
 see the amended open-issue entry below, which also records that it protects LESS than the next
 paragraph claims (it does not prevent local-id collision).**
-`0035-reconciler-vendor-adapter-seam.md` §(d) item 4 defines
+`0083-reconciler-vendor-adapter-seam.md` §(d) item 4 defines
 `RemoteRef{vendor, instance, remote_id}` precisely so two deployments of one vendor never
 collide, and that is the mechanism this provenance decision is *designed* to lean on. It is not
 built: `src/` contains only the frozen dataclass definition and its docstring — `grep -rn
@@ -216,7 +216,7 @@ guidance to a future maintainer is explicit:
 
 ### (g) What execution proved about the port — and about what a contract suite certifies
 
-`0035-reconciler-vendor-adapter-seam.md`'s **proof-of-seam** argument is that a backend-agnostic
+`0083-reconciler-vendor-adapter-seam.md`'s **proof-of-seam** argument is that a backend-agnostic
 contract suite is what certifies a backend. Driving the DC assembly against a real Jira for the
 first time showed that argument holds **only as far as the port is COMPLETE and TYPED**.
 
@@ -294,23 +294,23 @@ restricted create screen. So "live testing is the oracle" is necessary and still
 
 | Rejected | Why |
 |---|---|
-| **Fork per deployment** (PR #120's separate adapter package) | Two copies of the field maps and sanitizers drift — they had *already* drifted, `outbound_fields`/`config.py` carrying a `"deleted": "Done"` entry `jira_fields` lacked. Cross-adapter private imports are also a dependency direction `0035-reconciler-vendor-adapter-seam.md` never sanctioned, and they make `adapters/jira/` a concrete backend and a shared library at once, with nothing pinning what is shared. |
+| **Fork per deployment** (PR #120's separate adapter package) | Two copies of the field maps and sanitizers drift — they had *already* drifted, `outbound_fields`/`config.py` carrying a `"deleted": "Done"` entry `jira_fields` lacked. Cross-adapter private imports are also a dependency direction `0083-reconciler-vendor-adapter-seam.md` never sanctioned, and they make `adapters/jira/` a concrete backend and a shared library at once, with nothing pinning what is shared. |
 | **A hand-rolled stdlib REST client** | PR #120's client is competent, but `pycontribs/jira` already absorbs DC-vs-Cloud auth, pagination, and payload quirks that thousands of users have found. Confining it to an opt-in extra keeps the cost off every rebar install, so the "no dependencies" objection does not apply. |
 | **`atlassian-python-api`** instead of `pycontribs/jira` | Surveyed in ADR 0004; it does support DC with PAT auth. `pycontribs/jira` wins on two specifics: it ships the Dockerized-Jira-SDK harness pattern adopted as this epic's oracle, and `JIRA(server=…, token_auth=…)` covers DC-vs-Cloud divergence behind one client object. Either would work; picking one and confining it to an extra is what matters. |
 | **Generalizing the store vocabulary now** (`jira_key`, the `jira-` prefix, the channel vocabulary) | It is epic `be74`'s spine, touches 50+ binding-store sites, and would force a store migration for no user-visible benefit while delaying the DC delivery. Cloud and DC are the same vendor; there is nothing yet to generalize *for*. |
 | **Migrating Cloud onto `pycontribs/jira`** | Puts the only live-validated path at risk (~29-test patch surface, production Jira) to serve a deployment that does not need it. See §(d). |
-| **Moving the location-pinned modules now** (`adf.py`, `outbound_fields.py`, `comment_limits.py`) | Tidier layout, but it requires teaching the dynamic loader the new sub-package and re-targeting every `mock.patch("rebar_reconciler.<mod>.<attr>")` site — `0035-reconciler-vendor-adapter-seam.md` **Phase 2**. Dependency inversion gets the same single-implementation guarantee at a fraction of the risk. |
+| **Moving the location-pinned modules now** (`adf.py`, `outbound_fields.py`, `comment_limits.py`) | Tidier layout, but it requires teaching the dynamic loader the new sub-package and re-targeting every `mock.patch("rebar_reconciler.<mod>.<attr>")` site — `0083-reconciler-vendor-adapter-seam.md` **Phase 2**. Dependency inversion gets the same single-implementation guarantee at a fraction of the risk. |
 | **Documenting all of this only in `docs/architecture.md`** | rebar's ADR set is where rejected alternatives live. Without them, fork-per-deployment and the hand-rolled client get re-proposed the next time a Jira-like tracker appears. |
 
 ## Consequences
 
 - **`adapters/` is now three packages, and the extra level is a fact a reader must know.** The
-  layer diagram in `0035-reconciler-vendor-adapter-seam.md` §(c) shows two levels; the family
+  layer diagram in `0083-reconciler-vendor-adapter-seam.md` §(c) shows two levels; the family
   layer sits inside the adapter half and is one-way by machine-checked contract.
 - **A second Jira-family deployment is a configuration, not a fork.** A third one implements the
   two contracts and registers a key; it writes no value maps, no sanitizers, no link vocabulary,
   and no probe classifier of its own.
-- **`0035-reconciler-vendor-adapter-seam.md`'s "first real second backend is out of scope"
+- **`0083-reconciler-vendor-adapter-seam.md`'s "first real second backend is out of scope"
   statement is superseded.** Epic `e369` landed Jira Data Center ahead of the GitHub adapter
   `be74` was reserved for. That file has been corrected in all three places the claim appeared
   and now points here.

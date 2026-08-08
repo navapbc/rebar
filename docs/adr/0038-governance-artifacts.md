@@ -1,5 +1,7 @@
 # ADR 0038 — Governance artifacts: lead-maintainer language, CoC version, CODEOWNERS non-goal
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0038 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0038; the others were reassigned to 0089 (was `0038-async-liveness-watchdog.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic breaded-ammonitic-elephant — OSS v1.0.0 front door)
 **Date:** 2026-07-09
 

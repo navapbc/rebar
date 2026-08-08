@@ -1,5 +1,7 @@
 # ADR 0032 — When a DSO gap becomes a graded Pass-2 sub-answer vs. a prompt gloss
 
+> **Number note (story 0743):** for a window before the 0743 renumbering, ADR 0032 was shared by 2 ADRs (a collision). This ADR is the earliest-landed and retains 0032; the others were reassigned to 0081 (was `0032-adjective-adjective-animal-aliases.md`). See [RENUMBERING.md](RENUMBERING.md).
+
 **Status:** Accepted (epic cite-stone-sea — DSO plan-review gap adoption / WS1 — neat-spa-ulcer)
 **Date:** 2026-07-06
 

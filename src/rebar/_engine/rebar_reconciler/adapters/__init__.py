@@ -5,7 +5,7 @@
 # second backend). The reconciler's backend-neutral core — the differ / apply /
 # dispatch / store machinery at the package root — targets the operations these
 # vendor modules provide (issue CRUD, field mapping, the transport). See
-# ``docs/adr/0035-reconciler-vendor-adapter-seam.md`` for the seam design and the
+# ``docs/adr/0083-reconciler-vendor-adapter-seam.md`` for the seam design and the
 # phased-migration plan (Phase 1 relocates only the loader-safe, low-reference
 # vendor modules; the rest are inventoried there for Phase 2).
 
