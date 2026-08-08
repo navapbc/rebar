@@ -33,14 +33,14 @@ def _step_index(steps: list[dict], command: str) -> int:
     return matches[0]
 
 
-def _first_merge_index(steps: list[dict]) -> int:
+def _core_push_index(steps: list[dict]) -> int:
     matches = [
         index
         for index, step in enumerate(steps)
-        if any(line.startswith("git merge ") for line in _commands(step))
+        if any("python -m rebar._store.push" in line for line in _commands(step))
     ]
-    assert matches, "workflow must contain its tickets reconvergence merge"
-    return min(matches)
+    assert len(matches) == 1, "workflow must delegate once to the core push entrypoint"
+    return matches[0]
 
 
 def test_reconcile_workflows_provision_the_ours_driver_once() -> None:
@@ -50,7 +50,7 @@ def test_reconcile_workflows_provision_the_ours_driver_once() -> None:
         canary, "git worktree add -B tickets .tickets-tracker origin/tickets"
     )
     canary_init = _step_index(canary, "rebar init")
-    assert canary_mount < canary_init < _first_merge_index(canary)
+    assert canary_mount < canary_init < _core_push_index(canary)
     assert not any(
         "git config merge.ours.driver" in line for step in canary for line in _commands(step)
     ), "the canary already configures the driver through rebar init"
@@ -60,4 +60,4 @@ def test_reconcile_workflows_provision_the_ours_driver_once() -> None:
         production, "git worktree add -B tickets .tickets-tracker origin/tickets"
     )
     production_config = _step_index(production, "git config merge.ours.driver true")
-    assert production_mount < production_config < _first_merge_index(production)
+    assert production_mount < production_config < _core_push_index(production)

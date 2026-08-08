@@ -18,6 +18,10 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **`reconcile-bridge-canary.yml` is a client-copied template.** Existing client copies keep
+  their current delivery loop until maintainers opt in by refreshing that workflow from this
+  release; refresh it deliberately rather than assuming repository updates modify copied files.
+
 - **BREAKING — the `[eval]` extra is removed, and with it the unused `inspect-ai`
   dependency.** rebar never imported `inspect_ai`: prompt evaluation
   (`rebar prompt eval`, spec validation, grader discipline, coverage, JUnit) is

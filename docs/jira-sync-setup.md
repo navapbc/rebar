@@ -136,6 +136,20 @@ client makes is the install step — this repo installs itself from source:
 Pin a released version (`pip install nava-rebar==X.Y.Z`) so the reconciler code is
 reproducible across runs. Reconcile does **not** need the `[agents]` extra.
 
+### Refreshing existing copied templates
+
+Workflow copies are yours to maintain: upgrading rebar does not change an existing
+`.github/workflows/reconcile-bridge.yml` or `reconcile-bridge-canary.yml`. Refresh is
+an explicit opt-in action: copy the current templates into your repository, review the
+diff, and merge it on your normal change-control path. The current templates delegate
+delivery to the strict synchronous store core. After a clean recovery merge it re-pushes
+immediately, rather than waiting in a workflow-local retry loop.
+
+No store cleanup is needed to roll this template change back. Restore the prior inline
+flush loop in a canary copy if that is the desired rollback. For the reconciler template,
+remove `--strict` from the core call site to return to best-effort delivery; do not rewrite
+the tickets worktree or its event history.
+
 ## 5. Validate safely, then enable
 
 Do **not** let `live` mode be your first run. The bridge supports read-only and
@@ -216,7 +230,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | **`rebar reconcile --mode <mode>`** | This is the reconcile entry point (`== python -m rebar_reconciler`). It is a lean-runtime capability — no `[agents]` extra needed. |
 | **Exit-code handling (0 / 75 / 3 / other)** | `__main__.py` returns **75** (reschedule — rebase-retry exhausted; the next */20 run retries) and **3** (another pass already holds the pass-lock). Both are operational, not errors, so we exit 0 on them; any other non-zero fails the job. |
 | **Commit-back + push when dirty *or ahead*** | **The reconciler does not push.** It writes inbound events as *uncommitted* files in the worktree and makes its own `.bridge_state/bindings.json` commit *without pushing*. So a clean worktree does **not** mean "nothing to push" — we push whenever the local `tickets` branch is ahead of `origin/tickets`. This is the single biggest divergence from a naive DSO copy (whose `git status --porcelain` gate would skip pushing the reconciler's own binding commit). |
-| **Fetch-rebase-push retry loop** | Multiple writers (this bridge, the canary, interactive `rebar` clients) push to the same orphan branch. The event log is union-mergeable, so a rejected push is resolved by fetch→rebase→retry with backoff. |
+| **Strict core commit + push** | Multiple writers (this bridge, the canary, interactive `rebar` clients) share the orphan branch. The store core owns fetch→merge→immediate-repush recovery and makes a failed workflow delivery terminal. |
 | **`concurrency: reconcile-bridge` (cancel-in-progress: false)** | A second guard atop the reconciler's own pass-lock; ensures an in-flight pass finishes before the next scheduled one starts rather than racing it. |
 | **acli download + sha256 verify + auth** | The reconciler shells out to `acli` for all Jira I/O. Pinning + checksum-verifying the binary keeps CI reproducible and supply-chain-safe. |
 | **`timeout-minutes: 60`** | The one-time initial sync creates issues serially via acli (~4 s each), and commit-back persists only on a **completed** pass — so the budget must cover a full bulk pass or progress never converges. 60 is a ceiling, not a duration; steady-state passes finish in minutes. |
@@ -229,7 +243,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 |------|--------|
 | **Query last successful `reconcile-bridge.yml` run** | A silently-disabled or chronically-failing bridge is invisible otherwise. The canary is the dead-man's switch that makes staleness loud. |
 | **Treat GitHub API errors as transient** | Treating an API blip as "stale" would file a false-alarm bug every outage. |
-| **`rebar list/create/comment/transition`** | rebar's CLI is the ticket interface. Unlike the reconciler, **CLI writes auto-commit and auto-push** to `origin/tickets`, so the canary needs no explicit commit-back for its ticket ops — only a best-effort *flush* guard (auto-push is non-fatal on failure). |
+| **`rebar list/create/comment/transition`** | rebar's CLI is the ticket interface. Unlike the reconciler, **CLI writes auto-commit and auto-push** to `origin/tickets`; the canary's strict core flush makes any still-unpushed ticket changes terminal. |
 | **Bug-close `--reason "Fixed: …"`** | rebar enforces a bug-close reason prefixed `Fixed:` or `Escalated to user:`. Auto-recovery counts as a fix. |
 | **`BRIDGE_CANARY_ALERT:` comment prefix** | The reconciler's outbound comment sync excludes this prefix, so the canary's fresh-timestamped "still stale" comments are **not** mirrored to Jira (a volatile timestamp never dedups → duplicate Jira comments). |
 | **`permissions: contents: write`, `actions: read`** | Minimum: push ticket changes + read the bridge's run history. |

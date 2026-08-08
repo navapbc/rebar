@@ -14,9 +14,9 @@
 # Classification + alert-lifecycle LOGIC lives in scripts/canary_bridge.py
 # (ticket e602 — shell-to-Python Tier 3); the steps here are thin invocations
 # plus plumbing. Unit tests: tests/scripts/test_canary_bridge.py. The final
-# "flush unpushed" CAS push loop deliberately STAYS in YAML and is tested
-# verbatim (ticket 4c4f's decision — extraction creates an untested-glue
-# drift seam); do NOT migrate it into the module.
+# "flush unpushed" step is a strict, synchronous process-boundary adapter;
+# rebar._store.push owns its CAS recovery, and an executable workflow smoke
+# test protects the formerly verbatim YAML contract.
 #
 # rebar divergences from DSO's canary:
 #   * ticket ops use the `rebar` CLI (rebar list/create/comment/transition), which
@@ -206,44 +206,13 @@ jobs:
           python scripts/canary_bridge.py binding-drift-alert
 
       - name: Flush any unpushed ticket changes to origin/tickets
-        # rebar CLI auto-pushes, but best-effort: this guard re-pushes if a prior
-        # auto-push failed and left the local tickets branch ahead of origin.
+        # Core owns strict, synchronous delivery and CAS recovery; this adapter keeps
+        # the canary's terminal-red behavior when local ticket changes cannot land.
         if: env.DRY_RUN == 'false'
         run: |
           set -euo pipefail
           cd .tickets-tracker
-          # EXPLICIT refspec is load-bearing — do NOT simplify to `git fetch origin
-          # tickets`. A bare fetch always writes FETCH_HEAD but only writes
-          # refs/remotes/origin/tickets when the configured remote.origin.fetch
-          # refspec covers `tickets`; under a narrow/single-branch fetch config it
-          # exits 0 leaving origin/tickets absent or STALE, so the ahead-count below
-          # (and the merge in the retry loop) reads the wrong snapshot. Matches the
-          # form used in the "Mount tickets branch as a worktree" step above.
-          git fetch origin '+tickets:refs/remotes/origin/tickets' || true
-          ahead=$(git rev-list --count origin/tickets..HEAD 2>/dev/null || echo 0)
-          if [ "$ahead" -eq 0 ]; then
-            echo "Nothing to flush — local tickets branch not ahead of origin."
-            exit 0
-          fi
-          echo "Flushing $ahead unpushed commit(s)."
-          for attempt in 1 2 3 4 5; do
-            if git push origin HEAD:tickets 2>/tmp/push_err; then
-              echo "Push succeeded (attempt $attempt)."; exit 0
-            fi
-            if grep -qiE 'non-fast-forward|rejected|fetch first' /tmp/push_err; then
-              # EXPLICIT refspec (see above): a bare fetch leaves origin/tickets
-              # stale under a narrow refspec, so the merge below would re-merge the
-              # same old snapshot and the push would stay rejected every attempt.
-              git fetch origin '+tickets:refs/remotes/origin/tickets' || true
-              # MERGE, not rebase: rebase over a remote compaction resurrects the
-              # source event files it deleted (SNAPSHOT_INCONSISTENT, bug f193).
-              git merge --no-edit origin/tickets || { git merge --abort 2>/dev/null || true; echo "::error::merge conflict"; exit 1; }
-              sleep $(( (1 << attempt) + RANDOM % 3 ))
-            else
-              echo "::error::non-retryable push failure: $(cat /tmp/push_err)"; exit 1
-            fi
-          done
-          echo "::error::push failed after retries"; exit 1
+          REBAR_SYNC_PUSH=always python -m rebar._store.push push --tracker . --strict
 
       - name: Fail job on stale (surface as a red run in the Actions UI)
         if: steps.check.outputs.stale == 'true'

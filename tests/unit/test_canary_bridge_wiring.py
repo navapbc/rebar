@@ -1,4 +1,4 @@
-"""Anti-rot gate: the canary's logic must stay in scripts/canary_bridge.py.
+"""Anti-rot gate: the canary keeps policy in Python and delegates delivery to core.
 
 Ticket e602 (shell-to-Python Tier 3) migrated the reconcile-bridge-canary
 workflow's classification + alert-lifecycle logic out of YAML run-blocks into
@@ -6,10 +6,10 @@ workflow's classification + alert-lifecycle logic out of YAML run-blocks into
 
 * each of the four subcommands is invoked by exactly one canary step;
 * no logic-bearing rebar/gh invocations reappear in YAML run-blocks (the
-  allowlisted exceptions: ``rebar init`` plumbing and the verbatim-tested CAS
-  flush loop, which ticket 4c4f keeps in YAML deliberately);
-* the flush loop's CAS retry shape is still present (guard against an
-  accidental migration of the loop into the module).
+  allowlisted exceptions are ``rebar init`` plumbing and the private core push
+  process boundary);
+* the flush step remains a thin, strict, synchronous push-only adapter while
+  retry and merge policy stays in ``rebar._store.push``.
 """
 
 from __future__ import annotations
@@ -63,8 +63,8 @@ def test_module_exists() -> None:
 def test_no_logic_bearing_rebar_calls_left_in_yaml() -> None:
     """Direct rebar ticket/fsck operations must not reappear in run-blocks.
 
-    ``rebar init`` (store provisioning plumbing) is the single allowed direct
-    call; every other rebar operation goes through scripts/canary_bridge.py.
+    ``rebar init`` (store provisioning plumbing) and the thin private core push
+    boundary are allowed; other rebar operations go through canary_bridge.py.
     """
     offenders: list[str] = []
     for name, run in _run_blocks().items():
@@ -86,18 +86,13 @@ def test_no_logic_bearing_rebar_calls_left_in_yaml() -> None:
     )
 
 
-def test_flush_cas_loop_stays_in_yaml_verbatim_shape() -> None:
-    """The CAS push-retry loop stays in YAML (4c4f decision) — never migrate it."""
+def test_flush_step_delegates_to_strict_core_push() -> None:
+    """The canary keeps its red disposition while core owns CAS retry policy."""
     flush = [run for name, run in _run_blocks().items() if "Flush" in name]
     assert len(flush) == 1, "the flush-unpushed step is missing from the canary"
     body = flush[0]
-    for marker in (
-        "for attempt in 1 2 3 4 5",
-        "git push origin HEAD:tickets",
-        "git merge --no-edit origin/tickets",
-        "+tickets:refs/remotes/origin/tickets",
-    ):
-        assert marker in body, (
-            f"flush loop lost its CAS marker {marker!r} — the verbatim-tested YAML "
-            f"loop (ticket 4c4f) must not be altered or migrated"
-        )
+    invocation = "REBAR_SYNC_PUSH=always python -m rebar._store.push push --tracker . --strict"
+    assert invocation in " ".join(body.replace("\\\n", " ").split())
+    assert body.count("python -m rebar._store.push") == 1
+    for forbidden in ("git push", "git fetch", "git merge", "raw-git-ok"):
+        assert forbidden not in body, f"flush step still owns {forbidden!r} instead of core"
