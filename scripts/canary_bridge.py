@@ -1,13 +1,8 @@
 """canary_bridge.py — extracted alert-classification logic from reconcile-bridge-canary.yml.
 
 This module is Tier 3 of the shell→Python strangler-fig migration (ticket e602-1354-6778-4c0f).
-It absorbs the four YAML run-block decision trees while deliberately leaving two loops in YAML:
-
-- The reconcile-bridge.yml commit-back CAS push loop
-- The canary flush (tickets-branch push retry loop)
-
-Both loops require verbatim-execution guarantees per ticket 4c4f's decision; this module must
-never absorb them.  The raw-git-write lint (d37e) allowlists those YAML loops specifically.
+It absorbs the four YAML run-block decision trees. Tickets-branch commit and delivery now live
+in ``rebar._store.push``; the workflows retain only strict process-boundary adapters.
 
 The two alert subcommands are automated bug filers and follow the bug-creation
 contract — dedup search first, ≤1 accumulation comment per 24h, abort-if-empty,

@@ -49,18 +49,17 @@ def test_no_shallow_fetch_of_tickets(workflow: Path) -> None:
 
 
 @pytest.mark.parametrize("workflow", RECONCILE_WORKFLOWS, ids=lambda p: p.name)
-def test_reconcile_uses_merge_not_rebase(workflow: Path) -> None:
-    """Reconciliation of origin/tickets must use ``git merge``, never ``git
-    rebase`` (rebase over a remote compaction resurrects deleted event files)."""
+def test_reconcile_delegates_merge_not_rebase_to_core_push(workflow: Path) -> None:
+    """Workflow delivery delegates to the merge-based core and never rebases."""
     text = workflow.read_text(encoding="utf-8")
     rebase_hits = re.findall(r"git rebase[^\n]*origin/tickets", text)
     assert not rebase_hits, (
         f"{workflow.name} must reconcile with 'git merge', not 'git rebase "
         f"origin/tickets' (bug f193); found:\n{rebase_hits}"
     )
-    assert "git merge --no-edit origin/tickets" in text, (
-        f"{workflow.name} should reconcile the tickets branch with "
-        "'git merge --no-edit origin/tickets'"
+    assert "python -m rebar._store.push" in text, (
+        f"{workflow.name} must delegate tickets reconvergence to the core push entrypoint; "
+        "the executable core suite owns merge-vs-rebase behavior"
     )
 
 
@@ -70,10 +69,10 @@ def test_tickets_fetch_always_names_the_destination_ref(workflow: Path) -> None:
 
     A bare ``git fetch origin tickets`` always writes ``FETCH_HEAD`` but writes
     ``refs/remotes/origin/tickets`` only OPPORTUNISTICALLY — when the remote's CONFIGURED
-    refspec covers that branch. These workflows consume the result as ``origin/tickets``
-    (``git rev-list origin/tickets..HEAD``, ``git merge --no-edit origin/tickets``), so a
-    configured refspec that does not cover ``tickets`` would leave that consumer reading an
-    absent or STALE ref and the push-retry loop unable to converge at any budget.
+    refspec covers that branch. The workflow mount consumes the result as
+    ``origin/tickets``; delivery now delegates to the core push entrypoint, whose own
+    real-git suite pins the same explicit destination-ref contract. A narrow configured
+    refspec must not leave either consumer reading an absent or stale ref.
 
     ``actions/checkout`` builds its workspace with ``git remote add``, which installs the
     wildcard ``+refs/heads/*:refs/remotes/origin/*``, so these workflows are not currently
