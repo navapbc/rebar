@@ -100,6 +100,29 @@ def test_absence_claim_veto_drops_refuted_absence() -> None:
     assert d["reason"] == "veto:absence-refuted"
 
 
+def test_on_target_veto_only_fires_in_execution_review() -> None:
+    """The execution-phase on-target veto: a finding the verifier confirms the code already
+    satisfies (``current_state_satisfies_plan_goal == "yes"``) is DROPPED with reason
+    ``veto:plan-goal-satisfied`` — but ONLY when ``execution_review=True``. At planning time
+    (default) it is inert, so a genuine planning-stage true positive is byte-unchanged."""
+    on_target = _verif(binary={"current_state_satisfies_plan_goal": "yes"})
+    # Planning phase (default): the veto is inert — full-validity finding survives.
+    assert review_kernel.pass3_decide(on_target, blocking_enabled=True)["decision"] != "dropped"
+    # Execution phase: the veto fires even at full validity + impact.
+    d = review_kernel.pass3_decide(on_target, blocking_enabled=True, execution_review=True)
+    assert d["decision"] == "dropped"
+    assert d["reason"] == "veto:plan-goal-satisfied"
+    # Only a DEFINITE "yes" vetoes: "no"/"insufficient"/absent never drop, even in execution.
+    for ans in ("no", "insufficient", "na"):
+        keep = _verif(binary={"current_state_satisfies_plan_goal": ans})
+        assert (
+            review_kernel.pass3_decide(keep, blocking_enabled=True, execution_review=True)[
+                "decision"
+            ]
+            != "dropped"
+        )
+
+
 # ── the threshold is a PARAMETER: two consumers, one kernel, independent partitions ──
 def test_parameterized_threshold_two_consumers_one_kernel() -> None:
     """A mid-priority finding (validity 1.0 × impact 0.5 = 0.5): a STRICT gate
@@ -215,8 +238,18 @@ def test_verification_contract_shares_the_binary_vocabulary() -> None:
     # contracts or the graded vocabulary.
     assert _binary_fields(base) == expected_binary
     assert _binary_fields(code) == expected_binary
-    assert _binary_fields(plan) == expected_binary | {"prerequisite_attribution_valid"}
+    assert _binary_fields(plan) == expected_binary | {
+        "prerequisite_attribution_valid",
+        "current_state_satisfies_plan_goal",
+    }
     assert "prerequisite_attribution_valid" not in review_kernel.GRADED_BINARY
+    assert "current_state_satisfies_plan_goal" not in review_kernel.GRADED_BINARY
+    # The on-target veto binary MUST default to "na" (abstain) so an omitted/tool-less
+    # verification never spuriously fires the execution-phase drop.
+    _binary_model = (
+        plan.model_fields["verifications"].annotation.__args__[0].model_fields["binary"].annotation
+    )
+    assert _binary_model.model_fields["current_state_satisfies_plan_goal"].default == "na"
     # the plan model is a strict SUPERSET on severity_attributes: the base five + 7 axes + detection
     base_sev = _severity_fields(base)
     plan_sev = _severity_fields(plan)
