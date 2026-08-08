@@ -377,11 +377,16 @@ re-read and pick up from the current state. See [concurrency.md](concurrency.md)
 
 ## Jira
 
-If your project syncs to Jira, tickets reconcile bidirectionally through
-`rebar reconcile`. The staged bridge group offers `rebar bridge preview` to
-show proposed Jira changes, `rebar bridge sync` to apply them, `rebar bridge pause
+If your project syncs to Jira, use `rebar bridge preview` to show proposed Jira
+changes and `rebar bridge sync` to apply them. `rebar bridge pause
 REASON` to stop scheduled reconciliation, and `rebar bridge resume` to restart it.
-The established `rebar reconcile`, `rebar jira-onboard`, `rebar bridge-probe`,
+`preview` and `sync` accept `--only IDS` or `--except IDS`; `sync` also accepts
+positive `--max-changes N` and retains an audit manifest for explicitly limited runs.
+
+The established `rebar reconcile` adapter remains available: no arguments still mean
+dry-run, every historical `--mode` value is retained, and `--filter-local-ids` keeps
+its write-only filtering semantics. Direct argument-less `python -m rebar_reconciler`
+still means live synchronization. The `rebar jira-onboard`, `rebar bridge-probe`,
 `rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
 Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).

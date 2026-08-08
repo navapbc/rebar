@@ -74,7 +74,9 @@ over one git-backed store.
     self-healing `refs/reconciler/*` bare-ref CAS lock (the legacy tickets-branch
     `.reconciler-pass-lock` `file` backend + the `lock_backend` selector were removed
     pre-1.0; epic
-    dust-troth-naval / ADR 0031).
+    dust-troth-naval / ADR 0031). Canonical `bridge preview` / `bridge sync` and
+    retained reconcile adapters normalize before this shared spine; see
+    [ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md).
   - **Import/export** (`rebar._io`, code at `src/rebar/_io/`) — NDJSON
     export/import of ticket state backing `rebar.export_tickets`/`import_tickets`,
     the CLI `export`/`import` subcommands, and the MCP equivalents (see

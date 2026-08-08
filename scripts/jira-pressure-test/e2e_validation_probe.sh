@@ -68,8 +68,8 @@ skip_test() {
     SKIPPED=$((SKIPPED + 1))
 }
 
-# Run one reconciler pass and capture output. Arguments are forwarded to
-# python -m rebar_reconciler (e.g. --mode bootstrap-strict).
+# Run one bridge-engine operation and capture output. Arguments are forwarded to
+# python -m rebar_reconciler (for example, preview or sync --max-changes 10).
 run_reconciler() {
     local output
     output=$(cd "$RECONCILER_DIR" && python -m rebar_reconciler "$@" 2>&1) || true
@@ -78,11 +78,10 @@ run_reconciler() {
 
 # Run a reconciler pass SCOPED to this probe's own ticket (LOCAL_ID). The store
 # may hold local-only tickets that are not meant to sync to Jira; an unfiltered
-# bootstrap pass would try to push them all to Jira. --filter-local-ids restricts
-# applied mutations to the probe ticket so the probe is safe + deterministic in
-# any store. LOCAL_ID is a global set in Phase 1 before any filtered pass.
+# sync would otherwise try to push them all to Jira. --only narrows the complete
+# examination to the probe ticket so the probe is safe and deterministic.
 run_filtered_reconciler() {
-    run_reconciler --mode bootstrap-throttle --filter-local-ids "$LOCAL_ID" --repo-root "$REPO_ROOT"
+    run_reconciler sync --max-changes 100 --only "$LOCAL_ID" --repo-root "$REPO_ROOT"
 }
 
 # Extract a field from a Jira issue via ACLI search (search-based, not

@@ -1,8 +1,8 @@
-"""The staged ``rebar bridge`` command group and reconciler launcher.
+"""The primary ``rebar bridge`` command group and reconciler launcher.
 
 ``bridge`` intentionally presents four stable operator actions. Its parser
-owns nested-command discovery and argument validation; it never forwards child
-arguments to the reconciler.
+owns nested-command discovery and argument validation, then forwards the
+validated canonical child arguments to the reconciler.
 The launcher is shared with the established ``reconcile`` spelling so that
 both entry points continue to use the same interpreter, repository discovery,
 and engine environment.
@@ -19,16 +19,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-_BRIDGE_MODES = {"preview": "dry-run", "sync": "live"}
+_BRIDGE_MODES = {"preview", "sync"}
 
 
-def launch_reconciler(argv: Sequence[str], *, default_mode: str = "dry-run") -> int:
+def launch_reconciler(argv: Sequence[str], *, default_mode: str | None = "dry-run") -> int:
     """Run ``rebar_reconciler`` with repository defaults when they are absent.
 
     ``reconcile`` deliberately accepts its historical reconciler arguments, so
-    this function retains that behavior.  The nested bridge commands pass no
-    user-supplied child arguments and select their operation through
-    ``default_mode`` instead.
+    this function retains that behavior. Canonical bridge commands forward their
+    validated subcommand and options unchanged, without injecting a legacy mode.
     """
     from rebar import config
     from rebar._engine import engine_env
@@ -37,7 +36,9 @@ def launch_reconciler(argv: Sequence[str], *, default_mode: str = "dry-run") -> 
     args = list(argv)
     if not any(arg == "--repo-root" or arg.startswith("--repo-root=") for arg in args):
         args += ["--repo-root", root]
-    if not any(arg == "--mode" or arg.startswith("--mode=") for arg in args):
+    if default_mode is not None and not any(
+        arg == "--mode" or arg.startswith("--mode=") for arg in args
+    ):
         args += ["--mode", default_mode]
     # Use this interpreter rather than a bare ``python3``: the reconciler imports
     # ``rebar.*`` in-package, while engine_env exposes its top-level package.
@@ -48,7 +49,7 @@ def _parser() -> argparse.ArgumentParser:
     """Create the parser for the supported bridge operations."""
     parser = argparse.ArgumentParser(
         prog="rebar bridge",
-        description="Run staged Jira synchronization.",
+        description="Synchronize rebar tickets with Jira.",
     )
     commands = parser.add_subparsers(
         dest="command",
@@ -56,15 +57,32 @@ def _parser() -> argparse.ArgumentParser:
         title="commands",
         metavar="{preview,sync,pause,resume}",
     )
-    commands.add_parser(
+    preview = commands.add_parser(
         "preview",
         help="Show proposed Jira changes without applying them.",
         description="Show proposed Jira changes without applying them.",
     )
-    commands.add_parser(
+    sync = commands.add_parser(
         "sync",
-        help="Apply the staged Jira synchronization.",
-        description="Apply the staged Jira synchronization.",
+        help="Apply proposed Jira changes.",
+        description="Apply proposed Jira changes.",
+    )
+    for command in (preview, sync):
+        selection = command.add_mutually_exclusive_group()
+        selection.add_argument(
+            "--only", metavar="IDS", help="Examine only these local IDs or bound Jira keys."
+        )
+        selection.add_argument(
+            "--except",
+            dest="except_ids",
+            metavar="IDS",
+            help="Exclude these local IDs or bound Jira keys.",
+        )
+    sync.add_argument(
+        "--max-changes",
+        type=_positive_int,
+        metavar="N",
+        help="Apply at most N proposed changes and retain an audit manifest.",
     )
     pause = commands.add_parser(
         "pause",
@@ -80,6 +98,17 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _positive_int(value: str) -> int:
+    """Argparse converter for canonical mutation ceilings."""
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def _group_help() -> str:
     """Load the pinned group help used by the top-level help dispatcher."""
     from rebar._cli import _help
@@ -87,13 +116,18 @@ def _group_help() -> str:
     return _help.subcommand_help("bridge") or _parser().format_help()
 
 
-def _launch_bridge_command(command: str) -> int:
+def _launch_bridge_command(command: str, parsed: argparse.Namespace) -> int:
     """Launch the reconciler for a parser-validated bridge command."""
-    try:
-        default_mode = _BRIDGE_MODES[command]
-    except KeyError as exc:  # Defensive: argparse limits command to this mapping.
-        raise AssertionError(f"unhandled bridge command: {command!r}") from exc
-    return launch_reconciler((), default_mode=default_mode)
+    if command not in _BRIDGE_MODES:
+        raise AssertionError(f"unhandled bridge command: {command!r}")
+    args = [command]
+    if getattr(parsed, "max_changes", None) is not None:
+        args += ["--max-changes", str(parsed.max_changes)]
+    if getattr(parsed, "only", None) is not None:
+        args += ["--only", parsed.only]
+    if getattr(parsed, "except_ids", None) is not None:
+        args += ["--except", parsed.except_ids]
+    return launch_reconciler(args, default_mode=None)
 
 
 def _pause_remote(root: str) -> str:
@@ -158,11 +192,11 @@ def _pause_or_resume(command: str, reason: str | None = None) -> int:
 
 
 def bridge_cli(argv: Sequence[str]) -> int:
-    """Run the staged bridge command group.
+    """Run the primary bridge command group.
 
     A bare group invocation shows its compact command overview.  argparse
-    handles nested discovery, each verb's help, and rejection of every child
-    argument other than its standard help request.
+    handles nested discovery, each verb's help, and validation of its supported
+    child arguments before forwarding canonical operations to the engine.
     """
     args = list(argv)
     if not args:
@@ -177,5 +211,5 @@ def bridge_cli(argv: Sequence[str]) -> int:
         return 1 if exit_code is None else int(exit_code)
 
     if parsed.command in _BRIDGE_MODES:
-        return _launch_bridge_command(parsed.command)
+        return _launch_bridge_command(parsed.command, parsed)
     return _pause_or_resume(parsed.command, getattr(parsed, "reason", None))

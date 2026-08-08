@@ -24,7 +24,7 @@ Usage:
     # apply (clears bind-state); add --strip-tags to also remove dso-id:jira-* tags:
     python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker --apply
 
-After applying, run `rebar reconcile --mode dry-run` and confirm 0 mutations target
+After applying, run `rebar bridge preview` and confirm 0 mutations target
 the old project before enabling live sync. The bind-state files are backed up to a
 sibling ``.bridge_state.bak-<label>`` directory unless --no-backup is given.
 """
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Stripped {stripped}/{tag_count} id tags.")
 
     print(
-        "\nDone. Now run `rebar reconcile --mode dry-run` and confirm 0 mutations "
+        "\nDone. Now run `rebar bridge preview` and confirm 0 mutations "
         "target the old project before enabling live sync."
     )
     return 0

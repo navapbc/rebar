@@ -16,7 +16,6 @@ Exit codes:
 
 from __future__ import annotations
 
-import argparse
 import datetime
 import importlib
 import importlib.util
@@ -45,6 +44,8 @@ except ImportError:  # pragma: no cover - bare-interpreter fallback
 # same module objects and patch() targets resolve correctly.
 _ADVISORY_LOCK_KEY = "rebar_reconciler._advisory_lock"
 _MODE_KEY = "rebar_reconciler.mode"
+_REQUEST_KEY = "rebar_reconciler.request"
+_HELPERS_KEY = "rebar_reconciler.reconcile_helpers"
 
 
 def _load_sibling_keyed(dotted_key: str, filename: str):
@@ -381,11 +382,30 @@ class _Heartbeat:
             self._thread.join(timeout=self._interval + 5)
 
 
+def _optional_request_kwargs(
+    selection_kind: str | None,
+    selection_ids: set[str] | None,
+    max_changes: int | None,
+) -> dict[str, object]:
+    """Return only canonical request fields explicitly supplied by the caller."""
+    kwargs: dict[str, object] = {}
+    if selection_kind is not None:
+        kwargs["selection_kind"] = selection_kind
+    if selection_ids is not None:
+        kwargs["selection_ids"] = selection_ids
+    if max_changes is not None:
+        kwargs["max_changes"] = max_changes
+    return kwargs
+
+
 def run_pass(
     repo_root: Path | None = None,
     pass_id: str | None = None,
     target_mode=None,
     filter_local_ids: set[str] | None = None,
+    selection_kind: str | None = None,
+    selection_ids: set[str] | None = None,
+    max_changes: int | None = None,
     abort_check=None,
 ) -> int:
     """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
@@ -438,8 +458,12 @@ def run_pass(
             target_mode=target_mode,
             filter_local_ids=filter_local_ids,
             abort_check=abort_check,
+            **_optional_request_kwargs(selection_kind, selection_ids, max_changes),
         )
     except Exception as exc:  # noqa: BLE001 — body-inspecting: classify reschedule vs error to pick exit code
+        if type(exc).__name__ == "SelectionStaleError":
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
         if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
             print(
                 f"RESCHEDULE: reconcile_once signalled reschedule: {exc}",
@@ -512,6 +536,17 @@ def run_pass(
     return 0
 
 
+def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
+    """Resolve canonical selection tokens before any pass-lock inspection."""
+    if not request.selection_tokens:
+        return None, None
+    helpers = _load_sibling_keyed(_HELPERS_KEY, "reconcile_helpers.py")
+    try:
+        return helpers.resolve_selection(request.repo_root, request.selection_tokens), None
+    except helpers.SelectionError as exc:
+        return None, str(exc)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m rebar_reconciler``.
 
@@ -530,58 +565,19 @@ def main(argv: list[str] | None = None) -> int:
 
     install_stderr_handler("rebar_reconciler")
 
-    parser = argparse.ArgumentParser(prog="rebar_reconciler")
-    parser.add_argument(
-        "--repo-root",
-        default=None,
-        help="Repository root (default: auto-detect from script location)",
-    )
-    # --mode is NOT required; omitting it defaults to 'live' so that
-    # inject-and-heal.sh (which calls 'python3 -m rebar_reconciler --repo-root ...'
-    # with no --mode flag) continues to work with the steady-state production mode.
-    parser.add_argument(
-        "--mode",
-        default=None,
-        help=(
-            "Rollout-safety mode: reconcile-check | dry-run | bootstrap-strict "
-            "| bootstrap-throttle | live (default: live)"
-        ),
-    )
-    parser.add_argument(
-        "--dry-run-enumerate",
-        action="store_true",
-        default=False,
-        help=(
-            "Print the list of ticket-tracker entries that the reconciler would enumerate "
-            "(after .scratch/ exclusion) and exit without running a pass. "
-            "Each entry is printed as an absolute path, one per line."
-        ),
-    )
-    parser.add_argument(
-        "--filter-local-ids",
-        default=None,
-        help=(
-            "Comma-separated list of local ticket IDs.  When set, all three "
-            "differs run on their full unfiltered inputs (same code paths as "
-            "production) but only mutations targeting these IDs (or their "
-            "bound Jira keys) reach the applier.  For validation use only."
-        ),
-    )
-    args = parser.parse_args(argv)
-    # Default to the project repo root when --repo-root is omitted. Mirrors
-    # run_pass()'s default at lines 84-85 so the four advisory_lock guard
-    # calls below (which declare repo_root: Path, not Optional) never see
-    # None and accidentally invoke `git -C None ...` (bug 5be7-d657-1dde-4237).
-    repo_root = (
-        Path(args.repo_root)
-        if args.repo_root
-        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-    )
+    mode_mod = _load_sibling_keyed(_MODE_KEY, "mode.py")
+    request_mod = _load_sibling_keyed(_REQUEST_KEY, "request.py")
+    try:
+        request = request_mod.normalize_request(argv, mode_mod)
+    except (request_mod.RequestError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    repo_root = request.repo_root
 
     # --dry-run-enumerate: list enumerable ticket directories and exit.
     # This path is intentionally placed before advisory-lock and mode checks so
     # the flag is usable in test fixtures without a live Jira config or lock state.
-    if getattr(args, "dry_run_enumerate", False):
+    if request.dry_run_enumerate:
         resolved_root = (
             repo_root
             if repo_root is not None
@@ -604,19 +600,18 @@ def main(argv: list[str] | None = None) -> int:
     # Step 1: Mode validation (dd-2) — BEFORE any fetcher reference.
     # Load mode.py under the dotted key so tests can pre-seed sys.modules.
     # -------------------------------------------------------------------------
-    mode_mod = _load_sibling_keyed(_MODE_KEY, "mode.py")
-    mode_str = args.mode if args.mode is not None else mode_mod.Mode.LIVE.value
-    try:
-        target_mode = mode_mod.Mode.from_str(mode_str)
-    except ValueError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
+    target_mode = request.target_mode
 
     # -------------------------------------------------------------------------
     # Step 1b: reconcile-check mode — read-only diagnostic, no lock needed.
     # -------------------------------------------------------------------------
     if target_mode == mode_mod.Mode.RECONCILE_CHECK:
         return _run_reconcile_check(repo_root)
+
+    selection_ids, selection_error = _resolve_request_selection(request)
+    if selection_error is not None:
+        print(f"ERROR: {selection_error}", file=sys.stderr)
+        return 2
 
     # -------------------------------------------------------------------------
     # Step 2: Advisory lock + phase-gate checks.
@@ -632,7 +627,8 @@ def main(argv: list[str] | None = None) -> int:
     # refs/reconciler/*; scrub any pre-existing .reconciler-* lock files still
     # committed on the tickets branch from the old file backend. Idempotent; a git
     # failure logs and continues (never aborts the pass).
-    _purge_committed_reconciler_locks(repo_root)
+    if selection_ids is None:
+        _purge_committed_reconciler_locks(repo_root)
 
     # Generate pass_id ONCE, up-front — it is both the lock/steal HOLDER and is
     # threaded into run_pass(). (Previously generated at Step 3, below the lock
@@ -708,21 +704,14 @@ def main(argv: list[str] | None = None) -> int:
                         f"pass lock lease lost mid-pass (pass_id={pass_id!r}) — aborting"
                     )
 
-        filter_local_ids: set[str] | None = None
-        if args.filter_local_ids is not None:
-            parsed = {s.strip() for s in args.filter_local_ids.split(",") if s.strip()}
-            if not parsed:
-                print(
-                    "ERROR: --filter-local-ids must contain at least one non-empty ID",
-                    file=sys.stderr,
-                )
-                return 2
-            filter_local_ids = parsed
         return run_pass(
             repo_root=repo_root,
             pass_id=pass_id,
             target_mode=target_mode,
-            filter_local_ids=filter_local_ids,
+            filter_local_ids=request.filter_local_ids,
+            selection_kind=request.selection_kind,
+            selection_ids=selection_ids,
+            max_changes=request.max_changes,
             abort_check=abort_check,
         )
     except Exception as exc:  # noqa: BLE001 — CLI top-level: log + traceback, return exit code 1

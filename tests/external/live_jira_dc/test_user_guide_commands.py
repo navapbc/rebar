@@ -155,13 +155,13 @@ def documented_repo(
 
 
 @_skip
-def test_the_documented_config_and_dry_run_work_against_a_real_dc_instance(
+def test_the_documented_config_and_preview_work_against_a_real_dc_instance(
     documented_repo: Path,
 ) -> None:
-    """THE CRITERION: `rebar reconcile --dry-run`, run exactly as documented, against a
+    """THE CRITERION: `rebar bridge preview`, run exactly as documented, against a
     real Jira Data Center instance configured exactly as documented.
 
-    Asserts on the ENVELOPE, not merely the exit code. ``--dry-run`` is a no-write mode,
+    Asserts on the ENVELOPE, not merely the exit code. ``preview`` is non-mutating,
     and no-write modes are the ones that emit JSON on stdout (``__main__.py:445-452``);
     a run that exited 0 having produced no envelope did not complete a pass.
     """
@@ -172,8 +172,7 @@ def test_the_documented_config_and_dry_run_work_against_a_real_dc_instance(
             sys.executable,
             "-m",
             "rebar_reconciler",
-            "--mode",
-            "dry-run",
+            "preview",
             "--repo-root",
             str(documented_repo),
         ],
@@ -184,10 +183,10 @@ def test_the_documented_config_and_dry_run_work_against_a_real_dc_instance(
     )
 
     assert "Traceback (most recent call last)" not in cp.stderr, (
-        f"the documented dry-run raised an unhandled exception:\n{cp.stderr}"
+        f"the documented preview raised an unhandled exception:\n{cp.stderr}"
     )
     assert cp.returncode == 0, (
-        f"the documented setup did not produce a working dry-run "
+        f"the documented setup did not produce a working preview "
         f"(exit {cp.returncode}).\n--stdout--\n{cp.stdout}\n--stderr--\n{cp.stderr}"
     )
 
@@ -199,16 +198,16 @@ def test_the_documented_config_and_dry_run_work_against_a_real_dc_instance(
         except json.JSONDecodeError:
             continue
     assert envelope is not None, (
-        f"no JSON envelope on stdout — the dry-run exited 0 without completing a "
+        f"no JSON envelope on stdout — the preview exited 0 without completing a "
         f"pass:\n{cp.stdout}\n--stderr--\n{cp.stderr}"
     )
     assert envelope.get("no_write") is True, (
-        f"the documented `--dry-run` did not run as a NO-WRITE mode: {envelope!r}. "
+        f"the documented preview was not non-mutating: {envelope!r}. "
         f"A guide that tells operators to 'inspect before enabling live sync' and then "
         f"writes would be actively dangerous."
     )
     assert envelope.get("mutation_failures", 0) == 0, (
-        f"the documented dry-run reported mutation failures: {envelope!r}"
+        f"the documented preview reported mutation failures: {envelope!r}"
     )
 
 
@@ -238,8 +237,7 @@ def test_the_documented_setup_refuses_to_read_the_pat_from_config(
             sys.executable,
             "-m",
             "rebar_reconciler",
-            "--mode",
-            "dry-run",
+            "preview",
             "--repo-root",
             str(documented_repo),
         ],
