@@ -162,6 +162,20 @@ FALSE, and the finding is dropped). Answer `na` unless the finding claims an abs
 claims_absence and absence_confirmed_in_context default `na` unless the finding is premised on
 an absence.
 
+current_state_satisfies_plan_goal is yes|no|insufficient|na — for a finding premised on the code
+not matching something the plan references or directs (e.g. "the plan says remove X, but no symbol
+X exists"), compare the code AS IT IS NOW to the END STATE the plan directs.
+  'yes' = the code already SATISFIES the plan's directed end state (the plan directs X to be
+          absent and X is indeed absent; or directs X present and X is present) — an expected,
+          on-target state, not a defect. The finding is dropped.
+  'no'  = the code CONTRADICTS the plan's directed end state (the plan needs X and the code does
+          not meet that). A real defect — the finding stands.
+This is a PRESENT-STATE code check: answer a definite yes/no ONLY for a code-grounded finding
+(criteria E4/G1G2/A1/G6/asserted-capability) whose current code state you have actually
+determined. For any other finding — you have no tools to inspect the code here — answer `na` (the
+default), so a tool-less verification never fires this veto. Also answer `na` unless the finding is
+premised on such a plan-vs-code discrepancy.
+
 ANTI-FP — adopted-library contract (FP6): if the asserted gap is a capability that is
 the DOCUMENTED CONTRACT of an adopted, maintained third-party dependency the plan commits
 to, the dependency's contract IS the existing mitigation — answer `no_existing_mitigation=yes`,

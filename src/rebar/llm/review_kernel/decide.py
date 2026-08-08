@@ -520,6 +520,7 @@ def pass3_decide(
     block_threshold: float = DEFAULT_BLOCK_THRESHOLD,
     blocking_enabled: bool = False,
     impact_fn: Callable[[dict[str, Any]], float] | None = None,
+    execution_review: bool = False,
 ) -> dict[str, Any]:
     """The deterministic decision. Returns
     ``{decision, reason, validity, impact, priority, severity, block_threshold,
@@ -528,8 +529,12 @@ def pass3_decide(
 
     Rules (the v1 authoritative shape):
       * no verification → INDETERMINATE (verifier produced nothing for this finding);
-      * cited_reference_accurate == "no" → DROPPED (the only veto, fires only when a
+      * cited_reference_accurate == "no" → DROPPED (a veto, fires only when a
         code citation is present);
+      * absence-claim refuted → DROPPED (the a8e5 absence veto);
+      * ``execution_review`` AND current_state_satisfies_plan_goal == "yes" → DROPPED
+        (the on-target veto — an execution-phase re-review found the code already at the
+        plan's directed end state, so the finding only re-reports completed work);
       * validity < 0.5 → DROPPED (low validity);
       * else BLOCK iff (not vetoed) AND blocking_enabled AND priority ≥ block_threshold;
       * else ADVISORY.
@@ -538,7 +543,12 @@ def pass3_decide(
     to the mean :func:`impact` — so any caller that does not pass it (e.g. the code-review path
     today) is byte-unchanged — while the plan-review gate threads ``impact_fn=impact_plan`` and
     code-review later threads its own. The signed-verdict shape is identical either way; only
-    the ``impact`` scalar's provenance differs."""
+    the ``impact`` scalar's provenance differs.
+
+    ``execution_review`` (default False) enables the on-target veto ONLY for a plan-review
+    EXECUTION re-review — a planning-phase review and every code-review call leave it False, so
+    a genuine planning-stage true positive (e.g. "remove X that never existed") is byte-unchanged.
+    """
     if not verification:
         return {
             "decision": "indeterminate",
@@ -583,6 +593,24 @@ def pass3_decide(
             "block_threshold": block_threshold,
             "blocking_enabled": blocking_enabled,
         }
+    # Execution-phase on-target veto: only during a plan-review EXECUTION re-review, a finding
+    # that the code lacks (or already contains) something the plan directs is DROPPED when the
+    # verifier confirms the code already SATISFIES the plan's directed end state
+    # ("current_state_satisfies_plan_goal" == "yes") — the finding merely re-reports completed,
+    # on-target work. A DEFINITE confirmation only ("insufficient"/"no"/"na" never veto); the
+    # field is na-default and plan-review-only, and execution_review is False for planning
+    # reviews + every code-review call, so those paths are byte-unchanged.
+    if execution_review and binary.get("current_state_satisfies_plan_goal") == "yes":
+        return {
+            "decision": "dropped",
+            "reason": "veto:plan-goal-satisfied",
+            "validity": val,
+            "impact": imp,
+            "priority": priority,
+            "severity": sev,
+            "block_threshold": block_threshold,
+            "blocking_enabled": blocking_enabled,
+        }
     if val < 0.5:
         decision, reason = "dropped", "low-validity"
     elif blocking_enabled and priority >= block_threshold:
@@ -614,6 +642,7 @@ def pass3_over_findings(
     *,
     threshold_for: ThresholdResolver,
     impact_fn: Callable[[dict[str, Any]], float] | None = None,
+    execution_review: bool = False,
 ) -> list[dict[str, Any]]:
     """Deterministic Pass-3 over the verifiable findings: per-criterion thresholds
     (resolved by the consumer-supplied ``threshold_for``) + :func:`pass3_decide`
@@ -624,7 +653,9 @@ def pass3_over_findings(
 
     ``impact_fn`` (story fishable-apivorous-redhead) is threaded verbatim to
     :func:`pass3_decide` — the plan-review wrapper passes ``impact_plan``; a caller that
-    omits it gets the mean :func:`impact` unchanged."""
+    omits it gets the mean :func:`impact` unchanged. ``execution_review`` is likewise threaded
+    verbatim (default False) — only a plan-review execution re-review sets it, enabling the
+    on-target veto; every other caller is byte-unchanged."""
     decided: list[dict[str, Any]] = []
     for i, f in enumerate(findings):
         block_threshold, blocking_enabled = threshold_for(f.get("criteria", []))
@@ -633,6 +664,7 @@ def pass3_over_findings(
             block_threshold=block_threshold,
             blocking_enabled=blocking_enabled,
             impact_fn=impact_fn,
+            execution_review=execution_review,
         )
         decided.append({**f, **d, "verification": verifs.get(i), "tier": "LLM"})
     return decided
