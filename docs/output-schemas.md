@@ -136,6 +136,27 @@ Not every non-zero exit is a "failure" in this sense: the per-ticket **gates**
 result at exit 0; and `clarity-check` has its own always-JSON contract outside the
 `--output` system. Those are documented exemptions, not envelope cases.
 
+### The same failure channel over MCP
+
+An MCP tool has no `--output` flag and no stdout of its own, so failures travel a
+different wire but carry the **same `error_envelope` identity**. When a tool body
+raises a known rebar exception, the server-side guard
+(`src/rebar/_mcp_errors.py`, installed in `build_server`) re-raises an
+`McpEnvelopeError` whose `.envelope` is the very same
+`{error, input, message[, exit_code]}` dict — with `error` drawn from the shared
+`rebar.KNOWN_ERROR_CODES` vocabulary (classified by `rebar.error_code_for`). FastMCP
+then wraps it as `ToolError(...) from McpEnvelopeError`, so an in-process caller reads
+the structured dict off **`ToolError.__cause__.envelope`**, and a wire client recovers
+the same JSON from the `isError` text after the `"Error executing tool <name>: "`
+prefix. The original engine exception is preserved one level deeper on
+`McpEnvelopeError.__cause__`, so its typed identity (e.g. `ConcurrencyError`,
+returncode 10) is not lost. `input` is optional in this channel (a target-less gate
+refusal omits it); the CLI always supplies it. Two RETURN-shaped soft errors
+(`explain_criterion`, the structured LLM-failure path) instead keep their existing
+dict shape but gain an `error` vocabulary code alongside a human `message`, preserving
+the disposition fields agents branch on. Pinned by
+`tests/interfaces/contracts/test_mcp_error_envelope_{happy,heldout}.py`.
+
 ## Source of truth & drift guard
 
 **The hand-authored JSON Schema files under `src/rebar/schemas/*.schema.json` are
