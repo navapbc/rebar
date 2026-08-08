@@ -332,6 +332,42 @@ def test_pass3_absence_claim_veto() -> None:
     assert d["decision"] == "dropped" and d["reason"] == "veto:absence-refuted"
 
 
+def test_pass3_on_target_veto_threaded_by_execution_phase() -> None:
+    """The plan-review wrapper threads ``execution_review`` into the kernel: a CODE-GROUNDED
+    on-target finding (``current_state_satisfies_plan_goal == "yes"``) is KEPT during a planning
+    review but DROPPED (``veto:plan-goal-satisfied``) during an execution re-review."""
+    from rebar.llm.plan_review import orchestrator
+
+    finding = {"finding": "the plan says remove X, but no symbol X exists", "criteria": ["E4"]}
+    verifs = {0: _verif(binary={"current_state_satisfies_plan_goal": "yes"})}
+    planning = orchestrator.pass3_over_findings([finding], verifs, execution_review=False)
+    assert planning[0]["decision"] != "dropped"
+    execution = orchestrator.pass3_over_findings([finding], verifs, execution_review=True)
+    assert execution[0]["decision"] == "dropped"
+    assert execution[0]["reason"] == "veto:plan-goal-satisfied"
+
+
+def test_pass3_on_target_veto_restricted_to_grounded_cohort() -> None:
+    """The on-target veto is COHORT-RESTRICTED: a non-code-grounded finding (criteria NOT in
+    ``registry.CODEBASE_GROUNDED``) whose tool-less single-turn verifier answered ``"yes"`` is
+    NOT dropped even in an execution review — the wrapper forces its answer to ``na`` so a present-
+    state check the verifier could not actually make never fires the veto. A grounded finding with
+    the same answer IS dropped (the discriminator is the criteria cohort, nothing else)."""
+    from rebar.llm.plan_review import orchestrator, registry
+
+    yes = {"current_state_satisfies_plan_goal": "yes"}
+    non_grounded = {"finding": "plan references X", "criteria": ["T1"]}
+    grounded_crit = sorted(registry.CODEBASE_GROUNDED)[0]
+    grounded = {"finding": "plan references X", "criteria": [grounded_crit]}
+    verifs = {0: _verif(binary=yes), 1: _verif(binary=yes)}
+    decided = orchestrator.pass3_over_findings(
+        [non_grounded, grounded], verifs, execution_review=True
+    )
+    assert decided[0]["decision"] != "dropped"  # non-grounded: veto neutralized
+    assert decided[1]["decision"] == "dropped"  # grounded: veto fires
+    assert decided[1]["reason"] == "veto:plan-goal-satisfied"
+
+
 # ── a8e5 Component 2: DET-tier hygiene backstop (subject-less DET findings drop) ──────────────
 def test_det_hygiene_drops_subjectless_det_finding() -> None:
     """A DET finding that names NO subject — no ``location`` and no ``evidence`` spans — is

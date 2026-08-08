@@ -50,7 +50,7 @@ def test_execution_phase_flows_through_reducer_manifest_sidecar_and_pass3(monkey
     )
     captured = {}
 
-    def fake_kernel(findings, verifs, *, threshold_for, impact_fn):
+    def fake_kernel(findings, verifs, *, threshold_for, impact_fn, execution_review=False):
         captured["threshold"] = threshold_for("T1")
         return findings
 
