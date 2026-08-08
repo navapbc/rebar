@@ -43,6 +43,25 @@ malformed near-miss like `[operator_attested]` — is treated as **codebase-veri
 every pre-existing ticket is unaffected, and a missing/garbled tag fails safe to the
 stricter bar rather than silently weakening it.
 
+### Plan-time evidence-kind validation
+
+Plan review applies a built-in `evidence-kind` criterion to every acceptance checkbox before
+work begins. It compares the exact tag with where completion evidence can truthfully live:
+
+- an external event or live-state outcome without the exact tag receives the existing
+  remediation to use `- [ ] [operator-attested] …`;
+- a durable repository fact carrying the tag receives a blocking finding only when the reviewer
+  can cite affirmative repository evidence at an exact file path and symbol/declaration;
+- a checkbox that bundles repository proof with outside-world proof is `split-required` and must
+  become independently certifiable criteria.
+
+The repository-grounding threshold is deliberately asymmetric. Related test, deployment, or
+migration code does not prove that a test run, deployment, or database mutation occurred. An
+ambiguous or unlocatable case abstains rather than inferring an evidence kind from keywords. When
+the repository does ground the fact, ticket comments cannot substitute for repository proof.
+This closes the tag-as-trust-bypass while preserving genuinely external outcomes and leaves the
+completion verifier's reach unchanged.
+
 ### What a signature means (bounded)
 
 A signed completion verdict asserts: **"as far as the ticket and the codebase are concerned,
@@ -117,6 +136,6 @@ same reasoning that a lying `- [x]` checkbox always was.
   hand-wavy ones still FAIL — and the finding now carries per-finding `remediation` telling
   the author to record proof (reference id, observed outcome, when).
 - Existing tickets are unaffected (untagged → codebase-verifiable).
-- The change is confined to the verifier prompt, the `VerdictFinding.remediation` field, the
-  eval spec fixtures/rubric, this ADR, and the `docs/plan-review-criteria-guide.md` authoring note. `common.schema.json`
-  and other reviewers are untouched.
+- The completion-verifier implementation remains confined to its existing prompt,
+  `VerdictFinding.remediation`, and eval contract. Plan review separately validates evidence-kind
+  selection through its built-in grounded criterion; `common.schema.json` remains untouched.

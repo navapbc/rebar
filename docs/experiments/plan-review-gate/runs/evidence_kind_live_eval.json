@@ -1,0 +1,125 @@
+{
+  "_provenance": {
+    "ticket": "deeb-89c1-1080-4690",
+    "criterion": "evidence-kind",
+    "date": "2026-08-08",
+    "base_sha": "586357b70996537ac790a82da56fe6e372d0d3e5",
+    "model": "bedrock:us.anthropic.claude-sonnet-4-6",
+    "command": "REBAR_GATE_ALLOW_UNGATED=1 rebar criteria eval evidence-kind --runs 2 --output json",
+    "read_root": "isolated worktree, audited explicit-local override",
+    "solver": "production Pass-1 criterion path with the packaged agentic prompt",
+    "runs_per_fixture": 2,
+    "fixture_count": 12,
+    "total_live_single_criterion_runs": 24,
+    "note": "The first invocation made zero model calls because agentic local reads were not inside gate_read_root. This recorded run used the repository-documented audited local-eval override; shipped gate behavior is unchanged."
+  },
+  "thresholds": {
+    "genuine_external_precision": 1.0,
+    "named_fixture_recall": 1.0,
+    "macro_precision": 0.9,
+    "macro_recall": 0.9,
+    "previously_passing_regressions": 0
+  },
+  "observed": {
+    "genuine_external_precision": 1.0,
+    "named_fixture_recall": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "previously_passing_regressions": 0,
+    "recall": 1.0,
+    "false_accept": 0.0,
+    "agreement": 1.0,
+    "kappa": 1.0,
+    "stability_min": 1.0,
+    "stability_mean": 1.0,
+    "n_fire": 7,
+    "n_nofire": 5
+  },
+  "cases": [
+    {
+      "id": "EK-F-A1",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-115B",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-8C4F",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-MALFORMED",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-OVERTAG-METHOD",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-OVERTAG-CONFIG",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-F-MIXED-SPLIT",
+      "expect": "finding",
+      "expected_fire": true,
+      "observed_fire": true,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-P-TEST-RUN",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-P-AWS-DEPLOY",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-P-DB-MODIFIED",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-P-CODE-UNTAGGED",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    },
+    {
+      "id": "EK-P-AMBIGUOUS-OVERTAG",
+      "expect": "pass",
+      "expected_fire": false,
+      "observed_fire": false,
+      "stability": 1.0
+    }
+  ],
+  "passed": true
+}
