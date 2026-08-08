@@ -574,6 +574,59 @@ def test_push_retry_spends_the_fifth_merge_with_one_terminal_push(two_clones, mo
     assert (tracker_a / local_ticket).is_dir()
 
 
+def test_commit_and_push_preserves_local_and_competing_remote_events(two_clones, monkeypatch):
+    """The composed dirty commit plus CAS push retains both sides of a real race."""
+    _remote, repo_a, repo_b, _seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+    local_path = tracker_a / "local-composite.json"
+    local_path.write_text('{"side":"local"}\n', encoding="utf-8")
+    assert "local-composite.json" in _git("status", "--porcelain", cwd=tracker_a).stdout
+
+    original_git = push._git
+    local_commit: list[str] = []
+    competitor_commit: list[str] = []
+    raced = False
+
+    def competitor_wins_before_first_push(base: str, *args: str, **kwargs: object):
+        nonlocal raced
+        if Path(base) == tracker_a and args and args[0] == "push" and not raced:
+            raced = True
+            local_commit.append(_git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip())
+            competitor = tracker_b / "remote-competitor.json"
+            competitor.write_text('{"side":"remote"}\n', encoding="utf-8")
+            _git("add", competitor.name, cwd=tracker_b)
+            _git("commit", "-q", "-m", "remote competitor", cwd=tracker_b)
+            competitor_commit.append(_git("rev-parse", "HEAD", cwd=tracker_b).stdout.strip())
+            _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b)
+        return original_git(base, *args, **kwargs)
+
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
+    monkeypatch.setattr(push, "_git", competitor_wins_before_first_push)
+    push.commit_and_push_tickets_branch(
+        tracker_a,
+        message="commit local side before CAS reconciliation",
+        strict=True,
+    )
+
+    assert raced and len(local_commit) == len(competitor_commit) == 1
+    final = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
+    remote_final = _git("ls-remote", "origin", "refs/heads/tickets", cwd=tracker_a).stdout.split()[
+        0
+    ]
+    assert final == remote_final
+    for ancestor in (*local_commit, *competitor_commit):
+        assert (
+            _git(
+                "merge-base", "--is-ancestor", ancestor, final, cwd=tracker_a, check=False
+            ).returncode
+            == 0
+        )
+    assert _git("show", "HEAD:local-composite.json", cwd=tracker_a).stdout == ('{"side":"local"}\n')
+    assert _git("show", "HEAD:remote-competitor.json", cwd=tracker_a).stdout == (
+        '{"side":"remote"}\n'
+    )
+
+
 # ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────
 def _seed_dir_files(tracker: Path, ticket_id: str, suffix: str) -> list[Path]:
     return sorted(p for p in (tracker / ticket_id).glob(f"*{suffix}") if not p.name.startswith("."))

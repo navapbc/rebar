@@ -497,6 +497,114 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     )
 
 
+def _ignore_lock_artifacts(base_path: str) -> bool:
+    """Keep the lock's own files out of Git even in an implicit-legacy store."""
+    resolved = _git(base_path, "rev-parse", "--git-path", "info/exclude")
+    if resolved.returncode != 0 or not resolved.stdout.strip():
+        return False
+    exclude_path = resolved.stdout.strip()
+    if not os.path.isabs(exclude_path):
+        exclude_path = os.path.join(base_path, exclude_path)
+    try:
+        with open(exclude_path, encoding="utf-8") as fh:
+            existing = fh.read()
+        missing = [
+            pattern
+            for pattern in (".ticket-write.lock", ".ticket-write.lock.d/")
+            if pattern not in existing.splitlines()
+        ]
+        if missing:
+            with open(exclude_path, "a", encoding="utf-8") as fh:
+                if existing and not existing.endswith("\n"):
+                    fh.write("\n")
+                fh.write("\n".join(missing) + "\n")
+    except OSError:
+        return False
+    return True
+
+
+def commit_and_push_tickets_branch(
+    tracker: str | os.PathLike,
+    *,
+    message: str,
+    strict: bool = False,
+    author_name: str | None = None,
+    author_email: str | None = None,
+) -> None:
+    """Commit all pending tracker changes under its write lock, then push.
+
+    A clean tracker can still be ahead of its remote, so delivery always follows a
+    successful locked phase.  Default callers retain pending content after a local
+    failure and return best-effort; strict callers receive a classified
+    :class:`PushDeliveryError`.
+    """
+    from rebar._store import lock as _lock
+
+    canonical = _lock.canonical_tracker(tracker)
+    remote_ref = "origin/tickets"
+    if not _ignore_lock_artifacts(canonical):
+        detail = "could not exclude tracker lock artifacts from staging"
+        _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
+        logger.warning("tickets branch commit skipped: %s", detail)
+        return
+    try:
+        with _lock.write_lock(canonical, dual_window=True):
+            try:
+                _lock.check_no_rebase_in_progress(canonical)
+            except _lock.RebaseGuard:
+                _raise_if_strict(
+                    strict,
+                    "merge-recovery-blocked",
+                    "tracker is in rebase or merge recovery state",
+                    canonical,
+                    remote_ref,
+                )
+                logger.warning(
+                    "tickets branch commit skipped: tracker is in rebase/merge recovery state"
+                )
+                return
+
+            dirty = _git(canonical, "status", "--porcelain")
+            if dirty.returncode != 0:
+                detail = dirty.stderr or dirty.stdout or "git status failed"
+                _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
+                logger.warning("tickets branch commit skipped: %s", detail.strip())
+                return
+            if dirty.stdout:
+                staged = _git(canonical, "add", "-A")
+                if staged.returncode != 0:
+                    detail = staged.stderr or staged.stdout or "git add failed"
+                    _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
+                    logger.warning("tickets branch commit skipped: %s", detail.strip())
+                    return
+
+                identity: list[str] = []
+                if author_name is not None:
+                    identity.extend(("-c", f"user.name={author_name}"))
+                if author_email is not None:
+                    identity.extend(("-c", f"user.email={author_email}"))
+                committed = _git(
+                    canonical,
+                    *identity,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    message,
+                )
+                if committed.returncode != 0:
+                    detail = committed.stderr or committed.stdout or "git commit failed"
+                    _raise_if_strict(strict, "commit-failed", detail, canonical, remote_ref)
+                    logger.warning("tickets branch commit skipped: %s", detail.strip())
+                    return
+    except _lock.LockTimeout as exc:
+        _raise_if_strict(strict, "commit-lock-timeout", str(exc), canonical, remote_ref)
+        logger.warning("tickets branch commit skipped: %s", exc)
+        return
+
+    push_tickets_branch(canonical, strict=strict)
+
+
 def push_after_commit(tracker: str | os.PathLike) -> None:
     """Best-effort auto-push for the inline-commit write paths.
 
@@ -540,11 +648,26 @@ def _main(argv: list[str] | None = None) -> int:
     push_parser = commands.add_parser("push")
     push_parser.add_argument("--tracker", required=True)
     push_parser.add_argument("--strict", action="store_true")
+    commit_parser = commands.add_parser("commit-and-push")
+    commit_parser.add_argument("--tracker", required=True)
+    commit_parser.add_argument("--message", required=True)
+    commit_parser.add_argument("--strict", action="store_true")
+    commit_parser.add_argument("--author-name")
+    commit_parser.add_argument("--author-email")
     parsed = parser.parse_args(argv)
-    if parsed.command != "push":  # pragma: no cover - argparse constrains this today.
-        raise AssertionError(f"unhandled push command: {parsed.command!r}")
     try:
-        push_tickets_branch(parsed.tracker, strict=parsed.strict)
+        if parsed.command == "push":
+            push_tickets_branch(parsed.tracker, strict=parsed.strict)
+        elif parsed.command == "commit-and-push":
+            commit_and_push_tickets_branch(
+                parsed.tracker,
+                message=parsed.message,
+                strict=parsed.strict,
+                author_name=parsed.author_name,
+                author_email=parsed.author_email,
+            )
+        else:  # pragma: no cover - argparse constrains this today.
+            raise AssertionError(f"unhandled push command: {parsed.command!r}")
     except PushDeliveryError as exc:
         sys.stderr.write(f"{exc}\n")
         return 1
