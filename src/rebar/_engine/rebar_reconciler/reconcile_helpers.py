@@ -339,6 +339,70 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
         return []
 
 
+class SelectionError(ValueError):
+    """A canonical selection could not be resolved without side effects."""
+
+
+class SelectionStaleError(SelectionError):
+    """A preflight-resolved ticket vanished before the locked pass load."""
+
+
+def _local_ticket_id(ticket: dict) -> str:
+    return str(ticket.get("ticket_id") or ticket.get("id") or "")
+
+
+def _local_ticket_ids(local_tickets: list[dict]) -> set[str]:
+    return {local_id for ticket in local_tickets if (local_id := _local_ticket_id(ticket))}
+
+
+def resolve_selection(repo_root: Path, tokens: tuple[str, ...]) -> set[str]:
+    """Resolve every local ID/Jira key read-only before pass-lock inspection."""
+    local_ids = _local_ticket_ids(_read_local_tickets(repo_root, no_sync=True))
+    binding_store_mod = _load("reconcile_selection_binding_store", "binding_store.py")
+    bindings = binding_store_mod.load_binding_store(repo_root)
+    resolved: set[str] = set()
+    unresolved: list[str] = []
+    for token in tokens:
+        local_id = token if token in local_ids else bindings.get_local_id(token)
+        if local_id is None or local_id not in local_ids:
+            unresolved.append(token)
+        else:
+            resolved.add(local_id)
+    if unresolved:
+        raise SelectionError(
+            "unresolved --only/--except identifier(s): " + ", ".join(sorted(unresolved))
+        )
+    return resolved
+
+
+def ensure_selection_current(selection_ids: set[str], local_tickets: list[dict]) -> None:
+    """Fail closed when a preflight target vanished before the locked load."""
+    missing = selection_ids - _local_ticket_ids(local_tickets)
+    if missing:
+        raise SelectionStaleError(
+            "selection became stale before reconciliation: " + ", ".join(sorted(missing))
+        )
+
+
+def narrow_selection_inputs(
+    kind: str,
+    selection_ids: set[str],
+    local_tickets: list[dict],
+    prev_snapshot: dict,
+    curr_snapshot: dict,
+    binding_store: Any,
+) -> tuple[list[dict], dict, dict]:
+    """Narrow all differ inputs using the stable preflight-resolved local IDs."""
+    jira_keys = {key for local_id in selection_ids if (key := binding_store.get_jira_key(local_id))}
+    keep = kind == "only"
+    local = [
+        ticket for ticket in local_tickets if ((_local_ticket_id(ticket) in selection_ids) == keep)
+    ]
+    prev = {key: value for key, value in prev_snapshot.items() if ((key in jira_keys) == keep)}
+    curr = {key: value for key, value in curr_snapshot.items() if ((key in jira_keys) == keep)}
+    return local, prev, curr
+
+
 def _build_filter_target_set(
     filter_local_ids: set[str],
     binding_store: Any,

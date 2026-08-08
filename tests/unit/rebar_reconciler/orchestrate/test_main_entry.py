@@ -197,11 +197,27 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     _FakeMode.LIVE = _FakeMode()
     mode_stub.Mode = _FakeMode
 
+    request_stub = types.ModuleType("_request_stub")
+    request_stub.RequestError = ValueError
+    request_stub.normalize_request = MagicMock(
+        return_value=types.SimpleNamespace(
+            repo_root=tmp_path,
+            target_mode=_FakeMode.LIVE,
+            dry_run_enumerate=False,
+            selection_tokens=(),
+            filter_local_ids=None,
+            selection_kind=None,
+            max_changes=None,
+        )
+    )
+
     def _fake_load_sibling(key, filename):
         if "advisory" in filename:
             return advisory_stub
         if "mode" in filename:
             return mode_stub
+        if "request" in filename:
+            return request_stub
         raise ImportError(f"Unexpected _load_sibling_keyed call: {filename}")
 
     with (

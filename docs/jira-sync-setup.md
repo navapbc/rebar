@@ -1,7 +1,8 @@
 # Automating Jira ⇄ rebar sync (GitHub Actions)
 
-rebar's reconciler keeps a Jira project and the rebar `tickets` store in sync. Run
-by hand it is `rebar reconcile`; this guide shows how to run it **automatically and
+rebar's bridge keeps a Jira project and the rebar `tickets` store in sync. Preview
+by hand with `rebar bridge preview` and apply with `rebar bridge sync`; this guide
+shows how to run it **automatically and
 observably** in GitHub Actions, the way this repo does, so a client project can
 stand the same thing up by copying two workflow files and setting a handful of repo
 variables/secrets.
@@ -11,7 +12,7 @@ project-specific lives in GitHub repo Variables/Secrets, not in the files:
 
 | Workflow | File | Cadence | Purpose |
 |----------|------|---------|---------|
-| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | `*/20` floor; **~pass-duration (this repo: ~7 min)** when `RECONCILE_CONTINUOUS=true` — see [§ Continuous loop](#continuous-loop--running-more-often-than-the-20-minute-floor) | runs `rebar reconcile --mode live`, commits the resulting events back to the `tickets` branch, and pushes |
+| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | `*/20` floor; **~pass-duration (this repo: ~7 min)** when `RECONCILE_CONTINUOUS=true` — see [§ Continuous loop](#continuous-loop--running-more-often-than-the-20-minute-floor) | runs `rebar bridge sync`, commits the resulting events back to the `tickets` branch, and pushes |
 | **Reconciler Heartbeat Canary** | `.github/workflows/reconcile-bridge-canary.yml` | hourly | files a rebar bug ticket if the bridge goes stale, and auto-closes it on recovery |
 
 > The pair is **sufficient** for an automated, durable, bidirectional sync and
@@ -44,7 +45,7 @@ project-specific lives in GitHub repo Variables/Secrets, not in the files:
 
 ## 2. Configure the sync target in `rebar.toml`
 
-Add the `[jira]` section so local `rebar reconcile` and the CI run agree on the
+Add the `[jira]` section so local `rebar bridge preview` / `rebar bridge sync` and the CI run agree on the
 target. The **secret** `JIRA_API_TOKEN` is **never** a config key — it is supplied
 via the environment only.
 
@@ -227,7 +228,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | Step | rebar fact that requires it |
 |------|------------------------------|
 | **Mount `tickets` as a worktree** | The store lives on the `tickets` orphan branch at the repo root; `actions/checkout` lands you on `main`. The reconciler reads/writes `.tickets-tracker`, so the branch must be mounted there. We mount on the real `tickets` branch (`-B tickets`) so `tracker.branch` matches and `rebar fsck` doesn't WARN. |
-| **`rebar reconcile --mode <mode>`** | This is the reconcile entry point (`== python -m rebar_reconciler`). It is a lean-runtime capability — no `[agents]` extra needed. |
+| **`rebar bridge preview` / `rebar bridge sync`** | These are the primary bridge entry points. They are lean-runtime capabilities — no `[agents]` extra needed. The workflow retains `rebar reconcile --mode reconcile-check` for the distinct lock-free diagnostic. |
 | **Exit-code handling (0 / 75 / 3 / other)** | `__main__.py` returns **75** (reschedule — rebase-retry exhausted; the next */20 run retries) and **3** (another pass already holds the pass-lock). Both are operational, not errors, so we exit 0 on them; any other non-zero fails the job. |
 | **Commit-back + push when dirty *or ahead*** | **The reconciler does not push.** It writes inbound events as *uncommitted* files in the worktree and makes its own `.bridge_state/bindings.json` commit *without pushing*. So a clean worktree does **not** mean "nothing to push" — we push whenever the local `tickets` branch is ahead of `origin/tickets`. This is the single biggest divergence from a naive DSO copy (whose `git status --porcelain` gate would skip pushing the reconciler's own binding commit). |
 | **Strict core commit + push** | Multiple writers (this bridge, the canary, interactive `rebar` clients) share the orphan branch. The store core owns fetch→merge→immediate-repush recovery and makes a failed workflow delivery terminal. |
@@ -265,7 +266,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 | Concern | DSO | rebar |
 |---------|-----|-------|
-| Invocation | `python -m dso_reconciler` | `rebar reconcile --mode <mode>` |
+| Invocation | `python -m dso_reconciler` | `rebar bridge preview` / `rebar bridge sync` |
 | Reschedule / lock exit codes | (n/a) | **75** reschedule, **3** pass-in-flight (handled) |
 | Reconciler pushes its events? | no → commit-back required | no → commit-back required, **plus push-when-ahead** for its binding commit |
 | Ticket CLI | `.claude/scripts/dso ticket …` | `rebar list/create/comment/transition` (auto-push) |
@@ -424,7 +425,7 @@ python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker
 python scripts/retarget_jira_project.py --tracker-dir .tickets-tracker --apply
 
 # 3. VERIFY before enabling live sync — the plan must show 0 old-project targets:
-rebar reconcile --mode dry-run
+rebar bridge preview
 ```
 
 This was validated on a clone of a DIG-bound store: clearing bindings +

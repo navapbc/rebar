@@ -8,13 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
-## Staged `bridge` command group
+## `bridge preview` / `bridge sync` are primary
 
 `rebar bridge preview` shows proposed Jira changes, while `rebar bridge sync`
-applies them. `rebar bridge pause REASON` temporarily stops scheduled
-reconciliation, and `rebar bridge resume` clears that pause. This is additive:
-the established `rebar reconcile`, `rebar jira-onboard`, `rebar bridge-probe`,
-`rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
+applies them. Canonical selection (`--only` / `--except`) narrows examination;
+`bridge sync --max-changes N` keeps live behavior while retaining a deterministic
+audit manifest with its complete deferred remainder. `rebar bridge pause REASON`
+temporarily stops scheduled synchronization, and `rebar bridge resume` clears it.
+
+This expand-contract migration retains `rebar reconcile`, direct engine `--mode`,
+and `--filter-local-ids`. Their historical defaults do not collapse: argument-less
+`rebar reconcile` stays dry-run, argument-less direct engine invocation stays live,
+and the legacy filter remains a post-computation write filter. Reconcile-check remains
+the lock-free diagnostic and is not an alias for preview. See
+[ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md).
+
+The production workflow maps its retained profiles exactly: `dry-run` → `bridge preview`,
+`bootstrap-strict` → `bridge sync --max-changes 10`, `bootstrap-throttle` →
+`bridge sync --max-changes 100`, and `live` → `bridge sync`; `reconcile-check` alone
+continues through `rebar reconcile --mode reconcile-check` for its diagnostic contract.
 
 ## `bridge-status` and `purge-bridge` removed (breaking, no aliases)
 

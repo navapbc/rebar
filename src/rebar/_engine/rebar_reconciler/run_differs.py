@@ -267,7 +267,10 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
     side effects, plus the quarantine set + seed mutations the differ honors.
     """
     persist = ctx.persist
-    filter_local_ids = ctx.filter_local_ids
+    # Both legacy filtering and canonical selection scope the pass, so suppress
+    # global side effects for either.  Canonical selection has already narrowed
+    # differ inputs; it must never flow into the legacy post-differ write filter.
+    scoped_ids = ctx.filter_local_ids or ctx.selection_ids
     repo_root = ctx.repo_root
     invariants_mod = ctx.invariants_mod
     prev_snapshot = ctx.prev_snapshot
@@ -284,7 +287,7 @@ def _run_differs_invariants(ctx: Any) -> tuple[bool, set[str], list]:
     # Compose the bug-filing gate: invariant checks FILE local bug tickets
     # (CREATE events), so they must be skipped both for filtered passes (scope
     # leak) and for cap-0 no-write passes (ticket yaw-plait-doe).
-    skip_invariant_filing = (not persist) or bool(filter_local_ids)
+    skip_invariant_filing = (not persist) or bool(scoped_ids)
     if skip_invariant_filing:
         _reason = "no-write mode" if not persist else "filtered pass"
         # Diagnostic line → stderr so no-write mode keeps STDOUT a pure JSON
@@ -372,7 +375,9 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     Returns ``(outbound_raw, absent_alive_fields, outbound_diff_client)`` for the
     inbound differ + binding-walk phases that follow.
     """
-    filter_local_ids = ctx.filter_local_ids
+    # Recovery is a whole-store side effect, so any scoped pass suppresses it.
+    # This is separate from the legacy post-differ write filter in reconcile.py.
+    scoped_ids = ctx.filter_local_ids or ctx.selection_ids
     binding_store = ctx.binding_store
     local_tickets = ctx.local_tickets
     local_label_intent_mod = ctx.local_label_intent_mod
@@ -407,7 +412,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     # Filtered passes skip pending-binding recovery to avoid finalizing
     # bindings for non-test tickets (scope leak).
     ctx.recovery_failures = 0
-    if not filter_local_ids:
+    if not scoped_ids:
         recovery_failures: list[dict[str, Any]] = []
         try:
             binding_store.recover_pending_bindings(

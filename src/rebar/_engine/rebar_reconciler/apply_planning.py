@@ -64,7 +64,7 @@ def _mode_sort_key(m) -> tuple[str, str, str]:
     return (d_str, a_str, str(t or ""))
 
 
-def _partition_by_mode_cap(mode, mutations):
+def _partition_by_mode_cap(mode, mutations, *, max_changes: int | None = None):
     """Coerce *mode* to a Mode enum and partition *mutations* per its cap.
 
     Returns ``(mode, mode_mod, mutations_input, deferred_for_manifest)``. When
@@ -87,7 +87,9 @@ def _partition_by_mode_cap(mode, mutations):
                 f"mode must be a Mode enum member or a recognised mode string, "
                 f"got {type(mode).__name__}: {mode!r}"
             )
-        cap = mode_mod.MODE_CAPS.get(mode)
+        if max_changes is not None and max_changes <= 0:
+            raise ValueError("max_changes must be a positive integer")
+        cap = max_changes if max_changes is not None else mode_mod.MODE_CAPS.get(mode)
         # Sort deterministically before applying the cap so the applied /
         # deferred partition is reproducible across passes.
         ordered = sorted(mutations_input, key=_mode_sort_key)
@@ -140,6 +142,7 @@ def _emit_mode_manifest(
     manifest_path,
     repo_root,
     persist,
+    max_changes: int | None = None,
 ):
     """Render + write the mode-specific manifest; return an (action, value) sentinel.
 
@@ -151,7 +154,7 @@ def _emit_mode_manifest(
     renderer_mod = _load_manifest_renderer()
     applied_for_manifest = list(mutations_list)
 
-    if mode == mode_mod.Mode.LIVE:
+    if mode == mode_mod.Mode.LIVE and max_changes is None:
         # LIVE: no manifest file per contract. Remove the legacy manifest
         # written by _apply_batch.
         #
@@ -203,6 +206,8 @@ def _emit_mode_manifest(
         "outbound": rendered.get("outbound"),
         "inbound": rendered.get("inbound"),
     }
+    if max_changes is not None:
+        rendered_with_meta["max_changes"] = max_changes
     if "spot_check" in rendered:
         rendered_with_meta["spot_check"] = rendered["spot_check"]
     # Also expose the deferred mutations list (sorted) so tests and

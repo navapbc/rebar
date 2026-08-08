@@ -211,6 +211,31 @@ def run_reconcile(repo: Path, mode: str, *, only: str | None = None):
     )
 
 
+def run_bridge(
+    repo: Path,
+    command: str,
+    *,
+    only: str | None = None,
+    max_changes: int | None = None,
+):
+    """Invoke a primary ``preview`` or ``sync`` reconciler command.
+
+    Unlike the retained ``run_reconcile`` compatibility helper, ``only`` uses the
+    primary selection contract and therefore narrows examination as well as writes.
+    """
+    from rebar._engine import engine_env
+
+    argv = [sys.executable, "-m", "rebar_reconciler", command]
+    if max_changes is not None:
+        argv += ["--max-changes", str(max_changes)]
+    if only is not None:
+        argv += ["--only", only]
+    argv += ["--repo-root", str(repo)]
+    return subprocess.run(
+        argv, env=engine_env(str(repo)), text=True, capture_output=True, check=False
+    )
+
+
 def envelope(cp) -> dict[str, Any]:
     out = cp.stdout.strip()
     for line in reversed([ln for ln in out.splitlines() if ln.strip()]):

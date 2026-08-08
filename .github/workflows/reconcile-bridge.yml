@@ -23,7 +23,8 @@
 #
 # rebar divergences from DSO's reconcile-bridge (see docs/jira-sync-setup.md
 # "Necessary & sufficient"):
-#   * invocation is `rebar reconcile --mode <mode>` (== python -m rebar_reconciler)
+#   * primary invocation uses `rebar bridge preview` / `rebar bridge sync`; the
+#     lock-free reconcile-check diagnostic retains its compatibility spelling
 #   * exit 75 = reschedule (next cron retries), exit 3 = pass-in-flight — both benign
 #   * the reconciler may leave inbound events uncommitted or create its own binding
 #     commit; the final strict core adapter commits when needed and synchronously
@@ -37,7 +38,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Reconciler rollout-safety mode'
+        description: 'Bridge operation profile'
         required: false
         default: 'live'
         type: choice
@@ -258,10 +259,18 @@ jobs:
           REBAR_RECONCILER_FAIL_SILENT_NOOP: "1"
         run: |
           set -uo pipefail
-          echo "Reconciling in mode: $MODE"
+          echo "Reconciling with bridge profile: $MODE"
           reconcile_logs="$(mktemp -d)"
+          case "$MODE" in
+            reconcile-check) command=(rebar reconcile --mode reconcile-check) ;;
+            dry-run) command=(rebar bridge preview) ;;
+            bootstrap-strict) command=(rebar bridge sync --max-changes 10) ;;
+            bootstrap-throttle) command=(rebar bridge sync --max-changes 100) ;;
+            live) command=(rebar bridge sync) ;;
+            *) echo "::error::Unknown bridge profile: $MODE"; exit 2 ;;
+          esac
           set +e
-          rebar reconcile --mode "$MODE" > "$reconcile_logs/stdout" 2> "$reconcile_logs/stderr"
+          "${command[@]}" > "$reconcile_logs/stdout" 2> "$reconcile_logs/stderr"
           rc=$?
           set -e
           cat "$reconcile_logs/stdout"

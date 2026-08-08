@@ -63,6 +63,9 @@ StatusMappingError = _helpers.StatusMappingError
 preflight_status_mapping = _helpers.preflight_status_mapping
 _commit_binding_store_snapshot = _helpers._commit_binding_store_snapshot
 _read_local_tickets = _helpers._read_local_tickets
+SelectionStaleError = _helpers.SelectionStaleError
+ensure_selection_current = _helpers.ensure_selection_current
+narrow_selection_inputs = _helpers.narrow_selection_inputs
 _build_filter_target_set = _helpers._build_filter_target_set
 _mutation_matches_filter = _helpers._mutation_matches_filter
 _build_plan_entries = _helpers._build_plan_entries
@@ -92,6 +95,9 @@ class _PassContext:
     repo_root: Path
     target_mode: Any = None
     filter_local_ids: set[str] | None = None
+    selection_kind: str | None = None
+    selection_ids: set[str] | None = None
+    max_changes: int | None = None
     # optional per-mutation lost-lease checkpoint (epic dust-troth-naval): a
     # zero-arg callable the applier invokes before each mutation; it raises
     # (ReconcileLockLost) if the ref-lock heartbeat lost the lease. None = no-op.
@@ -139,6 +145,9 @@ def reconcile_once(
     repo_root: Path | None = None,
     target_mode=None,
     filter_local_ids: set[str] | None = None,
+    selection_kind: str | None = None,
+    selection_ids: set[str] | None = None,
+    max_changes: int | None = None,
     abort_check=None,
 ) -> dict:
     """Run one reconciler pass: fetch → diff → apply.
@@ -179,6 +188,9 @@ def reconcile_once(
         repo_root=repo_root,
         target_mode=target_mode,
         filter_local_ids=filter_local_ids,
+        selection_kind=selection_kind,
+        selection_ids=selection_ids,
+        max_changes=max_changes,
         abort_check=abort_check,
     )
     _load_snapshots(ctx)
@@ -199,6 +211,7 @@ def _load_snapshots(ctx: _PassContext) -> None:
     repo_root = ctx.repo_root
     target_mode = ctx.target_mode
     filter_local_ids = ctx.filter_local_ids
+    selection_ids = ctx.selection_ids
     fetcher = _load("reconcile_fetcher", "fetcher.py")
     differ = _load("reconcile_differ", "differ.py")
     applier = _load("reconcile_applier", "applier.py")
@@ -227,37 +240,36 @@ def _load_snapshots(ctx: _PassContext) -> None:
         persist = mode_mod.MODE_CAPS.get(target_mode) != 0
 
     # -----------------------------------------------------------------------
-    # Sync logger: create at pass start, close at pass end (finally block).
-    # In no-write mode use a no-op logger so no sync-log-<ts>.jsonl is created.
-    # -----------------------------------------------------------------------
-    log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
-    sync_logger = sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
-    sync_logger.log(
-        "sync_pass_start",
-        pass_id=pass_id,
-        mode=target_mode.value if target_mode else "live",
-        filtered=bool(filter_local_ids),
-        filter_count=len(filter_local_ids) if filter_local_ids else 0,
-    )
-    if filter_local_ids:
-        print(
-            f"FILTERED PASS: scope restricted to {len(filter_local_ids)} "
-            f"local IDs — not a production reconciliation."
-        )
-
-    # Ensure snapshots directory exists
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-
-    # -----------------------------------------------------------------------
     # Read local tickets from the ticket CLI.
     # -----------------------------------------------------------------------
-    local_tickets = _read_local_tickets(repo_root, no_sync=not persist)
+    local_tickets = _read_local_tickets(repo_root, no_sync=(not persist) or bool(selection_ids))
 
     # -----------------------------------------------------------------------
     # Load and recover binding store.
     # -----------------------------------------------------------------------
     binding_store = binding_store_mod.load_binding_store(repo_root)
+    if selection_ids:
+        ensure_selection_current(selection_ids, local_tickets)
+
+    # Create write-bearing pass artifacts only after the under-lock staleness check.
+    log_path = repo_root / "bridge_state" / f"sync-log-{pass_id}.jsonl"
+    sync_logger = sync_logger_mod.SyncLogger(log_path) if persist else _NoOpSyncLogger()
+    scoped_ids = selection_ids or filter_local_ids
+    sync_logger.log(
+        "sync_pass_start",
+        pass_id=pass_id,
+        mode=target_mode.value if target_mode else "live",
+        filtered=bool(scoped_ids),
+        filter_count=len(scoped_ids) if scoped_ids else 0,
+    )
+    if scoped_ids:
+        print(
+            f"FILTERED PASS: scope restricted to {len(scoped_ids)} "
+            f"local IDs — not a production reconciliation."
+        )
+
+    snapshots_dir = repo_root / "bridge_state" / "snapshots"
+    snapshots_dir.mkdir(parents=True, exist_ok=True)
 
     # Read previous snapshot from the tickets-tracker directory (persisted  # tickets-boundary-ok
     # between GHA runs via the commit-back step). The earlier approach wrote
@@ -289,6 +301,16 @@ def _load_snapshots(ctx: _PassContext) -> None:
     else:
         curr_path = None
         curr_snapshot = fetcher.compute_snapshot(pass_id, repo_root)
+
+    if selection_ids and ctx.selection_kind:
+        local_tickets, prev_snapshot, curr_snapshot = narrow_selection_inputs(
+            ctx.selection_kind,
+            selection_ids,
+            local_tickets,
+            prev_snapshot,
+            curr_snapshot,
+            binding_store,
+        )
 
     ctx.persist = persist
     ctx.fetcher = fetcher
@@ -474,6 +496,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 **_synced_kw,
             )
         else:
+            _max_kw = {"max_changes": ctx.max_changes} if ctx.max_changes is not None else {}
             manifest_path = applier.apply(
                 mutations,
                 pass_id,
@@ -481,6 +504,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 mode=target_mode,
                 binding_store=binding_store,
                 persist=persist,
+                **_max_kw,
                 **_abort_kw,
                 **_synced_kw,
             )
