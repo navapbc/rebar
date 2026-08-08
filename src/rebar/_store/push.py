@@ -67,6 +67,16 @@ def _is_non_fast_forward(stderr: str) -> bool:
     return bool(_NON_FF.search(stderr))
 
 
+def _is_multi_bundle(stderr: str) -> bool:
+    """Whether *stderr* shows the git-remote-s3 multi-bundle state (a ref with two bundles).
+
+    True when the message reports ``multiple bundles`` or ``multiple updates for ref``
+    (case-insensitive); False for a plain non-fast-forward or a transport error.
+    """
+    low = stderr.lower()
+    return "multiple bundles" in low or "multiple updates for ref" in low
+
+
 _DIRTY_WD = re.compile(
     r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
 )
@@ -469,11 +479,37 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
     stderr = ""
     fifth_merge_clean = False
+    healed_once = False
     for attempt in range(1, _MAX_RETRIES + 1):
         res = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
             return
         stderr = res.stderr or ""
+        # Heal git-remote-s3's multi-bundle state BEFORE the non-FF classification: the merge
+        # collapses the divergent bundles losslessly, then we retry the push once.
+        if _is_multi_bundle(stderr) and not healed_once:
+            from rebar._store import s3_doctor
+
+            try:
+                s3_doctor.heal_multi_bundle(base_path, remote, branch)
+            except s3_doctor.S3DoctorConflict as exc:
+                logger.warning(
+                    "s3 doctor could not heal multi-bundle ref %s: %s (%s)%s",
+                    remote_ref,
+                    exc,
+                    exc.hint,
+                    _unpushed_summary(base_path, remote_ref),
+                )
+                _raise_if_strict(
+                    strict, "push-multi-bundle-conflict", str(exc), base_path, remote_ref
+                )
+                return
+            except OptionalDependencyError as exc:
+                logger.warning("s3 doctor unavailable for multi-bundle heal: %s", exc)
+                _raise_if_strict(strict, "push-transport-failed", stderr, base_path, remote_ref)
+                return
+            healed_once = True
+            continue
         if not _is_non_fast_forward(stderr):
             # Terminal: a transport failure OR a policy decline (bug 2a76). Report the
             # reason git gave AND the backlog size, then stop — hitting the remote twice
