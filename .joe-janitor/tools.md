@@ -300,3 +300,46 @@ Comment units dispositioned DO_NOT_MOVE / KEEP (left verbatim) during ticket da4
   contract comments describing the current preserve-and-ignore invariant; KEPT (only the wire-format
   changelog block was collapsed to a docs pointer, its content preserved in docs/event-schema.md).
 - All `# noqa`, `# type:`, `# pragma` markers in the touched files — reason: pragmas, DO_NOT_MOVE.
+
+## ab77
+
+Comment triage for ticket `ab77` (root `src/rebar/*.py` + `attest/`, `metrics/`, `review_bot/`,
+`opcert_service/`, `audit/`, `grounding/`, `_guides/`). Scope was in GOOD health; yield small.
+Units below were dispositioned DO_NOT_MOVE / KEEP (left verbatim) unless noted.
+
+- `src/rebar/_mcp_llm.py:1-275` — the FastMCP tool docstrings (~121 wire-visible lines across the
+  registrar) ARE the MCP tool descriptions published to clients: API surface, not narration.
+  DO_NOT_MOVE / KEEP verbatim (includes the L68 `DEPRECATED (use review_plan)` tool docstring).
+- `src/rebar/_config_schema.py` `# read-via: <pointer>` markers (12) at lines
+  158, 162, 171, 261, 262, 355, 356, 357, 436, 497, 534, 545 — MACHINE-CONSUMED by the CI gate
+  `scripts/check_config_reads.py`. Deleting/moving one breaks CI. DO_NOT_MOVE verbatim.
+- `src/rebar/_config_schema.py` inline key docs that are the SOLE documentation for a key
+  (`docs/config.md` has no row) — e.g. `completion_floor_active`, `comment_max_chars`,
+  `auth_proxy_secret_env`. Not trimmed: doc-loss caveat (would require writing the docs/config.md
+  row FIRST). DO_NOT_MOVE.
+- `src/rebar/_mcp_models.py:33-35` — the schema-assurance comment citing the CI drift gate
+  `python -m rebar.schemas.check_mcp_models --check`. NOW ACCURATE on main (`BridgeFsckOut` declares
+  `binding_drift`; the `test_mcp_model_schema_drift_*` tests exist). The shard's original "live
+  defect" headline is MOOT/already-fixed. Left UNTOUCHED; drift defect NOT re-filed. DO_NOT_MOVE.
+- All `# noqa` / `# type: ignore` / `# pragma` markers across the scope (98 sites, incl.
+  `voter.py:648` `noqa: BLE001 — fail-open on the COUNTER, never the vote`, `app.py` E402) —
+  load-bearing pragmas. DO_NOT_MOVE verbatim.
+- `src/rebar/attest/registry.py:23`, `src/rebar/attest/__init__.py:8` — "legacy HMAC-SHA256 retired
+  for the op-cert kinds, no longer registered" (story 8f1d). Verified accurate against the current
+  registry (only `sshsig` registers; unpinned kind fails closed). CORRECT / KEEP as current-state
+  narration.
+- `src/rebar/review_bot/config.py:33-58,42-46,60`, `app.py:135-158` bounded-shutdown invariants;
+  `voter.py:55-72` in-flight counter deliberate over-count; `voter.py:638-645` retryable
+  coverage-gap deferral. All measure-carrying, current invariants — KEPT VERBATIM; ADRs 0067/0068/
+  0069 are now their durable fuller home and are cited from each seam.
+
+### CORRECT-IN-PLACE (this ticket)
+
+- `src/rebar/review_bot/config.py:56` — garbled "lets total shutdown state an upper bound" →
+  "…have an upper bound" (corrupted verb on a live-invariant comment; fact unchanged).
+- `src/rebar/review_bot/app.py:143` — garbled "hang shutdown with no stateable upper bound" →
+  "…with no upper bound" (same; `stateable` is not a word).
+- `src/rebar/review_bot/config.py:247` and `:262` — comments asserted the adapter actively compares
+  a finding's severity against `blocking_severities` as a live PASS→BLOCK threshold. Confirmed STALE
+  against `adapter.py:13` (the four-pass gate decides PASS/BLOCK; `blocking_severities` is only
+  env-parsed/tested, never consumed on the review path). Reworded to "vestigial for this path".

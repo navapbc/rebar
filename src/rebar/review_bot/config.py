@@ -46,6 +46,7 @@ DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200
 #: container's ``stop_grace_period`` is sized against this value, so the test that asserts that
 #: relationship must be able to read it WITHOUT importing the fastapi-laden ``app`` module (the
 #: ``reviewbot`` extra is not installed in the default test tier).
+#: The bounded two-phase shutdown (drain, then cancel) this budget bounds is recorded in ADR 0067.
 DEFAULT_SHUTDOWN_DRAIN_SECONDS = 1200
 
 #: Bounded window (seconds) for the lifespan's post-drain ``cancel`` + ``await`` of the
@@ -53,7 +54,7 @@ DEFAULT_SHUTDOWN_DRAIN_SECONDS = 1200
 #: ``asyncio.to_thread`` offload unwinds the coroutine at its await point immediately, but a
 #: task slow to honor cancellation — a shielded cleanup, a synchronous ``finally``, or the
 #: orphaned OS thread of a to_thread worker that CANNOT be force-cancelled — would otherwise
-#: make the join unbounded. Bounding it lets total shutdown state an upper bound
+#: make the join unbounded. Bounding it lets total shutdown have an upper bound
 #: (drain + cancel); anything still running is abandoned (the process is exiting anyway) and
 #: its in-flight store write is bounded independently by ``event_append``'s per-git timeout.
 #: Lives here (not in ``app``) for the same reason as the two budgets above: the container's
@@ -65,6 +66,7 @@ DEFAULT_SHUTDOWN_CANCEL_SECONDS = 10
 #: deferring vote-less and escalates to the fail-closed ``-1`` (ticket 0347). Attempts are
 #: counted in the receiver's ``review_attempts`` ledger (see ``dedup.py``); the budget is
 #: reset by a successful vote or an explicit ``reset_attempts`` (the bb9b re-trigger).
+#: The defer→escalate contract this budget bounds is recorded in ADR 0069.
 DEFAULT_RETRYABLE_GAP_MAX_ATTEMPTS = 3
 
 #: Default ceiling (seconds) on how far the backfill reconciler may hold its persisted cursor
@@ -241,8 +243,9 @@ def _severities_env(name: str, default: frozenset[str]) -> frozenset[str]:
 
 
 #: The review_code severity vocabulary (mirrors ``rebar.llm.findings.SEVERITIES``).
-#: Kept local so ``config`` stays free of the ``agents`` extra; the adapter compares
-#: a finding's severity against ``BLOCKING_SEVERITIES`` ⊆ this set.
+#: Kept local so ``config`` stays free of the ``agents`` extra. ``BLOCKING_SEVERITIES`` is a
+#: subset of this set; the four-pass gate now decides PASS vs BLOCK, so the adapter's old
+#: severity comparison against it is vestigial for this path (see ``adapter.py``).
 SEVERITIES: frozenset[str] = frozenset({"critical", "high", "medium", "low", "info"})
 
 #: Default blocking set: a finding at critical OR high blocks the change.
@@ -257,7 +260,8 @@ class ReceiverConfig:
     llm_review_max_value: int = 1
     #: The ``LLM-Review`` value cast for a BLOCK / error (leaves change unsubmittable).
     llm_review_block_value: int = -1
-    #: Findings at/above any of these severities block (PASS→BLOCK threshold).
+    #: Blocking-severity set, still env-parsed but vestigial for the review path: the four-pass
+    #: gate now decides PASS→BLOCK, not a severity threshold here (see ``adapter.py``).
     blocking_severities: frozenset[str] = field(default_factory=lambda: DEFAULT_BLOCKING_SEVERITIES)
     #: SQLite dedup store on the box's data volume (single-box appropriate).
     dedup_db_path: str = "/var/gerrit/site/reviewbot/voted.db"
