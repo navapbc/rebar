@@ -14,6 +14,7 @@ _mode_mod = importlib.util.module_from_spec(_spec)
 sys.modules["rebar_reconciler_mode_under_test"] = _mode_mod
 _spec.loader.exec_module(_mode_mod)
 Mode = _mode_mod.Mode
+MODE_CAPS = _mode_mod.MODE_CAPS
 
 
 def test_from_str_accepts_known_mode():
@@ -43,6 +44,17 @@ def test_mode_has_exactly_five_members():
         "bootstrap-strict",
         "bootstrap-throttle",
         "live",
+    }
+
+
+def test_mode_caps_preserve_all_five_legacy_limits():
+    """MODE_CAPS remains the exact compatibility contract for every mode."""
+    assert MODE_CAPS == {
+        Mode.RECONCILE_CHECK: 0,
+        Mode.DRY_RUN: 0,
+        Mode.BOOTSTRAP_STRICT: 10,
+        Mode.BOOTSTRAP_THROTTLE: 100,
+        Mode.LIVE: None,
     }
 
 
