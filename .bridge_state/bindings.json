@@ -88729,7 +88729,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "Codebase-health audit run 2026-08-05/06. 73 candidate findings were verified by independent blue-team agents that never saw the discovery agents' output; 27 survived a validity floor of 0.75 and an impact floor of 0.5. Nine were dropped on citation vetoes or outright refutation \u2014 including two fabricated citations produced by the audit's own discovery agents, which is why the verification pass is load-bearing and not ceremony.\n\nRemediations were proposed by two agents working blind to each other; 16 of 20 moves converged independently. Four divergent items went to OSS research, which overturned both proposers twice.\n\nFull audit record: `.joe-janitor/report-2026-08-06.md`. Durable playbook: `.joe-janitor/tools.md`.\n\nScope note: the bridge/reconciler command-surface redesign that this audit surfaced is tracked as its own epic, not here. The `doctor`/`fsck`/`validate` consolidation is tracked on existing epic `dabb-7d4b-f5bc-40e6`; only two cheap decoupled wins from it are carried here.\n\n## Acceptance Criteria\n\n- [x] Code-review provenance is wired: `--ref`/`--source` reach `CodeReviewRequest`, and results\n      carry `source`/`verified_at_sha` like the four sibling producers\n- [x] The snapshot-entry contract is enforced by CI rather than asserted by an ADR\n- [x] An `LLM-Review` vote provably attaches to the tree that was reviewed\n- [x] `docs/exit-codes.md` covers every dispatcher arm and every emitted code, and CI keeps it that way\n- [x] `bug_close_reason_ok` and the `_attestation.py` module are deleted\n- [x] ADR numbers uniquely identify a document, and a new collision cannot merge\n- [x] Comment triage complete across all six subsystem shards, with each shard's `do_not_move` list\n      preserved as the protection record\n- [x] No library read path can terminate its host process\n- [x] The \"passed but unsigned \u21d2 retryable\" rule is available to CLI and MCP from one implementation\n- [x] One terminal-state predicate decides whether a blocker is satisfied, everywhere\n- [x] Retired config files honour the deprecation registry's `behavior` field\n- [x] `validate --fix` no longer advertises a repair it does not perform\n- [x] `docs/chatgpt-agent-guide.md` no longer directs agents to the wrong command",
+        "description": "Codebase-health audit run 2026-08-05/06. 73 candidate findings were verified by independent blue-team agents that never saw the discovery agents' output; 27 survived a validity floor of 0.75 and an impact floor of 0.5. Nine were dropped on citation vetoes or outright refutation \u2014 including two fabricated citations produced by the audit's own discovery agents, which is why the verification pass is load-bearing and not ceremony.\n\nRemediations were proposed by two agents working blind to each other; 16 of 20 moves converged independently. Four divergent items went to OSS research, which overturned both proposers twice.\n\nFull audit record: `.joe-janitor/report-2026-08-06.md`. Durable playbook: `.joe-janitor/tools.md`.\n\nScope note: the bridge/reconciler command-surface redesign that this audit surfaced is tracked as its own epic, not here. The `doctor`/`fsck`/`validate` consolidation is tracked on existing epic `dabb-7d4b-f5bc-40e6`; only two cheap decoupled wins from it are carried here.\n\n## Acceptance Criteria\n\n- [x] Code-review provenance is wired: `--ref`/`--source` reach `CodeReviewRequest`, and results\n      carry `source`/`verified_at_sha` like the four sibling producers\n- [x] [operator-attested] The snapshot-entry contract is enforced by CI rather than asserted by an ADR\n- [x] [operator-attested] An `LLM-Review` vote provably attaches to the tree that was reviewed\n- [x] [operator-attested] `docs/exit-codes.md` covers every dispatcher arm and every emitted code, and CI keeps it that way\n- [x] `bug_close_reason_ok` and the `_attestation.py` module are deleted\n- [x] ADR numbers uniquely identify a document, and a new collision cannot merge\n- [x] [operator-attested] Comment triage complete across all six subsystem shards, with each shard's `do_not_move` list\n      preserved as the protection record\n- [x] [operator-attested] No library read path can terminate its host process\n- [x] [operator-attested] The \"passed but unsigned \u21d2 retryable\" rule is available to CLI and MCP from one implementation\n- [x] One terminal-state predicate decides whether a blocker is satisfied, everywhere\n- [x] Retired config files honour the deprecation registry's `behavior` field\n- [x] `validate --fix` no longer advertises a repair it does not perform\n- [x] [operator-attested] `docs/chatgpt-agent-guide.md` no longer directs agents to the wrong command",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Janitor Cleanup 2026-08-06"
@@ -98245,6 +98245,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-31T04:07:12Z"
+    },
+    "cb91-1535-fe3a-47fc": {
+      "created_at": "2026-08-08T18:50:15Z",
+      "jira_id": "4587725",
+      "jira_key": "REB-2685",
+      "state": "confirmed",
+      "updated_at": "2026-08-08T18:50:17Z"
     },
     "cb9c-49cb-5aba-488d": {
       "baseline": {
@@ -132278,6 +132285,7 @@
     "REB-2682": "879f-5549-91e3-4d6f",
     "REB-2683": "521b-04c3-572f-4514",
     "REB-2684": "def1-9c3c-6802-48bd",
+    "REB-2685": "cb91-1535-fe3a-47fc",
     "REB-269": "aa71-1c86-5129-49d8",
     "REB-27": "101a-a28b-026d-4bad",
     "REB-270": "ab61-f3e8-6ee6-4905",
