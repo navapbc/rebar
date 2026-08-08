@@ -20,6 +20,7 @@ import subprocess
 import sys
 from typing import Any
 
+from rebar._optional import OptionalDependencyError
 from rebar._store import compat
 from rebar._store.gitutil import run_git
 
@@ -661,6 +662,11 @@ def push_after_commit(tracker: str | os.PathLike) -> None:
 
         canonical = _lock.canonical_tracker(str(tracker))
         push_tickets_branch(canonical)
+    except OptionalDependencyError:
+        # A misconfigured S3 remote is a deliberate fail-closed override of the best-effort
+        # contract (mirrors write_and_push's uncaught call): let it escape so the inline-commit
+        # write paths halt with the actionable install message instead of silently swallowing it.
+        raise
     except Exception:
         logger.warning(
             "best-effort tickets-branch push failed; PUSH_PENDING will surface via fsck",
