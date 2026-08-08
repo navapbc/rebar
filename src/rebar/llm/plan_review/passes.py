@@ -578,7 +578,7 @@ def pass4_coach(
     blocking = blocking or []
     triggers = {c for f in blocking + surviving for c in f.get("criteria", []) or []}
 
-    def _pick(instructions: str, applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    def _pick(instructions: str, _applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         req = RunRequest(
             system_prompt=_resolve_system(PASS_COACH, plan, cfg),
             instructions=instructions,

@@ -345,7 +345,7 @@ def handle_delete(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     return HandlerResult(outcome)
 
 
-def handle_unknown(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
+def handle_unknown(mutation: dict, _ctx: BatchApplyContext) -> HandlerResult:
     """Record the legacy unrecognised-action error outcome (the ``else`` arm)."""
     outcome = dict(mutation)
     action = mutation.get("action", "")

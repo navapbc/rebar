@@ -188,7 +188,7 @@ def steal_pass_lock(pass_id: str, repo_root: Path, *, sleep_fn=time.sleep) -> st
         return None
 
 
-def renew_pass_lock(pass_id: str, repo_root: Path, oid: str) -> str:
+def renew_pass_lock(_pass_id: str, repo_root: Path, oid: str) -> str:
     """Heartbeat: renew the pass lease, returning the new oid.
 
     Raises :class:`_ref_lock.LeaseLostError` if the lease was lost/stolen.
@@ -197,7 +197,7 @@ def renew_pass_lock(pass_id: str, repo_root: Path, oid: str) -> str:
     return ref_lock.renew(repo_root, ref_lock.LOCK_REF, oid=oid, remote=_lock_remote(repo_root))
 
 
-def release_pass_lock(pass_id: str, repo_root: Path, oid: str | None = None) -> None:
+def release_pass_lock(_pass_id: str, repo_root: Path, oid: str | None = None) -> None:
     """Release the reconciler pass lock (idempotent).
 
     Observed-oid CAS delete of ``refs/reconciler/lock`` against *oid* (the latest oid
