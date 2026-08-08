@@ -377,16 +377,26 @@ CONCURRENCY_CODE = 10
 def _concurrency_cause(srv, tool: str, args: dict) -> BaseException:
     """Run an MCP tool expected to reject, returning the chained root cause.
 
-    Asserts the ToolError chains a ``rebar.ConcurrencyError`` carrying the shared
-    engine exit code (10) — the structured identity, independent of wording."""
+    8a31: MCP failures now carry a structured ``error_envelope`` on an
+    ``McpEnvelopeError`` (the same machine identity the CLI emits) — here the
+    ``concurrency_conflict`` code with the shared engine exit code (10). The original
+    ``rebar.ConcurrencyError`` is preserved one level deeper on ``__cause__``."""
+    from rebar._mcp_errors import McpEnvelopeError
+
     with pytest.raises(Exception) as exc:  # FastMCP raises mcp ...ToolError
         asyncio.run(srv.call_tool(tool, args))
     cause = exc.value.__cause__ or exc.value
-    assert isinstance(cause, rebar.ConcurrencyError), (
-        f"expected ConcurrencyError cause, got {type(cause).__name__}: {cause!r}"
+    assert isinstance(cause, McpEnvelopeError), (
+        f"expected McpEnvelopeError cause, got {type(cause).__name__}: {cause!r}"
     )
-    assert getattr(cause, "returncode", None) == CONCURRENCY_CODE
-    return cause
+    assert cause.envelope["error"] == "concurrency_conflict"
+    assert cause.envelope["exit_code"] == CONCURRENCY_CODE
+    engine = cause.__cause__
+    assert isinstance(engine, rebar.ConcurrencyError), (
+        f"expected ConcurrencyError chained, got {type(engine).__name__}: {engine!r}"
+    )
+    assert getattr(engine, "returncode", None) == CONCURRENCY_CODE
+    return engine
 
 
 def test_transition_stale_current_mcp_concurrency_error(rebar_repo) -> None:

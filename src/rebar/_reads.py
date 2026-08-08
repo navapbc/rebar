@@ -63,7 +63,11 @@ def show_ticket(ticket_id: str, *, repo_root=None, include_inbound: bool = False
     try:
         return ticket_reads.show_state(ticket_id, tracker, include_inbound=include_inbound)
     except ticket_reads.ReadError as exc:
-        raise _rebar_error(f"rebar show failed (exit 1): {exc.message}") from None
+        err = _rebar_error(f"rebar show failed (exit 1): {exc.message}")
+        # Preserve the error_code for TicketNotFoundError (ticket 8a31)
+        if isinstance(exc, ticket_reads.TicketNotFoundError):
+            err.error_code = "ticket_not_found"
+        raise err from None
 
 
 def list_by_query(query: ticket_reads.TicketQuery, *, repo_root=None) -> list[dict]:

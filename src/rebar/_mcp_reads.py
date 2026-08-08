@@ -63,8 +63,8 @@ def register_read_tools(mcp, ctx) -> None:
         (``plan`` = how to write a passing plan; ``review`` = how to pass code review;
         ``commit-trailer`` = the required ``rebar-ticket:`` commit-trailer format). A pure
         registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared
-        lookup as the `rebar explain` CLI. On failure returns a structured error ``{error, kind}``
-        (kind ∈ unknown-id / malformed-registry / missing-file)."""
+        lookup as the `rebar explain` CLI. On failure returns a structured error
+        ``{error, kind, message}`` (kind ∈ unknown-id / malformed-registry / missing-file)."""
         from rebar.llm.plan_review import registry
 
         try:
@@ -74,7 +74,14 @@ def register_read_tools(mcp, ctx) -> None:
             section = registry.explain_criterion(criterion_id)
             return {"criterion_id": criterion_id, "section": section}
         except registry.ExplainError as exc:
-            return {"error": str(exc), "kind": exc.kind}
+            # Map exc.kind to vocabulary code (ticket 8a31)
+            kind_to_code = {
+                "unknown-id": "criterion_unknown_id",
+                "malformed-registry": "criterion_registry_malformed",
+                "missing-file": "criterion_missing_file",
+            }
+            code = kind_to_code.get(exc.kind, "command_failed")
+            return {"error": code, "kind": exc.kind, "message": str(exc)}
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def list_tickets(

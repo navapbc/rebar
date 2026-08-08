@@ -41,3 +41,81 @@ class ConcurrencyError(RebarError):
 
     Raised by :func:`rebar.transition` when the engine reports exit code 10.
     """
+
+
+# ── Error classification vocabulary (ticket 8a31) ──────────────────────────────
+
+KNOWN_ERROR_CODES: frozenset[str] = frozenset(
+    {
+        "ticket_not_found",
+        "show_failed",
+        "deps_failed",
+        "concurrency_conflict",
+        "claim_failed",
+        "invalid_ticket_type",
+        "tracker_root_unresolved",
+        "criterion_unknown_id",
+        "criterion_registry_malformed",
+        "criterion_missing_file",
+        "llm_unavailable",
+        "command_failed",
+    }
+)
+
+
+def error_code_for(exc: BaseException) -> str:
+    """Classify a rebar exception to a machine-readable error code (ticket 8a31).
+
+    Returns a stable vocabulary code (one of :data:`KNOWN_ERROR_CODES`) derived from
+    the exception's type and attributes, in precedence order:
+
+    1. ``ConcurrencyError`` / ``ConcurrencyMismatch`` → ``concurrency_conflict``
+    2. ``TicketNotFoundError`` → ``ticket_not_found``
+    3. ``TrackerRootError`` → ``tracker_root_unresolved``
+    4. a non-empty ``exc.error_code`` attribute → that code
+    5. ``LLMError`` → ``llm_unavailable``
+    6. fallback → ``command_failed``
+
+    Imports exception types lazily to avoid cycles (this is a stdlib-only leaf).
+    """
+    # 1. ConcurrencyError / ConcurrencyMismatch (before error_code branch, since
+    #    ConcurrencyMismatch is a CommandError subclass with NO error_code)
+    if isinstance(exc, ConcurrencyError):
+        return "concurrency_conflict"
+    try:
+        from rebar._commands.txn import ConcurrencyMismatch
+
+        if isinstance(exc, ConcurrencyMismatch):
+            return "concurrency_conflict"
+    except ImportError:
+        pass
+
+    # 2. TicketNotFoundError (a ReadError subclass, classified by type)
+    try:
+        from rebar._engine_support.reads import TicketNotFoundError
+
+        if isinstance(exc, TicketNotFoundError):
+            return "ticket_not_found"
+    except ImportError:
+        pass
+
+    # 3. TrackerRootError
+    if isinstance(exc, TrackerRootError):
+        return "tracker_root_unresolved"
+
+    # 4. An explicit error_code attribute (CommandError or RebarError with one set)
+    code = getattr(exc, "error_code", None)
+    if code:
+        return code
+
+    # 5. LLMError
+    try:
+        from rebar.llm.errors import LLMError
+
+        if isinstance(exc, LLMError):
+            return "llm_unavailable"
+    except ImportError:
+        pass
+
+    # 6. Fallback
+    return "command_failed"

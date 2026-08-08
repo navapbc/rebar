@@ -316,8 +316,11 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     # disposition so the close gate can fail-closed on it programmatically. ──
     verdict = _unwrap(asyncio.run(srv.call_tool("verify_completion", {"ticket_id": epic})))
     assert isinstance(verdict, dict), verdict
-    err = str(verdict.get("error", "")).lower()
-    assert "agents" in err and "disabled" not in err, verdict
+    # 8a31: the soft-error `error` is now a shared vocabulary code; the human text
+    # (naming the missing extra) moved to `message`.
+    assert verdict.get("error") == "llm_unavailable", verdict
+    msg = str(verdict.get("message", "")).lower()
+    assert "agents" in msg and "disabled" not in msg, verdict
     assert verdict.get("resolution_class"), verdict  # classifier disposition present, not silent
 
 

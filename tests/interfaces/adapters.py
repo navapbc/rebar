@@ -335,13 +335,25 @@ class McpAdapter(Adapter):
     def _reject(exc: Exception) -> Outcome:
         """Map a FastMCP ToolError to the shared structured Outcome.
 
-        FastMCP wraps the tool's exception in a ToolError but chains the original
-        via ``__cause__`` — and rebar's write tools call the library directly, so
-        that cause is the very same ``ConcurrencyError`` (returncode 10) the
-        library raises. We read the typed identity off the cause, NOT off the
-        wrapper's prose message, giving MCP the ONE shared structured identity.
+        FastMCP wraps the tool's exception in a ToolError chained via ``__cause__``.
+        Since 8a31 that cause is an ``McpEnvelopeError`` carrying the structured
+        ``error_envelope`` (the SAME machine identity the CLI emits) — its
+        ``exit_code`` is the shared code (10 for concurrency) — and the original
+        typed ``ConcurrencyError`` is preserved one level deeper on its own
+        ``__cause__``. We read the shared code off the envelope and the typed
+        identity off the chained engine exception, giving MCP the ONE shared
+        structured identity across surfaces.
         """
+        from rebar._mcp_errors import McpEnvelopeError
+
         cause = exc.__cause__ or exc
+        if isinstance(cause, McpEnvelopeError):
+            engine = cause.__cause__ or cause
+            return Outcome(
+                ok=False,
+                code=cause.envelope.get("exit_code"),
+                error_type=type(engine).__name__,
+            )
         return Outcome(
             ok=False,
             code=getattr(cause, "returncode", None),

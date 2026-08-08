@@ -213,8 +213,16 @@ def test_mcp_write_validation_and_schema_contract(
             )
         )
     cause = exc_info.value.__cause__
-    assert isinstance(cause, rebar.RebarError)
-    assert cause.returncode == 2
+    # 8a31: MCP failures carry a structured envelope on McpEnvelopeError; the original
+    # RebarError (returncode 2) is preserved one level deeper on its __cause__.
+    from rebar._mcp_errors import McpEnvelopeError
+
+    assert isinstance(cause, McpEnvelopeError)
+    assert cause.envelope["error"] == "command_failed"
+    assert cause.envelope["exit_code"] == 2
+    engine = cause.__cause__
+    assert isinstance(engine, rebar.RebarError)
+    assert engine.returncode == 2
     assert _tickets_ref(rebar_repo) == before_ref
 
 

@@ -28,7 +28,8 @@ def _structured_llm_failure(exc: Exception) -> dict:
 
     o = outcome_of(exc)
     return {
-        "error": str(exc),
+        "error": "llm_unavailable",
+        "message": str(exc),
         "resolution_class": o.resolution_class.value if o is not None else None,
         "retryable": bool(o.retryable) if o is not None else False,
         "diagnostic": o.diagnostic if o is not None else None,
