@@ -131,6 +131,10 @@ sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/
                         # branch's source of truth on origin=GitHub while code review lives on a
                         # separate `gerrit` remote. Validated as a git remote name (rejects
                         # spaces / `:` / `~` / `/` / control; dots + non-leading hyphens allowed).
+                        # The named remote's URL may be an `s3://bucket/prefix` remote served by
+                        # the OPTIONAL `git-remote-s3` helper (`pip install 'nava-rebar[s3]'`),
+                        # keeping ticket history entirely out of any git host — see
+                        # `s3-backend.md`. This is opt-in; core rebar never requires boto3/AWS.
 
 # MCP server gates
 mcp.readonly         = false
