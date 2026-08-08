@@ -144,9 +144,15 @@ def test_double_acquire_convergence_single_winner(
 def test_ref_backend_phase_gate(
     advisory_lock: ModuleType, mode_mod: ModuleType, tmp_git_repo: Path, _ref_backend: None
 ) -> None:
-    """check_phase_gate reads the refs/reconciler/gate blob and blocks a higher mode."""
+    """The real ref backend round-trips reconcile-check and gates only higher modes."""
     ref_lock = advisory_lock._load_ref_lock()
     assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_THROTTLE, tmp_git_repo) is False
-    ref_lock.set_gate(tmp_git_repo, mode_mod.Mode.BOOTSTRAP_STRICT.value)
+    ref_lock.set_gate(tmp_git_repo, mode_mod.Mode.RECONCILE_CHECK.value)
+    assert ref_lock.read_gate(tmp_git_repo) == "reconcile-check"
+    assert (
+        ref_lock.read_gate(tmp_git_repo, remote=advisory_lock._lock_remote(tmp_git_repo))
+        == "reconcile-check"
+    )
+    assert advisory_lock._mode_blocks(mode_mod.Mode.BOOTSTRAP_THROTTLE, "reconcile-check") is True
     assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_THROTTLE, tmp_git_repo) is True
-    assert advisory_lock.check_phase_gate(mode_mod.Mode.BOOTSTRAP_STRICT, tmp_git_repo) is False
+    assert advisory_lock.check_phase_gate(mode_mod.Mode.RECONCILE_CHECK, tmp_git_repo) is False
