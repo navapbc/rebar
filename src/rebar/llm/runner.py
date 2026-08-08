@@ -91,20 +91,19 @@ class RunRequest:
     # (RunnerAgentStep) sets `mode="structured"` + `output_schema=<prompt.outputs>`
     # when this is single_turn, so the two stay consistent.
     execution_mode: str = "agentic"
-    # Per-operation extra tools appended to the agent's tool list (e.g. a read-only
-    # rebar ``show_ticket`` for the completion verifier). DEFAULTED None so existing
-    # review callers are unchanged. (Post-cutover the pydantic_ai runner supplies
-    # show_ticket natively, so this is always None in practice.)
+    # Per-operation extra tools appended to the agent's tool list. DEFAULTED None so existing
+    # review callers are unchanged. LIVE: the completion verifier's token-recovery path
+    # (`llm/workflow/completion_recovery.py`, story 2948) sets it to a `record` tool threaded
+    # through `workflow/runs.py`; asserted by `tests/unit/workflow/test_completion_banking.py`.
     extra_tools: list | None = None
-    # Extended-thinking flag (1268). When set, the structured-output stack uses
-    # PromptedOutput rather than a provider-native/strict constraint — a CURRENT
-    # Anthropic API constraint (it 400s when extended thinking is on together with a
-    # forced/native output constraint), not a workaround for any forced-tool mechanism
-    # (none exists in the stack; output is selected by `output_mode()`). The RECOMMENDED
-    # authoring pattern for a step that needs deep reasoning AND structured output is to
-    # SPLIT it into two steps — a `mode="text"` reasoning step then a `mode="structured"`
-    # extraction step (both already supported by the engine) — rather than forcing one
-    # step to do both; this flag covers the single-step case.
+    # Extended-thinking flag (1268). Under thinking the structured-output stack routes
+    # PromptedOutput UNLESS the model is MEASURED to accept a native output constraint under
+    # thinking (`caps.native_output_with_thinking`); not a workaround for any forced-tool
+    # mechanism (none exists; output is selected by `output_mode()`). The documented Anthropic
+    # 400 was `tool_choice` x thinking, NOT json_schema output x thinking, which is wire-legal
+    # today (measured E1) — see `structured.output_mode` / `capabilities`. RECOMMENDED for a
+    # step needing deep reasoning AND structured output: SPLIT into a `mode="text"` reasoning
+    # step then a `mode="structured"` extraction step; this flag covers the single-step case.
     thinking: bool = False
     # Hard ceilings for deliberately bounded exploratory sub-calls. Unlike
     # ``config.max_iterations`` these may LOWER an operation-wide floor.
@@ -255,8 +254,9 @@ class PydanticAIRunner:
     code: the provider is chosen by the model string (``anthropic:…`` / ``openai:…`` /
     ``google-gla:…``). Structured output is selected by ``output_mode()`` —
     ``NativeOutput`` for providers with strict constrained decoding, ``PromptedOutput``
-    for everyone else (including Anthropic when extended thinking is active, which
-    Anthropic 400s if combined with a forced/native output constraint); no forced-tool
+    for everyone else (including Anthropic under extended thinking UNLESS the model is
+    measured to accept native output under thinking — see ``output_mode`` /
+    ``capabilities.native_output_with_thinking``); no forced-tool
     ``ToolOutput`` is used anywhere in the stack. The structured-output reliability stack
     (NativeOutput/json-repair/bounded retry) is implemented in the structured module
     (story 1268).

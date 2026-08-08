@@ -175,3 +175,57 @@ comment triage (path — one-line why):
 - CODE (behavior-preserving): `_engine_support/reads_cli.py` — extracted `_reject_unknown_option`
   and called it from the six unknown-option arms (show/list/session-logs/deps/ready/search),
   removing the repeated explanatory comment; observable output unchanged (verified by the CLI tests).
+
+## 4b94 llm core — do_not_move
+
+Comment triage for ticket `4b94` (llm/ core subtree, EXCLUDING `plan_review/` and `workflow/`).
+Every item below was deliberately KEPT VERBATIM (disposition DO_NOT_MOVE) — a lint/type pragma,
+a test-introspected docstring, a measured external-API fact, an anti-refactor / rejected-alternative
+warning, or a load-bearing live-field decision. `path:line` is approximate (post-edit).
+
+### Live-field decision (NOT dead code — do not delete)
+
+- `runner.py` `RunRequest.extra_tools` field + its two use sites (`if req.extra_tools:` /
+  `tools = [*tools, *req.extra_tools]`) — KEPT. The field is LIVE: set by
+  `llm/workflow/completion_recovery.py:469,665` (the token-recovery record tool, story 2948),
+  threaded through `workflow/runs.py`, and asserted by
+  `tests/unit/workflow/test_completion_banking.py:491` ("the record tool is still wired"). The
+  ticket's premise that it "is always None in practice" is FALSE; only the STALE comment was
+  corrected in place, the field and call sites stay.
+
+### Measured external-API / provider facts (cannot be re-derived from code)
+
+- `capabilities.py` `_MODEL_ID_CAPABILITY_OVERRIDES` MEASURED matrix (~295-316) — "MEASURED
+  (ticket 2932, real AWS us-east-2)" temperature-deprecation 400s, and the ticket-1903 boto3
+  converse matrix (account 896586841071 / us-east-1). Real-AWS-account measured facts; VERBATIM.
+- `capabilities.py` `native_output_with_thinking` provenance (~337-346) — MEASURED run E1
+  (outputConfig json_schema + extended thinking wire-legal, no 400; sonnet-4-6 adaptive,
+  haiku-4-5 budget 2048) and "the bare alias 400s at request validation". Measured; VERBATIM.
+- `capabilities.py` `_is_claude` boto3-import note (~283-292) — measured import-cost reason
+  (BedrockModelProfile drags botocore onto the always-run path). VERBATIM.
+- `providers.py` deprecated-alias / pydantic-ai 1.107.1 `infer_provider` notes and the many
+  measured `providers.py:line` behavioural facts in the retained body. Left as-is except the
+  module docstring, which duplicated ADR 0059 §1 and was collapsed to a citation.
+- Numerous measured 400/status-code facts across `failure.py`, `agent_call.py`,
+  `structured_run.py`, `structured.py` (grammar-compilation-timeout server-side 400 after ~185s,
+  Bedrock ValidationException classes). Out of primary scope / measured — untouched.
+
+### Anti-refactor / rejected-alternative warnings (keep VERBATIM)
+
+- `capabilities.py` `_REBAR_OVERRIDES` rejected-alternative (~268-281) — the flag-only rule
+  `supports_json_schema_output and not supports_thinking` "was tried and REJECTED: it breaks
+  gemini … and groq …. Do not reintroduce it." VERBATIM.
+- `capabilities.py` `_MODEL_ID_CAPABILITY_OVERRIDES` "SEPARATE table … not a widening" +
+  "must contain no prefix-match call, an attested S2 criterion" structural invariant. VERBATIM.
+
+### Lint / type pragmas (never move)
+
+- `capabilities.py` `# noqa: BLE001` on the `WebSearchTool()` isinstance probe and on `_is_claude`
+  paths; all other `# noqa` / `# type: ignore` across the subtree. VERBATIM.
+
+### Test-introspected / assertion-anchored docstrings
+
+- `structured.py` `output_mode` docstring and `capabilities.py` override notes referenced by
+  `tests/unit/test_structured.py` (the PromptedOutput-vs-NativeOutput assertions). Corrected the
+  stale blanket-400 claim only where it CONTRADICTED current runtime; the measured/asserted
+  content stays.

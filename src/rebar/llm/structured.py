@@ -8,11 +8,13 @@ recognized anti-pattern):
 
   (1) provider-native CONSTRAINED decoding / strict json_schema where the provider
       offers it (:func:`output_mode` -> NativeOutput), else cross-provider
-      PromptedOutput. PromptedOutput is also the mode used whenever extended thinking is
-      on, because Anthropic currently 400s when extended thinking is combined with a
-      native/forced output constraint ("Thinking may not be enabled when tool_choice
-      forces tool use") — a live API constraint on the current pydantic_ai output modes,
-      not a relic of any earlier forced-tool mechanism;
+      PromptedOutput. PromptedOutput is also the mode used under extended thinking
+      UNLESS the model is MEASURED to accept a native output constraint under thinking
+      (``caps.native_output_with_thinking``); the documented Anthropic 400 was
+      ``tool_choice`` x thinking ("Thinking may not be enabled when tool_choice forces
+      tool use"), NOT ``outputConfig`` json_schema x thinking, which succeeds on the wire
+      today (measured E1) — see :func:`output_mode`; it is not a relic of any earlier
+      forced-tool mechanism;
   (2) DETERMINISTIC tolerant parse of near-miss output (:func:`tolerant_parse`, via
       json-repair — NO LLM): strips markdown fences, repairs trailing commas / unclosed
       braces / smart quotes;

@@ -1,33 +1,15 @@
 """Per-run provider construction seam (story S1 / one-provider-factory).
 
-Provider construction used to be an inline special case in ``runner.run()``: an
-``if resolved.startswith("anthropic")`` branch that built the retrying Anthropic
-model directly, with a matching ad-hoc ``_http_client`` teardown in the run's
-``finally``. Any second provider needing custom construction (its own retrying
-transport, a bespoke client, etc.) would have had to add another branch in that
-same spot — there was no single place that answered "how is a Provider built for
-provider X". ``ProviderSession`` is that place: one per-run object holding a
-registry of ``provider_name -> builder`` and exposing ``provider_factory``, the
-exact ``(str) -> Provider`` hook pydantic-ai's ``infer_model(provider_factory=...)``
-calls (verified against pydantic-ai 1.107.1: ``infer_model`` parses the model
-string into ``(provider_name, model_name)`` and calls
-``provider = provider_factory(provider_name)`` with the BARE provider name, e.g.
-``"anthropic"`` — never the full ``"anthropic:claude-..."`` model string).
+``ProviderSession`` owns the per-run ``provider_name -> builder`` registry and exposes
+``provider_factory``, the ``(str) -> Provider`` hook pydantic-ai's
+``infer_model(provider_factory=...)`` calls with the BARE provider name. It is a context-manager
+SESSION (not a bare function) because the hook returns only a ``Provider`` — the retrying
+``httpx.AsyncClient`` a builder opens alongside it is tracked in ``self._closeables`` and closed
+on ``__exit__``. Leaf module: heavy libraries (httpx, pydantic-ai) import inside the functions
+that need them so ``import rebar.llm`` stays stdlib-only.
 
-It is a SESSION, not a bare function, because the hook's return type carries only
-a ``Provider`` — there is no channel back to the caller for the retrying
-``httpx.AsyncClient`` a builder opens alongside it. Each builder that opens one
-appends it to ``self._closeables``; the session is a context manager, so
-``runner.run()`` wraps its body in ``with ProviderSession(cfg) as session:`` and
-``__exit__`` closes everything the builders opened — the old ad-hoc
-``_http_client`` local and its bespoke ``finally`` teardown disappear. One session
-per ``run()`` call, never shared across runs or threads, so ``_closeables`` needs
-no locking.
-
-Leaf module (matches the ``anthropic_model.py`` convention): imports nothing from
-``runner``; heavy libraries (httpx, pydantic-ai) are imported **inside** the
-functions that need them, never at module top, so ``import rebar.llm`` stays
-stdlib-only.
+See ADR 0059 §1 (docs/adr/0059-llm-provider-seam-and-support-tiers.md) for the full rationale —
+why the seam is this hook, the three-step resolution order, and where builder bodies live.
 """
 
 from __future__ import annotations
