@@ -341,6 +341,40 @@ def _recover_non_fast_forward(
         return None
 
 
+def _require_s3_helper_if_s3_url(remote_url: str) -> None:
+    """Fail closed on an s3://|s3+zip:// remote whose git-remote-s3 helper is missing/too old.
+
+    A deliberate exception to push_tickets_branch's best-effort contract: raises
+    OptionalDependencyError UNCONDITIONALLY (independent of `strict`), because a misconfigured
+    S3 remote must halt loudly rather than be swallowed. A no-op for any other scheme.
+    """
+    if remote_url.startswith("s3://") or remote_url.startswith("s3+zip://"):
+        from rebar._optional import require_s3_helper
+
+        require_s3_helper()
+
+
+def _require_s3_helper_for_configured_remote(base_path: str) -> None:
+    """Resolve the configured remote for ``base_path`` and fail closed if it is an S3 URL.
+
+    Used by the async delivery arm to surface a misconfigured-S3 error IN THE PARENT (the
+    detached child's stderr is discarded). A malformed config or an unavailable git binary
+    simply skips this best-effort preflight.
+    """
+    from rebar.config import ConfigError, tickets_remote
+
+    try:
+        remote = tickets_remote(os.path.dirname(base_path))
+    except ConfigError:
+        return
+    try:
+        resolved = _git(base_path, "remote", "get-url", remote)
+    except OSError:
+        return
+    if resolved.returncode == 0:
+        _require_s3_helper_if_s3_url(resolved.stdout.strip())
+
+
 def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     """Push ``HEAD:tickets`` according to the configured delivery policy.
 
@@ -366,6 +400,9 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
             base_path,
             remote_ref,
         )
+        # Fail fast IN THE PARENT on a misconfigured S3 remote — the detached child's stderr
+        # is discarded, so the actionable message would otherwise be lost.
+        _require_s3_helper_for_configured_remote(base_path)
         # Detach a synchronous push (REBAR_SYNC_PUSH=always) that survives parent exit.
         # The dispatcher launches the CLI as a bare `python3` whose `rebar`
         # importability comes from a parent sys.path bootstrap the child does NOT
@@ -426,6 +463,7 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
         )
         return
     remote_ref = f"{remote}/{branch}"
+    _require_s3_helper_if_s3_url(remote_url.stdout.strip())
 
     push_env = {**os.environ, "PRE_COMMIT_ALLOW_NO_CONFIG": "1"}
     stderr = ""
