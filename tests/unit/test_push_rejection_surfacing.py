@@ -31,7 +31,9 @@ remote" is observed from the remote side rather than from a spy.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -212,3 +214,44 @@ def test_rejection_never_fails_the_caller_and_keeps_the_local_commit(
         "commits intact"
     )
     assert _ahead(tracker) == 1, "the local-ahead commit must survive a rejected push"
+
+
+def test_strict_module_cli_translates_delivery_error_without_writing_an_event(
+    rejecting_origin: tuple[Path, Path],
+) -> None:
+    """Only the module boundary converts strict failure to stderr and nonzero."""
+    tracker, _log = rejecting_origin
+    head_before = _git(tracker, "rev-parse", "HEAD").stdout.strip()
+    events_before = {
+        path.relative_to(tracker): path.read_bytes() for path in tracker.rglob("*.json")
+    }
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "rebar._store.push",
+            "push",
+            "--tracker",
+            str(tracker),
+            "--strict",
+        ],
+        cwd=tracker,
+        env=dict(os.environ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert "push-policy-declined" in completed.stderr
+    assert "GH013" in completed.stderr or "pre-receive hook declined" in completed.stderr
+    assert "1 unpushed commits on origin/tickets..HEAD" in completed.stderr
+    assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert _ahead(tracker) == 1
+    events_after = {
+        path.relative_to(tracker): path.read_bytes() for path in tracker.rglob("*.json")
+    }
+    assert events_after == events_before
+    assert not any("BRIDGE_ALERT" in path.name for path in tracker.rglob("*"))
