@@ -25,6 +25,8 @@ importable in the leanest install) and never imports the optional packages itsel
 
 from __future__ import annotations
 
+import importlib.metadata
+import shutil
 from importlib import import_module
 from importlib.util import find_spec
 
@@ -43,6 +45,10 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "run inside the fail-open worker boundary",
     ),
     "metrics": ("lizard", "code-health metrics analyzers"),
+    "s3": (
+        "git_remote_s3",
+        "the awslabs/git-remote-s3 remote helper for an s3:// ticket-store remote",
+    ),
 }
 
 
@@ -94,3 +100,64 @@ def guard_import(module: str, *, extra: str):
             f"{module!r} is required for the {extra!r} extra but is not importable; "
             f"{_install_hint(extra)}"
         ) from exc
+
+
+MIN_GIT_REMOTE_S3 = "0.3.2"
+
+
+def require_s3_helper() -> None:
+    """Raise OptionalDependencyError unless the S3 remote helper is installed and new enough.
+
+    Checks two conditions (fail closed):
+    1. The git-remote-s3 console script is on PATH (shutil.which).
+    2. The installed git-remote-s3 distribution is >= 0.3.2.
+
+    Version is parsed stdlib-only: split on '.', take the first three components,
+    extract the leading run of digits from each, and convert to int. A non-numeric
+    leading component (e.g. "unknown") is treated as NOT meeting the minimum.
+    """
+    # Check 1: console script on PATH
+    if shutil.which("git-remote-s3") is None:
+        raise OptionalDependencyError(
+            f"the 's3' extra is required for this feature but is not installed; "
+            f"{_install_hint('s3')}"
+        )
+
+    # Check 2: distribution version >= 0.3.2
+    try:
+        version_str = importlib.metadata.version("git-remote-s3")
+    except importlib.metadata.PackageNotFoundError:
+        raise OptionalDependencyError(
+            f"the 's3' extra is required for this feature but is not installed; "
+            f"{_install_hint('s3')}"
+        ) from None
+
+    # Parse version: split on '.', extract leading digits from each component
+    parts = version_str.split(".")
+    parsed_version: tuple[int, ...] = ()
+    for part in parts[:3]:  # Take first 3 components
+        # Extract leading run of digits
+        digits = ""
+        for char in part:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        if not digits:
+            # Non-numeric leading component: fail closed
+            raise OptionalDependencyError(
+                f"git-remote-s3 version {version_str!r} does not meet the minimum "
+                f"version {MIN_GIT_REMOTE_S3}; {_install_hint('s3')}"
+            )
+        parsed_version = (*parsed_version, int(digits))
+
+    # Pad with zeros if fewer than 3 components
+    while len(parsed_version) < 3:
+        parsed_version = (*parsed_version, 0)
+
+    minimum_version = (0, 3, 2)
+    if parsed_version < minimum_version:
+        raise OptionalDependencyError(
+            f"git-remote-s3 version {version_str!r} does not meet the minimum "
+            f"version {MIN_GIT_REMOTE_S3}; {_install_hint('s3')}"
+        )
