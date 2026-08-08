@@ -1446,7 +1446,7 @@ def test_lifespan_is_safe_by_default_without_per_test_stubs(monkeypatch, tmp_pat
     with TestClient(appmod.app) as client:
         response = client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "in_flight": 0}
+        assert response.json() == {"status": "ok", "in_flight": 0, "queue_depth": 0}
 
     # timing: hang-guard — 2s dwarfs this sub-second local lifecycle path.
     assert time.monotonic() - start < 2
