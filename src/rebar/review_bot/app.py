@@ -132,8 +132,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if janitor_stop is not None:
             janitor_stop.set()
-        # Graceful drain (deploy resilience): let the still-running worker finish the QUEUED
-        # events before we cancel it, so a routine autodeploy restart does not abandon
+        # Graceful drain (deploy resilience; ADR 0067): let the still-running worker finish the
+        # QUEUED events before we cancel it, so a routine autodeploy restart does not abandon
         # acknowledged (202 "queued") webhooks (the in-memory queue is otherwise lost on every
         # restart). Bounded by ``config.shutdown_drain_seconds()``; anything still queued when
         # the window elapses is left for the backfill reconciler — fail-safe, never fail-lose.
@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # unwinds at the next await — including the await inside an ``asyncio.to_thread`` offload,
         # which returns immediately without waiting for the orphaned OS thread). But a task slow
         # to honor cancellation — a shielded region, a synchronous ``finally`` — would make an
-        # unbounded ``await task`` hang shutdown with no stateable upper bound. Await the join
+        # unbounded ``await task`` hang shutdown with no upper bound. Await the join
         # under ``shutdown_cancel_seconds()`` and ABANDON whatever is still pending (the process
         # is exiting; any in-flight store write is bounded independently by event_append's
         # per-git timeout). ``gather(return_exceptions=True)`` collects each task's CancelledError

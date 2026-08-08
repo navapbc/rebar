@@ -52,7 +52,7 @@ logger = logging.getLogger("rebar.review_bot.voter")
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
 _locks_guard = asyncio.Lock()
 
-# ── in-flight review accounting (bug 34cd) ───────────────────────────────────────
+# ── in-flight review accounting (bug 34cd; ADR 0068) ─────────────────────────────
 # How many reviews are executing IN THIS PROCESS right now. Exported over ``/health`` so
 # the deploy loop (infra/scripts/autodeploy.sh) can DEFER a container recreation that
 # would otherwise KILL a running review — a recreation mid-review is INVISIBLE to every
@@ -635,8 +635,8 @@ async def _review_and_vote(
                 )
                 return {"status": "error", "change_id": change_id, "stage": "review_setup"}
 
-        # Retryable coverage gap (ticket 0347): defer — cast NO vote, so the vote-LESS change
-        # stays visible to the backfill reconciler, which re-drives it within its interval.
+        # Retryable coverage gap (ticket 0347; ADR 0069): defer — cast NO vote, so the vote-LESS
+        # change stays visible to the backfill reconciler, which re-drives it within its interval.
         # Keys STRICTLY on the adapter's machine-readable gap_reason: a real finding and an
         # indeterminate-that-ran-to-completion carry a non-retryable reason, and the merge-path
         # _merge_coverage_gap_decision carries no gap_reason at all — all still vote. Escalate
