@@ -31,6 +31,7 @@ import pytest
 
 from rebar import _engine
 from rebar._commands import fsck
+from rebar._store import push
 
 pytestmark = pytest.mark.integration
 
@@ -506,6 +507,71 @@ def test_failed_push_never_drops_local_commit(two_clones):
     _expire_sync_marker(tracker_a)
     _engine_run(repo_a, "list")
     assert local_ticket in _list_status(repo_a), "local commit dropped after failed-push sync"
+
+
+def test_push_retry_spends_the_fifth_merge_with_one_terminal_push(two_clones, monkeypatch):
+    """Five deterministic real competitors force all retries; the sixth push converges."""
+    remote, repo_a, repo_b, _seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # Create A's local-only commit, then reconnect it to the shared real origin.
+    _remote_remove(tracker_a)
+    local_ticket = _create(repo_a, "task", "local commit survives five competitors")
+    _remote_add(tracker_a, remote)
+    local_before = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
+
+    original_git = push._git
+    push_attempts = 0
+    competitor_shas: list[str] = []
+
+    def competitor_wins_before_first_five_pushes(base: str, *args: str, **kwargs: object):
+        nonlocal push_attempts
+        if Path(base) == tracker_a and args and args[0] == "push":
+            push_attempts += 1
+            if push_attempts <= 5:
+                ticket_id = f"99{push_attempts:02d}-comp-9999-9999"
+                ticket_dir = tracker_b / ticket_id
+                ticket_dir.mkdir()
+                event = ticket_dir / f"170000000000000000{push_attempts}-{ticket_id}-CREATE.json"
+                event.write_text('{"side":"competitor"}\n', encoding="utf-8")
+                _git("add", "-A", cwd=tracker_b)
+                _git(
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    f"ticket: CREATE competitor {push_attempts}",
+                    cwd=tracker_b,
+                )
+                competitor_shas.append(_git("rev-parse", "HEAD", cwd=tracker_b).stdout.strip())
+                _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b)
+        return original_git(base, *args, **kwargs)
+
+    monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
+    monkeypatch.setattr(push, "_git", competitor_wins_before_first_five_pushes)
+
+    push.push_tickets_branch(str(tracker_a))
+
+    local_after = _git("rev-parse", "HEAD", cwd=tracker_a).stdout.strip()
+    remote_after = _git("ls-remote", "origin", "refs/heads/tickets", cwd=tracker_a).stdout.split()[
+        0
+    ]
+    assert push_attempts == 6
+    assert remote_after == local_after
+    assert (
+        _git(
+            "merge-base", "--is-ancestor", local_before, local_after, cwd=tracker_a, check=False
+        ).returncode
+        == 0
+    )
+    for sha in competitor_shas:
+        assert (
+            _git(
+                "merge-base", "--is-ancestor", sha, local_after, cwd=tracker_a, check=False
+            ).returncode
+            == 0
+        )
+    assert (tracker_a / local_ticket).is_dir()
 
 
 # ─────────────────── RC2b: snapshot horizon + rebuild-on-stray (36d1) ─────────

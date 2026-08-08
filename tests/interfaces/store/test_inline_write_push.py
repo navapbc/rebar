@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 import rebar
+from rebar._store import push
 
 
 def _git(*args: str, cwd: Path) -> None:
@@ -111,3 +112,61 @@ def test_delete_pushes_on_its_own(repo_with_origin: Path) -> None:
     rc = delete.delete_cli([t, "--user-approved"], repo_root=str(repo))
     assert rc == 0
     assert _ahead(repo) == 0, "a trailing delete must not strand its DELETE commit"
+
+
+@pytest.mark.parametrize("operation", ["claim", "close", "compact", "delete"])
+def test_inline_write_callers_keep_the_legacy_best_effort_push_contract(
+    repo_with_origin: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """Each shipped caller reaches push_after_commit without opting into strict mode."""
+    repo = repo_with_origin
+    ticket = rebar.create_ticket("task", "T", description=_ac("T"), repo_root=str(repo))
+    if operation == "close":
+        rebar.claim(ticket, assignee="me", repo_root=str(repo))
+    if operation == "compact":
+        for index in range(3):
+            rebar.comment(ticket, f"comment {index}", repo_root=str(repo))
+
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        push,
+        "push_after_commit",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    if operation == "claim":
+        rebar.claim(ticket, assignee="me", repo_root=str(repo))
+    elif operation == "close":
+        rebar.transition(ticket, "in_progress", "closed", repo_root=str(repo))
+    elif operation == "compact":
+        from rebar._commands import compact
+
+        assert compact.compact_cli([ticket, "--threshold=0"], repo_root=str(repo)) == 0
+    else:
+        from rebar._commands import delete
+
+        assert delete.delete_cli([ticket, "--user-approved"], repo_root=str(repo)) == 0
+
+    assert calls
+    assert all(kwargs == {} for _args, kwargs in calls)
+
+
+def test_compact_all_keeps_the_legacy_best_effort_push_contract(
+    repo_with_origin: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rebar._commands import compact
+
+    repo = repo_with_origin
+    ticket = rebar.create_ticket("task", "T", description=_ac("T"), repo_root=str(repo))
+    rebar.comment(ticket, "one", repo_root=str(repo))
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    monkeypatch.setattr(
+        push,
+        "push_after_commit",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert compact.compact_all_cli([], repo_root=str(repo)) == 0
+    assert calls and all(kwargs == {} for _args, kwargs in calls)
