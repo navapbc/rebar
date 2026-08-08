@@ -180,3 +180,21 @@ def test_init_mount_s3_remote_missing_helper_fails_closed(tmp_path: Path, monkey
     with pytest.raises(_optional.OptionalDependencyError) as ei:
         init._mount_or_create_branch(str(repo), tracker)
     assert "pip install 'nava-rebar[s3]'" in str(ei.value)
+
+
+def test_push_after_commit_s3_missing_helper_propagates(tmp_path: Path, monkeypatch) -> None:
+    """push_after_commit (transition/reopen/claim/compact/delete auto-push) must NOT swallow it.
+
+    push_after_commit wraps push_tickets_branch in a best-effort `except Exception`; the
+    deliberate S3 fail-closed override must escape that swallow so the inline-commit write
+    paths halt with the actionable message, exactly like write_and_push's uncaught call.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _wire_push(monkeypatch, "s3://my-bucket/tickets")
+    _arrange_helper(monkeypatch, on_path=False, version="0.3.2")
+    monkeypatch.setattr("rebar._store.lock.canonical_tracker", lambda _t=None: str(tracker))
+
+    with pytest.raises(_optional.OptionalDependencyError) as ei:
+        push.push_after_commit(str(tracker))
+    assert "pip install 'nava-rebar[s3]'" in str(ei.value)
