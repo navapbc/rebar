@@ -20,6 +20,7 @@ import argparse
 import datetime
 import importlib
 import importlib.util
+import json
 import os
 import sys
 import threading
@@ -101,6 +102,46 @@ def _try_load_step(name: str):
     sys.modules[dotted_name] = mod
     spec.loader.exec_module(mod)
     return mod
+
+
+def _pause_exit_code(advisory, target_mode, mode_mod, repo_root: Path) -> int | None:
+    """Return the pause outcome before any reconciler mutation, if applicable."""
+    if not hasattr(advisory, "read_pause"):
+        return None
+    try:
+        pause = advisory.read_pause(repo_root)
+    except advisory.ReconcileGateError:
+        print(
+            "ERROR: refs/reconciler/gate is corrupt; run 'rebar bridge resume' to clear it",
+            file=sys.stderr,
+        )
+        return 1
+    if pause is None or mode_mod.MODE_CAPS[target_mode] == 0:
+        return None
+    status = {
+        "paused": True,
+        "reason": pause["reason"],
+        "who": pause["who"],
+        "paused_at": pause["paused_at"],
+    }
+    print(f"BRIDGE_PAUSED: {json.dumps(status, separators=(',', ':'))}", file=sys.stderr)
+    return 0
+
+
+def _post_pause_preflight(advisory, target_mode, repo_root: Path) -> tuple[bool, int | None]:
+    """Check the pre-existing lock and phase guards after the pause decision."""
+    held = advisory.check_pass_lock(repo_root)
+    if held and not _lock_steal_enabled():
+        print("reconcile: refs/reconciler/lock is held — another pass in flight", file=sys.stderr)
+        return held, 3
+    if advisory.check_phase_gate(target_mode, repo_root):
+        print(
+            f"reconcile: refs/reconciler/gate blocks advancement to "
+            f"{target_mode.value}; clear the gate to advance",
+            file=sys.stderr,
+        )
+        return held, 4
+    return held, None
 
 
 def _run_reconcile_check(repo_root: Path) -> int:
@@ -583,6 +624,10 @@ def main(argv: list[str] | None = None) -> int:
     # -------------------------------------------------------------------------
     advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
 
+    pause_exit = _pause_exit_code(advisory, target_mode, mode_mod, repo_root)
+    if pause_exit is not None:
+        return pause_exit
+
     # One-time migration (epic dust-troth-naval / C4): the lock moved to
     # refs/reconciler/*; scrub any pre-existing .reconciler-* lock files still
     # committed on the tickets branch from the old file backend. Idempotent; a git
@@ -600,23 +645,9 @@ def main(argv: list[str] | None = None) -> int:
     # (story 9622) instead of unconditionally exiting 3 — a SIGKILLed pass would
     # otherwise wedge refs/reconciler/lock until an operator hand-deleted it. Gated
     # by REBAR_RECONCILER_LOCK_STEAL (default ON; OFF = old unconditional exit-3).
-    held = advisory.check_pass_lock(repo_root)
-    if held and not _lock_steal_enabled():
-        print(
-            "reconcile: refs/reconciler/lock is held — another pass in flight",
-            file=sys.stderr,
-        )
-        return 3
-
-    # Step 2b: phase-gate check (dd-4) — BEFORE any lock mutation, so a gate-blocked
-    # pass never needlessly steals.
-    if advisory.check_phase_gate(target_mode, repo_root):
-        print(
-            f"reconcile: refs/reconciler/gate blocks advancement to "
-            f"{target_mode.value}; clear the gate to advance",
-            file=sys.stderr,
-        )
-        return 4
+    held, preflight_exit = _post_pause_preflight(advisory, target_mode, repo_root)
+    if preflight_exit is not None:
+        return preflight_exit
 
     # Resolve a held lock via steal (only reached when steal is enabled — the
     # kill-switch early-returns above). Cases 1/2/3a/3b live in _resolve_held_lock;

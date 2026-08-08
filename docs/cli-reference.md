@@ -31,6 +31,8 @@ Run staged Jira synchronization.
 Commands:
   preview   Show proposed Jira changes without applying them
   sync      Apply the staged Jira synchronization
+  pause     Temporarily stop scheduled reconciliation
+  resume    Resume scheduled reconciliation
 ```
 
 ### `bridge-fsck`

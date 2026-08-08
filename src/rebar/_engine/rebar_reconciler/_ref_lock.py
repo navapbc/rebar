@@ -1,63 +1,4 @@
-"""Bare-ref CAS lock primitive for the reconciler pass-lock / phase-gate.
-
-A lock lives as a git **ref -> blob** (``refs/reconciler/lock`` /
-``refs/reconciler/gate``), NOT as a file in the tickets working tree — so it is
-never union-merged and never taxes the ticket-event hot paths. The blob is a
-newline-terminated UTF-8 JSON document::
-
-    {"holder": "<pass id>", "lease_secs": 120, "heartbeat_ns": 173…, "fence": 0}
-
-* ``heartbeat_ns`` (``time.time_ns()``) is the acquisition / renew anchor — it is
-  diagnostic only; the skew-proof lease-expiry rule (C2) reads ``fence`` + the ref
-  oid, not this wall clock.
-* ``fence`` is a monotonic **progress-witness / generation counter** seeded to 0
-  on acquire; C2 increments it on renew/steal. It is NOT a full fencing token
-  (no stale-writer rejection is claimed of the protected resource).
-
-**CAS contract.** ``git hash-object -w --stdin`` plants the blob and yields its
-OID; ``git update-ref <ref> <oid> <old>`` then advances the ref only if it still
-points at ``<old>``:
-
-* **acquire** is create-only — ``<old>`` is 40 zeros, so the CAS fails iff the ref
-  already exists. That exit-128 means "lock already held" — definitive, NOT
-  retried; :func:`acquire` raises :class:`RefLockHeldError`.
-* **release** deletes the ref (``git update-ref -d <ref> <old-oid>``) against the
-  exact observed OID. A CAS mismatch (ref already gone, or now owned by someone
-  else) is a benign **idempotent success**, not an error.
-
-Only genuinely transient CAS races are retried (via the shared
-``_cas_advance_with_retry`` in :mod:`_advisory_lock`); acquire/release classify
-their definitive exit-128 outcomes through the shared :func:`_cas_once` seam so
-there is exactly ONE CAS discriminator in the reconciler.
-
-**Distributed operation.** With ``remote is None`` the CAS is a pure local
-``update-ref`` (unit tests / single-clone). With a ``remote`` the authoritative
-ref lives on that remote: :func:`read` force-fetches ``<ref>:<ref>`` first, and
-acquire/release do the CAS as a ``git push --force-with-lease=<ref>:<old>``
-(explicit lease-ref form, never bare) — the remote-side equivalent of the
-old-oid ``update-ref`` CAS. The reconciler passes ``remote="origin"`` (wired in
-C3); AC0 proves the ``refs/reconciler/*`` refspec round-trips through GitHub.
-
-**The remote is the decider — in both directions.** The local ref is only a cache
-of it, so remote ABSENCE must propagate too: git cannot delete a local ref through
-a refspec whose source is gone, so :func:`_fetch_ref` follows a failed fetch with
-an ``ls-remote`` probe and prunes the local ref when the remote is reachable and
-the ref is provably absent, and :func:`release` deletes both halves (remote push
-delete + local ``update-ref -d``). Without that, a local ``read`` planted a copy
-of another machine's lock which outlived the holder's remote-only release and
-wedged the clone: every later ``read`` said HELD, and ``steal`` could not break it
-(``--force-with-lease`` against an absent remote ref is rejected as "stale info",
-i.e. classified as a CAS mismatch). A remote we cannot REACH is different: it
-leaves the local ref alone (fail-closed / still HELD), because declaring locks
-free during a network outage would destroy cross-machine mutual exclusion.
-
-**Fail-closed reads.** :func:`read` raises :class:`RefLockCorruptError` on a
-corrupt / partial / empty blob and :class:`RefLockTimeoutError` on a subprocess
-timeout; callers treat either (indeed any read failure) as HELD, never free.
-
-No lease-expiry / steal / ``renew()`` logic lives here — that is C2, which
-extends this module.
-"""
+"""Bare-ref CAS primitives for reconciler locks and the persistent phase gate."""
 
 from __future__ import annotations
 
@@ -639,16 +580,8 @@ def steal(
     return try_break_if_stale(repo_root, ref, first=first, holder=holder, remote=remote)
 
 
-# ---------------------------------------------------------------------------
-# Phase gate (C3 consumer): a persistent throttle marker, NOT a lease-held lock.
-#
-# The gate uses the SAME ref->blob CAS mechanism but its own tiny schema
-# ``{"gated_mode": "<mode>"}`` (no holder/lease/fence — it is not leased or
-# stolen). set/clear are CAS-managed; a corrupt/unreadable gate blob fails closed
-# (treated as gated) consistent with the lock read contract.
-# ---------------------------------------------------------------------------
-
 _GATE_FIELD = "gated_mode"
+_PAUSE_FIELDS = ("gated_mode", "paused", "reason", "who", "paused_at")
 
 
 def _encode_gate(mode: str) -> bytes:
@@ -704,6 +637,71 @@ def clear_gate(repo_root: Path, ref: str = GATE_REF, *, remote: str | None = Non
     if oid is None:
         return False
     return release(repo_root, ref, oid=oid, remote=remote)
+
+
+def _decode_pause(raw: bytes) -> dict[str, object] | None:
+    """Decode a complete pause document, or return ``None`` for a legacy gate."""
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RefLockCorruptError(f"corrupt gate blob: {exc}", raw=raw) from exc
+    if not isinstance(doc, dict):
+        raise RefLockCorruptError("gate blob is not a JSON object", raw=raw)
+    if "paused" not in doc:
+        return None
+    if set(doc) != set(_PAUSE_FIELDS) or doc.get("gated_mode") != "reconcile-check":
+        raise RefLockCorruptError("pause blob has an invalid schema", raw=raw)
+    if doc["paused"] is not True or any(
+        not isinstance(doc[name], str) or not doc[name] for name in _PAUSE_FIELDS[2:]
+    ):
+        raise RefLockCorruptError("pause blob has invalid values", raw=raw)
+    return doc
+
+
+def read_pause(
+    repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None
+) -> dict[str, object] | None:
+    """Return a validated pause document; legacy gated-mode blobs remain readable."""
+    oid = _ref_oid(repo_root, ref, remote=remote)
+    return None if oid is None else _decode_pause(_read_blob_bytes(repo_root, ref, oid))
+
+
+def _pause_conflict(repo_root: Path, ref: str, remote: str | None) -> RefLockError:
+    """Re-read and describe the authoritative pause that won a conflicting CAS."""
+    current = read_pause(repo_root, ref, remote=remote)
+    if current is None:
+        return RefLockError("gate pause changed concurrently and is no longer active")
+    status = {key: current[key] for key in _PAUSE_FIELDS[2:]}
+    return RefLockError(f"gate is already paused: {json.dumps(status, separators=(',', ':'))}")
+
+
+def set_pause(
+    repo_root: Path,
+    *,
+    reason: str,
+    who: str,
+    paused_at: str,
+    ref: str = GATE_REF,
+    remote: str | None = None,
+) -> str:
+    """CAS-create a pause, preserving an existing pause with the same reason."""
+    if not all(isinstance(value, str) and value for value in (reason, who, paused_at)):
+        raise RefLockError("pause reason, who, and paused_at must be non-empty strings")
+    old = _ref_oid(repo_root, ref, remote=remote)
+    if old is not None:
+        raw = _read_blob_bytes(repo_root, ref, old)
+        existing = _decode_pause(raw)
+        if existing is None:
+            _decode_gate(raw)
+        elif existing["reason"] == reason:
+            return old
+        else:
+            raise _pause_conflict(repo_root, ref, remote)
+    doc = dict(zip(_PAUSE_FIELDS, ("reconcile-check", True, reason, who, paused_at), strict=True))
+    new_oid = _hash_object(repo_root, (json.dumps(doc) + "\n").encode("utf-8"))
+    if not _cas_advance(repo_root, ref, new_oid=new_oid, old_oid=old or _ZERO_OID, remote=remote):
+        raise _pause_conflict(repo_root, ref, remote)
+    return new_oid
 
 
 # ---------------------------------------------------------------------------

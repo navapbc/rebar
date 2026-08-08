@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -52,9 +53,13 @@ def mode_mod() -> ModuleType:
     return _load("rebar_reconciler.mode", ENGINE / "mode.py")
 
 
-def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
+def _git(args: list[str], repo: Path, **kwargs) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ["git", "-C", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        **kwargs,
     )
 
 
@@ -139,6 +144,146 @@ def test_phase_gate_reads_gate_ref(
     # Clearing the gate re-opens.
     ref_lock.clear_gate(repo)
     assert advisory.check_phase_gate(throttle, repo) is False
+
+
+def _gate_blob(ref_lock: ModuleType, repo: Path) -> bytes:
+    oid = _git(["rev-parse", ref_lock.GATE_REF], repo).stdout.strip()
+    return _git(["cat-file", "blob", oid], repo).stdout.encode()
+
+
+def test_pause_blob_retains_the_legacy_gate_field(
+    ref_lock: ModuleType, repo: Path, ref_backend
+) -> None:
+    paused_at = "2026-08-08T17:00:00Z"
+    oid = ref_lock.set_pause(
+        repo,
+        reason="planned maintenance",
+        who="operator@example.com",
+        paused_at=paused_at,
+    )
+
+    assert _git(["rev-parse", ref_lock.GATE_REF], repo).stdout.strip() == oid
+    assert json.loads(_gate_blob(ref_lock, repo)) == {
+        "gated_mode": "reconcile-check",
+        "paused": True,
+        "reason": "planned maintenance",
+        "who": "operator@example.com",
+        "paused_at": paused_at,
+    }
+
+
+def _legacy_decode_gate(raw: bytes) -> str:
+    """Verbatim pre-pause decoder shipped by the previous binary."""
+    if not raw:
+        raise ValueError("empty gate blob")
+    doc = json.loads(raw.decode("utf-8"))
+    if (
+        not isinstance(doc, dict)
+        or not isinstance(doc.get("gated_mode"), str)
+        or not doc["gated_mode"]
+    ):
+        raise ValueError("gate blob missing a non-empty 'gated_mode'")
+    return doc["gated_mode"]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "planned maintenance",
+        'quoted reason: "database cutover"',
+        "two-line reason\nwith a delimiter: value",
+    ],
+)
+def test_pre_pause_decoder_accepts_every_new_pause_blob(
+    ref_lock: ModuleType, repo: Path, ref_backend, reason: str
+) -> None:
+    ref_lock.set_pause(
+        repo,
+        reason=reason,
+        who="operator@example.com",
+        paused_at="2026-08-08T17:00:00Z",
+    )
+
+    assert _legacy_decode_gate(_gate_blob(ref_lock, repo)) == "reconcile-check"
+
+
+def test_same_reason_repause_preserves_exact_blob_and_metadata(
+    ref_lock: ModuleType, repo: Path, ref_backend
+) -> None:
+    first_oid = ref_lock.set_pause(
+        repo,
+        reason="planned maintenance",
+        who="first@example.com",
+        paused_at="2026-08-08T17:00:00Z",
+    )
+    first_raw = _gate_blob(ref_lock, repo)
+
+    second_oid = ref_lock.set_pause(
+        repo,
+        reason="planned maintenance",
+        who="second@example.com",
+        paused_at="2026-08-09T01:02:03Z",
+    )
+
+    assert second_oid == first_oid
+    assert _gate_blob(ref_lock, repo) == first_raw
+
+
+def test_different_reason_repause_refuses_and_preserves_state(
+    ref_lock: ModuleType, repo: Path, ref_backend
+) -> None:
+    first_oid = ref_lock.set_pause(
+        repo,
+        reason="database cutover",
+        who="first@example.com",
+        paused_at="2026-08-08T17:00:00Z",
+    )
+    first_raw = _gate_blob(ref_lock, repo)
+
+    with pytest.raises(ref_lock.RefLockError, match="database cutover"):
+        ref_lock.set_pause(
+            repo,
+            reason="network maintenance",
+            who="second@example.com",
+            paused_at="2026-08-09T01:02:03Z",
+        )
+
+    assert _git(["rev-parse", ref_lock.GATE_REF], repo).stdout.strip() == first_oid
+    assert _gate_blob(ref_lock, repo) == first_raw
+
+
+def test_pause_cas_loss_surfaces_winner_without_overwrite(
+    ref_lock: ModuleType, repo: Path, ref_backend, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    winner = {
+        "gated_mode": "reconcile-check",
+        "paused": True,
+        "reason": "winner maintenance",
+        "who": "winner@example.com",
+        "paused_at": "2026-08-08T18:00:00Z",
+    }
+    winner_raw = (json.dumps(winner) + "\n").encode()
+
+    def lose_cas(*_args, **_kwargs) -> bool:
+        winner_oid = ref_lock._hash_object(repo, winner_raw)
+        _git(["update-ref", ref_lock.GATE_REF, winner_oid], repo)
+        return False
+
+    monkeypatch.setattr(ref_lock, "_cas_advance", lose_cas)
+
+    with pytest.raises(ref_lock.RefLockError) as raised:
+        ref_lock.set_pause(
+            repo,
+            reason="loser maintenance",
+            who="loser@example.com",
+            paused_at="2026-08-08T17:00:00Z",
+        )
+
+    message = str(raised.value)
+    assert "winner maintenance" in message
+    assert "winner@example.com" in message
+    assert "2026-08-08T18:00:00Z" in message
+    assert _gate_blob(ref_lock, repo) == winner_raw
 
 
 # ---------------------------------------------------------------------------

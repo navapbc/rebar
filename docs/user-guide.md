@@ -379,10 +379,11 @@ re-read and pick up from the current state. See [concurrency.md](concurrency.md)
 
 If your project syncs to Jira, tickets reconcile bidirectionally through
 `rebar reconcile`. The staged bridge group offers `rebar bridge preview` to
-show proposed Jira changes and `rebar bridge sync` to apply them. The established
-`rebar reconcile`, `rebar jira-onboard`, `rebar bridge-probe`, `rebar bridge-fsck`,
-and `rebar doctor` spellings and workflows remain available. Setting up Jira is an
-operator task — see
+show proposed Jira changes, `rebar bridge sync` to apply them, `rebar bridge pause
+REASON` to stop scheduled reconciliation, and `rebar bridge resume` to restart it.
+The established `rebar reconcile`, `rebar jira-onboard`, `rebar bridge-probe`,
+`rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
+Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 
 ### Jira Cloud vs. Jira Data Center
@@ -411,6 +412,8 @@ project = "REB"                                   # env override: JIRA_PROJECT
 export JIRA_PAT=...        # the Personal Access Token — env-only, never a config key
 rebar bridge preview       # inspect proposed Jira changes
 rebar bridge sync          # apply the staged synchronization
+rebar bridge pause "maintenance window"  # stop scheduled reconciliation
+rebar bridge resume        # resume scheduled reconciliation
 ```
 
 **Least privilege — use a dedicated service account, never an admin token.** Mint the PAT on

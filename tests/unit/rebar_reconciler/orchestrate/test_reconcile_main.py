@@ -246,6 +246,25 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
     stub_reconcile.reconcile_once.assert_called_once()
 
 
+def test_reconcile_check_returns_before_pause_and_pass_lock_reads(main_mod, tmp_path):
+    """The legacy read-only diagnostic keeps its pre-gate early-return ordering."""
+    run_check = MagicMock(return_value=0)
+    pass_lock = MagicMock(side_effect=AssertionError("pass lock must not be read"))
+    pause_read = MagicMock(side_effect=AssertionError("pause gate must not be read"))
+
+    with (
+        patch.object(main_mod, "_run_reconcile_check", run_check),
+        patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", pass_lock),
+        patch(f"{_ADVISORY_LOCK_KEY}.read_pause", pause_read),
+    ):
+        rc = main_mod.main(["--mode=reconcile-check", "--repo-root", str(tmp_path)])
+
+    assert rc == 0
+    run_check.assert_called_once_with(tmp_path)
+    pass_lock.assert_not_called()
+    pause_read.assert_not_called()
+
+
 def test_lock_released_on_exception(main_mod, tmp_path):
     """When reconcile_once raises, release_pass_lock is still called (finally block)."""
     release_mock = MagicMock()

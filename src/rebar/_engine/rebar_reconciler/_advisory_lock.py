@@ -108,6 +108,10 @@ class ReconcileLockLost(RuntimeError):
     no-ops (the ref already moved), so a re-run is safe/idempotent."""
 
 
+class ReconcileGateError(RuntimeError):
+    """Raised when the phase-gate ref cannot be safely read."""
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -223,6 +227,15 @@ def check_phase_gate(target_mode, repo_root: Path) -> bool:
     ref_lock = _load_ref_lock()
     gated_mode_str = ref_lock.read_gate(repo_root, remote=_lock_remote(repo_root))
     return _mode_blocks(target_mode, gated_mode_str)
+
+
+def read_pause(repo_root: Path) -> dict[str, object] | None:
+    """Read a pause marker, translating corrupt gate state for the CLI boundary."""
+    ref_lock = _load_ref_lock()
+    try:
+        return ref_lock.read_pause(repo_root, remote=_lock_remote(repo_root))
+    except (ref_lock.RefLockCorruptError, ref_lock.RefLockTimeoutError) as exc:
+        raise ReconcileGateError(str(exc)) from exc
 
 
 def _mode_blocks(target_mode, gated_mode_str: str | None) -> bool:
