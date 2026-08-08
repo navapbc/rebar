@@ -21009,7 +21009,7 @@
         },
         "description": "## Context\nCompletion verification for b42a found that the shipped Mode enum, MODE_CAPS mapping, and reconcile-check phase-gate value remain present, but the acceptance criterion over-attributed their direct coverage to test_mode.py and test_advisory_lock.py. The change is already merged; add focused characterization coverage without changing production behavior.\n\n## Approach\n- Extend the existing mode contract suite to pin the complete MODE_CAPS mapping, including RECONCILE_CHECK=0 and every legacy mode cap.\n- Extend the existing ref-backed advisory-lock phase-gate test to write and read the exact reconcile-check value and prove higher modes block while the equal reconcile-check target remains allowed.\n- Keep all old mode values, ordering, caps, and gate storage unchanged.\n\n## Acceptance Criteria\n- [x] tests/unit/rebar_reconciler/orchestrate/test_mode.py directly asserts the complete MODE_CAPS mapping for all five legacy modes.\n- [x] tests/unit/rebar_reconciler/state/test_advisory_lock.py round-trips gated_mode reconcile-check through the real ref backend and proves equal-versus-higher blocking behavior.\n- [x] No production file changes.\n- [x] Focused tests, make lint, and make typecheck pass.\n\n## Compatibility and rollback\nThis is additive characterization coverage only. Reverting the test commit restores the prior coverage level without changing runtime state.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Pin legacy reconciler mode-cap and phase-gate continuity"
       },
       "created_at": "2026-08-08T00:48:19Z",
