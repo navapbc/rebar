@@ -131,9 +131,7 @@ def _apply_inbound_create(
     )
 
 
-def _apply_inbound_update(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
-) -> ApplyResult:
+def _apply_inbound_update(mutation, *, repo_root=None, **_kwargs) -> ApplyResult:
     """Apply a remote-side update to an existing local jira-* ticket.
 
     Writes one EDIT event with the changed fields, plus an additional STATUS
@@ -174,7 +172,7 @@ def _apply_inbound_update(
 
 
 def _apply_inbound_clean_label(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Remove rebar-id-* labels from a Jira issue.
 
@@ -202,7 +200,7 @@ def _apply_inbound_clean_label(
 
 
 def _apply_inbound_repair_property(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
+    mutation, *, client: TicketTransport | None = None, **_kwargs
 ) -> ApplyResult:
     """Repair a missing ``local_id`` entity property on a Jira issue.
 
@@ -220,9 +218,7 @@ def _apply_inbound_repair_property(
     return ApplyResult(mutation.direction, mutation.action, outcome)
 
 
-def _apply_inbound_conflict(
-    mutation, *, client: TicketTransport | None = None, repo_root=None
-) -> ApplyResult:
+def _apply_inbound_conflict(mutation, **_kwargs) -> ApplyResult:
     """Emit a ``suppress_pair`` follow-on and a ``pending_bug_ticket`` directive
     for an unresolved (local, Jira) conflict.
 

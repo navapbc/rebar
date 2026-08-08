@@ -73,7 +73,7 @@ from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
 _DEFAULT_DOCS_URL = "https://github.com/navapbc/rebar/blob/main/docs/plan-review-criteria-guide.md"
 
 
-def plan_review_docs_url(explicit_root: str | os.PathLike[str] | None = None) -> str:
+def plan_review_docs_url(_explicit_root: str | os.PathLike[str] | None = None) -> str:
     """Base URL for the plan-review criteria authoring guide (no trailing ``#anchor``):
     ``REBAR_DOCS_URL`` if set, else the canonical hosted guide. The default is deliberately
     root-independent so coaching deep-links resolve from a consumer install (which has no rebar

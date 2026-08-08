@@ -225,7 +225,7 @@ def _fold_close_class(state: dict, data: dict) -> None:
         state["close_class"] = data["close_class"]
 
 
-def process_status(state: dict, event: dict, data: dict, filepath: str) -> None:
+def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None:
     """Apply a STATUS event with fork detection and lexical UUID tie-break.
 
     If current_status in the event doesn't match state['status'], a fork has
@@ -538,7 +538,7 @@ def _file_impact_scope(data: dict, paths: list) -> tuple[str, str]:
     return "undeclared", ""
 
 
-def process_file_impact(state: dict, event: dict, data: dict) -> None:
+def process_file_impact(state: dict, _event: dict, data: dict) -> None:
     """Apply a FILE_IMPACT event: replace the tri-state declaration (LWW)."""
     paths = data.get("file_impact") or []
     scope, reason = _file_impact_scope(data, paths)
@@ -547,7 +547,7 @@ def process_file_impact(state: dict, event: dict, data: dict) -> None:
     state["no_file_impact_reason"] = reason
 
 
-def process_verify_commands(state: dict, event: dict, data: dict) -> None:
+def process_verify_commands(state: dict, _event: dict, data: dict) -> None:
     """Apply a VERIFY_COMMANDS event: replace state.verify_commands (last-writer-wins).
 
     Mirrors the jq `show` reducer semantics (`.verify_commands = ev.data.verify_commands // []`)
@@ -560,7 +560,7 @@ def process_verify_commands(state: dict, event: dict, data: dict) -> None:
     state["verify_commands"] = data.get("verify_commands") or []
 
 
-def process_workflow_run(state: dict, event: dict, data: dict) -> None:
+def process_workflow_run(state: dict, _event: dict, data: dict) -> None:
     """Apply a WORKFLOW_RUN event: per-key LWW into ``state.workflow_runs[run_id]``.
 
     Workflow run-state lives on rebar's only durable surface — the target ticket's
@@ -581,7 +581,7 @@ def process_workflow_run(state: dict, event: dict, data: dict) -> None:
     runs[run_id] = dict(data)
 
 
-def process_workflow_step(state: dict, event: dict, data: dict) -> None:
+def process_workflow_step(state: dict, _event: dict, data: dict) -> None:
     """Apply a WORKFLOW_STEP event: per-key LWW into
     ``state.workflow_steps[run_id][frame_key]``.
 
@@ -610,7 +610,7 @@ def process_workflow_step(state: dict, event: dict, data: dict) -> None:
     run_steps[key] = dict(data)
 
 
-def process_commits(state: dict, event: dict, data: dict) -> None:
+def process_commits(state: dict, _event: dict, data: dict) -> None:
     """Apply a COMMITS event: union commit records into ``state.commits`` (WS-H).
 
     The code-review example workflow needs commit SHAs attached to a ticket as
