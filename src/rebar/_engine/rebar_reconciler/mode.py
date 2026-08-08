@@ -14,7 +14,6 @@ The bootstrap modes are progressive warm-up phases before full live operation.
 
 from __future__ import annotations
 
-import functools
 from enum import Enum
 
 # Ordered list defines < / > semantics for check_phase_gate.
@@ -28,7 +27,6 @@ _ORDERED = [
 ]
 
 
-@functools.total_ordering
 class Mode(str, Enum):
     """Reconciler operation mode.
 
@@ -85,16 +83,28 @@ class Mode(str, Enum):
         return _ORDERED.index(self.value)
 
     def __lt__(self, other: object) -> bool:
-        """Order Modes by their position in ``_ORDERED``.
-
-        Combined with ``@functools.total_ordering`` this yields the full set
-        of comparison operators (``<``, ``<=``, ``>``, ``>=``) for free; ``==``
-        comes from the Enum base class. Comparison against a non-Mode returns
-        NotImplemented so Python can fall back to the reflected operator.
-        """
+        """Order Modes by their position in ``_ORDERED``."""
         if not isinstance(other, Mode):
             return NotImplemented
-        return _ORDERED.index(self.value) < _ORDERED.index(other.value)
+        return self.rank() < other.rank()
+
+    def __le__(self, other: object) -> bool:
+        """Order Modes by their position in ``_ORDERED``."""
+        if not isinstance(other, Mode):
+            return NotImplemented
+        return self.rank() <= other.rank()
+
+    def __gt__(self, other: object) -> bool:
+        """Order Modes by their position in ``_ORDERED``."""
+        if not isinstance(other, Mode):
+            return NotImplemented
+        return self.rank() > other.rank()
+
+    def __ge__(self, other: object) -> bool:
+        """Order Modes by their position in ``_ORDERED``."""
+        if not isinstance(other, Mode):
+            return NotImplemented
+        return self.rank() >= other.rank()
 
 
 # Per-mode mutation cap. None means uncapped (LIVE). 0 means "apply nothing"
