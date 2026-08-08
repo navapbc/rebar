@@ -461,7 +461,7 @@ def test_workflow_marker_comment_silences_step(lint, tree):
             steps:
               - name: commit back CAS loop
                 run: |
-                  # raw-git-ok: CAS push loop stays verbatim in YAML per ticket 4c4f
+                  # raw-git-ok: fixture proves an explicitly reviewed workflow exemption
                   cd .tickets-tracker
                   git add -A
                   git commit -m "reconcile"
