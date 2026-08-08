@@ -69,3 +69,37 @@ def test_mode_ordering_supports_comparison():
     assert Mode.LIVE.rank() > Mode.BOOTSTRAP_THROTTLE.rank()
     assert Mode.BOOTSTRAP_THROTTLE.rank() > Mode.BOOTSTRAP_STRICT.rank()
     assert Mode.BOOTSTRAP_STRICT.rank() > Mode.DRY_RUN.rank()
+
+
+def test_mode_rich_comparisons_follow_rank_for_every_pair():
+    """Inherited string comparisons never replace the five-mode rank contract."""
+    ordered = [
+        Mode.RECONCILE_CHECK,
+        Mode.DRY_RUN,
+        Mode.BOOTSTRAP_STRICT,
+        Mode.BOOTSTRAP_THROTTLE,
+        Mode.LIVE,
+    ]
+    for index, lower in enumerate(ordered):
+        assert lower <= lower
+        assert lower >= lower
+        assert not lower < lower
+        assert not lower > lower
+        for higher in ordered[index + 1 :]:
+            assert lower < higher
+            assert lower <= higher
+            assert higher > lower
+            assert higher >= lower
+
+
+def test_mode_rich_comparisons_accept_equivalent_members_from_a_second_load():
+    """Dynamic loader aliases retain the same five-value comparison contract."""
+    spec = importlib.util.spec_from_file_location("rebar_reconciler_mode_second_load", MODE_PATH)
+    assert spec is not None and spec.loader is not None
+    second = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = second
+    spec.loader.exec_module(second)
+
+    assert Mode.BOOTSTRAP_THROTTLE > second.Mode.RECONCILE_CHECK
+    assert Mode.RECONCILE_CHECK <= second.Mode.RECONCILE_CHECK
+    assert Mode.LIVE.__gt__("bootstrap-throttle") is NotImplemented
