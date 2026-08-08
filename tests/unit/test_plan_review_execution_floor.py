@@ -43,7 +43,7 @@ def test_execution_review_floors_blocking_threshold_without_hiding_finding(monke
     )
     thresholds = []
 
-    def fake_kernel(findings, verifs, *, threshold_for, impact_fn):
+    def fake_kernel(findings, verifs, *, threshold_for, impact_fn, execution_review=False):
         threshold, enabled = threshold_for("T1")
         thresholds.append((threshold, enabled))
         return [{**findings[0], "block_threshold": threshold, "blocking_enabled": enabled}]

@@ -676,13 +676,51 @@ def pass3_over_findings(
             block_threshold = max(block_threshold, 0.80)
         return block_threshold, blocking_enabled
 
+    # On-target veto cohort restriction (plan-review-specific): the execution-phase veto keyed on
+    # `current_state_satisfies_plan_goal` trusts a PRESENT-STATE code check, which only the
+    # code-grounded verifier can actually perform. For a finding OUTSIDE the code-grounded cohort
+    # (verified single-turn, tool-less), a `yes` is not a real present-state check, so force the
+    # answer to "na" before delegating — the kernel veto then cannot fire on it. Mirrors the
+    # `asserted_capability_confirmed` cohort restriction, but enforced deterministically here (not
+    # only by prompt) so a non-grounded finding can never be silently dropped.
+    if execution_review:
+        verifs = _restrict_on_target_veto_to_grounded(findings, verifs)
+
     # Plan-review dispatches its own impact model (story fishable-apivorous-redhead):
     # severity-first MAX + hard override + detection amplifier over the 7 plan-severity axes,
     # INSTEAD of the mean `impact`. The signed-verdict shape is unchanged; code-review keeps
     # the kernel default (no impact_fn) and is byte-unchanged.
     return review_kernel.pass3_over_findings(
-        findings, verifs, threshold_for=_threshold_for, impact_fn=review_kernel.impact_plan
+        findings,
+        verifs,
+        threshold_for=_threshold_for,
+        impact_fn=review_kernel.impact_plan,
+        execution_review=execution_review,
     )
+
+
+def _restrict_on_target_veto_to_grounded(
+    findings: list[dict[str, Any]], verifs: dict[int, dict[str, Any]]
+) -> dict[int, dict[str, Any]]:
+    """Neutralize the on-target veto answer (``current_state_satisfies_plan_goal``) for any finding
+    whose criteria do NOT intersect :data:`registry.CODEBASE_GROUNDED` — forcing it to ``"na"`` so
+    the kernel's execution-phase veto cannot drop a finding whose ``yes`` came from a tool-less
+    single-turn verifier that could not actually inspect present code state. Returns a shallow copy
+    that only rewrites the affected verifications; grounded findings and untouched keys are shared
+    unchanged (a byte-identical passthrough when nothing needs neutralizing)."""
+    grounded = registry.CODEBASE_GROUNDED
+    out = dict(verifs)
+    for i, f in enumerate(findings):
+        if grounded.intersection(f.get("criteria") or []):
+            continue
+        v = verifs.get(i)
+        if not v:
+            continue
+        binary = v.get("binary") or {}
+        if binary.get("current_state_satisfies_plan_goal") in (None, "na"):
+            continue
+        out[i] = {**v, "binary": {**binary, "current_state_satisfies_plan_goal": "na"}}
+    return out
 
 
 def _exempt_verdict(ctx: PlanContext, *, reason: str) -> dict[str, Any]:

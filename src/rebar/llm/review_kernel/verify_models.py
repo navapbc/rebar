@@ -281,7 +281,23 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
             "prerequisite_attribution_valid": (
                 str,
                 Field(default="na", description="yes|no|na"),
-            )
+            ),
+            # Execution-phase on-target veto (na-default, NOT graded). Drops the
+            # execution-review false positive where the finding reports that the code lacks
+            # (or already contains) something the plan directs — but the code has in fact
+            # reached the plan's own directed end state, so the finding merely re-reports
+            # completed, on-target work. Vetoes ONLY during an execution review
+            # (decide.pass3_decide's execution_review branch); at planning time it is inert,
+            # so a genuine planning-stage "remove X that never existed" true positive stands.
+            # COHORT-RESTRICTED (analogous in intent to asserted_capability_confirmed, though a
+            # DIFFERENT cohort set): a definite "yes" is a PRESENT-STATE code check only the
+            # code-grounded verifier can make, so it stays "na" outside the CODEBASE_GROUNDED
+            # cohort (E4/G1G2/A1/G6/asserted-capability), enforced deterministically in
+            # orchestrator.pass3_over_findings (not only by prompt).
+            "current_state_satisfies_plan_goal": (
+                str,
+                Field(default="na", description="yes|no|insufficient|na"),
+            ),
         },
     )
 
