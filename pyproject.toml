@@ -186,6 +186,12 @@ jira-datacenter = [
 grounding-t2 = [
     "pyright>=1.1",
 ]
+# Optional S3 ticket-store backend (epic cf3c). Ships the awslabs/git-remote-s3 remote
+# helper (Apache-2.0) so `sync.remote` can point at an s3://bucket/prefix remote. NEVER
+# required by core rebar; only operators using the S3 backend install it. The >=0.3.2 floor
+# is the first release carrying the IfNoneMatch per-ref lock that prevents the
+# multiple-bundles corruption.
+s3 = ["git-remote-s3>=0.3.2"]
 dev = [
     "pytest>=8",
     "mcp>=1.28.1,<2",

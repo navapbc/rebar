@@ -692,6 +692,20 @@ wheels = [
 ]
 
 [[package]]
+name = "git-remote-s3"
+version = "0.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "boto3" },
+    { name = "botocore" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b4/cb/ab39005e007a6d9eb4e0c3c0b624d5054cb43d14ea4d98f63ef7e97de2ea/git_remote_s3-0.3.2.tar.gz", hash = "sha256:92cab72ae2e50e53464780b0f25b5b03f3f51ced24f5ac71954ccea13b3bd886", size = 27638, upload-time = "2026-03-14T11:54:48.922Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/3b/ca5f780bfd132f64d0b5958dd8f3229804234dd0da0142b891d8ee67b471/git_remote_s3-0.3.2-py3-none-any.whl", hash = "sha256:3a5a1f6cc886327556a1d01ace254d604a884d35af74c40514be004185aa7f80", size = 26272, upload-time = "2026-03-14T11:54:50.051Z" },
+]
+
+[[package]]
 name = "googleapis-common-protos"
 version = "1.75.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1549,6 +1563,9 @@ reviewbot = [
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
 ]
+s3 = [
+    { name = "git-remote-s3" },
+]
 tracing = [
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-sdk" },
@@ -1568,6 +1585,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'reviewbot'" },
     { name = "fastapi", marker = "extra == 'ui'" },
     { name = "genai-prices", marker = "extra == 'pricing'" },
+    { name = "git-remote-s3", marker = "extra == 's3'", specifier = ">=0.3.2" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.18" },
     { name = "jinja2", marker = "extra == 'ui'" },
     { name = "jira", marker = "extra == 'jira-datacenter'", specifier = ">=3.8,<4" },
@@ -1602,7 +1620,7 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'ui'" },
     { name = "zizmor", marker = "extra == 'dev'", specifier = "==1.29.0" },
 ]
-provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "tracing", "grounding", "metrics", "jira-datacenter", "grounding-t2", "dev"]
+provides-extras = ["mcp", "reviewbot", "ui", "agents", "bedrock", "pricing", "tracing", "grounding", "metrics", "jira-datacenter", "grounding-t2", "s3", "dev"]
 
 [[package]]
 name = "nodeenv"

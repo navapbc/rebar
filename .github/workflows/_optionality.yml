@@ -172,6 +172,7 @@ jobs:
             "tracing:tracing"
             "grounding:grounding"
             "metrics:metrics"
+            "s3:s3"
             "mcp:mcp"
             "union:agents,eval,tracing"
           )

@@ -363,7 +363,8 @@ def test_optionality_loop_covers_every_declared_extra() -> None:
 
     run = _optionality_loop_step_run()
     # Entries are "<label>:<pip extras>"; the union entry's label is not an extra name.
-    labels = {m.group(1) for m in re.finditer(r'"([a-z_]+):([a-z_,]+)"', run)}
+    # Extra/pip-extra names may contain digits (e.g. `s3`), so allow them in both groups.
+    labels = {m.group(1) for m in re.finditer(r'"([a-z0-9_]+):([a-z0-9_,]+)"', run)}
     missing = set(_optional.EXTRAS) - labels
     assert not missing, (
         f"optional extra(s) {sorted(missing)} are declared in rebar._optional.EXTRAS but are not "
