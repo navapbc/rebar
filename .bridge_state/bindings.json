@@ -42536,9 +42536,17 @@
       "updated_at": "2026-08-06T19:03:53Z"
     },
     "5623-9208-3d3b-4c31": {
+      "baseline": {
+        "assignee": null,
+        "description": "In ProductionBatchRunner's project-criterion resolution (the project.-prefixed activated overlay criteria path, _project_criteria/route_criteria re-route), under PROBE MODE (drift-refresh) the built-in set is the tiny probe allowlist (E4+G1G2), but route_criteria has no probe notion, so an activated project criterion is ALSO evaluated during a probe. Harmless today (the drift comparison keys off E4/G1G2), but a future change should thread the probe allowlist into this routing to suppress evaluating activated project criteria during a probe. Discovered while triaging comments in src/rebar/llm/plan_review/production_batch_runner.py (ticket ad16).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "plan-review: thread probe allowlist into project-criterion routing (drift-refresh)"
+      },
       "created_at": "2026-08-08T11:01:24Z",
       "jira_id": "4587713",
       "jira_key": "REB-2675",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-08T11:01:27Z"
     },
@@ -114776,9 +114784,17 @@
       "updated_at": "2026-07-12T19:38:40Z"
     },
     "e907-8dbd-7627-4725": {
+      "baseline": {
+        "assignee": null,
+        "description": "ProductionBatchRunner.run receives req.usd_budget as a per-plan cost cap override, but there is no clean seam in today's pass1/sizing API to apply it: run_pass1 \u2192 sizing.shed_to_budget computes the cap internally via sizing.plan_budget_cap(ctx) (reading REBAR_PLAN_REVIEW_BUDGET as the base, then centrality-scaling it), with no injection point. The only current overrides are (a) mutating the process-global, centrality-scaled env var (NOT a true cap override) or (b) adding a cap-override parameter \u2014 gate code outside the thin adapter. Today the requested override is JOURNALED (coverage.requested_usd_budget / budget_override_applied=false, a WARNING) and the computed cap is used. Follow-up: thread an explicit cap_override through run_pass1 \u2192 shed_to_budget so req.usd_budget is honoured. Discovered while triaging comments in src/rebar/llm/plan_review/production_batch_runner.py (ticket ad16).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "plan-review: explicit cap_override seam through run_pass1 -> shed_to_budget"
+      },
       "created_at": "2026-08-08T11:01:27Z",
       "jira_id": "4587714",
       "jira_key": "REB-2676",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-08T11:01:30Z"
     },
