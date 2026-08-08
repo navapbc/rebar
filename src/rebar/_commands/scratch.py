@@ -216,7 +216,7 @@ def _clear(args: list[str]) -> int:
     return 0
 
 
-def scratch_cli(argv: list[str], *, repo_root=None) -> int:
+def scratch_cli(argv: list[str], *, _repo_root=None) -> int:
     """``rebar scratch <verb> [args...]`` — route set/get/clear; unknown verb →
     compact JSON error (matching the bash printf)."""
     if len(argv) < 1:
