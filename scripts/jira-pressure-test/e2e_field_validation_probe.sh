@@ -140,7 +140,7 @@ run_reconciler() {
 run_filtered_reconciler() {
     local filter_ids="$1"
     shift
-    run_reconciler --mode bootstrap-throttle --filter-local-ids "$filter_ids" --repo-root "$REPO_ROOT" "$@"
+    run_reconciler sync --max-changes 100 --only "$filter_ids" --repo-root "$REPO_ROOT" "$@"
 }
 
 get_jira_field() {

@@ -358,6 +358,7 @@ def apply(
     mode=None,
     binding_store=None,
     persist: bool = True,
+    max_changes: int | None = None,
     abort_check=None,
     synced_fields_out=None,
 ):
@@ -389,7 +390,9 @@ def apply(
         raise TypeError("apply() legacy batch form requires pass_id as the second argument")
 
     # Mode-cap enforcement (story 286b): coerce mode + partition into applied/deferred.
-    mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(mode, mutations)
+    mode, mode_mod, mutations_input, deferred_for_manifest = _partition_by_mode_cap(
+        mode, mutations, max_changes=max_changes
+    )
 
     # Direction-aware dispatch (defect #8): inbound typed Mutations route through
     # _apply_typed per-mutation; outbound/untyped go to the legacy _apply_batch.
@@ -509,6 +512,7 @@ def apply(
             manifest_path,
             repo_root,
             persist,
+            max_changes,
         )
         if action == "RETURN":
             return value

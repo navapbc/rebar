@@ -14,14 +14,10 @@ What it pins:
    creation channel and a ``jira-`` local-id prefix, with the deployment distinguished by
    ``RemoteRef.instance`` — the epic's shared-identity decision.
 
-WHY THE EXCEPTION CHECK IS A SUBPROCESS ASSERTION, not ``caplog``: ``rebar.reconcile()``
-runs the reconciler in a SUBPROCESS (``subprocess.run(..., capture_output=True)``,
-``src/rebar/_lib_ops.py:114``). ``caplog`` hooks only the *test* process's ``logging`` and
-can never observe those records; worse, on the success path ``reconcile()`` returns parsed
-stdout JSON and DISCARDS stderr entirely (it survives only inside the ``RebarError`` raised
-when the return code is not 0/75). So a swallowed traceback would be invisible to it. These
-tests therefore invoke the reconciler subprocess DIRECTLY with the same argv
-``_lib_ops.reconcile`` builds, and assert on the captured streams.
+WHY THE EXCEPTION CHECK IS A SUBPROCESS ASSERTION, not ``caplog``: the bridge runs the
+reconciler in a SUBPROCESS. ``caplog`` hooks only the *test* process's ``logging`` and can
+never observe those records. These tests therefore invoke the primary reconciler subprocess
+vocabulary DIRECTLY and assert on both captured streams.
 
 Tier notes (inherited from ``tests/external/``; see ``test_transport.py`` for the full
 rationale, reproduced here only where it matters):
@@ -44,7 +40,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 import textwrap
 import urllib.error
 import urllib.request
@@ -52,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _dc_support import run_bridge as _run_bridge
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
 
@@ -147,29 +143,6 @@ def dc_rebar_repo(
     return rebar_repo
 
 
-def _run_reconcile(repo: Path, mode: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the reconciler subprocess directly — the same argv ``_lib_ops.reconcile``
-    builds — so BOTH streams are observable. ``reconcile()`` itself discards stderr on
-    the success path, which is precisely where a swallowed traceback would hide."""
-    from rebar._engine import engine_env
-
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "rebar_reconciler",
-            "--mode",
-            mode,
-            "--repo-root",
-            str(repo),
-        ],
-        env=engine_env(str(repo)),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-
 def _envelope(cp: subprocess.CompletedProcess[str]) -> dict[str, Any]:
     """Parse the reconciler's JSON result envelope from stdout (last JSON line)."""
     out = cp.stdout.strip()
@@ -234,15 +207,15 @@ def _assert_no_unhandled_exception(cp: subprocess.CompletedProcess[str], *, what
 @_skip
 @_skip_no_extra
 def test_dc_reconcile_pass_raises_no_unhandled_exception(dc_rebar_repo: Path) -> None:
-    cp = _run_reconcile(dc_rebar_repo, "dry-run")
-    _assert_no_unhandled_exception(cp, what="dry-run")
+    cp = _run_bridge(dc_rebar_repo, "preview")
+    _assert_no_unhandled_exception(cp, what="preview")
 
-    # dry-run IS a no_write mode, so it DOES emit a JSON envelope (__main__.py:445-452
+    # Preview IS a no_write operation, so it DOES emit a JSON envelope (__main__.py:445-452
     # calls json.dumps only on the no_write branch). Keep the stronger assertion here;
     # only the WRITING-mode tests below had to change.
     envelope = _envelope(cp)
     assert envelope.get("mutation_failures", 0) == 0, (
-        f"the dry-run pass reported mutation failures: {envelope}"
+        f"the preview reported mutation failures: {envelope}"
     )
 
 
@@ -256,10 +229,10 @@ def test_dc_reconcile_pass_raises_no_unhandled_exception(dc_rebar_repo: Path) ->
 def test_a_repeated_dc_reconcile_pass_writes_nothing(dc_rebar_repo: Path) -> None:
     """A second pass immediately after the first must be a no-op. Writing on every pass
     would still look like 'success' on a single run while thrashing the remote forever."""
-    first = _run_reconcile(dc_rebar_repo, "bootstrap-strict")
+    first = _run_bridge(dc_rebar_repo, "sync", max_changes=10)
     _assert_no_unhandled_exception(first, what="first pass")
 
-    second = _run_reconcile(dc_rebar_repo, "bootstrap-strict")
+    second = _run_bridge(dc_rebar_repo, "sync", max_changes=10)
     _assert_no_unhandled_exception(second, what="second pass")
 
     _assert_wrote_nothing(second, what="second pass")
@@ -310,7 +283,7 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
     remote_key = created["key"]
     track_issue(remote_key)
 
-    cp = _run_reconcile(dc_rebar_repo, "bootstrap-strict")
+    cp = _run_bridge(dc_rebar_repo, "sync", max_changes=10)
     _assert_no_unhandled_exception(cp, what="inbound provenance pass")
     _assert_converged_writing_pass(cp, what="inbound provenance pass")
 

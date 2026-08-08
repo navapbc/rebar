@@ -170,7 +170,8 @@ def test_preview_is_read_only_and_sync_persists_the_binding(
     bridge_state = rebar_repo / ".rebar" / "bridge-state" / "bindings.json"
 
     def fake_reconciler(argv: list[str], *, env=None) -> int:
-        mode = argv[argv.index("--mode") + 1]
+        route = argv[3]
+        mode = {"preview": "dry-run", "sync": "live"}[route]
         with transport_log.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"operation": "search", "mode": mode}) + "\n")
         if mode == "dry-run":
@@ -215,7 +216,8 @@ def test_sync_launches_live_and_preserves_child_exit_code(rebar_repo: Path, monk
 
     monkeypatch.setattr(subprocess, "call", phase_gate)
     assert _cli.main(["bridge", "sync"]) == 4
-    assert calls[0][-2:] == ["--mode", "live"]
+    assert calls[0][3] == "sync"
+    assert "--mode" not in calls[0]
 
 
 def test_bridge_help_avoids_internal_vocabulary_and_numeric_exit_codes(

@@ -26,13 +26,20 @@ Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-r
 ```
 Usage: rebar bridge <command>
 
-Run staged Jira synchronization.
+Synchronize rebar tickets with Jira.
 
 Commands:
   preview   Show proposed Jira changes without applying them
   sync      Apply the staged Jira synchronization
   pause     Temporarily stop scheduled reconciliation
   resume    Resume scheduled reconciliation
+
+Preview and sync options:
+  --only IDS       Examine only the named local IDs or bound Jira keys
+  --except IDS     Exclude the named local IDs or bound Jira keys
+
+Sync option:
+  --max-changes N  Apply at most N proposed changes and retain the audit manifest
 ```
 
 ### `bridge-fsck`
