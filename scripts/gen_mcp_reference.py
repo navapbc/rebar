@@ -157,6 +157,14 @@ def render() -> str:
         "inline note."
     )
     lines.append("")
+    lines.append(
+        "**Failure shape:** a tool that fails with a known rebar error raises "
+        "`ToolError` whose `__cause__` is an `McpEnvelopeError` carrying the shared "
+        "`error_envelope` (`{error, input?, message[, exit_code]}`, `error` from "
+        "`rebar.KNOWN_ERROR_CODES`) — the same machine-readable identity the CLI emits. "
+        "See [output-schemas.md](output-schemas.md#the-same-failure-channel-over-mcp)."
+    )
+    lines.append("")
 
     lines.append("## Read-only (always available)")
     lines.append("")

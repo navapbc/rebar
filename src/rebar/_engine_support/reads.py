@@ -275,6 +275,12 @@ class ReadError(Exception):
         self.message = message
 
 
+class TicketNotFoundError(ReadError):
+    """A ticket-not-found failure (ticket 8a31). A ReadError subclass so every
+    existing ``except ReadError`` still catches it, but with a TYPE identity so the
+    error classifier can map it to ``ticket_not_found`` without message sniffing."""
+
+
 def inbound_deps_state(ticket_id: str, tracker: str) -> list[dict]:
     """Computed INBOUND edges for the per-ticket show view (bug 05cb).
 
@@ -307,10 +313,10 @@ def show_state(
 ) -> dict:
     resolved = resolve_ticket_id(ticket_id, tracker)
     if resolved is None:
-        raise ReadError(f"Ticket '{ticket_id}' not found")
+        raise TicketNotFoundError(f"Ticket '{ticket_id}' not found")
     ticket_path = os.path.join(tracker, resolved)
     if not os.path.isdir(ticket_path):
-        raise ReadError(f"Ticket '{ticket_id}' not found")
+        raise TicketNotFoundError(f"Ticket '{ticket_id}' not found")
     state = reduce_ticket(ticket_path)
     if state is None:
         raise ReadError(f'ticket "{resolved}" has no CREATE or SNAPSHOT event')

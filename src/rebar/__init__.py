@@ -31,7 +31,12 @@ from rebar._engine import engine_dir
 # such as ``rebar._reads`` can source them downward instead of reaching UP into this
 # facade. Re-exported here for back-compat: ``rebar.RebarError`` /
 # ``from rebar import RebarError`` (and ``ConcurrencyError``) are unchanged.
-from rebar._errors import ConcurrencyError, RebarError
+from rebar._errors import (
+    KNOWN_ERROR_CODES,
+    ConcurrencyError,
+    RebarError,
+    error_code_for,
+)
 from rebar._lib_gates import (
     check_ac,
     clarity_check,
@@ -141,6 +146,7 @@ except importlib.metadata.PackageNotFoundError:  # pragma: no cover - dev checko
 
 
 __all__ = [
+    "KNOWN_ERROR_CODES",
     "ConcurrencyError",
     # exceptions
     "RebarError",
@@ -166,6 +172,7 @@ __all__ = [
     "edit_ticket",
     "engine_dir",
     "ensure_identity_for",
+    "error_code_for",
     "export_tickets",
     "find_inbound_relationships",
     "fsck",

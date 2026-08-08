@@ -4,6 +4,8 @@
 
 The tools the rebar MCP server (`rebar-mcp`) exposes, enumerated from the server's own registrars and grouped by gate tier. Each tool is listed with the first line of its description; the closed set of hybrid gate cases carry an inline note.
 
+**Failure shape:** a tool that fails with a known rebar error raises `ToolError` whose `__cause__` is an `McpEnvelopeError` carrying the shared `error_envelope` (`{error, input?, message[, exit_code]}`, `error` from `rebar.KNOWN_ERROR_CODES`) — the same machine-readable identity the CLI emits. See [output-schemas.md](output-schemas.md#the-same-failure-channel-over-mcp).
+
 ## Read-only (always available)
 
 Registered by `register_read_tools` and always exposed — reads never mutate the store. Two rows carry an inline gate note (their write/mutation path is gated).

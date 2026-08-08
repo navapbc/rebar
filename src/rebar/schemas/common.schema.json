@@ -105,7 +105,7 @@
     "error_envelope": {
       "type": "object",
       "additionalProperties": true,
-      "required": ["error", "input", "message"],
+      "required": ["error", "message"],
       "properties": {
         "error": { "type": "string", "description": "Machine error code, e.g. 'ticket_not_found'." },
         "input": { "type": "string", "description": "The raw input that failed to resolve." },

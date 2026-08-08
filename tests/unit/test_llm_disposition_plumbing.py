@@ -162,7 +162,8 @@ def test_structured_llm_failure_carries_disposition():
     assert out["retryable"] is True
     assert out["resolution_class"] == "WAIT_AND_RETRY"
     assert out["diagnostic"] == {"type": "overload", "status_code": 529}
-    assert "overloaded" in out["error"]
+    assert out["error"] == "llm_unavailable"
+    assert "overloaded" in out["message"]
 
 
 def test_structured_llm_failure_bare_error():
