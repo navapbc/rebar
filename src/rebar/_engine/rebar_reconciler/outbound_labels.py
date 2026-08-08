@@ -3,7 +3,8 @@
 Extracted verbatim from ``outbound_differ`` along the seam that already existed
 there — a self-contained cluster (``_diff_labels`` + ``_diff_status_annotation_labels``
 and the two constants they read) that the differ calls but nothing else in the module
-feeds. Splitting it keeps ``outbound_differ`` under the repo's module-size cap and puts
+feeds. Splitting it keeps ``outbound_differ`` under the module-size cap (see ADR 0058)
+and puts
 these next to their siblings ``outbound_links`` / ``outbound_comments`` /
 ``outbound_assignee``, which already own the other per-concern outbound diffs.
 

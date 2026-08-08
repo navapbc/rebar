@@ -10,7 +10,7 @@ no capability Protocol of their own in ``_backend.py`` (unlike
 ``SupportsLinks``/``SupportsComments``) — so they stand together rather than
 as a full module plus a sub-100-line fragment.
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
 ``AssigneeNotFoundError`` moves WITH the members that raise it (``_assign``,
 ``validate_assignee_exists``); ``transport.py`` re-exports it so
 ``transport.AssigneeNotFoundError`` keeps resolving for existing importers.

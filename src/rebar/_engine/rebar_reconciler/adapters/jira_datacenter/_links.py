@@ -9,7 +9,7 @@ mutate + a per-item read + a paged project-wide map). ``_hierarchy.py``'s and
 ``_issues.py``'s capabilities are each large enough to stand alone; these two
 are not, so they stand together rather than as two sub-100-line files.
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
 """
 
 from __future__ import annotations

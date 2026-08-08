@@ -2,7 +2,7 @@
 epic e369) — sub-task ``parent`` writes, the Epic Link custom-field lookup,
 and the bulk parent-map reader. Where 39c1 / 9bb9 / future parent work lands.
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
 ``_resolve_epic_link_field_id`` (ticket 9bb9) is SHARED by ``set_parent``
 (outbound write) and ``get_parent_map`` (inbound read) — one discovery,
 never two definitions that could disagree about which field they mean.

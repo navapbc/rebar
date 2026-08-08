@@ -22,9 +22,11 @@ The design (ADR 0035 §(d)):
 * :class:`RemoteRef` is the identity tuple ``{vendor, instance, remote_id}`` that
   replaces the hardcoded ``"jira"`` provider literal and the bare remote key.
 
-S2 (this story) only *defines* the port and lands a thin ``JiraBackend`` +
-``JiraIdentityConvention`` implementation of it; routing core call sites through
-the port is S4, config-driven selection is S3.
+This module *defines* the port and lands a thin ``JiraBackend`` +
+``JiraIdentityConvention`` implementation of it. Config-driven selection (S3,
+:func:`~rebar_reconciler._backend_registry.select_backend`) and routing core call
+sites through the port (S4, e.g. ``run_differs`` injecting ``backend.outbound`` /
+``backend.inbound`` / ``backend.transport``) have both landed.
 """
 
 from __future__ import annotations
@@ -54,14 +56,9 @@ class BackendPaginationStallError(RuntimeError):
     back at a new offset), or a cursor walk handed the same non-null token twice.
     Every further request would return the same page forever.
 
-    **Readers must re-raise this PAST their fail-open handlers.** A stalled pager
-    is a TRUNCATED whole-project read, not a transient fault: degrading around it
-    writes a snapshot the differ then treats as authoritative (missing parents
-    read as parentless, missing issuelinks as "no links", so removals become
-    undetectable). That silent-loss class has shipped repeatedly here — bug deac
-    (``fetcher._iter_pages``), bug 9263 (the DC transport pager), bug cabc
-    (Cloud's ``acli_graph`` cursor walk) — which is why the loud abort is the
-    contract rather than a per-reader choice.
+    **Readers must re-raise this PAST their fail-open handlers** — a stalled pager
+    is a TRUNCATED whole-project read, not a transient fault. The contract, and the
+    three incidents (bugs deac / 9263 / cabc) that made it one, are in ADR 0062.
 
     Lives in core beside the other ``Backend*`` errors so BOTH the adapters that
     raise it and the core ``fetcher`` handlers that must re-raise it can name one

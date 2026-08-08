@@ -2,7 +2,7 @@
 (ticket 465d, epic e369) — construction, the unwrap boundary, the logged-retry
 choke point, and the one shared pager.
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
 Every capability mixin (``_issues.py``, ``_hierarchy.py``, ``_links.py``,
 ``_comments.py``, ``_people.py``, ``_properties.py``) inherits from
 :class:`_TransportBase` so mypy sees ``self._client`` / ``self.project`` /

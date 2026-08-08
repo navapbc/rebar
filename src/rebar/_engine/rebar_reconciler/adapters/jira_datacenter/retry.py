@@ -1,11 +1,8 @@
 """Retry policy + error translation for the Jira Data Center transport (story
 S1 [rebar:f2f3-9cb1-335b-4e31], epic e369).
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
-The move is forced by the LOCKED 800-line module-size cap
-(``.github/module-size-limit.txt``): ``transport.py`` stood at 789 lines, leaving
-eleven lines of headroom, and the 429 rate-limit policy that story S2
-[rebar:6758-26b8-c9ea-4c5d] adds cannot be written in place.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); this
+module changes no behaviour.
 
 ``TlsVerificationError`` moves WITH its factory rather than staying behind:
 ``_tls_verification_error`` returns it, so splitting the two would make this

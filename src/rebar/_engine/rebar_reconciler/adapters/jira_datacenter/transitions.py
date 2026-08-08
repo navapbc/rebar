@@ -3,11 +3,10 @@
 Everything in this module answers one question — *"which Jira transition moves this
 issue to the state the reconciler asked for, and what happens when none does?"* —
 and it is the cluster ``JiraDataCenterTransport.transition_issue_by_name`` and
-``JiraDataCenterTransport.update_issue`` both call. It was relocated out of
+``JiraDataCenterTransport.update_issue`` both call. It was extracted from
 ``transport.py`` along that already-existing call-graph seam (``update_issue`` →
-``route_status_to_transition`` → ``resolve_transition``) to buy headroom under the
-LOCKED 800-line module-size cap, exactly as the retry/error cluster was relocated to
-``retry.py`` by story S1. ``transport.py`` re-exports the public names, so
+``route_status_to_transition`` → ``resolve_transition``) under the module-size cap
+(see ADR 0058). ``transport.py`` re-exports the public names, so
 ``transport.<name>`` keeps resolving for existing importers.
 
 **Status is not an editable Jira field.** ``PUT /rest/api/2/issue/{key}`` with

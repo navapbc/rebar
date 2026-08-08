@@ -1,8 +1,10 @@
 """In-tree backend registry + selector (S3, epic bbf1).
 
-STUB: signatures pinned, bodies to be implemented. Maps ``config.reconciler.backend``
-to a factory ``Callable[[Config], Backend]``. A second backend registers itself
-in-tree under ``adapters/<x>/`` (no setuptools entry-points).
+Maps ``config.reconciler.backend`` to a factory ``Callable[[Config], Backend]``.
+A second backend registers itself in-tree under ``adapters/<x>/`` (no setuptools
+entry-points). ``select_backend`` is the live selector the reconciler core drives
+through — it is imported by the fetcher, the differs, the appliers, and the
+adapters that self-register.
 
 Design constraints (see ADR 0035 §(d) + the S3 plan):
 

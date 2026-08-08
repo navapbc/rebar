@@ -1,7 +1,7 @@
 """Core issue CRUD + status/label mutation mixin for the Jira Data Center
 transport (ticket 465d, epic e369) — the ``TicketTransport`` capability.
 
-RELOCATED VERBATIM out of ``transport.py``; this module changes no behaviour.
+Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no behaviour change.
 """
 
 from __future__ import annotations

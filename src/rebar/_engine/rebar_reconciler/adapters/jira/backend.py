@@ -10,8 +10,9 @@ Protocol delegates to the existing pure function:
 * ``transport`` → the injected ``acli.AcliClient`` (a ``TicketTransport``)
 
 Jira supports links + comments, so ``JiraBackend`` also satisfies ``SupportsLinks``
-and ``SupportsComments`` (delegating those to the transport). No core call site is
-rewired here (that is S4); no logic is relocated (that is S4/S5).
+and ``SupportsComments`` (delegating those to the transport). Core call sites now
+drive this backend through the port via
+:func:`~rebar_reconciler._backend_registry.select_backend`.
 """
 
 from __future__ import annotations
