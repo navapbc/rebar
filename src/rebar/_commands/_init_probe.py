@@ -83,6 +83,15 @@ def remote_exists(repo: str, remote: str, *, run_git_fn=run_git) -> bool:
     return run_git_fn(repo, "remote", "get-url", remote, check=False).returncode == 0
 
 
+def require_s3_helper_if_s3_remote(repo: str, remote: str, *, run_git_fn=run_git) -> None:
+    """Fail closed at init/mount if `remote` is an s3://|s3+zip:// URL lacking a current helper."""
+    cp = run_git_fn(repo, "remote", "get-url", remote, check=False)
+    if cp.returncode == 0:
+        from rebar._store.push import _require_s3_helper_if_s3_url
+
+        _require_s3_helper_if_s3_url(cp.stdout.strip())
+
+
 def probe_remote_branch(
     repo: str,
     remote: str,

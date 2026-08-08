@@ -385,6 +385,7 @@ def _mount_or_create_branch(repo: str, tracker: str, *, force_new_store: bool = 
 
     branch = tickets_branch(repo)  # configured tracker.branch (default "tickets")
     remote_name = tickets_remote(repo)  # configured sync.remote (default "origin")
+    _init_probe.require_s3_helper_if_s3_remote(repo, remote_name, run_git_fn=run_git)
     local = _git_ok(repo, "rev-parse", "--verify", branch)
     remote = _git_ok(repo, "rev-parse", "--verify", f"{remote_name}/{branch}")
     if local:
