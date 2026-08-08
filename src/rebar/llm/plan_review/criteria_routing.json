@@ -1224,6 +1224,33 @@
     "routing": "leaf",
     "trigger": "deterministically PRE-GATED (ticket 4ee2): runs only when BOTH a module reference AND a capability verb are present (rule module-capability-conjunction in det_gate_rules.py); a fired plan is still LLM-gated by its checklist GATE"
   },
+  "evidence-kind": {
+    "exec": "AGENT",
+    "facet": "codebase-grounding",
+    "applies_at": {
+      "scope": [
+        "container",
+        "leaf"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "blocking",
+    "checklist": [
+      {
+        "key": "acceptance_items_classified",
+        "check": "Visit every acceptance-criterion checkbox independently. Classify the completion evidence as codebase-verifiable, operator-attested, mixed, or insufficient. Repository classification requires affirmative evidence from an exact file path and symbol; ambiguous or unlocatable cases are insufficient and abstain."
+      },
+      {
+        "key": "evidence_kind_matches_tag",
+        "check": "For a single-kind criterion, the exact case-insensitive [operator-attested] tag appears only when completion proof is an outside-world event or live-state outcome. FIRE on an untagged/malformed external outcome, or on a tagged repository fact grounded by exact path/symbol evidence; explain that ticket comments cannot substitute for repository proof."
+      },
+      {
+        "key": "mixed_evidence_is_split",
+        "check": "A criterion that combines repository proof with outside-world proof is split-required: FIRE with a request for independently certifiable criteria and assign neither evidence kind to the bundled item."
+      }
+    ],
+    "routing": "base"
+  },
   "decomp-shape": {
     "exec": "AGENT",
     "facet": "container",

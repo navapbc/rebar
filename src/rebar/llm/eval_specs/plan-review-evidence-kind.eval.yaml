@@ -1,0 +1,225 @@
+# Frozen multi-sample classification corpus for the built-in `evidence-kind` criterion.
+# The gold set covers both ADR-0043 error directions, mixed evidence, and the deliberate
+# fail-open controls. Run with `rebar criteria eval evidence-kind --output json`.
+prompt: plan-review-evidence-kind
+model: bedrock:us.anthropic.claude-sonnet-4-6
+epochs: 2
+gate: at_least(2)
+coverage_threshold: 1.0
+quality_thresholds:
+  genuine_external_precision: 1.0
+  named_fixture_recall: 1.0
+  macro_precision: 0.9
+  macro_recall: 0.9
+  previously_passing_regressions: 0
+scorers:
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a finding case emits at least one
+      evidence-kind finding and a pass case emits none.
+dataset:
+  # Named historical misses: outside-world outcomes lacked the exact tag.
+  - id: EK-F-A1
+    corpus: rebar
+    criterion: evidence-kind
+    class: missing-external-tag
+    expect: finding
+    note: >-
+      A1: the benchmark execution outcome cannot be recovered from its harness or report
+      schema. Remediation must add the exact operator-attested tag.
+    input: >
+      ## Approach
+
+      Add and run the evidence-classification benchmark against the frozen corpus.
+
+      ## Acceptance Criteria
+
+      - [ ] The pinned benchmark run completed successfully with macro precision and recall
+        above 0.90, and its measured results were recorded on the ticket.
+  - id: EK-F-115B
+    corpus: rebar
+    criterion: evidence-kind
+    class: missing-external-tag
+    expect: finding
+    note: >-
+      Historical 115b shape: live-store surgery is an observed outside-world outcome.
+    input: >
+      ## Approach
+
+      Repair the shared ticket store during a quiet operator window.
+
+      ## Acceptance Criteria
+
+      - [ ] The live-store fsck completed successfully and repaired every orphaned event.
+  - id: EK-F-8C4F
+    corpus: rebar
+    criterion: evidence-kind
+    class: missing-external-tag
+    expect: finding
+    note: >-
+      Historical 8c4f shape: Gerrit submission and mirror replication are live outcomes.
+    input: >
+      ## Approach
+
+      Land the change through the two-vote Gerrit contribution path.
+
+      ## Acceptance Criteria
+
+      - [ ] The Gerrit change received both votes, was submitted to main, and replicated to
+        the GitHub mirror.
+  - id: EK-F-MALFORMED
+    corpus: rebar
+    criterion: evidence-kind
+    class: malformed-external-tag
+    expect: finding
+    note: >-
+      ADR-0043 treats the underscore near-miss as codebase-verifiable; remediation names the
+      exact hyphenated checkbox syntax.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator_attested] The production AWS deployment completed and its health check
+        returned 200.
+
+  # The bypass: exact tags applied to durable repository facts.
+  - id: EK-F-OVERTAG-METHOD
+    corpus: rebar
+    criterion: evidence-kind
+    class: overtagged-codebase
+    expect: finding
+    note: >-
+      The named method is directly inspectable in decide_ops.py. The finding must cite the
+      exact path/symbol and explain why ticket comments cannot replace repository proof.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The `operator_attested_ac_texts` method exists in
+        `src/rebar/llm/plan_review/decide_ops.py`.
+  - id: EK-F-OVERTAG-CONFIG
+    corpus: rebar
+    criterion: evidence-kind
+    class: overtagged-codebase
+    expect: finding
+    note: >-
+      Removing a named JSON key from a named checked-in routing entry is durable repository
+      state, regardless of whether an operator comments that it was removed.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The `default_posture` key is removed from the
+        `asserted-capability` entry in
+        `src/rebar/llm/plan_review/criteria_routing.json`.
+  - id: EK-F-MIXED-SPLIT
+    corpus: rebar
+    criterion: evidence-kind
+    class: mixed-split
+    expect: finding
+    note: >-
+      One checkbox bundles a repository symbol and a live deployment. The finding must be
+      split-required and must not force the bundle into either evidence kind.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The `operator_attested_ac_texts` method exists in
+        `src/rebar/llm/plan_review/decide_ops.py` and the resulting service was deployed to
+        production AWS successfully.
+
+  # Genuine external negatives: nearby code never turns the observed outcome into repo proof.
+  - id: EK-P-TEST-RUN
+    corpus: rebar
+    criterion: evidence-kind
+    class: genuine-external
+    expect: pass
+    regression_control: true
+    note: >-
+      The repository contains tests and Make targets, but their existence does not prove this
+      run occurred. The exact tag is correct.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] `make test` completed successfully against the current commit
+        and the run result was recorded on the ticket.
+  - id: EK-P-AWS-DEPLOY
+    corpus: rebar
+    criterion: evidence-kind
+    class: genuine-external
+    expect: pass
+    regression_control: true
+    note: >-
+      Terraform and deployment definitions may exist in the repository; the live AWS outcome
+      still requires an observation outside the tree.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The new review service was deployed to AWS production and its
+        live health endpoint returned 200.
+  - id: EK-P-DB-MODIFIED
+    corpus: rebar
+    criterion: evidence-kind
+    class: genuine-external
+    expect: pass
+    regression_control: true
+    note: >-
+      A checked-in migration can prove intended behavior, not that the production database
+      mutation occurred. The exact tag is correct.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The production database migration completed and the live
+        schema reports the new evidence_kind column.
+
+  # Clean repository and fail-open controls.
+  - id: EK-P-CODE-UNTAGGED
+    corpus: rebar
+    criterion: evidence-kind
+    class: clean-codebase
+    expect: pass
+    regression_control: true
+    note: >-
+      The same named-symbol repository fact is correct when left untagged.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] The `operator_attested_ac_texts` method exists in
+        `src/rebar/llm/plan_review/decide_ops.py`.
+  - id: EK-P-AMBIGUOUS-OVERTAG
+    corpus: rebar
+    criterion: evidence-kind
+    class: fail-open-ambiguous
+    expect: pass
+    regression_control: true
+    note: >-
+      This sounds code-adjacent but names no locatable repository artifact. The criterion must
+      abstain rather than infer a repository fact from vocabulary alone.
+    input: >
+      ## Acceptance Criteria
+
+      - [ ] [operator-attested] The compliance connector exposes the required regional policy
+        capability.
+
+gold_set:
+  - input: "A1 benchmark execution succeeded and measured thresholds were recorded, without the exact tag."
+    label: finding
+  - input: "115b live-store fsck surgery completed, without the exact tag."
+    label: finding
+  - input: "8c4f Gerrit votes, submission, and replication completed, without the exact tag."
+    label: finding
+  - input: "An AWS deployment outcome uses the malformed [operator_attested] near-miss."
+    label: finding
+  - input: "A named method in decide_ops.py is tagged operator-attested."
+    label: finding
+  - input: "Removal of a named key from checked-in criteria_routing.json is tagged operator-attested."
+    label: finding
+  - input: "One checkbox bundles a named repository symbol with a successful AWS deployment."
+    label: finding
+  - input: "An exactly tagged make test run completed successfully; test code also exists."
+    label: pass
+  - input: "An exactly tagged AWS deployment completed; deployment definitions also exist."
+    label: pass
+  - input: "An exactly tagged production DB mutation completed; migration code also exists."
+    label: pass
+  - input: "A named repository method exists and the criterion is untagged."
+    label: pass
+  - input: "An operator-tagged connector capability names no locatable repository artifact."
+    label: pass

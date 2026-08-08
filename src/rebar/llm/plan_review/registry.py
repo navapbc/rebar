@@ -74,7 +74,7 @@ RegistryError = _criteria.CriteriaError
 # prompt's ``execution_mode``, not per criterion-id, so EVERY AGENT-tier criterion can
 # read code. (Story 2's progressive drift-refresh therefore does NOT reuse a
 # "code-blind" subset of findings; it gates whole-verdict reuse on a fresh probe.)
-CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6", "asserted-capability"})
+CODEBASE_GROUNDED = frozenset({"E4", "G1G2", "A1", "G6", "asserted-capability", "evidence-kind"})
 
 # AGENT-tier criteria (one tool-using agent loop each; ~85× a single-turn call) —
 # gated by proportionate scrutiny. Container criteria G3/G4 read the LIVE ticket
@@ -96,6 +96,7 @@ AGENT_TIER = frozenset(
         "T10",
         "T11",
         "asserted-capability",
+        "evidence-kind",
         "decomp-shape",
     }
 )
@@ -170,6 +171,9 @@ CANONICAL_LLM = frozenset(
         # blocking is a future dogfood-gated criteria_routing.json change (see the promotion gate
         # in docs/plan-review-gate.md).
         "asserted-capability",
+        # ADR-0043 evidence-kind validator (story deeb): inspect every acceptance item and
+        # block only grounded mismatches between its exact tag and where completion proof lives.
+        "evidence-kind",
         # Decomposition-shape container criterion (epic 6982 / R3) — an advisory, AGENT-tier
         # CONTAINER criterion (facet `container`, like G3/G4; runs on the pass1_container fan-out)
         # that flags two decomposition-SHAPE smells G3/G4 don't target: a layer-cake split

@@ -26,6 +26,10 @@ Amended by ticket 28d5 (G7 blocking enablement, FP-verified on ticket 696a):
     scoping comes from the plan-v4 divergence grading (ADR 0054): only the two
     floor-grade kinds can reach the bar; incomplete_enumeration never floors.
 
+Amended by ticket deeb (operator-attested evidence-kind trust-bypass guard):
+  - evidence-kind added as blocking @ 0.95 after its frozen two-run corpus produced
+    7/7 required findings, zero false accepts across five pass controls, and stability 1.0.
+
 Proving command:
     .venv/bin/pytest tests/unit/test_threshold_recalibration.py -v
 """
@@ -47,6 +51,8 @@ PILOT_BLOCKING = {"T3": 0.90, "T10": 0.90, "T5c": 0.90}
 # The ticket-28d5 G7 enablement: blocking @ 0.85 (kept OUT of PILOT_BLOCKING — the
 # parametrized 0.90 posture test iterates that dict).
 G7_BLOCKING = {"G7": 0.85}
+# The ticket-deeb evidence-kind trust-bypass guard: blocking only at high confidence.
+EVIDENCE_KIND_BLOCKING = {"evidence-kind": 0.95}
 
 # AC4: the COMPLETE expected routing, pinned INLINE (no separate snapshot file). Any unintended
 # change to ANY criterion's (block_threshold, default_posture) fails the assertion below.
@@ -94,6 +100,7 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "no-file-impact": (0.95, "advisory"),
     "removal-rationale": (0.95, "advisory"),
     "asserted-capability": (0.95, "advisory"),
+    "evidence-kind": (0.95, "blocking"),
     "decomp-shape": (0.95, "advisory"),
     "necessity": (0.95, "advisory"),
     # Joint AC satisfiability (bug creamy-cocksure-elkhound) ships ADVISORY: promoting it to
@@ -178,6 +185,7 @@ def test_only_the_approved_and_prerequisite_criteria_are_blocking() -> None:
         | set(PROMOTED)
         | set(PILOT_BLOCKING)
         | set(G7_BLOCKING)
+        | set(EVIDENCE_KIND_BLOCKING)
         | {"T4", "prerequisite-consistency"}
     )
     assert blocking == expected

@@ -2,8 +2,8 @@
 
 These pin the ACs that the DET-lint tests cannot reach: that the criterion rides the `.rebar/`
 PROJECT OVERLAY (never the shipped default set), that it is tool-enabled so its contradiction
-probe can actually read the repo, and that the shipped `[operator-attested]` contract text is
-left unchanged so no other rebar client changes behaviour.
+probe can actually read the repo, and that the shipped `[operator-attested]` contract text stays
+at its deliberately approved wording.
 """
 
 from __future__ import annotations
@@ -26,13 +26,15 @@ PROMPT = REPO / ".rebar" / "prompts" / "plan-review-project-measurement-provenan
 # — that THIS STORY leaves the shipped contract wording alone — in every environment.
 #
 # `docs/plan-review-criteria-guide.md` is GENERATED and legitimately changes whenever any
-# criterion is added (e.g. T15), so only its contract SENTENCES are pinned, never the whole file.
+# criterion is added. Only its contract SENTENCES are pinned, never the whole file; ticket deeb
+# deliberately updated this digest when the built-in evidence-kind validator extended the
+# cross-client contract.
 CONTRACT_DIGESTS: dict[str, tuple[str, int]] = {
     "src/rebar/llm/reviewers/plan_review_F1.md": ("55272f1413a044eb", 1),
     "src/rebar/llm/reviewers/plan_review_E2.md": ("67326b3e8226ec77", 1),
     "src/rebar/llm/reviewers/plan_review_E6.md": ("975ade3a3d70c3fe", 1),
     "src/rebar/llm/plan_review/coach_moves.py": ("cda82d9f1d54416b", 2),
-    "docs/plan-review-criteria-guide.md": ("2bc2bb9f73d1bcc4", 3),
+    "docs/plan-review-criteria-guide.md": ("b9885d2952d216dc", 7),
 }
 
 
@@ -132,9 +134,8 @@ def test_criterion_descriptor_builds_without_prompt_not_found() -> None:
 
 @pytest.mark.parametrize("path", sorted(CONTRACT_DIGESTS))
 def test_shipped_contract_text_is_unchanged(path: str) -> None:
-    """No cross-client behaviour change: this story amends the [operator-attested] evidence
-    contract in an ADR and the project overlay, never in the shipped text that every rebar
-    client reads. If this fails, the contract wording itself moved."""
+    """Contract-bearing lines stay pinned; an intentional cross-client change updates the
+    expected digest and count in the same reviewed change."""
     expected_digest, expected_count = CONTRACT_DIGESTS[path]
     lines = _contract_lines((REPO / path).read_text())
     assert len(lines) == expected_count, (
