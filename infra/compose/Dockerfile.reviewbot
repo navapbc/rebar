@@ -31,8 +31,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 # git is needed at runtime: rebar's engine shells out to git for the event store.
 # curl + ca-certificates: fetch the gitleaks release binary below.
+# openssh-client is needed at runtime for AUTHORSHIP SIGNING (bug beb1): rebar signs each
+# event with SSHSIG via `ssh-keygen -Y sign` (rebar.attest.sshsig), which requires OpenSSH
+# >= 8.9. Without it `sign_event_authorship` raises SshKeygenUnavailable, `_seam` catches it
+# and writes the event UNSIGNED — so the bot silently produced 8880 unsigned events. Debian
+# bookworm (python:3.12-slim) ships OpenSSH 9.2, which satisfies the floor.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git curl ca-certificates \
+    && apt-get install -y --no-install-recommends git curl ca-certificates openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Security scanners for the code-review gate's WS5 fail-CLOSED detectors (epic b744 / WS5).

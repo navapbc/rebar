@@ -52,3 +52,24 @@ def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) ->
 
     assert result.returncode == 0, result.stderr
     assert receipt.read_text().splitlines() == ["ensure", "app"]
+
+
+# ── bug beb1: authorship signing shells out to ssh-keygen, so the image MUST carry it ──────
+def test_reviewbot_image_installs_openssh_for_sshsig() -> None:
+    """rebar signs each event's authorship with SSHSIG via ``ssh-keygen -Y sign``
+    (``rebar.attest.sshsig``), which requires OpenSSH >= 8.9. The review-bot image was built
+    ``FROM python:3.12-slim`` installing only ``git curl ca-certificates``, so ssh-keygen was
+    absent and ``sign_event_authorship`` raised ``SshKeygenUnavailable``. ``_seam`` catches
+    that and writes the event UNSIGNED, which is how the bot produced 8880 unsigned events.
+
+    The failure was doubly hidden: the exception is only logged as a warning, and it was
+    never even reached while ``author_id`` was null (``_seam`` gates on
+    ``if author_id and signing_key``), so nothing surfaced until the identity was fixed.
+    """
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    install_lines = [ln for ln in text.splitlines() if "apt-get install" in ln]
+    assert install_lines, "expected an apt-get install line in Dockerfile.reviewbot"
+    assert any("openssh-client" in ln for ln in install_lines), (
+        "Dockerfile.reviewbot must install openssh-client — without ssh-keygen every event "
+        "this bot writes is silently unsigned"
+    )
