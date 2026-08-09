@@ -31,6 +31,7 @@ Synchronize rebar tickets with Jira.
 Commands:
   preview   Show proposed Jira changes without applying them
   sync      Apply the staged Jira synchronization
+  status    Show the reconciler's durable status snapshot
   pause     Temporarily stop scheduled reconciliation
   resume    Resume scheduled reconciliation
 
@@ -40,6 +41,11 @@ Preview and sync options:
 
 Sync option:
   --max-changes N  Apply at most N proposed changes and retain the audit manifest
+
+Status options:
+  --target ID       Compare the witness with this environment id
+  --max-age AGE     Enable age-based staleness (for example 2h)
+  --json            Emit the snapshot as JSON
 ```
 
 ### `bridge-fsck`

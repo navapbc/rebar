@@ -107,6 +107,7 @@ def _plant_remote_blob(remote: Path, raw: bytes, ref: str = "refs/reconciler/gat
         (("bridge", "--help"), 0, "usage: rebar bridge"),
         (("bridge", "preview", "--help"), 0, "usage: rebar bridge preview"),
         (("bridge", "sync", "--help"), 0, "usage: rebar bridge sync"),
+        (("bridge", "status", "--help"), 0, "usage: rebar bridge status"),
         (("bridge", "pause", "--help"), 0, "usage: rebar bridge pause"),
         (("bridge", "resume", "--help"), 0, "usage: rebar bridge resume"),
     ],
@@ -119,7 +120,7 @@ def test_bridge_discovery_contracts(
     assert usage in completed.stdout.lower()
     assert completed.stderr == ""
     combined = (completed.stdout + completed.stderr).lower()
-    for future_verb in ("status", "resolve", "probe", "fsck", "bind", "unbind"):
+    for future_verb in ("resolve", "probe", "fsck", "bind", "unbind"):
         assert not re.search(rf"(?<![-a-z]){future_verb}(?![-a-z])", combined)
 
 

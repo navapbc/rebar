@@ -28,6 +28,7 @@ Test-loading strategy:
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -49,6 +50,16 @@ _MODE_PATH = _PKG_DIR / "mode.py"
 _ADVISORY_LOCK_KEY = "rebar_reconciler._advisory_lock"
 _MODE_KEY = "rebar_reconciler.mode"
 _MAIN_KEY = "rebar_reconciler.__main__"
+
+
+@pytest.fixture(autouse=True)
+def _git_repo(tmp_path: Path) -> None:
+    """Mutating main-path tests provide the git ref store finalization requires."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    (tracker / ".env-id").write_text("test-local\n", encoding="utf-8")
+
 
 # ---------------------------------------------------------------------------
 # Helpers

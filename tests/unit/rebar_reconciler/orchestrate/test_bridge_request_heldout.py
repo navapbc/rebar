@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -13,6 +14,10 @@ import rebar_reconciler.__main__ as main_mod
 
 def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:
     """Run the real parser/guard spine while replacing only lock and pass I/O."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    (tracker / ".env-id").write_text("test-local\n", encoding="utf-8")
     captured: dict = {}
     real_load = main_mod._load_sibling_keyed
     advisory = types.SimpleNamespace(

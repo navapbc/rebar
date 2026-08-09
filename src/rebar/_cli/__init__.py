@@ -118,7 +118,8 @@ _LIFECYCLE = frozenset({"transition", "reopen", "claim"})
 _COMPACT = frozenset({"compact", "compact-all"})
 # Bridge commands share the explicit routing census, while retaining their own
 # initialization policies below.
-_BRIDGE = frozenset({"bridge", "bridge-fsck"})
+_BRIDGE = frozenset({"bridge", "bridge-status", "bridge-fsck"})
+_HIDDEN_ALIASES = frozenset({"bridge-status"})
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -249,10 +250,10 @@ def _emit_subcommand_help(sub: str) -> int:
 
 def _dispatch_bridge(sub: str, rest: list[str]) -> int:
     """Dispatch bridge commands while preserving their distinct init policies."""
-    if sub == "bridge":
+    if sub in {"bridge", "bridge-status"}:
         from rebar._cli._bridge_commands import bridge_cli
 
-        return bridge_cli(rest)
+        return bridge_cli(rest if sub == "bridge" else ["status", *rest])
 
     from rebar import config
 
@@ -640,11 +641,11 @@ def _main_dispatch(argv: list[str]) -> int:
     sub, rest = first, argv[1:]
 
     # `rebar <sub> --help|-h` as the FIRST arg after the subcommand → usage, no exec.
-    if rest and rest[0] in ("--help", "-h"):
+    if rest and rest[0] in ("--help", "-h") and sub not in _HIDDEN_ALIASES:
         return _emit_subcommand_help(sub)
 
     # Unknown subcommand: error to stderr + overview to stdout, exit 1.
-    if sub not in _help.known_subcommands():
+    if sub not in _help.known_subcommands() and sub not in _HIDDEN_ALIASES:
         sys.stderr.write(f"Error: unknown subcommand '{sub}'\n")
         sys.stdout.write(_help.overview())
         return 1

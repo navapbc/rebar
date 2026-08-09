@@ -165,11 +165,9 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
 from rebar_reconciler.pass_io import (  # noqa: E402
     EXIT_RESCHEDULE,
     RescheduleError,
-    _handle_failed_write_result,
     _load_mapping,
     _write_mapping_atomic,
     _write_mapping_json_atomic,
-    _write_pass_record,
 )
 
 # ---------------------------------------------------------------------------
@@ -590,12 +588,6 @@ def _apply_batch(
         snapshots_dir.mkdir(parents=True, exist_ok=True)
         manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2))
-        write_result = concurrency.rebase_retry(
-            repo_root,
-            lambda: _write_pass_record(repo_root, pass_id, 0),
-        )
-        if not write_result.ok:
-            _handle_failed_write_result(write_result, pass_id)
         return manifest_path
 
     # Resolve the configured project scope for the cross-project safety guard
@@ -676,18 +668,6 @@ def _apply_batch(
     snapshots_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = snapshots_dir / f"{pass_id}.manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
-
-    # Wrap the tickets-branch write in rebase_retry (up to 3 attempts).
-    # On non-fast-forward push rejection the helper fetches + rebases + retries.
-    # On exhaustion, emit a health event to stderr and raise RescheduleError so
-    # the process can exit with EXIT_RESCHEDULE.  No retry-counter file is
-    # written to disk; the next pass starts fresh.
-    write_result = concurrency.rebase_retry(
-        repo_root,
-        lambda: _write_pass_record(repo_root, pass_id, len(mutations)),
-    )
-    if not write_result.ok:
-        _handle_failed_write_result(write_result, pass_id)
 
     return manifest_path
 

@@ -140,6 +140,130 @@ def cmd_check_heartbeat(
         return 1
 
     window_hours = int(window_str)
+    source = getattr(args, "source", None) or environ.get("REBAR_CANARY_HEARTBEAT_SOURCE", "status")
+    if source not in {"status", "github-api"}:
+        print(
+            f"::error::REBAR_CANARY_HEARTBEAT_SOURCE must be status or github-api, got {source!r}"
+        )
+        return 1
+    if source == "status":
+        return _check_status_heartbeat(runner, environ, now_epoch, window_hours)
+    return _check_github_heartbeat(runner, environ, now_epoch, window_hours)
+
+
+def _check_status_heartbeat(
+    runner: Runner,
+    environ: Mapping[str, str],
+    now_epoch: int,
+    window_hours: int,
+) -> int:
+    """Classify the canonical bridge status, including the stalled-lease witness."""
+    gh_output = environ["GITHUB_OUTPUT"]
+
+    def take_snapshot() -> dict | None:
+        rc, stdout, stderr = runner(
+            [
+                "rebar",
+                "bridge",
+                "status",
+                "--target",
+                "reconciler",
+                "--max-age",
+                f"{window_hours}h",
+                "--json",
+            ]
+        )
+        try:
+            decoded = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
+            print(f"::error::bridge status returned invalid JSON (exit {rc}): {stderr}")
+            return None
+        if not isinstance(decoded, dict) or not isinstance(decoded.get("verdict"), str):
+            print("::error::bridge status JSON is missing a verdict")
+            return None
+        return decoded
+
+    status = take_snapshot()
+    if status is None:
+        return 1
+    verdict = status["verdict"]
+    if verdict == "NEVER_RUN":
+        # Producer-first rollout: old producers have no ref yet, so retain the
+        # one-release GitHub run-history witness until the first new pass lands.
+        return _check_github_heartbeat(
+            runner,
+            environ,
+            now_epoch,
+            window_hours,
+            bootstrap=True,
+        )
+    if verdict == "RUNNING":
+        lease = status.get("lock_lease_secs")
+        if not isinstance(lease, (int, float)) or isinstance(lease, bool) or lease <= 0:
+            print("::error::RUNNING status omitted a positive lock lease")
+            return 1
+        if lease > 480:
+            print(
+                f"::error::reconciler lease {lease:g}s exceeds the 480s canary ceiling "
+                "inside the fixed 10-minute job timeout"
+            )
+            return 1
+        time.sleep(lease)
+        second = take_snapshot()
+        if second is None:
+            return 1
+        advanced = second.get("verdict") == "RUNNING" and (
+            second.get("lock_oid") != status.get("lock_oid")
+            or second.get("live_lock_fence") != status.get("live_lock_fence")
+        )
+        if advanced:
+            _append_outputs(
+                gh_output,
+                stale="false",
+                last_run_ago="in progress",
+                status_msg="Reconciler healthy — live lease advanced during the canary witness.",
+            )
+            return 0
+        if second.get("verdict") != "RUNNING":
+            second_verdict = str(second.get("verdict") or "INDETERMINATE")
+            recovered = second_verdict in {"HEALTHY", "PAUSED"}
+            _append_outputs(
+                gh_output,
+                stale="false" if recovered else "true",
+                last_run_ago=str(second.get("completed_at") or "never"),
+                status_msg=f"Reconciler status {second_verdict} after the observed lease.",
+            )
+            return 0
+        _append_outputs(
+            gh_output,
+            stale="true",
+            last_run_ago="crashed",
+            status_msg="CRASHED — reconciler lease made no OID/fence progress over one lease.",
+        )
+        return 0
+    healthy = verdict in {"HEALTHY", "PAUSED"}
+    _append_outputs(
+        gh_output,
+        stale="false" if healthy else "true",
+        last_run_ago=str(status.get("completed_at") or "never"),
+        status_msg=(
+            f"Reconciler status {verdict}."
+            if healthy
+            else f"Reconciler unhealthy — canonical status is {verdict}."
+        ),
+    )
+    return 0
+
+
+def _check_github_heartbeat(
+    runner: Runner,
+    environ: Mapping[str, str],
+    now_epoch: int,
+    window_hours: int,
+    *,
+    bootstrap: bool = False,
+) -> int:
+    """One-release rollback/bootstrap source based on successful workflow runs."""
     repo = environ["GITHUB_REPOSITORY"]
     gh_output = environ["GITHUB_OUTPUT"]
 
@@ -205,6 +329,7 @@ def cmd_check_heartbeat(
             last_run_ago=ago,
             status_msg=(
                 f"Reconciler healthy \u2014 last successful run was {age_hours}h {age_mins}m ago."
+                + (" (last-pass producer bootstrap fallback)." if bootstrap else "")
             ),
         )
     return 0
@@ -545,7 +670,14 @@ def main(
     )
     sub = parser.add_subparsers(dest="subcommand")
     for name in _SUBCOMMANDS:
-        sub.add_parser(name)
+        child = sub.add_parser(name)
+        if name == "check-heartbeat":
+            child.add_argument(
+                "--source",
+                choices=("status", "github-api"),
+                default=None,
+                help="Heartbeat source (default: canonical bridge status).",
+            )
 
     args = parser.parse_args(argv)
     if args.subcommand is None:
