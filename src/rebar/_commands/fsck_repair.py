@@ -15,6 +15,7 @@ and aborted if a reconciler pass is (or may be) in flight.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from rebar._store import compat, lock
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
+
+logger = logging.getLogger(__name__)
 
 # ── A3 (34b1) live-store remediation: orphan disposition ─────────────────────
 # Routed BY EVENT TYPE. Additive/commutative orphans are safe to AUTO-RECOVER via a
@@ -471,3 +474,134 @@ def _repair_run(
         f"{triage} orphan(s) await human triage"
     )
     return lines, remaining
+
+
+def _abbrev(uuids: list[str], limit: int = 3) -> str:
+    """``a, b, c...`` — the first ``limit`` uuids, ellipsised when there are more."""
+    head = ", ".join(uuids[:limit])
+    return f"{head}..." if len(uuids) > limit else head
+
+
+def snapshot_missing_sources(ticket_dir: str) -> list[str]:
+    """UUIDs cited by the newest active SNAPSHOT that have NO event file on disk (bug b636).
+
+    Compaction before the I1 non-destructive rename (story tricolour-head-ratfish) DELETED
+    its folded sources, so for those tickets the cited state survives only inside the
+    SNAPSHOT's ``compiled_state``. A non-empty return is therefore PROOF that the raw log is
+    incomplete: a from-zero replay (even ``include_retired=True``) would reconstruct a partial
+    history and whatever status happened to survive would win.
+
+    Best-effort — an unreadable or absent snapshot yields ``[]`` (nothing proven missing).
+    """
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        return []
+    snaps = [n for n in names if is_active_event(n) and n.endswith("-SNAPSHOT.json")]
+    if not snaps:
+        return []
+    try:
+        with open(os.path.join(ticket_dir, snaps[-1]), encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    cited = ((snapshot.get("data") or {}).get("source_event_uuids")) or []
+    present = {u for u in cited if any(u in name for name in names)}
+    return [u for u in cited if u not in present]
+
+
+def missing_sources_finding(
+    ticket_dir: str, ticket_id: str, snapshot_filename: str, source_uuids: list
+) -> list[str]:
+    """The ``SNAPSHOT_MISSING_SOURCES`` finding, so the latent population is visible BEFORE a
+    repair runs. Such a ticket is NOT safely rebuildable: a from-zero replay would drop the
+    state those deleted events carried."""
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        names = []
+    absent = [u for u in source_uuids if not any(u in n for n in names)]
+    if not absent:
+        return []
+    return [
+        f"SNAPSHOT_MISSING_SOURCES: {ticket_id}/{snapshot_filename} — "
+        f"{len(absent)} cited source event(s) absent from disk ({_abbrev(absent)}); "
+        "raw log incomplete — NOT auto-rebuildable, human triage required"
+    ]
+
+
+def rebuild_source_state(ticket_id: str, ticket_dir: str):
+    """The state a rebuild would persist, or ``None`` when it must NOT proceed (bug b636).
+
+    FAIL CLOSED first: a from-zero replay is sound only when the raw log is COMPLETE, so a
+    prior SNAPSHOT citing sources absent from disk aborts the rebuild rather than
+    reconstructing a partial history. Ticket 34b1 already classifies STATUS and the other
+    order-sensitive kinds as HUMAN-TRIAGE, never auto-rebuilt — but that classification gates
+    only WHICH ORPHAN TYPE TRIGGERS a rebuild, and a rebuild is whole-ticket. This moves the
+    guard from the trigger to the blast radius.
+
+    Then the usual reduce: full raw-history state (active + retired, snapshots stripped),
+    INCLUDING the merged-in orphan the stale snapshot's positional skip had dropped.
+    """
+    from rebar.reducer import reduce_ticket
+
+    missing = snapshot_missing_sources(ticket_dir)
+    if missing:
+        logger.warning(
+            "fsck: REFUSING snapshot rebuild for %s — prior SNAPSHOT cites %d source event(s) "
+            "absent from disk (%s); the raw log is incomplete and a rebuild would drop state "
+            "held only in the snapshot. Human triage required.",
+            ticket_id,
+            len(missing),
+            _abbrev(missing),
+        )
+        return None
+    state = reduce_ticket(ticket_dir, include_retired=True)
+    if state is None or state.get("status") in ("error", "fsck_needed"):
+        return None
+    return state
+
+
+def repair_or_plan(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    findings: list[str],
+    rescan,
+    *,
+    no_mutate: bool,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    """RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then re-check
+    (folds the orphan back in). Returns ``(lines_to_emit, findings_after)``.
+
+    Under ``dry_run`` it only PLANS (bug b636): ``--repair-snapshots`` previously ignored
+    ``--dry-run`` entirely and MUTATED the store, so the broad legacy rebuild could not be
+    previewed at all.
+    """
+    rebuildable = any(
+        "SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f or "SNAPSHOT_STALE_CHANNEL" in f
+        for f in findings
+    )
+    if not rebuildable:
+        return [], findings
+    if dry_run:
+        absent = snapshot_missing_sources(ticket_dir)
+        if absent:
+            return [
+                f"DRY-RUN: would SKIP {ticket_id} — {len(absent)} cited source event(s) "
+                "absent from disk (not safely rebuildable)"
+            ], findings
+        return [f"DRY-RUN: would rebuild SNAPSHOT for {ticket_id}"], findings
+    if no_mutate:
+        return [], findings
+
+    from rebar._commands.compact import rebuild_snapshot_from_full_log
+
+    if not rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir):
+        return [], findings
+    post = rescan()
+    resolved = len(findings) - len(post)
+    if resolved > 0:
+        return [f"FIXED: rebuilt SNAPSHOT for {ticket_id} ({resolved} finding(s) resolved)"], post
+    return [], post
