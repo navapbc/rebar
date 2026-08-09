@@ -7,10 +7,11 @@ This file has TWO test classes:
 
 2. TestAcliContractRegression — locks down the EXACT ACLI command shape and
    payload structure for every documented invocation pattern. These tests
-   exist because epic 3a03 surfaced three layered ACLI invocation bugs
-   (ProjectKey null, priority dict shape, --label vs --labels flag) that
-   would have been caught pre-cutover by a command-shape contract test.
-   Every confirmed-correct pattern from epic 3a03's ACLI audit is pinned
+   exist because pre-extraction DSO epic 3a03-b3f2-b34c-4e4f surfaced three
+   layered ACLI invocation bugs (ProjectKey null, priority dict shape,
+   --label vs --labels flag) that would have been caught pre-cutover by a
+   command-shape contract test. Every confirmed-correct pattern from that
+   pre-extraction DSO epic's (3a03-b3f2-b34c-4e4f) ACLI audit is pinned
    here; regression (flag rename, payload key drift, missing --yes) will
    fail loudly in CI.
 
@@ -411,7 +412,8 @@ class TestAcliClientUpdateFieldExtraction:
 # Each test pins one ACLI invocation pattern to its EMPIRICALLY-VERIFIED shape
 # against ACLI v1.3.18 + DIG project. A regression introducing a flag rename,
 # missing --yes, payload-key typo, or shape drift WILL fail loudly in CI.
-# Reference: epic 3a03 spec External Command Contract; bug c916 audit findings.
+# Reference: pre-extraction DSO epic 3a03-b3f2-b34c-4e4f spec External Command
+# Contract; bug c916 audit findings.
 # ============================================================================
 
 
