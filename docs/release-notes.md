@@ -30,6 +30,21 @@ The production workflow maps its retained profiles exactly: `dry-run` → `bridg
 `bridge sync --max-changes 100`, and `live` → `bridge sync`; `reconcile-check` alone
 continues through `rebar reconcile --mode reconcile-check` for its diagnostic contract.
 
+Canonical `bridge preview` / `bridge sync` (including the direct-engine canonical verbs) now
+expose only 0 success/benign, 1 operational failure, and 2 invalid invocation/configuration.
+Converged, paused, another-pass-in-flight, reschedule, and the historical phase-gate outcome
+are benign canonical exit 0 states with a stable one-line state marker. The engine still
+classifies and executes a single pass; route adapters translate only the final status/message,
+so repository and ref effects are identical.
+
+This is a rolling migration, not removal of compatibility. `rebar reconcile --mode ...`,
+direct-engine `--mode`, argument-less direct-engine invocation, and the existing library/MCP
+reconcile adapters retain their historical defaults, messages, and 3 (pass in flight), 4
+(phase gate), and 75 (reschedule) sentinels. Existing systemd units, Jenkins jobs, scripts,
+checked-out workflows, and older environments therefore continue unchanged while new
+automation moves to canonical 0/1/2. The production workflow no longer carries a 3/75
+whitelist; its paused-marker commit-skip remains unchanged.
+
 ## `bridge-status` and `purge-bridge` removed (breaking, no aliases)
 
 The public `rebar bridge-status` and `rebar purge-bridge` commands, their help pages,

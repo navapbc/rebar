@@ -10,7 +10,7 @@
 # Single-flight concurrency (cancel-in-progress: false) ensures a running pass
 # completes before the next scheduled invocation starts; the reconciler's own
 # pass-lock (refs/reconciler/lock, the self-healing ref-lock; ADR 0031) is a second
-# guard (exit 3 == "another pass already running", treated as benign here).
+# guard (a concurrent pass is a canonical benign exit 0).
 #
 # Continuous loop (OPT-IN, default OFF): set repo Variable RECONCILE_CONTINUOUS=true
 # to have each run re-dispatch the next via workflow_dispatch (the documented
@@ -25,7 +25,7 @@
 # "Necessary & sufficient"):
 #   * primary invocation uses `rebar bridge preview` / `rebar bridge sync`; the
 #     lock-free reconcile-check diagnostic retains its compatibility spelling
-#   * exit 75 = reschedule (next cron retries), exit 3 = pass-in-flight — both benign
+#   * canonical bridge commands use 0 benign/success, 1 operational, 2 invocation/config
 #   * the reconciler may leave inbound events uncommitted or create its own binding
 #     commit; the final strict core adapter commits when needed and synchronously
 #     pushes either case, keeping the workflow red if delivery cannot converge.
@@ -239,11 +239,8 @@ jobs:
 
       - name: Run reconciler
         id: reconcile
-        # Exit-code contract (src/rebar/_engine/rebar_reconciler/__main__.py):
-        #   0  converged
-        #   75 reschedule (rebase-retry exhausted) — the next cron run retries
-        #   3  another pass already in flight — benign under */20 cadence
-        #   *  unrecoverable — fail the job
+        # Canonical exit contract: 0 success/benign, 1 operational failure,
+        # 2 invalid invocation/configuration.
         env:
           JIRA_URL: ${{ vars.JIRA_URL }}
           JIRA_USER: ${{ vars.JIRA_USER }}
@@ -303,12 +300,11 @@ jobs:
             echo "paused=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Reconcile bridge is paused; skipping ticket commit and push."
           fi
-          case "$rc" in
-            0)  [ "$paused" = "true" ] || echo "Reconcile converged." ;;
-            75) echo "::notice::Reconcile rescheduled (exit 75) — next scheduled run will retry." ;;
-            3)  echo "::notice::Another reconcile pass is in flight (exit 3) — benign, skipping." ;;
-            *)  echo "::error::Reconcile failed (exit $rc)"; exit "$rc" ;;
-          esac
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Reconcile failed (exit $rc)"
+            exit "$rc"
+          fi
+          [ "$paused" = "true" ] || echo "Reconcile converged."
 
       - name: Commit reconciler events back and push to origin/tickets
         if: steps.reconcile.outputs.paused != 'true'

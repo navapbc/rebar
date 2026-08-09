@@ -422,3 +422,25 @@ def test_real_legacy_gate_keeps_old_error_contract(rebar_repo: Path, tmp_path: P
     assert "BRIDGE_PAUSED" not in completed.stderr
     assert _tracker_snapshot(rebar_repo) == before
     assert _remote_blob(remote, "refs/reconciler/lock") is None
+
+
+def test_real_canonical_gate_is_benign_while_legacy_stays_4(
+    rebar_repo: Path, tmp_path: Path
+) -> None:
+    remote = _configure_origin(rebar_repo, tmp_path)
+    _plant_remote_blob(remote, b'{"gated_mode":"reconcile-check"}\n')
+    before = _tracker_snapshot(rebar_repo)
+
+    canonical = _run_cli(rebar_repo, "bridge", "sync")
+
+    assert canonical.returncode == 0
+    assert canonical.stdout == ""
+    assert canonical.stderr == "BRIDGE_STATE: legacy-gated\n"
+    assert _tracker_snapshot(rebar_repo) == before
+    assert _remote_blob(remote, "refs/reconciler/lock") is None
+
+    legacy = _run_cli(rebar_repo, "reconcile", "--mode", "live")
+    assert legacy.returncode == 4
+    assert "blocks advancement" in legacy.stderr
+    assert _tracker_snapshot(rebar_repo) == before
+    assert _remote_blob(remote, "refs/reconciler/lock") is None

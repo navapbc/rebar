@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import threading
+from enum import Enum
 from pathlib import Path
 
 # Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
@@ -46,6 +47,44 @@ _ADVISORY_LOCK_KEY = "rebar_reconciler._advisory_lock"
 _MODE_KEY = "rebar_reconciler.mode"
 _REQUEST_KEY = "rebar_reconciler.request"
 _HELPERS_KEY = "rebar_reconciler.reconcile_helpers"
+
+
+class _Disposition(Enum):
+    """One semantic pass outcome, translated only at the invoking route."""
+
+    CONVERGED = ("converged", 0, 0)
+    PAUSED = ("paused", 0, 0)
+    IN_FLIGHT = ("in-flight", 0, 3)
+    PHASE_GATE = ("legacy-gated", 0, 4)
+    RESCHEDULE = ("reschedule", 0, 75)
+    OPERATIONAL_FAILURE = ("operational_failure", 1, 1)
+    INVALID_INVOCATION = ("invalid_invocation", 2, 2)
+
+    def __init__(self, state: str, canonical_exit: int, legacy_exit: int):
+        self.state = state
+        self.canonical_exit = canonical_exit
+        self.legacy_exit = legacy_exit
+
+
+def _finish_disposition(
+    disposition: _Disposition,
+    route: str | None,
+    *,
+    legacy_message: str | None = None,
+    canonical_message: str | None = None,
+) -> int:
+    """Render one classified result through the canonical or compatibility adapter."""
+    if route in {"preview", "sync"}:
+        if disposition.canonical_exit == 0:
+            print(canonical_message or f"BRIDGE_STATE: {disposition.state}", file=sys.stderr)
+        elif canonical_message is not None:
+            print(canonical_message, file=sys.stderr)
+        elif legacy_message is not None:
+            print(legacy_message, file=sys.stderr)
+        return disposition.canonical_exit
+    if legacy_message is not None:
+        print(legacy_message, file=sys.stderr)
+    return disposition.legacy_exit
 
 
 def _load_sibling_keyed(dotted_key: str, filename: str):
@@ -105,18 +144,20 @@ def _try_load_step(name: str):
     return mod
 
 
-def _pause_exit_code(advisory, target_mode, mode_mod, repo_root: Path) -> int | None:
+def _pause_exit_code(advisory, target_mode, mode_mod, repo_root: Path, route: str | None):
     """Return the pause outcome before any reconciler mutation, if applicable."""
     if not hasattr(advisory, "read_pause"):
         return None
     try:
         pause = advisory.read_pause(repo_root)
     except advisory.ReconcileGateError:
-        print(
-            "ERROR: refs/reconciler/gate is corrupt; run 'rebar bridge resume' to clear it",
-            file=sys.stderr,
+        return _finish_disposition(
+            _Disposition.OPERATIONAL_FAILURE,
+            route,
+            legacy_message=(
+                "ERROR: refs/reconciler/gate is corrupt; run 'rebar bridge resume' to clear it"
+            ),
         )
-        return 1
     if pause is None or mode_mod.MODE_CAPS[target_mode] == 0:
         return None
     status = {
@@ -125,23 +166,24 @@ def _pause_exit_code(advisory, target_mode, mode_mod, repo_root: Path) -> int | 
         "who": pause["who"],
         "paused_at": pause["paused_at"],
     }
-    print(f"BRIDGE_PAUSED: {json.dumps(status, separators=(',', ':'))}", file=sys.stderr)
-    return 0
+    marker = f"BRIDGE_PAUSED: {json.dumps(status, separators=(',', ':'))}"
+    return _finish_disposition(
+        _Disposition.PAUSED,
+        route,
+        legacy_message=marker,
+        canonical_message=marker,
+    )
 
 
-def _post_pause_preflight(advisory, target_mode, repo_root: Path) -> tuple[bool, int | None]:
+def _post_pause_preflight(
+    advisory, target_mode, repo_root: Path
+) -> tuple[bool, _Disposition | None]:
     """Check the pre-existing lock and phase guards after the pause decision."""
     held = advisory.check_pass_lock(repo_root)
     if held and not _lock_steal_enabled():
-        print("reconcile: refs/reconciler/lock is held — another pass in flight", file=sys.stderr)
-        return held, 3
+        return held, _Disposition.IN_FLIGHT
     if advisory.check_phase_gate(target_mode, repo_root):
-        print(
-            f"reconcile: refs/reconciler/gate blocks advancement to "
-            f"{target_mode.value}; clear the gate to advance",
-            file=sys.stderr,
-        )
-        return held, 4
+        return held, _Disposition.PHASE_GATE
     return held, None
 
 
@@ -244,12 +286,12 @@ def _resolve_held_lock(advisory, pass_id, repo_root, *, acquire_fn):
     if stolen_oid is not None:
         return (None, stolen_oid, True)
     if advisory.check_pass_lock(repo_root):
-        return (3, None, False)  # live holder made progress over our lease window
+        return (_Disposition.IN_FLIGHT, None, False)
     # freed during our steal sleep -> acquire normally (win: proceed; lose: yield).
     try:
         return (None, acquire_fn(), True)
     except advisory.ReconcileLockError:
-        return (3, None, False)
+        return (_Disposition.IN_FLIGHT, None, False)
 
 
 def _purge_committed_reconciler_locks(repo_root: Path) -> None:
@@ -398,6 +440,31 @@ def _optional_request_kwargs(
     return kwargs
 
 
+def _reconcile_exception_exit(
+    exc: Exception,
+    *,
+    route: str | None,
+    reschedule_error_cls,
+    lock_lost_cls,
+) -> int:
+    """Classify one failed reconcile_once call, then translate it by route."""
+    if type(exc).__name__ == "SelectionStaleError":
+        return _finish_disposition(
+            _Disposition.INVALID_INVOCATION, route, legacy_message=f"ERROR: {exc}"
+        )
+    if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
+        message = f"RESCHEDULE: reconcile_once signalled reschedule: {exc}"
+        return _finish_disposition(_Disposition.RESCHEDULE, route, legacy_message=message)
+    if lock_lost_cls is not None and isinstance(exc, lock_lost_cls):
+        message = f"RESCHEDULE: pass lock lease lost mid-pass: {exc}"
+        return _finish_disposition(_Disposition.RESCHEDULE, route, legacy_message=message)
+    return _finish_disposition(
+        _Disposition.OPERATIONAL_FAILURE,
+        route,
+        legacy_message=f"ERROR: reconcile_once raised: {exc}",
+    )
+
+
 def run_pass(
     repo_root: Path | None = None,
     pass_id: str | None = None,
@@ -411,41 +478,26 @@ def run_pass(
 ) -> int:
     """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
 
-    Returns 0 on converged state, EXIT_RESCHEDULE (75) when applier signals a
-    reschedule (rebase_retry exhausted) OR when the pass lock's lease is lost
-    mid-pass (bug 449f-f9bf-be90-47fe — see the ReconcileLockLost arm below), and
-    1 on any other unrecoverable error.
+    The pass is classified once, then its route translates that disposition:
+    canonical preview/sync use 0/1/2 while the compatibility route preserves
+    historical 3/4/75 sentinels.
 
-    When *pass_id* is None (legacy entry-point), one is generated here so the
-    helper remains usable in isolation. Production callers should pass the
-    pass_id from main() so the lock-holder and the recorded reconcile pass
-    share the same identifier — previously two distinct timestamps were
-    generated and a sub-second race could record mismatched pass_ids.
+    A missing *pass_id* retains the legacy helper behavior of generating one.
     """
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
     reconcile = _try_load_step("reconcile")
     if reconcile is None:
-        # Graceful no-op when reconcile.py is absent in the current deployment
-        # (e.g., orchestrator deployed ahead of the reconcile module).
-        print("OK: no-op (reconcile.py not present in this deployment)")
-        return 0
+        if route not in {"preview", "sync"}:
+            print("OK: no-op (reconcile.py not present in this deployment)")
+        return _finish_disposition(_Disposition.CONVERGED, route)
 
-    # F6: load the applier module so RescheduleError + EXIT_RESCHEDULE are
-    # available for explicit handling. Without this, the broad `except
-    # Exception` below would mask RescheduleError under exit 1, hiding the
-    # reschedule signal from any scheduler that distinguishes 75 from 1.
     applier = _try_load_step("applier")
 
     if pass_id is None:
         pass_id = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     reschedule_error_cls = getattr(applier, "RescheduleError", None) if applier else None
-    exit_reschedule = getattr(applier, "EXIT_RESCHEDULE", 75) if applier else 75
-    # Bug 449f-f9bf-be90-47fe: resolve ReconcileLockLost the same defensive way as
-    # RescheduleError above — it lives in the _advisory_lock sibling (loaded under the
-    # dotted key so a test-seeded stub is reused), and a stub without the attribute (or
-    # a deployment without the file) must degrade to "not classifiable", not blow up.
     try:
         _advisory = (
             None
@@ -466,44 +518,14 @@ def run_pass(
             **_optional_request_kwargs(selection_kind, selection_ids, max_changes),
             **({"route": route} if route is not None else {}),
         )
-    except Exception as exc:  # noqa: BLE001 — body-inspecting: classify reschedule vs error to pick exit code
-        if type(exc).__name__ == "SelectionStaleError":
-            print(f"ERROR: {exc}", file=sys.stderr)
-            return 2
-        if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
-            print(
-                f"RESCHEDULE: reconcile_once signalled reschedule: {exc}",
-                file=sys.stderr,
-            )
-            return exit_reschedule
-        if lock_lost_cls is not None and isinstance(exc, lock_lost_cls):
-            # Bug 449f-f9bf-be90-47fe: losing the pass-lock lease mid-pass is the
-            # DESIGNED outcome of ADR 0031 (docs/adr/0031-reconciler-ref-lock.md,
-            # ticket 2711): the heartbeat noticed another holder, so this pass aborts,
-            # the finally-release no-ops (the ref already moved), and a re-run is
-            # idempotent. That is exactly EXIT_RESCHEDULE's meaning ("the next
-            # scheduled run will retry"), and it matches the exit 3 the SAME condition
-            # gets when detected BEFORE the pass starts. It used to fall through to
-            # exit 1, which .github/workflows/reconcile-bridge.yml (whitelist 0/75/3)
-            # turned into a red run for a benign, expected race. Benign is not silent:
-            # the exception text (which names the lease loss) still goes to stderr.
-            print(
-                f"RESCHEDULE: pass lock lease lost mid-pass: {exc}",
-                file=sys.stderr,
-            )
-            return exit_reschedule
-        print(f"ERROR: reconcile_once raised: {exc}", file=sys.stderr)
-        return 1
+    except Exception as exc:  # noqa: BLE001 — classification owns the process contract
+        return _reconcile_exception_exit(
+            exc,
+            route=route,
+            reschedule_error_cls=reschedule_error_cls,
+            lock_lost_cls=lock_lost_cls,
+        )
 
-    # Bug 85a1: truthful tally. Before this fix, the message printed
-    # mutation_count (computed pre-apply) under the verb "converged", which
-    # was structurally lying when mutations errored out mid-pass. Now:
-    #   - applied > 0       → "OK: applied N (F failed) — pass <id>"
-    #   - applied == 0 and computed == 0 → "OK: steady-state pass converged"
-    #   - applied == 0 and computed > 0  → "OK: applied 0 of N (N failed) — pass <id>"
-    # The "converged" verb is reserved for genuine no-op passes (computed=0).
-    # Legacy callers that read mutation_count from reconcile_once's return
-    # still work; this only changes the human-readable stdout line.
     computed = result.get("mutation_count", 0)
     applied = result.get("mutations_applied", computed)
     failures = result.get("mutation_failures", 0)
@@ -516,30 +538,30 @@ def run_pass(
     if result.get("no_write"):
         import json as _json
 
-        print(
-            f"OK: dry-run computed {computed} mutations (0 applied, no writes)",
-            file=sys.stderr,
-        )
+        if route not in {"preview", "sync"}:
+            print(
+                f"OK: dry-run computed {computed} mutations (0 applied, no writes)",
+                file=sys.stderr,
+            )
         print(_json.dumps(result))
-        return 0
+        return _finish_disposition(_Disposition.CONVERGED, route)
 
-    if computed == 0 and applied == 0:
-        print("OK: steady-state pass converged — 0 mutations")
-    elif failures == 0:
-        print(f"OK: applied {applied} of {computed} mutations")
-    else:
-        print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
-    # Fail loud: a pass that reached the applier but recorded per-mutation
-    # failures (e.g. the _apply_one backstop isolated an unhandled handler
-    # exception) must surface a NON-ZERO exit so a scheduler/CI treats the pass
-    # as degraded rather than clean. Distinct from EXIT_RESCHEDULE (75, above)
-    # and the hard-exception path (also 1, above). Benign paths stay 0: the
-    # 400-comment-fallback is counted as APPLIED (no "error" key — see
-    # reconcile.py), so it does not increment `failures`, and a zero-failure
-    # pass returns 0.
+    if route not in {"preview", "sync"}:
+        if computed == 0 and applied == 0:
+            print("OK: steady-state pass converged — 0 mutations")
+        elif failures == 0:
+            print(f"OK: applied {applied} of {computed} mutations")
+        else:
+            print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
+    # Per-mutation failures are operational failures; successful fallbacks are
+    # counted as applied by reconcile.py and therefore remain converged.
     if failures > 0:
-        return 1
-    return 0
+        return _finish_disposition(
+            _Disposition.OPERATIONAL_FAILURE,
+            route,
+            canonical_message=f"ERROR: reconcile completed with {failures} mutation failures",
+        )
+    return _finish_disposition(_Disposition.CONVERGED, route)
 
 
 def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
@@ -639,7 +661,7 @@ def main(argv: list[str] | None = None) -> int:
     # -------------------------------------------------------------------------
     advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
 
-    pause_exit = _pause_exit_code(advisory, target_mode, mode_mod, repo_root)
+    pause_exit = _pause_exit_code(advisory, target_mode, mode_mod, repo_root, route)
     if pause_exit is not None:
         return pause_exit
 
@@ -663,7 +685,15 @@ def main(argv: list[str] | None = None) -> int:
     # by REBAR_RECONCILER_LOCK_STEAL (default ON; OFF = old unconditional exit-3).
     held, preflight_exit = _post_pause_preflight(advisory, target_mode, repo_root)
     if preflight_exit is not None:
-        return preflight_exit
+        legacy_message = (
+            "reconcile: refs/reconciler/lock is held — another pass in flight"
+            if preflight_exit is _Disposition.IN_FLIGHT
+            else (
+                "reconcile: refs/reconciler/gate blocks advancement to "
+                f"{target_mode.value}; clear the gate to advance"
+            )
+        )
+        return _finish_disposition(preflight_exit, route, legacy_message=legacy_message)
 
     # Resolve a held lock via steal (only reached when steal is enabled — the
     # kill-switch early-returns above). Cases 1/2/3a/3b live in _resolve_held_lock;
@@ -671,18 +701,18 @@ def main(argv: list[str] | None = None) -> int:
     # freed-acquired) is adopted below without a second acquire.
     pre_acquired_oid: str | None = None
     if held:
-        exit_code, pre_acquired_oid, _ok = _resolve_held_lock(
+        held_disposition, pre_acquired_oid, _ok = _resolve_held_lock(
             advisory,
             pass_id,
             repo_root,
             acquire_fn=lambda: advisory.acquire_pass_lock(pass_id, repo_root),
         )
-        if exit_code is not None:
-            print(
-                "reconcile: refs/reconciler/lock held by a live pass — yielding",
-                file=sys.stderr,
+        if held_disposition is not None:
+            return _finish_disposition(
+                held_disposition,
+                route,
+                legacy_message=("reconcile: refs/reconciler/lock held by a live pass — yielding"),
             )
-            return exit_code
 
     # -------------------------------------------------------------------------
     # Step 3: acquire (or adopt the stolen lock), run pass, release in finally.

@@ -161,6 +161,35 @@ def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):
     assert rc == 75, f"EXIT_RESCHEDULE must equal 75; got {rc}"
 
 
+def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, capsys):
+    """Canonical sync names a reschedule and exposes only the 0/1/2 contract."""
+    import importlib.util
+
+    applier_path = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
+    spec = importlib.util.spec_from_file_location(
+        "applier_for_canonical_reschedule_test", applier_path
+    )
+    applier_mod = importlib.util.module_from_spec(spec)
+    sys.modules["applier_for_canonical_reschedule_test"] = applier_mod
+    spec.loader.exec_module(applier_mod)
+    stub_reconcile = _make_stub_reconcile(
+        side_effect=applier_mod.RescheduleError(attempt_count=3, last_error="exhausted")
+    )
+
+    def _load_step(name):
+        if name == "reconcile":
+            return stub_reconcile
+        if name == "applier":
+            return applier_mod
+        return None
+
+    with patch.object(main_mod, "_try_load_step", side_effect=_load_step):
+        rc = main_mod.run_pass(repo_root=tmp_path, route="sync")
+
+    assert rc == 0
+    assert capsys.readouterr().err == "BRIDGE_STATE: reschedule\n"
+
+
 def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     """main() threads --repo-root through to run_pass and returns its exit code.
 

@@ -18,13 +18,40 @@ to an emitted code are contract changes and must be called out in release notes.
 | `2`  | usage error | An unrecognized CLI `--option` on a **structured read command** (`show`, `list`, `deps`, `ready`, `search`), which reject unknown options rather than silently ignoring them. Also the not-found/usage path of `clarity-check` (see the gate note below). The plan-review gate's **INDETERMINATE** verdict also exits `2` — either from a non-retryable LLM degrade **or** from the deliberate **not-claimable fast-fail** (`review-plan` refusing a ticket that can't be claimed yet — a `ticket-not-claimable` finding with `coverage.llm_ran=false`; **no LLM ran**). Predates and is unchanged by exit 11. |
 | `10` | concurrency mismatch | Optimistic-concurrency rejection: a state-dependent op (`transition`/`claim`/`reopen`) re-read the ticket under lock and the actual status no longer matched the expected one. **Normal under parallelism** — re-read and pick another, never force. Emitted by `_commands/txn.py` (`ConcurrencyMismatch`). |
 | `11` | transient — retry | An LLM gate (`review-plan` / `review-code` / `verify-completion` / the `close` completion gate) degraded on a **systemic, retryable** LLM failure (rate-limit / connection blip — the classifier's `WAIT_AND_RETRY` / `RETRY_NOW` disposition). The verdict is unsigned; **re-run after the backoff window** rather than treating it as a real BLOCK/FAIL. Distinct from `2` (INDETERMINATE, non-retryable) so a driving agent can auto-retry only the genuinely transient case. Additive (2026-07 window) — see "Recorded decisions". |
-| `3`  | stale-rebase sentinel / poor health | Two emitters: (a) `fsck-recover --detect-only` found a paused rebase or merge in the tracker git worktree and exited without attempting recovery (`src/rebar/_commands/fsck_recover.py` — the `detect_only=True` branch); (b) `validate`'s health-severity bucket when the score is 2/5 — poor, significant issues (`exit == 5 - score`; `src/rebar/_engine_support/validate.py:393`). |
-| `4`  | critical health | `validate`'s health-severity bucket when the repo-health score is 1/5 — critical, immediate action needed (`src/rebar/_engine_support/validate.py:393`). Not emitted by any other command. |
+| `3`  | stale-rebase sentinel / poor health | `fsck-recover --detect-only` found a paused rebase or merge; `validate` scored repo health 2/5; or a **legacy reconciler route** found another pass in flight. Canonical bridge routes translate that last benign state to 0. |
+| `4`  | critical health / legacy phase gate | `validate` scored repo health 1/5, or a **legacy reconciler route** was stopped by its historical phase gate. Canonical bridge routes translate the phase-gate state to 0. |
 | `12` | review attestation stale or absent | `review-plan --status` found the ticket's plan-review attestation is not current — the plan changed since the last review, the attestation was never written, or the verified-at SHA is no longer reachable. Exit 0 means current; 12 means a fresh `rebar review-plan` is needed before `claim` will pass the gate (`src/rebar/_cli/_llm_commands.py` — `return 0 if status["ok"] else 12`). |
-| `75` | rebase / merge guard | A write was attempted while the tracker git worktree is in a paused rebase or merge state. The write is refused — run `rebar fsck-recover` to drain the stale rebase before retrying. Emitted by `RebaseGuard` (`src/rebar/_store/lock.py` — `returncode = 75`), surfaced to the process as a `CommandError` via `src/rebar/_commands/_seam.py`. |
+| `75` | rebase / merge guard / legacy reschedule | A ticket-store write was refused during a paused rebase or merge (`RebaseGuard`), or a **legacy reconciler route** requested another pass. Canonical bridge routes translate the benign reconciler reschedule to 0; the store guard remains 75. |
 | `78` | store schema incompatible | The tracker store was written by a newer rebar that this version cannot safely read or write (`StoreIncompatibleError`). Upgrade this rebar installation. Emitted by `src/rebar/_store/compat.py` (`returncode = 78`), surfaced the same way as 75. |
 
 > **Forward compatibility:** a client or agent encountering an **unknown or unlisted non-zero exit code MUST treat it as a failure**; new codes may be added in future breaking-change windows.
+
+### Bridge routes: canonical 0/1/2 and retained compatibility sentinels
+
+`rebar bridge preview`, `rebar bridge sync`, and the direct-engine `preview` / `sync`
+routes expose only this canonical contract: **0** success or a benign scheduler state,
+**1** operational failure, and **2** invalid invocation or configuration. The reconciler
+classifies one execution once; the route adapter changes only its process status and message,
+never the selected policy, repository effects, or refs.
+
+Canonical benign states return 0 with one stable stderr line:
+
+| State | Canonical line |
+|-------|----------------|
+| converged | `BRIDGE_STATE: converged` |
+| paused | `BRIDGE_PAUSED: {…}` (the existing single-line JSON marker) |
+| another pass in flight | `BRIDGE_STATE: in-flight` |
+| reschedule requested | `BRIDGE_STATE: reschedule` |
+| historical phase gate | `BRIDGE_STATE: legacy-gated` |
+
+The rolling-migration compatibility routes — `rebar reconcile --mode ...`, direct-engine
+`--mode`, argument-less direct-engine invocation, and the library/MCP reconcile adapters that
+launch them — retain their historical results and defaults. Converged and paused remain 0;
+another pass in flight remains **3**; the phase gate remains **4**; and reschedule remains
+**75**. Their established messages remain unchanged (`reconcile: ... another pass in flight`,
+`reconcile: ... gate blocks advancement ...`, and `RESCHEDULE: ...`). This lets older
+systemd units, Jenkins jobs, checked-out workflows, scripts, and environments migrate without
+a flag day. New automation should use the canonical bridge routes and ordinary 0/1/2 handling.
 
 ### Cross-cutting rules
 
@@ -91,7 +118,7 @@ guarantee `2`).
 |------------|:------:|:----:|:-----------:|-------|
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
 | `bridge-fsck` | 0 | — | — | audit; no ticket id |
-| `bridge` | 0 | — | — | no ticket id; `preview` shows proposed Jira changes, `sync` applies them, and `pause`/`resume` control scheduled reconciliation |
+| `bridge` | 0 | — | — | no ticket id; canonical `preview`/`sync` use 0/1/2 as documented above; `pause`/`resume` control scheduled reconciliation |
 | `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
 | `clarity-check` | 0 | **2** | — | **gate**: 0=pass, 1=fail-verdict, 2=not-found/usage |
@@ -145,7 +172,7 @@ guarantee `2`).
 | `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
 | `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |
 | `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |
-| `reconcile` | 0 | — | — | no ticket id; subprocess passthrough to rebar_reconciler; exits with the reconciler's own code |
+| `reconcile` | 0 | — | — | no ticket id; compatibility subprocess passthrough retaining reconciler codes 3/4/75 |
 | `remote-cert` | 0 | — | — | no ticket id; trusted op-cert gate service client; bad args → 2; error → 1 |
 | `review` | 0 | 1 | — | **DEPRECATED** shim forwarding to `review-plan` (with `--no-sign`); PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |
 | `review-code` | 0 | — | — | no ticket id; PASS → 0, BLOCK → 1, INDETERMINATE → 2, retryable degrade → 11 |

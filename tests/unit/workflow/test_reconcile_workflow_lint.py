@@ -174,16 +174,16 @@ def test_nonzero_marker_never_masks_failure_or_sets_paused_output(tmp_path: Path
     ("rc", "expected_rc", "message"),
     [
         (0, 0, "Reconcile converged."),
-        (75, 0, "Reconcile rescheduled"),
-        (3, 0, "Another reconcile pass is in flight"),
         (1, 1, "Reconcile failed (exit 1)"),
-        (4, 4, "Reconcile failed (exit 4)"),
-        (17, 17, "Reconcile failed (exit 17)"),
+        (2, 2, "Reconcile failed (exit 2)"),
     ],
 )
-def test_workflow_preserves_every_existing_exit_mapping(
+def test_workflow_uses_only_canonical_exit_contract(
     tmp_path: Path, rc: int, expected_rc: int, message: str
 ) -> None:
+    run_step = _named_step(_PRODUCTION, "reconcile", "Run reconciler")["run"]
+    assert 'case "$rc" in' not in run_step
+
     completed, output = _run_reconciler_step(tmp_path, rc=rc)
 
     assert completed.returncode == expected_rc
