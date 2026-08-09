@@ -61,9 +61,15 @@ helper) is a single-site edit, and no rebar-owned boto3/credential/key-layout co
 the one bundle-key string the helper defines.
 
 **Lowering the push-lock TTL was rejected.** The helper self-heals a stale per-ref push lock by
-stealing it once it exceeds `DEFAULT_LOCK_TTL_SECONDS = 60` (overridable via
-`GIT_REMOTE_S3_LOCK_TTL_SECONDS`). Lowering the TTL to shorten the rare post-crash delay was
-considered and rejected: a shorter window risks stealing a lock from a slow-but-live push,
+clearing and re-acquiring it during the next push's lock acquisition once it exceeds
+`DEFAULT_LOCK_TTL_SECONDS = 60` (`git-remote-s3` v0.3.2 `remote.py`: `acquire_lock` lines
+352–400; default at line 45). The TTL is overridable via `GIT_REMOTE_S3_LOCK_TTL_SECONDS` —
+the name the code reads (`remote.py:95`, verified at tag `v0.3.2` = commit
+[`9f3290e`](https://github.com/awslabs/git-remote-s3/blob/9f3290e1f19090a9c11ae5b8c01ec8abe6184ab9/git_remote_s3/remote.py#L95));
+upstream's README still prints the older `GIT_REMOTE_S3_LOCK_TTL`, a string that appears only in
+the README and in no `.py` file of the release, so the code ignores it.
+Lowering the TTL to shorten the rare post-crash delay was
+considered and rejected: a shorter window risks clearing a lock from a slow-but-live push,
 trading a bounded, rare delay for a correctness hazard. The 60s default stays.
 
 [grs3]: https://github.com/awslabs/git-remote-s3

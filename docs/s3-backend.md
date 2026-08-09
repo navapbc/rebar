@@ -132,9 +132,24 @@ operator action and no data loss**:
   heal, deletes nothing, and surfaces `rebar fsck-recover` rather than dropping a parent. It
   contrasts deliberately with upstream's interactive `git-remote-s3 doctor`, which prompts and
   can discard a head.
-- **Stale push-lock auto-steal.** The helper serializes pushes with a per-ref S3 lock object. If
-  a client dies mid-push, the lock self-heals: the next client steals it once it is older than
-  the helper's TTL — `git-remote-s3`'s `DEFAULT_LOCK_TTL_SECONDS = 60` (overridable via the
-  `GIT_REMOTE_S3_LOCK_TTL_SECONDS` environment variable). The resulting one-time delay of up to
-  ~60s is a rare, bounded cost; rebar intentionally does **not** lower it, because a shorter TTL
-  risks stealing a lock from a slow-but-live push.
+- **Stale push-lock auto-clear.** The helper serializes pushes with a per-ref S3 lock object. If
+  a client dies mid-push, the lock self-heals **during the next push's lock acquisition**: when
+  `acquire_lock` finds the existing lock older than the TTL it deletes it and re-acquires in the
+  same call (`git-remote-s3` v0.3.2 `remote.py`, `acquire_lock` at lines 352–400) — no separate
+  step and no cross-client "steal" of a live lock. The TTL is
+  `DEFAULT_LOCK_TTL_SECONDS = 60` (`remote.py:45`), overridable via the
+  `GIT_REMOTE_S3_LOCK_TTL_SECONDS` environment variable — the name the code actually reads
+  (`remote.py:95`, verified at tag `v0.3.2`). Note that upstream's README documents the older
+  `GIT_REMOTE_S3_LOCK_TTL`, which the code does **not** honor, so set the `_SECONDS` form. If a
+  stale lock ever persists, the helper's own contention message points operators at the manual
+  `git-remote-s3 doctor --lock-ttl <seconds>` cleanup path (`remote.py:236–237`). The resulting
+  one-time delay of up to ~60s is a rare, bounded cost; rebar intentionally does **not** lower
+  it, because a shorter TTL risks clearing a lock from a slow-but-live push.
+
+  > **Env-var name — verify against your installed version.** The code reads
+  > `GIT_REMOTE_S3_LOCK_TTL_SECONDS` (v0.3.2 tag = commit `9f3290e`,
+  > [`git_remote_s3/remote.py#L95`](https://github.com/awslabs/git-remote-s3/blob/9f3290e1f19090a9c11ae5b8c01ec8abe6184ab9/git_remote_s3/remote.py#L95)).
+  > Upstream's README documents `GIT_REMOTE_S3_LOCK_TTL` (no `_SECONDS`), but that string appears
+  > **only in the README** — it is present in **no `.py` file** of the release, so the code does
+  > not honor it. Set the `_SECONDS` form; if you override the TTL, confirm the exact name in
+  > your installed version's `git_remote_s3/remote.py` before relying on it.
