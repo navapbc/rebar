@@ -54007,10 +54007,24 @@
     },
     "6a65-25b5-b5c3-436d": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\n\nCumulative error counters in infra/scripts/observability.sh persist an acknowledgement offset before CloudWatch accepts the matching datapoint. A transient put-metric-data failure therefore causes the next interval to compute zero from an already-advanced baseline, permanently losing the positive delta. The same copied construct affects seven metric streams across six code shapes, including the G2P block omitted from the original five-site census.\n\n## Proven root cause\n\nEach affected block writes total to its offset file before running aws cloudwatch put-metric-data. Whole-script runtime probes showed offset 2/source 7/failing AWS becomes offset 7, and the next successful run publishes 0 rather than 5 for every stream. Removing only error suppression does not recover the count. Original feature stories explicitly require these observed failures to publish metrics and trip alarms.\n\n## Repair plan\n\n- Reorder each of the six concrete publish shapes so the matching offset advances only after a successful CloudWatch call. Cover replication, voter, merge-change, deploy, both shared autodeploy-marker streams, and G2P.\n- Preserve the script systemd exit-0 contract and existing logging behavior: AWS failure stays best-effort for the overall probe, but the failed metric remains unacknowledged.\n- Keep zero-delta publication behavior unchanged; a successful zero publish may acknowledge the observed total. Preserve reset handling where total below offset retries total.\n- Add a whole-script PATH-shim regression oracle that drives the real script, fails each targeted AWS metric once, proves the offset is byte-identical after failure, then proves a successful retry publishes the accumulated delta and advances the offset. Include zero/reset controls and both shared-helper metrics.\n\n## Testing\n\n- Run `pytest -q tests/scripts/test_observability_offsets_6a65.py tests/scripts/test_observability_exit.py`.\n- Run `make lint` and `make typecheck`.\n\n## Acceptance Criteria\n\n- [ ] All seven cumulative counter streams advance their offset only after the matching successful AWS publication, checked by the whole-script test.\n- [ ] A failed publication leaves the targeted offset byte-identical, checked for every stream by the whole-script test.\n- [ ] A subsequent successful run publishes the accumulated delta and then advances the offset, checked for every stream.\n- [ ] Reset handling retries the reset total after failure, and zero-delta behavior remains compatible.\n- [ ] observability.sh still exits zero when an individual AWS publication fails and on a healthy run.\n- [ ] The held-out oracle is observed RED before the fix, GREEN after the fix, and RED again under the original pre-acknowledgement mutation.\n- [ ] Repository lint and typecheck gates pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "observability.sh advances its metric offset before the CloudWatch publish, so a transient put-metric-data failure permanently loses that interval's count"
       },
       "created_at": "2026-08-07T17:00:53Z",
@@ -91288,10 +91302,24 @@
     },
     "beb1-d778-e7d9-425a": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# Where the unsigned events come from\n\nThe project intends to sign every event, but ~11.2k ACTIVE events carry no `author_sig`. Broken down by `env_id`, the cause is NOT diffuse \u2014 it is one environment.\n\n## Evidence \u2014 signed rate per environment (active, non-SNAPSHOT events)\n\n| env_id | signed | unsigned | signed% | last seen | top author |\n|---|---|---|---|---|---|\n| b2b5c498 | 0 | 8880 | 0.0% | 2026-08-09T16:16 | Unknown (8880) |\n| ade0f2ef (this host) | 9617 | 2186 | 81.5% | 2026-08-09T18:22 | RebarBotNava |\n| reconciler | 95 | 93 | 50.5% | 2026-08-07 | reconciler |\n| 4d084713 | 243 | 0 | 100% | 2026-08-08 | RebarBotNava |\n| rebar-bridge[bot] envs | 10 | 0 | 100% | \u2014 | rebar-bridge[bot] |\n\n**env b2b5c498 is the problem**: 8880 events, ZERO signed, every one authored \"Unknown\", and still writing. Its envelopes carry `author: \"Unknown\"`, `author_id: null`, `author_email: \"\"`, `author_sig: null`, `creation_channel: null` \u2014 i.e. NO identity is configured in that environment at all, so both the authorship stamp and the signature are skipped, and the creation-channel provenance feature is also a no-op there.\n\nIt is GROWING: 2818 events in 2026-07, 6062 in 2026-08.\n\nEvent types it writes: CLAIM_ENRICH 1500, TICKET_DIGEST 1496, DONE_ENRICH 1496, REVIEW_RESULT 1187, CREATE 1185, LINK 1100, ENQUEUE_ENRICH 912, COMMENT 4. First seen 2026-07-10 20:58, right after the event-sourced enrichment queue landed (75d1a4672d, 2026-07-09) \u2014 so it looks like a headless drainer/automation environment. Note it also CREATEs tickets and writes REVIEW_RESULTs unsigned, so the gap is not limited to the enrichment queue.\n\n## This host is NOT the problem\nade0f2ef's 2186 unsigned events are legacy: 772 from 2026-06, 1412 from 2026-07, and only **2** in 2026-08. Signing works here now. Store-wide the June rate was 0% signed (the feature did not exist), July 51%, August 48% \u2014 and the August figure is dragged down almost entirely by b2b5c498.\n\n## Not to be confused with the b636 restore\nThe b636 remediation restored 5041 unsigned historical events, which moved fsck's raw tally. That was benign (they predate signing). THIS ticket is the separate, ongoing gap.\n\n## Acceptance criteria\n- [ ] Identify the host/process behind env_id b2b5c498 (its events are the only lead:\n      enrichment-queue drainer + CREATE/LINK/REVIEW_RESULT, first seen 2026-07-10).\n- [ ] That environment writes events with a resolved author identity AND an `author_sig`.\n- [ ] `creation_channel` is stamped there too (currently null for all 8880).\n- [ ] A guard makes an identity-less writer loud rather than silent \u2014 e.g. the append path\n      refuses, or fsck reports an env whose signed-rate is 0%, so this cannot recur unnoticed.\n- [ ] Decide the disposition of the 8880 existing unsigned events (backfill is likely\n      impossible \u2014 signatures cannot be forged retroactively; document them as an accepted\n      pre-fix cohort scoped out of verify-authorship).",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "One environment writes every event unsigned and identity-less (author=Unknown, 8880 events, ongoing)"
       },
       "created_at": "2026-08-09T18:33:24Z",
