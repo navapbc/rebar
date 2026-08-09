@@ -52,6 +52,18 @@ fi
 git -C "$DIR" config user.email "$EMAIL"
 git -C "$DIR" config user.name "$NAME"
 
+# (a2) ALSO set the identity globally (bug beb1). rebar resolves event attribution via
+# `_seam.attribution_fields()`, which reads git config from `config.repo_root()` — inside this
+# container that is /app (the rebar source clone), NOT $DIR. With no identity there,
+# `author_email` came back empty and `resolve_current_identity()` returned None, so every event
+# this bot wrote was stamped author "Unknown"/author_id null — and `_seam` gates signing on
+# `if author_id and signing_key`, so a null author_id ALSO skipped signing entirely, before the
+# key was ever consulted. 8880 events were written unsigned and unattributed this way.
+# --global is correct HERE (unlike the repo-local line above): this container is dedicated to
+# the review bot, so there is no other clone for a global identity to leak into.
+git config --global user.email "$EMAIL"
+git config --global user.name "$NAME"
+
 # Reconcile this persistent single-branch clone before the bot starts writing artifacts.
 # A normal compatible store uses rebar's non-destructive merge-as-union path.  The one
 # deliberately narrow exception is the epoch reclaim migration: a clean pre-epoch clone
