@@ -7,6 +7,8 @@ import json
 import logging
 import os
 
+from rebar._store.fsutil import atomic_write
+
 logger = logging.getLogger(__name__)
 
 # Invariant I1 (docs/concurrency.md): compaction RENAMES the event files it folds
@@ -138,12 +140,10 @@ def read_cache(
 
 
 def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) -> None:
-    """Atomically write the state to .cache.json using a tmp-then-rename pattern."""
+    """Atomically publish one complete cache generation."""
     try:
-        cache_tmp = cache_path + ".tmp"
-        with open(cache_tmp, "w", encoding="utf-8") as tf:
-            json.dump({"dir_hash": dir_hash, "state": state}, tf, ensure_ascii=False)
-        os.rename(cache_tmp, cache_path)
+        envelope = json.dumps({"dir_hash": dir_hash, "state": state}, ensure_ascii=False)
+        atomic_write(cache_path, envelope)
     except OSError:
         logger.warning("failed to write cache for %s", ticket_dir, exc_info=True)
 
