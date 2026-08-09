@@ -389,10 +389,12 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
     except ReadError:
         return {
             "ticket_id": ticket_id,
+            "alias": None,
             "status": "unknown",
             "title": None,
             "blocking_summary": None,
         }
+    alias = state.get("alias")
     title = state.get("title") or "untitled"
     status = state.get("status") or "unknown"
     blockers: list[str] = []
@@ -408,7 +410,13 @@ def summary_compute(ticket_id: str, tracker: str) -> dict:
         # display default, not a wrong control-flow answer.
         pass
     suffix = ("blocked by: " + " ".join(blockers)) if (blockers and not ready) else "ready"
-    return {"ticket_id": ticket_id, "status": status, "title": title, "blocking_summary": suffix}
+    return {
+        "ticket_id": ticket_id,
+        "alias": alias,
+        "status": status,
+        "title": title,
+        "blocking_summary": suffix,
+    }
 
 
 def summary_cli(argv: list[str], tracker: str) -> int:

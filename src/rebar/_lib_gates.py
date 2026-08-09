@@ -204,7 +204,12 @@ def grounding_info() -> GroundingInfo:
 
 def summary(*ticket_ids: str, repo_root=None) -> list[dict[str, Any]]:
     """One-line-per-ticket summary as structured JSON: a list of
-    {ticket_id, status, title, blocking_summary}."""
+    {ticket_id, alias, status, title, blocking_summary}.
+
+    ``ticket_id`` preserves each caller-supplied token; ``alias`` is the exact
+    resolved human-friendly alias, or ``None`` when the token cannot be
+    resolved unambiguously.
+    """
     from rebar._engine_support import gates, reads
 
     tracker = reads.tracker_dir(repo_root)

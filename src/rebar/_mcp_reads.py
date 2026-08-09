@@ -259,7 +259,11 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def summary(ticket_ids: list[str]) -> list[dict]:
-        """One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]."""
+        """One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}].
+
+        ticket_id preserves the caller token; alias is the exact resolved
+        human-friendly alias, or null when resolution fails closed.
+        """
         return rebar.summary(*ticket_ids)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])

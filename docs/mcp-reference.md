@@ -32,7 +32,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `render_workflow` | Render a workflow (a .rebar/workflows/<name> name or a file path) to a |
 | `search` | Full-text search over titles/descriptions/comments/tags (replay-derived). |
 | `show_ticket` | Show compiled ticket state (accepts full id, short id, or alias). |
-| `summary` | One-line-per-ticket summary [{ticket_id, status, title, blocking_summary}]. |
+| `summary` | One-line-per-ticket summary [{ticket_id, alias, status, title, blocking_summary}]. |
 | `ticket_deps` | Show the dependency graph for a ticket. |
 | `validate` | Repo-wide quality health check (JSON report: score, critical/major/ |
 | `verify_signature` | Certify a ticket's verified-steps manifest against its signature. |

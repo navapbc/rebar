@@ -64,6 +64,14 @@ response does not invalidate credentials already proven by Git over HTTPS.
 
 ## Record your work in rebar, not in scratch notes
 
+**Choose ticket identifiers by context.** After discovering or resolving a ticket, use its
+exact human-friendly **alias** in subsequent tracker commands (`show`, `comment`, `edit`,
+`claim`, `transition`, and links); do not keep copying a short hexadecimal prefix. Reserve the
+full canonical four-quad ticket ID for identity-sensitive artifacts, especially
+`rebar-ticket:` trailers, signatures/attestations, and durable cross-system references. The
+resolver's acceptance of aliases and short forms in some identity-sensitive paths is
+compatibility behavior, not the authoring policy.
+
 Before starting, `search`/`list` for an existing ticket; if none fits, `create` one and
 capture the plan (and its acceptance criteria) in the description. As you work, write
 progress, decisions, and emergent findings back as `comment`s on the ticket (and `create` +
@@ -213,7 +221,8 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
 - **Two remotes (split residency):** `origin` → GitHub (the code mirror **and** the `tickets`
   branch's source of truth = the `sync.remote` rebar auto-pushes ticket events to); `gerrit` →
   the code-review remote. **Code review goes to `gerrit`; ticket events go to `origin`.**
-- **Every commit needs** a `rebar-ticket: <id>` trailer (or a leading `<id>:` subject) so CI's
+- **Every commit needs** a `rebar-ticket: <full-canonical-id>` trailer (or a leading
+  `<full-canonical-id>:` subject) so CI's
   `Verified` gate accepts it (`rebar explain commit-trailer` for the exact format and accepted
   id forms; `rebar verify-commit-ticket` to check a commit locally), **and** a DCO sign-off.
   Before committing, verify
@@ -266,10 +275,11 @@ auto-commit/auto-push and do NOT go through Gerrit.)
 
 ```python
 import rebar
-tid = rebar.create_ticket("task", "title", return_alias=True)   # -> {"id","alias"}
-rebar.claim(tid["id"])                   # uses ticket.default_assignee; ConcurrencyError if taken
-rebar.link(child, parent, "discovered_from")
-rebar.transition(tid["id"], "in_progress", "closed")
+created = rebar.create_ticket("task", "title", return_alias=True)  # -> {"id","alias"}
+ticket = created["alias"]                 # use the alias for subsequent tracker commands
+rebar.claim(ticket)                        # uses ticket.default_assignee; ConcurrencyError if taken
+rebar.link(child_alias, parent_alias, "discovered_from")
+rebar.transition(ticket, "in_progress", "closed")
 ```
 
 The full library API and the reusable subsystems (signing, LLM runtime, prompt/contract,

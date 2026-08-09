@@ -209,11 +209,17 @@ def test_gate_results(rebar_repo: Path) -> None:
 
 def test_summary_shape(rebar_repo: Path) -> None:
     r = str(rebar_repo)
-    a = rebar.create_ticket("task", "S a", repo_root=r)
-    b = rebar.create_ticket("task", "S b", repo_root=r)
+    created_a = rebar.create_ticket("task", "S a", repo_root=r, return_alias=True)
+    created_b = rebar.create_ticket("task", "S b", repo_root=r, return_alias=True)
+    a, b = created_a["id"], created_b["id"]
     v = schemas.validator(schemas.SUMMARY)
-    v.validate(_cli_json("summary", a, b, "--output", "json", cwd=r))
-    v.validate(rebar.summary(a, b, repo_root=r))
+    cli_result = _cli_json("summary", a, b, "--output", "json", cwd=r)
+    library_result = rebar.summary(a, b, repo_root=r)
+    v.validate(cli_result)
+    v.validate(library_result)
+    expected_aliases = [created_a["alias"], created_b["alias"]]
+    assert [item["alias"] for item in cli_result] == expected_aliases
+    assert [item["alias"] for item in library_result] == expected_aliases
 
 
 def test_list_epics_cli_removed(rebar_repo: Path) -> None:

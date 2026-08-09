@@ -429,6 +429,8 @@ Usage: rebar sign <ticket_id> <manifest_json>   (HMAC-sign a JSON array of verif
 
 ```
 Usage: rebar summary <ticket_id> [<ticket_id> ...] [--output json]
+  JSON items are {ticket_id, alias, status, title, blocking_summary}.
+  ticket_id preserves the caller token; alias is the exact resolved alias, or null when unresolved or ambiguous.
 ```
 
 ### `tag`
