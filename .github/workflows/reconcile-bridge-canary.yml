@@ -50,6 +50,14 @@ on:
         required: false
         default: '2'
         type: string
+      status_source:
+        description: 'Heartbeat source (status; github-api is one-release rollback)'
+        required: false
+        default: 'status'
+        type: choice
+        options:
+          - 'status'
+          - 'github-api'
 
 concurrency:
   group: reconcile-bridge-canary
@@ -69,6 +77,7 @@ jobs:
       ALERT_WINDOW_HOURS: ${{ inputs.alert_window_hours || '2' }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       ALERT_TAG: heartbeat-alert
+      REBAR_CANARY_HEARTBEAT_SOURCE: ${{ inputs.status_source || 'status' }}
       # NOTE: REBAR_IDENTITY_SIGNING_KEY is exported by the "Materialize the Rebar Bot signing
       # key" step (via $GITHUB_ENV) and is deliberately NOT set here. Job-level `env:` cannot
       # reference ${{ runner.temp }} — the `runner` context is unavailable outside steps, so a
@@ -92,6 +101,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin '+tickets:refs/remotes/origin/tickets'
+          git fetch origin '+refs/reconciler/*:refs/reconciler/*'
           rm -rf .tickets-tracker
           git worktree add -B tickets .tickets-tracker origin/tickets
 
@@ -159,7 +169,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          python scripts/canary_bridge.py check-heartbeat
+          python scripts/canary_bridge.py check-heartbeat --source "${REBAR_CANARY_HEARTBEAT_SOURCE}"
 
       - name: Log canary result
         run: |

@@ -630,15 +630,9 @@ def main(argv: list[str] | None = None) -> int:
     if enumeration_exit is not None:
         return enumeration_exit
 
-    # -------------------------------------------------------------------------
-    # Step 1: Mode validation (dd-2) — BEFORE any fetcher reference.
-    # Load mode.py under the dotted key so tests can pre-seed sys.modules.
-    # -------------------------------------------------------------------------
     target_mode = request.target_mode
 
-    # -------------------------------------------------------------------------
     # Step 1b: reconcile-check mode — read-only diagnostic, no lock needed.
-    # -------------------------------------------------------------------------
     if target_mode == mode_mod.Mode.RECONCILE_CHECK:
         return _run_reconcile_check(repo_root)
 
@@ -655,10 +649,8 @@ def main(argv: list[str] | None = None) -> int:
             route=route,
         )
 
-    # -------------------------------------------------------------------------
     # Step 2: Advisory lock + phase-gate checks.
     # Load _advisory_lock under the dotted key so tests can pre-seed sys.modules.
-    # -------------------------------------------------------------------------
     advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
 
     pause_exit = _pause_exit_code(advisory, target_mode, mode_mod, repo_root, route)
@@ -714,33 +706,19 @@ def main(argv: list[str] | None = None) -> int:
                 legacy_message=("reconcile: refs/reconciler/lock held by a live pass — yielding"),
             )
 
-    # -------------------------------------------------------------------------
     # Step 3: acquire (or adopt the stolen lock), run pass, release in finally.
-    # -------------------------------------------------------------------------
-    # Bug b859: acquire_pass_lock was previously OUTSIDE the try/except so
-    # ReconcileLockError (or any pre-run_pass exception) escaped uncaught as
-    # a raw Python traceback — invisible to operators / probes that look
-    # for the ``ERROR:`` prefix. Move acquire_pass_lock INTO the try, gated
-    # by an ``acquired`` flag so the finally clause only releases when we
-    # actually held the lock. Diagnostic tracebacks are emitted to stderr
-    # so the probe's unfiltered side-car log captures them too.
     acquired = False
     lock_oid: str | None = None
     heartbeat: _Heartbeat | None = None
     abort_check = None
+    from rebar_reconciler import last_pass
+
     try:
-        # Adopt the stolen/freed-acquired oid (story 9622) — skip acquire_pass_lock,
-        # which would otherwise re-CAS the ref we already own — or acquire normally
-        # (the not-held path).
         if pre_acquired_oid is not None:
             lock_oid = pre_acquired_oid
         else:
             lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
         acquired = True
-        # The ref-lock backend returns an oid; start the daemon heartbeat that renews
-        # the lease at max(1, lease//3) and build the per-mutation abort checkpoint that
-        # raises ReconcileLockLost if the heartbeat loses the lease mid-pass. A test
-        # stub of `advisory` returning None (no ref backend) simply skips the heartbeat.
         if lock_oid is not None and hasattr(advisory, "_load_ref_lock"):
             ref_lock = advisory._load_ref_lock()
             interval = ref_lock.heartbeat_interval(advisory._lock_lease_secs())
@@ -754,44 +732,26 @@ def main(argv: list[str] | None = None) -> int:
                         f"pass lock lease lost mid-pass (pass_id={pass_id!r}) — aborting"
                     )
 
-        return run_pass(
-            repo_root=repo_root,
-            pass_id=pass_id,
-            target_mode=target_mode,
-            filter_local_ids=request.filter_local_ids,
-            selection_kind=request.selection_kind,
-            selection_ids=selection_ids,
-            max_changes=request.max_changes,
-            route=route,
-            abort_check=abort_check,
+        return last_pass.finalize_process(
+            repo_root,
+            pass_id,
+            lambda: run_pass(
+                repo_root=repo_root,
+                pass_id=pass_id,
+                target_mode=target_mode,
+                filter_local_ids=request.filter_local_ids,
+                selection_kind=request.selection_kind,
+                selection_ids=selection_ids,
+                max_changes=request.max_changes,
+                route=route,
+                abort_check=abort_check,
+            ),
         )
-    except Exception as exc:  # noqa: BLE001 — CLI top-level: log + traceback, return exit code 1
-        # Print the prefixed line first so grep-based probes see it, THEN
-        # the traceback so operators can root-cause. Both go to stderr.
-        print(f"ERROR: run_pass raised: {exc}", file=sys.stderr)
-        import traceback as _tb
-
-        _tb.print_exc(file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 — acquire/heartbeat boundary
+        print(f"ERROR: reconciler process failed before finalization: {exc}", file=sys.stderr)
         return 1
     finally:
-        # Stop the heartbeat first so it no longer advances the ref, then release
-        # against the LATEST oid it renewed to (a stale/absent ref no-ops).
-        if heartbeat is not None:
-            heartbeat.stop()
-        if acquired:
-            try:
-                if heartbeat is not None:
-                    # Ref backend: release against the LATEST renewed oid.
-                    advisory.release_pass_lock(pass_id, repo_root, oid=heartbeat.current_oid())
-                else:
-                    # File backend (or a test stub with a 2-arg release).
-                    advisory.release_pass_lock(pass_id, repo_root)
-            except Exception as _rel_exc:  # noqa: BLE001 — release in finally must not mask original error
-                # Release failure must not mask the original error path.
-                print(
-                    f"WARN: release_pass_lock failed for pass_id={pass_id!r}: {_rel_exc!r}",
-                    file=sys.stderr,
-                )
+        last_pass.release_process_lock(advisory, heartbeat, acquired, pass_id, repo_root)
 
 
 if __name__ == "__main__":

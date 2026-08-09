@@ -12,9 +12,15 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Removed
 
-- **BREAKING — the `bridge-status` and `purge-bridge` CLI commands are removed with no
-  compatibility aliases.** Invoking either name now follows the standard unknown-subcommand
-  path and exits non-zero. No persisted data format changes with their removal.
+- **BREAKING — `purge-bridge` is removed with no compatibility alias.** Invoking it follows the
+  standard unknown-subcommand path and exits non-zero. No persisted data format changes.
+
+### Added
+
+- **Canonical reconciler status:** `rebar bridge status` reads the durable last-pass, pause, and
+  live-lease refs and reports `PAUSED`, `RUNNING`, `FOREIGN`, `FAILED`, `STALE`, `HEALTHY`, or
+  `NEVER_RUN`. Age-based staleness is opt-in with `--max-age`; `rebar bridge-status` is retained
+  as a hidden compatibility alias. The heartbeat canary now uses this status by default.
 
 ### Changed
 

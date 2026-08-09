@@ -108,7 +108,6 @@ class _PassContext:
     fetcher: Any = None
     differ: Any = None
     applier: Any = None
-    health_mod: Any = None
     invariants_mod: Any = None
     binding_store_mod: Any = None
     outbound_differ_mod: Any = None
@@ -218,7 +217,6 @@ def _load_snapshots(ctx: _PassContext) -> None:
     fetcher = _load("reconcile_fetcher", "fetcher.py")
     differ = _load("reconcile_differ", "differ.py")
     applier = _load("reconcile_applier", "applier.py")
-    health_mod = _load("reconcile_health", "health.py")
     invariants_mod = _load("reconcile_invariants", "invariants.py")
     binding_store_mod = _load("reconcile_binding_store", "binding_store.py")
     outbound_differ_mod = _load("reconcile_outbound_differ", "outbound_differ.py")
@@ -319,7 +317,6 @@ def _load_snapshots(ctx: _PassContext) -> None:
     ctx.fetcher = fetcher
     ctx.differ = differ
     ctx.applier = applier
-    ctx.health_mod = health_mod
     ctx.invariants_mod = invariants_mod
     ctx.binding_store_mod = binding_store_mod
     ctx.outbound_differ_mod = outbound_differ_mod
@@ -400,7 +397,7 @@ def _handle_corrupt_snapshot(
 
 def _apply_mutations(ctx: _PassContext) -> None:
     """Apply phase: optional filter-scope narrowing + status preflight + the single
-    applier.apply dispatch (wrapped so health.record_pass fires even on failure).
+    applier.apply dispatch and normalize its write/no-write return shapes.
     Records manifest_path / nowrite_plan / the unfiltered count back onto ctx.
     """
     mutations = ctx.mutations
@@ -411,7 +408,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
     target_mode = ctx.target_mode
     persist = ctx.persist
     applier = ctx.applier
-    health_mod = ctx.health_mod
     sync_logger = ctx.sync_logger
 
     # Story 21dd: the reconciler's outbound apply publishes ticket writes externally
@@ -454,11 +450,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # per-mutation failure rather than taking down every later mutation.
     preflight_status_mapping(mutations)
 
-    # F8: wrap apply in try/except/finally so health.record_pass STILL fires
-    # on apply failure with degraded fields (local_mutation_count=0,
-    # failure_kind set). Without this wrapping, failed passes were invisible
-    # to monitoring.
-    #
     # Direction-aware dispatch lives inside applier.apply (PR #371 / defect
     # #8): the applier partitions typed Mutations by direction internally and
     # routes inbound via _apply_typed per-mutation, outbound via the batch
@@ -471,7 +462,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
     nowrite_plan: dict | None = None
     # Bug c903: LIVE returns its applied/failed tally here instead of a Path.
     apply_tally: dict | None = None
-    apply_exc: BaseException | None = None
     try:
         # Backward compatibility: tests stub applier.apply with a signature
         # that does not accept the `mode` kwarg. Only pass it when caller
@@ -513,9 +503,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 **_abort_kw,
                 **_synced_kw,
             )
-    except BaseException as exc:
-        apply_exc = exc
-        raise
     finally:
         # In no-write mode, apply() returns the computed plan dict instead of
         # a manifest Path. Capture it for the report and treat manifest_path
@@ -531,33 +518,6 @@ def _apply_mutations(ctx: _PassContext) -> None:
         elif persist and isinstance(manifest_path, dict):
             apply_tally = manifest_path
             manifest_path = None
-        # health.record_pass writes a bridge_state/health/<ts>.json file —
-        # skip it in no-write mode (ticket yaw-plait-doe).
-        if persist:
-            per_type_counts = health_mod.count_open_by_type(repo_root=repo_root)
-            if apply_exc is None:
-                health_mod.record_pass(
-                    pass_id=pass_id,
-                    pre_fsck=0,
-                    post_fsck=0,
-                    per_type_counts=per_type_counts,
-                    local_mutation_count=len(mutations),
-                    repo_root=repo_root,
-                )
-            else:
-                # Classify the failure: reschedule vs generic apply error.
-                failure_kind = (
-                    "reschedule" if type(apply_exc).__name__ == "RescheduleError" else "apply_error"
-                )
-                health_mod.record_pass(
-                    pass_id=pass_id,
-                    pre_fsck=0,
-                    post_fsck=0,
-                    per_type_counts=per_type_counts,
-                    local_mutation_count=0,
-                    repo_root=repo_root,
-                    failure_kind=failure_kind,
-                )
 
     ctx.mutations = mutations
     ctx.unfiltered_count = unfiltered_count

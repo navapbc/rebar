@@ -91,6 +91,7 @@ NOW = 1_785_800_000  # arbitrary fixed epoch
 def hb_env(tmp_path: Path, **over: str) -> dict[str, str]:
     env = {
         "ALERT_WINDOW_HOURS": "2",
+        "REBAR_CANARY_HEARTBEAT_SOURCE": "github-api",
         "GITHUB_REPOSITORY": "navapbc/rebar",
         "GITHUB_OUTPUT": str(tmp_path / "gh_out"),
     }

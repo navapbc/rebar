@@ -1,6 +1,6 @@
 """The primary ``rebar bridge`` command group and reconciler launcher.
 
-``bridge`` intentionally presents four stable operator actions. Its parser
+``bridge`` intentionally presents five stable operator actions. Its parser
 owns nested-command discovery and argument validation, then forwards the
 validated canonical child arguments to the reconciler.
 The launcher is shared with the established ``reconcile`` spelling so that
@@ -14,6 +14,7 @@ import argparse
 import datetime
 import importlib
 import importlib.util
+import json
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -55,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{preview,sync,pause,resume}",
+        metavar="{preview,sync,status,pause,resume}",
     )
     preview = commands.add_parser(
         "preview",
@@ -84,6 +85,14 @@ def _parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Apply at most N proposed changes and retain an audit manifest.",
     )
+    status = commands.add_parser(
+        "status",
+        help="Show the reconciler's durable status snapshot.",
+        description="Show the reconciler's durable status snapshot.",
+    )
+    status.add_argument("--target", metavar="ENVIRONMENT_ID")
+    status.add_argument("--max-age", type=_duration_seconds, metavar="DURATION")
+    status.add_argument("--json", action="store_true", help="Emit the snapshot as JSON.")
     pause = commands.add_parser(
         "pause",
         help="Temporarily stop scheduled reconciliation.",
@@ -107,6 +116,20 @@ def _positive_int(value: str) -> int:
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return parsed
+
+
+def _duration_seconds(value: str) -> int:
+    """Parse a positive integer duration with an optional s/m/h suffix."""
+    units = {"s": 1, "m": 60, "h": 3600}
+    suffix = value[-1:].lower()
+    number = value[:-1] if suffix in units else value
+    try:
+        parsed = int(number)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive duration (for example 2h)") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive duration (for example 2h)")
+    return parsed * units.get(suffix, 1)
 
 
 def _group_help() -> str:
@@ -191,6 +214,33 @@ def _pause_or_resume(command: str, reason: str | None = None) -> int:
         return 1
 
 
+def _status(parsed: argparse.Namespace) -> int:
+    """Render the shared status-core snapshot in machine or operator form."""
+    from rebar import config
+
+    _ref_lock_module()  # bootstrap the engine package for the in-process status core
+    last_pass = importlib.import_module("rebar_reconciler.last_pass")
+    try:
+        result = last_pass.snapshot(
+            Path(config.repo_root()),
+            target_environment_id=parsed.target,
+            max_age_seconds=parsed.max_age,
+        )
+    except Exception as exc:  # noqa: BLE001 - one clean CLI error boundary
+        sys.stderr.write(f"Error: cannot read bridge status: {exc}\n")
+        return 1
+    if parsed.json:
+        sys.stdout.write(json.dumps(result, sort_keys=True) + "\n")
+    else:
+        summary = result["verdict"]
+        if result.get("pass_id"):
+            summary += f" pass={result['pass_id']} environment={result['environment_id']}"
+        if result.get("failure_kind"):
+            summary += f" failure={result['failure_kind']}"
+        sys.stdout.write(summary + "\n")
+    return 0 if result["verdict"] in last_pass.HEALTHY_VERDICTS else 1
+
+
 def bridge_cli(argv: Sequence[str]) -> int:
     """Run the primary bridge command group.
 
@@ -212,4 +262,6 @@ def bridge_cli(argv: Sequence[str]) -> int:
 
     if parsed.command in _BRIDGE_MODES:
         return _launch_bridge_command(parsed.command, parsed)
+    if parsed.command == "status":
+        return _status(parsed)
     return _pause_or_resume(parsed.command, getattr(parsed, "reason", None))

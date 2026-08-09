@@ -5,7 +5,6 @@ Owns the filesystem artifacts a pass writes and the lazy loaders for the
 sibling stores it consults:
   * the local↔Jira id/field mapping (``mapping.json``) — load + atomic writes +
     set-field provenance,
-  * the per-pass completion record,
   * the reschedule contract (``RescheduleError``/``EXIT_RESCHEDULE``) raised when
     the tickets-branch write exhausts ``rebase_retry``,
   * lazy loaders for ``conflict_resolver`` and ``alert_store``.
@@ -46,28 +45,6 @@ class RescheduleError(Exception):
         super().__init__(f"reject_and_reschedule after {attempt_count} attempt(s): {last_error}")
         self.attempt_count = attempt_count
         self.last_error = last_error
-
-
-def _write_pass_record(repo_root: Path, pass_id: str, mutation_count: int) -> None:
-    """Write a pass completion record to bridge_state/snapshots/<pass_id>.pass_record.json.
-
-    This simulates the tickets-branch write.  In a full implementation this
-    would commit the record to the tickets orphan branch.
-
-    Args:
-        repo_root:      Repository root directory.
-        pass_id:        Unique identifier for this reconciliation pass.
-        mutation_count: Number of mutations processed in this pass.
-    """
-    snapshots_dir = repo_root / "bridge_state" / "snapshots"
-    snapshots_dir.mkdir(parents=True, exist_ok=True)
-    record_path = snapshots_dir / f"{pass_id}.pass_record.json"
-    record = {
-        "pass_id": pass_id,
-        "mutation_count": mutation_count,
-        "status": "complete",
-    }
-    record_path.write_text(json.dumps(record, indent=2))
 
 
 def _load_conflict_resolver():

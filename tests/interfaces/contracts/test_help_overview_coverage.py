@@ -31,7 +31,7 @@ from rebar._cli import _help
 # 5899; use ``list --type=epic ...``.)
 _OVERVIEW_ALLOWLIST = frozenset({"help"})
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_RETIRED_BRIDGE_COMMANDS = ("bridge-status", "purge-bridge")
+_RETIRED_BRIDGE_COMMANDS = ("purge-bridge",)
 
 
 def _routable_subcommands() -> frozenset[str]:
@@ -82,7 +82,7 @@ def _overview_listed() -> frozenset[str]:
 
 def test_routable_set_matches_pinned_help_set() -> None:
     """Every routable arm has pinned help text and vice-versa (no drift)."""
-    routable = _routable_subcommands()
+    routable = _routable_subcommands() - _cli._HIDDEN_ALIASES
     known = _help.known_subcommands()
     assert routable - known == frozenset(), (
         f"routable but no pinned help text: {sorted(routable - known)}"
