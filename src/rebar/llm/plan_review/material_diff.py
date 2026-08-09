@@ -100,7 +100,11 @@ def canonical_description(
 
 
 def material_basis(
-    ctx: PlanContext, *, normalize_checkboxes: bool = True, normalize_whitespace: bool | None = None
+    ctx: PlanContext,
+    *,
+    normalize_checkboxes: bool = True,
+    normalize_whitespace: bool | None = None,
+    normalize_reason: bool = True,
 ) -> dict[str, Any]:
     """The ordered mapping the composite fingerprint hashes.
 
@@ -115,6 +119,8 @@ def material_basis(
     historical name because the repo documents it as the legacy-algorithm switch;
     ``normalize_whitespace`` overrides only the whitespace half, which the grandfather
     fallback uses to recompute the intermediate (checkbox-only) generation.
+    ``normalize_reason=False`` independently reproduces generations that hashed the raw
+    no-file-impact reason before reason canonicalization was introduced.
     """
     basis: dict[str, Any] = {
         "ticket_id": ctx.ticket_id,
@@ -128,9 +134,12 @@ def material_basis(
     }
     if ctx.state.get("file_impact_scope") == "none":
         reason = ctx.state.get("no_file_impact_reason")
+        reason = reason if isinstance(reason, str) else ""
+        if normalize_reason:
+            reason = normalize_insignificant_whitespace(reason)
         basis["file_impact_scope"] = {
             "kind": "none",
-            "reason": reason if isinstance(reason, str) else "",
+            "reason": reason,
         }
     return basis
 

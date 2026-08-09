@@ -338,6 +338,7 @@ def current_material_fingerprint_impl(
     repo_root=None,
     normalize_checkboxes: bool = True,
     normalize_whitespace: bool | None = None,
+    normalize_reason: bool = True,
 ) -> str | None:
     """Recompute the ticket's material fingerprint from a LIGHT read (the ticket + its
     child ids only — no full child fetch, no LLM), matching
@@ -358,6 +359,7 @@ def current_material_fingerprint_impl(
             ctx,
             normalize_checkboxes=normalize_checkboxes,
             normalize_whitespace=normalize_whitespace,
+            normalize_reason=normalize_reason,
         )
     except Exception:
         # Cannot compute the current fingerprint → caller treats material as unknown

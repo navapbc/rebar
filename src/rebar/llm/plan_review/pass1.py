@@ -737,7 +737,11 @@ def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def material_fingerprint(
-    ctx: PlanContext, *, normalize_checkboxes: bool = True, normalize_whitespace: bool | None = None
+    ctx: PlanContext,
+    *,
+    normalize_checkboxes: bool = True,
+    normalize_whitespace: bool | None = None,
+    normalize_reason: bool = True,
 ) -> str:
     """A hash of the ticket's MATERIAL plan content (description / AC / file_impact /
     decomposition) — bound into the attestation so a material edit invalidates the
@@ -758,7 +762,9 @@ def material_fingerprint(
     key separately so a staleness message can name WHICH component moved (bug 94a3). One
     definition of "material" keeps the composite and the per-component view in agreement;
     ``normalize_whitespace`` (default: follow ``normalize_checkboxes``) reproduces the
-    intermediate post-330c/pre-2be7 generation for the same grandfather fallback.
+    intermediate post-330c/pre-2be7 generation for the same grandfather fallback, while
+    ``normalize_reason=False`` independently reproduces generations with a raw
+    no-file-impact reason.
     """
     from .material_diff import material_basis
 
@@ -766,6 +772,7 @@ def material_fingerprint(
         ctx,
         normalize_checkboxes=normalize_checkboxes,
         normalize_whitespace=normalize_whitespace,
+        normalize_reason=normalize_reason,
     )
     blob = json.dumps(basis, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]

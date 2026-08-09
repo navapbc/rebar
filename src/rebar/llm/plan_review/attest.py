@@ -651,19 +651,31 @@ def _legacy_material_ok(signed: str, ticket_id: str, repo_root) -> bool:
     of the CURRENT material proves nothing changed — not even box state — so it is not a
     material edit. Strictly narrower than the normalized check: a real edit matches none.
 
-    Both superseded generations are tried: pre-330c (raw description) and the intermediate
-    post-330c/pre-2be7 one (checkbox-normalized, whitespace raw). Without the second, a
-    pre-330c attestation signed over UNTICKED boxes would stop surviving a tick once
-    whitespace canonicalization landed, silently regressing bug 94a3 observation 1."""
+    All superseded generations are tried: pre-330c (raw description), the intermediate
+    post-330c/pre-2be7 one (checkbox-normalized, whitespace raw), and post-2be7/pre-reason-
+    normalization (canonical description). Each used the raw no-file-impact reason. Without
+    the second, a pre-330c attestation signed over UNTICKED boxes would stop surviving a tick
+    once whitespace canonicalization landed, silently regressing bug 94a3 observation 1."""
     try:
         from .relation_snapshot import current_material_fingerprint_impl
 
         candidates = [
             current_material_fingerprint_impl(
-                ticket_id, repo_root=repo_root, normalize_checkboxes=False
+                ticket_id,
+                repo_root=repo_root,
+                normalize_checkboxes=False,
+                normalize_reason=False,
             ),
             current_material_fingerprint_impl(
-                ticket_id, repo_root=repo_root, normalize_whitespace=False
+                ticket_id,
+                repo_root=repo_root,
+                normalize_whitespace=False,
+                normalize_reason=False,
+            ),
+            current_material_fingerprint_impl(
+                ticket_id,
+                repo_root=repo_root,
+                normalize_reason=False,
             ),
         ]
     except Exception:  # noqa: BLE001 — best-effort fallback; an uncomputable legacy hash is simply no match
