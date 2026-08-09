@@ -58,6 +58,7 @@ def derive_plan_material_pin_health(
         repo_root=repo_root,
         enforced=enforced,
         fingerprint=current_material_fingerprint,
+        compatible_fingerprint=_legacy_material_ok,
     )
 
 

@@ -128,8 +128,14 @@ def derive_health(
     repo_root,
     enforced: bool,
     fingerprint: Callable[..., str | None],
+    compatible_fingerprint: Callable[[str, str, object], bool] | None = None,
 ) -> DerivedPlanMaterialPinHealth:
-    """Compare typed pins with current narrow material and aggregate fixed-severity health."""
+    """Compare typed pins with current narrow material and aggregate fixed-severity health.
+
+    ``compatible_fingerprint`` recognizes supported historical fingerprint generations of
+    the same current material.  The latest fingerprint remains in the detail payload for
+    observability; compatibility changes only the derived status.
+    """
     if not pin_records:
         return {"pin_status": "legacy-unpinned", "enforced": enforced, "targets": []}
 
@@ -163,7 +169,16 @@ def derive_health(
             if not fingerprint_failed:
                 _warn_unreadable(pin, repo_root)
         elif current != pin.material_fingerprint:
-            status = "stale-pin-drift"
+            try:
+                compatible = bool(
+                    compatible_fingerprint
+                    and compatible_fingerprint(
+                        pin.material_fingerprint, pin.canonical_id, repo_root
+                    )
+                )
+            except Exception:  # noqa: BLE001 - compatibility failure stays conservatively stale
+                compatible = False
+            status = "current" if compatible else "stale-pin-drift"
         else:
             status = "current"
         targets.append(
