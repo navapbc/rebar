@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"pyproject.toml","reason":"bump version to 0.7.1"},{"path":"server.json","reason":"bump version + packages[0].version to 0.7.1"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1783352784942396001,"uuid":"e1619ce6-01a9-46f4-a599-3a8feba23eb6"}
