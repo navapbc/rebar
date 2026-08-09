@@ -197,3 +197,39 @@ def test_emission_failure_emits_greppable_marker(
     captured = capsys.readouterr()
     assert "ARTIFACT_EMIT_ERROR" in captured.err  # greppable journald marker emitted
     assert "Idead" in captured.err  # carries the change id for correlation
+
+
+# ── bug beb1: the identity must ALSO be global, or rebar attributes events to "Unknown" ────
+def test_ensure_sets_a_global_identity_for_attribution(
+    origin_with_tickets: Path, tmp_path: Path
+) -> None:
+    """rebar resolves event attribution via ``_seam.attribution_fields()``, which reads git
+    config from ``config.repo_root()`` — in the review-bot container that is /app, NOT the
+    tickets clone. A repo-local identity on the clone alone therefore left `author_email`
+    empty and `resolve_current_identity()` None, so events were stamped author "Unknown" with
+    author_id null. That also skipped SIGNING outright, because `_seam` gates on
+    ``if author_id and signing_key``. 8880 live events were written unsigned this way.
+    """
+    home = tmp_path / "home"
+    clone = _fresh_clone(origin_with_tickets, tmp_path / "clone_global", home)
+
+    # RED precondition: no global identity yet.
+    pre = subprocess.run(
+        ["git", "config", "--global", "user.email"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "HOME": str(home)},
+    )
+    assert pre.stdout.strip() == ""
+
+    assert _run_ensure(clone, home).returncode == 0
+
+    env = {**os.environ, "HOME": str(home)}
+    g_email = subprocess.run(
+        ["git", "config", "--global", "user.email"], capture_output=True, text=True, env=env
+    ).stdout.strip()
+    g_name = subprocess.run(
+        ["git", "config", "--global", "user.name"], capture_output=True, text=True, env=env
+    ).stdout.strip()
+    assert g_email == "joeoakhart+bot@navapbc.com", "global identity drives rebar attribution"
+    assert g_name == "Rebar Bot"

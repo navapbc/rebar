@@ -96,15 +96,22 @@ reviewbot_tickets_pat="$(get_param_optional reviewbot-tickets-pat)"
 # precedent) and export only its PATH via REBAR_IDENTITY_SIGNING_KEY in the .env. Blank ⇒
 # the reviewbot writes unsigned (its types are gate-exempt, so this is attribution only).
 rebar_bot_signing_key="$(get_param_optional rebar-bot-signing-key)"
-signing_key_path=""
+# ALWAYS create the file, even when the SSM slot is blank (bug beb1). docker creates a
+# DIRECTORY when a bind-mount source is missing, so an absent key file would break review-bot
+# start now that the key is mounted in. An EMPTY file is the "unsigned" state: rebar treats an
+# unreadable/empty key as no key and writes unsigned, which is the documented fallback.
+signing_key_path="$(dirname "${ENV_FILE}")/rebar-bot-signing-key"
+key_tmp="$(mktemp "${signing_key_path}.XXXXXX")"
+chmod 600 "${key_tmp}"
+printf '%s' "${rebar_bot_signing_key}" > "${key_tmp}"
+[ -n "${rebar_bot_signing_key}" ] && printf '\n' >> "${key_tmp}"
+mv -f "${key_tmp}" "${signing_key_path}"
+chmod 600 "${signing_key_path}"
 if [ -n "${rebar_bot_signing_key}" ]; then
-  signing_key_path="$(dirname "${ENV_FILE}")/rebar-bot-signing-key"
-  key_tmp="$(mktemp "${signing_key_path}.XXXXXX")"
-  chmod 600 "${key_tmp}"
-  printf '%s\n' "${rebar_bot_signing_key}" > "${key_tmp}"
-  mv -f "${key_tmp}" "${signing_key_path}"
-  chmod 600 "${signing_key_path}"
   echo "fetch-secrets.sh: materialized rebar-bot signing key to ${signing_key_path} (0600)" >&2
+else
+  echo "fetch-secrets.sh: rebar-bot-signing-key is blank — wrote an EMPTY ${signing_key_path};" \
+       "the review bot will write UNSIGNED events" >&2
 fi
 
 # --- Write the .env atomically (0600), then move into place ----------------

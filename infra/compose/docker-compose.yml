@@ -118,6 +118,11 @@ services:
       # credential helper materialized by the entrypoint from REVIEWBOT_TICKETS_PAT (see .env /
       # fetch-secrets.sh); the persistent tickets worktree below is its store.
       REBAR_SYNC_PUSH: "always"
+      # Authorship signing key, CONTAINER-side path (bug beb1). fetch-secrets.sh materializes
+      # the key on the HOST and exports that HOST path via env_file; that path does not exist
+      # in this container's namespace, so rebar silently wrote every event unsigned. Override
+      # with the mount target below; keep the two in sync.
+      REBAR_IDENTITY_SIGNING_KEY: "/run/secrets/rebar-bot-signing-key"
       # Point rebar's ambient tickets store (config.tracker_dir, read by the reviewbot's
       # create_ticket/link/emit calls that pass repo_root=None) at the PERSISTENT tickets worktree,
       # NOT the container's /app cwd — so artifact writes land in the pushable clone.
@@ -222,6 +227,11 @@ services:
       # amplifier). Bind onto the EBS host path like the gerrit_* site volumes; the external
       # volume is created by compose-up.sh (and pre-provisioned on the host). The review-bot
       # image runs as root, so the root-owned host dir is writable.
+      # The authorship signing key materialized by fetch-secrets.sh next to this compose file
+      # (bug beb1). Read-only; the path MUST match REBAR_IDENTITY_SIGNING_KEY above.
+      # fetch-secrets.sh always creates this file (empty when the SSM slot is blank) because a
+      # missing bind-mount source would make docker create a DIRECTORY here and break start-up.
+      - ./rebar-bot-signing-key:/run/secrets/rebar-bot-signing-key:ro
       - gerrit_reviewbot:/var/gerrit/site/reviewbot
       # Persistent tickets worktree (story limestone-unethical-zebrafinch): a durable clone of the
       # `tickets` branch that survives container recreation, so the reviewbot's code_review artifact
