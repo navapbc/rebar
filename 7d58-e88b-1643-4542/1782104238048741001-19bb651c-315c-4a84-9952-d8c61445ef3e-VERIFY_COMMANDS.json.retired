@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/unit/test_pydantic_ai_runner.py tests/unit/test_parity_bar.py -q","dd_id":"runner","dd_text":"PydanticAIRunner + parity bar"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782104238048741001,"uuid":"19bb651c-315c-4a84-9952-d8c61445ef3e"}
