@@ -434,6 +434,84 @@ def _read_event_uuid(path: str) -> str:
 
 
 # raw-git-ok: store-maintenance command, seam-internal
+def snapshot_missing_sources(ticket_dir: str) -> list[str]:
+    """UUIDs cited by the newest active SNAPSHOT that have NO event file on disk (b636).
+
+    Compaction before ``16640a705d`` ("retire folded events to ``*.retired`` instead of
+    deleting") DELETED its folded sources, so for those tickets the cited state survives
+    only inside the SNAPSHOT's ``compiled_state``. A non-empty return therefore means the
+    raw log is PROVABLY INCOMPLETE and a from-zero replay (even ``include_retired=True``)
+    would silently reconstruct a partial history — reverting closed tickets to whatever
+    status event happened to survive. Callers must fail closed on that.
+
+    Best-effort: an unreadable/absent snapshot yields ``[]`` (nothing proven missing).
+    """
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        return []
+    snaps = [n for n in names if is_active_event(n) and n.endswith("-SNAPSHOT.json")]
+    if not snaps:
+        return []
+    try:
+        with open(os.path.join(ticket_dir, snaps[-1]), encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    cited = ((snapshot.get("data") or {}).get("source_event_uuids")) or []
+    if not cited:
+        return []
+    # A source is present if any file (active OR retired) carries its uuid.
+    present = {uuid_ for uuid_ in cited if any(uuid_ in name for name in names)}
+    return [uuid_ for uuid_ in cited if uuid_ not in present]
+
+
+def _refuse_incomplete_log(ticket_id: str, ticket_dir: str) -> bool:
+    """True when a rebuild MUST be refused because the raw log is provably incomplete (b636).
+
+    If the prior SNAPSHOT cites sources that no longer exist on disk (legacy delete-style
+    compaction), replaying what survives would silently discard the state those events
+    carried — order-sensitive STATUS above all, which ticket 34b1 already classifies as
+    HUMAN-TRIAGE, never auto-rebuilt. Logs the refusal so the operator can triage.
+    """
+    missing = snapshot_missing_sources(ticket_dir)
+    if not missing:
+        return False
+    logger.warning(
+        "fsck: REFUSING snapshot rebuild for %s — prior SNAPSHOT cites %d source event(s) "
+        "absent from disk (%s); the raw log is incomplete and a rebuild would drop state "
+        "held only in the snapshot. Human triage required.",
+        ticket_id,
+        len(missing),
+        _abbrev(missing),
+    )
+    return True
+
+
+def _abbrev(uuids: list[str], limit: int = 3) -> str:
+    """``a, b, c...`` — first ``limit`` uuids, ellipsised when there are more."""
+    head = ", ".join(uuids[:limit])
+    return f"{head}..." if len(uuids) > limit else head
+
+
+def _rebuild_source_state(ticket_id: str, ticket_dir: str) -> dict | None:
+    """The state a rebuild would persist, or ``None`` when the rebuild must be refused.
+
+    Two gates. **b636 fail-closed**: a from-zero replay is only sound when the raw log is
+    COMPLETE, so a prior SNAPSHOT citing sources absent from disk aborts the rebuild rather
+    than reconstructing a partial history. Then the usual reduce validation: full raw-history
+    state (active + retired, snapshots stripped) INCLUDING the merged-in orphan the stale
+    snapshot's positional skip had dropped.
+    """
+    if _refuse_incomplete_log(ticket_id, ticket_dir):
+        return None
+    compiled_state = reduce_ticket(ticket_dir, include_retired=True)
+    if compiled_state is None or compiled_state.get("status") in ("error", "fsck_needed"):
+        logger.warning("fsck: snapshot rebuild for %s aborted (reduce failed)", ticket_id)
+        return None
+    return compiled_state
+
+
 def rebuild_snapshot_from_full_log(
     tracker: str,
     ticket_id: str,
@@ -469,11 +547,8 @@ def rebuild_snapshot_from_full_log(
                 "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
             )
 
-        # Full raw-history state (active + retired, snapshots stripped) — INCLUDES the
-        # merged-in orphan the stale snapshot's positional skip had dropped.
-        compiled_state = reduce_ticket(ticket_dir, include_retired=True)
-        if compiled_state is None or compiled_state.get("status") in ("error", "fsck_needed"):
-            logger.warning("fsck: snapshot rebuild for %s aborted (reduce failed)", ticket_id)
+        compiled_state = _rebuild_source_state(ticket_id, ticket_dir)
+        if compiled_state is None:
             return False
         # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
         # either (task 7ed9 never-emit) — it is re-derived in memory on replay.
