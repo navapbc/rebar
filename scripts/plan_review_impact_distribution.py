@@ -48,10 +48,10 @@ def aggregate(tickets_root: str) -> dict[str, Any]:
     files = sorted(
         glob.glob(os.path.join(tickets_root, "**", "*REVIEW_RESULT.json"), recursive=True)
     )
-    sev = collections.Counter()
-    tier_sev: dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
-    decision = collections.Counter()
-    attrs = {k: collections.Counter() for k in _ATTR_KEYS}
+    sev: collections.Counter[Any] = collections.Counter()
+    tier_sev: dict[Any, collections.Counter[Any]] = collections.defaultdict(collections.Counter)
+    decision: collections.Counter[Any] = collections.Counter()
+    attrs: dict[str, collections.Counter[Any]] = {k: collections.Counter() for k in _ATTR_KEYS}
     impacts: list[float] = []
     n_findings = n_llm = n_with_attrs = 0
     for fp in files:

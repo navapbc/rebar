@@ -97,7 +97,17 @@ EXCLUDED_FILES = (
     Path("tests/unit/test_raw_git_write_lint.py"),
 )
 
-_OPAQUE = object()  # sentinel: argv not resolvable by local tracking
+
+class _Opaque:
+    """Sentinel type: argv not resolvable by local tracking.
+
+    A distinct class (rather than a bare ``object()``) so the resolver return
+    unions stay narrowable — ``isinstance(x, _Opaque)`` splits the union, where
+    an ``is _OPAQUE`` check against an ``object`` instance does not.
+    """
+
+
+_OPAQUE = _Opaque()
 
 
 @dataclass
@@ -167,7 +177,7 @@ def _function_marker(
 # ---------------------------------------------------------------------------
 
 
-def _git_subcommand(tokens: list[str | None]) -> str | object | None:
+def _git_subcommand(tokens: list[str | None]) -> str | _Opaque | None:
     """The git subcommand from resolved argv tokens, skipping global options.
 
     Returns the subcommand string, None when there is none, or _OPAQUE when an
@@ -252,8 +262,11 @@ class _ScopeLinter:
                     return
                 if f.attr == "append" and len(call.args) == 1:
                     a = call.args[0]
-                    is_str = isinstance(a, ast.Constant) and isinstance(a.value, str)
-                    cur.append(a.value if is_str else None)
+                    cur.append(
+                        a.value
+                        if isinstance(a, ast.Constant) and isinstance(a.value, str)
+                        else None
+                    )
                 elif f.attr == "extend" and len(call.args) == 1:
                     add = self._resolve_elements(call.args[0])
                     if add is not None:
@@ -263,7 +276,7 @@ class _ScopeLinter:
 
     # -- argv resolution ----------------------------------------------------
 
-    def _resolve_argv(self, node: ast.AST) -> list[str | None] | object:
+    def _resolve_argv(self, node: ast.AST) -> list[str | None] | _Opaque:
         elements = self._resolve_elements(node)
         if elements is not None:
             return elements
@@ -281,7 +294,7 @@ class _ScopeLinter:
 
     # -- sanction + emission --------------------------------------------------
 
-    def _emit(self, node: ast.AST, kind: str, detail: str) -> None:
+    def _emit(self, node: ast.stmt | ast.expr, kind: str, detail: str) -> None:
         line = node.lineno
         sanction = self.reasons.get(line) or self.func_sanction
         self.hits.append(Hit(self.rel_path, line, kind, detail, sanction))
@@ -314,14 +327,14 @@ class _ScopeLinter:
         if not call.args:
             return
         argv = self._resolve_argv(call.args[0])
-        if argv is _OPAQUE:
+        if isinstance(argv, _Opaque):
             self._emit(
                 call,
                 "unresolvable-argv",
                 "raw subprocess call with argv not resolvable by local tracking (fail-closed)",
             )
             return
-        tokens = argv  # type: ignore[assignment]
+        tokens = argv
         if not tokens:
             return
         head = tokens[0]
@@ -333,7 +346,7 @@ class _ScopeLinter:
         if head != "git" and not head.endswith("/git"):
             return
         sub = _git_subcommand(tokens)
-        if sub is _OPAQUE:
+        if isinstance(sub, _Opaque):
             self._emit(call, "unresolvable-argv", "git argv subcommand position is not a literal")
         elif isinstance(sub, str) and sub in MUTATION_VERBS:
             self._emit(call, "raw-git-mutation", f"raw subprocess git mutation: git {sub}")
@@ -345,10 +358,10 @@ class _ScopeLinter:
         for arg in call.args:
             if isinstance(arg, ast.Starred):
                 inner = self._resolve_argv(arg.value)
-                if inner is _OPAQUE:
+                if isinstance(inner, _Opaque):
                     starred_untracked = True
                 else:
-                    tokens.extend(t for t in inner if t is not None)  # type: ignore[union-attr]
+                    tokens.extend(t for t in inner if t is not None)
             elif isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 tokens.append(arg.value)
             elif isinstance(arg, (ast.List, ast.Tuple)):

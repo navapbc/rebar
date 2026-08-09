@@ -218,7 +218,7 @@ def main(argv: list[str]) -> int:
 
 
 def _truthy(value: str | None) -> bool:
-    return bool(value) and value.strip().lower() in {"1", "true", "yes", "on"}
+    return value is not None and value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 if __name__ == "__main__":

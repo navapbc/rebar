@@ -548,9 +548,10 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
 
 
 def _run_lock(base_path: Path | None) -> int:
+    base: dict[str, int] | None
     if base_path is not None:
         try:
-            base: dict[str, int] | None = load_baseline(base_path)
+            base = load_baseline(base_path)
         except SchemaError as exc:
             print(
                 f"error: could not load base baseline from {base_path}: {exc}",
@@ -563,9 +564,9 @@ def _run_lock(base_path: Path | None) -> int:
         except LockFetchError as exc:
             print(f"::error::{exc}", file=sys.stderr)
             return 1
-        if base is None:
-            print("complexity-baseline lock: main has no baseline yet — bootstrap, allowing.")
-            return 0
+    if base is None:
+        print("complexity-baseline lock: main has no baseline yet — bootstrap, allowing.")
+        return 0
     try:
         branch = load_baseline(BASELINE_PATH)
     except SchemaError as exc:
