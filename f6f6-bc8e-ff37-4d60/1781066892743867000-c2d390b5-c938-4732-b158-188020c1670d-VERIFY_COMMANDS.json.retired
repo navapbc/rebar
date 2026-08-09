@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces/test_mcp.py -k fsck -q","dd_id":"DD1","dd_text":"fsck(recover=True) blocked under readonly"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066892743867000,"uuid":"c2d390b5-c938-4732-b158-188020c1670d"}
