@@ -101,11 +101,12 @@ if [ -f "$REPL_LOG" ]; then
   prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || echo 0)
   case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
   new=$(( total - prev )); [ "$new" -lt 0 ] && new=$total
-  echo "$total" > "$REPL_OFFSET_FILE"
   # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s5.tf
   # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-    --metric-name replication_errors --unit Count --value "$new" 2>/dev/null || true
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name replication_errors --unit Count --value "$new" 2>/dev/null; then
+    echo "$total" > "$REPL_OFFSET_FILE"
+  fi
   [ "$new" -gt 0 ] && logger -t rebar-health "replication failures (new this interval)=${new}"
 fi
 
@@ -131,11 +132,12 @@ vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$vprev" in '' | *[!0-9]*) vprev=0 ;; esac
 vnew=$((vtotal - vprev))
 [ "$vnew" -lt 0 ] && vnew=$vtotal
-echo "$vtotal" >"$VOTER_OFFSET_FILE"
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s4b.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null || true
+if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name voter_errors --unit Count --value "$vnew" 2>/dev/null; then
+  echo "$vtotal" >"$VOTER_OFFSET_FILE"
+fi
 [ "$vnew" -gt 0 ] && logger -t rebar-health "review-bot voter failures (new this interval)=${vnew}"
 
 # --- 4c. review-bot merge-change path failures (epic 88ab / S2) -------------
@@ -154,9 +156,10 @@ mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$mprev" in '' | *[!0-9]*) mprev=0 ;; esac
 mnew=$((mtotal - mprev))
 [ "$mnew" -lt 0 ] && mnew=$mtotal
-echo "$mtotal" >"$MERGE_OFFSET_FILE"
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null || true
+if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null; then
+  echo "$mtotal" >"$MERGE_OFFSET_FILE"
+fi
 [ "$mnew" -gt 0 ] && logger -t rebar-health "review-bot merge-change failures (new this interval)=${mnew}"
 
 # --- 4d. continuous auto-deploy failures (epic 88ab / story 8903) -----------
@@ -175,9 +178,10 @@ dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$dprev" in '' | *[!0-9]*) dprev=0 ;; esac
 dnew=$((dtotal - dprev))
 [ "$dnew" -lt 0 ] && dnew=$dtotal
-echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null || true
+if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null; then
+  echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
+fi
 [ "$dnew" -gt 0 ] && logger -t rebar-health "auto-deploy failures (new this interval)=${dnew}"
 
 
@@ -207,9 +211,10 @@ publish_autodeploy_marker_delta() {
   case "$prev" in '' | *[!0-9]*) prev=0 ;; esac
   new=$((total - prev))
   [ "$new" -lt 0 ] && new=$total
-  echo "$total" >"$offset_file"
-  aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-    --metric-name "$metric" --unit Count --value "$new" 2>/dev/null || true
+  if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+    --metric-name "$metric" --unit Count --value "$new" 2>/dev/null; then
+    echo "$total" >"$offset_file"
+  fi
   [ "$new" -gt 0 ] && logger -t rebar-health "${label} (new this interval)=${new}"
   return 0
 }
@@ -253,11 +258,12 @@ gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$gprev" in '' | *[!0-9]*) gprev=0 ;; esac
 gnew=$((gtotal - gprev))
 [ "$gnew" -lt 0 ] && gnew=$gtotal
-echo "$gtotal" >"$G2P_OFFSET_FILE"
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_1fa8.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
-aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
-  --metric-name g2p_dispatch_errors --unit Count --value "$gnew" 2>/dev/null || true
+if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
+  --metric-name g2p_dispatch_errors --unit Count --value "$gnew" 2>/dev/null; then
+  echo "$gtotal" >"$G2P_OFFSET_FILE"
+fi
 [ "$gnew" -gt 0 ] && logger -t rebar-health "g2p CI-dispatch failures (new this interval)=${gnew}"
 
 # --- 5. Gerrit->GitHub mirror out-of-sync (WS7 / a774) ---------------------
