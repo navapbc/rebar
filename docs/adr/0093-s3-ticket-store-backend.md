@@ -62,7 +62,9 @@ the one bundle-key string the helper defines.
 
 **Lowering the push-lock TTL was rejected.** The helper self-heals a stale per-ref push lock by
 stealing it once it exceeds `DEFAULT_LOCK_TTL_SECONDS = 60` (overridable via
-`GIT_REMOTE_S3_LOCK_TTL_SECONDS`). Lowering the TTL to shorten the rare post-crash delay was
+`GIT_REMOTE_S3_LOCK_TTL_SECONDS` — verified as the name read in the helper's `remote.py`;
+upstream's README still prints the older `GIT_REMOTE_S3_LOCK_TTL`, which the code ignores).
+Lowering the TTL to shorten the rare post-crash delay was
 considered and rejected: a shorter window risks stealing a lock from a slow-but-live push,
 trading a bounded, rare delay for a correctness hazard. The 60s default stays.
 

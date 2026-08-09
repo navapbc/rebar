@@ -135,6 +135,8 @@ operator action and no data loss**:
 - **Stale push-lock auto-steal.** The helper serializes pushes with a per-ref S3 lock object. If
   a client dies mid-push, the lock self-heals: the next client steals it once it is older than
   the helper's TTL — `git-remote-s3`'s `DEFAULT_LOCK_TTL_SECONDS = 60` (overridable via the
-  `GIT_REMOTE_S3_LOCK_TTL_SECONDS` environment variable). The resulting one-time delay of up to
+  `GIT_REMOTE_S3_LOCK_TTL_SECONDS` environment variable — the name the code reads in
+  `remote.py`; upstream's README currently prints the older `GIT_REMOTE_S3_LOCK_TTL`, which the
+  code does **not** honor, so use the `_SECONDS` form). The resulting one-time delay of up to
   ~60s is a rare, bounded cost; rebar intentionally does **not** lower it, because a shorter TTL
   risks stealing a lock from a slow-but-live push.
