@@ -18,7 +18,7 @@ from rebar.llm.overlap.judge import (
     judge_batch,
     judge_one,
 )
-from rebar.llm.runner import Runner, RunRequest
+from rebar.llm.runner import PydanticAIRunner, Runner, RunRequest
 
 _LABEL_RE = re.compile(r"\[candidate_id: ([^\]]+)\]")
 
@@ -542,3 +542,142 @@ def test_missing_corpus_digest_makes_no_call() -> None:
     out = judge("Q", _digest(), ["missing"], {}, config=_cfg(), runner=runner)
     assert out == []
     assert runner.requests == []
+
+
+def _function_runner(
+    reply: str, *, finish_reason: str | None = None, error: Exception | None = None
+) -> tuple[PydanticAIRunner, list[dict]]:
+    """Real structured runner with a deterministic model and observable model settings."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    settings: list[dict] = []
+
+    def generate(messages, info):
+        del messages
+        settings.append(dict(info.model_settings or {}))
+        if error is not None:
+            raise error
+        return ModelResponse(parts=[TextPart(reply)], finish_reason=finish_reason)
+
+    cfg = _cfg(repo_path=str(Path(__file__).resolve().parents[2]))
+    return PydanticAIRunner(cfg, model_override=FunctionModel(generate)), settings
+
+
+def test_runaway_batch_is_bounded_and_abstains() -> None:
+    """A large malformed reply spends one bounded generation, then abstains exactly."""
+    query, corpus = _six()
+    runaway_reply = "not-json-" * 600
+    assert len(runaway_reply) > 4096
+    runner, settings = _function_runner(runaway_reply)
+
+    out = judge_batch(
+        query,
+        list(corpus.items()),
+        _cfg(repo_path=str(Path(__file__).resolve().parents[2])),
+        runner,
+        shared_side="first",
+    )
+
+    abstain = {
+        "relation": "unrelated",
+        "shared_artifact": None,
+        "confidence": 0.0,
+        "abstain": True,
+    }
+    assert out == {candidate_id: abstain for candidate_id in corpus}
+    assert [item["max_tokens"] for item in settings] == [1024]
+    assert [item["timeout"] for item in settings] == [60.0]
+
+
+@pytest.mark.parametrize(
+    ("reply", "finish_reason", "error"),
+    [
+        ('{"verdicts":[', "length", None),
+        ("", None, TimeoutError("overlap request timed out")),
+    ],
+)
+def test_bounded_abstention_on_truncation_or_timeout(
+    reply: str, finish_reason: str | None, error: Exception | None
+) -> None:
+    """A truncated or timed-out bounded request returns exact per-candidate abstention."""
+    query, corpus = _six()
+    runner, settings = _function_runner(reply, finish_reason=finish_reason, error=error)
+
+    out = judge_batch(
+        query,
+        list(corpus.items()),
+        _cfg(repo_path=str(Path(__file__).resolve().parents[2])),
+        runner,
+        shared_side="first",
+    )
+
+    abstain = {
+        "relation": "unrelated",
+        "shared_artifact": None,
+        "confidence": 0.0,
+        "abstain": True,
+    }
+    assert out == {candidate_id: abstain for candidate_id in corpus}
+    assert [item["max_tokens"] for item in settings] == [1024]
+    assert [item["timeout"] for item in settings] == [60.0]
+
+
+def test_request_budget_sets_one_transport_attempt_and_60_second_timeout() -> None:
+    """The overlap call declares the transport/timeout policy that the runner realizes."""
+
+    class _TimeoutRunner(Runner):
+        name = "timeout"
+
+        def __init__(self) -> None:
+            self.requests: list[RunRequest] = []
+
+        def preflight(self) -> None:
+            pass
+
+        def run(self, req: RunRequest) -> dict:
+            self.requests.append(req)
+            raise TimeoutError("overlap request timed out")
+
+    query, corpus = _six()
+    runner = _TimeoutRunner()
+    out = judge_batch(query, list(corpus.items()), _cfg(), runner, shared_side="first")
+
+    assert len(runner.requests) == 1
+    req = runner.requests[0]
+    assert req.transport_attempt_limit == 1
+    assert req.request_timeout_limit_s == 60
+    assert all(verdict["abstain"] is True for verdict in out.values())
+
+
+def test_valid_six_candidate_batch_survives_the_request_budget() -> None:
+    """The nearest valid control retains label-keyed verdict mapping under the same bounds."""
+    query, corpus = _six()
+    response = {
+        "verdicts": [
+            {
+                "candidate_id": candidate_id,
+                "relation": "related_distinct",
+                "shared_artifact": f"artifact-{candidate_id}",
+                "confidence": 0.9,
+                "abstain": False,
+            }
+            for candidate_id in reversed(corpus)
+        ]
+    }
+    runner, settings = _function_runner(json.dumps(response))
+
+    out = judge_batch(
+        query,
+        list(corpus.items()),
+        _cfg(repo_path=str(Path(__file__).resolve().parents[2])),
+        runner,
+        shared_side="first",
+    )
+
+    assert list(out) == list(corpus)
+    assert all(
+        out[candidate_id]["shared_artifact"] == f"artifact-{candidate_id}"
+        for candidate_id in corpus
+    )
+    assert [item["max_tokens"] for item in settings] == [1024]

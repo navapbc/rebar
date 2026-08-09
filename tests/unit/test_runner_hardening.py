@@ -81,3 +81,15 @@ def test_text_mode_makes_a_single_call() -> None:
     out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(req)
     assert out["text"] == "just some prose"
     assert calls["i"] == 1
+
+
+def test_request_local_structured_retry_limit_can_disable_retry() -> None:
+    """A bounded advisory sub-call can fail after one malformed structured generation."""
+    model, calls = _sequence_model(["never any json"])
+    req = _structured_req()
+    req.structured_retry_limit = 0
+
+    with pytest.raises(LLMRunnerError):
+        PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(req)
+
+    assert calls["i"] == 1

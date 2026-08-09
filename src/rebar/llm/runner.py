@@ -105,10 +105,12 @@ class RunRequest:
     # step needing deep reasoning AND structured output: SPLIT into a `mode="text"` reasoning
     # step then a `mode="structured"` extraction step; this flag covers the single-step case.
     thinking: bool = False
-    # Hard ceilings for deliberately bounded exploratory sub-calls. Unlike
-    # ``config.max_iterations`` these may LOWER an operation-wide floor.
+    # Hard ceilings for deliberately bounded sub-calls; these may LOWER run-wide policy.
     iteration_limit: int | None = None
     output_token_limit: int | None = None
+    structured_retry_limit: int | None = None
+    transport_attempt_limit: int | None = None
+    request_timeout_limit_s: int | None = None
     # Remove all tools after this pydantic-ai run step, leaving a final turn
     # that can summarize gathered evidence as text.
     tool_step_limit: int | None = None
@@ -214,36 +216,24 @@ class FakeRunner:
 
 
 def _effective_config(base: LLMConfig, req: RunRequest) -> LLMConfig:
-    """``base`` with the request's per-call MODEL substituted, or ``base`` unchanged.
+    """Return a per-request config copy without mutating or raising ``base`` policy.
 
     A runner instance is built ONCE per gate run and shared by every step, so ``base``
-    (``self._config``) is the run-wide FLOOR and ``req.config`` carries per-call tuning. That
-    split is not new here — :func:`rebar.llm.structured_run.build_usage_limits` states it
-    outright ("``self._config`` (``cfg``) is the floor; ``req.config`` is the per-call
-    override") and applies it to the step budget, and ``run()`` applies it to ``temperature``.
-    The MODEL was the one per-call value that did not follow the rule: ``run()`` resolved it from
-    ``self._config``, so a workflow step's declared ``model:`` — resolved through
-    ``resolve_model`` into ``req.config.model`` by ``RunnerAgentStep`` — was computed and then
-    discarded, and every call in a run went to the shared model regardless of declaration
-    (story b690).
-
-    Substituted into a COPY of the config rather than read as a loose variable at the call, so
-    every model-ADJACENT decision downstream — the ``ProviderSession``, the capability record,
-    the fallback chain, the caching settings — is taken for the model that actually runs. Copied
-    rather than assigned so honouring one step cannot change the floor for the next.
-
-    An ABSENT or EMPTY requested model falls back to ``base`` rather than raising. That is the
-    deliberate choice for a value on the LLM call path: substituting an empty model would build a
-    provider session for nothing and fail deep inside the SDK, whereas falling back to the
-    run-wide floor is the same thing a step that declares no ``model:`` at all already does.
-    ``LLMConfig.model`` defaults to ``DEFAULT_MODEL`` and so is never empty via the workflow path;
-    this branch exists for a direct library caller. The ``getattr`` matches the existing
-    ``req.config`` reads in ``run()`` (e.g. ``temperature``), which tolerate a stubbed config.
+    is run-wide policy and ``req.config`` carries per-call model tuning. Bounded operations may
+    additionally lower timeout/transport attempts; their effective values must be present before
+    provider/model construction. Missing or empty model values retain the run-wide model.
     """
+    updates: dict[str, Any] = {}
     requested = getattr(req.config, "model", None)
-    if not requested or requested == base.model:
-        return base
-    return replace(base, model=requested)
+    if requested and requested != base.model:
+        updates["model"] = requested
+    if req.request_timeout_limit_s is not None:
+        updates["timeout_s"] = min(base.timeout_s, max(1, int(req.request_timeout_limit_s)))
+    if req.transport_attempt_limit is not None:
+        updates["llm_retry_max_attempts"] = min(
+            base.llm_retry_max_attempts, max(1, int(req.transport_attempt_limit))
+        )
+    return replace(base, **updates) if updates else base
 
 
 # ── Pydantic AI runner (provider-agnostic, behind the same seam) ──────────────
