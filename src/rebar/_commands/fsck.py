@@ -65,7 +65,12 @@ _STRUCTURED_KINDS = {
 
 
 def _scan(
-    tracker: str, no_mutate: bool, repo_root=None, *, repair_snapshots: bool = False
+    tracker: str,
+    no_mutate: bool,
+    repo_root=None,
+    *,
+    repair_snapshots: bool = False,
+    dry_run: bool = False,
 ) -> tuple[list[str], int]:
     lines: list[str] = []
     issue_count = 0
@@ -173,21 +178,17 @@ def _scan(
         # re-check (folds the orphan back in) — the remediation A3 runs against the live store.
         # SNAPSHOT_STALE_CHANNEL (story 568c) rebuilds the same way: replaying the retained
         # CREATE under include_retired re-projects the missing creation_channel.
-        rebuildable = any(
-            "SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f or "SNAPSHOT_STALE_CHANNEL" in f
-            for f in findings
-        )
-        if repair_snapshots and not no_mutate and rebuildable:
-            from rebar._commands.compact import rebuild_snapshot_from_full_log
-
-            if rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir):
-                post = _snap_findings()
-                resolved = len(findings) - len(post)
-                if resolved > 0:
-                    lines.append(
-                        f"FIXED: rebuilt SNAPSHOT for {ticket_id} ({resolved} finding(s) resolved)"
-                    )
-                findings = post
+        if repair_snapshots:
+            repair_lines, findings = _maybe_repair_snapshot(
+                tracker,
+                ticket_id,
+                ticket_dir,
+                findings,
+                _snap_findings,
+                no_mutate=no_mutate,
+                dry_run=dry_run,
+            )
+            lines.extend(repair_lines)
 
         lines.extend(findings)
         issue_count += len(findings)
@@ -257,6 +258,86 @@ def _scan(
     return lines, issue_count
 
 
+def _maybe_repair_snapshot(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    findings: list[str],
+    rescan,
+    *,
+    no_mutate: bool,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    """RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then
+    re-check (folds the orphan back in) — the remediation A3 runs against the live store.
+    ``SNAPSHOT_STALE_CHANNEL`` (story 568c) rebuilds the same way: replaying the retained
+    CREATE under ``include_retired`` re-projects the missing creation_channel.
+
+    Returns ``(lines_to_emit, findings_after)``. Under ``dry_run`` (b636) it only PLANS —
+    ``--repair-snapshots`` previously ignored ``--dry-run`` entirely and mutated the store.
+    """
+    rebuildable = any(
+        "SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f or "SNAPSHOT_STALE_CHANNEL" in f
+        for f in findings
+    )
+    if not rebuildable:
+        return [], findings
+    if dry_run:
+        return [_dry_run_plan_line(ticket_dir, ticket_id)], findings
+    if no_mutate:
+        return [], findings
+
+    from rebar._commands.compact import rebuild_snapshot_from_full_log
+
+    if not rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir):
+        return [], findings
+    post = rescan()
+    resolved = len(findings) - len(post)
+    out = (
+        [f"FIXED: rebuilt SNAPSHOT for {ticket_id} ({resolved} finding(s) resolved)"]
+        if resolved > 0
+        else []
+    )
+    return out, post
+
+
+def _missing_sources_finding(
+    ticket_dir: str, ticket_id: str, snapshot_filename: str, source_uuids: list
+) -> list[str]:
+    """b636 SNAPSHOT_MISSING_SOURCES: a cited source with NO file on disk (active OR
+    retired) means legacy delete-style compaction removed it, so the state it carried
+    survives only inside this snapshot's compiled_state. Such a ticket is NOT safely
+    rebuildable — a from-zero replay would silently drop that state. Surfaced so the latent
+    population is visible BEFORE anyone runs a repair."""
+    from rebar._commands.compact import _abbrev
+
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        names = []
+    absent = [u for u in source_uuids if not any(u in n for n in names)]
+    if not absent:
+        return []
+    return [
+        f"SNAPSHOT_MISSING_SOURCES: {ticket_id}/{snapshot_filename} — "
+        f"{len(absent)} cited source event(s) absent from disk ({_abbrev(absent)}); "
+        "raw log incomplete — NOT auto-rebuildable, human triage required"
+    ]
+
+
+def _dry_run_plan_line(ticket_dir: str, ticket_id: str) -> str:
+    """b636: the per-ticket line ``--repair-snapshots --dry-run`` prints instead of writing."""
+    from rebar._commands.compact import snapshot_missing_sources
+
+    absent = snapshot_missing_sources(ticket_dir)
+    if absent:
+        return (
+            f"DRY-RUN: would SKIP {ticket_id} — {len(absent)} cited source event(s) "
+            "absent from disk (not safely rebuildable)"
+        )
+    return f"DRY-RUN: would rebuild SNAPSHOT for {ticket_id}"
+
+
 def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> list[str]:
     out: list[str] = []
     try:
@@ -282,6 +363,8 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
     source_uuids = _data.get("source_event_uuids", [])
     if not source_uuids:
         return out
+
+    out.extend(_missing_sources_finding(ticket_dir, ticket_id, snapshot_filename, source_uuids))
 
     # Map uuid -> (filename, event_type). The type is parsed from the filename suffix
     # (``{ts}-{uuid}-{TYPE}.json``), so it agrees with the event body without a second read.
@@ -579,7 +662,13 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=
     # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
     # always mutates (default False).
-    lines, issue_count = _scan(tracker, no_mutate, repo_root, repair_snapshots=repair_snapshots)
+    lines, issue_count = _scan(
+        tracker,
+        no_mutate or dry_run,
+        repo_root,
+        repair_snapshots=repair_snapshots,
+        dry_run=dry_run,
+    )
     summary = (
         "fsck complete: no issues found"
         if issue_count == 0
