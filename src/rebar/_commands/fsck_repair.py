@@ -15,6 +15,7 @@ and aborted if a reconciler pass is (or may be) in flight.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from rebar._store import compat, lock
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
+
+logger = logging.getLogger(__name__)
 
 # ── A3 (34b1) live-store remediation: orphan disposition ─────────────────────
 # Routed BY EVENT TYPE. Additive/commutative orphans are safe to AUTO-RECOVER via a
@@ -471,3 +474,261 @@ def _repair_run(
         f"{triage} orphan(s) await human triage"
     )
     return lines, remaining
+
+
+def _abbrev(uuids: list[str], limit: int = 3) -> str:
+    """``a, b, c...`` — the first ``limit`` uuids, ellipsised when there are more."""
+    head = ", ".join(uuids[:limit])
+    return f"{head}..." if len(uuids) > limit else head
+
+
+def snapshot_missing_sources(ticket_dir: str) -> list[str]:
+    """UUIDs cited by the newest active SNAPSHOT that have NO event file on disk (bug b636).
+
+    Compaction before the I1 non-destructive rename (story tricolour-head-ratfish) DELETED
+    its folded sources, so for those tickets the cited state survives only inside the
+    SNAPSHOT's ``compiled_state``. A non-empty return is therefore PROOF that the raw log is
+    incomplete: a from-zero replay (even ``include_retired=True``) would reconstruct a partial
+    history and whatever status happened to survive would win.
+
+    Best-effort — an unreadable or absent snapshot yields ``[]`` (nothing proven missing).
+    """
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        return []
+    snaps = [n for n in names if is_active_event(n) and n.endswith("-SNAPSHOT.json")]
+    if not snaps:
+        return []
+    try:
+        with open(os.path.join(ticket_dir, snaps[-1]), encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    cited = ((snapshot.get("data") or {}).get("source_event_uuids")) or []
+    present = {u for u in cited if any(u in name for name in names)}
+    return [u for u in cited if u not in present]
+
+
+def missing_sources_finding(
+    ticket_dir: str, ticket_id: str, snapshot_filename: str, source_uuids: list
+) -> list[str]:
+    """The ``SNAPSHOT_MISSING_SOURCES`` finding, so the latent population is visible BEFORE a
+    repair runs. Such a ticket is NOT safely rebuildable: a from-zero replay would drop the
+    state those deleted events carried."""
+    try:
+        names = sorted(os.listdir(ticket_dir))
+    except OSError:
+        names = []
+    absent = [u for u in source_uuids if not any(u in n for n in names)]
+    if not absent:
+        return []
+    return [
+        f"SNAPSHOT_MISSING_SOURCES: {ticket_id}/{snapshot_filename} — "
+        f"{len(absent)} cited source event(s) absent from disk ({_abbrev(absent)}); "
+        "raw log incomplete — NOT auto-rebuildable, human triage required"
+    ]
+
+
+def rebuild_source_state(ticket_id: str, ticket_dir: str):
+    """The state a rebuild would persist, or ``None`` when it must NOT proceed (bug b636).
+
+    FAIL CLOSED first: a from-zero replay is sound only when the raw log is COMPLETE, so a
+    prior SNAPSHOT citing sources absent from disk aborts the rebuild rather than
+    reconstructing a partial history. Ticket 34b1 already classifies STATUS and the other
+    order-sensitive kinds as HUMAN-TRIAGE, never auto-rebuilt — but that classification gates
+    only WHICH ORPHAN TYPE TRIGGERS a rebuild, and a rebuild is whole-ticket. This moves the
+    guard from the trigger to the blast radius.
+
+    Then the usual reduce: full raw-history state (active + retired, snapshots stripped),
+    INCLUDING the merged-in orphan the stale snapshot's positional skip had dropped.
+    """
+    from rebar.reducer import reduce_ticket
+
+    missing = snapshot_missing_sources(ticket_dir)
+    if missing:
+        logger.warning(
+            "fsck: REFUSING snapshot rebuild for %s — prior SNAPSHOT cites %d source event(s) "
+            "absent from disk (%s); the raw log is incomplete and a rebuild would drop state "
+            "held only in the snapshot. Human triage required.",
+            ticket_id,
+            len(missing),
+            _abbrev(missing),
+        )
+        return None
+    state = reduce_ticket(ticket_dir, include_retired=True)
+    if state is None or state.get("status") in ("error", "fsck_needed"):
+        return None
+    return state
+
+
+def repair_or_plan(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    findings: list[str],
+    rescan,
+    *,
+    no_mutate: bool,
+    dry_run: bool,
+) -> tuple[list[str], list[str]]:
+    """RC2b Option 1: rebuild a stale snapshot that dropped a merged-in orphan, then re-check
+    (folds the orphan back in). Returns ``(lines_to_emit, findings_after)``.
+
+    Under ``dry_run`` it only PLANS (bug b636): ``--repair-snapshots`` previously ignored
+    ``--dry-run`` entirely and MUTATED the store, so the broad legacy rebuild could not be
+    previewed at all.
+    """
+    rebuildable = any(
+        "SNAPSHOT_INCONSISTENT" in f
+        or "ORPHAN_EVENT" in f
+        or "SNAPSHOT_STALE_CHANNEL" in f
+        or "SNAPSHOT_MISSING_SOURCES" in f
+        for f in findings
+    )
+    if not rebuildable:
+        return [], findings
+    if dry_run:
+        return _dry_run_plan(tracker, ticket_id, ticket_dir), findings
+    if no_mutate:
+        return [], findings
+
+    rebuilt, restored = rebuild_with_restore(tracker, ticket_id, ticket_dir)
+    if not rebuilt:
+        return [], findings
+    post = rescan()
+    resolved = len(findings) - len(post)
+    if resolved <= 0:
+        return [], post
+    detail = f" after restoring {len(restored)} deleted event(s)" if restored else ""
+    return [
+        f"FIXED: rebuilt SNAPSHOT for {ticket_id}{detail} ({resolved} finding(s) resolved)"
+    ], post
+
+
+def _dry_run_plan(tracker: str, ticket_id: str, ticket_dir: str) -> list[str]:
+    """The per-ticket line a dry run prints instead of writing anything (bug b636)."""
+    absent = snapshot_missing_sources(ticket_dir)
+    if not absent:
+        return [f"DRY-RUN: would rebuild SNAPSHOT for {ticket_id}"]
+    candidates = restore_deleted_sources(tracker, ticket_id, ticket_dir, dry_run=True)
+    if len(candidates) >= len(absent):
+        return [
+            f"DRY-RUN: would restore {len(candidates)} deleted event(s) from history for "
+            f"{ticket_id}, then rebuild"
+        ]
+    return [
+        f"DRY-RUN: would SKIP {ticket_id} — {len(absent)} cited source event(s) absent from "
+        f"disk, only {len(candidates)} recoverable from history (not safely rebuildable)"
+    ]
+
+
+def _deleted_history(tracker: str, ticket_id: str) -> dict[str, str]:
+    """Map ``path -> commit that deleted it`` for every event file ever removed from this
+    ticket dir, in ONE ticket-scoped pass.
+
+    Modelled on :func:`rebar.attest.authorship.build_ticket_position_commit_map`, which does
+    the same directory-prefix single-pass walk for ``--diff-filter=A``. CRITICAL DIFFERENCE:
+    that helper lets the OLDEST commit win (correct for ADD — the oldest add introduced the
+    event). For DELETE the correct fold is the NEWEST deletion, because a path can be added
+    and deleted more than once across successive compactions and only the last removal has
+    the current pre-image. ``git log`` streams newest-first, so FIRST-SEEN wins here.
+    """
+    try:
+        res = run_git(
+            tracker,
+            "log",
+            "--diff-filter=D",
+            "--name-only",
+            "--format=@%H",
+            "--",
+            f"{ticket_id}/",
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if res.returncode != 0:
+        return {}
+    out: dict[str, str] = {}
+    commit = ""
+    for line in (res.stdout or "").splitlines():
+        if line.startswith("@"):
+            commit = line[1:]
+        elif line.startswith(f"{ticket_id}/") and commit:
+            out.setdefault(line, commit)  # newest-first stream => first seen is newest
+    return out
+
+
+def restore_deleted_sources(
+    tracker: str, ticket_id: str, ticket_dir: str, *, dry_run: bool = False
+) -> list[str]:
+    """Restore the event files a legacy compaction DELETED, from tickets-branch history.
+
+    Compaction before the I1 non-destructive rename (story tricolour-head-ratfish) removed
+    its folded sources from the worktree, but the blobs stay reachable at the deleting
+    commit's parent. Each is written back as a folded ``*.retired`` source — NEVER as a live
+    event — so the subsequent rebuild replays it under ``include_retired=True`` without
+    resurrecting it into the active log.
+
+    Sweeps the ticket's FULL deletion history rather than the newest SNAPSHOT's
+    ``source_event_uuids``: an earlier deleted STATUS that no surviving snapshot cites still
+    breaks the chain's ``current_status`` precondition, so the reducer would reject both it
+    and the close that follows.
+
+    Returns the filenames restored (or, under ``dry_run``, those that WOULD be restored).
+    """
+    try:
+        have = set(os.listdir(ticket_dir))
+    except OSError:
+        return []
+    restored: list[str] = []
+    for path, commit in sorted(_deleted_history(tracker, ticket_id).items()):
+        name = path.split("/")[-1]
+        if name in have or name + RETIRED_SUFFIX in have:
+            continue
+        if dry_run:
+            restored.append(name)
+            continue
+        try:
+            blob = run_git(tracker, "show", f"{commit}^:{path}", check=False, text=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if blob.returncode != 0 or not blob.stdout:
+            continue
+        try:
+            with open(os.path.join(ticket_dir, name + RETIRED_SUFFIX), "wb") as fh:
+                fh.write(blob.stdout)
+        except OSError:
+            logger.warning("fsck: could not restore %s for %s", name, ticket_id)
+            continue
+        restored.append(name)
+    if restored and not dry_run:
+        logger.warning(
+            "fsck: restored %d deleted source event(s) for %s from tickets history",
+            len(restored),
+            ticket_id,
+        )
+    return restored
+
+
+def rebuild_with_restore(tracker: str, ticket_id: str, ticket_dir: str) -> tuple[bool, list[str]]:
+    """Restore any deleted sources, then rebuild. Returns ``(rebuilt, restored_filenames)``.
+
+    This is the repair path's single entrypoint. The b636 fail-closed guard inside
+    :func:`rebar._commands.compact.rebuild_snapshot_from_full_log` still applies: if the
+    restore could not complete the log, the rebuild refuses and the ticket is surfaced for
+    human triage rather than rewritten from a partial history.
+    """
+    restored: list[str] = []
+    if snapshot_missing_sources(ticket_dir):
+        restored = restore_deleted_sources(tracker, ticket_id, ticket_dir)
+        cache = os.path.join(ticket_dir, ".cache.json")
+        if os.path.exists(cache):
+            try:
+                os.remove(cache)
+            except OSError:
+                pass
+
+    from rebar._commands.compact import rebuild_snapshot_from_full_log
+
+    return rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir), restored

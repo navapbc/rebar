@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 
 from rebar import config
-from rebar._commands import _seam
+from rebar._commands import _seam, fsck_repair
 from rebar._commands._compact_policy import is_foldable
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import compat, event_append, fsutil, hlc, lock
@@ -469,11 +469,15 @@ def rebuild_snapshot_from_full_log(
                 "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
             )
 
-        # Full raw-history state (active + retired, snapshots stripped) — INCLUDES the
-        # merged-in orphan the stale snapshot's positional skip had dropped.
-        compiled_state = reduce_ticket(ticket_dir, include_retired=True)
-        if compiled_state is None or compiled_state.get("status") in ("error", "fsck_needed"):
-            logger.warning("fsck: snapshot rebuild for %s aborted (reduce failed)", ticket_id)
+        # Full raw-history state INCLUDING the merged-in orphan the stale snapshot dropped.
+        # None when the rebuild must NOT proceed — the b636 fail-closed guard (prior SNAPSHOT
+        # cites sources absent from disk => incomplete log) or a failed reduce.
+        compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
+        if compiled_state is None:
+            logger.warning(
+                "fsck: snapshot rebuild for %s aborted (incomplete log or reduce failure)",
+                ticket_id,
+            )
             return False
         # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
         # either (task 7ed9 never-emit) — it is re-derived in memory on replay.

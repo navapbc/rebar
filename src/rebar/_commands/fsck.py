@@ -42,6 +42,12 @@ from rebar._commands.fsck_repair import (  # noqa: F401
     _resolve_tracker_git_dir,
     _ticket_dirs,
 )
+from rebar._commands.fsck_repair import (
+    missing_sources_finding as _missing_sources_finding,
+)
+from rebar._commands.fsck_repair import (
+    repair_or_plan as _repair_or_plan,
+)
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store import compat
 from rebar._store.gitutil import _reclaim_if_stale_index_lock, run_git
@@ -65,7 +71,12 @@ _STRUCTURED_KINDS = {
 
 
 def _scan(
-    tracker: str, no_mutate: bool, repo_root=None, *, repair_snapshots: bool = False
+    tracker: str,
+    no_mutate: bool,
+    repo_root=None,
+    *,
+    repair_snapshots: bool = False,
+    dry_run: bool = False,
 ) -> tuple[list[str], int]:
     lines: list[str] = []
     issue_count = 0
@@ -173,21 +184,17 @@ def _scan(
         # re-check (folds the orphan back in) — the remediation A3 runs against the live store.
         # SNAPSHOT_STALE_CHANNEL (story 568c) rebuilds the same way: replaying the retained
         # CREATE under include_retired re-projects the missing creation_channel.
-        rebuildable = any(
-            "SNAPSHOT_INCONSISTENT" in f or "ORPHAN_EVENT" in f or "SNAPSHOT_STALE_CHANNEL" in f
-            for f in findings
-        )
-        if repair_snapshots and not no_mutate and rebuildable:
-            from rebar._commands.compact import rebuild_snapshot_from_full_log
-
-            if rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir):
-                post = _snap_findings()
-                resolved = len(findings) - len(post)
-                if resolved > 0:
-                    lines.append(
-                        f"FIXED: rebuilt SNAPSHOT for {ticket_id} ({resolved} finding(s) resolved)"
-                    )
-                findings = post
+        if repair_snapshots:
+            emitted, findings = _repair_or_plan(
+                tracker,
+                ticket_id,
+                ticket_dir,
+                findings,
+                _snap_findings,
+                no_mutate=no_mutate,
+                dry_run=dry_run,
+            )
+            lines.extend(emitted)
 
         lines.extend(findings)
         issue_count += len(findings)
@@ -280,6 +287,7 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
             "predates creation_channel; rebuild from the retained CREATE to persist it"
         )
     source_uuids = _data.get("source_event_uuids", [])
+    out.extend(_missing_sources_finding(ticket_dir, ticket_id, snapshot_filename, source_uuids))
     if not source_uuids:
         return out
 
@@ -579,7 +587,13 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=
     # True)) pass no_mutate=True so they never delete the stale lock; the CLI `fsck`
     # always mutates (default False).
-    lines, issue_count = _scan(tracker, no_mutate, repo_root, repair_snapshots=repair_snapshots)
+    lines, issue_count = _scan(
+        tracker,
+        no_mutate or dry_run,
+        repo_root,
+        repair_snapshots=repair_snapshots,
+        dry_run=dry_run,
+    )
     summary = (
         "fsck complete: no issues found"
         if issue_count == 0
