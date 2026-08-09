@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":"bash tests/scripts/test-ticket-help-overview-coverage.sh","dd_id":"DD1","dd_text":"overview covers every dispatcher arm"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066916893919000,"uuid":"c7c8df39-5114-4aef-b932-4b680336c57b"}
