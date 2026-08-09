@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/ -k 'execution_mode or prompt_contract or contract_drift' -q","dd_id":"S4-DD1","dd_text":"runner mode + surfacing + drift"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1782231634121883001,"uuid":"341c3b32-42be-43cd-90e0-20de6a25e906"}
