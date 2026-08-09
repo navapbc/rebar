@@ -351,12 +351,15 @@ def test_inbound_differ_uses_injected_mapper() -> None:
 # limits move behind the port (InboundMapper.normalize_rich_text / FieldSanitizer.
 # fit_comment), NO package-root core module may carry a
 # ``"rebar_reconciler.adapters.jira[...]"`` string constant (an actual lazy-load key) —
-# with a SINGLE recorded exemption: inbound_fields.py IS the Jira InboundMapper impl
-# (delegated by adapters/jira/backend.py), kept at the package root only for loader
-# location-pinning; its physical relocation is out of epic bbf1's scope, tracked by
-# follow-up ticket 556a-5a1f-adb3-4139 (linked discovered_from bbf1). A docstring/comment
-# that MENTIONS the string in prose is not a load key, so the gate inspects string
-# CONSTANTS by value (via AST), not raw text.
+# with a SINGLE deliberate exemption: inbound_fields.py is the one mapper shared by
+# the Cloud and Data Center adapters. Keeping it at the package root lets both adapters
+# reuse that implementation without opening the sibling-adapter import edge forbidden
+# by J7. It cannot move unchanged into adapters/jira_family/ either: root-core consumers
+# are intentionally barred from that layer, and its Cloud ADF dependency must not be
+# hidden from the boundary gate behind a path-string load. The rooted module is therefore
+# the explicit cost of preserving both seals, not temporary relocation debt. A
+# docstring/comment that MENTIONS the string in prose is not a load key, so the gate
+# inspects string CONSTANTS by value (via AST), not raw text.
 _VENDOR_LAZYLOAD_PREFIX = "rebar_reconciler.adapters.jira"
 _SWEEP_EXEMPTIONS = {"inbound_fields.py"}
 
@@ -372,7 +375,7 @@ def _has_vendor_lazyload_literal(path: Path) -> bool:
 
 
 def test_no_root_core_module_carries_vendor_lazyload_literal() -> None:
-    """Union sweep: only inbound_fields.py may carry a vendor lazy-load literal (21ca)."""
+    """The deliberately rooted shared mapper is the only lazy-load exemption (21ca)."""
     offenders = [
         path.name
         for path in sorted(_REC.glob("*.py"))
@@ -382,10 +385,11 @@ def test_no_root_core_module_carries_vendor_lazyload_literal() -> None:
         f"package-root core modules must not carry a {_VENDOR_LAZYLOAD_PREFIX!r} lazy-load "
         f"literal (route rich-text/limit work through InboundMapper.normalize_rich_text / "
         f"FieldSanitizer.fit_comment); offenders: {offenders}. Only {_SWEEP_EXEMPTIONS} is "
-        f"exempt (follow-up ticket 556a)."
+        f"exempt so Cloud and Data Center can share one mapper without a sibling-adapter "
+        f"import (ticket 556a)."
     )
 
 
 def test_sweep_exemption_is_still_needed() -> None:
-    """The exemption is honest: inbound_fields.py genuinely still carries the literal."""
+    """The deliberate exemption is honest: the rooted mapper carries the literal."""
     assert _has_vendor_lazyload_literal(_REC / "inbound_fields.py")
