@@ -95313,9 +95313,17 @@
       "updated_at": "2026-06-25T23:14:43Z"
     },
     "c50e-7326-9cac-45e4": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction\n1. Run a ticket write whose description or linked context contains short hexadecimal fragments that are ambiguous ticket-id prefixes.\n2. Observe the write commit successfully, then the post-write enrichment drain emits repeated errors such as `Ambiguous prefix 'a9dd' matches multiple tickets` for fragments that were not intended as ticket citations.\n3. The originating CLI process remains alive after the ticket state change and must be interrupted.\n\n## Expected\nCitation enrichment recognizes only explicit ticket-reference syntax and post-write commands exit promptly after a successful write.\n\n## Actual\nThe scanner resolves unrelated four-character hex fragments as ticket ids, emits repeated ambiguity errors, and leaves the post-write command running after its state transition has committed. Reproduced during duplicate-consolidation transitions on 2026-08-08; affected fragments included a9dd, dbb2, 3e8b, 03ef, 94a3, c5b3, 18ae, and 4527.\n\n## Acceptance Criteria\n- [ ] A regression test feeds prose containing ambiguous four-hex fragments without explicit citation syntax and proves the enrichment drain does not resolve them as tickets.\n- [ ] Explicit supported ticket citations continue to resolve.\n- [ ] A successful ticket write exits after the bounded enrichment drain even when candidate text contains ambiguous fragments.\n- [ ] The original post-write reproduction completes without ambiguity errors or a lingering process.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Enrichment drain treats unrelated short hex fragments as ticket prefixes and hangs post-write commands"
+      },
       "created_at": "2026-08-09T04:20:12Z",
       "jira_id": "4587735",
       "jira_key": "REB-2695",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-09T04:20:15Z"
     },
