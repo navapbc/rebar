@@ -14,3 +14,4 @@
 .opcert-key.pub
 */.archived
 */.write.lock
+..cache.json.*.tmp
