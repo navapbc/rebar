@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"body":"Done. executor.input_schema_for is the single resolver; editor._config_input_schema + interpreter._consumer_input_schema both delegate. 323 tests green, lint clean, behavior unchanged."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1782261025411059001,"uuid":"3771e987-8802-4f1c-ac4d-1d41e0d7897c"}
