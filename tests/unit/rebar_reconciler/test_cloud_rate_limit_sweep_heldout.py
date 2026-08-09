@@ -126,6 +126,7 @@ MUTATION CHECK (AC final bullet), recorded RED/GREEN in the change description:
 
 from __future__ import annotations
 
+import ast
 import email.message
 import subprocess
 import sys
@@ -505,14 +506,28 @@ _DC_SWEPT = {
 }
 
 
+_JIRA_ADAPTER_PKG = "src/rebar/_engine/rebar_reconciler/adapters/jira"
+
+# The DECLARED transport surface this sweep is ABOUT (ticket 8a5e ruled that scoping
+# correct; ticket 81d5's operator decision — option B — kept it rather than globbing the
+# package). Naming it makes the sweep's subject a reviewable constant instead of a literal
+# buried inside _step0_names, and gives the anti-drift guard below a denominator to derive
+# "everything else in the package" from.
+_SWEPT_TRANSPORT_MODULES = (
+    f"{_JIRA_ADAPTER_PKG}/acli.py",
+    f"{_JIRA_ADAPTER_PKG}/acli_graph.py",
+    f"{_JIRA_ADAPTER_PKG}/acli_rest.py",
+    f"{_JIRA_ADAPTER_PKG}/acli_cli_ops.py",
+)
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
 def _step0_names() -> set[str]:
-    repo_root = Path(__file__).resolve().parents[3]
-    files = [
-        "src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py",
-        "src/rebar/_engine/rebar_reconciler/adapters/jira/acli_graph.py",
-        "src/rebar/_engine/rebar_reconciler/adapters/jira/acli_rest.py",
-        "src/rebar/_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py",
-    ]
+    repo_root = _repo_root()
+    files = list(_SWEPT_TRANSPORT_MODULES)
     out = subprocess.run(
         ["git", "grep", "-nE", r"^(    )?def [_a-z]", "--", *files],
         cwd=repo_root,
@@ -553,4 +568,276 @@ def test_dc_crosscheck_every_dc_swept_mutation_is_covered_on_cloud() -> None:
     assert not missing, (
         f"DC's rate-limit sweep covers member(s) Cloud's table omits: {sorted(missing)} — "
         f"either classify them or record why the divergence is legitimate"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ANTI-DRIFT GUARD (ticket 81d5, operator decision 2026-08-07 — option B).
+#
+# The sweep above stays scoped to the DECLARED transport surface
+# (``_SWEPT_TRANSPORT_MODULES``); a package-wide glob was REJECTED because it would pull
+# ~90 unrelated members across 8 modules into the 429 policy classification and silently
+# redefine the sweep's subject from "the transport layer" to "the whole jira package",
+# contradicting 8a5e's disposition.
+#
+# What the guard buys instead: drift detection over that declared surface. A classified
+# mutating member cannot be renamed into, moved into, or newly defined in an UNSWEPT
+# ``adapters/jira/*.py`` module and quietly escape the sweep — the only shape admitted
+# outside the swept set is the deliberately narrow pure transport FACADE that
+# ``backend.py`` already uses (one ``return self.transport.<same name>(...)`` forwarding the
+# declared arguments unchanged). Such a facade issues no HTTP call and carries no 429
+# policy of its own, so it is not a mutation site; anything else — a guard, a retry, a log
+# line, an argument transform, an extra statement, or a non-``self.transport`` target — is.
+#
+# This is deliberately NARROWER than the rejected glob: it catches a classified NAME
+# drifting out from under the sweep, not a brand-new mutating member under a brand-new
+# name. That is exactly what option B was chosen to guarantee.
+# ---------------------------------------------------------------------------
+
+
+def _unswept_jira_modules() -> list[Path]:
+    """Every ``adapters/jira`` Python module the sweep does NOT enumerate.
+
+    DERIVED from the package listing minus ``_SWEPT_TRANSPORT_MODULES``, so a module added
+    beside the swept four lands in the guard's scope the day it appears — including
+    ``acli_subprocess.py`` and ``jira_fields.py``, which earlier hand-written scope notes
+    omitted. ``__init__.py`` is excluded: it re-exports, it does not define members."""
+    root = _repo_root()
+    swept = {root / p for p in _SWEPT_TRANSPORT_MODULES}
+    return sorted(
+        p
+        for p in (root / _JIRA_ADAPTER_PKG).glob("*.py")
+        if p not in swept and p.name != "__init__.py"
+    )
+
+
+def _is_pure_transport_facade(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether ``fn`` is the ONE collision shape admitted outside the swept modules:
+
+    ``def name(self, a, b, *, c): return self.transport.name(a, b, c=c)``
+
+    Every clause below is load-bearing — each loosening reopens the hole the guard exists
+    to close, so the predicate fails CLOSED on anything it does not positively recognise.
+    An ``async def`` can never qualify (the transport surface is synchronous, and awaiting
+    is itself behaviour the sweep would need to classify)."""
+    if isinstance(fn, ast.AsyncFunctionDef):
+        return False
+
+    body = list(fn.body)
+    # A docstring is not executable, so it does not make the facade impure. Nothing else
+    # may precede the return.
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        body = body[1:]
+    if len(body) != 1 or not isinstance(body[0], ast.Return):
+        return False
+    call = body[0].value
+    if not isinstance(call, ast.Call):
+        return False
+
+    # target must be exactly ``self.transport.<same name>``
+    func = call.func
+    if not isinstance(func, ast.Attribute) or func.attr != fn.name:
+        return False
+    receiver = func.value
+    if not isinstance(receiver, ast.Attribute) or receiver.attr != "transport":
+        return False
+    if not isinstance(receiver.value, ast.Name) or receiver.value.id != "self":
+        return False
+
+    # arguments must be FORWARDED UNCHANGED: no *args/**kwargs on either side, no
+    # defaults re-supplied, no transforms, no re-ordering, no dropped or added arguments.
+    spec = fn.args
+    if spec.vararg or spec.kwarg or any(k.arg for k in call.keywords if k.arg is None):
+        return False
+    positional = [a.arg for a in (*spec.posonlyargs, *spec.args)]
+    if not positional or positional[0] != "self":
+        return False
+    positional = positional[1:]
+    if len(call.args) != len(positional):
+        return False
+    if any(
+        not isinstance(arg, ast.Name) or arg.id != declared
+        for arg, declared in zip(call.args, positional, strict=True)
+    ):
+        return False
+    keyword_only = [a.arg for a in spec.kwonlyargs]
+    if [k.arg for k in call.keywords] != keyword_only:
+        return False
+    return all(isinstance(k.value, ast.Name) and k.value.id == k.arg for k in call.keywords)
+
+
+def _classified_collisions(source: str) -> list[tuple[str, bool]]:
+    """``(name, is_pure_transport_facade)`` for every def in ``source`` whose name is in
+    ``_CLASSIFIED_MUTATING`` — at ANY nesting depth, so hiding a mutation inside a nested
+    class or a closure does not evade the guard."""
+    return [
+        (node.name, _is_pure_transport_facade(node))
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name in _CLASSIFIED_MUTATING
+    ]
+
+
+# The collisions that exist today and are known-benign (8a5e measured both as one-line pure
+# delegations under backend.py's explicit "delegates to transport" sections).
+_KNOWN_BENIGN_COLLISIONS = {
+    ("backend.py", "set_relationship"),
+    ("backend.py", "add_comment"),
+}
+
+
+def test_antidrift_scope_covers_every_unswept_jira_adapter_module() -> None:
+    """AC1/AC2: the sweep itself stays scoped to the declared four transport modules, and
+    the guard's scope is the DERIVED remainder of the package — explicitly including
+    ``acli_subprocess.py`` and ``jira_fields.py``."""
+    root = _repo_root()
+    assert len(_SWEPT_TRANSPORT_MODULES) == 4, (
+        f"the swept transport surface must stay the four modules 8a5e ruled correct, got "
+        f"{list(_SWEPT_TRANSPORT_MODULES)} — widening it is a 429-policy scope decision, "
+        f"not a refactor (ticket 81d5 rejected the package-wide glob)"
+    )
+    for rel in _SWEPT_TRANSPORT_MODULES:
+        assert (root / rel).is_file(), f"declared swept transport module is missing: {rel}"
+
+    unswept = {p.name for p in _unswept_jira_modules()}
+    assert not unswept & {Path(p).name for p in _SWEPT_TRANSPORT_MODULES}, (
+        f"the anti-drift scope must be DISJOINT from the swept set, got overlap in {unswept}"
+    )
+    for required in ("acli_subprocess.py", "jira_fields.py", "backend.py"):
+        assert required in unswept, (
+            f"{required} is an unswept adapters/jira module and must be inside the "
+            f"anti-drift scope, got {sorted(unswept)}"
+        )
+
+
+def test_antidrift_unswept_classified_collisions_are_only_pure_transport_facades() -> None:
+    """AC3/AC4/AC5: every def OUTSIDE the swept transport modules whose name is in
+    ``_CLASSIFIED_MUTATING`` must be a pure same-name ``self.transport`` delegation — and
+    the accepted ones are exactly the two known-benign backend facades."""
+    accepted: set[tuple[str, str]] = set()
+    offenders: list[str] = []
+    for module in _unswept_jira_modules():
+        for name, is_facade in _classified_collisions(module.read_text(encoding="utf-8")):
+            if is_facade:
+                accepted.add((module.name, name))
+            else:
+                offenders.append(f"{module.name}::{name}")
+
+    assert not offenders, (
+        f"unswept adapters/jira module(s) define classified MUTATING name(s) that are not "
+        f"pure transport facades: {sorted(offenders)}. The Cloud 429 sweep only enumerates "
+        f"{[Path(p).name for p in _SWEPT_TRANSPORT_MODULES]}, so such a definition carries "
+        f"no verified 429 policy — either move it into a swept transport module, or reduce "
+        f"it to a single `return self.transport.<same name>(...)` forwarding its arguments "
+        f"unchanged"
+    )
+    assert accepted == _KNOWN_BENIGN_COLLISIONS, (
+        f"the set of accepted transport facades outside the sweep changed: expected "
+        f"{sorted(_KNOWN_BENIGN_COLLISIONS)}, got {sorted(accepted)}. A new one is a 429 "
+        f"policy decision — record it here deliberately rather than letting it drift in"
+    )
+
+
+# name -> source of an UNSWEPT module defining a classified mutating name. Each REJECTED
+# case is a shape that would silently escape the sweep; the ACCEPTED case pins that the
+# guard is not vacuously red. Written against ``add_comment`` because it is the sharpest
+# case: it is classified single-attempt BY DESIGN (a comment has no idempotency key), so a
+# retry smuggled into an unswept copy is a real duplicate-write bug.
+_FACADE_ACCEPTED = (
+    "class B:\n    def add_comment(self, r, b):\n        return self.transport.add_comment(r, b)\n"
+)
+_FACADE_REJECTED: dict[str, str] = {
+    "extra statement": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        b = b.strip()\n"
+        "        return self.transport.add_comment(r, b)\n"
+    ),
+    "guard": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        if not b:\n"
+        "            return None\n"
+        "        return self.transport.add_comment(r, b)\n"
+    ),
+    "retry loop": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        for _ in range(3):\n"
+        "            return self.transport.add_comment(r, b)\n"
+    ),
+    "logging": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        log.info('x')\n"
+        "        return self.transport.add_comment(r, b)\n"
+    ),
+    "argument transform": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        return self.transport.add_comment(r, b.upper())\n"
+    ),
+    "dropped argument": (
+        "class B:\n    def add_comment(self, r, b):\n        return self.transport.add_comment(r)\n"
+    ),
+    "reordered arguments": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        return self.transport.add_comment(b, r)\n"
+    ),
+    "renamed transport call": (
+        "class B:\n"
+        "    def add_comment(self, r, b):\n"
+        "        return self.transport.append_comment(r, b)\n"
+    ),
+    "non-transport target": (
+        "class B:\n    def add_comment(self, r, b):\n        return self.client.add_comment(r, b)\n"
+    ),
+    "self-call": (
+        "class B:\n    def add_comment(self, r, b):\n        return self._add_comment(r, b)\n"
+    ),
+    "module-level function": ("def add_comment(r, b):\n    return transport.add_comment(r, b)\n"),
+    "star-args passthrough": (
+        "class B:\n"
+        "    def add_comment(self, *args, **kw):\n"
+        "        return self.transport.add_comment(*args, **kw)\n"
+    ),
+    "async facade": (
+        "class B:\n"
+        "    async def add_comment(self, r, b):\n"
+        "        return self.transport.add_comment(r, b)\n"
+    ),
+    "no return": (
+        "class B:\n    def add_comment(self, r, b):\n        self.transport.add_comment(r, b)\n"
+    ),
+    "nested-class mutation": (
+        "class Outer:\n"
+        "    class Inner:\n"
+        "        def add_comment(self, r, b):\n"
+        "            return urlopen(r, b)\n"
+    ),
+}
+
+
+def test_antidrift_guard_accepts_the_exact_facade_shape() -> None:
+    """AC3: the deliberately narrow facade shape backend.py uses is ACCEPTED, so the guard
+    is not vacuously red (a guard nothing can pass would be deleted, not obeyed)."""
+    assert _classified_collisions(_FACADE_ACCEPTED) == [("add_comment", True)]
+
+
+@pytest.mark.parametrize("shape", sorted(_FACADE_REJECTED))
+def test_antidrift_guard_rejects_unswept_non_facade_mutation(shape: str) -> None:
+    """AC5: a moved/new unswept definition using a classified mutating name turns the guard
+    RED unless it is EXACTLY the pure-facade shape."""
+    collisions = _classified_collisions(_FACADE_REJECTED[shape])
+    assert collisions, f"fixture {shape!r} defines no classified mutating name — bad fixture"
+    assert all(not is_facade for _, is_facade in collisions), (
+        f"the anti-drift guard ACCEPTED a non-facade unswept definition ({shape}) — that is "
+        f"the exact drift this guard exists to catch: a classified mutating name living "
+        f"outside the swept transport modules while carrying behaviour of its own"
     )
