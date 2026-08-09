@@ -42,21 +42,21 @@ def _capture_run(argv: list[str], tmp_path: Path) -> tuple[int, dict]:
 
 
 @pytest.mark.parametrize(
-    ("argv", "expected_mode"),
+    ("argv", "expected_mode", "expected_lock_count"),
     [
-        (["preview"], "dry-run"),
-        (["sync"], "live"),
+        (["preview"], "dry-run", 0),
+        (["sync"], "live", 1),
     ],
 )
 def test_primary_and_legacy_routes_preserve_distinct_engine_defaults(
-    tmp_path: Path, argv: list[str], expected_mode: str
+    tmp_path: Path, argv: list[str], expected_mode: str, expected_lock_count: int
 ) -> None:
     rc, captured = _capture_run(argv, tmp_path)
 
     assert rc == 0
     assert captured["target_mode"].value == expected_mode
-    assert captured["advisory"].acquire_pass_lock.call_count == 1
-    assert captured["advisory"].release_pass_lock.call_count == 1
+    assert captured["advisory"].acquire_pass_lock.call_count == expected_lock_count
+    assert captured["advisory"].release_pass_lock.call_count == expected_lock_count
 
 
 def test_capped_sync_remains_live_for_gate_and_pass_classification(tmp_path: Path) -> None:

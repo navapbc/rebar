@@ -133,6 +133,17 @@ class _SuppressionIndex:
             self.suppressed_targets.add(local_id)
 
 
+def _batch_failure_count(manifest_path) -> int:
+    """Read the exact failed-outcome count before canonical rendering replaces it."""
+    if manifest_path is None:
+        return 0
+    try:
+        outcomes = json.loads(Path(manifest_path).read_text()).get("mutations", []) or []
+    except (OSError, ValueError, AttributeError):
+        return 0
+    return sum(1 for outcome in outcomes if isinstance(outcome, dict) and outcome.get("error"))
+
+
 def _emit_mode_manifest(
     mode,
     mode_mod,
@@ -143,6 +154,7 @@ def _emit_mode_manifest(
     repo_root,
     persist,
     max_changes: int | None = None,
+    route: str | None = None,
 ):
     """Render + write the mode-specific manifest; return an (action, value) sentinel.
 
@@ -154,7 +166,7 @@ def _emit_mode_manifest(
     renderer_mod = _load_manifest_renderer()
     applied_for_manifest = list(mutations_list)
 
-    if mode == mode_mod.Mode.LIVE and max_changes is None:
+    if mode == mode_mod.Mode.LIVE and max_changes is None and route != "sync":
         # LIVE: no manifest file per contract. Remove the legacy manifest
         # written by _apply_batch.
         #
@@ -206,6 +218,18 @@ def _emit_mode_manifest(
         "outbound": rendered.get("outbound"),
         "inbound": rendered.get("inbound"),
     }
+    if route is not None:
+        proposed_for_manifest = applied_for_manifest + list(deferred_for_manifest)
+        failed_count = _batch_failure_count(manifest_path) if route == "sync" else 0
+        rendered_with_meta = {
+            "pass_id": pass_id,
+            "mode": getattr(mode, "value", str(mode)),
+            "route": route,
+            "applied_count": max(0, len(applied_for_manifest) - failed_count),
+            "failed_count": failed_count,
+            "deferred_count": len(deferred_for_manifest),
+            "plan": renderer_mod.render_plan(proposed_for_manifest),
+        }
     if max_changes is not None:
         rendered_with_meta["max_changes"] = max_changes
     if "spot_check" in rendered:
