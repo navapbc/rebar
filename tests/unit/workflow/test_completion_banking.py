@@ -184,6 +184,18 @@ def test_record_tool_signature_and_idempotency(tmp_path) -> None:
     assert bank.get("c01-bbbb")["truncated"] is True
 
 
+def test_record_tool_docstring_is_the_bounded_commit_transition(tmp_path) -> None:
+    doc = inspect.getdoc(_bank(tmp_path).make_record_tool()) or ""
+    lowered = doc.casefold()
+    assert "sufficient" not in lowered
+    assert "confident" not in lowered
+    assert "current criterion id" in lowered
+    assert "single commit action" in lowered
+    assert "next response after the third repository evidence call" in lowered
+    assert "record `met=false`" in lowered
+    assert "confirmation selects the next id" in lowered
+
+
 # ── coverage merge by ID, order-insensitive, retry-on-missing ────────────────────────
 def test_validate_coverage_order_insensitive_success() -> None:
     criteria = ["A crit", "B crit", "C crit"]
@@ -448,9 +460,45 @@ def test_primary_criteria_manifest_lists_every_id_and_truncates() -> None:
     manifest = cb.primary_criteria_manifest(crit, ids)
     for cid in ids.values():
         assert cid in manifest
-    assert "record_criterion_verdict" in manifest
+    assert "record_criterion_verdict" not in manifest
+    assert "bank" not in manifest.casefold()
+    assert manifest.splitlines()[1] == "## Criterion IDs"
+    assert all(line.startswith("- c") for line in manifest.splitlines()[2:])
     assert "…" in manifest  # the 400-char criterion is truncated
     assert cb.primary_criteria_manifest([], {}) == ""  # no criteria → no manifest
+
+
+def test_system_prompts_define_the_finite_per_criterion_bank_loop() -> None:
+    from pathlib import Path
+
+    primary = Path("src/rebar/llm/reviewers/completion_verifier.md").read_text()
+    successor = cb.successor_system_prompt(None)
+    for prompt in (primary, successor):
+        compact = " ".join(prompt.split())
+        assert "exactly one current unbanked criterion" in compact
+        assert "use applicable prefetched evidence first" in compact
+        assert "at most three additional repository evidence-tool calls" in compact
+        assert compact.index("use applicable prefetched evidence first") < compact.index(
+            "at most three additional repository evidence-tool calls"
+        )
+        assert "bank `met=false`" in compact
+        assert "only after `record_criterion_verdict` confirms the write" in compact
+        assert "every response in this loop contains exactly one tool call" in compact
+        assert "increments the current id's evidence-call count" in compact
+        assert "at count 3, the next response is commit" in compact
+        assert "selects the next id and resets the evidence-call count to 0" in compact
+    successor_addendum = " ".join(
+        successor.split("## Resuming after exhaustion (incremental banking)", 1)[1].split()
+    )
+    for requirement in (
+        "remainder ids in their listed order",
+        "use applicable prefetched evidence first",
+        "at most three additional repository evidence-tool calls",
+        "every response in this loop contains exactly one tool call",
+        "at count 3, the next response is commit",
+        "selects the next id and resets the evidence-call count to 0",
+    ):
+        assert requirement in successor_addendum
 
 
 def test_primary_manifest_reads_ticket_and_fails_open(tmp_path, monkeypatch) -> None:
@@ -485,10 +533,81 @@ def test_primary_run_passes_manifest_as_extra_context(tmp_path, monkeypatch) -> 
     step = _step(_StubRunner())
     step.run(ctx)
     extra = captured.get("extra_context") or ""
-    assert "record_criterion_verdict" in extra
+    assert "record_criterion_verdict" not in extra
+    assert "bank" not in extra.casefold()
     ids = cb.criterion_id_map(cr.explicit_completion_criteria(_ticket(3)))
     assert all(cid in extra for cid in ids.values())
-    assert captured.get("extra_tools")  # the record tool is still wired
+    (record_tool,) = captured.get("extra_tools")
+    policy = record_tool._rebar_completion_evidence_policy
+    assert policy.criterion_ids == tuple(ids.values())
+    assert policy.max_evidence_responses == 3
+    assert policy.evidence_tool_names == {"read_file", "list_directory", "search_files"}
+
+
+def test_primary_empty_criteria_keeps_record_tool_unflagged(tmp_path, monkeypatch) -> None:
+    ctx = _ctx(0, tmp_path, monkeypatch)
+    captured: dict = {}
+
+    class _FakePrimary:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+        def run(self, _ctx):
+            raise _primary_exc()
+
+    monkeypatch.setattr(cr, "RunnerAgentStep", _FakePrimary)
+    monkeypatch.setattr(
+        cr.CompletionAgentStep, "_recover", lambda self, c, e, b: cr._ex.StepResult(outputs={})
+    )
+    _step(_StubRunner()).run(ctx)
+    (record_tool,) = captured["extra_tools"]
+    assert not hasattr(record_tool, "_rebar_completion_evidence_policy")
+    assert captured.get("extra_context") == ""
+
+
+def test_successor_record_tool_carries_batch_manifest_policy(tmp_path) -> None:
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def run(self, req):
+            captured["request"] = req
+            return {"verdict": "FAIL", "criteria": [], "_usage": {"requests": 1}}
+
+    criteria = ["criterion A", "criterion B"]
+    ids = cb.criterion_id_map(criteria)
+    bank = _fresh_bank(tmp_path)
+    step = _step(_CaptureRunner())
+    step._run_one_successor(
+        _CaptureRunner(),
+        "T-1",
+        "CTX",
+        "SYSTEM",
+        criteria,
+        ids,
+        4,
+        bank,
+    )
+    (record_tool,) = captured["request"].extra_tools
+    policy = record_tool._rebar_completion_evidence_policy
+    assert policy.criterion_ids == tuple(ids[text] for text in criteria)
+    policy.fallback_record(ids[criteria[0]], "bounded evidence")
+    assert bank.get(ids[criteria[0]])["source"] == "tool"
+
+
+def test_successor_empty_batch_keeps_record_tool_unflagged(tmp_path) -> None:
+    captured: dict = {}
+
+    class _CaptureRunner:
+        def run(self, req):
+            captured["request"] = req
+            return {"verdict": "FAIL", "criteria": [], "_usage": {"requests": 0}}
+
+    runner = _CaptureRunner()
+    _step(runner)._run_one_successor(
+        runner, "T-1", "CTX", "SYSTEM", [], {}, 2, _fresh_bank(tmp_path)
+    )
+    (record_tool,) = captured["request"].extra_tools
+    assert not hasattr(record_tool, "_rebar_completion_evidence_policy")
 
 
 def test_runner_agent_step_appends_extra_context_to_ticket_context(monkeypatch) -> None:

@@ -64,14 +64,30 @@ _SUCCESSOR_BANKING_ADDENDUM = """
 ## Resuming after exhaustion (incremental banking)
 
 You are RESUMING a completion verification that a previous run could not finish within its
-budget. Verify ONLY the REMAINDER criteria listed in the user message (identified by id).
-Criteria listed as already-verified are read-only context — do NOT re-verify them.
+budget. Verify the REMAINDER criteria listed in the user message (identified by id), and treat
+the already-verified criteria as read-only context.
 
-As soon as you have sufficient evidence for a remainder criterion, call
-``record_criterion_verdict(criterion_id, met, evidence)`` to bank it — banked verdicts are
-PROVISIONAL and REVISABLE (re-recording overwrites). Bank each criterion incrementally so
-your progress survives even if this run also exhausts its budget. When every remainder
-criterion is judged, emit the structured verdict for the remainder (keyed per criterion).
+Run this authoritative state machine while any remainder id remains unbanked. Loop invariant:
+every response in this loop contains exactly one tool call.
+
+1. **SELECT** — process the remainder ids in their listed order: choose the first unbanked id as
+   the exactly one current unbanked criterion and set its evidence-call count to 0. Evidence
+   priority: use applicable prefetched evidence first, followed by other applicable evidence
+   already present in the ticket context.
+2. **EVIDENCE** — when more evidence is needed and the count is 0, 1, or 2, the response calls
+   exactly one repository evidence tool (``read_file``, ``list_directory``, or ``search_files``)
+   for the current id. Its result increments the current id's evidence-call count. Reconsider
+   the current id after each result; evidence gathered now may be reused for later ids. This
+   state permits at most three additional repository evidence-tool calls for the current id.
+3. **COMMIT** — when the evidence demonstrates a verdict, commit immediately. Commit boundary:
+   at count 3, the next response is commit. That response calls only
+   ``record_criterion_verdict(criterion_id, met, evidence)``: bank ``met=true`` when the evidence
+   demonstrates the criterion, or bank ``met=false`` with the bounded searches when it does not.
+4. **ADVANCE** — advance only after ``record_criterion_verdict`` confirms the write. Its
+   confirmation selects the next id and resets the evidence-call count to 0. A later discovery
+   may revise a provisional verdict with one overwrite call, then resume the current id and
+   count. After every remainder id has a confirmed bank write, emit the structured verdict for
+   the remainder (keyed per criterion).
 """
 
 
@@ -175,17 +191,13 @@ def primary_criteria_manifest(expected: list[str], id_by_text: dict[str, str]) -
     The primary carries the ``record_criterion_verdict`` tool but — unlike a successor, which
     is handed its remainder listed by id — the base completion-verifier context lists the
     acceptance criteria as prose with NO ids, so the model has no valid ``criterion_id`` to
-    bank and banks nothing. This appends a volatile id manifest (one line per criterion, in
-    document order, each truncated) to the primary's ticket context so it can bank as it goes.
-    Returns "" when there are no criteria (nothing to bank)."""
+    bank and banks nothing. This appends a volatile DATA-ONLY id manifest (one line per
+    criterion, in document order, each truncated) to the primary's untrusted ticket context;
+    the authoritative banking instructions remain in the system prompt. Returns "" when
+    there are no criteria (nothing to bank)."""
     if not expected:
         return ""
-    lines = ["", "## Criterion IDs — bank with these EXACT ids"]
-    lines.append(
-        "When you judge a criterion, immediately call "
-        "`record_criterion_verdict(criterion_id, met, evidence)` with the matching id below "
-        "BEFORE gathering evidence for the next one:"
-    )
+    lines = ["", "## Criterion IDs"]
     for text in expected:
         one_line = re.sub(r"\s+", " ", text).strip()
         if len(one_line) > _MANIFEST_TEXT_CAP:
@@ -518,20 +530,22 @@ class CriterionBank:
     def make_record_tool(self):
         """Return the ``record_criterion_verdict`` tool bound to this bank.
 
-        A plain function (pydantic-ai reads its signature + docstring). ``met`` is bool-only —
-        there is NO third value; an unbanked criterion is represented by ABSENCE from the
-        bank, surfaced downstream as a ``met=false`` unverified placeholder. Evidence is capped
-        at banking time; a capped entry carries a ``truncated`` flag. The upsert is idempotent
-        — re-recording a criterion overwrites its prior provisional entry.
+        Pydantic-ai reads the returned function's signature and docstring; that model-facing
+        contract defines the current-id single COMMIT action and third-evidence-call boundary.
+        Writes remain bool-only, evidence-capped, provisional, and idempotently revisable.
         """
         bank = self
 
         def record_criterion_verdict(criterion_id: str, met: bool, evidence: str) -> str:
-            """Record this criterion's PROVISIONAL, REVISABLE verdict as soon as its evidence
-            is sufficient.
+            """Use this tool for the current criterion id as the response's single COMMIT action.
+
+            Enter COMMIT when existing evidence demonstrates the verdict. The bounded transition
+            enters COMMIT in the next response after the third repository evidence call. At that
+            boundary, record `met=false` when evidence has not demonstrated MET. A successful
+            confirmation selects the next id.
 
             Args:
-                criterion_id: the criterion's stable id (from the remainder listing).
+                criterion_id: the criterion's stable id from the manifest or remainder listing.
                 met: whether the criterion is demonstrably met (true) or not (false).
                 evidence: concrete evidence (file paths + line numbers) for the judgment;
                     capped at 3000 characters.

@@ -324,6 +324,15 @@ def build_agent_kwargs(
     Both optional keys are OMITTED rather than set to ``None`` when absent: a present-but-None
     value would reach the provider, so an unflagged request must stay byte-identical to the
     pre-capability era."""
+    # Completion evidence governance is selected ONLY by private, schema-invisible metadata
+    # on a function tool.  At this seam ``runner`` has already appended ``extra_tools`` to the
+    # repository function tools, so no request flag, reviewer-name inference, or public carrier
+    # is needed.  Keep the import local with the other pydantic-ai toolset machinery.
+    completion_policy = None
+    if tools:
+        from rebar.llm.completion_tool_policy import completion_evidence_policy_from_tools
+
+        completion_policy = completion_evidence_policy_from_tools(tools)
     if req.tool_step_limit is not None and tools:
         # Steering convergence boundary — keeps tool DEFINITIONS advertised (a
         # provider-protocol requirement: an empty tool surface over a toolUse history is a
@@ -338,6 +347,13 @@ def build_agent_kwargs(
         # Sits BETWEEN steering (innermost) and the runaway guard (outermost).
         toolsets = _memo_toolsets(tools, toolsets)
         tools = []
+    if completion_policy is not None and toolsets:
+        # Completion-only finite evidence boundary.  It sits OUTSIDE memoization so cached
+        # repository responses still count as model evidence responses, and INSIDE runaway so
+        # the generic loop guard continues to observe every attempted call.
+        from rebar.llm.completion_tool_policy import wrap_completion_evidence_policy
+
+        toolsets = wrap_completion_evidence_policy(toolsets, completion_policy)
     if tools or toolsets:
         # Runaway loop breaker (bug c827), armed for EVERY Agent call with a tool surface
         # — not only step-limited ones — and put OUTERMOST so it also observes steered

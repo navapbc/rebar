@@ -346,3 +346,13 @@ def test_toolset_unchanged_with_prefetch_enabled() -> None:
     )
     assert isinstance(section, str)
     assert isinstance(manifest, list)
+
+
+def test_prefetch_repository_surface_matches_completion_policy_governance() -> None:
+    """Prefetch remains context-only while the completion policy governs exactly the same
+    three repository evidence tools that stay available for targeted follow-up reads."""
+    from rebar.llm import pai_tools
+    from rebar.llm.completion_tool_policy import COMPLETION_EVIDENCE_TOOL_NAMES
+
+    names = frozenset(tool.__name__ for tool in pai_tools.filesystem_tools(None))
+    assert names == COMPLETION_EVIDENCE_TOOL_NAMES

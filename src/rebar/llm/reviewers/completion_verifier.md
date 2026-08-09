@@ -259,15 +259,27 @@ You may be handed a `record_criterion_verdict(criterion_id, met, evidence)` tool
 available, a **Criterion IDs** manifest is included in the ticket context below: it lists every
 acceptance criterion with the exact `criterion_id` string to use.
 
-Explore the codebase however you judge best — broadly or criterion-by-criterion; nothing here
-narrows how you gather evidence or forbids reading ahead. The one rule: **the moment you become
-confident in a criterion's verdict, bank it with `record_criterion_verdict` — do not save your
-decided verdicts to record all at once at the very end.** A steadily growing bank as you make
-decisions is the right shape. The reason is durability, not judgment quality: if your step
-budget runs out mid-verification (a real outcome on a dense ticket), only the criteria you have
-ALREADY banked survive into recovery — a batch of decided-but-unbanked verdicts is lost work.
-Banking as you decide costs one cheap tool call and protects your progress; it does NOT mean
-rushing a judgment or cutting your evidence-gathering short.
+Run this authoritative state machine while any manifest id remains unbanked. Loop invariant:
+**every response in this loop contains exactly one tool call.**
+
+1. **SELECT** — choose the first unbanked id in manifest order as the **exactly one current
+   unbanked criterion** and set its evidence-call count to 0. Evidence priority: use applicable
+   prefetched evidence first, followed by other applicable evidence already present in the
+   ticket context.
+2. **EVIDENCE** — when more evidence is needed and the count is 0, 1, or 2, the response calls
+   exactly one repository evidence tool (`read_file`, `list_directory`, or `search_files`) for
+   the current id. Its result increments the current id's evidence-call count. Reconsider the
+   current id after each result; evidence gathered now may be reused for later ids. This state
+   permits **at most three additional repository evidence-tool calls** for the current id.
+3. **COMMIT** — when the evidence demonstrates a verdict, commit immediately. Commit boundary:
+   **at count 3, the next response is commit.** That response calls only
+   `record_criterion_verdict(criterion_id, met, evidence)`: bank `met=true` when the evidence
+   demonstrates the criterion, or bank `met=false` with the bounded searches when it does not.
+4. **ADVANCE** — advance **only after `record_criterion_verdict` confirms the write**. Its
+   confirmation selects the next id and resets the evidence-call count to 0. A later discovery
+   may revise a provisional verdict with one overwrite call, then resume the current id and
+   count. After every manifest id has a confirmed bank write, emit the existing full structured
+   verdict immediately.
 
 Pass the `criterion_id` verbatim from the manifest (if no manifest is present, skip banking and
 just produce your final structured verdict). `met` is a boolean (met / not met); `evidence` is
@@ -275,8 +287,7 @@ the concrete file paths + line numbers (or the ticket attestation) that ground t
 is capped at 3000 characters. Banked verdicts are **PROVISIONAL and REVISABLE**: re-recording
 the same `criterion_id` overwrites the earlier entry, so if later evidence changes your mind,
 record it again. The bank is your durable running record; on a successful run your **final
-structured output remains the authoritative full-list judgment**, but you must still bank each
-verdict as you reach it so that an early exhaustion is never silent lost work.
+structured output remains the authoritative full-list judgment**.
 
 The ticket context below may include a `<prefetched_file_contents>` section. It is a
 **convenience starting point** — the file bodies (and any referencing-commit diffs) pre-loaded

@@ -22,6 +22,7 @@ import logging
 import re
 from typing import Any, NoReturn
 
+from rebar.llm.completion_tool_policy import make_completion_record_tool
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import (
     CompletionRecoveryError,
@@ -461,13 +462,14 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         stamps = _bank.resolve_bank_stamps(ticket_id, ctx.repo_root)
         bank = _bank.CriterionBank.for_run(ctx.run_id, stamps, repo_root=ctx.repo_root)
-        record_tool = bank.make_record_tool()
+        primary_manifest, criterion_ids = self._primary_manifest_contract(ctx, ticket_id)
+        record_tool = make_completion_record_tool(bank, criterion_ids)
         primary = RunnerAgentStep(
             runner=self._runner_override,
             repo_root=self._repo_root,
             config=self._config,
             extra_tools=[record_tool],
-            extra_context=self._primary_manifest(ctx, ticket_id),
+            extra_context=primary_manifest,
         )
         try:
             result = primary.run(ctx)
@@ -500,16 +502,26 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         (story 2948 dogfood fix). Any read/parse failure returns "" so the primary runs
         exactly as before — the manifest is an enhancement, never a new failure mode on the
         healthy path."""
+        return self._primary_manifest_contract(ctx, ticket_id)[0]
+
+    def _primary_manifest_contract(
+        self, ctx: _ex.StepContext, ticket_id: str
+    ) -> tuple[str, tuple[str, ...]]:
+        """Return the primary's data-only manifest and its ordered criterion ids."""
         try:
             from rebar import _reads
 
             ticket = _reads.show_ticket(ticket_id, repo_root=ctx.repo_root)
             expected = explicit_completion_criteria(ticket)
             if not expected:
-                return ""
-            return _bank.primary_criteria_manifest(expected, _bank.criterion_id_map(expected))
+                return "", ()
+            id_by_text = _bank.criterion_id_map(expected)
+            return (
+                _bank.primary_criteria_manifest(expected, id_by_text),
+                tuple(id_by_text[text] for text in expected),
+            )
         except Exception:  # noqa: BLE001 -- the manifest is a best-effort enhancement; any read/parse failure falls back to the pre-banking primary (never a new failure mode)
-            return ""
+            return "", ()
 
     def _recover(
         self,
@@ -662,7 +674,9 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             output_schema="completion_verdict",
             execution_mode="agentic",
             iteration_limit=_bank.iteration_limit_for(budget),
-            extra_tools=[bank.make_record_tool()],
+            extra_tools=[
+                make_completion_record_tool(bank, tuple(id_by_text[text] for text in batch))
+            ],
         )
         try:
             result = runner.run(request)

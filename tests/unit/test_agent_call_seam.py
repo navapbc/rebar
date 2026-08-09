@@ -77,6 +77,72 @@ def test_kwargs_carry_the_prompt_the_tools_and_the_tool_timeout():
     assert "a_tool" in memo.wrapped.tools, "the tool definition must stay advertised"
 
 
+def test_completion_metadata_adds_policy_between_memo_and_runaway():
+    """Only the private completion metadata opts into the completion wrapper, and its
+    placement is the frozen steering -> memo -> completion -> runaway composition."""
+    from rebar.llm.completion_tool_policy import (
+        COMPLETION_EVIDENCE_POLICY_ATTR,
+        COMPLETION_EVIDENCE_TOOL_NAMES,
+        CompletionEvidencePolicy,
+    )
+
+    cfg = _cfg()
+
+    def record_criterion_verdict(criterion_id: str, met: bool, evidence: str) -> str:
+        return criterion_id
+
+    setattr(
+        record_criterion_verdict,
+        COMPLETION_EVIDENCE_POLICY_ATTR,
+        CompletionEvidencePolicy(
+            criterion_ids=("c00-a",),
+            max_evidence_responses=3,
+            evidence_tool_names=COMPLETION_EVIDENCE_TOOL_NAMES,
+            banked_ids=set,
+            fallback_record=lambda criterion_id, evidence: None,
+        ),
+    )
+    out = build_agent_kwargs(
+        cfg,
+        _req(cfg),
+        [record_criterion_verdict],
+        [],
+        model_settings=None,
+        web_caps=None,
+    )
+    (runaway,) = out["toolsets"]
+    completion = runaway.wrapped
+    memo = completion.wrapped
+    assert type(completion).__name__ == "_CompletionEvidenceToolset"
+    assert type(memo).__name__ == "_MemoNudgeToolset"
+    assert "record_criterion_verdict" in memo.wrapped.tools
+
+
+def test_unflagged_and_lookalike_metadata_preserve_the_old_wrapper_identity():
+    """A similarly named record tool and an attribute with the wrong value type are both
+    unflagged: the old runaway -> memo -> function-toolset chain stays unchanged."""
+    from rebar.llm.completion_tool_policy import COMPLETION_EVIDENCE_POLICY_ATTR
+
+    cfg = _cfg()
+
+    def record_criterion_verdict() -> str:
+        return "x"
+
+    setattr(record_criterion_verdict, COMPLETION_EVIDENCE_POLICY_ATTR, {"criterion_ids": ["x"]})
+    out = build_agent_kwargs(
+        cfg,
+        _req(cfg),
+        [record_criterion_verdict],
+        [],
+        model_settings=None,
+        web_caps=None,
+    )
+    (runaway,) = out["toolsets"]
+    memo = runaway.wrapped
+    assert type(memo).__name__ == "_MemoNudgeToolset"
+    assert "record_criterion_verdict" in memo.wrapped.tools
+
+
 def test_model_settings_and_capabilities_ride_along_when_present():
     cfg = _cfg()
     out = build_agent_kwargs(
