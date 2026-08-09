@@ -4418,6 +4418,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-01T02:20:50Z"
     },
+    "08c8-b6b2-4da6-4373": {
+      "created_at": "2026-08-09T22:24:25Z",
+      "jira_id": "4587748",
+      "jira_key": "REB-2706",
+      "state": "confirmed",
+      "updated_at": "2026-08-09T22:24:27Z"
+    },
     "08ce-0e74-07f6-414e": {
       "baseline": {
         "assignee": null,
@@ -16377,7 +16384,7 @@
         },
         "description": "## Context / Problem\n\n`tests/scripts/bridge/test_bridge_acli_field_coverage.py` cites \"epic 3a03\" in short, four-hex form at lines 10, 13, and 414. In this repository `3a03` resolves to `3a03-9863-542e-4ae1`, an unrelated closed bug about the `_no_repo_root_leaks` test-isolation guard. A reader following the citation lands on the wrong ticket, so the provenance of the ACLI contract-regression tests is effectively lost.\n\nThe verified source is the pre-extraction DSO epic `3a03-b3f2-b34c-4e4f` (closed, 24 children, \"level-triggered reconciler\"), recorded in the DSO ticket-data mining report stored on the tickets branch under `63cc-ec94-4792-464b`. Evidence for that attribution:\n\n- The citations arrived verbatim in `b534f47a7f` (\"Extract DSO ticket system + Jira reconciler\n  into standalone rebar\", 2026-06-08), so they name DSO ids, not rebar ids.\n- The same file and `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_graph.py` cite\n  sibling DSO bug ids in full form (`c916-74a1-ed06-40e4`, `4fa9-0846-519e-4c30`,\n  `5010-1c6a-9387-4b5b`); none of them resolve in the rebar store either.\n- `3a03-b3f2-b34c-4e4f` is the only DSO-era id beginning `3a03` recorded anywhere in this\n  repository's history, and it shares the prefix the author abbreviated.\n\nThe earlier hypothesis on this ticket that the source was rebar epic `3006-e198-13db-4e1f` is disproved: `3006` was created 2026-07-03, a month after the citations landed in this repository and six weeks after the 2026-05-24 ACLI audit they describe, and its plan never mentions ACLI. Citing it would substitute one wrong reference for another.\n\n## Approach\n\nRewrite the three short `epic 3a03` citations to the full DSO id `3a03-b3f2-b34c-4e4f`, labelled as a pre-extraction DSO ticket so no reader mistakes it for the rebar ticket that now owns the `3a03` prefix. This matches the full-id convention the surrounding code already uses for the sibling DSO bug ids, and it needs no new lookup table or doc. The edits are inside a module docstring and a comment banner only, so no test or assertion changes.\n\n## Scope\n\n- `tests/scripts/bridge/test_bridge_acli_field_coverage.py` \u2014 lines 10, 13, and 414: replace\n  the short `epic 3a03` citation with `pre-extraction DSO epic 3a03-b3f2-b34c-4e4f`. No\n  executable line, fixture, assertion, or test name changes.\n\nNo other file changes. The sibling short form `bug c916` on line 409 is left alone: it does not collide with any rebar ticket and its full id is already given on line 422.\n\n## Acceptance Criteria\n\n- [x] `grep -n \"3a03\" tests/scripts/bridge/test_bridge_acli_field_coverage.py` returns three\n  lines, each containing the full id `3a03-b3f2-b34c-4e4f` and none containing a bare `3a03`\n  short-form citation.\n- [x] Each of the three corrected citations identifies the id as a pre-extraction DSO ticket,\n  verified by reading lines 10, 13, and 414.\n- [x] `git diff` for the change touches only comment and docstring lines in that one file,\n  verified by inspecting the diff.\n- [x] `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/scripts/bridge/test_bridge_acli_field_coverage.py`\n  passes with the same collected test count as before the edit.\n- [x] `make lint` and `make typecheck` pass in the worktree.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Correct surviving dangling 3a03 citations in ACLI bridge tests"
       },
       "created_at": "2026-08-07T16:08:23Z",
@@ -76592,10 +76599,24 @@
     },
     "9f7f-3abe-0db4-4dcf": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# fsck should RESTORE deleted sources, not just refuse\n\n## STACKED ON UNLANDED CHANGE 1557 (bug b636) \u2014 read this first\nThis story is the SECOND change in a stack. Gerrit change 1557 (bug `b636`) is unlanded at the time of writing, and it INTRODUCES the symbols this plan builds on. They do NOT exist on `origin/main` yet:\n- `compact_rebuild.snapshot_missing_sources(ticket_dir)` \u2014 the cited-but-absent-source\n  predicate (1557 also extracts the whole rebuild cluster from `compact.py` into the new\n  `_commands/compact_rebuild.py` leaf for the module-size cap).\n- `fsck._maybe_repair_snapshot(...)` \u2014 1557 extracts the previously INLINE repair block from\n  `fsck._scan` (main's fsck.py:180-190) into this helper.\n- the `SNAPSHOT_MISSING_SOURCES` fsck finding.\nDo not start this story until 1557 has merged; re-verify these names against the merged tree before implementing.\n\n## Why\n1557 makes the rebuild FAIL CLOSED when the prior SNAPSHOT cites source events absent from disk. That stops new corruption but leaves the population permanently un-repairable: a dry run of the fixed fsck reports 505 live tickets in that shape, and `fsck --repair` can then never drive them to fsck-zero.\n\n## Evidence restoration is possible\nDeleted event files remain reachable in `origin/tickets` history at the deleting commit's parent. Over the 505 flagged tickets: 504 have deletion records covering every cited-missing uuid, 1 partial, 0 with none. Validated on a COPY of the live store: restoring every deleted event file then rebuilding restored 214/214 already-regressed tickets (486 events).\n\n## Prior art to REUSE, and where it must DIFFER\n`attest/authorship.py:build_ticket_position_commit_map` is the ticket-scoped, single-pass `git log --diff-filter=A --name-only` walk, cost-tuned as the batched form of `resolve_event_commit`. Reuse that SHAPE. CRITICAL DIFFERENCE: that helper streams newest->oldest and OVERWRITES, so the OLDEST commit wins \u2014 correct for `--diff-filter=A` (the oldest ADD introduced the event). For `--diff-filter=D` the correct fold is the NEWEST deletion (the last time the path was removed), because a path may be added and deleted more than once across successive compactions. Copying the oldest-wins fold direction would read a stale pre-image. Use first-seen-wins over the newest-first stream, and TEST a path deleted twice. Blob reads use the existing `git show <ref>:<path>` idiom (`binding_store.py`, `_store/compat.py`).\n\n## Naming\n`_commands/fsck_recover.py` already owns 'recover' here, so the new primitive is `restore_deleted_sources`.\n\n## Why the snapshot's citation list is not enough\nTicket 72d5 recovered its close STATUS but still read in_progress: an EARLIER deleted STATUS that no surviving snapshot cites broke the chain's current_status precondition, so the reducer rejected both it and the close. Restoration must sweep the ticket's FULL deletion history.\n\n## Acceptance criteria\n- [ ] `compact_rebuild.restore_deleted_sources(tracker, ticket_id, ticket_dir) -> list[str]`\n      restores every event file deleted from that ticket dir, enumerated by ONE ticket-scoped\n      `git log --diff-filter=D --name-only -- <tid>/` pass, NEWEST-deletion-wins, each blob\n      read at the deleting commit's parent and written back as a folded `.retired` source\n      (never resurrected live). Returns restored filenames.\n- [ ] `compact_rebuild.rebuild_with_restore(...)` owns restore -> re-check\n      `snapshot_missing_sources` -> rebuild, refusing (1557 fail-closed) only when restoration\n      cannot complete the log.\n- [ ] BOTH live rebuild call sites route through it: `fsck._maybe_repair_snapshot` (post-1557)\n      and `fsck_repair.py:268`. Neither may call `rebuild_snapshot_from_full_log` directly.\n- [ ] `--dry-run` reports per ticket how many events WOULD be restored and whether a rebuild\n      would follow, writing nothing.\n- [ ] Per-ticket scan only (no full-history index build) so it stays usable on a large store.\n- [ ] BACK-OUT + blast-radius: the run pre-tags the tracker before any write (as A3 did, but\n      the tag MUST be created before the FIRST batch \u2014 `pre-a3-remediation` was stamped\n      mid-run, after 2 of 4 batches, and is therefore not a valid rollback point). Before any\n      live run, the whole sweep is executed against a COPY of the store and the resulting\n      status of EVERY ticket is diffed against the pre-run state; only the intended\n      restorations may change status.\n- [ ] Held-out test: a ticket whose close exists ONLY in history is restored and reads closed\n      after `fsck --repair`.\n- [ ] Held-out test: a path deleted TWICE restores the newest pre-image, not the oldest.\n- [ ] Held-out test: a ticket with genuinely unrecoverable sources still refuses, unchanged\n      from 1557.",
         "priority": "Highest",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "fsck: auto-recover deleted SNAPSHOT sources from tickets history, then rebuild"
       },
       "created_at": "2026-08-09T07:21:38Z",
@@ -131896,6 +131917,7 @@
     "REB-2703": "aea0-0dac-b501-464c",
     "REB-2704": "beb1-d778-e7d9-425a",
     "REB-2705": "ea2a-1571-efdc-4447",
+    "REB-2706": "08c8-b6b2-4da6-4373",
     "REB-271": "ab74-b205-72af-4ce1",
     "REB-272": "acc1-1c4d-5ac4-44e0",
     "REB-273": "acdd-a711-64e7-47fe",
