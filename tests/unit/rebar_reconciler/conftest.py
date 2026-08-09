@@ -72,6 +72,12 @@ def _seed_dotted_namespace() -> None:
     # engine submodule falls through generically, instead of hand-seeding each
     # one. Already-seeded flat sys.modules keys (e.g. alert_store below) still
     # win, so their object identity is preserved.
+    #
+    # NOTE: this extension is no longer load-bearing — ``tests/unit/conftest.py``
+    # performs the same bridge for EVERY ``tests/unit`` collection, so by the time
+    # this runs the engine dir is already on the shadow's ``__path__`` and the
+    # append below no-ops. It is kept deliberately, as site-local documentation of
+    # the shadow at the directory that creates it.
     _engine_pkg = str(_ENGINE_DIR / "rebar_reconciler")
     if _engine_pkg not in rebar_reconciler.__path__:
         rebar_reconciler.__path__.append(_engine_pkg)
