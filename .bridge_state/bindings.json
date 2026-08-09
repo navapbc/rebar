@@ -92047,11 +92047,25 @@
     },
     "c1fd-be12-44b7-4d31": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# Concurrent reducer cache writers can publish a current hash with stale state\n\n## Context and authoritative intent\n\nThe reducer cache is a rebuildable optimization over deterministic event replay. `write_cache` promises an atomic cache publication, the cache invalidation tests require a newly added event to be reflected, and the original plan-review fan-out epic `sulky-pane-flag` requires concurrency without fidelity regression.\n\nThe report originally attributed a cap=12 plan-review abort to the `.cache.json.tmp` rename race. Phase-1 experiments rejected that fatality claim for immutable gate snapshots: redundant writers log caught warnings but do not escape or corrupt the equal result. The confirmed defect is reachable when concurrent reductions observe different event generations.\n\n## Proven root cause\n\nTwo reducer cache writers use the same fixed `.cache.json.tmp` artifact: `write_cache` in `src/rebar/reducer/_cache.py` and corrupt-CREATE handling in `src/rebar/reducer/_processors.py`. Overlapping writers can hold file descriptors to the same inode; after one renames it into place, another can keep mutating the now-visible final file. Runtime proof through real `reduce_ticket` appended an EDIT between old-generation and new-generation reductions and produced a valid cache with the current hash but stale `authorship`. A subsequent normal reduction returned the stale cached state without replay. Serialized controls produced no false hits.\n\n## Repair plan\n\n1. Replace `write_cache` fixed-temp publication with the canonical `rebar._store.fsutil.atomic_write`, preserving the surrounding best-effort OSError handling.\n2. Route the inline corrupt-CREATE cache publication in `process_create` through `write_cache`, so every reducer cache writer shares the isolated same-directory temp, atomic replace, cleanup, and failure policy.\n3. Extend the canonical tracker gitignore ensure-registry for `atomic_write` private cache temp names and pin that registry/staging contract.\n4. Add deterministic threaded reducer regressions through the real cache seam: capture coherent old/new states around a controlled event append, release at least eight writers, and assert the current-hash read equals a cache-bypassing replay oracle. Add an immutable-writer control and a corrupt-CREATE writer control so no fixed `.cache.json.tmp` writer remains.\n5. Run the focused reducer/cache and init/gitignore suites, then lint and typecheck.\n\n## Acceptance criteria\n\n- [ ] Concurrent reductions of different event generations publish only complete coherent envelopes; a current-hash cache hit equals cache-bypassing deterministic replay.\n- [ ] At least eight concurrent reductions of one immutable ticket complete without `FileNotFoundError` cache-write warnings.\n- [ ] The normal and corrupt-CREATE cache paths both publish through the canonical `atomic_write` mechanism.\n- [ ] Publication failure cleanup leaves no private cache temp files.\n- [ ] Every private cache temp artifact shape is covered by the canonical tracker gitignore/ensure-registry contract.\n- [ ] A `git add -A` staging probe excludes every private cache temp artifact shape.\n- [ ] Cache publication failure is logged and does not prevent independently replayed ticket state from returning.\n- [ ] Focused reducer/cache and init/gitignore tests pass.\n- [ ] `make lint` passes.\n- [ ] `make typecheck` passes.",
         "priority": "Medium",
-        "status": "To Do",
-        "summary": "Ticket-tracker snapshot cache tmp->final rename races under concurrent plan-review fan-out"
+        "status": "In Progress",
+        "summary": "Concurrent reducer cache writers can publish a current hash with stale state"
       },
       "created_at": "2026-08-07T15:55:53Z",
       "jira_id": "4587555",
