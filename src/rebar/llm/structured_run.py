@@ -213,6 +213,9 @@ def _pai_structured(
 
     model_cls = contracts.response_model_for(req.output_schema)
     mode_obj = structured.output_mode(model_cls, caps, thinking=req.thinking)
+    output_retries = structured.OUTPUT_RETRIES
+    if req.structured_retry_limit is not None:
+        output_retries = min(output_retries, max(0, int(req.structured_retry_limit)))
     if isinstance(mode_obj, NativeOutput):
         # Bug 895c: the provider compiles this contract's JSON Schema into a decoding grammar
         # and can 400 outright ("Grammar compilation timed out." / "Schema is too complex.").
@@ -221,9 +224,7 @@ def _pai_structured(
         # back to the PROMPTED path below (measured to return the same verdict in ~11s) rather
         # than losing this step to a request that can never succeed as configured.
         try:
-            agent = Agent(
-                model, output_type=mode_obj, retries={"output": structured.OUTPUT_RETRIES}, **kwargs
-            )
+            agent = Agent(model, output_type=mode_obj, retries={"output": output_retries}, **kwargs)
             with usage_log.capture_attempt_messages():
                 run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
             # Silent-success parity (story drake): the PromptedOutput path below already checks
@@ -256,7 +257,7 @@ def _pai_structured(
     schema_hint = structured.schema_directive(model_cls)
     prompt = f"{req.instructions}\n\n{schema_hint}"
     last: Exception | None = None
-    for _ in range(structured.OUTPUT_RETRIES + 1):
+    for _ in range(output_retries + 1):
         with usage_log.capture_attempt_messages():
             result = agent.run_sync(prompt, usage_limits=usage_limits)
         try:
@@ -293,7 +294,7 @@ def _pai_structured(
             reply=str(result.output),  # the LAST attempt's raw reply
             model=getattr(model, "model_name", None) or str(model),
             contract=req.output_schema or "",
-            attempts=structured.OUTPUT_RETRIES + 1,
+            attempts=output_retries + 1,
         )
         if path is not None:
             raise type(last)(f"{last} [raw reply captured: {path}]") from last

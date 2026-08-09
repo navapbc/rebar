@@ -178,6 +178,10 @@ def judge_batch(
             mode="structured",
             output_schema="overlap_verdict_batch",
             execution_mode="single_turn",
+            output_token_limit=1024,
+            structured_retry_limit=0,
+            transport_attempt_limit=1,
+            request_timeout_limit_s=60,
         )
         res = get_runner(cfg, override=runner).run(req)
         entries = res.get("verdicts") if isinstance(res, dict) else None

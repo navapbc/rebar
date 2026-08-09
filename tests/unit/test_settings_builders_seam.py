@@ -25,7 +25,7 @@ from pydantic_ai.usage import UsageLimits
 
 from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.config import LLMConfig
-from rebar.llm.runner import RunRequest
+from rebar.llm.runner import PydanticAIRunner, RunRequest, _effective_config
 from rebar.llm.structured_run import build_model_settings, build_usage_limits
 
 pytestmark = pytest.mark.unit
@@ -216,3 +216,67 @@ def test_absent_cache_settings_yield_a_plain_dict():
     cfg = _cfg(timeout_s=30)
     out = build_model_settings(cfg, _req(cfg), _caps(), _MODEL, None, model_override=None)
     assert out["timeout"] == 30.0
+
+
+def test_request_limits_only_lower_transport_policy() -> None:
+    """Request-local limits lower the run-wide policy; omitted limits preserve it."""
+    base = _cfg(timeout_s=600, llm_retry_max_attempts=4)
+    unchanged = _effective_config(base, _req(base))
+    assert unchanged is base
+
+    bounded_req = _req(base)
+    bounded_req.request_timeout_limit_s = 60
+    bounded_req.transport_attempt_limit = 1
+    bounded = _effective_config(base, bounded_req)
+    assert bounded.timeout_s == 60
+    assert bounded.llm_retry_max_attempts == 1
+    assert base.timeout_s == 600
+    assert base.llm_retry_max_attempts == 4
+
+    raised_req = _req(base)
+    raised_req.request_timeout_limit_s = 1200
+    raised_req.transport_attempt_limit = 8
+    raised = _effective_config(base, raised_req)
+    assert raised.timeout_s == 600
+    assert raised.llm_retry_max_attempts == 4
+
+
+def test_request_transport_limits_reach_model_and_provider_construction(monkeypatch) -> None:
+    """The lowered config exists before either model or transport construction begins."""
+    from rebar.llm import runner as runner_mod
+
+    captured: dict[str, LLMConfig] = {}
+
+    class _StopConstruction(Exception):
+        pass
+
+    class _CapturingProviderSession:
+        def __init__(self, cfg):
+            captured["provider"] = cfg
+
+        def __enter__(self):
+            raise _StopConstruction
+
+        def __exit__(self, *args):
+            return False
+
+    def _capture_model(cfg):
+        captured["model"] = cfg
+        return _MODEL
+
+    monkeypatch.setattr(runner_mod, "_pai_check_config", lambda cfg: None)
+    monkeypatch.setattr(runner_mod, "_pai_model", _capture_model)
+    monkeypatch.setattr(runner_mod, "primary_endpoint_for", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner_mod, "ProviderSession", _CapturingProviderSession)
+
+    base = _cfg(timeout_s=600, llm_retry_max_attempts=4)
+    req = _req(base, mode="text", execution_mode="single_turn")
+    req.request_timeout_limit_s = 60
+    req.transport_attempt_limit = 1
+    with pytest.raises(_StopConstruction):
+        PydanticAIRunner(base).run(req)
+
+    assert captured["model"].timeout_s == 60
+    assert captured["model"].llm_retry_max_attempts == 1
+    assert captured["provider"].timeout_s == 60
+    assert captured["provider"].llm_retry_max_attempts == 1
