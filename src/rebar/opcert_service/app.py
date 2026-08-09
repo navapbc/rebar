@@ -73,16 +73,14 @@ async def _worker(app: FastAPI) -> None:
             if rec is None:
                 continue
             rec["status"] = "running"
-            fields = await asyncio.wait_for(
-                asyncio.to_thread(
+            async with asyncio.timeout(cfg.job_timeout_seconds):
+                fields = await asyncio.to_thread(
                     jobs.run_job,
                     ticket_id=rec["ticket_id"],
                     kind=rec["kind"],
                     cfg=cfg,
                     ssm_fetcher=app.state.ssm_fetcher,
-                ),
-                timeout=cfg.job_timeout_seconds,
-            )
+                )
             rec.update(fields)
         except asyncio.CancelledError:
             raise

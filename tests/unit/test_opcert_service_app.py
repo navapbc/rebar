@@ -12,7 +12,10 @@ review-bot app's offline posture (its endpoints are likewise not exercised witho
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import time
+import types
 
 import pytest
 
@@ -142,6 +145,103 @@ def test_matching_guard_is_accepted(client, monkeypatch):
         headers={"X-Opcert-Guard": GUARD},
     )
     assert resp.status_code == 202
+
+
+@pytest.mark.timeout(2)
+def test_worker_records_job_timeout(monkeypatch):
+    """A job that exceeds its configured bound records the timeout contract."""
+    from rebar.opcert_service import app as app_module
+
+    async def drive():
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        inner_started = asyncio.Event()
+        never_released = asyncio.Event()
+
+        async def block_past_timeout():
+            inner_started.set()
+            await never_released.wait()
+
+        def barrier_to_thread(*args, **kwargs):
+            return block_past_timeout()
+
+        monkeypatch.setattr(app_module.asyncio, "to_thread", barrier_to_thread)
+        record = jobs.new_record("job", "t", "plan-review")
+        fake_app = types.SimpleNamespace(
+            state=types.SimpleNamespace(
+                queue=queue,
+                jobs={"job": record},
+                config=OpcertServiceConfig(guard=GUARD, job_timeout_seconds=0.01),
+                ssm_fetcher=object(),
+            )
+        )
+        worker = asyncio.create_task(app_module._worker(fake_app))
+        try:
+            queue.put_nowait("job")
+            await queue.join()
+
+            assert inner_started.is_set()
+            assert record["status"] == "error"
+            assert record["error"] == {
+                "class": jobs.ERR_TIMEOUT,
+                "message": "job exceeded the 0.01s per-run timeout",
+            }
+            assert record["ticket_id"] == "t"
+            assert record["kind"] == "plan-review"
+        finally:
+            worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
+
+    asyncio.run(drive())
+
+
+@pytest.mark.timeout(2)
+def test_worker_cancellation_survives_job_completion_race(monkeypatch):
+    """Shutdown must finish when a job completion collides with worker cancellation."""
+    from rebar.opcert_service import app as app_module
+
+    async def drive():
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        inner_started = asyncio.Event()
+        release_inner = asyncio.Event()
+
+        async def complete_at_shutdown():
+            inner_started.set()
+            await release_inner.wait()
+            return _fake_completed(ticket_id="t", kind="plan-review")
+
+        def barrier_to_thread(*args, **kwargs):
+            return complete_at_shutdown()
+
+        monkeypatch.setattr(app_module.asyncio, "to_thread", barrier_to_thread)
+        record = jobs.new_record("job", "t", "plan-review")
+        fake_app = types.SimpleNamespace(
+            state=types.SimpleNamespace(
+                queue=queue,
+                jobs={"job": record},
+                config=OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0),
+                ssm_fetcher=object(),
+            )
+        )
+        worker = asyncio.create_task(app_module._worker(fake_app))
+        try:
+            queue.put_nowait("job")
+            await inner_started.wait()
+            assert record["status"] == "running"
+            release_inner.set()
+            worker.cancel()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+
+            assert worker.done(), "worker ignored shutdown cancellation and returned to queue"
+            assert worker.cancelled()
+        finally:
+            if not worker.done():
+                worker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await worker
+
+    asyncio.run(drive())
 
 
 def test_invalid_kind_is_400(client):
