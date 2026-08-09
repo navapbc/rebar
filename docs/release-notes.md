@@ -45,17 +45,25 @@ checked-out workflows, and older environments therefore continue unchanged while
 automation moves to canonical 0/1/2. The production workflow no longer carries a 3/75
 whitelist; its paused-marker commit-skip remains unchanged.
 
-## `bridge-status` and `purge-bridge` removed (breaking, no aliases)
+## Durable reconciler status and last-pass witness
 
-The public `rebar bridge-status` and `rebar purge-bridge` commands, their help pages,
-and the `bridge_status` output schema are removed. Both command names now follow the
-standard unknown-subcommand path and exit non-zero; no deprecation or compatibility
-alias is provided.
+`rebar bridge status` is the canonical status surface. It reads the authoritative
+`refs/reconciler/last-pass` record together with the pause ref and live lock, applying the same
+verdict precedence in text and JSON. `--max-age` explicitly enables staleness; without it a
+matching successful pass remains healthy regardless of age. Healthy, paused, and running return
+zero; foreign, failed, stale, and never-run return nonzero. Target identity resolves from
+`--target`, then `REBAR_ENV_ID`, then the local tracker `.env-id`.
 
-Agents must stop invoking either command. Unresolved bridge alerts continue to appear
-in the supported ticket read surfaces with neutral guidance, so they remain visible
-without `bridge-status`. There is no replacement purge command. This removal does not
-change persisted ticket data, and rollback is a straight revert of the removal change.
+The hidden `rebar bridge-status` compatibility spelling routes through the identical parser and
+core, but stays out of top-level help. `purge-bridge` remains removed with no replacement.
+
+Mutating reconciler processes publish the schema-v1 last-pass ref before stopping their heartbeat
+or releasing the lock. The only local status artifact is the rolling
+`.tickets-tracker/.bridge_state/last-pass.json`; consumers ignore it unless pass and environment
+match the ref. The canary now defaults to canonical status, with `github-api` retained as a
+one-release rollback/bootstrap source selected by
+`REBAR_CANARY_HEARTBEAT_SOURCE=github-api`. See
+[ADR 0094](adr/0094-reconciler-last-pass-two-witness-status.md).
 
 ## The `[eval]` extra is removed (breaking, no alias)
 

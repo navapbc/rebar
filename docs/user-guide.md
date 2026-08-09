@@ -386,6 +386,13 @@ deterministic, field-level audit manifest without applying changes. Canonical sy
 comparable manifest for both capped and uncapped runs; a capped run also records the complete
 deferred remainder.
 
+`rebar bridge status` reads the reconciler's durable last-pass, pause, and live-lock witnesses.
+Use `--json` for automation, `--target ENVIRONMENT_ID` to select the expected producer, and
+`--max-age 2h` only when age should make an otherwise successful pass stale. Without
+`--max-age`, no implicit age threshold applies. Healthy, paused, and running exit zero; foreign,
+failed, stale, and never-run exit nonzero. The older `rebar bridge-status` spelling remains a
+hidden compatibility alias; `purge-bridge` remains retired.
+
 The established `rebar reconcile` adapter remains available: no arguments still mean
 dry-run, every historical `--mode` value is retained, and `--filter-local-ids` keeps
 its write-only filtering semantics. Direct argument-less `python -m rebar_reconciler`

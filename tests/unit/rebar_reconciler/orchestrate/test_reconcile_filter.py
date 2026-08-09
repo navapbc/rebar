@@ -275,8 +275,6 @@ class TestReconcileOnceFiltered:
 
         # Health stub
         health = types.ModuleType("reconcile_health")
-        health.count_open_by_type = lambda repo_root=None: {}
-        health.record_pass = lambda **kwargs: None
         stubs["reconcile_health"] = health
 
         # Invariants stub

@@ -78,8 +78,6 @@ def _make_stub_applier() -> ModuleType:
 
 def _make_stub_health() -> ModuleType:
     stub = types.ModuleType("reconcile_health")
-    stub.record_pass = lambda **kwargs: None
-    stub.count_open_by_type = lambda repo_root=None: {}
     return stub
 
 

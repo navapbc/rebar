@@ -71,6 +71,7 @@ def hb_env(tmp_path: Path, **over: str) -> dict[str, str]:
         "ALERT_WINDOW_HOURS": "2",
         "GITHUB_REPOSITORY": "navapbc/rebar",
         "GITHUB_OUTPUT": str(tmp_path / "gh_out"),
+        "REBAR_CANARY_HEARTBEAT_SOURCE": "github-api",
     }
     env.update(over)
     (tmp_path / "gh_out").touch()
@@ -101,6 +102,136 @@ def drift_env(tmp_path: Path, **over: str) -> dict[str, str]:
     }
     env.update(over)
     return env
+
+
+class SequenceRunner(FakeRunner):
+    """Return successive responses for repeated canonical status snapshots."""
+
+    def __init__(self, responses: list[tuple[int, str, str]]):
+        super().__init__()
+        self._sequence = iter(responses)
+
+    def __call__(self, argv: list[str]) -> tuple[int, str, str]:
+        self.calls.append(list(argv))
+        if argv[:3] == ["rebar", "bridge", "status"]:
+            return next(self._sequence)
+        return (0, "", "")
+
+
+def status_env(tmp_path: Path, **over: str) -> dict[str, str]:
+    env = hb_env(tmp_path, REBAR_CANARY_HEARTBEAT_SOURCE="status")
+    env.update(over)
+    return env
+
+
+def _status(verdict: str, **extra: object) -> tuple[int, str, str]:
+    payload: dict[str, object] = {"verdict": verdict, "pass_id": "pass-canary"}
+    payload.update(extra)
+    lock = payload.get("lock")
+    if isinstance(lock, dict):
+        payload.update(
+            lock_oid=lock.get("oid"),
+            live_lock_fence=lock.get("fence"),
+            lock_lease_secs=lock.get("lease_secs"),
+        )
+    return (0 if verdict in {"HEALTHY", "PAUSED", "RUNNING"} else 1, json.dumps(payload), "")
+
+
+def test_status_source_is_default_and_never_queries_workflow_heartbeat(
+    mod: ModuleType, tmp_path: Path
+) -> None:
+    runner = SequenceRunner([_status("HEALTHY")])
+    env = hb_env(tmp_path)
+    env.pop("REBAR_CANARY_HEARTBEAT_SOURCE")
+    rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
+    assert rc == 0
+    assert read_outputs(tmp_path / "gh_out")["stale"] == "false"
+    assert runner.calls == [
+        [
+            "rebar",
+            "bridge",
+            "status",
+            "--target",
+            "reconciler",
+            "--max-age",
+            "2h",
+            "--json",
+        ]
+    ]
+
+
+def test_explicit_github_api_source_preserves_one_release_rollback(
+    mod: ModuleType, tmp_path: Path
+) -> None:
+    payload = json.dumps({"updated_at": _iso(NOW - 60)})
+    runner = FakeRunner({("gh", "api"): (0, payload, "")})
+    env = hb_env(tmp_path, REBAR_CANARY_HEARTBEAT_SOURCE="github-api")
+    rc = mod.main(["check-heartbeat"], runner=runner, environ=env, now_epoch=NOW)
+    assert rc == 0
+    assert read_outputs(tmp_path / "gh_out")["stale"] == "false"
+    assert runner.calls and runner.calls[0][:2] == ["gh", "api"]
+
+
+def test_running_snapshot_waits_observed_lease_and_advancing_fence_stays_running(
+    mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(mod.time, "sleep", sleeps.append)
+    runner = SequenceRunner(
+        [
+            _status(
+                "RUNNING",
+                lock={"oid": "a" * 40, "fence": 8, "lease_secs": 120, "holder": "p"},
+            ),
+            _status(
+                "RUNNING",
+                lock={"oid": "b" * 40, "fence": 9, "lease_secs": 120, "holder": "p"},
+            ),
+        ]
+    )
+    rc = mod.main(["check-heartbeat"], runner=runner, environ=status_env(tmp_path), now_epoch=NOW)
+    assert rc == 0
+    assert sleeps == [120]
+    out = read_outputs(tmp_path / "gh_out")
+    assert out["stale"] == "false"
+    assert "advanced" in out["status_msg"].lower()
+
+
+def test_stalled_fence_across_lease_is_crashed(
+    mod: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(mod.time, "sleep", lambda _seconds: None)
+    lock = {"oid": "a" * 40, "fence": 8, "lease_secs": 120, "holder": "p"}
+    runner = SequenceRunner([_status("RUNNING", lock=lock), _status("RUNNING", lock=lock)])
+    rc = mod.main(["check-heartbeat"], runner=runner, environ=status_env(tmp_path), now_epoch=NOW)
+    assert rc == 0
+    out = read_outputs(tmp_path / "gh_out")
+    assert out["stale"] == "true"
+    assert "crashed" in out["status_msg"].lower()
+
+
+def test_lease_over_job_budget_fails_loudly_without_sleep(
+    mod: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        mod.time,
+        "sleep",
+        lambda _seconds: pytest.fail("oversized lease must fail before sleeping"),
+    )
+    runner = SequenceRunner(
+        [
+            _status(
+                "RUNNING",
+                lock={"oid": "a" * 40, "fence": 8, "lease_secs": 481, "holder": "p"},
+            )
+        ]
+    )
+    rc = mod.main(["check-heartbeat"], runner=runner, environ=status_env(tmp_path), now_epoch=NOW)
+    assert rc == 1
+    assert "480" in capsys.readouterr().out
 
 
 # Consecutive-red threshold fixture (ticket 4527): the heartbeat filer only

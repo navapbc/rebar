@@ -16,6 +16,7 @@ pass to reconcile.reconcile_once(pass_id, repo_root=...):
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -50,6 +51,15 @@ def main_mod():
             f"__main__.py not found at {MAIN_PATH} — implement the module to make tests pass."
         )
     return _load_main_module()
+
+
+@pytest.fixture(autouse=True)
+def _git_repo(tmp_path: Path) -> None:
+    """Mutating main-path tests provide the git ref store finalization requires."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    (tracker / ".env-id").write_text("test-local\n", encoding="utf-8")
 
 
 def _make_stub_reconcile(return_value=None, side_effect=None) -> types.ModuleType:

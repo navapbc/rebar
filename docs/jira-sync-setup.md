@@ -146,8 +146,8 @@ diff, and merge it on your normal change-control path. The current templates del
 delivery to the strict synchronous store core. After a clean recovery merge it re-pushes
 immediately, rather than waiting in a workflow-local retry loop.
 
-No store cleanup is needed to roll this template change back. Restore the prior inline
-flush loop in a canary copy if that is the desired rollback. For the reconciler template,
+No store cleanup is needed to roll this template change back. Set
+`REBAR_CANARY_HEARTBEAT_SOURCE=github-api` for the one-release heartbeat rollback. For the reconciler template,
 remove `--strict` from the core call site to return to best-effort delivery; do not rewrite
 the tickets worktree or its event history.
 
@@ -242,8 +242,8 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 | Step | Reason |
 |------|--------|
-| **Query last successful `reconcile-bridge.yml` run** | A silently-disabled or chronically-failing bridge is invisible otherwise. The canary is the dead-man's switch that makes staleness loud. |
-| **Treat GitHub API errors as transient** | Treating an API blip as "stale" would file a false-alarm bug every outage. |
+| **Fetch `refs/reconciler/*` and run `rebar bridge status --target reconciler`** | The durable last-pass ref is the completion witness; the live lock's advancing OID/fence separately proves a running holder. A producer-first deployment with no last-pass yet temporarily uses the GitHub run-history bootstrap witness. |
+| **`github-api` status source** | One-release rollback for copied templates; API errors remain transient in that mode. |
 | **`rebar list/create/comment/transition`** | rebar's CLI is the ticket interface. Unlike the reconciler, **CLI writes auto-commit and auto-push** to `origin/tickets`; the canary's strict core flush makes any still-unpushed ticket changes terminal. |
 | **Bug-close `--reason "Fixed: …"`** | rebar enforces a bug-close reason prefixed `Fixed:` or `Escalated to user:`. Auto-recovery counts as a fix. |
 | **`BRIDGE_CANARY_ALERT:` comment prefix** | The reconciler's outbound comment sync excludes this prefix, so the canary's fresh-timestamped "still stale" comments are **not** mirrored to Jira (a volatile timestamp never dedups → duplicate Jira comments). |

@@ -330,9 +330,6 @@ def _make_stub_applier(tmp_path: Path) -> ModuleType:
 
 def _make_stub_health() -> ModuleType:
     stub = types.ModuleType("reconcile_health")
-    stub.record_pass = lambda **kwargs: None
-    # reconcile_once() calls count_open_by_type() before record_pass(); stub must expose both.
-    stub.count_open_by_type = lambda repo_root=None: {}
     return stub
 
 
