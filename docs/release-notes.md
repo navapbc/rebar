@@ -11,16 +11,18 @@ observed by an agent or a different rebar version.
 ## `bridge preview` / `bridge sync` are primary
 
 `rebar bridge preview` shows proposed Jira changes, while `rebar bridge sync`
-applies them. Canonical selection (`--only` / `--except`) narrows examination;
-`bridge sync --max-changes N` keeps live behavior while retaining a deterministic
-audit manifest with its complete deferred remainder. `rebar bridge pause REASON`
+applies them. Preview is lock-free and emits a deterministic field-level manifest.
+Canonical sync retains a comparable manifest for capped and uncapped runs;
+`bridge sync --max-changes N` also records its complete deferred remainder. Canonical
+selection (`--only` / `--except`) narrows examination. `rebar bridge pause REASON`
 temporarily stops scheduled synchronization, and `rebar bridge resume` clears it.
 
 This expand-contract migration retains `rebar reconcile`, direct engine `--mode`,
 and `--filter-local-ids`. Their historical defaults do not collapse: argument-less
 `rebar reconcile` stays dry-run, argument-less direct engine invocation stays live,
-and the legacy filter remains a post-computation write filter. Reconcile-check remains
-the lock-free diagnostic and is not an alias for preview. See
+and the legacy filter remains a post-computation write filter. Legacy uncapped LIVE keeps
+its tally/no-manifest behavior. Reconcile-check remains its distinct lock-free diagnostic
+and is not an alias for preview. See
 [ADR 0092](adr/0092-bridge-primary-vocabulary-compatibility-adapters.md).
 
 The production workflow maps its retained profiles exactly: `dry-run` → `bridge preview`,

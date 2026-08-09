@@ -359,6 +359,7 @@ def apply(
     binding_store=None,
     persist: bool = True,
     max_changes: int | None = None,
+    route: str | None = None,
     abort_check=None,
     synced_fields_out=None,
 ):
@@ -435,6 +436,7 @@ def apply(
     # Deferred bug-filing directives from inbound conflict leaves, processed
     # AFTER _apply_batch to keep the apply path commit-free (bug d822).
     pending_bug_tickets: list[dict] = []
+    inbound_applied_count = 0
 
     for mut in inbound_typed:
         if not persist:
@@ -447,6 +449,7 @@ def apply(
         if suppression.is_suppressed(getattr(mut, "target", "")):
             continue
         result = _apply_typed(mut, client=client, repo_root=repo_root, binding_store=binding_store)
+        inbound_applied_count += 1
         result_payload = getattr(result, "payload", None) if result is not None else None
         follow_on = result_payload.get("follow_on") if isinstance(result_payload, dict) else None
         if isinstance(follow_on, dict) and follow_on.get("kind") == "suppress_pair":
@@ -513,6 +516,8 @@ def apply(
             repo_root,
             persist,
             max_changes,
+            route,
+            inbound_applied_count + len(outbound_list) if route == "sync" and persist else None,
         )
         if action == "RETURN":
             return value

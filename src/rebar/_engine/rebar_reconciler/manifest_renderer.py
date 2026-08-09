@@ -11,9 +11,9 @@ profile:
 * ``bootstrap-throttle``: both directions summarized to totals, plus a
   10% deterministic ``spot_check`` sample selected by a stable SHA-256 hash
   of the target (Python's built-in ``hash()`` is randomized per-process).
-* ``live``: no manifest file (GHA log only); the dispatch in ``applier.apply``
-  is the caller's responsibility — this module does NOT emit a renderer for
-  LIVE.
+* legacy ``live``: no manifest file (GHA log only); canonical ``bridge sync``
+  retains the field-comparable plan rendered here. Route selection remains the
+  caller's responsibility.
 
 All renderers return plain dicts (JSON-serializable) and are pure functions:
 no I/O, no time, no environment access. The caller writes the result to disk.
@@ -29,7 +29,7 @@ Contract: ``docs/contracts/asymmetric-manifest.md``.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 
@@ -60,9 +60,33 @@ def _payload_of(m: Any) -> dict:
     if p is None and isinstance(m, dict):
         # Legacy batch dicts carry their per-mutation fields under "fields".
         p = m.get("fields", {})
-    if not isinstance(p, dict):
+    if not isinstance(p, Mapping):
         return {}
     return dict(p)
+
+
+def _local_id_of(m: Any) -> str:
+    """Return the local ticket id carried by a typed or legacy mutation."""
+    if isinstance(m, dict):
+        return str(m.get("local_id", "") or "")
+    provenance = getattr(m, "provenance", None)
+    if isinstance(provenance, Mapping):
+        return str(provenance.get("local_id", "") or "")
+    return ""
+
+
+def render_plan(mutations: Iterable[Any]) -> list[dict]:
+    """Render canonical field-comparable entries for one pass's proposals."""
+    return [
+        {
+            "direction": _direction_of(m),
+            "action": _action_of(m),
+            "target": _target_of(m),
+            "local_id": _local_id_of(m),
+            "fields": _payload_of(m),
+        }
+        for m in mutations
+    ]
 
 
 def _totals(mutations: Iterable[Any]) -> dict[str, int]:

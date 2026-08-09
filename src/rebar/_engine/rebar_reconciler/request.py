@@ -57,7 +57,7 @@ class ReconcileRequest:
 
 
 def _parser() -> _Parser:
-    parser = _Parser(prog="rebar_reconciler")
+    parser = _Parser(prog="rebar_reconciler", allow_abbrev=False)
     parser.add_argument("command", nargs="?", choices=("preview", "sync"))
     parser.add_argument(
         "--repo-root",

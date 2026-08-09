@@ -381,12 +381,16 @@ If your project syncs to Jira, use `rebar bridge preview` to show proposed Jira
 changes and `rebar bridge sync` to apply them. `rebar bridge pause
 REASON` to stop scheduled reconciliation, and `rebar bridge resume` to restart it.
 `preview` and `sync` accept `--only IDS` or `--except IDS`; `sync` also accepts
-positive `--max-changes N` and retains an audit manifest for explicitly limited runs.
+positive `--max-changes N`. Canonical preview runs without writer locks and emits a
+deterministic, field-level audit manifest without applying changes. Canonical sync retains a
+comparable manifest for both capped and uncapped runs; a capped run also records the complete
+deferred remainder.
 
 The established `rebar reconcile` adapter remains available: no arguments still mean
 dry-run, every historical `--mode` value is retained, and `--filter-local-ids` keeps
 its write-only filtering semantics. Direct argument-less `python -m rebar_reconciler`
-still means live synchronization. The `rebar jira-onboard`, `rebar bridge-probe`,
+still means live synchronization, including its historical uncapped LIVE tally/no-manifest
+behavior. The `rebar jira-onboard`, `rebar bridge-probe`,
 `rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
 Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
