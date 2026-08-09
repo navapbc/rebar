@@ -359,6 +359,7 @@ def apply(
     binding_store=None,
     persist: bool = True,
     max_changes: int | None = None,
+    route: str | None = None,
     abort_check=None,
     synced_fields_out=None,
 ):
@@ -513,6 +514,7 @@ def apply(
             repo_root,
             persist,
             max_changes,
+            route,
         )
         if action == "RETURN":
             return value

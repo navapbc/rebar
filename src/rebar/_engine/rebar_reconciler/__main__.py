@@ -406,6 +406,7 @@ def run_pass(
     selection_kind: str | None = None,
     selection_ids: set[str] | None = None,
     max_changes: int | None = None,
+    route: str | None = None,
     abort_check=None,
 ) -> int:
     """Execute one steady-state reconciliation pass via reconcile.reconcile_once().
@@ -446,7 +447,11 @@ def run_pass(
     # dotted key so a test-seeded stub is reused), and a stub without the attribute (or
     # a deployment without the file) must degrade to "not classifiable", not blow up.
     try:
-        _advisory = _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
+        _advisory = (
+            None
+            if route == "preview"
+            else _load_sibling_keyed(_ADVISORY_LOCK_KEY, "_advisory_lock.py")
+        )
     except ImportError:
         _advisory = None
     lock_lost_cls = getattr(_advisory, "ReconcileLockLost", None) if _advisory else None
@@ -459,6 +464,7 @@ def run_pass(
             filter_local_ids=filter_local_ids,
             abort_check=abort_check,
             **_optional_request_kwargs(selection_kind, selection_ids, max_changes),
+            **({"route": route} if route is not None else {}),
         )
     except Exception as exc:  # noqa: BLE001 — body-inspecting: classify reschedule vs error to pick exit code
         if type(exc).__name__ == "SelectionStaleError":
@@ -547,6 +553,28 @@ def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
         return None, str(exc)
 
 
+def _dry_run_enumeration_exit(request) -> int | None:
+    """Handle the compatibility directory-enumeration route before lock checks."""
+    if not request.dry_run_enumerate:
+        return None
+    repo_root = request.repo_root
+    resolved_root = (
+        repo_root
+        if repo_root is not None
+        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+    )
+    tickets_dir = resolved_root / ".tickets-tracker"
+    if not tickets_dir.is_dir():
+        return 0
+    for entry in sorted(tickets_dir.iterdir()):
+        if not entry.is_dir():
+            continue
+        if ".scratch" in entry.parts:
+            continue
+        print(entry)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m rebar_reconciler``.
 
@@ -573,28 +601,12 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     repo_root = request.repo_root
+    route = getattr(request, "route", None)
 
-    # --dry-run-enumerate: list enumerable ticket directories and exit.
-    # This path is intentionally placed before advisory-lock and mode checks so
-    # the flag is usable in test fixtures without a live Jira config or lock state.
-    if request.dry_run_enumerate:
-        resolved_root = (
-            repo_root
-            if repo_root is not None
-            else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-        )
-        tickets_dir = resolved_root / ".tickets-tracker"
-        if not tickets_dir.is_dir():
-            # No tracker directory — emit nothing and exit cleanly.
-            return 0
-        for entry in sorted(tickets_dir.iterdir()):
-            if not entry.is_dir():
-                continue
-            # Apply the same .scratch/ exclusion used by health.py walkers.
-            if ".scratch" in entry.parts:
-                continue
-            print(entry)
-        return 0
+    # This compatibility path remains before mode and advisory-lock checks.
+    enumeration_exit = _dry_run_enumeration_exit(request)
+    if enumeration_exit is not None:
+        return enumeration_exit
 
     # -------------------------------------------------------------------------
     # Step 1: Mode validation (dd-2) — BEFORE any fetcher reference.
@@ -612,6 +624,14 @@ def main(argv: list[str] | None = None) -> int:
     if selection_error is not None:
         print(f"ERROR: {selection_error}", file=sys.stderr)
         return 2
+    if route == "preview":
+        return run_pass(
+            repo_root=repo_root,
+            target_mode=target_mode,
+            selection_kind=request.selection_kind,
+            selection_ids=selection_ids,
+            route=route,
+        )
 
     # -------------------------------------------------------------------------
     # Step 2: Advisory lock + phase-gate checks.
@@ -712,6 +732,7 @@ def main(argv: list[str] | None = None) -> int:
             selection_kind=request.selection_kind,
             selection_ids=selection_ids,
             max_changes=request.max_changes,
+            route=route,
             abort_check=abort_check,
         )
     except Exception as exc:  # noqa: BLE001 — CLI top-level: log + traceback, return exit code 1
