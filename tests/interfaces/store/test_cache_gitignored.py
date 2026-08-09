@@ -9,6 +9,8 @@ conflicts (Concurrency Doctrine §0 I3/I6), so:
   2. ``git add -A`` in the tracker never stages a ``.cache.json`` — neither one at
      the tracker root nor one sitting inside a ticket directory alongside real
      event files.
+  3. The private same-directory temp shape used by ``fsutil.atomic_write`` is
+     likewise excluded at the tracker root and inside ticket directories.
 """
 
 from __future__ import annotations
@@ -38,9 +40,12 @@ def test_git_add_never_stages_cache_json(rebar_repo: Path) -> None:
     ticket_dir = tracker / tid
     assert ticket_dir.is_dir()
 
-    # Stray caches: one at the tracker root, one inside the ticket dir.
+    # Stray caches: one at the tracker root, one inside the ticket dir, plus the
+    # private temp shape used while atomically publishing each location.
     (tracker / ".cache.json").write_text('{"stale": true}')
     (ticket_dir / ".cache.json").write_text('{"stale": true}')
+    (tracker / "..cache.json.root.tmp").write_text('{"partial": true}')
+    (ticket_dir / "..cache.json.ticket.tmp").write_text('{"partial": true}')
 
     subprocess.run(["git", "add", "-A"], cwd=tracker, capture_output=True, text=True)
     staged = _git_out("diff", "--cached", "--name-only", cwd=tracker).splitlines()

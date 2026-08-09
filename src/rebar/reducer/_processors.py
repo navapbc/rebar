@@ -53,19 +53,11 @@ def process_create(
     from ._state import make_error_dict
 
     if not data.get("ticket_type") or not data.get("title"):
+        from ._cache import write_cache
+
         fsck_result = make_error_dict(ticket_id, "fsck_needed", "corrupt_create_event")
         # Write the fsck result to cache immediately so callers get consistent results
-        try:
-            cache_tmp = cache_path + ".tmp"
-            with open(cache_tmp, "w", encoding="utf-8") as tf:
-                json.dump(
-                    {"dir_hash": dir_hash, "state": fsck_result},
-                    tf,
-                    ensure_ascii=False,
-                )
-            os.rename(cache_tmp, cache_path)
-        except OSError:
-            pass
+        write_cache(cache_path, dir_hash, fsck_result, os.path.dirname(cache_path))
         return fsck_result
 
     state["ticket_id"] = ticket_id

@@ -42,7 +42,7 @@ _GITIGNORE = f""".env-id
 .state-cache
 .scratch/
 .cache.json
-*/.cache.json
+..cache.json.*.tmp
 {WRITE_LOCK_NAME}
 {MKDIR_LOCK_NAME}/
 {_GRAPH_CACHE_FILE}
