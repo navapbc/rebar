@@ -1,0 +1,1 @@
+{"author":"Iso Tester","data":{"file_impact":[{"path":"src/rebar/signing.py","reason":"shared ref-resolution boundary"},{"path":"docs/adr/0002-code-drift-invalidation.md","reason":"ADR 0002 update"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1782531107123239001,"uuid":"f23dd165-a095-42ae-ad2c-4e417d442c55"}
