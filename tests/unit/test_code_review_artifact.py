@@ -109,14 +109,11 @@ def _load_outbound_differ():
         sys.path.insert(0, str(engine_dir))
     # Under pytest, tests/unit/rebar_reconciler/__init__.py is itself importable as
     # the top-level ``rebar_reconciler`` package and SHADOWS the engine package of the
-    # same name (which lacks _loader.py etc.). Extend that package's __path__ with the
-    # engine dir so outbound_differ's own ``from rebar_reconciler.<x> import ...`` fall
-    # through to the real engine modules — the pattern the reconciler conftest uses.
-    import rebar_reconciler
-
+    # same name (which lacks _loader.py etc.). tests/unit/conftest.py bridges that
+    # shadow for every tests/unit collection, so outbound_differ's own
+    # ``from rebar_reconciler.<x> import ...`` already falls through to the real
+    # engine modules — no per-module __path__ compensation is needed here.
     engine_pkg = str(engine_dir / "rebar_reconciler")
-    if engine_pkg not in rebar_reconciler.__path__:
-        rebar_reconciler.__path__.append(engine_pkg)
     spec = importlib.util.spec_from_file_location(
         "outbound_differ_code_review", Path(engine_pkg) / "outbound_differ.py"
     )

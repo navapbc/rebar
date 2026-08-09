@@ -53,18 +53,14 @@ def _reconciler_modules():
     """Import the engine-rooted ``rebar_reconciler`` modules (own sys.path root).
 
     Under pytest the ``tests/unit/rebar_reconciler`` package shadows the engine package
-    of the same name, so — like ``tests/unit/rebar_reconciler/conftest.py`` — we put the
-    engine on ``sys.path`` and extend the shadowing package's ``__path__`` to the engine
-    dir so engine submodules (``mutation``, ``conflict_resolver``, ``timeutil``) resolve.
+    of the same name. ``tests/unit/conftest.py`` bridges that shadow for every
+    ``tests/unit`` collection by appending the engine package dir to the shadow's
+    ``__path__``, so engine submodules (``mutation``, ``conflict_resolver``,
+    ``timeutil``) resolve here without any per-module compensation.
     """
     engine = Path(__file__).resolve().parents[2] / "src" / "rebar" / "_engine"
     if str(engine) not in sys.path:
         sys.path.insert(0, str(engine))
-    import rebar_reconciler
-
-    engine_pkg = str(engine / "rebar_reconciler")
-    if engine_pkg not in rebar_reconciler.__path__:
-        rebar_reconciler.__path__.append(engine_pkg)
     from rebar_reconciler import conflict_resolver, mutation
 
     return mutation, conflict_resolver
