@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces -k doc -q","dd_id":"DD1","dd_text":"docstrings name all six relations + all mutating reconcile modes"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781066905093325000,"uuid":"57e249a9-1929-4bf6-99a4-2b983a01d29e"}
