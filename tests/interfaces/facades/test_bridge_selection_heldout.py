@@ -72,7 +72,7 @@ def _run_with_real_preflight(main_mod, argv: list[str]) -> tuple[int, dict, Magi
 
 
 @pytest.mark.parametrize("flag", ["--only", "--except"])
-def test_selection_resolves_local_ids_and_bound_jira_keys_before_lock(
+def test_preview_selection_resolves_local_ids_and_bound_jira_keys_without_lock(
     rebar_repo: Path, flag: str
 ) -> None:
     first = rebar.create_ticket("task", "first", return_alias=True)["id"]
@@ -96,8 +96,8 @@ def test_selection_resolves_local_ids_and_bound_jira_keys_before_lock(
     assert captured["selection_kind"] == flag.removeprefix("--")
     assert captured["selection_ids"] == {first, second}
     assert captured["target_mode"].value == "dry-run"
-    acquire.assert_called_once()
-    release.assert_called_once()
+    acquire.assert_not_called()
+    release.assert_not_called()
 
 
 def test_partial_unresolved_selection_is_atomic_and_never_acquires_lock(

@@ -98,6 +98,7 @@ class _PassContext:
     selection_kind: str | None = None
     selection_ids: set[str] | None = None
     max_changes: int | None = None
+    route: str | None = None
     # optional per-mutation lost-lease checkpoint (epic dust-troth-naval): a
     # zero-arg callable the applier invokes before each mutation; it raises
     # (ReconcileLockLost) if the ref-lock heartbeat lost the lease. None = no-op.
@@ -148,6 +149,7 @@ def reconcile_once(
     selection_kind: str | None = None,
     selection_ids: set[str] | None = None,
     max_changes: int | None = None,
+    route: str | None = None,
     abort_check=None,
 ) -> dict:
     """Run one reconciler pass: fetch → diff → apply.
@@ -188,6 +190,7 @@ def reconcile_once(
         repo_root=repo_root,
         target_mode=target_mode,
         filter_local_ids=filter_local_ids,
+        route=route,
         selection_kind=selection_kind,
         selection_ids=selection_ids,
         max_changes=max_changes,
@@ -497,6 +500,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
             )
         else:
             _max_kw = {"max_changes": ctx.max_changes} if ctx.max_changes is not None else {}
+            _route_kw = {"route": ctx.route} if ctx.route is not None else {}
             manifest_path = applier.apply(
                 mutations,
                 pass_id,
@@ -505,6 +509,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 binding_store=binding_store,
                 persist=persist,
                 **_max_kw,
+                **_route_kw,
                 **_abort_kw,
                 **_synced_kw,
             )
@@ -731,8 +736,11 @@ def _persist_and_log(ctx: _PassContext) -> dict:
     # manifest file was written (ticket yaw-plait-doe).
     if nowrite_plan is not None:
         result["no_write"] = True
-        result["mode"] = getattr(target_mode, "value", str(target_mode))
-        result["plan"] = _build_plan_entries(mutations)
+        if ctx.route == "preview":
+            result.update(nowrite_plan)
+        else:
+            result["mode"] = getattr(target_mode, "value", str(target_mode))
+            result["plan"] = _build_plan_entries(mutations)
     if filter_local_ids:
         result["filtered"] = True
         result["filter_local_ids"] = sorted(filter_local_ids)
