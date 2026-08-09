@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/steps.py","reason":"step registry + idempotency wrapper"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781760313010233001,"uuid":"c82246b9-0d12-456e-a647-a98d24abf189"}
