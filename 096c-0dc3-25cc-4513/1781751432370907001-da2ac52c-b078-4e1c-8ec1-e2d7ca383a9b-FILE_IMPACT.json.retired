@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"file_impact":[{"path":"src/rebar/llm/workflow/steps.py","reason":"scripted step registry incl unsecured gate"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"FILE_IMPACT","timestamp":1781751432370907001,"uuid":"da2ac52c-b078-4e1c-8ec1-e2d7ca383a9b"}
