@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"verify_commands":[{"command":".venv/bin/python -m pytest tests/interfaces/store/test_inline_write_push.py -q","dd_id":"D1","dd_text":"each inline-commit write pushes on its own"}]},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"VERIFY_COMMANDS","timestamp":1781738968230462001,"uuid":"940fafe2-387b-4c5f-b49f-73ef209eac85"}
