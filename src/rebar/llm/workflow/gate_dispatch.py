@@ -55,6 +55,8 @@ from rebar.llm.workflow.plan_review_recovery import (  # noqa: F401
     _attach_plan_review_metrics,
     _cancelled_plan_review_verdict,
     _collect_step_ids,
+    _config_fault_plan_review_verdict,
+    _criteria_config_failure,
     _degraded_plan_review_verdict,
     _recover_plan_review_coach_failure,
     _recover_plan_review_verify_failure,
@@ -211,6 +213,19 @@ def produce_plan_review_verdict(
     if res.status == "succeeded" and isinstance(verdict, dict) and "verdict" in verdict:
         _attach_plan_review_metrics(verdict, rec, total_ms)
         return verdict
+
+    # A criteria/configuration parse fault is a local deterministic failure, not an LLM outage.
+    # The assemble step carries this exact exception identity through the generic interpreter as
+    # a stable structured marker; discriminate it before any source-blind degraded fallback.
+    criteria_config_error = _criteria_config_failure(rec)
+    if criteria_config_error is not None:
+        return _config_fault_plan_review_verdict(
+            ctx,
+            cfg,
+            error=criteria_config_error,
+            advisory_cap=advisory_cap,
+            runner_name=runner_sel.name,
+        )
 
     # The run failed mid-tail. Pass-4 coach is advisory POLISH — bespoke run_review treats a
     # coach failure as NON-fatal (it still emits the verdict, sans coaching). Mirror that: if

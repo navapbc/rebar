@@ -446,15 +446,18 @@ def finalize_verdict(
     indeterminate = parts["indeterminate"]
     dropped = parts["dropped"]
     # A DET block is still an actionable BLOCK even with no LLM. Otherwise, a SYSTEMIC
-    # LLM-tier failure (llm_unavailable) makes the review INDETERMINATE — never a hollow
-    # PASS — so it is not signed (fuel-posse-ball). A genuine unsupported-stack abstain
-    # (the tier ran, a criterion couldn't ground) is NOT llm_unavailable → still PASS.
+    # LLM-tier failure (llm_unavailable) or a local criteria/configuration fault makes the
+    # review INDETERMINATE — never a hollow PASS — so it is not signed (fuel-posse-ball). A
+    # genuine unsupported-stack abstain (the tier ran, a criterion couldn't ground) is NOT
+    # systemic → still PASS.
     if blocking:
         # A genuine blocking finding (DET or a prioritized LLM block) is an actionable BLOCK and
         # must NOT be masked by a subsidiary prerequisite-pass indeterminacy — the author needs
         # "fix your plan", not a transient "re-run" (client report §3). Both still fail the claim.
         verdict = "BLOCK"
     elif coverage.get("prerequisite_indeterminate"):
+        verdict = "INDETERMINATE"
+    elif coverage.get("config_fault"):
         verdict = "INDETERMINATE"
     elif coverage.get("llm_unavailable"):
         verdict = "INDETERMINATE"

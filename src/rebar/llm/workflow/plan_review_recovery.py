@@ -38,6 +38,11 @@ STEP_VERIFY = "verify"
 STEP_DECIDE = "decide"
 STEP_COACH = "coach"
 
+# Stable scripted-step failure vocabulary.  This marker crosses the generic workflow recorder
+# boundary so gate dispatch can distinguish a local criteria/configuration fault from an LLM
+# outage without parsing exception prose.
+CRITERIA_CONFIG_FAILURE_KIND = "criteria_config"
+
 # The step ids the recovery/metrics logic depends on being present in the loaded gate doc.
 _PLAN_REVIEW_REQUIRED_STEP_IDS = frozenset(
     {STEP_PRECHECK, STEP_ASSEMBLE, STEP_FINDERS, STEP_VERIFY, STEP_DECIDE, STEP_COACH}
@@ -298,6 +303,57 @@ def _recover_plan_review_verify_failure(rec, cfg, *, error) -> dict[str, Any] | 
         pctx, parts, coaching=[], coverage=coverage, runner_name=cfg.runner, model=cfg.model
     )
     return _findings.validate_structured(verdict, "plan_review_verdict")
+
+
+def _criteria_config_failure(rec) -> str | None:
+    """Return the original diagnostic for a typed criteria-config assemble failure.
+
+    Only the exact failed assemble frame and stable structured marker qualify.  Other scripted
+    failures — including failures with similar prose — continue through the generic recovery
+    path unchanged.
+    """
+    for step in reversed(rec.steps):
+        frame_key = step.get("frame_key") or step.get("step_id") or ""
+        if step.get("status") != "failed" or str(frame_key).rsplit("/", 1)[-1] != STEP_ASSEMBLE:
+            continue
+        outputs = step.get("outputs") or {}
+        if outputs.get("failure_kind") != CRITERIA_CONFIG_FAILURE_KIND:
+            return None
+        diagnostic = outputs.get("failure_diagnostic")
+        return str(diagnostic) if diagnostic is not None else ""
+    return None
+
+
+def _config_fault_plan_review_verdict(
+    ctx, cfg, *, error: str, advisory_cap: int, runner_name: str | None
+) -> dict[str, Any]:
+    """Fail closed for a local criteria/config fault without claiming an LLM outage."""
+    from rebar.llm.plan_review import det_floor, orchestrator
+
+    det_results = det_floor.run_det_floor(ctx)
+    det_blocks = det_floor.det_blocking_findings(det_results)
+    det_advisories = det_floor.det_advisory_findings(det_results)
+    config_error = (
+        "The running installed rebar build is suspect because it could not load this "
+        "repository's criteria configuration. Use the repository checkout build and retry "
+        f"the plan review. Original diagnostic: {error}"
+    )
+    coverage = {
+        "det": det_floor.det_coverage(det_results),
+        "llm_ran": False,
+        "config_fault": True,
+        "config_fault_kind": CRITERIA_CONFIG_FAILURE_KIND,
+        "config_error": config_error,
+        "hierarchy_incomplete": getattr(ctx, "hierarchy_incomplete", False),
+        "hierarchy_incomplete_detail": getattr(ctx, "hierarchy_incomplete_detail", []),
+    }
+    parts = orchestrator.partition_findings(
+        det_blocks, det_advisories, [], advisory_cap=advisory_cap
+    )
+    # No provider provenance: no LLM frame ran, so no provider served this verdict.
+    return orchestrator.finalize_verdict(
+        ctx, parts, coaching=[], coverage=coverage, runner_name=runner_name, model=cfg.model
+    )
 
 
 def _degraded_plan_review_verdict(

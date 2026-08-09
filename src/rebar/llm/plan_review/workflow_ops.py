@@ -33,7 +33,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from rebar.llm.workflow.executor import StepContext, register_step
+from rebar.llm.workflow.executor import StepContext, StepResult, register_step
+from rebar.llm.workflow.plan_review_recovery import CRITERIA_CONFIG_FAILURE_KIND
 
 logger = logging.getLogger(__name__)
 
@@ -194,9 +195,16 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
         "route_criteria — this op never re-implements applies()/overlay filtering."
     ),
 )
-def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
+def plan_review_assemble_criteria(ctx: StepContext) -> StepResult | dict[str, Any]:
     """route_criteria(ctx) → {include_<ID>: bool, ..., routing}. The included criteria are
-    gated INTO the batch by their `when: ${{ steps.assemble.outputs.include_<ID> }}`."""
+    gated INTO the batch by their `when: ${{ steps.assemble.outputs.include_<ID> }}`.
+
+    A criteria-overlay/configuration failure is returned as a failed ``StepResult`` with a
+    stable ``failure_kind``.  The workflow recorder therefore retains the exception's identity
+    for the verdict dispatcher instead of reducing it to an indistinguishable error string.
+    """
+    from rebar.llm.criteria import CriteriaError
+
     from . import orchestrator, registry
 
     tid = _ticket_id(ctx)
@@ -205,25 +213,36 @@ def plan_review_assemble_criteria(ctx: StepContext) -> dict[str, Any]:
     # merged below into routing.det_gated — the sidecar's coverage.routing carries it, so
     # a criterion skipped on total vocabulary absence (zero LLM routing) stays observable.
     gate_log: dict[str, str] = {}
-    single, agent = orchestrator.route_criteria(pctx, gate_log=gate_log)
-    # The EFFECTIVE vocabulary = canonical built-ins ∪ activated PROJECT criteria (from the
-    # `.rebar/criteria_routing.json` overlay), resolved against the SAME root route_criteria
-    # loaded (pctx.repo_root) so the vocab and the loaded criteria never diverge. ISF is fed
-    # the linked session log by the finder itself (never a rubric chunk), so it is never a
-    # batch criterion — excluded from the inclusion vocabulary here.
-    # exec:DET criteria run in the deterministic phase (det_floor), NOT the LLM batch — so they
-    # own NO `include_<ID>` batch slot. Exclude them (and ISF, fed the session log directly) from
-    # the inclusion vocabulary, reading `exec` from the effective routing. Story 7f0d.
-    _routing = registry.effective_routing(pctx.repo_root)
+    try:
+        single, agent = orchestrator.route_criteria(pctx, gate_log=gate_log)
+        # The EFFECTIVE vocabulary = canonical built-ins ∪ activated PROJECT criteria (from the
+        # `.rebar/criteria_routing.json` overlay), resolved against the SAME root route_criteria
+        # loaded (pctx.repo_root) so the vocab and the loaded criteria never diverge. ISF is fed
+        # the linked session log by the finder itself (never a rubric chunk), so it is never a
+        # batch criterion — excluded from the inclusion vocabulary here.
+        # exec:DET criteria run in the deterministic phase (det_floor), NOT the LLM batch — so they
+        # own NO `include_<ID>` batch slot. Exclude them (and ISF, fed the session log directly)
+        # from the inclusion vocabulary, reading `exec` from the effective routing. Story 7f0d.
+        _routing = registry.effective_routing(pctx.repo_root)
 
-    def _is_det(cid: str) -> bool:
-        return str((_routing.get(cid) or {}).get("exec", "")).upper() == "DET"
+        def _is_det(cid: str) -> bool:
+            return str((_routing.get(cid) or {}).get("exec", "")).upper() == "DET"
 
-    effective = [
-        cid
-        for cid in registry.effective_criteria(pctx.repo_root)
-        if cid != "ISF" and not _is_det(cid)
-    ]
+        effective = [
+            cid
+            for cid in registry.effective_criteria(pctx.repo_root)
+            if cid != "ISF" and not _is_det(cid)
+        ]
+    except CriteriaError as exc:
+        diagnostic = str(exc)
+        return StepResult(
+            outputs={
+                "failure_kind": CRITERIA_CONFIG_FAILURE_KIND,
+                "failure_diagnostic": diagnostic,
+            },
+            status="failed",
+            error=diagnostic,
+        )
 
     # `.`→`_` sanitizes a `project.<name>` id to a valid workflow output key; co-located with
     # the CONSUME-site `when` reference emitted in `project_criteria` below (built-in ids have

@@ -2,11 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/plan_review_assemble_criteria_output.schema.json",
   "title": "PlanReviewAssembleCriteriaOutput",
-  "description": "OUTPUT of `plan_review_assemble_criteria`: a per-criterion `include_<ID>` boolean (the INCLUDED set route_criteria selected — proportionate scrutiny + overlay triggering) the batch step's `when` reads, plus the `routing` record {single_turn[], agent_tier[]}. Dynamic-keyed (one `include_<ID>` per canonical criterion) so this output deliberately carries NO top-level `properties` — it is UNKNOWN to the reference name-existence linter by design (never a false 'undeclared output' error on an `include_<ID>` ref).",
+  "description": "OUTPUT of `plan_review_assemble_criteria`: a per-criterion `include_<ID>` boolean (the INCLUDED set route_criteria selected — proportionate scrutiny + overlay triggering) the batch step's `when` reads, plus the `routing` record {single_turn[], agent_tier[]}. A failed criteria/configuration load carries the stable `failure_kind: criteria_config` marker and original `failure_diagnostic` so verdict dispatch does not misclassify it as an LLM outage. Dynamic-keyed (one `include_<ID>` per canonical criterion) so this output deliberately carries NO top-level `properties` — it is UNKNOWN to the reference name-existence linter by design (never a false 'undeclared output' error on an `include_<ID>` ref).",
   "type": "object",
   "patternProperties": {
     "^include_[A-Za-z0-9]+$": { "type": "boolean", "description": "Whether this criterion is in the routed INCLUDED set." },
-    "^routing$": { "type": "object", "additionalProperties": true, "description": "The criteria routing record {single_turn[], agent_tier[]}." }
+    "^routing$": { "type": "object", "additionalProperties": true, "description": "The criteria routing record {single_turn[], agent_tier[]}." },
+    "^failure_kind$": { "type": "string", "enum": ["criteria_config"], "description": "Stable machine-readable failure kind emitted only when the shared criteria configuration loader raises CriteriaError." },
+    "^failure_diagnostic$": { "type": "string", "description": "The original CriteriaError diagnostic, retained verbatim for actionable reporting." }
   },
   "additionalProperties": true
 }
