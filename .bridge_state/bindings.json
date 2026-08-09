@@ -15182,10 +15182,24 @@
     },
     "2207-2917-e21b-42bd": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\nCI 'Gerrit Verified Gate' pytest on ubuntu-latest/py3.11 intermittently fails with a worker crash, blocking otherwise-green changes:\n\n    [gw3] node down: Not properly terminated\n    worker 'gw3' crashed while running 'tests/unit/test_opcert_service_app.py::test_matching_guard_is_accepted'\n    1 failed, 11495 passed, 66 skipped\n\n- py3.11 ONLY - py3.12/py3.13/macos-py3.13 pass on the same tree.\n- Nondeterministic - crashed on two consecutive runs of change 1552 (31282246724, 31283024535) yet passed green in a concurrent run (31283137439) on the same base main 2d440ad668. Also bit epic cf3c change 0289 PS4.\n- It is a worker-process death ('node down'), not an assertion failure - likely a fastapi TestClient + opcert_service.jobs (subprocess/thread/signal) interaction under xdist on py3.11.\n\n## Impact\n\nA worker crash on an unrelated test forces repeated recheck cycles (~15 min each) to land any change, including docs-only ones. A CI-reliability tax, not a product bug.\n\n## Acceptance criteria\n\n- [ ] Root-cause the gw3 crash on py3.11 for test_matching_guard_is_accepted (repro under xdist; isolate the subprocess/signal/threading interaction).\n- [ ] Make the opcert-service test robust on py3.11 (or serialize it off xdist on 3.11) so the Verified py3.11 lane is deterministically green.\n- [ ] No regression on py3.12/py3.13/macos.\n\nDiscovered while landing docs story b014 (epic cf3c); unrelated to that change.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "py3.11 xdist worker crash: opcert test_matching_guard_is_accepted"
       },
       "created_at": "2026-08-08T23:31:46Z",
