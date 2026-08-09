@@ -1,0 +1,1 @@
+{"author":"Joe Oakhart","data":{"body":"Done: ticket_graph/_relations.py single source for _BLOCKING_RELATIONS; _ready/_status/_hierarchy converged (kept out of _status to preserve _ready dependency-light). Commit 54f9ead."},"env_id":"ade0f2ef-51cc-45a2-bb97-c09846cd3df5","event_type":"COMMENT","timestamp":1781041302548440000,"uuid":"846009ab-71a1-43a7-a99d-b9354cb3dbae"}
