@@ -40,7 +40,7 @@ FIXTURES = {
 
 
 def plan_text(tid: str) -> str:
-    return rebar.show_ticket(tid)["description"]
+    return str(rebar.show_ticket(tid)["description"] or "")
 
 
 def run(label: str, request: dict) -> dict:

@@ -38,6 +38,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 # ── rebar command resolution ────────────────────────────────────────────────
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -566,7 +567,7 @@ def _probe() -> None:  # deliberately one linear probe script
     )
     run_rb("show", task)
     assert_not_contains('"parent_status_uuid"', "internal key not leaked in show")
-    task_row = next((x for x in _list_json() if x.get("ticket_id") == task), {})
+    task_row: dict[str, Any] = next((x for x in _list_json() if x.get("ticket_id") == task), {})
     assert_eq(
         [{"command": "echo", "dd_id": "D1", "dd_text": "t"}],
         task_row.get("verify_commands"),

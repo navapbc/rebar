@@ -238,8 +238,15 @@ actionlint-bin:  ## Ensure a pinned actionlint is available (repo-local, digest-
 verify-mcp-pin:  ## Verify the embedded mcp-publisher SHA-256 matches the live pinned download.
 	python scripts/verify_mcp_publisher_pin.py
 
-typecheck:  ## ERRORS ONLY: mypy over the whole library (gating; full src/rebar).
-	mypy src/rebar
+# scripts/ is IN the typecheck scope (ticket cc99). ae96 brought scripts/ under ruff
+# but not mypy, leaving the CI gate implementations themselves type-unchecked even
+# though several of them ARE the gates behind the `Verified` vote. Including them cost
+# 15 fixes across 6 files (all missing annotations or lost `X | None` narrowing, several
+# latent bugs) — no per-module mypy override and no blanket ignores were needed, because
+# pyproject's `follow_imports = "silent"` + `ignore_missing_imports` already absorb the
+# `sys.path` bootstraps ae96 flagged as the structural obstacle.
+typecheck:  ## ERRORS ONLY: mypy over the whole library + scripts/ (gating).
+	mypy src/rebar scripts
 
 config-check:  ## ERRORS ONLY: validate every infra config (fails CI on a malformed config -> can't reach main).
 	bash infra/scripts/config-check.sh

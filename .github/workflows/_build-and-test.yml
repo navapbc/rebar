@@ -101,11 +101,12 @@ jobs:
         env:
           SKIP: no-commit-to-branch,lint,typecheck
 
-      # GATING: mypy over the WHOLE library. Previously core-only (reducer/graph/
-      # _store) with the rest tracked as an advisory "full tree" ratchet — that debt
-      # was driven to zero (story urge-abbey-goal), so `make typecheck` now covers all
-      # of src/rebar and gates. Same command local + the pre-commit hook run.
-      - name: mypy — full library (gating)
+      # GATING: mypy over the WHOLE library AND scripts/. Previously core-only (reducer/
+      # graph/_store) with the rest tracked as an advisory "full tree" ratchet — that debt
+      # was driven to zero (story urge-abbey-goal), so `make typecheck` covers all of
+      # src/rebar; ticket cc99 then added scripts/, so the gate implementations invoked by
+      # this workflow are themselves type-checked. Same command local + pre-commit hook.
+      - name: mypy — full library + scripts/ (gating)
         run: make typecheck
 
       # Validate every infra config so a MALFORMED config can never reach `main` (epic 88ab
