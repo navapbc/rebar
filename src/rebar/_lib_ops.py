@@ -112,7 +112,10 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
         root,
     ]
     cp = subprocess.run(cmd, env=engine_env(root), text=True, capture_output=True, check=False)
-    if cp.returncode not in (0, 75):  # 75 == EXIT_RESCHEDULE
+    # Intentionally consume the direct-engine --mode compatibility contract:
+    # 75 is its historical benign reschedule sentinel. Canonical bridge adapters
+    # are owned by follow-up ticket f789 and must not change this public facade yet.
+    if cp.returncode not in (0, 75):
         raise RebarError(
             f"reconcile ({mode}) failed (exit {cp.returncode}): {cp.stderr.strip()}",
             returncode=cp.returncode,

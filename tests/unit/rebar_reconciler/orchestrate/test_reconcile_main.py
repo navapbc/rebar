@@ -246,6 +246,36 @@ def test_phase_gate_requires_removal_to_advance(main_mod, fetcher_sentinel, tmp_
     stub_reconcile.reconcile_once.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("lock_held", "phase_gated", "expected_state"),
+    [
+        (True, False, "in-flight"),
+        (False, True, "legacy-gated"),
+    ],
+)
+def test_canonical_sync_maps_benign_preflight_to_zero(
+    main_mod,
+    tmp_path,
+    monkeypatch,
+    capsys,
+    lock_held: bool,
+    phase_gated: bool,
+    expected_state: str,
+) -> None:
+    """Canonical sync translates old benign guards without running a pass."""
+    monkeypatch.setenv("REBAR_RECONCILER_LOCK_STEAL", "0")
+    with (
+        patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", return_value=lock_held),
+        patch(f"{_ADVISORY_LOCK_KEY}.check_phase_gate", return_value=phase_gated),
+        patch.object(main_mod, "run_pass") as run_pass,
+    ):
+        rc = main_mod.main(["sync", "--repo-root", str(tmp_path)])
+
+    assert rc == 0
+    assert capsys.readouterr().err == f"BRIDGE_STATE: {expected_state}\n"
+    run_pass.assert_not_called()
+
+
 def test_reconcile_check_returns_before_pause_and_pass_lock_reads(main_mod, tmp_path):
     """The legacy read-only diagnostic keeps its pre-gate early-return ordering."""
     run_check = MagicMock(return_value=0)
