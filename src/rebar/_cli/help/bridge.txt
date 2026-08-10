@@ -8,6 +8,10 @@ Commands:
   status    Show the reconciler's durable status snapshot
   pause     Temporarily stop scheduled reconciliation
   resume    Resume scheduled reconciliation
+  fsck      Audit bridge mappings (orphans, duplicates, stale SYNCs)
+  check-access
+            Check Jira access with a create/label/search/delete round-trip
+  setup     Interactively configure and validate Jira access
 
 Preview and sync options:
   --only IDS       Examine only the named local IDs or bound Jira keys
@@ -20,3 +24,5 @@ Status options:
   --target ID       Compare the witness with this environment id
   --max-age AGE     Enable age-based staleness (for example 2h)
   --json            Emit the snapshot as JSON
+
+Run `rebar bridge <command> --help` for command-specific options.

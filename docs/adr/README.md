@@ -52,7 +52,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0036 — Impact-model permissive rollout + version-segmented calibration cadence](0036-impact-model-rollout-and-calibration-cadence.md)
 - [0055 — The Jira-family sub-seam, shared `jira` provenance, and the Data Center horizon](0055-jira-family-sub-seam.md)
 - [0069 — A retryable coverage gap defers vote-less under a bounded per-revision budget, then escalates to a fail-closed −1](0069-retryable-coverage-gap-bounded-deferral.md)
-- [0070 — How `rebar jira-onboard` persists Jira config (stdlib-only, never edits pyproject)](0070-jira-onboard-config-write.md)
+- [0070 — How `rebar bridge setup` persists Jira config (stdlib-only, never edits pyproject)](0070-jira-onboard-config-write.md)
 - [0080 — Schema-derived TypedDicts as the public `rebar.*` return contract](0080-schema-derived-typeddicts.md)
 - [0083 — Reconciler vendor-adapter seam (Jira-neutral core + `adapters/<backend>/`)](0083-reconciler-vendor-adapter-seam.md)
 - [0084 — ACLI subprocess 429 rate-limit backoff (bounded, jittered, Retry-After-aware)](0084-acli-429-rate-limit-backoff.md)

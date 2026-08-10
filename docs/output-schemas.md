@@ -46,7 +46,7 @@ Structured via `--output json`:
 | `get-verify-commands`            | `verify_commands`         |
 | `scratch get/set/clear`          | `scratch_envelope`        |
 | `show` (not found)               | `error_envelope`          |
-| `bridge-fsck`                    | `bridge_fsck`             |
+| `bridge fsck`                    | `bridge_fsck`             |
 | `create`                         | `create_result`           |
 | `claim`                          | `claim_result`            |
 | `transition` / `reopen`          | `transition_result`       |

@@ -75,7 +75,7 @@ def test_no_logic_bearing_rebar_calls_left_in_yaml() -> None:
             "rebar create",
             "rebar comment",
             "rebar transition",
-            "rebar bridge-fsck",
+            "rebar bridge fsck",
         )
         for needle in needles:
             if needle in run:

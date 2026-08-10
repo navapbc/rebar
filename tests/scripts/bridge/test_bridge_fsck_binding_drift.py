@@ -1,4 +1,4 @@
-"""bridge-fsck binding-level drift audit (epic 3006-e198, child 8de5).
+"""bridge fsck binding-level drift audit (epic 3006-e198, child 8de5).
 
 The pre-fix ``audit_bridge_mappings`` walked local event dirs ONLY (orphan /
 duplicate / stale SYNC) and was structurally blind to binding-level drift: a

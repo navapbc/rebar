@@ -444,10 +444,10 @@ Jira instance), run the Jira capability preflight:
 
 ```bash
 export JIRA_URL=... JIRA_USER=... JIRA_API_TOKEN=...   # optional: JIRA_PROJECT
-rebar bridge-probe
+rebar bridge check-access
 ```
 
-`rebar bridge-probe` runs a six-step round-trip (create → label → property-write
+`rebar bridge check-access` runs a six-step round-trip (create → label → property-write
 → JQL-search → property-read → delete) against live Jira, creating and deleting a
 single throwaway issue. It prints `PROBE_PASS`/`PROBE_FAIL` per step and exits 0
 (all pass), 1 (a step failed), or 2 (missing credentials). For broader, manual

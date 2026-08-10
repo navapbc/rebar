@@ -435,7 +435,7 @@ def test_comment_timestamp_derived_from_now_epoch(mod: ModuleType, tmp_path: Pat
 
 
 def test_fsck_empty_stdout_degrades(mod: ModuleType, tmp_path: Path) -> None:
-    runner = FakeRunner({("rebar", "bridge-fsck"): (1, "", "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (1, "", "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -447,7 +447,7 @@ def test_fsck_empty_stdout_degrades(mod: ModuleType, tmp_path: Path) -> None:
 
 
 def test_fsck_missing_binding_drift_key(mod: ModuleType, tmp_path: Path) -> None:
-    runner = FakeRunner({("rebar", "bridge-fsck"): (0, json.dumps({"other": 1}), "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (0, json.dumps({"other": 1}), "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -468,7 +468,7 @@ def test_summary_cell_order_is_canonical(mod: ModuleType, tmp_path: Path) -> Non
             }
         }
     )
-    runner = FakeRunner({("rebar", "bridge-fsck"): (1, fsck, "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -481,7 +481,7 @@ def test_summary_cell_order_is_canonical(mod: ModuleType, tmp_path: Path) -> Non
 def test_unknown_extra_cells_ignored(mod: ModuleType, tmp_path: Path) -> None:
     """Only the five canonical cells count (YAML parity: fixed tuple)."""
     fsck = json.dumps({"binding_drift": {"mystery": ["m"], "dangling": ["d"]}})
-    runner = FakeRunner({("rebar", "bridge-fsck"): (1, fsck, "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -520,7 +520,7 @@ def test_drift_alert_close_on_recovery(mod: ModuleType, tmp_path: Path) -> None:
     assert argv[1] == "transition"
     assert "--class" in argv and argv[argv.index("--class") + 1] == "env_integration"
     reason = argv[argv.index("--reason") + 1]
-    assert reason.startswith("Fixed: bridge-fsck reports zero binding drift")
+    assert reason.startswith("Fixed: bridge fsck reports zero binding drift")
 
 
 def test_drift_alert_dry_run_zero_writes(mod: ModuleType, tmp_path: Path) -> None:

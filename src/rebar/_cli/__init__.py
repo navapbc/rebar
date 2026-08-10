@@ -164,7 +164,7 @@ def _reconcile(argv: list[str]) -> int:
 
 
 def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
-    """``rebar bridge-probe`` → live Jira capability preflight.
+    """``rebar bridge check-access`` → live Jira capability preflight.
 
     Launches the genuine python probe (``jira-capability-probe.py``) under
     ``sys.executable`` with ``engine_env`` (so the engine's
@@ -177,7 +177,7 @@ def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -
     and these **override** any same-named variable inherited from ``os.environ``
     (``{**engine_env(), **extra_env}`` — last writer wins). The probe reads
     ``JIRA_URL`` / ``JIRA_USER`` / ``JIRA_PROJECT`` from its process env (not from
-    ``load_config()``), so ``rebar jira-onboard`` passes the just-persisted,
+    ``load_config()``), so ``rebar bridge setup`` passes the just-persisted,
     config-resolved settings here to bridge the file→env gap and to ensure the probe
     validates exactly what was persisted (not a stale inherited env value).
     """
@@ -254,15 +254,9 @@ def _dispatch_bridge(sub: str, rest: list[str]) -> int:
         from rebar._cli._bridge_commands import bridge_cli
 
         return bridge_cli(rest if sub == "bridge" else ["status", *rest])
+    from rebar._cli._bridge_commands import bridge_fsck_cli
 
-    from rebar import config
-
-    # The bridge mapping audit auto-inits only when no test tracker is injected.
-    if not config.tracker_dir_override():
-        ensure_initialized(init_only=False)
-    from rebar._engine_support import bridge_fsck
-
-    return bridge_fsck.main(rest)
+    return bridge_fsck_cli(rest)
 
 
 def _dispatch_primary(sub: str, rest: list[str]) -> int:
@@ -582,8 +576,8 @@ def _main_dispatch(argv: list[str]) -> int:
     if argv and argv[0] == "llm":
         return _llm(argv[1:])
 
-    # jira-onboard intercept (the interactive Jira onboarding wizard; owns its
-    # --help, like llm/reconcile). Detects + prompts + persists + validates.
+    # Compatibility jira-onboard intercept. The canonical `bridge setup` child and
+    # this alias share jira_onboard; the alias retains its historical prog in help.
     if argv and argv[0] == "jira-onboard":
         from rebar._cli._jira_onboard import jira_onboard
 
