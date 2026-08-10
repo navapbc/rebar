@@ -86599,6 +86599,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-20T21:11:36Z"
     },
+    "b273-e0ba-f719-4f1c": {
+      "created_at": "2026-08-10T17:51:07Z",
+      "jira_id": "4587831",
+      "jira_key": "REB-2726",
+      "state": "confirmed",
+      "updated_at": "2026-08-10T17:51:09Z"
+    },
     "b27d-269a-2ba3-43b4": {
       "baseline": {
         "assignee": null,
@@ -117561,9 +117568,17 @@
       "updated_at": "2026-06-29T17:29:34Z"
     },
     "eca3-d294-42f7-44b4": {
+      "baseline": {
+        "assignee": null,
+        "description": "# A tracker re-clone silently re-identifies the environment, invalidating every attestation\n\n`.env-id` is git-ignored local state (tracker `.gitignore` lines 1, 13, 14 cover `.env-id`, `.opcert-key`, `.opcert-key.pub`) that is STAMPED INTO EVERY EVENT and is the `principal` of every op-cert attestation. Re-cloning the tracker without carrying it over mints a NEW environment identity, and every attestation signed by the old one becomes unverifiable.\n\n## Observed\nThe `.tickets-tracker` was converted to a standalone clone on 2026-08-09. `.env-id` was regenerated at 20:39 (`b8a354e0-\u2026`, replacing `ade0f2ef-\u2026`) and a new `.opcert-key` at 20:50. Store scan: 2498 ticket directories carry material referencing the OLD env id, 7 carry both, 4 carry only the new one.\n\n`rebar review-plan <id> --status` on task b2bb then reported:\n    verdict: foreign_key \u2014 \"op-cert signed by a different environment\n    (principal 'ade0f2ef-\u2026'; this environment is 'b8a354e0-\u2026')\"\nso the claim gate demanded a fresh LLM review for an attestation that had already been earned.\n\n## Why 'just accept both env ids' does NOT fix it\n`_opcert_signing.verify_opcert_record` short-circuits on `principal != own_env_id`, but that is not the binding constraint. The step behind it verifies against `_opcert_own_public_key(tracker)` \u2014 the LOCAL `.pub`. Verifying a signature made by `ade0f2ef` needs THAT environment's public key, which is gone: the key files are git-ignored, were never committed (`git log --all -- .opcert-key .opcert-key.pub .env-id` is empty), and the old tracker directory was replaced with no backup on disk.\n\nSo an accept-list would move the failure from `foreign_key` to `mismatch`. Making it PASS would require accepting the principal WITHOUT verifying the signature, which turns the attestation from a cryptographic claim into an honor-system label and defeats the gate.\n\n## Measured blast radius \u2014 small, which is why no data surgery is warranted\nAll 93 open tickets are in `plan_review_phase: planning`, so none advanced on the strength of an old attestation; they need a review before claiming regardless. The loss only costs a re-review for a ticket that had ALREADY earned a passing attestation but was not yet claimed (b2bb was one; it has been re-earned). Do NOT rewrite ticket history for this.\n\n## Acceptance criteria\n- [ ] Initializing/attaching to a tracker that ALREADY contains events does not silently mint\n      a new `.env-id`. It refuses, or warns loudly and names the consequence (every existing\n      attestation becomes foreign), with an explicit flag to proceed.\n- [ ] The re-clone/bootstrap path is documented with the exact local state that must be\n      carried over (`.env-id`, `.opcert-key`, `.opcert-key.pub`, `.ensure-applied`) and what\n      breaks per file if it is not.\n- [ ] `rebar doctor` (or fsck) reports when the store contains events stamped with an env id\n      other than the current one, so a silent re-identification is DETECTED rather than\n      discovered later at a gate.\n- [ ] Held-out test: a tracker with existing events + a fresh `.env-id` is reported by the\n      detector above and is not silently accepted.\n\n## Follow-on worth considering separately (the principled 'multiple env ids')\nPublish each environment's op-cert PUBLIC key into the store, the way author identities already are, so an attestation from a PREVIOUSLY-TRUSTED environment stays verifiable in any clone and a re-clone is survivable. That is a real trust-model change \u2014 local same-environment certification becomes a small federated trust root \u2014 and needs its own design and security review. It is the only form of 'accept multiple env ids' that is backed by a key you can actually check.\n\n## Provenance\nFound when the claim gate blocked task b2bb during the store/signing remediation session.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Tracker re-clone silently re-identifies the environment, voiding attestations"
+      },
       "created_at": "2026-08-10T17:46:09Z",
       "jira_id": "4587830",
       "jira_key": "REB-2725",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-10T17:46:12Z"
     },
@@ -132189,6 +132204,7 @@
     "REB-2721": "9b70-3108-706a-4483",
     "REB-2723": "c8fd-1274-bcea-408e",
     "REB-2725": "eca3-d294-42f7-44b4",
+    "REB-2726": "b273-e0ba-f719-4f1c",
     "REB-273": "acdd-a711-64e7-47fe",
     "REB-274": "add5-54b2-bff4-42cd",
     "REB-275": "ae52-52f3-94a3-4c8a",
