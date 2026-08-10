@@ -62,6 +62,7 @@ def _routable_subcommands() -> frozenset[str]:
             "delete",
             "fsck",
             "fsck-recover",
+            "tracker-maintenance",
             "doctor",
             "bridge-probe",
             "grounding-info",
