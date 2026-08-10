@@ -1,10 +1,23 @@
-"""In-process ``compact`` / ``compact-all``.
+"""In-process ``compact`` / ``compact-all`` — the CLI facade.
 
 Compaction squashes a ticket's event log into ONE SNAPSHOT event under the unified
 write lock: re-list events inside the lock, partition out forward-compat
 unknown-type events (never absorbed/deleted), re-check the threshold, reduce the
-current state, write the SNAPSHOT, delete the originals, invalidate the reducer
+current state, write the SNAPSHOT, retire the originals, invalidate the reducer
 cache, and ``git add -A`` + commit atomically.
+
+Task b2bb split the engines out of this module, leaving the argument parsing and the
+operator-facing reporting here:
+
+* :mod:`rebar._commands.compact_txn` — the locked compaction TRANSACTION
+  (``_compact_locked``) plus the snapshot primitives both engines share.
+* :mod:`rebar._commands.compact_rebuild` — SNAPSHOT reconstruction from the full log
+  (``rebuild_snapshot_from_full_log``), the fsck repair path.
+
+The names those modules own are RE-EXPORTED here so every existing import path —
+``fsck_repair`` / ``fsck_restore`` reaching for ``rebuild_snapshot_from_full_log``, and
+the tests importing ``_snapshot_strip_keys`` / ``_build_authorship_ledger`` — keeps
+resolving against ``rebar._commands.compact`` unchanged.
 
 Reuses ``rebar._store.lock`` (the fcntl+mkdir dual-leg lock),
 ``rebar.reducer.reduce_ticket`` (in-process), and ``event_append.event_filename``.
@@ -14,35 +27,29 @@ SNAPSHOT bytes go through the single canonical serializer
 
 from __future__ import annotations
 
-import json
-import logging
 import os
-import subprocess
 import sys
-import time
-import uuid
-from pathlib import Path
 
 from rebar import config
-from rebar._commands import _seam, fsck_repair
-from rebar._commands._compact_policy import is_foldable
+from rebar._commands.compact_rebuild import (
+    get_rebuild_count,
+    rebuild_snapshot_from_full_log,
+)
+from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public path
+    _build_authorship_ledger,
+    _compact_locked,
+    _git,
+    _snapshot_strip_keys,
+    _sync_before_compact,
+)
 from rebar._engine_support.resolver import resolve_ticket_id
-from rebar._store import compat, event_append, fsutil, hlc, lock
-from rebar._store.canonical import canonical_str
-from rebar._store.gitutil import run_git_write
-from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
-logger = logging.getLogger(__name__)
-
-# Process-level count of SNAPSHOT rebuilds (RC2b Option 1) — observability for the
-# fsck remediation path (A3). Read via get_rebuild_count().
-_REBUILD_COUNT = 0
-
-
-def get_rebuild_count() -> int:
-    """Number of snapshot rebuilds performed by this process (RC2b Option 1)."""
-    return _REBUILD_COUNT
+__all__ = [
+    "compact_all_cli",
+    "compact_cli",
+    "get_rebuild_count",
+    "rebuild_snapshot_from_full_log",
+]
 
 
 def _usage() -> int:
@@ -53,550 +60,6 @@ def _usage() -> int:
         "                     config or 1800s in ns (events younger than this stay live)\n"
     )
     return 1
-
-
-# raw-git-ok: store-maintenance command, seam-internal
-def _git(tracker: str, *args: str):
-    return run_git_write(tracker, *args, check=False)
-
-
-def _sync_before_compact(tracker: str) -> None:
-    """Pull the latest tickets before compacting (best-effort, in-process) so a
-    remote SNAPSHOT written by another agent is visible and local compaction can
-    defer to it. Honors the ``sync.pull`` policy and is fully best-effort (every
-    fetch failure is swallowed). Replaces the former dead ``ticket sync`` shell-out
-    (no such subcommand existed; ``shell=True`` injection smell)."""
-    from rebar._engine_support import reads
-
-    reads.ensure_fresh(tracker)
-
-
-def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
-    """Independently scan the folded event files and build the SNAPSHOT authorship ledger
-    (epic gnu-whale-ichor / 117b): one ``{event_uuid, content_hash, signature, signer_pubkey,
-    position}`` record per folded event that carries an ``author_sig``. This preserves the
-    signed events so the merge-gate ``rebar verify-authorship`` can re-verify them AFTER the
-    raw event files are retired (folded into the SNAPSHOT).
-
-    Everything the gate needs is captured at compaction time (when the raw file + git history
-    are still present): ``content_hash`` (the canonical content binding), the ``signature``
-    envelope, the ``signer_pubkey`` that actually verifies it (``identify_signer``; ``null`` for
-    a forged/foreign sig — the entry is STILL recorded so the gate can flag it), and the
-    ``position`` (the ``{timestamp}-{uuid}`` string plus its resolved introducing
-    ``commit_sha``) for the commit-ancestry era check. Unsigned events are omitted (the
-    presence-only count lives in ``compiled_state`` already). Best-effort throughout — a
-    lookup/decode failure records ``null`` rather than raising.
-
-    The introducing commits are resolved for the WHOLE ticket in ONE directory-scoped
-    ``git log`` walk (:func:`~rebar.attest.authorship.build_ticket_position_commit_map`),
-    not one full-history walk per signed event. That per-event form was 99.2% of a
-    measured 48.1s ``compact-on-close`` — all of it inside the store write lock, starving
-    every concurrent writer (bug 7084 / remediation R1). Attribution is unchanged: a
-    position the map misses still falls back to the per-event resolver and then to the
-    global one, exactly as before, so the batching can only ever cost time — never a
-    wrong or missing commit in the attestation chain."""
-    from rebar.attest import authorship, dsse
-
-    position_commits: dict[str, str] = {}
-    if event_paths:
-        position_commits = authorship.build_ticket_position_commit_map(
-            os.path.dirname(event_paths[0]), repo_root=repo_root
-        )
-
-    ledger: list[dict] = []
-    for path in event_paths:
-        try:
-            with open(path, encoding="utf-8") as f:
-                ev = json.load(f)
-        except (OSError, ValueError):
-            continue
-        sig = ev.get("author_sig")
-        if not sig:
-            continue
-        author_id = ev.get("author_id")
-        position_str = f"{ev.get('timestamp')}-{ev.get('uuid')}"
-        ticket_dir = os.path.dirname(path)
-
-        signer_pubkey = None
-        try:
-            envelope = dsse.decode(sig if isinstance(sig, str) else "")
-            signer_pubkey = authorship.identify_signer(
-                envelope, str(author_id), repo_root=repo_root
-            )
-        except Exception:  # noqa: BLE001 — a decode/lookup failure records a null signer
-            signer_pubkey = None
-
-        commit_sha = position_commits.get(position_str)
-        if commit_sha is None:
-            # Map miss (an empty map from a git failure, or a file introduced only inside
-            # a merge commit): fall back to the per-event resolver, which is what this
-            # loop used to call unconditionally.
-            commit_sha = authorship.resolve_event_commit(
-                position_str, ticket_dir, repo_root=repo_root
-            )
-        if commit_sha is None:
-            # resolve_event_commit can return None at fold time (its ticket-scoped pathspec
-            # may miss the introducing commit). Fall back to the GLOBAL position resolver so
-            # we persist the REAL introducing commit rather than a null the merge-gate later
-            # fail-closes to ``key_not_valid_at_era`` (bug B). Only persist null if BOTH fail.
-            tracker = os.path.dirname(ticket_dir)
-            commit_sha = authorship.resolve_position_commit(
-                position_str, tracker, repo_root=repo_root
-            )
-
-        ledger.append(
-            {
-                "event_uuid": ev.get("uuid"),
-                "content_hash": authorship.authorship_content_hash(ev),
-                "signature": sig,
-                "signer_pubkey": signer_pubkey,
-                "position": {"commit_sha": commit_sha, "position": position_str},
-            }
-        )
-    return ledger
-
-
-def _snapshot_strip_keys() -> set[str]:
-    """Keys to drop from a SNAPSHOT's compiled_state before persisting. ``updated_at`` is
-    a derived presentation field re-computed every replay. The legacy ``signature`` mirror
-    is ALWAYS dropped (task 7ed9 hardcoded never-emit) — new snapshots carry only the
-    kind-keyed ``attestations`` map. The mirror is still re-derived in memory on replay
-    (reducer ``process_signature``), so verification keeps working on a compacted ticket."""
-    return {"updated_at", "signature"}
-
-
-def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
-    """Test-only failpoint (inert in production). When the environment variable
-    ``REBAR_TEST_COMPACT_RENAME_BARRIER`` names a directory, pause after the FIRST
-    source rename (``n_renamed == 1``) so a test can reliably SIGKILL a real
-    compactor process in the mid-retirement window — SNAPSHOT already written, one
-    source ``*.retired``, the rest still active, nothing committed and the write lock
-    still held. The hook writes a ``reached`` marker (its PID) and then blocks until a
-    ``release`` file appears, so the test controls the kill point deterministically
-    with no timing race. Guarded entirely by the env var: unset ⇒ immediate return."""
-    barrier = os.environ.get("REBAR_TEST_COMPACT_RENAME_BARRIER")
-    if not barrier or n_renamed != 1:
-        return
-    bdir = Path(barrier)
-    (bdir / "reached").write_text(str(os.getpid()), encoding="utf-8")
-    release = bdir / "release"
-    while not release.exists():
-        time.sleep(0.02)
-
-
-# raw-git-ok: store-maintenance command, seam-internal
-def _compact_locked(
-    tracker: str,
-    ticket_id: str,
-    ticket_dir: str,
-    threshold: int,
-    no_commit: bool,
-    horizon: int = 0,
-) -> int:
-    """The locked compaction critical section. Returns 0 on success (prints
-    EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
-    skip line), 1 on lock timeout / reducer / state / git failure."""
-    try:
-        handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
-    except lock.LockTimeout as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        return 1
-    except compat.StoreIncompatibleError as exc:
-        # Story 21dd: fail closed (non-zero) on an incompatible store before compaction.
-        sys.stderr.write(str(exc) + "\n")
-        return exc.returncode
-    try:
-        # Re-list event files inside the lock (authoritative). Exclude -SYNC.json
-        # (bridge metadata that must survive compaction).
-        candidates = sorted(
-            os.path.join(ticket_dir, f)
-            for f in os.listdir(ticket_dir)
-            if f.endswith(".json") and not f.startswith(".") and not f.endswith("-SYNC.json")
-        )
-        # Forward-compat: unknown-type events (written by a newer clone) are
-        # preserved untouched — never snapshotted or deleted. Parse each candidate
-        # once, capturing its uuid + timestamp for the horizon partition below.
-        parsed: list[tuple[str, str, int | None]] = []  # (path, uuid, ts)
-        for fp in candidates:
-            try:
-                with open(fp, encoding="utf-8") as f:
-                    ev = json.load(f)
-                etype = ev.get("event_type", "")
-                euuid = ev.get("uuid", os.path.basename(fp))
-                raw_ts = ev.get("timestamp")
-                ets = raw_ts if isinstance(raw_ts, int) else None
-            except (json.JSONDecodeError, OSError):
-                etype, euuid, ets = "", os.path.basename(fp), None
-            if etype and etype not in KNOWN_EVENT_TYPES:
-                continue
-            parsed.append((fp, euuid, ets))
-        event_count = len(parsed)
-
-        if event_count <= threshold:
-            sys.stdout.write("below threshold (re-checked inside flock) — skipping compaction\n")
-            return 0
-
-        # RC2b Option 3 (conservative horizon): only FOLD events older than the
-        # horizon. Younger "hot-edge" events stay live ``.json`` and — because the
-        # SNAPSHOT is timestamped just after the newest folded event and before the
-        # youngest live one — sort AFTER the snapshot and replay on top. So a
-        # concurrent sub-horizon append that merges in later is NOT silently dropped by
-        # the snapshot's positional skip. horizon<=0 folds everything (the pre-RC2b
-        # behavior; the offline test suite defaults to 0).
-        now = hlc.physical_now()
-
-        old = [(fp, u, ts) for (fp, u, ts) in parsed if is_foldable(ts, now, horizon)]
-        young = [(fp, u, ts) for (fp, u, ts) in parsed if not is_foldable(ts, now, horizon)]
-
-        if not old:
-            sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
-            return 0
-
-        fold_files = [fp for (fp, _u, _ts) in old]
-
-        # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
-        # youngest live one, so folded events sort before it (positionally skipped,
-        # their state in compiled_state) and live events sort after it (replayed).
-        if young:
-            old_ts = [ts for (_fp, _u, ts) in old if ts is not None]
-            young_ts = [ts for (_fp, _u, ts) in young if ts is not None]
-            max_old = max(old_ts) if old_ts else now
-            snapshot_ts = max_old + 1
-            if young_ts and snapshot_ts >= min(young_ts):
-                # No safe placement gap (adjacent straddling timestamps) — defer folding
-                # this pass rather than risk a mis-sorted snapshot.
-                sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
-                return 0
-            compiled_state = reduce_ticket(ticket_dir, event_files_override=fold_files)
-        else:
-            snapshot_ts = hlc.next_tick(tracker, ticket_id)
-            compiled_state = reduce_ticket(ticket_dir)
-
-        if compiled_state is None:
-            sys.stderr.write(
-                f"Error: reducer failed for ticket {ticket_id} (corrupt or ghost ticket)\n"
-            )
-            return 1
-        # ``updated_at`` is a derived presentation field (P1.1), re-computed on
-        # every replay. It must NOT enter the SNAPSHOT's compiled_state, or it
-        # would (a) ride into event-log bytes and (b) be restored stale by
-        # process_snapshot. Copy-and-drop it so the cache object is untouched.
-        # The legacy ``signature`` mirror is dropped here too (task 7ed9 never-emit) —
-        # new snapshots carry only ``attestations``.
-        _strip = _snapshot_strip_keys()
-        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
-        # Authorship ledger (epic gnu-whale-ichor / 3183): independently scan the folded
-        # events and preserve each SIGNED one so verify-authorship can re-verify it after
-        # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
-        compiled_state["authorship_ledger"] = _build_authorship_ledger(
-            fold_files, os.path.dirname(os.path.realpath(tracker))
-        )
-        status = compiled_state.get("status", "")
-        if status in ("error", "fsck_needed"):
-            sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
-            return 1
-
-        source_uuids = [u for (_fp, u, _ts) in old]
-
-        env_id = _seam.env_id(Path(tracker))
-        author = _git_author()
-
-        snapshot_uuid = str(uuid.uuid4())
-        snapshot_event = {
-            "event_type": "SNAPSHOT",
-            "timestamp": snapshot_ts,
-            "uuid": snapshot_uuid,
-            "env_id": env_id,
-            "author": author,
-            "data": {
-                "compiled_state": compiled_state,
-                "source_event_uuids": source_uuids,
-                "compacted_at": snapshot_ts,
-            },
-        }
-        # Denormalized author attribution (epic gnu-whale-ichor): stamp author_email /
-        # author_id on the SNAPSHOT envelope. No repo_root param here, so derive it from
-        # the tracker (mirrors the derivation in rebuild_snapshot_from_full_log).
-        snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
-        final_path = os.path.join(
-            ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
-        )
-        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
-
-        # I1: RENAME folded sources to ``*.retired`` rather than deleting them. The
-        # SNAPSHOT above is written atomically FIRST, so a crash mid-rename leaves a
-        # valid SNAPSHOT plus some already-retired sources; the SNAPSHOT-present
-        # short-circuit makes a re-compact a no-op, and an existing ``.retired``
-        # target is skipped (idempotent). A rename failure is logged (never
-        # swallowed) and every completed rename is reversed before we abort, so the
-        # fold is atomic: either all sources are retired or none are.
-        renamed: list[tuple[str, str]] = []
-        try:
-            for fp in fold_files:
-                retired = fp + RETIRED_SUFFIX
-                if os.path.exists(retired):
-                    continue  # idempotent re-run: source already retired
-                os.rename(fp, retired)
-                renamed.append((fp, retired))
-                logger.info("compact: retired folded event %s", os.path.basename(fp))
-                _maybe_pause_at_rename_barrier(len(renamed))
-        except OSError:
-            logger.warning(
-                "compact: failed to retire a folded event for %s — reversing %d rename(s)",
-                ticket_id,
-                len(renamed),
-                exc_info=True,
-            )
-            rollback_clean = True
-            for orig, retired in reversed(renamed):
-                try:
-                    os.rename(retired, orig)
-                except OSError:
-                    rollback_clean = False
-                    logger.warning(
-                        "compact: could not reverse rename %s -> %s", retired, orig, exc_info=True
-                    )
-            if rollback_clean:
-                # CLEAN rollback: every completed rename was reversed, so the store is
-                # back to its exact pre-fold state and the uncommitted SNAPSHOT is a
-                # stray artifact — remove it. (Preserves the original behavior.)
-                try:
-                    os.remove(final_path)
-                except OSError:
-                    logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
-                sys.stderr.write("Error: failed to retire folded events while holding lock\n")
-                return 1
-            # INCOMPLETE rollback: at least one reverse-rename failed, so a source is
-            # stuck as ``*.retired`` while its folded effect lives ONLY in the SNAPSHOT
-            # we wrote. We MUST intentionally RETAIN the SNAPSHOT here — removing it
-            # would drop that source's effect from BOTH an active event and the
-            # snapshot (silent data loss, the hazard this branch exists to avoid).
-            # Retaining it leaves a SNAPSHOT_INCONSISTENT state (a SNAPSHOT plus a
-            # reversed-to-active source) that ``fsck --repair-snapshots`` already
-            # rebuilds. Reads are already correct in this mixed window: the
-            # reversed-to-active source keeps its original (pre-snapshot) filename, so
-            # it is positionally skipped during replay and never double-counted. Do NOT
-            # "simplify" this back into an unconditional ``os.remove(final_path)``.
-            logger.warning(
-                "compact: rollback incomplete for %s — SNAPSHOT %s retained; run fsck",
-                ticket_id,
-                final_path,
-                exc_info=True,
-            )
-            sys.stderr.write(
-                "Error: failed to retire folded events while holding lock; rollback "
-                "incomplete (a folded source is stranded) — the SNAPSHOT is retained "
-                "to avoid data loss. Run `rebar fsck --repair-snapshots` to reconcile.\n"
-            )
-            return 1
-        try:
-            os.remove(os.path.join(ticket_dir, ".cache.json"))
-        except OSError:
-            pass
-
-        if not no_commit:
-            add = _git(tracker, "add", "-A", f"{ticket_id}/")
-            if add.returncode != 0:
-                # Include git's stderr: the seam's lock-exhaustion guidance rides in it (9305).
-                sys.stderr.write(f"Error: git operation failed while holding lock: {add.stderr}\n")
-                return 1
-            staged = _git(tracker, "diff", "--cached", "--quiet")
-            if staged.returncode != 0:
-                commit = _git(
-                    tracker, "commit", "-q", "--no-verify", "-m", f"ticket: COMPACT {ticket_id}"
-                )
-                if commit.returncode != 0:
-                    sys.stderr.write(
-                        f"Error: git operation failed while holding lock: {commit.stderr}\n"
-                    )
-                    return 1
-
-        sys.stdout.write(f"EVENT_COUNT={event_count}\n")
-        sys.stdout.write(f"compacted events into SNAPSHOT for {ticket_id}\n")
-        return 0
-    finally:
-        handle.release()
-
-
-def _git_author() -> str:
-    cp = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True)
-    if cp.returncode != 0:
-        return "system"
-    return cp.stdout.strip()
-
-
-def _read_event_uuid(path: str) -> str:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("uuid", os.path.basename(path))
-    except (json.JSONDecodeError, OSError):
-        return os.path.basename(path)
-
-
-# raw-git-ok: store-maintenance command, seam-internal
-def rebuild_snapshot_from_full_log(
-    tracker: str,
-    ticket_id: str,
-    ticket_dir: str,
-    *,
-    no_commit: bool = False,
-) -> bool:
-    """RC2b Option 1 (rebuild-on-stray): recompute a ticket's SNAPSHOT from the FULL
-    ordered event log INCLUDING ``*.retired`` sources, folding a merged-in pre-snapshot
-    orphan that a stale snapshot's positional skip had silently dropped.
-
-    Crash-safe via a ``.snapshot-rebuild.bak`` sentinel: it is written before any
-    mutation and removed only after a clean round-trip (a fresh reduce reproduces the
-    rebuilt state). A ``.bak`` present at entry means a prior rebuild was interrupted —
-    we rebuild again (the operation is idempotent). Runs under the write lock
-    (single-writer). Returns True if a rebuild was performed.
-    """
-    global _REBUILD_COUNT
-    try:
-        handle = lock.acquire(tracker, timeout=30, attempts=2, dual_window=True)
-    except lock.LockTimeout as exc:
-        logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
-        return False
-    except compat.StoreIncompatibleError as exc:
-        # Story 21dd: fail closed on an incompatible store — the snapshot rebuild is a
-        # mutation, so skip it (the read-only diagnostic still surfaces the record).
-        logger.warning("fsck: cannot rebuild snapshot for %s: %s", ticket_id, exc)
-        return False
-    try:
-        bak_path = os.path.join(ticket_dir, ".snapshot-rebuild.bak")
-        if os.path.exists(bak_path):
-            logger.warning(
-                "fsck: interrupted snapshot rebuild for %s (.bak present) — restarting", ticket_id
-            )
-
-        # Full raw-history state INCLUDING the merged-in orphan the stale snapshot dropped.
-        # None when the rebuild must NOT proceed — the b636 fail-closed guard (prior SNAPSHOT
-        # cites sources absent from disk => incomplete log) or a failed reduce.
-        compiled_state = fsck_repair.rebuild_source_state(ticket_id, ticket_dir)
-        if compiled_state is None:
-            logger.warning(
-                "fsck: snapshot rebuild for %s aborted (incomplete log or reduce failure)",
-                ticket_id,
-            )
-            return False
-        # The legacy ``signature`` mirror is never persisted into a rebuilt snapshot
-        # either (task 7ed9 never-emit) — it is re-derived in memory on replay.
-        _strip = _snapshot_strip_keys()
-        compiled_state = {k: v for k, v in compiled_state.items() if k not in _strip}
-
-        # Every raw (non-snapshot) event becomes a source of the new SNAPSHOT; the live
-        # ones are retired, superseded snapshot(s) are retired too.
-        live_raw: list[str] = []
-        source_uuids: list[str] = []
-        old_snaps: list[str] = []
-        raw_paths: list[str] = []
-        for name in sorted(os.listdir(ticket_dir)):
-            if name.startswith(".") or name.endswith("-SYNC.json"):
-                continue
-            path = os.path.join(ticket_dir, name)
-            base = name[: -len(RETIRED_SUFFIX)] if name.endswith(RETIRED_SUFFIX) else name
-            if base.endswith("-SNAPSHOT.json"):
-                if is_active_event(name):
-                    old_snaps.append(path)
-                continue
-            source_uuids.append(_read_event_uuid(path))
-            raw_paths.append(path)
-            if is_active_event(name):
-                live_raw.append(path)
-        # Authorship ledger (epic gnu-whale-ichor / 3183): rebuild it from the FULL raw log
-        # (active + retired) so a rebuilt SNAPSHOT preserves the signed-event ledger too.
-        compiled_state["authorship_ledger"] = _build_authorship_ledger(
-            raw_paths, os.path.dirname(os.path.realpath(tracker))
-        )
-
-        env_id = _seam.env_id(Path(tracker))
-        author = _git_author()
-        snapshot_uuid = str(uuid.uuid4())
-        snapshot_ts = hlc.next_tick(tracker, ticket_id)
-        snapshot_event = {
-            "event_type": "SNAPSHOT",
-            "timestamp": snapshot_ts,
-            "uuid": snapshot_uuid,
-            "env_id": env_id,
-            "author": author,
-            "data": {
-                "compiled_state": compiled_state,
-                "source_event_uuids": source_uuids,
-                "compacted_at": snapshot_ts,
-            },
-        }
-        # Denormalized author attribution (epic gnu-whale-ichor) — derive repo_root from
-        # the tracker (no repo_root param on this fsck-repair path).
-        snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
-
-        # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
-        try:
-            backup = ""
-            if old_snaps:
-                with open(old_snaps[-1], encoding="utf-8") as f:
-                    backup = f.read()
-            fsutil.atomic_write(bak_path, backup, encoding="utf-8")
-        except OSError:
-            logger.warning("fsck: could not write rebuild sentinel for %s", ticket_id)
-            return False
-
-        final_path = os.path.join(
-            ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
-        )
-        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
-
-        for fp in live_raw + old_snaps:
-            retired = fp + RETIRED_SUFFIX
-            if os.path.exists(retired):
-                continue
-            try:
-                os.rename(fp, retired)
-            except OSError:
-                logger.warning("fsck: could not retire %s during rebuild", fp, exc_info=True)
-
-        try:
-            os.remove(os.path.join(ticket_dir, ".cache.json"))
-        except OSError:
-            pass
-
-        # Clean round-trip: a fresh reduce must reproduce the rebuilt status before we
-        # drop the sentinel (else leave it so the next fsck retries).
-        check = reduce_ticket(ticket_dir)
-        if check is None or check.get("status") != compiled_state.get("status"):
-            logger.warning(
-                "fsck: snapshot rebuild round-trip mismatch for %s — leaving .bak for retry",
-                ticket_id,
-            )
-            return False
-        try:
-            os.remove(bak_path)
-        except OSError:
-            pass
-
-        _REBUILD_COUNT += 1
-        logger.warning(
-            "fsck: rebuilt SNAPSHOT for %s from full log (%d sources) — folded a merged-in "
-            "pre-snapshot orphan",
-            ticket_id,
-            len(source_uuids),
-        )
-
-        if not no_commit:
-            add = _git(tracker, "add", "-A", f"{ticket_id}/")
-            if add.returncode == 0:
-                staged = _git(tracker, "diff", "--cached", "--quiet")
-                if staged.returncode != 0:
-                    _git(
-                        tracker,
-                        "commit",
-                        "-q",
-                        "--no-verify",
-                        "-m",
-                        f"ticket: REBUILD SNAPSHOT {ticket_id}",
-                    )
-        return True
-    finally:
-        handle.release()
 
 
 def compact_cli(argv: list[str], *, repo_root=None) -> int:
@@ -700,12 +163,10 @@ def _scan_snapshot_state(tracker: str) -> tuple[list[str], int]:
     return needs, already
 
 
-# raw-git-ok: store-maintenance command, seam-internal
-def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar compact-all`` entry — backfill SNAPSHOTs for tickets lacking one."""
-    import contextlib
-    import io
-
+def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
+    """Parse ``compact-all`` flags. Returns ``(dry_run, limit, no_commit, early_rc)``
+    where ``early_rc`` is non-None when the caller should return it immediately
+    (``--help`` => 0, an unknown option => 1)."""
     dry_run = False
     limit = 0
     no_commit = False
@@ -718,10 +179,45 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             no_commit = True
         elif a in ("--help", "-h"):
             sys.stdout.write("Usage: ticket compact-all [--dry-run] [--limit=N] [--no-commit]\n")
-            return 0
+            return dry_run, limit, no_commit, 0
         else:
             sys.stderr.write(f"Error: unknown option '{a}'\n")
-            return 1
+            return dry_run, limit, no_commit, 1
+    return dry_run, limit, no_commit, None
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def _commit_backfill(tracker: str, compacted: int) -> None:
+    """Commit + push the batch of backfilled SNAPSHOTs (one commit for the whole run;
+    the per-ticket calls passed ``--skip-sync`` to defer the push here — bug
+    prone-octet-cheek)."""
+    sys.stdout.write(f"Staging and committing {compacted} new SNAPSHOT files...\n")
+    _git(tracker, "add", "-A")
+    if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
+        sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
+        return
+    _git(
+        tracker,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
+    )
+    sys.stdout.write("Committed.\n")
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
+
+
+def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
+    """``rebar compact-all`` entry — backfill SNAPSHOTs for tickets lacking one."""
+    import contextlib
+    import io
+
+    dry_run, limit, no_commit, early_rc = _compact_all_parse(argv)
+    if early_rc is not None:
+        return early_rc
 
     tracker = str(config.tracker_dir(repo_root))
     if not os.path.isdir(tracker):
@@ -774,24 +270,6 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stderr.write(f"  {tid}\n")
 
     if compacted > 0 and not no_commit:
-        sys.stdout.write(f"Staging and committing {compacted} new SNAPSHOT files...\n")
-        _git(tracker, "add", "-A")
-        if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
-            sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
-        else:
-            _git(
-                tracker,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
-            )
-            sys.stdout.write("Committed.\n")
-            # One best-effort push for the whole batch (per-ticket calls used
-            # --skip-sync to defer it here) — bug prone-octet-cheek.
-            from rebar._store import push
-
-            push.push_after_commit(tracker)
+        _commit_backfill(tracker, compacted)
 
     return 2 if error_ids else 0
