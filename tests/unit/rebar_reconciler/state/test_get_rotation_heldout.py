@@ -304,7 +304,7 @@ def test_rotation_paths_and_regenerable_documentation_are_pinned() -> None:
     from rebar_reconciler import git_adapter
 
     assert getattr(git_adapter, "GET_ROTATION_FILE", None) == ".bridge_state/get_rotation.json"
-    assert "get_rotation.json" in (push._resolve_conflicted_pop.__doc__ or "")
+    assert "get_rotation.json" in (push._resolve_conflicted_apply.__doc__ or "")
 
 
 def test_rotation_extraction_respects_module_size_policy() -> None:
