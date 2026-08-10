@@ -116,8 +116,42 @@ def test_library_and_mcp_bridge_fsck_entrypoints_remain_callable(rebar_repo: Pat
     """The CLI rename does not rename or detach either public programmatic surface."""
     from rebar.mcp_server import build_server
 
-    expected = {"orphaned": [], "duplicates": [], "stale": []}
-    assert rebar.bridge_fsck(repo_root=rebar_repo) == expected
+    expected_keys = {"unknown_event_types", "binding_drift", "store_integrity"}
+    library_result = rebar.bridge_fsck(repo_root=rebar_repo)
+    assert set(library_result) == expected_keys
+    assert library_result["unknown_event_types"] == []
+    assert library_result["store_integrity"] == []
 
     result = _unwrap(asyncio.run(build_server().call_tool("bridge_fsck", {})))
-    assert {key: result[key] for key in expected} == expected
+    assert set(result) == expected_keys
+    assert result == library_result
+
+
+def test_library_and_mcp_bridge_fsck_surface_operational_failures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Programmatic compatibility surfaces fail closed with the shared error identity."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from rebar._mcp_errors import McpEnvelopeError
+    from rebar.mcp_server import build_server
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tracker, check=True)
+
+    with pytest.raises(rebar.RebarError) as library_error:
+        rebar.bridge_fsck(repo_root=tmp_path)
+    assert library_error.value.returncode == 2
+    assert "tickets" in str(library_error.value).lower()
+
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    for var in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+        monkeypatch.delenv(var, raising=False)
+
+    with pytest.raises(ToolError) as mcp_error:
+        asyncio.run(build_server().call_tool("bridge_fsck", {}))
+    cause = mcp_error.value.__cause__
+    assert isinstance(cause, McpEnvelopeError)
+    assert cause.envelope["error"] == "command_failed"
+    assert "tickets" in cause.envelope["message"].lower()

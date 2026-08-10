@@ -514,7 +514,9 @@ def _probe() -> None:  # deliberately one linear probe script
     run_rb("fsck", "--output", "json")
     assert_contains('"issue_count"', "fsck json shape")
     run_rb("bridge", "fsck", "-o", "json")
-    assert_contains('"orphaned"', "bridge fsck json shape")
+    assert_contains('"unknown_event_types"', "bridge fsck unknown-event shape")
+    assert_contains('"binding_drift"', "bridge fsck binding-drift shape")
+    assert_contains('"store_integrity"', "bridge fsck store-integrity shape")
 
     section("lifecycle --output json — create/claim/transition/reopen/delete result shapes")
     # Parse STDOUT ONLY: `create` prints an advisory warning to STDERR, which the

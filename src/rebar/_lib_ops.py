@@ -73,8 +73,9 @@ def get_workflow_result(
 
 
 def bridge_fsck(*, repo_root=None) -> BridgeFsck:
-    """Bridge-mapping audit as structured JSON: {orphaned, duplicates, stale}.
-    A nonzero exit (anomalies present) is NORMAL, not an error.
+    """Offline bridge audit: unknown types, binding drift, and store integrity.
+    Anomaly findings are normal results, not errors. Operational scan failures
+    raise ``RebarError`` with ``returncode=2``.
 
     In-process (Tier E E6.5a): runs the audit via ``rebar._engine_support.
     bridge_fsck.audit_bridge_mappings`` instead of subprocessing the dispatcher.
@@ -85,7 +86,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
 
     tracker = config.tracker_dir(repo_root)
     findings = audit_bridge_mappings(Path(tracker))
-    return cast("BridgeFsck", {k: findings.get(k, []) for k in ("orphaned", "duplicates", "stale")})
+    return cast("BridgeFsck", findings)
 
 
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────
