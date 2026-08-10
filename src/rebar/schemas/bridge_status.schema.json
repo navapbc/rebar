@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge/status.schema.json",
+  "title": "BridgeStatus",
+  "description": "Durable bridge status snapshot from the last-pass, pause, and live-lock witnesses.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict", "target_environment_id"],
+  "properties": {
+    "verdict": { "enum": ["HEALTHY", "PAUSED", "RUNNING", "NEVER_RUN", "FOREIGN", "FAILED", "STALE"] },
+    "target_environment_id": { "type": "string" },
+    "record_oid": { "type": ["string", "null"] },
+    "detail_status": { "enum": ["missing", "mismatched", "matching"] },
+    "pause": { "type": ["object", "null"] },
+    "lock": { "type": ["object", "null"] },
+    "pass_id": { "type": ["string", "null"] },
+    "environment_id": { "type": ["string", "null"] },
+    "outcome": { "type": ["string", "null"] },
+    "failure_kind": { "type": ["string", "null"] },
+    "completed_at": { "type": ["string", "null"] },
+    "lock_fence": { "type": ["integer", "null"] },
+    "detail": { "type": "object", "additionalProperties": true },
+    "lock_oid": { "type": "string" },
+    "lock_holder": { "type": "string" },
+    "lock_lease_secs": { "type": "number" },
+    "live_lock_fence": { "type": "integer" }
+  }
+}

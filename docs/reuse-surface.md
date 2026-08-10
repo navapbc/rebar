@@ -18,6 +18,36 @@ Worked consumer of all four: the plan-review gate
 > anti-drift gate that introspects each documented callable) — re-verify with
 > `inspect.signature(...)` if in doubt.
 
+## Public bridge operations — `rebar.*`
+
+Use the noun-based facade for programmatic Jira bridge work:
+
+```python
+bridge_preview(*, only: list[str] | None = None, exclude: list[str] | None = None,
+               repo_root=None) -> BridgeRun
+bridge_sync(*, only: list[str] | None = None, exclude: list[str] | None = None,
+            max_changes: int | None = None, repo_root=None) -> BridgeRun
+bridge_status(*, target_environment_id: str | None = None,
+              max_age_seconds: int | None = None, repo_root=None) -> BridgeStatus
+bridge_pause(reason: str, *, repo_root=None) -> BridgeControl
+bridge_resume(*, repo_root=None) -> BridgeControl
+bridge_check_access() -> BridgeAccessCheck
+bridge_fsck(*, repo_root=None) -> BridgeFsck
+```
+
+`bridge_preview` selects the dry-run route and never applies changes;
+`bridge_sync` selects the live route and may cap work with `max_changes`.
+`only` and `exclude` are mutually exclusive. Status reads the durable witnesses,
+pause/resume use the shared observed-OID CAS control ref, and access checking returns
+the six-step provider result without invoking the CLI. Canonical invalid/operational
+run outcomes raise `RebarError` with return code 2/1.
+
+The compatibility facade `reconcile(mode="dry-run", *, repo_root=None) -> dict`
+remains supported with its subprocess-visible return and exception contract. MCP
+mirrors both sets of names; mutating bridge operations and mutating reconcile modes
+require `REBAR_MCP_ALLOW_JIRA_SYNC`, and read-only mode blocks mutations. Setup is
+interactive and intentionally has no library or MCP operation.
+
 ---
 
 ## 1. The signing surface — `rebar.signing`

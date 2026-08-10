@@ -118,14 +118,18 @@ def test_run_pass_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
     assert call_kwargs.get("repo_root") == tmp_path
 
 
-def test_run_pass_returns_1_when_reconcile_raises(main_mod, tmp_path):
+def test_run_pass_returns_1_when_reconcile_raises(main_mod, tmp_path, capsys):
     """run_pass() returns 1 and does not re-raise when reconcile_once raises."""
     stub = _make_stub_reconcile(side_effect=RuntimeError("boom"))
 
     with patch.object(main_mod, "_try_load_step", return_value=stub):
         rc = main_mod.run_pass(repo_root=tmp_path)
 
+    captured = capsys.readouterr()
     assert rc == 1
+    assert "ERROR: reconcile_once raised: boom" in captured.err
+    assert "OK:" not in captured.out
+    assert "OK:" not in captured.err
 
 
 def test_run_pass_returns_75_on_reschedule_error(main_mod, tmp_path):

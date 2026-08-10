@@ -8,6 +8,19 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Bridge operations are now first-class library and MCP APIs
+
+The public library and MCP server now expose typed `bridge_preview`, `bridge_sync`,
+`bridge_status`, `bridge_pause`, `bridge_resume`, and `bridge_check_access` operations.
+The new inputs describe the operation directly and never accept the legacy mode vocabulary.
+Preview remains strictly non-mutating; sync is explicitly mutating. MCP gates sync, pause,
+and resume through both the read-only policy and `mcp.allow_jira_sync`, while status,
+preview, fsck, and access checking remain available without that sync authorization.
+
+This is additive. `rebar.reconcile(mode=...)`, MCP `reconcile(mode=...)`, and
+`bridge_fsck` retain their names, defaults, schemas, return values, and error behavior.
+The interactive setup wizard remains a CLI-only operator flow.
+
 ## `bridge fsck` audits real offline state
 
 `rebar bridge fsck` now returns exactly `unknown_event_types`, `binding_drift`, and

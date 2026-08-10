@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge/control.schema.json",
+  "title": "BridgeControl",
+  "description": "Result of a durable bridge pause or resume control operation.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["state"],
+  "properties": {
+    "state": { "enum": ["paused", "resumed"] },
+    "reason": { "type": "string" },
+    "who": { "type": "string" },
+    "paused_at": { "type": "string" }
+  }
+}

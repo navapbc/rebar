@@ -37,6 +37,9 @@ def test_readonly_hides_write_tools(monkeypatch: pytest.MonkeyPatch) -> None:
         "reopen_ticket",
         "set_file_impact",
         "set_verify_commands",
+        "bridge_sync",
+        "bridge_pause",
+        "bridge_resume",
     ):
         assert write_tool not in names, write_tool
     # WS5d: quality-gate + file-impact READ tools stay exposed in readonly mode.

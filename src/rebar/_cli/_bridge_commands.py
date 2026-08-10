@@ -12,7 +12,6 @@ and engine environment.
 from __future__ import annotations
 
 import argparse
-import datetime
 import importlib
 import importlib.util
 import json
@@ -222,13 +221,6 @@ def _passthrough_help(command: str) -> int:
     return 0
 
 
-def _pause_remote(root: str) -> str:
-    """Resolve the configured tickets remote for the reconciler control ref."""
-    from rebar.config import tickets_remote
-
-    return tickets_remote(root)
-
-
 def _ref_lock_module():
     """Load the engine-scoped ref-lock module for the bridge control verbs."""
     from rebar._engine import engine_dir
@@ -248,37 +240,20 @@ def _ref_lock_module():
 
 def _pause_or_resume(command: str, reason: str | None = None) -> int:
     """Set or clear the reconciler pause ref through its observed-OID CAS API."""
-    from rebar import config
+    import rebar
+    from rebar._errors import RebarError
 
-    root = str(config.repo_root())
-    remote = _pause_remote(root)
-    if subprocess.run(
-        ["git", "-C", root, "remote", "get-url", remote], capture_output=True, check=False
-    ).returncode:
-        sys.stderr.write(f"Error: bridge pause/resume requires configured remote {remote!r}\n")
-        return 1
-    ref_lock = _ref_lock_module()
     try:
         if command == "resume":
-            if not ref_lock.clear_gate(Path(root), remote=remote):
+            from rebar._lib_ops import _bridge_resume_operation
+
+            _result, changed = _bridge_resume_operation()
+            if not changed:
                 sys.stdout.write("Bridge reconciliation is already resumed.\n")
             return 0
-        from rebar._commands.identity import _git_email
-
-        who = _git_email(root)
-        if who is None:
-            sys.stderr.write("Error: bridge pause requires a configured git user.email\n")
-            return 1
-        paused_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-        ref_lock.set_pause(
-            Path(root),
-            reason=reason or "",
-            who=who,
-            paused_at=paused_at.isoformat().replace("+00:00", "Z"),
-            remote=remote,
-        )
+        rebar.bridge_pause(reason or "")
         return 0
-    except (ref_lock.RefLockError, ref_lock.RefLockTimeoutError) as exc:
+    except (RebarError, ValueError) as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
 

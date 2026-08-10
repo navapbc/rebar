@@ -22,11 +22,13 @@ import importlib.util
 import json
 import os
 import sys
-import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from pathlib import Path
+
+from rebar_reconciler._heartbeat import Heartbeat as _Heartbeat
 
 # Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
 # in-package ``rebar.*`` store/reducer at runtime. The supported launchers
@@ -66,6 +68,16 @@ class _Disposition(Enum):
         self.state = state
         self.canonical_exit = canonical_exit
         self.legacy_exit = legacy_exit
+
+
+@dataclass(frozen=True)
+class PassResult:
+    """One classified pass before a route collapses it to a process exit."""
+
+    disposition: _Disposition
+    details: dict[str, object]
+    legacy_message: str | None = None
+    canonical_message: str | None = None
 
 
 def _finish_disposition(
@@ -345,87 +357,6 @@ def _purge_committed_reconciler_locks(repo_root: Path) -> None:
         print(f"WARN: legacy .reconciler-* purge skipped: {exc!r}", file=sys.stderr)
 
 
-class _Heartbeat:
-    """Daemon-thread lease heartbeat for the ref-lock backend (epic dust-troth-naval).
-
-    Renews the pass lease every ``interval`` seconds via
-    ``advisory.renew_pass_lock``. On a lost/stolen lease it sets ``lock_lost`` and
-    stops (a daemon thread cannot raise into the main thread — the main pass polls
-    ``lock_lost`` at per-mutation checkpoints and aborts). Other (transient) renew
-    errors are logged and retried on the next tick. The latest oid is published
-    back so the ``finally`` release CASes against the right value.
-    """
-
-    def __init__(self, advisory_mod, pass_id: str, repo_root: Path, oid: str, interval: int):
-        self._advisory = advisory_mod
-        self._pass_id = pass_id
-        self._repo_root = repo_root
-        self._oid = oid
-        self._interval = interval
-        self.lock_lost = threading.Event()
-        self._stop = threading.Event()
-        self._oid_lock = threading.Lock()
-        self._thread: threading.Thread | None = None
-        self._lease_lost_cls = advisory_mod._load_ref_lock().LeaseLostError
-
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="reconciler-heartbeat", daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        while not self._stop.wait(self._interval):
-            try:
-                new_oid = self._advisory.renew_pass_lock(
-                    self._pass_id, self._repo_root, self.current_oid()
-                )
-                with self._oid_lock:
-                    self._oid = new_oid
-            except self._lease_lost_cls:
-                # Bug 4afc-33cc-9e4f-4fe2: probe what the ref actually holds NOW.
-                # Reporting only that the lease is gone leaves "stolen by whom"
-                # unanswerable — the ambiguity that made that bug's lease losses
-                # unclassifiable after the fact. A DIFFERENT holder is a real takeover;
-                # our own oid still on the ref means the CAS failed for another reason.
-                # Strictly diagnostic: it must never mask or delay the abort, and a
-                # probe that fails says so rather than reporting nothing (silence would
-                # read as "no holder", which is the ambiguity being removed).
-                try:
-                    _rl = self._advisory._load_ref_lock()
-                    _st = _rl.read(
-                        self._repo_root,
-                        _rl.LOCK_REF,
-                        remote=self._advisory._lock_remote(self._repo_root),
-                    )
-                    held = (
-                        f"ref now oid={_st.oid} holder={_st.holder!r} fence={_st.fence}"
-                        if _st is not None
-                        else "ref now ABSENT"
-                    )
-                except Exception as exc:  # noqa: BLE001 — diagnostic must not mask the abort
-                    held = f"ref state UNREADABLE ({exc!r})"
-                print(
-                    f"ERROR: reconcile heartbeat lost the lease "
-                    f"(pass_id={self._pass_id!r}, we held {self.current_oid()}; {held})"
-                    f" — aborting pass",
-                    file=sys.stderr,
-                )
-                self.lock_lost.set()
-                return
-            except Exception as exc:  # noqa: BLE001 — transient renew error: log + retry
-                print(
-                    f"WARN: reconcile heartbeat renew failed (retrying): {exc!r}", file=sys.stderr
-                )
-
-    def current_oid(self) -> str:
-        with self._oid_lock:
-            return self._oid
-
-    def stop(self) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=self._interval + 5)
-
-
 def _optional_request_kwargs(
     selection_kind: str | None,
     selection_ids: set[str] | None,
@@ -442,27 +373,25 @@ def _optional_request_kwargs(
     return kwargs
 
 
-def _reconcile_exception_exit(
+def _reconcile_exception_result(
     exc: Exception,
     *,
-    route: str | None,
     reschedule_error_cls,
     lock_lost_cls,
-) -> int:
-    """Classify one failed reconcile_once call, then translate it by route."""
+) -> PassResult:
+    """Classify one failed reconcile_once call without choosing an adapter."""
+    details: dict[str, object] = {"error": str(exc)}
     if type(exc).__name__ == "SelectionStaleError":
-        return _finish_disposition(
-            _Disposition.INVALID_INVOCATION, route, legacy_message=f"ERROR: {exc}"
-        )
+        return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=f"ERROR: {exc}")
     if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
         message = f"RESCHEDULE: reconcile_once signalled reschedule: {exc}"
-        return _finish_disposition(_Disposition.RESCHEDULE, route, legacy_message=message)
+        return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)
     if lock_lost_cls is not None and isinstance(exc, lock_lost_cls):
         message = f"RESCHEDULE: pass lock lease lost mid-pass: {exc}"
-        return _finish_disposition(_Disposition.RESCHEDULE, route, legacy_message=message)
-    return _finish_disposition(
+        return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)
+    return PassResult(
         _Disposition.OPERATIONAL_FAILURE,
-        route,
+        details,
         legacy_message=f"ERROR: reconcile_once raised: {exc}",
     )
 
@@ -486,6 +415,56 @@ def run_pass(
 
     A missing *pass_id* retains the legacy helper behavior of generating one.
     """
+    result = run_pass_result(
+        repo_root=repo_root,
+        pass_id=pass_id,
+        target_mode=target_mode,
+        filter_local_ids=filter_local_ids,
+        selection_kind=selection_kind,
+        selection_ids=selection_ids,
+        max_changes=max_changes,
+        route=route,
+        abort_check=abort_check,
+    )
+    details = result.details
+    if details.get("no_write"):
+        if route not in {"preview", "sync"}:
+            print(
+                f"OK: dry-run computed {details.get('mutation_count', 0)} mutations "
+                "(0 applied, no writes)",
+                file=sys.stderr,
+            )
+        print(json.dumps(details))
+    elif route not in {"preview", "sync"} and details and result.legacy_message is None:
+        computed = details.get("mutation_count", 0)
+        applied = details.get("mutations_applied", computed)
+        failures = details.get("mutation_failures", 0)
+        if computed == 0 and applied == 0:
+            print("OK: steady-state pass converged — 0 mutations")
+        elif failures == 0:
+            print(f"OK: applied {applied} of {computed} mutations")
+        else:
+            print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
+    return _finish_disposition(
+        result.disposition,
+        route,
+        legacy_message=result.legacy_message,
+        canonical_message=result.canonical_message,
+    )
+
+
+def run_pass_result(
+    repo_root: Path | None = None,
+    pass_id: str | None = None,
+    target_mode=None,
+    filter_local_ids: set[str] | None = None,
+    selection_kind: str | None = None,
+    selection_ids: set[str] | None = None,
+    max_changes: int | None = None,
+    route: str | None = None,
+    abort_check=None,
+) -> PassResult:
+    """Execute and classify one pass, returning its structured detail in-process."""
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
@@ -493,7 +472,7 @@ def run_pass(
     if reconcile is None:
         if route not in {"preview", "sync"}:
             print("OK: no-op (reconcile.py not present in this deployment)")
-        return _finish_disposition(_Disposition.CONVERGED, route)
+        return PassResult(_Disposition.CONVERGED, {})
 
     applier = _try_load_step("applier")
 
@@ -521,49 +500,25 @@ def run_pass(
             **({"route": route} if route is not None else {}),
         )
     except Exception as exc:  # noqa: BLE001 — classification owns the process contract
-        return _reconcile_exception_exit(
+        return _reconcile_exception_result(
             exc,
-            route=route,
             reschedule_error_cls=reschedule_error_cls,
             lock_lost_cls=lock_lost_cls,
         )
 
-    computed = result.get("mutation_count", 0)
-    applied = result.get("mutations_applied", computed)
     failures = result.get("mutation_failures", 0)
 
-    # No-write (cap-0) modes (dry-run / reconcile-check via reconcile_once):
-    # emit the COMPUTED plan as JSON to STDOUT so library callers
-    # (rebar.reconcile) and MCP receive the full plan. The human-readable
-    # OK/RECON summary goes to STDERR so it does not corrupt the JSON payload.
-    # Writing-mode output shape is unchanged (OK line on stdout, no JSON).
     if result.get("no_write"):
-        import json as _json
-
-        if route not in {"preview", "sync"}:
-            print(
-                f"OK: dry-run computed {computed} mutations (0 applied, no writes)",
-                file=sys.stderr,
-            )
-        print(_json.dumps(result))
-        return _finish_disposition(_Disposition.CONVERGED, route)
-
-    if route not in {"preview", "sync"}:
-        if computed == 0 and applied == 0:
-            print("OK: steady-state pass converged — 0 mutations")
-        elif failures == 0:
-            print(f"OK: applied {applied} of {computed} mutations")
-        else:
-            print(f"OK: applied {applied} of {computed} mutations ({failures} failed)")
+        return PassResult(_Disposition.CONVERGED, result)
     # Per-mutation failures are operational failures; successful fallbacks are
     # counted as applied by reconcile.py and therefore remain converged.
     if failures > 0:
-        return _finish_disposition(
+        return PassResult(
             _Disposition.OPERATIONAL_FAILURE,
-            route,
+            result,
             canonical_message=f"ERROR: reconcile completed with {failures} mutation failures",
         )
-    return _finish_disposition(_Disposition.CONVERGED, route)
+    return PassResult(_Disposition.CONVERGED, result)
 
 
 def _resolve_request_selection(request) -> tuple[set[str] | None, str | None]:
@@ -610,6 +565,13 @@ def _run_with_last_pass(
     if getattr(target_mode, "value", None) == "dry-run":
         return run()
     return finalize(repo_root, pass_id, run)
+
+
+def _acquire_or_adopt_pass_lock(advisory, pass_id: str, repo_root: Path, adopted: str | None):
+    """Adopt a lock acquired during steal resolution, or acquire it once here."""
+    if adopted is not None:
+        return adopted
+    return advisory.acquire_pass_lock(pass_id, repo_root)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -729,10 +691,7 @@ def main(argv: list[str] | None = None) -> int:
     from rebar_reconciler import last_pass
 
     try:
-        if pre_acquired_oid is not None:
-            lock_oid = pre_acquired_oid
-        else:
-            lock_oid = advisory.acquire_pass_lock(pass_id, repo_root)
+        lock_oid = _acquire_or_adopt_pass_lock(advisory, pass_id, repo_root, pre_acquired_oid)
         acquired = True
         if lock_oid is not None and hasattr(advisory, "_load_ref_lock"):
             ref_lock = advisory._load_ref_lock()
