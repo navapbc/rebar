@@ -241,6 +241,29 @@ def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:
     schemas.validator(schemas.BRIDGE_FSCK).validate(rebar.bridge_fsck(repo_root=r))
 
 
+def test_bridge_fsck_schema_pins_new_required_fields_and_integrity_kinds() -> None:
+    schema = schemas.load("bridge_fsck")
+    assert set(schema["required"]) == {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+    assert set(schema["properties"]) == {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+    integrity_items = schema["properties"]["store_integrity"]["items"]["oneOf"]
+    assert {item["properties"]["kind"]["const"] for item in integrity_items} == {
+        "forward_missing_jira_key",
+        "forward_missing_reverse",
+        "forward_reverse_mismatch",
+        "reverse_missing_forward",
+        "reverse_nonconfirmed_forward",
+        "reverse_jira_key_mismatch",
+    }
+
+
 # ── signing result shapes (sign / verify-signature) ───────────────────────────
 def test_sign_and_verify_signature_shapes(rebar_repo: Path) -> None:
     r = str(rebar_repo)
