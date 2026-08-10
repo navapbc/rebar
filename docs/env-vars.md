@@ -147,7 +147,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_snapshot/git_fetch.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_snapshot/git_fetch.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py`, `src/rebar/opcert_service/jobs.py` |  |
-| `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact.py` |  |
+| `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/llm/usage_log.py` |  |
 | `REBAR_VERIFY_OVERLAP_ENABLED` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` |
