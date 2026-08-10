@@ -305,10 +305,9 @@ class NextBatch(TypedDict):
 class BridgeFsck(TypedDict):
     """Return shape of the `bridge_fsck` output schema."""
 
-    orphaned: list[dict[str, Any]]
-    duplicates: list[dict[str, Any]]
-    stale: list[dict[str, Any]]
-    binding_drift: NotRequired[dict[str, Any]]
+    unknown_event_types: list[str]
+    binding_drift: dict[str, Any]
+    store_integrity: list[Any]
 
 
 class WorkflowRun(TypedDict):

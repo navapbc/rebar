@@ -482,7 +482,6 @@ def cmd_heartbeat_alert(
 
 _DRIFT_CELLS = (
     "would_terminal",
-    "dangling",
     "local_gone",
     "unbound_jira",
     "retired_overlap",
@@ -497,17 +496,37 @@ def cmd_check_binding_drift(
 ) -> int:
     gh_output = environ["GITHUB_OUTPUT"]
 
-    _rc, stdout, _stderr = runner(["rebar", "bridge", "fsck", "--output", "json"])
+    rc, stdout, stderr = runner(["rebar", "bridge", "fsck", "--output", "json"])
+
+    # Exit 1 is the expected findings signal and still carries the JSON report.
+    # Exit 2 is an operational scan failure; never reinterpret it as an empty
+    # report, which could incorrectly close an existing alert ticket.
+    if rc not in {0, 1}:
+        print(f"::error::bridge fsck failed operationally (exit {rc}): {stderr or 'no diagnostic'}")
+        return 1
 
     try:
-        data: dict = json.loads(stdout) if stdout.strip() else {}
+        decoded = json.loads(stdout)
     except (json.JSONDecodeError, ValueError):
-        data = {}
+        print("::error::bridge fsck returned invalid JSON")
+        return 1
+    if not isinstance(decoded, dict) or not {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }.issubset(decoded):
+        print("::error::bridge fsck JSON is missing the required audit fields")
+        return 1
+    data: dict = decoded
 
     bd = data.get("binding_drift") or {}
     counts = {c: len(bd.get(c, [])) for c in _DRIFT_CELLS}
-    total = sum(counts.values())
-    summary = ", ".join(f"{c}={counts[c]}" for c in _DRIFT_CELLS if counts[c]) or "none"
+    integrity_count = len(data.get("store_integrity") or [])
+    total = sum(counts.values()) + integrity_count
+    summary_parts = [f"{c}={counts[c]}" for c in _DRIFT_CELLS if counts[c]]
+    if integrity_count:
+        summary_parts.append(f"store_integrity={integrity_count}")
+    summary = ", ".join(summary_parts) or "none"
 
     _append_outputs(
         gh_output,
@@ -534,12 +553,12 @@ def _drift_description(
     return textwrap.dedent(f"""\
         ## Reproduction Steps
 
-        Run `rebar bridge fsck` — the offline binding-drift arm (epic 3006-e198,
-        the convergence parity oracle) reports a non-empty `binding_drift` section.
+        Run `rebar bridge fsck` — the offline bridge audit reports binding drift or
+        a forward/reverse binding-store integrity inconsistency.
 
         ## Expected vs Actual
 
-        - **Expected:** `binding_drift` is empty (every bound pair converged).
+        - **Expected:** `binding_drift` and `store_integrity` are empty.
         - **Actual:** {drift_summary}
         - **Detected at:** {detected_at}
         - **Canary run:** {run_url}
@@ -548,10 +567,11 @@ def _drift_description(
 
         - [ ] Each reported drift is triaged (would_terminal → local archive/delete
               to propagate; dangling → confirmed 404 GC; unbound_jira → adopt or
-              archive the Jira-native issue; local_gone → investigate).
-        - [ ] `rebar bridge fsck` reports an empty `binding_drift` section.
+              archive the Jira-native issue; local_gone → investigate; store_integrity
+              → repair the inconsistent forward/reverse index entries).
+        - [ ] `rebar bridge fsck` reports empty `binding_drift` and `store_integrity`.
 
-        This ticket auto-closes when bridge fsck next reports zero binding drift.""")
+        This ticket auto-closes when bridge fsck next reports zero audit findings.""")
 
 
 def cmd_binding_drift_alert(
@@ -582,7 +602,7 @@ def cmd_binding_drift_alert(
     # persistent store state that cannot self-heal between runs, and the fsck
     # oracle never fails the canary run, so run conclusions carry no drift signal.
     if drift_found == "true" and not tid:
-        title = f"[binding-drift] bridge fsck found {drift_total} unhealed binding drift(s)"
+        title = f"[binding-drift] bridge fsck found {drift_total} audit finding(s)"
         desc = _drift_description(drift_total, drift_summary, ts, run_url)
         rc, _out, stderr = runner(
             [
@@ -608,7 +628,7 @@ def cmd_binding_drift_alert(
             print(f"Drift ticket {tid} already has a marker comment <24h old — skipping.")
             return 0
         body = (
-            f"{_ALERT_MARKER} Binding drift still present as of {ts}:"
+            f"{_ALERT_MARKER} Bridge audit findings still present as of {ts}:"
             f" {drift_summary}. Run: {run_url}"
         )
         rc, _out, stderr = runner(["rebar", "comment", tid, body])
@@ -616,8 +636,8 @@ def cmd_binding_drift_alert(
             print(stderr)
             return rc
     elif drift_found == "false" and tid:
-        reason = f"Fixed: bridge fsck reports zero binding drift at {ts}."
-        force_close = f"Fixed: zero binding drift at {ts} (bot alert auto-close)."
+        reason = f"Fixed: bridge fsck reports zero audit findings at {ts}."
+        force_close = f"Fixed: zero bridge audit findings at {ts} (bot alert auto-close)."
         rc, _out, stderr = runner(
             [
                 "rebar",

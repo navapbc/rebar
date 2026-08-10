@@ -16,6 +16,12 @@ pytest.importorskip("pydantic")
 from rebar._mcp_models import BridgeFsckOut
 
 
-def test_bridge_fsck_out_declares_binding_drift() -> None:
+def test_bridge_fsck_out_declares_the_new_top_level_contract() -> None:
     assert BridgeFsckOut is not None
-    assert "binding_drift" in BridgeFsckOut.model_fields
+    expected_fields = {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+    assert set(BridgeFsckOut.model_fields) == expected_fields
+    assert set(BridgeFsckOut.model_json_schema()["required"]) == expected_fields

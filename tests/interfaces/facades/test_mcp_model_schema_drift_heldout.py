@@ -64,12 +64,21 @@ def test_verify_signature_required_set_matches_schema() -> None:
 
 
 # ── end-to-end: the real advertised MCP outputSchema ──────────────────────────
-def test_mcp_bridge_fsck_outputschema_advertises_binding_drift() -> None:
+def test_mcp_bridge_fsck_outputschema_advertises_exact_new_contract() -> None:
     from rebar.mcp_server import build_server
 
     tools = {t.name: t for t in asyncio.run(build_server().list_tools())}
     out = tools["bridge_fsck"].outputSchema or {}
-    assert "binding_drift" in out.get("properties", {}), (
-        "the client-facing MCP outputSchema for bridge_fsck still under-declares "
-        "binding_drift, a field the tool always returns"
-    )
+    assert set(out.get("properties", {})) == {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+    assert set(out.get("required", [])) == {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+
+    item_schema = out["properties"]["store_integrity"]["items"]
+    assert item_schema["type"] == "object"
