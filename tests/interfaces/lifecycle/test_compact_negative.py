@@ -11,10 +11,15 @@ review flagged as untested:
   * ``compact`` surfaces a git-failure (the staged-commit ``git`` call fails) as a
     non-zero exit, again without corrupting the store.
 
-Both error paths are induced at the cleanest module seam: ``compact.lock.acquire``
-(the single lock entry the critical section uses) and ``compact._git`` (the single
-git shim every commit goes through). After each, the store still reduces and the
-ticket keeps its original status.
+Both error paths are induced at the cleanest module seam: ``lock.acquire`` (the single
+lock entry the critical section uses) and ``compact_txn._git`` (the single git shim
+every commit goes through). After each, the store still reduces and the ticket keeps
+its original status.
+
+Task b2bb moved the locked critical section out of ``compact`` into ``compact_txn``, so
+both seams are patched where they now live — ``_compact_locked`` reads ``compact_txn``'s
+module globals, and a patch applied to the ``compact`` facade would silently not take
+(the git-failure case would then exit 0 and the assertion would be vacuous).
 """
 
 from __future__ import annotations
@@ -28,6 +33,7 @@ import pytest
 
 import rebar
 from rebar._commands import compact as _compact
+from rebar._commands import compact_txn as _compact_txn
 from rebar._store import lock as _lock
 from rebar.reducer._cache import RETIRED_SUFFIX
 
@@ -134,7 +140,7 @@ def test_compact_lock_timeout_is_surfaced_without_corruption(
     def _boom(*_a: object, **_k: object) -> object:
         raise _lock.LockTimeout(30)
 
-    monkeypatch.setattr(_compact.lock, "acquire", _boom)
+    monkeypatch.setattr(_lock, "acquire", _boom)
     rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
     err = capsys.readouterr().err
     assert rc == 1
@@ -151,7 +157,7 @@ def test_compact_git_failure_is_surfaced(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     tid = _seed(rebar_repo, "gitfail")
-    real_git = _compact._git
+    real_git = _compact_txn._git
 
     def _fail_on_add(tracker: str, *args: str) -> subprocess.CompletedProcess:
         # Fail the staged-add inside the locked critical section; let gc.auto / diff
@@ -160,7 +166,7 @@ def test_compact_git_failure_is_surfaced(
             return subprocess.CompletedProcess(args, 1, "", "git add boom")
         return real_git(tracker, *args)
 
-    monkeypatch.setattr(_compact, "_git", _fail_on_add)
+    monkeypatch.setattr(_compact_txn, "_git", _fail_on_add)
     rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
     err = capsys.readouterr().err
     assert rc == 1
