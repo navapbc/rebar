@@ -493,3 +493,56 @@ def run_git_write(
             result.stderr,
         )
     return result
+
+
+# ── stranded-index classification (bug 2fa6) ────────────────────────────────────────────
+# The tickets branch has a KNOWN SHAPE: per-ticket event directories (several id styles —
+# `b636-f31a-d590-4642`, `jira-reb-1001`) plus a small set of store dotfiles. Rather than
+# pattern-match those styles, ASK THE BRANCH: a path whose top-level component is absent from
+# HEAD's tree does not belong to the store at all.
+#
+# This matters because a stranded unmerged index blocks EVERY store write. Before this, the
+# recovery had only two buckets — reconciler-regenerable (discard) and everything-else
+# (refuse as ticket data) — so paths that were NEITHER wedged the store until a human
+# intervened with raw git. That happened when a `git stash pop` in the tickets worktree
+# applied a stash created in a SOURCE worktree (the stash stack is shared across worktrees),
+# dropping `src/…` and `.rebar/…` into the store.
+
+
+def path_is_foreign_to_branch(tracker: str, path: str) -> bool:
+    """True when ``path``'s top-level component is not tracked on the checked-out branch.
+
+    Such a path CANNOT be ticket data, so a stranded conflict on it is safe to discard.
+    Conservative by construction: anything the branch does track is treated as store data and
+    left for a human. Fails CLOSED (returns False) if git cannot answer.
+    """
+    top = path.split("/", 1)[0]
+    if not top:
+        return False
+    probe = run_git(tracker, "cat-file", "-e", f"HEAD:{top}", check=False)
+    return probe.returncode != 0
+
+
+# raw-git-ok: locked store seam internal — this is the store's OWN stranded-index recovery,
+# invoked from event_append under the write lock. It is the sanctioned alternative to an
+# operator running `git rm` / `git checkout` in the tracker by hand, which is what this bug
+# (2fa6) exists to design out.
+def discard_unmerged_paths(tracker: str, regenerable: list[str], foreign: list[str]) -> None:
+    """Clear stranded unmerged entries: drop every stage from the index, then restore the
+    REGENERABLE ones from HEAD (the reconciler rebuilds their content) and delete the FOREIGN
+    ones outright (HEAD has no copy to restore — they never belonged to this branch)."""
+    both = [*regenerable, *foreign]
+    if not both:
+        return
+    run_git(  # raw-git-ok: locked store seam internal
+        tracker, "rm", "-q", "--cached", "--", *both, check=False
+    )
+    if regenerable:
+        run_git(  # raw-git-ok: locked store seam internal
+            tracker, "checkout", "HEAD", "--", *regenerable, check=False
+        )
+    for rel in foreign:
+        try:
+            os.remove(os.path.join(tracker, rel))
+        except OSError:
+            pass
