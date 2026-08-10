@@ -1,6 +1,7 @@
 """The primary ``rebar bridge`` command group and reconciler launcher.
 
-``bridge`` intentionally presents five stable operator actions. Its parser
+``bridge`` presents the stable operator actions for reconciliation, auditing,
+access checks, and setup. Its parser
 owns nested-command discovery and argument validation, then forwards the
 validated canonical child arguments to the reconciler.
 The launcher is shared with the established ``reconcile`` spelling so that
@@ -56,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{preview,sync,status,pause,resume}",
+        metavar="{preview,sync,status,pause,resume,fsck,check-access,setup}",
     )
     preview = commands.add_parser(
         "preview",
@@ -104,6 +105,24 @@ def _parser() -> argparse.ArgumentParser:
         help="Resume scheduled reconciliation.",
         description="Resume scheduled reconciliation.",
     )
+    fsck = commands.add_parser(
+        "fsck",
+        add_help=False,
+        help="Audit bridge mappings (orphans, duplicates, stale SYNCs).",
+    )
+    fsck.add_argument("args", nargs=argparse.REMAINDER)
+    check_access = commands.add_parser(
+        "check-access",
+        add_help=False,
+        help="Check live Jira access with a create/search/delete round-trip.",
+    )
+    check_access.add_argument("args", nargs=argparse.REMAINDER)
+    setup = commands.add_parser(
+        "setup",
+        add_help=False,
+        help="Interactively configure and validate Jira access.",
+    )
+    setup.add_argument("args", nargs=argparse.REMAINDER)
     return parser
 
 
@@ -151,6 +170,56 @@ def _launch_bridge_command(command: str, parsed: argparse.Namespace) -> int:
     if getattr(parsed, "except_ids", None) is not None:
         args += ["--except", parsed.except_ids]
     return launch_reconciler(args, default_mode=None)
+
+
+def bridge_fsck_cli(argv: Sequence[str]) -> int:
+    """Run the established bridge audit with its existing auto-init policy."""
+    from rebar import config
+
+    args = list(argv)
+    is_help = bool(args and args[0] in {"--help", "-h"})
+    if not is_help and not config.tracker_dir_override():
+        from rebar._cli._init import ensure_initialized
+
+        ensure_initialized(init_only=False)
+    from rebar._engine_support import bridge_fsck
+
+    return bridge_fsck.main(args)
+
+
+def _passthrough(command: str, argv: Sequence[str]) -> int:
+    """Route canonical bridge children through their established implementations."""
+    if command == "fsck":
+        return bridge_fsck_cli(argv)
+    if command == "check-access":
+        from rebar._cli import _bridge_probe
+
+        return _bridge_probe(list(argv))
+    if command == "setup":
+        from rebar._cli._jira_onboard import jira_onboard
+
+        return jira_onboard(list(argv), prog="rebar bridge setup")
+    raise AssertionError(f"unhandled bridge pass-through command: {command!r}")
+
+
+def _passthrough_help(command: str) -> int:
+    """Render canonical child help without invoking an operational implementation."""
+    if command == "fsck":
+        text = (
+            "Usage: rebar bridge fsck [--tickets-tracker=<path>] [--output json]\n\n"
+            "Audit bridge mappings for orphaned mappings, duplicate Jira keys, "
+            "stale SYNCs, and binding drift.\n"
+        )
+    elif command == "check-access":
+        text = (
+            "Usage: rebar bridge check-access\n\n"
+            "Check live Jira access with a create/label/search/delete round-trip. "
+            "Requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN; JIRA_PROJECT is optional.\n"
+        )
+    else:
+        raise AssertionError(f"unhandled bridge help command: {command!r}")
+    sys.stdout.write(text)
+    return 0
 
 
 def _pause_remote(root: str) -> str:
@@ -252,6 +321,10 @@ def bridge_cli(argv: Sequence[str]) -> int:
     if not args:
         sys.stdout.write(_group_help())
         return 0
+    if args[0] in {"fsck", "check-access", "setup"}:
+        if args[0] != "setup" and args[1:] in (["--help"], ["-h"]):
+            return _passthrough_help(args[0])
+        return _passthrough(args[0], args[1:])
 
     parser = _parser()
     try:

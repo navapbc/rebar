@@ -41,7 +41,7 @@ entries at startup.
    miss. Retirement writes to `bindings-retired.json` and is re-recoverable if the
    marker/label reappears.
 3. **Identity writes stay audited (L9).** No new path — including a unified
-   `bridge-fsck` that now *reads* `bindings.json` — may write a `rebar-id` label
+   `bridge fsck` that now *reads* `bindings.json` — may write a `rebar-id` label
    outside the three audited leaves.
 4. **Adoption of an unbound Jira issue MUST run the identity gates FIRST** (the
    `5854` policy is "adopt", but gated):
@@ -66,3 +66,11 @@ entries at startup.
   circuit breaker (ADR-adjacent) backstops a mass-retire.
 - Retirement must never become a hard delete; recovery from `bindings-retired.json`
   must survive the redesign.
+
+## Amendment: canonical audit vocabulary
+
+The mapping audit is canonically invoked as `rebar bridge fsck`. The historical
+`rebar bridge-fsck` spelling remains a compatibility alias routed through the same
+implementation and auto-initialization policy. This vocabulary change does not alter
+the read-only identity boundary in decision 3 or the public `bridge_fsck` library/MCP
+symbol names.

@@ -117,7 +117,7 @@ guarantee `2`).
 | Subcommand | success | miss | concurrency | notes |
 |------------|:------:|:----:|:-----------:|-------|
 | `archive` | 0 | 1 | — | idempotent on an already-archived ticket (still 0) |
-| `bridge-fsck` | 0 | — | — | audit; no ticket id |
+| `bridge fsck` | 0 | — | — | audit; no ticket id |
 | `bridge` | 0 | — | — | no ticket id; canonical `preview`/`sync` use 0/1/2 as documented above; `pause`/`resume` control scheduled reconciliation |
 | `check-ac` | 0 | 1 | — | **gate**: 0=has-AC, 1=missing-AC **or** not-found |
 | `claim` | 0 | 1 | 10 | 10 when the ticket is not open (already claimed) |
@@ -157,7 +157,7 @@ guarantee `2`).
 | `untag` | 0 | 1 | — | removing an absent tag is still 0 |
 | `validate` | **0-4** | — | — | **exception**: exit is a health-severity bucket, not the standard contract; takes **no** ticket id (passing one → 1) |
 | `audit` | 0 | — | — | no ticket id; `audit show <ticket>` reads the audit trail; unknown subcommand or bad option → 2; `audit serve` with missing `[ui]` extra → 1 |
-| `bridge-probe` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
+| `bridge check-access` | 0 | — | — | no ticket id; subprocess passthrough (jira-capability-probe.py); 0 = PROBE_PASS, non-zero = PROBE_FAIL |
 | `config` | 0 | — | — | no ticket id; reads or writes rebar config; error → 1 |
 | `criteria` | 0 | — | — | no ticket id; `criteria eval <id>` runs calibration fixtures live; empty or missing id → 2; unknown criterion → 1 |
 | `doctor` | 0 | — | — | no ticket id; 0 = no outstanding findings (or all repaired); 1 = findings remain; bad args → 2 |
@@ -168,7 +168,7 @@ guarantee `2`).
 | `idea` | 0 | 1 | — | promotes an `idea` ticket to `open`; bad args → 2 |
 | `identity` | 0 | — | — | no ticket id; shows or configures operator identity; no args → 1; error → 1 |
 | `import` | 0 | — | — | no ticket id; NDJSON ticket import; bad args → 2 |
-| `jira-onboard` | 0 | — | — | no ticket id; interactive Jira config wizard; error or user abort → 1 |
+| `bridge setup` | 0 | — | — | no ticket id; interactive Jira config wizard; error or user abort → 1 |
 | `llm` | 0 | — | — | no ticket id; `llm setup` FakeRunner dry-run; 0 = dry-run OK, 1 = dry-run failed or write error; no subcommand → 1 |
 | `metrics` | 0 | — | — | no ticket id; repo-wide metrics report; bad args → 2 |
 | `prompt` | 0 | — | — | no ticket id; `prompt eval <id>` validates a prompt's eval spec; error → 1; no subcommand → 1 |

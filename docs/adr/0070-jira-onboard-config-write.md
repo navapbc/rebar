@@ -1,10 +1,10 @@
-# ADR 0070: How `rebar jira-onboard` persists Jira config (stdlib-only, never edits pyproject)
+# ADR 0070: How `rebar bridge setup` persists Jira config (stdlib-only, never edits pyproject)
 
 > **Renumbered by story 0743:** previously ADR 0007 (a number shared by 3 ADRs — a collision); reassigned to 0070 to make ADR numbers unique. See [RENUMBERING.md](RENUMBERING.md).
 
 - **Status:** Accepted
-- **Context:** Story *Add interactive `rebar jira-onboard` wizard* (`b5db-7433`). The
-  config READ path (`load_config().jira.*`, `resolve_jira_settings`) and `bridge-probe`
+- **Context:** Story *Add interactive Jira onboarding wizard* (`b5db-7433`). The
+  config READ path (`load_config().jira.*`, `resolve_jira_settings`) and bridge access probe
   already existed; this ADR records the WRITE-path decisions the wizard introduced
   (`rebar.config.write_jira_config`).
 
@@ -58,3 +58,11 @@ standalone `rebar.toml`, a `pyproject.toml` `[tool.rebar.jira]` table, or a lega
   must NOT add a TOML-writer dependency to the core, without revisiting this ADR.
 - If round-trip fidelity (comment preservation) on a shared config file ever becomes a
   real requirement, that is the trigger to reconsider `tomlkit` — but only for that case.
+
+## Amendment: canonical bridge vocabulary
+
+`rebar bridge setup` is now the canonical spelling for this wizard, paired with
+`rebar bridge check-access` for its final validation. The historical `rebar jira-onboard`
+and `rebar bridge-probe` spellings remain compatibility aliases routed through the same
+implementations; the persistence, token handling, validation overlay, and exit behavior
+described by this ADR are unchanged.

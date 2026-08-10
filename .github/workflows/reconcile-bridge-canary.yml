@@ -5,7 +5,7 @@
 # closes the alert ticket when the reconciler recovers.
 #
 # Also runs the binding-drift PARITY ORACLE (epic 3006-e198, child 8de5): each
-# cycle it runs `rebar bridge-fsck` (offline classifier over bindings.json +
+# cycle it runs `rebar bridge fsck` (offline classifier over bindings.json +
 # prev_snapshot.json) and opens/updates/closes a `binding-drift-alert` bug when
 # the `binding_drift` section is non-empty — surfacing unhealed convergence drift.
 #
@@ -193,7 +193,7 @@ jobs:
           python scripts/canary_bridge.py heartbeat-alert
 
       # ── Binding-drift parity oracle (epic 3006-e198, child 8de5) ─────────────
-      # bridge-fsck now reads bindings.json + prev_snapshot.json READ-ONLY and runs
+      # bridge fsck now reads bindings.json + prev_snapshot.json READ-ONLY and runs
       # the convergence classifier offline (would_terminal / dangling / local_gone /
       # unbound_jira / retired_overlap). A non-empty binding_drift section is the
       # PARITY ORACLE every heal is validated against — surface it as a bridge_alert

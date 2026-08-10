@@ -236,7 +236,7 @@ def test_fsck_and_bridge_fsck_shapes(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     schemas.validator(schemas.FSCK).validate(_cli_json("fsck", "--output", "json", cwd=r))
     schemas.validator(schemas.BRIDGE_FSCK).validate(
-        _cli_json("bridge-fsck", "--output", "json", cwd=r)
+        _cli_json("bridge", "fsck", "--output", "json", cwd=r)
     )
     schemas.validator(schemas.BRIDGE_FSCK).validate(rebar.bridge_fsck(repo_root=r))
 

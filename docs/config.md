@@ -277,7 +277,7 @@ A non-https `jira.url` is REJECTED at config load (an `InsecureUrlError`, naming
 cleartext-credential risk) unless `allow_insecure = true`, which downgrades it to a
 warning — the parity of `reconciler.allow_insecure` for the Cloud transport. It governs
 the URL **scheme only** and never relaxes certificate verification. Intended for a
-loopback/trusted test instance; the `rebar jira-onboard` wizard is https-only and will
+loopback/trusted test instance; the `rebar bridge setup` wizard is https-only and will
 not persist a cleartext url.
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).

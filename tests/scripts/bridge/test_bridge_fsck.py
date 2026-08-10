@@ -1,14 +1,14 @@
-"""RED tests for ticket-bridge-fsck.py bridge mapping audit command.
+"""Tests for the canonical ``rebar bridge fsck`` mapping audit command.
 
 These tests are RED — they test functionality that does not yet exist.
-All test functions must FAIL before ticket-bridge-fsck.py is implemented
-and 'bridge-fsck' is registered in the ticket dispatcher.
+The public Python module remains ``bridge_fsck`` while the canonical CLI spelling
+is nested under the bridge command group.
 
 This is a BRIDGE-SPECIFIC fsck (mapping audit, orphans, duplicates, stale
 SYNC events) — distinct from the existing ticket-fsck.sh (JSON validity +
 CREATE presence + index.lock cleanup).
 
-The bridge-fsck command is expected to expose a Python module interface:
+The bridge fsck command exposes a Python module interface:
     audit_bridge_mappings(tickets_tracker: Path) -> dict
         Scan all ticket directories under tickets_tracker, read SYNC event
         files, and return a findings dict with keys:
@@ -23,7 +23,7 @@ The bridge-fsck command is expected to expose a Python module interface:
 
         Findings dict values are empty lists when no issues are found.
 
-CLI behavior (invoked as 'ticket bridge-fsck'):
+CLI behavior (invoked as ``rebar bridge fsck``):
     - Exit 0 when no issues found; outputs a "no issues found" message.
     - Exit non-zero (e.g. 1) when any issue category is non-empty.
     - Outputs the jira_key for each orphaned mapping (contains 'orphan').
@@ -44,7 +44,7 @@ SYNC event format (flat, from sync-event-format.md contract):
     schema with uuid/env_id/timestamp/data fields.
 
 Test: python3 -m pytest tests/scripts/test_bridge_fsck.py -v
-All tests must return non-zero until ticket-bridge-fsck.py is implemented.
+The command returns non-zero when audit findings are present.
 """
 
 from __future__ import annotations
@@ -396,7 +396,7 @@ def test_bridge_fsck_clean_output_when_no_issues(tmp_path: Path, fsck: ModuleTyp
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_bridge_fsck_exit_code(tmp_path: Path, fsck: ModuleType) -> None:
-    """ticket bridge-fsck must exit non-zero when issues exist, exit 0 when clean.
+    """rebar bridge fsck must exit non-zero when issues exist, exit 0 when clean.
 
     This test exercises the CLI entry-point behavior by calling the module's
     main() or run() function with a patched tickets_tracker path, then
@@ -432,7 +432,7 @@ def test_bridge_fsck_exit_code(tmp_path: Path, fsck: ModuleType) -> None:
         exit_code_issues = exc.code if isinstance(exc.code, int) else 1
 
     assert exit_code_issues != 0, (
-        f"ticket bridge-fsck must exit non-zero when issues are present; "
+        f"rebar bridge fsck must exit non-zero when issues are present; "
         f"got exit code: {exit_code_issues}"
     )
 
@@ -459,7 +459,7 @@ def test_bridge_fsck_exit_code(tmp_path: Path, fsck: ModuleType) -> None:
         exit_code_clean = exc.code if isinstance(exc.code, int) else 1
 
     assert exit_code_clean == 0, (
-        f"ticket bridge-fsck must exit 0 when no issues are found; got exit code: {exit_code_clean}"
+        f"rebar bridge fsck must exit 0 when no issues are found; got exit code: {exit_code_clean}"
     )
 
 
@@ -518,7 +518,7 @@ def test_bridge_fsck_mixed_precision_alert_does_not_suppress_stale(
 
 
 def test_bridge_fsck_warns_on_unknown_newer_event_type(tmp_path: Path, fsck: ModuleType) -> None:
-    """P2.3: bridge-fsck surfaces event types newer than this binary (a reconcile
+    """P2.3: bridge fsck surfaces event types newer than this binary (a reconcile
     host on an old binary would push stale state). SYNC must NOT be flagged."""
     tracker = tmp_path / ".tickets-tracker"
     ticket_dir = tracker / "w21-future"

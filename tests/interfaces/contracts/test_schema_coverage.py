@@ -101,7 +101,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "validate": lambda s: ["validate"],
     "fsck": lambda s: ["fsck"],
     "doctor": lambda s: ["doctor"],
-    "bridge-fsck": lambda s: ["bridge-fsck"],
+    "bridge-fsck": lambda s: ["bridge", "fsck"],
     "grounding-info": lambda s: ["grounding-info"],
     "create": lambda s: ["create", "task", "Made by guard"],
     "idea": lambda s: ["idea", "Made by guard"],

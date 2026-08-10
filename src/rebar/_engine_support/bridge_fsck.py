@@ -6,8 +6,9 @@ Scans .tickets-tracker/ for bridge mapping anomalies:
   - Stale SYNC events (most recent SYNC > 30 days old, no BRIDGE_ALERT activity)
   - Unresolved BRIDGE_ALERT counts
 
-Reached in-process via ``rebar.bridge_fsck()`` and the ``rebar bridge-fsck`` CLI
-arm; ``main()`` renders the byte-pinned CLI output (text / --output json).
+Reached in-process via ``rebar.bridge_fsck()`` and the ``rebar bridge fsck`` CLI
+arm; the compatibility ``bridge-fsck`` alias uses the same route. ``main()``
+renders the byte-pinned CLI output (text / --output json).
 
 Module interface:
     audit_bridge_mappings(tickets_tracker: Path) -> dict
@@ -52,7 +53,7 @@ def _read_json(path: Path) -> dict | None:
 def _load_classify():
     """Load the pure reconciler classifier (leaf, stdlib-only) by path.
 
-    bridge-fsck is the SECOND consumer of the one classifier (epic 3006-e198,
+    bridge fsck is the SECOND consumer of the one classifier (epic 3006-e198,
     child 8de5): the live pass ACTS on Decisions, this offline audit REPORTS
     them — healing the report-only/healing fork. classify.py lives under the
     hyphen-free reconciler package, so it is loaded via spec_from_file_location
@@ -106,7 +107,7 @@ def audit_bridge_mappings(
     stale: list[dict] = []
     # Forward-compat (P2.3): event types newer than this binary understands. A
     # reconcile host on an old binary would reduce without them and push stale
-    # state — surface it here (the operator who runs bridge-fsck is exactly that
+    # state — surface it here (the operator who runs bridge fsck is exactly that
     # host). Informational, never a bridge "issue".
     unknown_event_types: set[str] = set()
 
@@ -531,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     parser = argparse.ArgumentParser(
-        description="Audit bridge mappings in the ticket system for anomalies."
+        description="Audit bridge mappings in the ticket system for anomalies.",
     )
     parser.add_argument(
         "--tickets-tracker",
