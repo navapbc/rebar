@@ -10,9 +10,13 @@ observed by an agent or a different rebar version.
 
 ## Bridge maintenance commands are nested under `bridge`
 
-`rebar bridge fsck`, `rebar bridge check-access`, and `rebar bridge setup` are the canonical
-operator spellings for the mapping audit, live Jira capability round-trip, and onboarding
-wizard. `check-access` remains a distinct child, not an fsck option. The public library and MCP
+The primary operator spellings replace the old vocabulary as follows:
+
+- `rebar bridge-fsck` -> `rebar bridge fsck` for the mapping audit;
+- `rebar bridge-probe` -> `rebar bridge check-access` for the live Jira capability round-trip;
+- `rebar jira-onboard` -> `rebar bridge setup` for the onboarding wizard.
+
+`check-access` remains a distinct child, not an fsck option. The public library and MCP
 `bridge_fsck` symbol names are unchanged.
 
 This is an expand-contract migration: `rebar bridge-fsck`, `rebar bridge-probe`, and
