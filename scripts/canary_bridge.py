@@ -497,7 +497,7 @@ def cmd_check_binding_drift(
 ) -> int:
     gh_output = environ["GITHUB_OUTPUT"]
 
-    _rc, stdout, _stderr = runner(["rebar", "bridge-fsck", "--output", "json"])
+    _rc, stdout, _stderr = runner(["rebar", "bridge", "fsck", "--output", "json"])
 
     try:
         data: dict = json.loads(stdout) if stdout.strip() else {}
@@ -534,7 +534,7 @@ def _drift_description(
     return textwrap.dedent(f"""\
         ## Reproduction Steps
 
-        Run `rebar bridge-fsck` — the offline binding-drift arm (epic 3006-e198,
+        Run `rebar bridge fsck` — the offline binding-drift arm (epic 3006-e198,
         the convergence parity oracle) reports a non-empty `binding_drift` section.
 
         ## Expected vs Actual
@@ -549,9 +549,9 @@ def _drift_description(
         - [ ] Each reported drift is triaged (would_terminal → local archive/delete
               to propagate; dangling → confirmed 404 GC; unbound_jira → adopt or
               archive the Jira-native issue; local_gone → investigate).
-        - [ ] `rebar bridge-fsck` reports an empty `binding_drift` section.
+        - [ ] `rebar bridge fsck` reports an empty `binding_drift` section.
 
-        This ticket auto-closes when bridge-fsck next reports zero binding drift.""")
+        This ticket auto-closes when bridge fsck next reports zero binding drift.""")
 
 
 def cmd_binding_drift_alert(
@@ -582,7 +582,7 @@ def cmd_binding_drift_alert(
     # persistent store state that cannot self-heal between runs, and the fsck
     # oracle never fails the canary run, so run conclusions carry no drift signal.
     if drift_found == "true" and not tid:
-        title = f"[binding-drift] bridge-fsck found {drift_total} unhealed binding drift(s)"
+        title = f"[binding-drift] bridge fsck found {drift_total} unhealed binding drift(s)"
         desc = _drift_description(drift_total, drift_summary, ts, run_url)
         rc, _out, stderr = runner(
             [
@@ -616,7 +616,7 @@ def cmd_binding_drift_alert(
             print(stderr)
             return rc
     elif drift_found == "false" and tid:
-        reason = f"Fixed: bridge-fsck reports zero binding drift at {ts}."
+        reason = f"Fixed: bridge fsck reports zero binding drift at {ts}."
         force_close = f"Fixed: zero binding drift at {ts} (bot alert auto-close)."
         rc, _out, stderr = runner(
             [

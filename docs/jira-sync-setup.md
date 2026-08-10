@@ -19,7 +19,7 @@ project-specific lives in GitHub repo Variables/Secrets, not in the files:
 > **necessary** for it to be *reliable* unattended (the canary is the dead-man's
 > switch). The deeper validation — why every step exists — is in
 > [§ Necessary & sufficient](#necessary--sufficient) below. A third, optional
-> `weekly-bridge-fsck` audit is described in [§ Optional hardening](#optional-hardening).
+> weekly `rebar bridge fsck` audit is described in [§ Optional hardening](#optional-hardening).
 
 ---
 
@@ -49,24 +49,24 @@ Add the `[jira]` section so local `rebar bridge preview` / `rebar bridge sync` a
 target. The **secret** `JIRA_API_TOKEN` is **never** a config key — it is supplied
 via the environment only.
 
-> **Recommended: `rebar jira-onboard`.** Rather than hand-editing the file, run the
+> **Recommended: `rebar bridge setup`.** Rather than hand-editing the file, run the
 > interactive wizard — it detects whatever is already set (env or file), prompts only
 > for the missing `url`/`user`/`project`, persists them to a rebar-owned `rebar.toml`
-> `[jira]` section, reminds you the token stays an env var, and runs `bridge-probe` to
+> `[jira]` section, reminds you the token stays an env var, and runs `bridge check-access` to
 > validate end-to-end:
 >
 > ```sh
-> rebar jira-onboard                 # interactive
-> rebar jira-onboard --url https://your-site.atlassian.net \
+> rebar bridge setup                 # interactive
+> rebar bridge setup --url https://your-site.atlassian.net \
 >     --user bridge-bot@your-org.com --project REB   # non-interactive
-> rebar jira-onboard --reset         # clear the persisted [jira] keys
+> rebar bridge setup --reset         # clear the persisted [jira] keys
 > ```
 >
 > The wizard writes the same three keys shown below; the manual edit remains valid if
 > you prefer it (e.g. checking the file into a pyproject-managed repo by hand). The
 > wizard never edits a `pyproject.toml`; it writes/creates `rebar.toml` (which takes
 > read precedence). It never writes the secret token — set `JIRA_API_TOKEN` in your
-> environment (`export JIRA_API_TOKEN=...`) before the `bridge-probe` step.
+> environment (`export JIRA_API_TOKEN=...`) before the `bridge check-access` step.
 
 ```toml
 [jira]
@@ -254,7 +254,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 
 - **The `scripts/jira-pressure-test/` e2e probes** (`e2e_validation_probe.sh`, …) are
   explicitly **manual, live-mutating** tooling (their README says *do not wire into
-  CI*). For automated validation use `mode = reconcile-check` or `rebar bridge-probe`
+  CI*). For automated validation use `mode = reconcile-check` or `rebar bridge check-access`
   instead.
 - **A `BRIDGE_ENV_ID` input** (DSO required one). rebar doesn't: the reconciler stamps
   events with `REBAR_ENV_ID` (default `"reconciler"`) — it's an author label, not a
@@ -465,13 +465,13 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
 
 ## Optional hardening
 
-DSO also ships a **weekly bridge-fsck audit**. rebar exposes the same check as
-`rebar bridge-fsck` (orphaned mappings, duplicate Jira keys, stale SYNCs). To add it,
+DSO also ships a **weekly bridge audit**. rebar exposes the same check as
+`rebar bridge fsck` (orphaned mappings, duplicate Jira keys, stale SYNCs). To add it,
 create a third workflow that mounts the `tickets` worktree (steps 1–2 above) and runs:
 
 ```yaml
       - name: Bridge fsck audit
-        run: rebar bridge-fsck --tickets-tracker=.tickets-tracker --output json
+        run: rebar bridge fsck --tickets-tracker=.tickets-tracker --output json
 ```
 
 on a weekly `cron` (e.g. `0 6 * * 1`), failing the job on anomalies so they surface

@@ -1,4 +1,4 @@
-"""``rebar jira-onboard`` — the interactive Jira onboarding wizard.
+"""``rebar bridge setup`` — the interactive Jira onboarding wizard.
 
 A native intercept (owns its own ``--help``, like ``rebar llm`` / ``reconcile``).
 It DETECTS the current Jira settings the same way the reconciler's
@@ -11,7 +11,7 @@ three
 non-secret values to a rebar-owned ``rebar.toml`` ``[jira]`` section
 (:func:`rebar.config.write_jira_config`), GUIDES the operator that the secret
 ``JIRA_API_TOKEN`` stays an environment variable (never written to disk), and
-VALIDATES end-to-end by invoking ``rebar bridge-probe`` with the resolved settings
+VALIDATES end-to-end by invoking ``rebar bridge check-access`` with the resolved settings
 injected into the probe's environment.
 
 Config persistence + the reconciler read path already existed (story b5db); this
@@ -84,14 +84,14 @@ def _detected_line(name: str, value: str) -> str:
     return f"  {name:<8} {'= ' + value if value else '(missing)'}\n"
 
 
-def jira_onboard(argv: list[str]) -> int:
-    """Entry point for ``rebar jira-onboard`` (see module docstring)."""
+def jira_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
+    """Run the Jira setup wizard under its entrypoint-specific program name."""
     parser = argparse.ArgumentParser(
-        prog="rebar jira-onboard",
+        prog=prog,
         description=(
             "Interactively configure Jira: detect existing settings, prompt for "
             "missing url/user/project, persist them to rebar.toml, and validate via "
-            "bridge-probe. The secret JIRA_API_TOKEN stays an environment variable "
+            "bridge check-access. The secret JIRA_API_TOKEN stays an environment variable "
             "and is never written to a config file."
         ),
     )
@@ -99,7 +99,9 @@ def jira_onboard(argv: list[str]) -> int:
     parser.add_argument("--user", help="Jira account email (non-interactive)")
     parser.add_argument("--project", help="default Jira project key (non-interactive)")
     parser.add_argument(
-        "--no-validate", action="store_true", help="skip the post-onboard bridge-probe check"
+        "--no-validate",
+        action="store_true",
+        help="skip the post-setup bridge check-access check",
     )
     parser.add_argument(
         "--reset",
@@ -179,21 +181,21 @@ def jira_onboard(argv: list[str]) -> int:
             f"delete {target}.)\n"
         )
 
-    # Validate end-to-end via bridge-probe, with the just-persisted settings injected
+    # Validate end-to-end via bridge check-access, with the persisted settings injected
     # into the probe's environment (it reads JIRA_* from os.environ, not the config).
     if args.no_validate:
         sys.stdout.write(
-            "\nSkipped validation (--no-validate). Run `rebar bridge-probe` to verify.\n"
+            "\nSkipped validation (--no-validate). Run `rebar bridge check-access` to verify.\n"
         )
         return 0
     if not token_present and not os.environ.get(_TOKEN_ENV):
         sys.stdout.write(
-            f"\n{_TOKEN_ENV} is not set, so the live bridge-probe check is skipped.\n"
-            f"  Export {_TOKEN_ENV}, then run `rebar bridge-probe` to validate.\n"
+            f"\n{_TOKEN_ENV} is not set, so the live bridge check-access is skipped.\n"
+            f"  Export {_TOKEN_ENV}, then run `rebar bridge check-access` to validate.\n"
         )
         return 0
 
-    sys.stdout.write("\nValidating with bridge-probe...\n")
+    sys.stdout.write("\nValidating with bridge check-access...\n")
     from rebar._cli import _bridge_probe
 
     extra_env = {"JIRA_URL": url, "JIRA_USER": user, "JIRA_PROJECT": project}

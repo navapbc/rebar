@@ -19,7 +19,7 @@ Per-command behaviour is selected by a *profile* (default + allowed set):
     reader  show / list / search   default json   {json, llm}
     ready   ready                   default text   {text, llm, json}
     report  validate / next-batch /
-            summary / check-ac / quality-check / fsck / bridge-fsck
+            summary / check-ac / quality-check / fsck / bridge fsck
                                     default text   {text, json}
 
 Here ``text`` is each command's human/default rendering (for ``ready`` that is

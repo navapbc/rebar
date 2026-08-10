@@ -33,7 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = REPO_ROOT / "docs" / "cli-reference.md"
 CLI_INIT = REPO_ROOT / "src" / "rebar" / "_cli" / "__init__.py"
 
-# Curated one-line descriptions for the 16 intercept-arm commands. These commands own their
+# Curated one-line descriptions for intercept-arm commands. These commands own their
 # own ``--help`` and have no pinned ``help/*.txt``, and their ``--help`` output is not usable
 # programmatically (``rebar enrich --help`` prints JSON, others vary), so the descriptions are
 # hand-maintained here. The key set is drift-gated against ``ladder_intercepts()``.
@@ -60,8 +60,8 @@ INTERCEPT_COMMANDS: dict[str, str] = {
         "self-identity, and add/revoke its signing keys (`identity key add|revoke`)."
     ),
     "jira-onboard": (
-        "Interactive Jira onboarding wizard: detect, prompt for, persist, and validate "
-        "the Jira connection settings."
+        "Compatibility alias for `rebar bridge setup`; routes through the same interactive "
+        "Jira onboarding wizard."
     ),
     "llm": (
         "LLM-framework setup wizard for configuring the optional agent surfaces "
@@ -173,6 +173,11 @@ def render() -> str:
         "commands** are advanced commands handled before the dispatcher; each owns its own "
         "`--help` and is documented here by a curated one-liner — run `rebar <cmd> --help` "
         "for full usage."
+    )
+    lines.append(
+        "Bridge operations use the canonical nested forms `rebar bridge fsck`, "
+        "`rebar bridge check-access`, and `rebar bridge setup`; retained top-level "
+        "spellings are identified below as compatibility aliases."
     )
     lines.append("")
 

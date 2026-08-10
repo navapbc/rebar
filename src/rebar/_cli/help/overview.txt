@@ -25,9 +25,7 @@ Subcommands:
   check-ac      Check one ticket has an Acceptance Criteria block (<ticket_id>; exit 0=pass, 1=fail; AC_CHECK: pass|fail)
   quality-check Check one ticket's dispatch readiness (<ticket_id>; exit 0=pass, 1=fail; QUALITY: pass|fail)
   summary       One-line ticket summary with blocking status for one or more IDs
-  bridge-fsck   Audit bridge mappings (orphans, duplicates, stale SYNCs)
-  bridge-probe  Preflight live Jira capability (create/label/search/delete round-trip)
-  bridge        Preview or apply Jira synchronization
+  bridge        Preview, apply, audit, check, and configure Jira synchronization
   exists        O(1) presence check (exit 0=exists, 1=not found)
   list-descendants  BFS walk from a root ticket, bucketed by type (JSON)
   next-batch    Select next parallel agent batch for an epic [--output json]

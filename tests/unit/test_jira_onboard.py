@@ -1,4 +1,4 @@
-"""b5db: the interactive `rebar jira-onboard` wizard + its config writer.
+"""b5db: the interactive `rebar bridge setup` wizard + its config writer.
 
 Two surfaces under test:
 
@@ -6,9 +6,9 @@ Two surfaces under test:
     that persists url/user/project to a REBAR-OWNED ``rebar.toml`` ``[jira]`` section,
     NEVER editing a user ``pyproject.toml`` and NEVER writing the secret token.
   * ``rebar._cli._jira_onboard.jira_onboard`` — detect / prompt / persist / validate,
-    routed through ``rebar._cli.main(["jira-onboard", ...])``.
+    routed through ``rebar._cli.main(["bridge", "setup", ...])``.
 
-The bridge-probe subprocess is never actually launched (no live Jira): tests either
+The bridge check-access subprocess is never actually launched (no live Jira): tests either
 pass ``--no-validate`` or run with ``JIRA_API_TOKEN`` absent (probe skipped), or
 monkeypatch ``_bridge_probe`` to assert the env overlay.
 """
@@ -180,7 +180,7 @@ def test_wizard_surfaces_non_https_error_exit_one_no_write(tmp_path, monkeypatch
     """End-to-end: a non-https --url makes the wizard fail loudly (exit 1, Error printed)
     with no partial file, rather than persisting the cleartext url."""
     p = _proj(tmp_path, monkeypatch)
-    code = main(["jira-onboard", "--url", "http://insecure", "--user", "u", "--project", "P"])
+    code = main(["bridge", "setup", "--url", "http://insecure", "--user", "u", "--project", "P"])
     err = capsys.readouterr().err
     assert code == 1
     assert "not 'https'" in err
@@ -200,7 +200,7 @@ def test_detect_shows_existing_settings(tmp_path, monkeypatch, capsys) -> None:
     )
     cfg.reset_config_cache()
     # Non-interactive (flags) so no prompt; --no-validate to skip the probe.
-    code = main(["jira-onboard", "--project", "HV", "--no-validate"])
+    code = main(["bridge", "setup", "--project", "HV", "--no-validate"])
     out = capsys.readouterr().out
     assert code == 0
     assert "https://have" in out and "have@x" in out  # detected values surfaced
@@ -209,7 +209,7 @@ def test_detect_shows_existing_settings(tmp_path, monkeypatch, capsys) -> None:
 def test_persist_via_prompts_writes_config(tmp_path, monkeypatch, capsys) -> None:
     _proj(tmp_path, monkeypatch)
     _answers(monkeypatch, ["https://prompted", "p@x", "PR"])
-    code = main(["jira-onboard", "--no-validate"])
+    code = main(["bridge", "setup", "--no-validate"])
     out = capsys.readouterr().out
     assert code == 0
     cfg.reset_config_cache()
@@ -225,7 +225,7 @@ def test_empty_then_eof_aborts_with_no_write(tmp_path, monkeypatch, capsys) -> N
         raise EOFError
 
     monkeypatch.setattr("builtins.input", _raise)
-    code = main(["jira-onboard", "--no-validate"])
+    code = main(["bridge", "setup", "--no-validate"])
     assert code == 1
     assert not (p / "rebar.toml").exists()  # no partial write
 
@@ -233,10 +233,10 @@ def test_empty_then_eof_aborts_with_no_write(tmp_path, monkeypatch, capsys) -> N
 def test_token_absent_skips_probe_exit_zero(tmp_path, monkeypatch, capsys) -> None:
     _proj(tmp_path, monkeypatch)
     # No JIRA_API_TOKEN in env → probe is skipped, exit 0, guidance printed.
-    code = main(["jira-onboard", "--url", "https://x", "--user", "u", "--project", "P"])
+    code = main(["bridge", "setup", "--url", "https://x", "--user", "u", "--project", "P"])
     out = capsys.readouterr().out
     assert code == 0
-    assert "bridge-probe" in out and "JIRA_API_TOKEN" in out
+    assert "bridge check-access" in out and "JIRA_API_TOKEN" in out
 
 
 def test_validate_injects_resolved_settings_into_probe_env(tmp_path, monkeypatch, capsys) -> None:
@@ -249,7 +249,7 @@ def test_validate_injects_resolved_settings_into_probe_env(tmp_path, monkeypatch
         return 0
 
     monkeypatch.setattr("rebar._cli._bridge_probe", _fake_probe)
-    code = main(["jira-onboard", "--url", "https://j", "--user", "u@x", "--project", "PJ"])
+    code = main(["bridge", "setup", "--url", "https://j", "--user", "u@x", "--project", "PJ"])
     assert code == 0
     assert captured["extra_env"] == {
         "JIRA_URL": "https://j",
@@ -263,22 +263,32 @@ def test_no_validate_skips_probe_even_with_token(tmp_path, monkeypatch, capsys) 
     monkeypatch.setenv("JIRA_API_TOKEN", "tok")
 
     def _fail(*a, **k):  # the probe must NOT be invoked
-        raise AssertionError("bridge-probe should be skipped with --no-validate")
+        raise AssertionError("bridge check-access should be skipped with --no-validate")
 
     monkeypatch.setattr("rebar._cli._bridge_probe", _fail)
     code = main(
-        ["jira-onboard", "--url", "https://x", "--user", "u", "--project", "P", "--no-validate"]
+        [
+            "bridge",
+            "setup",
+            "--url",
+            "https://x",
+            "--user",
+            "u",
+            "--project",
+            "P",
+            "--no-validate",
+        ]
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "--no-validate" in out or "bridge-probe" in out
+    assert "--no-validate" in out or "bridge check-access" in out
 
 
 def test_probe_failure_is_surfaced_and_config_kept(tmp_path, monkeypatch, capsys) -> None:
     _proj(tmp_path, monkeypatch)
     monkeypatch.setenv("JIRA_API_TOKEN", "tok")
     monkeypatch.setattr("rebar._cli._bridge_probe", lambda argv, *, extra_env=None: 2)
-    code = main(["jira-onboard", "--url", "https://x", "--user", "u", "--project", "P"])
+    code = main(["bridge", "setup", "--url", "https://x", "--user", "u", "--project", "P"])
     assert code == 2  # the probe's non-zero exit is propagated
     # ...but the config was still persisted (write and validate are separate steps).
     cfg.reset_config_cache()
@@ -291,13 +301,14 @@ def test_reset_clears_and_exits(tmp_path, monkeypatch, capsys) -> None:
         '[jira]\nurl = "x"\nuser = "u"\nproject = "P"\n', encoding="utf-8"
     )
     cfg.reset_config_cache()
-    code = main(["jira-onboard", "--reset", "--yes"])
+    code = main(["bridge", "setup", "--reset", "--yes"])
     assert code == 0
     data = tomllib.loads((p / "rebar.toml").read_text(encoding="utf-8"))
     assert "jira" not in data
 
 
-def test_reset_declined_makes_no_change(tmp_path, monkeypatch) -> None:
+def test_legacy_jira_onboard_alias_remains_functional(tmp_path, monkeypatch) -> None:
+    """The historical spelling remains a compatibility route to the same wizard."""
     p = _proj(tmp_path, monkeypatch)
     before = '[jira]\nurl = "x"\n'
     (p / "rebar.toml").write_text(before, encoding="utf-8")

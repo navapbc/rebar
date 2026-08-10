@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/navapbc/rebar/schemas/bridge_fsck.schema.json",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge/fsck.schema.json",
   "title": "BridgeFsck",
-  "description": "Bridge-mapping audit findings, emitted by `rebar bridge-fsck --output json` (the {orphaned, duplicates, stale, binding_drift} dict that audit_bridge_mappings builds internally). Each entry is a finding object whose fields vary by anomaly type, so items are permissive objects. `binding_drift` (epic 3006-e198, child 8de5) is the offline arm of the one convergence classifier — it reads bindings.json read-only and reports the binding-level drift the live pass would act on.",
+  "description": "Bridge-mapping audit findings, emitted by `rebar bridge fsck --output json` (the {orphaned, duplicates, stale, binding_drift} dict that audit_bridge_mappings builds internally). Each entry is a finding object whose fields vary by anomaly type, so items are permissive objects. `binding_drift` (epic 3006-e198, child 8de5) is the offline arm of the one convergence classifier — it reads bindings.json read-only and reports the binding-level drift the live pass would act on.",
   "type": "object",
   "additionalProperties": true,
   "required": ["orphaned", "duplicates", "stale"],
