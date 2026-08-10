@@ -468,6 +468,22 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--reason=<
   --ref=<ref>: Completion close gate: verify (and sign) against the committed tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit while your worktree stays at the epic tip; default HEAD.
 ```
 
+### `tracker-maintenance`
+
+The supported door for raw git in the tickets tracker (bug 2fa6). Takes a backup ref
+BEFORE the first write, refuses when unpushed ticket commits would be at risk (failing
+closed if it cannot tell), and records a durable audit line. See
+[concurrency.md](concurrency.md#mutating-the-tracker-no-ad-hoc-raw-git).
+
+```
+Usage: rebar tracker-maintenance [--status] [--clean] [--force=<reason>]
+
+  --status          report what would change; makes NO writes (default)
+  --clean           perform the repair (backup ref first, then heal)
+  --force=<reason>  BREAK-GLASS: proceed even with unpushed ticket commits.
+                    Requires a written reason; recorded in the audit log.
+```
+
 ### `unlink`
 
 ```

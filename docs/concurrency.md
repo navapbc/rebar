@@ -468,3 +468,66 @@ form of this doctrine is `tests/integration/test_concurrency_regression.py`: two
 clones writing disjoint and overlapping events, reconverging by fetch/merge, and
 asserting union + one deterministic replayed state on both clones + identical
 UUID-based fork resolution. Every write/sync change runs against it.
+
+## Mutating the tracker: no AD-HOC raw git
+
+The ticket store is event-sourced and has its own API. **Route every routine write through
+rebar** — `create` / `comment` / `transition` / `link`, or, when you genuinely need to
+commit and deliver pending tracker content yourself,
+`rebar._store.push.commit_and_push_tickets_branch`, which does it under the write lock.
+
+The rule is **no _ad-hoc_ raw git in the tracker**, not "no raw git ever". That distinction
+is deliberate. A blanket prohibition with no sanctioned door is what produced bug `2fa6`:
+the store was wedged, every rebar write failed, and improvised `git add -A` / `commit` /
+`merge` / `rm` in the tracker worktree was the only way out. Improvisation is also how
+source files reach the tickets branch, which `origin/tickets` legitimately never carries.
+
+### Why `git stash` in particular is banned there
+
+git's stash stack is **repo-global**: every worktree of a repository pushes onto and pops
+from the same `refs/stash`. A `stash push` / `stash pop` pair executed in the tickets
+worktree can therefore apply an entry created on a *source* branch. That is not
+theoretical — it dropped `src/…` and `.rebar/…` into the store, left the index with
+unmerged entries and no `MERGE_HEAD`, and blocked every ticket write until a human
+intervened.
+
+rebar's own push recovery no longer does this: it records the dirty tree with
+`git stash create`, which writes a stash **commit object** and returns its sha without
+touching `refs/stash`, and restores it with `git stash apply <sha>`. A commit named by sha
+is unreachable from another worktree's pop. Hold the same line in anything you write.
+
+### The supported door — `rebar tracker-maintenance`
+
+For a store that rebar itself cannot write, use the maintenance entrypoint rather than
+improvising:
+
+```sh
+rebar tracker-maintenance            # --status (default): report; makes NO writes
+rebar tracker-maintenance --clean    # repair, inside the safety envelope
+```
+
+Its value is the envelope, not the repair:
+
+- **a backup ref before the first write** — `refs/rebar-maintenance/<utc>` is created at
+  the current HEAD before anything is mutated, and printed with its rollback command. (Its
+  predecessor stamped a `pre-a3-remediation` tag *after* two of four batches had already
+  run, which made it useless as a rollback point.)
+- **a refusal when unpushed ticket commits exist** — `rev-list origin/tickets..HEAD` being
+  non-empty is the one condition separating a recoverable local mess from real event loss.
+  A refused run makes **no** writes at all, backup ref included. It fails *closed*: if
+  `origin/tickets` is missing, local commits cannot be proven safe, so it refuses then too.
+- **a durable audit record** — what ran, when, by whom, what changed, and whether the
+  break-glass was used, appended to the tracker's git dir (not the worktree, so it can
+  never become store content that a later merge conflicts on).
+
+### The break-glass
+
+`--force=<reason>` overrides the unpushed-commits refusal for the case the envelope does
+not cover. It **requires a written reason**, is reported loudly on stderr, and is recorded
+in the audit line as `forced: true` alongside the reason, so a reviewer can see later that
+it was used and why. Treat it exactly as AGENTS.md treats `--force` on the claim/close
+gates: an escape hatch for a human operator's judgment call, not a routine agent move.
+
+`fsck` reports the condition independently — a `FOREIGN_STORE_PATH` finding means
+something wrote source paths into the tracker, and is a counted integrity issue rather
+than a warning, because a healthy store never has them.

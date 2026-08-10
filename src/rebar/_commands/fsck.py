@@ -399,6 +399,36 @@ def _tracker_health(tracker: str, repo_root=None) -> tuple[list[str], int]:
     return lines, issues
 
 
+def foreign_store_path_list(tracker: str) -> list[str]:
+    """Top-level tracker entries that cannot be ticket data, as a plain list.
+
+    THE single classifier for "is this path store pollution?" — :func:`_foreign_store_paths`
+    renders it for fsck's report and ``tracker-maintenance`` acts on it. Two copies of the
+    rule would be free to drift, and a repair that disagreed with the report it was shown
+    could delete something fsck never named.
+
+    A top-level entry is ticket data iff it is a directory holding at least one event file
+    (active or ``*.retired``); store artifacts all begin with a dot and are skipped."""
+
+    def _holds_events(path: str) -> bool:
+        try:
+            return any(
+                n.endswith(".json") or n.endswith(RETIRED_SUFFIX)
+                for n in os.listdir(path)
+                if not n.startswith(".")
+            )
+        except OSError:
+            return False
+
+    try:
+        entries = sorted(os.listdir(tracker))
+    except OSError:
+        return []
+    return [
+        n for n in entries if not n.startswith(".") and not _holds_events(os.path.join(tracker, n))
+    ]
+
+
 def _foreign_store_paths(tracker: str) -> str | None:
     """Report top-level tracker entries that cannot be ticket data (bug 2fa6).
 
@@ -418,23 +448,7 @@ def _foreign_store_paths(tracker: str) -> str | None:
     actually TRACKS are called out separately: those were committed into the tickets branch
     and will propagate on the next push, which is strictly worse than a working-tree stray."""
 
-    def _holds_events(path: str) -> bool:
-        try:
-            return any(
-                n.endswith(".json") or n.endswith(RETIRED_SUFFIX)
-                for n in os.listdir(path)
-                if not n.startswith(".")
-            )
-        except OSError:
-            return False
-
-    try:
-        entries = sorted(os.listdir(tracker))
-    except OSError:
-        return None
-    strays = [
-        n for n in entries if not n.startswith(".") and not _holds_events(os.path.join(tracker, n))
-    ]
+    strays = foreign_store_path_list(tracker)
     if not strays:
         return None
     committed = [n for n in strays if not path_is_foreign_to_branch(tracker, n)]

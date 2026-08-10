@@ -154,6 +154,12 @@ restated here:
 - **Concurrency** — optimistic concurrency, the parent-first claim/transition cascade, and
   "the store shares every write immediately" (auto-commit + auto-push to `sync.remote`) →
   `docs/concurrency.md`.
+- **Mutating the tracker** — the rule is **no AD-HOC raw git in the tickets tracker** (route
+  writes through rebar; `git stash` there is banned outright because the stash stack is
+  repo-global and shared by every worktree). When rebar itself cannot write the store, use the
+  supported door `rebar tracker-maintenance` (backup ref before the first write, refusal on
+  unpushed ticket commits, durable audit) and its `--force=<reason>` break-glass →
+  `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git".
 - **Session logs** — the `session_log` type semantics and the `session-log` helper +
   auto-rotation → `docs/event-schema.md` and `docs/user-guide.md`.
 - **LLM agent operations** — `review-plan`, `verify-completion`, `review-code`, `scan-spec` (the
