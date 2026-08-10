@@ -35,7 +35,7 @@ Commands:
   status    Show the reconciler's durable status snapshot
   pause     Temporarily stop scheduled reconciliation
   resume    Resume scheduled reconciliation
-  fsck      Audit bridge mappings (orphans, duplicates, stale SYNCs)
+  fsck      Audit committed events, binding drift, and binding-store integrity
   check-access
             Check Jira access with a create/label/search/delete round-trip
   setup     Interactively configure and validate Jira access
@@ -61,6 +61,10 @@ Run `rebar bridge <command> --help` for command-specific options.
 Compatibility alias for `rebar bridge fsck`.
 
 Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]
+
+Audits committed event compatibility, binding drift, and forward/reverse
+binding-store integrity without Jira access. Produces the same result and exit
+semantics as `rebar bridge fsck`.
 ```
 
 ### `bridge-probe`

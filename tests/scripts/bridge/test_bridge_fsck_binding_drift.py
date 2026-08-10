@@ -11,6 +11,7 @@ flags them (the old checks return clean over the same store: RED before the arm)
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import ModuleType
 
@@ -34,6 +35,35 @@ def _write_bindings(tracker: Path, bindings: dict, reverse: dict) -> None:
 
 def _confirmed(jira_key: str) -> dict:
     return {"jira_key": jira_key, "state": "confirmed"}
+
+
+def _init_tickets_repo(tracker: Path) -> None:
+    tracker.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(tracker), "init", "-q", "-b", "tickets"], check=True)
+    subprocess.run(
+        ["git", "-C", str(tracker), "config", "user.email", "test@example.com"], check=True
+    )
+    subprocess.run(["git", "-C", str(tracker), "config", "user.name", "Test"], check=True)
+
+
+def _commit_known_event(tracker: Path) -> None:
+    ticket_dir = tracker / "fixture-ticket"
+    ticket_dir.mkdir(parents=True, exist_ok=True)
+    (ticket_dir / "1-known-CREATE.json").write_text(
+        json.dumps(
+            {
+                "event_type": "CREATE",
+                "uuid": "11111111-1111-4111-8111-111111111111",
+                "timestamp": 1,
+                "author": "test",
+                "env_id": "22222222-2222-4222-8222-222222222222",
+                "data": {"ticket_type": "task", "title": "fixture", "parent_id": None},
+            }
+        ),
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "-C", str(tracker), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tracker), "commit", "-q", "-m", "fixture"], check=True)
 
 
 @pytest.mark.unit
@@ -254,18 +284,20 @@ def test_audit_bridge_mappings_includes_binding_drift_and_sets_exit(fsck, tmp_pa
     # The offline event-scan checks return clean, but binding_drift is non-empty →
     # the finding surfaces AND main() exits non-zero (class-D blindness healed).
     tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    _commit_known_event(tracker)
     _write_bindings(
         tracker,
         bindings={"loc-arch": _confirmed("REB-2")},
         reverse={"REB-2": "loc-arch"},
     )
     # No local ticket dirs at all → reduce yields nothing → loc-arch is local_gone.
-    findings = fsck.audit_bridge_mappings(tracker, now_ts=1_800_000_000_000_000_000)
+    findings = fsck.audit_bridge_mappings(tracker)
     assert "binding_drift" in findings
     drift = findings["binding_drift"]
     assert drift["local_gone"] == [{"local_id": "loc-arch", "jira_key": "REB-2"}]
-    # Old checks clean:
-    assert findings["orphaned"] == [] and findings["duplicates"] == [] and findings["stale"] == []
+    assert findings["unknown_event_types"] == []
+    assert findings["store_integrity"] == []
 
     # The report renders the section; main() exits 1 on drift.
     report = fsck._format_report(findings)
@@ -281,3 +313,242 @@ def test_no_bindings_store_is_clean(fsck, tmp_path):
     tracker.mkdir()
     drift = fsck.audit_binding_drift(tracker, local_states=[])
     assert drift == fsck._empty_binding_drift()
+
+
+# ---------------------------------------------------------------------------
+# Ticket 030f held-out oracle: committed-ref scanning and index integrity.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_unknown_event_scan_accepts_spacing_and_rejects_nested_text(fsck, tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    ticket_dir = tracker / "future-ticket"
+    ticket_dir.mkdir()
+    base = {
+        "uuid": "33333333-3333-4333-8333-333333333333",
+        "timestamp": 2,
+        "author": "future",
+        "env_id": "22222222-2222-4222-8222-222222222222",
+        "data": {},
+    }
+    compact = {"event_type": "FUTURE_COMPACT", **base}
+    spaced = {"event_type": "FUTURE_SPACED", **base}
+    nested = {
+        "event_type": "CREATE",
+        **base,
+        "data": {
+            "note": 'text containing "event_type":"TEXT_ONLY"',
+            "nested": {"event_type": "NESTED_ONLY"},
+        },
+    }
+    alert = {"event_type": "BRIDGE_ALERT", **base}
+    (ticket_dir / "1-compact.json").write_text(
+        json.dumps(compact, separators=(",", ":")), encoding="utf-8"
+    )
+    (ticket_dir / "2-spaced.json").write_text(json.dumps(spaced), encoding="utf-8")
+    (ticket_dir / "3-nested.json").write_text(json.dumps(nested), encoding="utf-8")
+    (ticket_dir / "4-alert.json").write_text(json.dumps(alert), encoding="utf-8")
+    subprocess.run(["git", "-C", str(tracker), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tracker), "commit", "-q", "-m", "future fixtures"], check=True)
+    # Prove the production path reads the committed ref, not the checked-out tree:
+    # the blobs remain reachable from refs/heads/tickets but are absent on disk.
+    subprocess.run(["git", "-C", str(tracker), "rm", "-q", "-r", "future-ticket"], check=True)
+
+    findings = fsck.audit_bridge_mappings(tracker)
+
+    assert findings["unknown_event_types"] == ["FUTURE_COMPACT", "FUTURE_SPACED"]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_store_integrity_reports_the_six_exact_contract_kinds(fsck, tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    _commit_known_event(tracker)
+    _write_bindings(
+        tracker,
+        bindings={
+            "missing-key": {"state": "confirmed"},
+            "missing-reverse": _confirmed("REB-2"),
+            "mismatch-source": _confirmed("REB-3"),
+            "mismatch-target": _confirmed("REB-3"),
+            "pending": {"state": "pending", "jira_key": "REB-5"},
+            "jira-mismatch": _confirmed("REB-X"),
+        },
+        reverse={
+            "REB-3": "mismatch-target",
+            "REB-4": "absent-local",
+            "REB-5": "pending",
+            "REB-6": "jira-mismatch",
+            "REB-X": "jira-mismatch",
+        },
+    )
+
+    findings = fsck.audit_bridge_mappings(tracker)["store_integrity"]
+
+    assert sorted(findings, key=lambda item: item["kind"]) == sorted(
+        [
+            {"kind": "forward_missing_jira_key", "local_id": "missing-key"},
+            {
+                "kind": "forward_missing_reverse",
+                "local_id": "missing-reverse",
+                "jira_key": "REB-2",
+            },
+            {
+                "kind": "forward_reverse_mismatch",
+                "local_id": "mismatch-source",
+                "jira_key": "REB-3",
+                "actual_local_id": "mismatch-target",
+            },
+            {
+                "kind": "reverse_missing_forward",
+                "local_id": "absent-local",
+                "jira_key": "REB-4",
+            },
+            {
+                "kind": "reverse_nonconfirmed_forward",
+                "local_id": "pending",
+                "jira_key": "REB-5",
+            },
+            {
+                "kind": "reverse_jira_key_mismatch",
+                "local_id": "jira-mismatch",
+                "jira_key": "REB-6",
+                "forward_jira_key": "REB-X",
+            },
+        ],
+        key=lambda item: item["kind"],
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_pending_forward_without_reverse_is_valid(fsck, tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    _commit_known_event(tracker)
+    _write_bindings(
+        tracker,
+        bindings={"pending": {"state": "pending", "jira_key": "REB-P"}},
+        reverse={},
+    )
+
+    assert fsck.audit_bridge_mappings(tracker)["store_integrity"] == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+@pytest.mark.parametrize(
+    ("mode", "diagnostic"),
+    [
+        ("missing_git", "git is unavailable"),
+        ("malformed_grep", "malformed"),
+        ("grep_failure", "git grep"),
+        ("candidate_failure", "candidate"),
+    ],
+)
+def test_scan_failures_raise_public_rebar_error(
+    fsck, tmp_path, monkeypatch: pytest.MonkeyPatch, mode: str, diagnostic: str
+):
+    import rebar
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+
+    def fake_run_git(cwd, *args, **kwargs):
+        del cwd, kwargs
+        if mode == "missing_git":
+            raise FileNotFoundError("git")
+        if args[0] == "grep":
+            if mode == "malformed_grep":
+                return subprocess.CompletedProcess(args, 0, "not-a-grep-record\n", "")
+            if mode == "grep_failure":
+                return subprocess.CompletedProcess(args, 2, "", "fatal: grep failed")
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                'refs/heads/tickets:future/1.json:1:"event_type":"FUTURE"\n',
+                "",
+            )
+        return subprocess.CompletedProcess(args, 128, "", "fatal: blob unreadable")
+
+    monkeypatch.setattr(fsck, "run_git", fake_run_git, raising=False)
+    with pytest.raises(rebar.RebarError) as raised:
+        fsck.audit_bridge_mappings(tracker)
+
+    assert raised.value.returncode == 2
+    assert diagnostic in str(raised.value).lower()
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_missing_tickets_ref_is_operational_error_and_cli_exit_two(
+    fsck, tmp_path, capsys: pytest.CaptureFixture[str]
+):
+    import rebar
+
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    subprocess.run(["git", "-C", str(tracker), "init", "-q", "-b", "main"], check=True)
+
+    with pytest.raises(rebar.RebarError) as raised:
+        fsck.audit_bridge_mappings(tracker)
+    assert raised.value.returncode == 2
+    assert "tickets" in str(raised.value).lower()
+
+    rc = fsck.main(["--tickets-tracker", str(tracker), "--output", "json"])
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    assert "tickets" in captured.err.lower()
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_store_integrity_gates_exit_but_unknown_types_do_not(
+    fsck, tmp_path, capsys: pytest.CaptureFixture[str]
+):
+    tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    ticket_dir = tracker / "future-ticket"
+    ticket_dir.mkdir()
+    (ticket_dir / "1-future.json").write_text(
+        json.dumps({"event_type": "FUTURE_ONLY"}), encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(tracker), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(tracker), "commit", "-q", "-m", "future fixture"], check=True)
+
+    assert fsck.main(["--tickets-tracker", str(tracker), "--output", "json"]) == 0
+    capsys.readouterr()
+
+    _write_bindings(
+        tracker,
+        bindings={"broken": _confirmed("REB-BROKEN")},
+        reverse={},
+    )
+    assert fsck.main(["--tickets-tracker", str(tracker), "--output", "json"]) == 1
+    assert json.loads(capsys.readouterr().out)["store_integrity"] == [
+        {
+            "kind": "forward_missing_reverse",
+            "local_id": "broken",
+            "jira_key": "REB-BROKEN",
+        }
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_human_report_advertises_only_live_checks(fsck, tmp_path, capsys):
+    tracker = tmp_path / ".tickets-tracker"
+    _init_tickets_repo(tracker)
+    _commit_known_event(tracker)
+
+    assert fsck.main(["--tickets-tracker", str(tracker)]) == 0
+    report = capsys.readouterr().out
+    lowered = report.lower()
+    for phantom in ("orphan", "duplicate", "stale sync", "unresolved alert"):
+        assert phantom not in lowered
+    assert "store integrity" in lowered
