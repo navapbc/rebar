@@ -434,16 +434,13 @@ def test_comment_timestamp_derived_from_now_epoch(mod: ModuleType, tmp_path: Pat
 # --------------------------------------------------------------------------
 
 
-def test_fsck_empty_stdout_degrades(mod: ModuleType, tmp_path: Path) -> None:
+def test_fsck_empty_stdout_fails_closed(mod: ModuleType, tmp_path: Path) -> None:
     runner = FakeRunner({("rebar", "bridge", "fsck"): (1, "", "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
-    assert rc == 0
-    out = read_outputs(tmp_path / "gh_out")
-    assert out["drift_found"] == "false"
-    assert out["drift_total"] == "0"
-    assert out["drift_summary"] == "none"
+    assert rc == 1
+    assert (tmp_path / "gh_out").read_text() == ""
 
 
 def test_fsck_missing_binding_drift_key(mod: ModuleType, tmp_path: Path) -> None:
@@ -451,21 +448,23 @@ def test_fsck_missing_binding_drift_key(mod: ModuleType, tmp_path: Path) -> None
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
-    assert rc == 0
-    assert read_outputs(tmp_path / "gh_out")["drift_found"] == "false"
+    assert rc == 1
+    assert (tmp_path / "gh_out").read_text() == ""
 
 
 def test_summary_cell_order_is_canonical(mod: ModuleType, tmp_path: Path) -> None:
-    """Summary lists cells in the fixed canonical order, only non-zero cells."""
+    """Summary lists only alerting cells in their fixed canonical order."""
     fsck = json.dumps(
         {
+            "unknown_event_types": [],
             "binding_drift": {
                 "retired_overlap": ["r"],
                 "unbound_jira": ["u1", "u2"],
                 "would_terminal": [],
                 "dangling": ["d"],
                 "local_gone": [],
-            }
+            },
+            "store_integrity": [],
         }
     )
     runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
@@ -474,21 +473,28 @@ def test_summary_cell_order_is_canonical(mod: ModuleType, tmp_path: Path) -> Non
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     out = read_outputs(tmp_path / "gh_out")
-    assert out["drift_summary"] == "dangling=1, unbound_jira=2, retired_overlap=1"
-    assert out["drift_total"] == "4"
+    assert out["drift_summary"] == "unbound_jira=2, retired_overlap=1"
+    assert out["drift_total"] == "3"
 
 
 def test_unknown_extra_cells_ignored(mod: ModuleType, tmp_path: Path) -> None:
-    """Only the five canonical cells count (YAML parity: fixed tuple)."""
-    fsck = json.dumps({"binding_drift": {"mystery": ["m"], "dangling": ["d"]}})
+    """Informational and unknown cells do not open an alert ticket."""
+    fsck = json.dumps(
+        {
+            "unknown_event_types": [],
+            "binding_drift": {"mystery": ["m"], "dangling": ["d"]},
+            "store_integrity": [],
+        }
+    )
     runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
     assert rc == 0
     out = read_outputs(tmp_path / "gh_out")
-    assert out["drift_total"] == "1"
-    assert out["drift_summary"] == "dangling=1"
+    assert out["drift_found"] == "false"
+    assert out["drift_total"] == "0"
+    assert out["drift_summary"] == "none"
 
 
 # --------------------------------------------------------------------------
@@ -506,7 +512,7 @@ def test_drift_alert_comment_format(mod: ModuleType, tmp_path: Path) -> None:
     writes = runner.rebar_writes()
     assert [c[1] for c in writes] == ["comment"]
     body = writes[0][3]
-    assert body.startswith("BRIDGE_CANARY_ALERT: Binding drift still present as of ")
+    assert body.startswith("BRIDGE_CANARY_ALERT: Bridge audit findings still present as of ")
     assert "would_terminal=2, local_gone=1" in body
 
 
@@ -520,7 +526,7 @@ def test_drift_alert_close_on_recovery(mod: ModuleType, tmp_path: Path) -> None:
     assert argv[1] == "transition"
     assert "--class" in argv and argv[argv.index("--class") + 1] == "env_integration"
     reason = argv[argv.index("--reason") + 1]
-    assert reason.startswith("Fixed: bridge fsck reports zero binding drift")
+    assert reason.startswith("Fixed: bridge fsck reports zero audit findings")
 
 
 def test_drift_alert_dry_run_zero_writes(mod: ModuleType, tmp_path: Path) -> None:

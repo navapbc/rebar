@@ -1,3 +1,7 @@
 Compatibility alias for `rebar bridge fsck`.
 
 Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]
+
+Audits committed event compatibility, binding drift, and forward/reverse
+binding-store integrity without Jira access. Produces the same result and exit
+semantics as `rebar bridge fsck`.

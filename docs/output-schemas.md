@@ -46,7 +46,7 @@ Structured via `--output json`:
 | `get-verify-commands`            | `verify_commands`         |
 | `scratch get/set/clear`          | `scratch_envelope`        |
 | `show` (not found)               | `error_envelope`          |
-| `bridge fsck`                    | `bridge_fsck`             |
+| `rebar bridge fsck`              | `bridge_fsck`             |
 | `create`                         | `create_result`           |
 | `claim`                          | `claim_result`            |
 | `transition` / `reopen`          | `transition_result`       |
@@ -67,6 +67,9 @@ Structured via `--output json`:
 
 The authoritative version of this table is `schemas.OUTPUT_SCHEMAS` in
 `src/rebar/schemas/__init__.py` — the registry the coverage guard consumes.
+
+The `rebar bridge fsck` result is a strict three-field object:
+`unknown_event_types`, `binding_drift`, and `store_integrity` are all required.
 
 ### `creation_channel` in `ticket_state`
 
