@@ -412,7 +412,18 @@ def _compact_locked(
             sys.stderr.write(f"Error: ticket {ticket_id} has status '{status}' — cannot compact\n")
             return 1
 
-        source_uuids = [u for (_fp, u, _ts) in old]
+        # A folded prior SNAPSHOT is NOT a source event (bug aea0). Its entire content IS
+        # its compiled_state, which this snapshot absorbs, so nothing is lost when the file
+        # goes away — but citing it makes fsck's snapshot_missing_sources check report a
+        # perfectly healthy ticket as damaged (and, post b636, as un-rebuildable) the
+        # moment it does. `parsed` admits SNAPSHOT because it is a KNOWN_EVENT_TYPE, which
+        # is how it ended up in this list. The REBUILD path in compact_rebuild already
+        # skips snapshots when building its source list; this makes the two agree.
+        source_uuids = [
+            u
+            for (fp, u, _ts) in old
+            if not os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
+        ]
 
         snapshot_event, final_path = _build_snapshot_event(
             tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
