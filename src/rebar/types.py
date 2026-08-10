@@ -310,6 +310,62 @@ class BridgeFsck(TypedDict):
     store_integrity: list[Any]
 
 
+class BridgeRun(TypedDict):
+    """Return shape of the `bridge_run` output schema."""
+
+    route: Literal["preview", "sync"]
+    state: Literal[
+        "converged",
+        "paused",
+        "in-flight",
+        "legacy-gated",
+        "reschedule",
+        "operational_failure",
+        "invalid_invocation",
+    ]
+    returncode: Literal[0, 1, 2]
+    details: dict[str, Any]
+
+
+class BridgeStatus(TypedDict):
+    """Return shape of the `bridge_status` output schema."""
+
+    verdict: Literal["HEALTHY", "PAUSED", "RUNNING", "NEVER_RUN", "FOREIGN", "FAILED", "STALE"]
+    target_environment_id: str
+    record_oid: NotRequired[str | None]
+    detail_status: NotRequired[Literal["missing", "mismatched", "matching"]]
+    pause: NotRequired[dict[str, Any] | None]
+    lock: NotRequired[dict[str, Any] | None]
+    pass_id: NotRequired[str | None]
+    environment_id: NotRequired[str | None]
+    outcome: NotRequired[str | None]
+    failure_kind: NotRequired[str | None]
+    completed_at: NotRequired[str | None]
+    lock_fence: NotRequired[int | None]
+    detail: NotRequired[dict[str, Any]]
+    lock_oid: NotRequired[str]
+    lock_holder: NotRequired[str]
+    lock_lease_secs: NotRequired[float]
+    live_lock_fence: NotRequired[int]
+
+
+class BridgeControl(TypedDict):
+    """Return shape of the `bridge_control` output schema."""
+
+    state: Literal["paused", "resumed"]
+    reason: NotRequired[str]
+    who: NotRequired[str]
+    paused_at: NotRequired[str]
+
+
+class BridgeAccessCheck(TypedDict):
+    """Return shape of the `bridge_access_check` output schema."""
+
+    verdict: Literal["PASS", "FAIL", "INVALID"]
+    reason: NotRequired[str]
+    steps: list[dict[str, Any]]
+
+
 class WorkflowRun(TypedDict):
     """Return shape of the `workflow_run` output schema."""
 

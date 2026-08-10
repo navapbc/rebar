@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/bridge/access-check.schema.json",
+  "title": "BridgeAccessCheck",
+  "description": "Structured result of the live six-step Jira bridge capability check.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["verdict", "steps"],
+  "properties": {
+    "verdict": { "enum": ["PASS", "FAIL", "INVALID"] },
+    "reason": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["step", "passed"],
+        "properties": {
+          "step": {
+            "enum": ["STEP_CREATE", "STEP_LABEL", "STEP_PROPERTY_WRITE", "STEP_JQL_SEARCH", "STEP_PROPERTY_READ", "STEP_DELETE"]
+          },
+          "passed": { "type": "boolean" },
+          "reason": { "type": "string" },
+          "detail": { "type": "string" }
+        }
+      }
+    }
+  }
+}

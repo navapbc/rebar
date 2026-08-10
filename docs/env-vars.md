@@ -19,11 +19,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `JIRA_API_TOKEN` | `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/jira-capability-probe.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
@@ -200,7 +200,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config.py:392` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:69` — `os.environ.get(<non-literal>)`
-- `src/rebar/mcp_server.py:633` — `os.environ.get(<non-literal>)`
+- `src/rebar/mcp_server.py:641` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:228` — `os.environ.get(<non-literal>)`

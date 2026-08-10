@@ -17,7 +17,11 @@ import sys
 
 # Maps model class name → schema base name (without .schema.json suffix).
 MODEL_SCHEMAS: dict[str, str] = {
+    "BridgeAccessCheckOut": "bridge_access_check",
+    "BridgeControlOut": "bridge_control",
     "BridgeFsckOut": "bridge_fsck",
+    "BridgeRunOut": "bridge_run",
+    "BridgeStatusOut": "bridge_status",
     "SignResultOut": "sign_result",
     "VerifySignatureResultOut": "verify_signature_result",
     "GroundingInfoOut": "grounding_info",

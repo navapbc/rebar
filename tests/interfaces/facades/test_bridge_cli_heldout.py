@@ -297,6 +297,8 @@ def test_pause_refuses_blank_reason_and_missing_git_email_without_write(
 
     blank = _run_cli(rebar_repo, "bridge", "pause", "")
     assert blank.returncode != 0
+    assert "Error:" in blank.stderr
+    assert "Traceback" not in blank.stderr
     assert _remote_blob(remote) is None
 
     subprocess.run(

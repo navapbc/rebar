@@ -52,7 +52,13 @@ from rebar._lib_gates import (
     validate,
 )
 from rebar._lib_ops import (
+    bridge_check_access,
     bridge_fsck,
+    bridge_pause,
+    bridge_preview,
+    bridge_resume,
+    bridge_status,
+    bridge_sync,
     reconcile,
 )
 from rebar._lib_ops import (
@@ -156,7 +162,13 @@ __all__ = [
     "apply_ticket_filters",
     "archive",
     "attach_commits",
+    "bridge_check_access",
     "bridge_fsck",
+    "bridge_pause",
+    "bridge_preview",
+    "bridge_resume",
+    "bridge_status",
+    "bridge_sync",
     "check_ac",
     "claim",
     # quality gates + file-impact

@@ -400,6 +400,14 @@ still means live synchronization, including its historical uncapped LIVE tally/n
 behavior. The canonical spellings are `rebar bridge setup`, `rebar bridge check-access`,
 `rebar bridge fsck`, and `rebar doctor`. The legacy `jira-onboard`, `bridge-probe`, and
 `bridge-fsck` spellings remain available as compatibility aliases.
+
+Python and MCP callers have the same noun-based machine operations:
+`bridge_preview`, `bridge_sync`, `bridge_status`, `bridge_pause`, `bridge_resume`,
+`bridge_check_access`, and the existing `bridge_fsck`. Their inputs are explicit—there
+is no mode string on the new tools—and their results are schema-backed dictionaries.
+`bridge_preview` cannot write; `bridge_sync` is explicitly mutating. The legacy library
+and MCP `reconcile(mode=...)` interfaces remain supported with the dry-run default and
+historical mode/return/error contracts. Interactive `bridge setup` remains CLI-only.
 Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 

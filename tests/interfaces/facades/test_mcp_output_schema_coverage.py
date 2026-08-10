@@ -60,7 +60,13 @@ CANONICAL: dict[str, str] = {
     "log_session": schemas.CREATE_RESULT,
     "claim_ticket": schemas.CLAIM_RESULT,
     "summary": schemas.SUMMARY,
+    "bridge_check_access": schemas.BRIDGE_ACCESS_CHECK,
     "bridge_fsck": schemas.BRIDGE_FSCK,
+    "bridge_pause": schemas.BRIDGE_CONTROL,
+    "bridge_preview": schemas.BRIDGE_RUN,
+    "bridge_resume": schemas.BRIDGE_CONTROL,
+    "bridge_status": schemas.BRIDGE_STATUS,
+    "bridge_sync": schemas.BRIDGE_RUN,
     "sign_manifest": schemas.SIGN_RESULT,
     "verify_signature": schemas.VERIFY_SIGNATURE_RESULT,
     "get_workflow_status": schemas.WORKFLOW_RUN,
@@ -285,7 +291,13 @@ def _call_args(name: str, s: dict) -> dict:
         "log_session": {"entry": "a verbose log entry"},
         "claim_ticket": {"ticket_id": s["claimable"], "assignee": "agent"},
         "summary": {"ticket_ids": [s["task"]]},
+        "bridge_check_access": {},
         "bridge_fsck": {},
+        "bridge_pause": {"reason": "schema coverage"},
+        "bridge_preview": {},
+        "bridge_resume": {},
+        "bridge_status": {},
+        "bridge_sync": {},
         "sign_manifest": {"ticket_id": s["task"], "manifest": ["step one", "step two"]},
         "verify_signature": {"ticket_id": s["task"]},
         "get_workflow_status": {"run_id": s["run_id"], "ticket_id": s["task"]},
@@ -295,9 +307,41 @@ def _call_args(name: str, s: dict) -> dict:
 
 
 @pytest.mark.parametrize("name", sorted(CANONICAL))
-def test_canonical_tool_result_validates(name: str, rebar_repo: Path) -> None:
+def test_canonical_tool_result_validates(
+    name: str, rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from rebar.mcp_server import build_server
 
+    bridge_results = {
+        "bridge_check_access": {"verdict": "PASS", "steps": []},
+        "bridge_pause": {
+            "state": "paused",
+            "reason": "schema coverage",
+            "who": "agent@example.com",
+            "paused_at": "2026-08-10T00:00:00Z",
+        },
+        "bridge_preview": {
+            "route": "preview",
+            "state": "converged",
+            "returncode": 0,
+            "details": {"no_write": True},
+        },
+        "bridge_resume": {"state": "resumed"},
+        "bridge_status": {
+            "verdict": "NEVER_RUN",
+            "target_environment_id": "schema-coverage",
+        },
+        "bridge_sync": {
+            "route": "sync",
+            "state": "converged",
+            "returncode": 0,
+            "details": {"mutations_applied": 0},
+        },
+    }
+    if name in bridge_results:
+        monkeypatch.setattr(rebar, name, lambda **_kwargs: bridge_results[name])
+        monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
+        monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     s = _seed(rebar_repo)
     srv = build_server()
     result = _unwrap(asyncio.run(srv.call_tool(name, _call_args(name, s))))

@@ -490,7 +490,17 @@ try:
 except rebar.ConcurrencyError:
     ...                                          # ticket changed since last read
 
-result = rebar.reconcile("dry-run")              # Jira sync (non-mutating)
+preview = rebar.bridge_preview(only=[tid])       # typed, non-mutating Jira plan
+sync = rebar.bridge_sync(max_changes=10)         # typed, explicitly mutating sync
+status = rebar.bridge_status(max_age_seconds=3600)
+# Durable operator controls and the live six-step capability check:
+rebar.bridge_pause("maintenance")
+rebar.bridge_resume()
+access = rebar.bridge_check_access()
+
+# Compatibility APIs remain supported with their published contracts:
+legacy = rebar.reconcile("dry-run")              # defaults to dry-run
+audit = rebar.bridge_fsck()                       # unchanged offline audit
 
 # Cryptographic attestation (environment-bound HMAC):
 rebar.sign_manifest(tid, ["unit tests: PASS", "security review: clean"])
@@ -535,9 +545,12 @@ rebar-mcp          # stdio transport
 Exposes ticket operations as MCP tools. The **complete tool reference**, grouped by
 gate tier (read-only / LLM-gated / write-gated), is
 [docs/mcp-reference.md](docs/mcp-reference.md) (generated from the server's own
-registrars). `reconcile` defaults to `dry-run` (`live` requires
-`REBAR_MCP_ALLOW_JIRA_SYNC=1`). Set `REBAR_MCP_READONLY=1` to expose only the read
-tools (no write/mutation tools). To register it in an MCP client (registry name
+registrars). Prefer the explicit `bridge_preview`, `bridge_sync`, `bridge_status`,
+`bridge_pause`, `bridge_resume`, and `bridge_check_access` tools. The retained
+`reconcile` tool still defaults to `dry-run`, and `bridge_fsck` remains unchanged.
+Sync/pause/resume and mutating legacy reconcile modes require
+`REBAR_MCP_ALLOW_JIRA_SYNC=1`; `REBAR_MCP_READONLY=1` blocks every mutation. To
+register it in an MCP client (registry name
 `io.github.navapbc/rebar`, or a direct `uvx` config), see
 [Install → MCP server](#mcp-server--from-the-mcp-registry) above.
 

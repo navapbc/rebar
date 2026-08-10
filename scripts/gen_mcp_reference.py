@@ -38,6 +38,7 @@ DOC_PATH = REPO_ROOT / "docs" / "mcp-reference.md"
 # gated by ``REBAR_MCP_READONLY`` (not the LLM gate), so it is documented under the
 # Write-gated section. This is the ONLY tool whose section differs from its registrar.
 _LLM_REGISTRAR_BUT_WRITE_GATED = "sign_review"
+_READ_REGISTRAR_BUT_WRITE_GATED = frozenset({"bridge_sync", "bridge_pause", "bridge_resume"})
 
 # Inline annotations for the closed set of hybrid special-cases (verified against the
 # registrar source: _mcp_reads.reconcile/fsck, _mcp_llm.sign_review, _mcp_writes.run_workflow).
@@ -46,6 +47,9 @@ _ANNOTATIONS: dict[str, str] = {
         "live/mutating modes are blocked by `REBAR_MCP_READONLY` first, then require "
         "`REBAR_MCP_ALLOW_JIRA_SYNC`; dry-run/check are always available"
     ),
+    "bridge_sync": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
+    "bridge_pause": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
+    "bridge_resume": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "fsck": "the recover path is gated by `REBAR_MCP_READONLY` (plain fsck is read-only)",
     _LLM_REGISTRAR_BUT_WRITE_GATED: (
         "hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it "
@@ -132,12 +136,15 @@ def render() -> str:
     tools = _registrar_tools()
     env = _gate_env_descriptions()
 
-    read = dict(tools["read"])
+    read = {n: s for n, s in tools["read"].items() if n not in _READ_REGISTRAR_BUT_WRITE_GATED}
     # sign_review moves from the LLM registrar into the Write-gated section.
     llm = {n: s for n, s in tools["llm"].items() if n != _LLM_REGISTRAR_BUT_WRITE_GATED}
     write = dict(tools["write"])
     if _LLM_REGISTRAR_BUT_WRITE_GATED in tools["llm"]:
         write[_LLM_REGISTRAR_BUT_WRITE_GATED] = tools["llm"][_LLM_REGISTRAR_BUT_WRITE_GATED]
+    for name in _READ_REGISTRAR_BUT_WRITE_GATED:
+        if name in tools["read"]:
+            write[name] = tools["read"][name]
 
     total = len(read) + len(llm) + len(write)
 
@@ -199,8 +206,9 @@ def render() -> str:
         f"Registered by `register_write_tools`, which is skipped entirely when the "
         f"server is read-only — so these mutation tools are ABSENT under "
         f"`REBAR_MCP_READONLY`: {env.get('REBAR_MCP_READONLY', '')} "
-        f"(`sign_review` is registered by the LLM registrar but is write-gated, so it is "
-        f"listed here.)"
+        f"(`sign_review` is registered by the LLM registrar but write-gated; bridge "
+        f"control/sync tools are conditionally omitted by the read registrar in read-only "
+        f"mode and enforce Jira-sync authorization at call time.)"
     )
     lines.append("")
     lines.append("| Tool | Summary |")
