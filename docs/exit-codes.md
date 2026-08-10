@@ -134,6 +134,7 @@ guarantee `2`).
 | `format` | 0 | 0 | — | tolerant read: unknown id renders empty, still 0 |
 | `fsck` | 0 | — | — | no ticket id |
 | `fsck-recover` | 0 | — | — | no ticket id; `--detect-only` exits **3** if stale rebase found; bad args → 2 |
+| `tracker-maintenance` | 0 | — | — | no ticket id; **1** = refused (unpushed ticket commits, or `origin/tickets` missing so they cannot be ruled out) without `--force=<reason>`; bad args / no tracker → 2 |
 | `get-file-impact` | 0 | 1 | — | |
 | `get-verify-commands` | 0 | 1 | — | |
 | `init` | 0 | — | — | idempotent |

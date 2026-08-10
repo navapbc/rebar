@@ -45,6 +45,7 @@ Subcommands:
   compact-all   Compact all eligible tickets [--dry-run] [--limit=<n>] [--no-commit]
   fsck          Check store integrity (JSON validity, CREATE presence, index.lock) [--output json]
   fsck-recover  Recover the tracker worktree (dangling commits, interrupted rebases) [--tracker-dir <path>]
+  tracker-maintenance  Supported door for raw git in the tracker; backup ref + refusal + audit [--status|--clean] [--force=<reason>]
   revert        Revert a ticket to a prior event UUID (<ticket_id> <target_uuid> [--reason=<text>])
   resolve       Resolve an id/alias/prefix to a canonical ticket id
   format        Render a ticket for display (<ticket_id> [mode])

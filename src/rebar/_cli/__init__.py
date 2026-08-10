@@ -153,7 +153,9 @@ _DISPATCH_PRIMARY = (
     | _COMPACT
     | _BRIDGE
 )
-_DISPATCH_MIDDLE = _IO | frozenset({"doctor", "fsck", "fsck-recover"}) | _WRITES_FULL
+_DISPATCH_MIDDLE = (
+    _IO | frozenset({"doctor", "fsck", "fsck-recover", "tracker-maintenance"}) | _WRITES_FULL
+)
 
 
 def _reconcile(argv: list[str]) -> int:
@@ -336,6 +338,14 @@ def _dispatch_middle(sub: str, rest: list[str]) -> int:
         from rebar._commands import fsck as _fsck
 
         return _fsck.fsck_cli(rest)
+    if sub == "tracker-maintenance":
+        # The SUPPORTED door for raw git in the tracker (bug 2fa6). Needs a real store to
+        # inspect, and must never auto-init one — an operator reaching for maintenance is
+        # repairing an EXISTING store, and silently creating a fresh one would hide that.
+        ensure_initialized(init_only=False)
+        from rebar._commands import tracker_maintenance as _tracker_maintenance
+
+        return _tracker_maintenance.tracker_maintenance_cli(rest)
     if sub == "fsck-recover":
         # The recover path resolves its own tracker (honors REBAR_TRACKER_DIR /
         # --tracker-dir); it only auto-inits when
