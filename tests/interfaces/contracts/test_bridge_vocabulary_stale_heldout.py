@@ -116,8 +116,12 @@ def test_library_and_mcp_bridge_fsck_entrypoints_remain_callable(rebar_repo: Pat
     """The CLI rename does not rename or detach either public programmatic surface."""
     from rebar.mcp_server import build_server
 
-    expected = {"orphaned": [], "duplicates": [], "stale": []}
-    assert rebar.bridge_fsck(repo_root=rebar_repo) == expected
+    expected_keys = {"unknown_event_types", "binding_drift", "store_integrity"}
+    library_result = rebar.bridge_fsck(repo_root=rebar_repo)
+    assert set(library_result) == expected_keys
+    assert library_result["unknown_event_types"] == []
+    assert library_result["store_integrity"] == []
 
     result = _unwrap(asyncio.run(build_server().call_tool("bridge_fsck", {})))
-    assert {key: result[key] for key in expected} == expected
+    assert set(result) == expected_keys
+    assert result == library_result

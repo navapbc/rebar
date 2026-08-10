@@ -30,6 +30,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **`bridge fsck` now audits real offline bridge state.** Its JSON result contains
+  `unknown_event_types`, `binding_drift`, and `store_integrity`; the permanently empty
+  SYNC-derived `orphaned`, `duplicates`, and `stale` keys are removed. Binding-index
+  inconsistencies exit 1, while Git/ref scan failures exit 2 instead of looking clean.
+  `rebar bridge-fsck` remains an identical compatibility entrypoint.
+
 - **`reconcile-bridge-canary.yml` is a client-copied template.** Existing client copies keep
   their current delivery loop until maintainers opt in by refreshing that workflow from this
   release; refresh it deliberately rather than assuming repository updates modify copied files.

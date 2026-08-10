@@ -183,10 +183,9 @@ try:
         passed: bool | None = None
 
     class BridgeFsckOut(_Out):
-        orphaned: list = []
-        duplicates: list = []
-        stale: list = []
-        binding_drift: dict = {}
+        unknown_event_types: list[str]
+        binding_drift: dict
+        store_integrity: list[dict]
 
     class SignResultOut(_Out):
         # Contract phase (story 8f1d): the

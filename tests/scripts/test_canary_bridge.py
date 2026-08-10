@@ -11,7 +11,8 @@ Subcommands (argv[0]):
 - ``heartbeat-alert``    — find/open/comment/close the ``heartbeat-alert``
   bug-ticket lifecycle against the rebar CLI (via the runner).
 - ``check-binding-drift`` — run ``rebar bridge fsck --output json``, tolerate
-  its designed exit-1-on-drift, classify the ``binding_drift`` section; emit
+  its designed exit-1-on-findings, classify ``binding_drift`` and
+  ``store_integrity``; emit
   ``drift_found`` / ``drift_total`` / ``drift_summary`` to $GITHUB_OUTPUT.
 - ``binding-drift-alert`` — same lifecycle shape for ``binding-drift-alert``.
 
@@ -24,8 +25,8 @@ Seams (keyword-only params of ``main``):
 Failure dispositions (each preserved from the YAML, NOT a blanket rule):
 - alert-lifecycle WRITES (create/comment/transition) fail LOUD -> exit != 0;
 - dedup FINDs (``rebar list``) fail SOFT -> treated as "no existing alert";
-- ``bridge fsck`` exit 1 with valid JSON is DRIFT DATA (the signal), never an
-  error; unparseable/empty stdout degrades to empty drift data.
+- ``bridge fsck`` exit 1 with valid JSON is finding data (the signal), never an
+  error; operational failures and invalid/partial JSON fail closed.
 """
 
 from __future__ import annotations
@@ -428,16 +429,24 @@ def test_heartbeat_alert_green_with_no_ticket_is_noop(mod: ModuleType, tmp_path:
 
 
 def test_check_binding_drift_exit1_with_json_is_drift_data(mod: ModuleType, tmp_path: Path) -> None:
-    """bridge fsck exits 1 BY DESIGN on drift: capture stdout, report the drift."""
+    """Exit 1 is finding data; drift and store-integrity counts are combined."""
     fsck = json.dumps(
         {
+            "unknown_event_types": [],
             "binding_drift": {
                 "would_terminal": ["a", "b"],
                 "dangling": [],
                 "local_gone": ["c"],
                 "unbound_jira": [],
                 "retired_overlap": [],
-            }
+            },
+            "store_integrity": [
+                {
+                    "kind": "forward_missing_reverse",
+                    "local_id": "loc-1",
+                    "jira_key": "REB-1",
+                }
+            ],
         }
     )
     runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
@@ -447,13 +456,13 @@ def test_check_binding_drift_exit1_with_json_is_drift_data(mod: ModuleType, tmp_
     assert rc == 0  # exit 1 from fsck is a SIGNAL, not an error
     out = read_outputs(tmp_path / "gh_out")
     assert out["drift_found"] == "true"
-    assert out["drift_total"] == "3"
-    assert out["drift_summary"] == "would_terminal=2, local_gone=1"
+    assert out["drift_total"] == "4"
+    assert out["drift_summary"] == "would_terminal=2, local_gone=1, store_integrity=1"
 
 
 def test_check_binding_drift_clean(mod: ModuleType, tmp_path: Path) -> None:
     """Exit 0 + empty binding_drift -> drift_found=false, summary 'none'."""
-    fsck = json.dumps({"binding_drift": {}})
+    fsck = json.dumps({"unknown_event_types": [], "binding_drift": {}, "store_integrity": []})
     runner = FakeRunner({("rebar", "bridge", "fsck"): (0, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
@@ -465,18 +474,42 @@ def test_check_binding_drift_clean(mod: ModuleType, tmp_path: Path) -> None:
     assert out["drift_summary"] == "none"
 
 
-def test_check_binding_drift_garbage_output_degrades_to_empty(
-    mod: ModuleType, tmp_path: Path
-) -> None:
-    """Unparseable fsck stdout degrades to empty drift data (YAML parity)."""
+def test_check_binding_drift_garbage_output_fails_closed(mod: ModuleType, tmp_path: Path) -> None:
+    """Unparseable fsck stdout cannot be reinterpreted as a clean store."""
     runner = FakeRunner({("rebar", "bridge", "fsck"): (1, "not json {", "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
-    assert rc == 0
-    out = read_outputs(tmp_path / "gh_out")
-    assert out["drift_found"] == "false"
-    assert out["drift_total"] == "0"
+    assert rc == 1
+    assert (tmp_path / "gh_out").read_text() == ""
+
+
+def test_check_binding_drift_operational_exit_two_fails_closed(
+    mod: ModuleType, tmp_path: Path
+) -> None:
+    """A Git/ref scan failure makes the canary step fail, never auto-close."""
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (2, "", "tickets ref unavailable")})
+    env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
+    (tmp_path / "gh_out").touch()
+
+    rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
+
+    assert rc == 1
+    assert (tmp_path / "gh_out").read_text() == ""
+
+
+def test_check_binding_drift_partial_old_shape_fails_closed(
+    mod: ModuleType, tmp_path: Path
+) -> None:
+    """An old partial payload cannot silently bypass store-integrity findings."""
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (0, json.dumps({"binding_drift": {}}), "")})
+    env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
+    (tmp_path / "gh_out").touch()
+
+    rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
+
+    assert rc == 1
+    assert (tmp_path / "gh_out").read_text() == ""
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +541,7 @@ def test_binding_drift_alert_opens_with_drift_title(mod: ModuleType, tmp_path: P
     creates = [c for c in runner.rebar_calls() if c[1] == "create"]
     assert len(creates) == 1
     argv = creates[0]
-    assert argv[3] == "[binding-drift] bridge fsck found 3 unhealed binding drift(s)"
+    assert argv[3] == "[binding-drift] bridge fsck found 3 audit finding(s)"
     assert "--tags" in argv and argv[argv.index("--tags") + 1] == "binding-drift-alert"
     assert "--detected-by" in argv
     assert argv[argv.index("--detected-by") + 1] == "binding-drift-canary"
@@ -555,7 +588,9 @@ def test_binding_drift_alert_accumulates_after_24h(mod: ModuleType, tmp_path: Pa
     assert rc == 0
     writes = runner.rebar_writes()
     assert [c[1] for c in writes] == ["comment"]
-    assert writes[0][3].startswith("BRIDGE_CANARY_ALERT: Binding drift still present as of ")
+    assert writes[0][3].startswith(
+        "BRIDGE_CANARY_ALERT: Bridge audit findings still present as of "
+    )
 
 
 def test_binding_drift_alert_empty_detail_aborts_loud(mod: ModuleType, tmp_path: Path) -> None:

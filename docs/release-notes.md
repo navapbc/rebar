@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## `bridge fsck` audits real offline state
+
+`rebar bridge fsck` now returns exactly `unknown_event_types`, `binding_drift`, and
+`store_integrity`. The former `orphaned`, `duplicates`, and `stale` result keys are removed:
+they depended on legacy `SYNC` events that rebar never emitted and were permanently empty.
+This is the output-contract break authorized for the bridge-vocabulary migration.
+
+Unknown event detection now reads `refs/heads/tickets` directly, using a cheap Git grep followed
+by top-level JSON verification for only residual candidates. It does not require a tickets
+checkout, and nested/comment text cannot become a finding. Git/ref/read failures fail closed as
+an operational exit 2 rather than reporting a clean store. `store_integrity` validates both
+directions of `bindings.json`; any inconsistency exits 1. Unknown types and the existing
+informational binding-drift cells remain non-gating.
+
+The compatibility `rebar bridge-fsck` entrypoint produces the identical new result and exit
+semantics as canonical `rebar bridge fsck`. Public library/MCP symbol names remain
+`bridge_fsck`; only their returned schema changes. The live `BRIDGE_ALERT` event/reducer path,
+the bridge-alert JSONL channel, and compatibility `rebar bridge-status` are unchanged.
+
 ## Bridge maintenance commands are nested under `bridge`
 
 The primary operator spellings replace the old vocabulary as follows:

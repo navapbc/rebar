@@ -268,7 +268,7 @@ def register_read_tools(mcp, ctx) -> None:
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def bridge_fsck() -> BridgeFsckOut:
-        """Audit bridge mappings -> {orphaned, duplicates, stale}."""
+        """Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}."""
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
