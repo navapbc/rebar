@@ -38217,7 +38217,7 @@
         "assignee": null,
         "description": "Umbrella for confirmed defects from a downstream client bug report (multi-agent workflow on a consumer repo, rebar v0.10.0). Children are independently reproducible + landable defects verified against v0.10.0 / the installed tool. Excluded: 8c (already fixed by e3c74881f in v0.10.0), 8a/8b (reviewer calibration, separate track), 3 (verdict-precedence design decision, needs maintainer call), 6 (backgrounded review-plan repo-root, repro pending).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Fix rebar defects surfaced by sec-semantic-layer client report"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
