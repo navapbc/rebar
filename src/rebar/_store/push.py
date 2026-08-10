@@ -6,9 +6,10 @@ or a config file — resolved via the typed config),
 pushes ``HEAD:tickets`` (the detached-HEAD commit, bug 27d8-b230), retries ≤3, and
 reconciles a non-fast-forward by **merging** ``origin/tickets`` (never rebasing —
 merge is atomic, no rebase-merge state to strand picks; 637b Fix 3), including the
-dirty-working-tree stash→merge→pop dance (bug 12a6). ALWAYS returns ``None``
-(best-effort): a push failure never fails the caller; ``fsck`` reports
-``PUSH_PENDING`` while the local branch is ahead of origin.
+dirty-working-tree set-aside→merge→restore dance (bug 12a6) — which uses a stash COMMIT
+OBJECT, never the repo-global ``refs/stash`` stack every worktree shares (bug 2fa6).
+ALWAYS returns ``None`` (best-effort): a push failure never fails the caller; ``fsck``
+reports ``PUSH_PENDING`` while the local branch is ahead of origin.
 """
 
 from __future__ import annotations
@@ -22,7 +23,7 @@ from typing import Any
 
 from rebar._optional import OptionalDependencyError
 from rebar._store import compat
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch, run_git
 
 logger = logging.getLogger(__name__)
 
@@ -164,55 +165,76 @@ def _raise_if_strict(
 
 
 # raw-git-ok: locked store seam internal
-def _resolve_conflicted_pop(base: str, stash: subprocess.CompletedProcess) -> None:
-    """Repair a ``git stash pop`` that applied-with-conflict (bug 6818).
+def _stash_create(base_path: str) -> str | None:
+    """Record the dirty working tree as a stash COMMIT OBJECT, off the shared stack.
 
-    The stashed working-tree edits live on reconciler-REGENERABLE files
-    (``.bridge_state/prev_snapshot.json``, ``bindings.json``, ``get_rotation.json`` — rebuilt on the
-    reconciler's next pass; a missing/empty prev_snapshot merely forces a full
-    re-fetch). When the post-stash merge brings the upstream copy of such a file in
-    cleanly but the stashed edit touches the same region, ``stash pop`` writes
-    conflict markers into the working tree, leaves an unmerged (UU, stages 1/2/3)
-    index entry, and KEEPS the stash — wedging the tracker (reconcile fail-closes
-    on the markers; every ``git commit`` refuses the unmerged path).
+    ``git stash create`` writes the stash commit and prints its sha WITHOUT touching
+    ``refs/stash``. That is the whole point (bug 2fa6): the stash stack is REPO-GLOBAL,
+    shared by every worktree, so a ``stash push``/``pop`` pair here could — and did — pop an
+    entry created on a source branch, dropping ``src/…`` into the store and stranding the
+    index. A commit addressed by sha is unreachable from another worktree's pop. Unlike
+    ``stash push``, ``create`` does NOT clean the working tree; the caller resets. Returns
+    the sha, ``""`` when the tree was already clean, or ``None`` on git failure."""
+    cp = _git(base_path, "stash", "create", "push_tickets_branch:auto-stash")
+    if cp.returncode != 0:
+        return None
+    return cp.stdout.strip()
 
-    The clean-pop happy path never reaches here. On a conflicted pop we resolve
-    deterministically: restore the conflicted path(s) to the merged HEAD (discarding
-    the regenerable working-tree edit) and drop the now-applied stash so nothing
-    dangles. After this the tree + index are consistent (no markers, no UU,
-    committable)."""
-    if stash.returncode == 0:
-        # `stash pop` can still report rc 0 with no conflict — but be defensive and
-        # check the index for unmerged entries left by an apply-with-conflict.
-        if not _git(base, "ls-files", "-u").stdout.strip():
-            return  # genuinely clean pop — nothing to repair
-    unmerged = _git(base, "diff", "--name-only", "--diff-filter=U").stdout.split()
-    if unmerged:
-        # Restore each conflicted path to the merged HEAD (committed) version: drops
-        # the stashed regenerable edit AND the conflict markers. Remove the unmerged
-        # index entries (all stages) THEN restore from HEAD, so no stranded stage is
-        # left behind (a bare `checkout HEAD --` does not always clear the UU).
-        _git(base, "rm", "-q", "--cached", "--", *unmerged)
-        _git(base, "checkout", "HEAD", "--", *unmerged)
-    # The stash was KEPT because the pop conflicted; the merged HEAD now carries the
-    # upstream content we want, so drop the now-superseded stash to leave nothing
-    # dangling. Best-effort (the top stash entry is the one we just popped).
-    _git(base, "stash", "drop", "--quiet")
+
+# raw-git-ok: locked store seam internal
+def _restore_stash(base_path: str, stash_sha: str) -> None:
+    """Re-apply the stash commit built by :func:`_stash_create`, repairing a conflict.
+
+    ``git stash apply <sha>`` names the commit explicitly, so it can only ever restore
+    OUR OWN recorded tree — there is no stack to consult and nothing to ``drop``
+    afterwards."""
+    if not stash_sha:
+        return  # nothing was stashed (clean tree)
+    applied = _git(base_path, "stash", "apply", "--quiet", stash_sha)
+    _resolve_conflicted_apply(base_path, applied)
+
+
+# raw-git-ok: locked store seam internal
+def _resolve_conflicted_apply(base: str, applied: subprocess.CompletedProcess) -> None:
+    """Repair a ``git stash apply`` that applied-with-conflict (bug 6818).
+
+    When the post-merge HEAD brings the upstream copy of a file in cleanly but the
+    stashed edit touches the same region, the apply writes conflict markers and leaves an
+    unmerged (UU) index entry — wedging the tracker (reconcile fail-closes on the markers;
+    every ``git commit`` refuses the unmerged path). A clean apply never reaches here.
+
+    The old code ASSUMED every conflicted path was reconciler-regenerable
+    (``.bridge_state/prev_snapshot.json``, ``bindings.json``, ``get_rotation.json`` — rebuilt
+    on the reconciler's next pass) and blind-restored it from HEAD. Bug 2fa6 disproved that,
+    so the assumption is ENFORCED: each path is classified against what the branch tracks and
+    the buckets diverge in :func:`~rebar._store.gitutil.discard_unmerged_paths` — a
+    tracked path is restored from HEAD (the reconciler rebuilds it), while a path the
+    branch does not track CANNOT be ticket data and is removed. Foreign paths are logged
+    rather than vanishing silently: their presence means source files reached the tracker."""
+    if applied.returncode == 0 and not _git(base, "ls-files", "-u").stdout.strip():
+        return  # genuinely clean apply — nothing to repair
+    unmerged = sorted(set(_git(base, "diff", "--name-only", "--diff-filter=U").stdout.split()))
+    if not unmerged:
+        return
+    foreign = [p for p in unmerged if path_is_foreign_to_branch(base, p)]
+    regenerable = [p for p in unmerged if p not in set(foreign)]
+    if foreign:
+        logger.warning(
+            "tickets tracker held conflicted paths the branch does not track — removing: %s",
+            ", ".join(foreign),
+        )
+    discard_unmerged_paths(base, regenerable, foreign)
 
 
 def _recover_dirty_merge(
     base_path: str, remote_ref: str, attempt: int, strict: bool
 ) -> bool | None:
-    """Stash, merge, and restore regenerable working-tree edits."""
-    stash = _git(
-        base_path,
-        "stash",
-        "push",
-        "--quiet",
-        "-m",
-        "push_tickets_branch:auto-stash",
-    )
-    if stash.returncode != 0:
+    """Set the dirty tree aside, merge, and restore the working-tree edits.
+
+    Uses a stash COMMIT OBJECT (never ``refs/stash``) so nothing here can interact with
+    the repo-global stash stack another worktree shares — see :func:`_stash_create`."""
+    stash_sha = _stash_create(base_path)
+    if stash_sha is None:
         _raise_if_strict(
             strict,
             "merge-recovery-blocked",
@@ -222,10 +244,27 @@ def _recover_dirty_merge(
         )
         logger.warning("tickets branch push failed: stash failed (attempt %s)", attempt)
         return False
+    if stash_sha:
+        # ``stash create`` leaves the tree dirty; clear it so the merge can proceed.
+        # Tracked files only — like ``stash push``, untracked files are left alone.
+        # Restores the tree to HEAD AFTER ``stash create`` recorded it, so the recorded
+        # state is never lost by this — the marker must sit on the call's own line.
+        reset = _git(  # raw-git-ok: locked store seam internal
+            base_path, "reset", "--hard", "-q"
+        )
+        if reset.returncode != 0:
+            _raise_if_strict(
+                strict,
+                "merge-recovery-blocked",
+                "could not clear the working tree during push recovery",
+                base_path,
+                remote_ref,
+            )
+            logger.warning("tickets branch push failed: reset failed (attempt %s)", attempt)
+            return False
     merge_target, problem = compat.store_epoch_merge_target(base_path, remote_ref)
     if merge_target is None or problem is not None:
-        pop = _git(base_path, "stash", "pop", "--quiet")
-        _resolve_conflicted_pop(base_path, pop)
+        _restore_stash(base_path, stash_sha)
         _raise_if_strict(
             strict,
             "store-epoch-during-recovery",
@@ -245,7 +284,7 @@ def _recover_dirty_merge(
     )
     if merge.returncode != 0:
         _git(base_path, "merge", "--abort")
-        _git(base_path, "stash", "pop", "--quiet")
+        _restore_stash(base_path, stash_sha)
         _raise_if_strict(
             strict,
             "merge-recovery-blocked",
@@ -255,8 +294,7 @@ def _recover_dirty_merge(
         )
         logger.warning("tickets branch merge failed after stash recovery (attempt %s)", attempt)
         return False
-    pop = _git(base_path, "stash", "pop", "--quiet")
-    _resolve_conflicted_pop(base_path, pop)
+    _restore_stash(base_path, stash_sha)
     return True
 
 
