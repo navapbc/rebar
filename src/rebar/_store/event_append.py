@@ -43,7 +43,12 @@ from rebar._store.canonical import canonical_bytes  # the single canonical seria
 # Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
 # re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
 from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
-from rebar._store.gitutil import _with_index_lock_retry, _with_transient_head_retry
+from rebar._store.gitutil import (
+    _with_index_lock_retry,
+    _with_transient_head_retry,
+    discard_unmerged_paths,
+    path_is_foreign_to_branch,
+)
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
 from rebar.reducer._version import (  # single source of truth for the type names
     KEY_ADD,
@@ -677,9 +682,9 @@ def _recover_from_unmerged(
     that blocks EVERY ``git commit``, wedging all store writes.
 
     Returns ``(healed, detail)``:
-    - ``(True, None)`` — all unmerged paths were reconciler-regenerable; they were
-      restored to HEAD and the event commit was retried successfully.
-    - ``(False, <actionable message>)`` — a NON-regenerable path is unmerged (real
+    - ``(True, None)`` — every unmerged path was reconciler-regenerable OR FOREIGN to the
+      tickets branch; they were cleared and the event commit was retried successfully.
+    - ``(False, <actionable message>)`` — a path the branch DOES track is unmerged (real
       ticket data, never auto-discarded); the caller raises with that message.
     - ``(False, None)`` — no unmerged paths (the commit failed for another reason) or
       the retry still failed; the caller raises the generic error.
@@ -689,20 +694,20 @@ def _recover_from_unmerged(
     ).stdout.split()
     if not unmerged:
         return (False, None)
-    nonregen = [p for p in unmerged if not p.startswith(_REGENERABLE_PREFIX)]
-    if nonregen:
+    regen = [p for p in unmerged if p.startswith(_REGENERABLE_PREFIX)]
+    rest = [p for p in unmerged if p not in regen]
+    # A path the tickets branch does not track CANNOT be ticket data (bug 2fa6), so discard
+    # it like a regenerable one rather than wedging every store write on it.
+    foreign = [p for p in rest if path_is_foreign_to_branch(tracker, p)]
+    ticket_data = [p for p in rest if p not in foreign]
+    if ticket_data:
         return (
             False,
             "Error: git commit blocked by unmerged path(s) in the tracker index: "
-            f"{', '.join(nonregen)} — the tickets worktree has a stranded merge/stash "
+            f"{', '.join(ticket_data)} — the tickets worktree has a stranded merge/stash "
             "conflict. Resolve it (e.g. `git -C <tracker> checkout HEAD -- <path>`) and retry.",
         )
-    # All unmerged paths are regenerable → restore to HEAD and retry the event commit
-    # once. Drop the unmerged index entries (all stages) THEN restore from HEAD: this
-    # reliably clears both the UU and the working-tree markers (a bare `checkout HEAD
-    # --` can leave a stranded stage behind).
-    _run_git(["git", "-C", tracker, "rm", "-q", "--cached", "--", *unmerged])
-    _run_git(["git", "-C", tracker, "checkout", "HEAD", "--", *unmerged])
+    discard_unmerged_paths(tracker, regen, foreign)
     _git_add(tracker, list(event_relpaths))
     # Same transient ``could not parse HEAD`` (read) AND object-DB temp-create (write)
     # self-heals as _git_commit — this UU-recovery commit reads HEAD and writes loose

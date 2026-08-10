@@ -81,3 +81,73 @@ def test_write_self_heals_preexisting_unmerged_bridge_state(
     # The event actually committed.
     fn = event_append.event_filename(event["timestamp"], event["uuid"], "COMMENT")
     assert (Path(tracker) / "tk" / fn).exists()
+
+
+# ── bug 2fa6: a path the tickets branch does not track is FOREIGN, not ticket data ────────
+def _tracker_with_unmerged(tmp_path: Path, rel: str, *, seed_path: bool) -> str:
+    """A tracker with a stranded UU on ``rel`` and NO MERGE_HEAD. When ``seed_path`` the
+    path's top-level component is committed first (so the branch tracks it)."""
+    td = tmp_path / "trk"
+    td.mkdir()
+    _git(td, "init", "-q", "-b", "tickets")
+    _git(td, "config", "user.email", "t@e.com")
+    _git(td, "config", "user.name", "T")
+    (td / ".bridge_state").mkdir()
+    (td / ".bridge_state" / "prev_snapshot.json").write_text("{}\n")
+    if seed_path:
+        p = td / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("seed\n")
+    _git(td, "add", "-A")
+    _git(td, "commit", "-q", "-m", "seed")
+    b1, b2, b3 = (_hash_object(td, c) for c in ("base\n", "ours\n", "theirs\n"))
+    info = f"100644 {b1} 1\t{rel}\n100644 {b2} 2\t{rel}\n100644 {b3} 3\t{rel}\n"
+    _git(td, "update-index", "--index-info", _in=info)
+    f = td / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("<<<<<<< ours\nours\n=======\ntheirs\n>>>>>>> theirs\n")
+    assert _git(td, "ls-files", "-u", rel).stdout.strip() != "", "fixture must create a UU"
+    return str(td)
+
+
+def _event(uuid: str = "u-2") -> dict:
+    return {
+        "timestamp": 1700000000000000000,
+        "uuid": uuid,
+        "event_type": "COMMENT",
+        "env_id": "e",
+        "author": "a",
+        "data": {"body": "x"},
+    }
+
+
+def test_write_self_heals_unmerged_path_foreign_to_the_branch(tmp_path: Path) -> None:
+    """A `git stash pop` in the tickets worktree can apply a stash created in a SOURCE
+    worktree (the stash stack is shared across worktrees), dropping `src/...` into the store.
+    Such a path is not reconciler-regenerable, but it is also NOT ticket data — the tickets
+    branch tracks no source tree — so it must be discarded, not left to wedge every write.
+    Uses the exact path observed on the live store.
+    """
+    rel = "src/rebar/llm/plan_review/det_floor.py"
+    tracker = _tracker_with_unmerged(tmp_path, rel, seed_path=False)
+
+    rc = event_append.stage_and_commit(tracker, "tk", _event())
+
+    assert rc == 0, "a foreign unmerged path must not wedge the write"
+    assert _git(tracker, "ls-files", "-u").stdout.strip() == "", "index must be consistent"
+    assert not (Path(tracker) / rel).exists(), "the foreign file itself must be gone"
+    fn = event_append.event_filename(1700000000000000000, "u-2", "COMMENT")
+    assert (Path(tracker) / "tk" / fn).exists(), "the event must have committed"
+
+
+def test_write_still_refuses_unmerged_path_the_branch_tracks(tmp_path: Path) -> None:
+    """The guard must not weaken: a path the branch DOES track is real ticket data and is
+    never auto-discarded — the write refuses and surfaces an actionable message."""
+    rel = "tk/1700000000000000000-u-9-COMMENT.json"
+    tracker = _tracker_with_unmerged(tmp_path, rel, seed_path=True)
+
+    with pytest.raises(Exception) as exc:
+        event_append.stage_and_commit(tracker, "tk", _event("u-3"))
+
+    assert "stranded merge/stash" in str(exc.value), str(exc.value)
+    assert rel in str(exc.value), "the offending ticket path must be named"
