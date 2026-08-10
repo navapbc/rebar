@@ -272,3 +272,51 @@ def test_restore_takes_the_newest_pre_image_when_deleted_twice(two_clones):  # n
     assert name in restored
     body = (seed_dir / (name + ".retired")).read_text()
     assert "NEW" in body and "OLD" not in body, "must restore the newest pre-image"
+
+
+def test_restore_falls_back_to_per_uuid_lookup(two_clones, monkeypatch):  # noqa: F811
+    """bug 85fa: the directory-scoped history walk can MISS a deletion that a path-scoped walk
+    reports (observed on live ticket f130, whose lost EDIT was invisible to
+    ``git log --diff-filter=D -- <tid>/`` but found by ``-- <tid>/*<uuid>*``). When the cheap
+    pass comes back empty, the per-uuid fallback must still recover the event."""
+    from rebar._commands import fsck_restore
+    from rebar._commands.fsck_repair import snapshot_missing_sources
+
+    _remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    seed_dir = tracker_a / seed
+
+    _engine_run(repo_a, "comment", seed, "body-recovered-by-fallback")
+    victim = sorted(seed_dir.glob("*-COMMENT.json"))[-1]
+    victim_uuid = _json.loads(victim.read_text())["uuid"]
+    create_uuid = _json.loads(next(seed_dir.glob("*-CREATE.json")).read_text())["uuid"]
+    _commit(tracker_a, "seed events")
+    victim.unlink()
+    _commit(tracker_a, "ticket: COMPACT (legacy delete-style)")
+
+    snap_uuid = "77777777-7777-4777-8777-777777777777"
+    (seed_dir / f"9000000000000000000-{snap_uuid}-SNAPSHOT.json").write_text(
+        _json.dumps(
+            {
+                "event_type": "SNAPSHOT",
+                "timestamp": 9000000000000000000,
+                "uuid": snap_uuid,
+                "env_id": "00000000-0000-4000-8000-000000000001",
+                "author": "Test",
+                "data": {
+                    "compiled_state": {"status": "closed"},
+                    "source_event_uuids": [create_uuid, victim_uuid],
+                },
+            }
+        )
+    )
+    assert snapshot_missing_sources(str(seed_dir)) == [victim_uuid]
+
+    # Simulate the directory-scoped walk missing the deletion entirely.
+    monkeypatch.setattr(fsck_restore, "_deleted_history", lambda *_a, **_k: {})
+
+    restored = fsck_restore.restore_deleted_sources(str(tracker_a), seed, str(seed_dir))
+
+    assert victim.name in restored, "the per-uuid fallback must recover what the walk missed"
+    assert (seed_dir / (victim.name + ".retired")).exists()
+    assert snapshot_missing_sources(str(seed_dir)) == []
