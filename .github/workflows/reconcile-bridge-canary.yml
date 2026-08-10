@@ -4,10 +4,9 @@
 # when no successful run has occurred within the alert window. Self-healing:
 # closes the alert ticket when the reconciler recovers.
 #
-# Also runs the binding-drift PARITY ORACLE (epic 3006-e198, child 8de5): each
-# cycle it runs `rebar bridge fsck` (offline classifier over bindings.json +
-# prev_snapshot.json) and opens/updates/closes a `binding-drift-alert` bug when
-# the `binding_drift` section is non-empty — surfacing unhealed convergence drift.
+# Also runs the offline bridge audit: each cycle `rebar bridge fsck` checks the
+# binding-drift parity oracle and forward/reverse binding-store integrity, then
+# opens/updates/closes a `binding-drift-alert` bug for actionable findings.
 #
 # This is a TEMPLATE: client projects copy it verbatim (see docs/jira-sync-setup.md).
 #
@@ -193,11 +192,10 @@ jobs:
           python scripts/canary_bridge.py heartbeat-alert
 
       # ── Binding-drift parity oracle (epic 3006-e198, child 8de5) ─────────────
-      # bridge fsck now reads bindings.json + prev_snapshot.json READ-ONLY and runs
-      # the convergence classifier offline (would_terminal / dangling / local_gone /
-      # unbound_jira / retired_overlap). A non-empty binding_drift section is the
-      # PARITY ORACLE every heal is validated against — surface it as a bridge_alert
-      # bug so unhealed drift opens/updates a ticket and self-closes on recovery.
+      # bridge fsck reads bindings.json + prev_snapshot.json READ-ONLY. It runs the
+      # convergence classifier and validates both binding-index directions. Surface
+      # actionable binding_drift or store_integrity findings as a bridge_alert bug;
+      # an operational scan failure fails this step instead of looking clean.
       - name: Check bridge binding-drift
         id: drift
         run: |

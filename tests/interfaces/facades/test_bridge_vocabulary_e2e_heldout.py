@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -27,9 +28,8 @@ def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_fsck_spellings_are_byte_for_byte_equivalent(rebar_repo: Path, tmp_path: Path) -> None:
-    """A real empty tracker produces the same audit result through either spelling."""
-    tracker = tmp_path / "tracker"
-    tracker.mkdir()
+    """A real committed tracker produces the new result through either spelling."""
+    tracker = rebar_repo / ".tickets-tracker"
     option = f"--tickets-tracker={tracker}"
 
     canonical = _run(rebar_repo, "bridge", "fsck", option, "--output", "json")
@@ -38,7 +38,29 @@ def test_fsck_spellings_are_byte_for_byte_equivalent(rebar_repo: Path, tmp_path:
     assert canonical.returncode == legacy.returncode
     assert canonical.stdout == legacy.stdout
     assert canonical.stderr == legacy.stderr
-    assert '"binding_drift"' in canonical.stdout
+    assert canonical.returncode == 0
+    assert set(json.loads(canonical.stdout)) == {
+        "unknown_event_types",
+        "binding_drift",
+        "store_integrity",
+    }
+
+
+def test_fsck_spellings_share_operational_failure_exit_two(
+    rebar_repo: Path, tmp_path: Path
+) -> None:
+    """Old workflows receive the same fail-closed behavior as the canonical command."""
+    tracker = tmp_path / "not-a-store"
+    tracker.mkdir()
+    option = f"--tickets-tracker={tracker}"
+
+    canonical = _run(rebar_repo, "bridge", "fsck", option, "--output", "json")
+    legacy = _run(rebar_repo, "bridge-fsck", option, "--output", "json")
+
+    assert canonical.returncode == legacy.returncode == 2
+    assert canonical.stdout == legacy.stdout == ""
+    assert canonical.stderr == legacy.stderr
+    assert "tickets" in canonical.stderr.lower() or "git" in canonical.stderr.lower()
 
 
 def test_check_access_spellings_share_missing_credential_failure(rebar_repo: Path) -> None:
@@ -63,3 +85,6 @@ def test_canonical_help_documents_distinct_mutating_access_check(rebar_repo: Pat
     assert "create" in access.stdout.lower()
     assert "delete" in access.stdout.lower()
     assert "check-access" not in fsck.stdout
+    assert "store integrity" in fsck.stdout.lower()
+    for phantom in ("orphan", "duplicate", "stale sync"):
+        assert phantom not in fsck.stdout.lower()

@@ -466,7 +466,8 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
 ## Optional hardening
 
 DSO also ships a **weekly bridge audit**. rebar exposes the same check as
-`rebar bridge fsck` (orphaned mappings, duplicate Jira keys, stale SYNCs). To add it,
+`rebar bridge fsck` (committed event compatibility, binding drift, and forward/reverse
+binding-store integrity). To add it,
 create a third workflow that mounts the `tickets` worktree (steps 1–2 above) and runs:
 
 ```yaml

@@ -13,7 +13,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | Tool | Summary |
 |------|---------|
 | `audit_trail` | The full audit read surface for a ticket (story 46f0): its FULL retained |
-| `bridge_fsck` | Audit bridge mappings -> {orphaned, duplicates, stale}. |
+| `bridge_fsck` | Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}. |
 | `check_ac` | Check the ticket has an Acceptance Criteria block |
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
 | `explain_criterion` | Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea / |
