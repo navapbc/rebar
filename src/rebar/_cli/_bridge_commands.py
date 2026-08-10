@@ -108,7 +108,7 @@ def _parser() -> argparse.ArgumentParser:
     fsck = commands.add_parser(
         "fsck",
         add_help=False,
-        help="Audit bridge mappings (orphans, duplicates, stale SYNCs).",
+        help="Audit committed event compatibility and binding-store integrity.",
     )
     fsck.add_argument("args", nargs=argparse.REMAINDER)
     check_access = commands.add_parser(
@@ -207,8 +207,8 @@ def _passthrough_help(command: str) -> int:
     if command == "fsck":
         text = (
             "Usage: rebar bridge fsck [--tickets-tracker=<path>] [--output json]\n\n"
-            "Audit bridge mappings for orphaned mappings, duplicate Jira keys, "
-            "stale SYNCs, and binding drift.\n"
+            "Audit committed event compatibility, binding drift, and forward/reverse "
+            "binding-store integrity without Jira access.\n"
         )
     elif command == "check-access":
         text = (

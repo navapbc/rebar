@@ -8,7 +8,7 @@ Commands:
   status    Show the reconciler's durable status snapshot
   pause     Temporarily stop scheduled reconciliation
   resume    Resume scheduled reconciliation
-  fsck      Audit bridge mappings (orphans, duplicates, stale SYNCs)
+  fsck      Audit committed events, binding drift, and binding-store integrity
   check-access
             Check Jira access with a create/label/search/delete round-trip
   setup     Interactively configure and validate Jira access
