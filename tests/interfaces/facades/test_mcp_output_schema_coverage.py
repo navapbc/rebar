@@ -43,7 +43,7 @@ EXEMPT = "EXEMPT"
 CANONICAL: dict[str, str] = {
     "show_ticket": schemas.TICKET_STATE,
     "list_tickets": schemas.TICKET_STATE,
-    "search": schemas.TICKET_STATE,
+    "search": schemas.SEARCH_RESULT,
     "ready_tickets": schemas.TICKET_STATE,
     "recent_session_logs": schemas.TICKET_STATE,
     "ticket_deps": schemas.DEPS_GRAPH,

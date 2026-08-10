@@ -135,6 +135,20 @@ try:
                 properties["plan_review_health"] = _inline_schema_refs(health, defs)
             return schema
 
+    class SearchResultOut(_Out):
+        """Bounded discovery projection; full bodies are available via show."""
+
+        model_config = ConfigDict(extra="forbid")
+
+        ticket_id: str
+        alias: str | None
+        title: str
+        ticket_type: str
+        status: str
+        priority: int
+        summary: str | None
+        snippet: str | None
+
     class DepsGraphOut(_Out):
         ticket_id: str
         deps: list[dict] = []
@@ -257,6 +271,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     PlanReviewHealthTargetOut = PlanReviewHealthAvailableOut = None  # type: ignore[assignment,misc]
     PlanReviewHealthUnavailableOut = None  # type: ignore[assignment,misc]
     TicketStateOut = None  # type: ignore[assignment,misc]
+    SearchResultOut = None  # type: ignore[assignment,misc]
     DepsGraphOut = ClarityResultOut = ValidateReportOut = None  # type: ignore[assignment,misc]
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]

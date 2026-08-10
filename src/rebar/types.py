@@ -159,6 +159,32 @@ class TicketStateLLM(TypedDict):
     ibl: NotRequired[list[Any]]
 
 
+class SearchResult(TypedDict):
+    """Return shape of the `search_result` output schema."""
+
+    ticket_id: str
+    alias: str | None
+    title: str
+    ticket_type: TicketType
+    status: TicketStatus
+    priority: int
+    summary: str | None
+    snippet: str | None
+
+
+class SearchResultLLM(TypedDict):
+    """Return shape of the `search_result_llm` output schema."""
+
+    id: str
+    a: NotRequired[str]
+    ttl: str
+    t: TicketType
+    st: TicketStatus
+    pr: int
+    sm: NotRequired[str]
+    sn: NotRequired[str]
+
+
 class CreateResult(TypedDict):
     """Return shape of the `create_result` output schema."""
 

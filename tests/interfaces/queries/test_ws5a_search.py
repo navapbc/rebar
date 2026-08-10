@@ -22,6 +22,16 @@ def _cli_search(repo: Path, *args: str) -> list:
     return json.loads(cp.stdout)
 
 
+def _cli_search_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, "-m", "rebar.cli", "search", *args],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        env={**_env(repo)},
+    )
+
+
 def _env(repo: Path) -> dict:
     import os
 
@@ -100,3 +110,81 @@ def test_search_parity_library_cli(rebar_repo: Path) -> None:
     lib = _ids(rebar.search("widget"))
     cli = _ids(_cli_search(rebar_repo, "widget"))
     assert lib == cli == {tid}
+
+
+def test_search_defaults_to_bounded_discovery_projection(rebar_repo: Path) -> None:
+    marker = "MixedCaseSearchNeedle"
+    description = f"  Intro\n\n{marker}  " + ("long body text " * 40)
+    tid = rebar.create_ticket("task", "projection target", description=description)
+    rebar.comment(tid, "a full comment body that discovery must not return")
+
+    result = next(t for t in rebar.search(marker.lower()) if t["ticket_id"] == tid)
+
+    assert set(result) == {
+        "ticket_id",
+        "alias",
+        "title",
+        "ticket_type",
+        "status",
+        "priority",
+        "summary",
+        "snippet",
+    }
+    assert result["summary"].startswith(f"Intro {marker}")
+    assert len(result["summary"]) <= 240
+    assert marker in result["snippet"]
+    assert len(result["snippet"]) <= 240
+    assert "description" not in result
+    assert "comments" not in result
+
+
+def test_search_snippet_can_come_from_comment_and_preserves_case(rebar_repo: Path) -> None:
+    tid = rebar.create_ticket("task", "comment projection target")
+    rebar.comment(tid, "before CommentOnlyNeedle after")
+
+    result = next(t for t in rebar.search("commentonlyneedle") if t["ticket_id"] == tid)
+
+    assert "CommentOnlyNeedle" in result["snippet"]
+    assert len(result["snippet"]) <= 240
+
+
+def test_search_null_fallbacks_for_empty_description_and_predicate_query(
+    rebar_repo: Path,
+) -> None:
+    tid = rebar.create_ticket("task", "predicate projection target")
+
+    result = next(t for t in rebar.search("status:open") if t["ticket_id"] == tid)
+
+    assert result["summary"] is None
+    assert result["snippet"] is None
+
+
+def test_search_cli_llm_and_full_output_contracts(rebar_repo: Path) -> None:
+    tid = rebar.create_ticket(
+        "task",
+        "cli projection target",
+        description="CliNeedle body",
+        return_alias=True,
+    )
+
+    llm = _cli_search_run(rebar_repo, "CliNeedle", "--output=llm")
+    assert llm.returncode == 0, llm.stderr
+    rows = [json.loads(line) for line in llm.stdout.splitlines() if line.strip()]
+    row = next(item for item in rows if item["id"] == tid["id"])
+    assert set(row) == {"id", "a", "ttl", "t", "st", "pr", "sm", "sn"}
+    assert "desc" not in row
+    assert "cm" not in row
+
+    full = _cli_search_run(rebar_repo, "CliNeedle", "--full")
+    assert full.returncode == 0, full.stderr
+    full_row = next(item for item in json.loads(full.stdout) if item["ticket_id"] == tid["id"])
+    assert full_row["description"] == "CliNeedle body"
+    assert "comments" in full_row
+
+    invalid = _cli_search_run(rebar_repo, "CliNeedle", "--output=bogus")
+    assert invalid.returncode == 2
+    assert "output" in invalid.stderr.lower()
+
+    incompatible = _cli_search_run(rebar_repo, "CliNeedle", "--full", "--output=llm")
+    assert incompatible.returncode == 2
+    assert "--full" in incompatible.stderr

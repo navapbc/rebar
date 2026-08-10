@@ -159,13 +159,23 @@ def test_cmd_show_renders_freshness(repo: str) -> None:
     assert "present-fresh" in out
 
 
-def test_library_shape_unchanged(repo: str) -> None:
-    # The library show/list/search returns still share one shape with a digest present.
+def test_digest_sidecar_does_not_leak_into_library_reads(repo: str) -> None:
     tid = rebar.create_ticket("task", "Shape", repo_root=repo)
     rebar.comment(tid, "searchable body token zzq", repo_root=repo)
     _emit(repo, tid)
     show = rebar.show_ticket(tid, repo_root=repo)
     lst = next(t for t in rebar.list_tickets(repo_root=repo) if t["ticket_id"] == tid)
     srch = next(t for t in rebar.search("zzq", repo_root=repo) if t["ticket_id"] == tid)
-    assert set(show) == set(lst) == set(srch)
+    assert set(show) == set(lst)
+    assert set(srch) == {
+        "ticket_id",
+        "alias",
+        "title",
+        "ticket_type",
+        "status",
+        "priority",
+        "summary",
+        "snippet",
+    }
     assert "digest_freshness" not in show
+    assert "digest_freshness" not in srch

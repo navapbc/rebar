@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/search_result.schema.json",
+  "title": "SearchResult",
+  "description": "Bounded ticket-discovery result emitted by default CLI/library/MCP search. Full bodies remain available through show or search --full.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ticket_id", "alias", "title", "ticket_type", "status", "priority", "summary", "snippet"],
+  "properties": {
+    "ticket_id": { "type": "string" },
+    "alias": { "type": ["string", "null"] },
+    "title": { "type": "string" },
+    "ticket_type": { "$ref": "common.schema.json#/$defs/ticket_type" },
+    "status": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "priority": { "$ref": "common.schema.json#/$defs/priority" },
+    "summary": { "type": ["string", "null"], "maxLength": 240 },
+    "snippet": { "type": ["string", "null"], "maxLength": 240 }
+  }
+}

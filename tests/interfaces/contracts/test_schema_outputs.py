@@ -79,14 +79,26 @@ def _seed(repo: Path) -> dict:
     return {"epic": epic, "task": task, "repo": r}
 
 
-def test_ticket_state_show_list_search(rebar_repo: Path) -> None:
+def test_ticket_state_show_and_list(rebar_repo: Path) -> None:
     s = _seed(rebar_repo)
     v = schemas.validator(schemas.TICKET_STATE)
     v.validate(rebar.show_ticket(s["task"], repo_root=s["repo"]))
     for t in rebar.list_tickets(repo_root=s["repo"]):
         v.validate(t)
+
+
+def test_search_result_json_and_llm(rebar_repo: Path) -> None:
+    s = _seed(rebar_repo)
+    v = schemas.validator(schemas.SEARCH_RESULT)
     for t in rebar.search("Task", repo_root=s["repo"]):
         v.validate(t)
+
+    llm = _cli("search", "Task", "--output", "llm", cwd=s["repo"])
+    assert llm.returncode == 0, llm.stderr
+    llm_validator = schemas.validator(schemas.SEARCH_RESULT_LLM)
+    for line in llm.stdout.splitlines():
+        if line.strip():
+            llm_validator.validate(json.loads(line))
 
 
 def test_ticket_state_llm(rebar_repo: Path) -> None:

@@ -46,6 +46,8 @@ from rebar import schemas
 TOP_LEVEL_OBJECTS: list[str] = [
     "ticket_state",
     "ticket_state_llm",
+    "search_result",
+    "search_result_llm",
     "create_result",
     "claim_result",
     "transition_result",

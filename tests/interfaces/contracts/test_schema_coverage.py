@@ -92,6 +92,7 @@ def test_commands_advertising_output_have_a_schema() -> None:
 CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "show": lambda s: ["show", s["task"]],
     "list": lambda s: ["list"],
+    "search": lambda s: ["search", "Task"],
     "ready": lambda s: ["ready"],
     "session-logs": lambda s: ["session-logs"],
     "next-batch": lambda s: ["next-batch", s["epic"], "--limit=0"],

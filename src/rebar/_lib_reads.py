@@ -14,13 +14,13 @@ subprocess (the bash orchestrator was retired in the bash→Python migration).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar._errors import RebarError
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
-    from rebar.types import DepsGraph, NextBatch, TicketState
+    from rebar.types import DepsGraph, NextBatch, SearchResult, TicketState
 
 
 def _json_or(out: str, default):
@@ -133,8 +133,7 @@ def list_tickets(
     tombstones via archived-exclusion; ``exclude_deleted`` only changes results
     when combined with ``include_archived=True``. ``min_children`` keeps tickets
     with ≥ N direct children and ``blocking_state`` ("unblocked"/"blocked") filters
-    by readiness. ``with_children_count`` adds a ``children_count`` field (opt-in,
-    so the default shape matches show/search — the single-reducer invariant).
+    by readiness. ``with_children_count`` adds a ``children_count`` field (opt-in).
     ``sort`` orders the result by ``priority|created|updated|id|status`` (prefix
     ``-`` for descending; unset values sort last); the default keeps store order.
     ``full`` (default ``True``) emits the bulky ``description``/``comments`` fields;
@@ -197,6 +196,7 @@ def next_batch(epic_id: str, *, repo_root=None) -> NextBatch:
     return cast("NextBatch", _reads.next_batch(epic_id, repo_root=repo_root))
 
 
+@overload
 def search(
     query: str,
     *,
@@ -205,13 +205,42 @@ def search(
     has_tag: str | None = None,
     include_archived: bool = False,
     sort: str | None = None,
+    full: Literal[False] = False,
     repo_root=None,
-) -> list[TicketState]:
-    """Full-text search over titles/descriptions/comments/tags (replay-derived).
+) -> list[SearchResult]: ...
 
-    Returns a JSON list of matching ticket states (same element shape as
-    :func:`list_tickets`). Plain whitespace-split terms match case-insensitively
-    (AND). The query also accepts field predicates — ``status:``/``type:``/
+
+@overload
+def search(
+    query: str,
+    *,
+    status: str | None = None,
+    ticket_type: str | None = None,
+    has_tag: str | None = None,
+    include_archived: bool = False,
+    sort: str | None = None,
+    full: Literal[True],
+    repo_root=None,
+) -> list[TicketState]: ...
+
+
+def search(
+    query: str,
+    *,
+    status: str | None = None,
+    ticket_type: str | None = None,
+    has_tag: str | None = None,
+    include_archived: bool = False,
+    sort: str | None = None,
+    full: bool = False,
+    repo_root=None,
+) -> list[SearchResult] | list[TicketState]:
+    """Search tickets, returning bounded discovery results by default.
+
+    Each default result contains identity/status fields plus a bounded summary
+    and match snippet; pass ``full=True`` for legacy full ticket states. Plain
+    whitespace-split terms match case-insensitively (AND). The query also accepts
+    field predicates — ``status:``/``type:``/
     ``priority:``/``assignee:``/``tag:``/``parent:`` (comma = OR within a field,
     ``priority`` accepts ``<``/``<=``/``>``/``>=`` and ``n..m`` ranges), with
     ``-``/``not:`` negation; an unknown ``field:`` degrades to a literal
@@ -226,6 +255,7 @@ def search(
         has_tag=has_tag,
         include_archived=include_archived,
         sort=sort,
+        full=full,
         repo_root=repo_root,
     )
 

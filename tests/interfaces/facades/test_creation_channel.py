@@ -251,13 +251,13 @@ def test_projections_ticket_state_schema_has_channel_and_const_marker():
     assert "creation_channel_inferred" not in schema.get("required", [])
 
 
-def test_projections_show_list_search_retain_channel(rebar_repo: Path):
+def test_full_state_projections_retain_channel_bounded_search_does_not(rebar_repo: Path):
     tid = rebar.create_ticket("task", "proj retain", repo_root=str(rebar_repo))
     assert rebar.show_ticket(tid, repo_root=str(rebar_repo))["creation_channel"] == "python"
     listed = {t["ticket_id"]: t for t in rebar.list_tickets(repo_root=str(rebar_repo))}
     assert listed[tid]["creation_channel"] == "python"
     hits = {t["ticket_id"]: t for t in rebar.search("proj retain", repo_root=str(rebar_repo))}
-    assert hits[tid]["creation_channel"] == "python"
+    assert "creation_channel" not in hits[tid]
 
 
 def test_projections_export_ndjson_retains_channel(rebar_repo: Path, tmp_path: Path):

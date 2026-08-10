@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/search_result_llm.schema.json",
+  "title": "SearchResultLLM",
+  "description": "Token-minified bounded search result emitted as NDJSON by search --output llm. Nullable values are omitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "ttl", "t", "st", "pr"],
+  "properties": {
+    "id": { "type": "string" },
+    "a": { "type": "string" },
+    "ttl": { "type": "string" },
+    "t": { "$ref": "common.schema.json#/$defs/ticket_type" },
+    "st": { "$ref": "common.schema.json#/$defs/ticket_status" },
+    "pr": { "$ref": "common.schema.json#/$defs/priority" },
+    "sm": { "type": "string", "maxLength": 240 },
+    "sn": { "type": "string", "maxLength": 240 }
+  }
+}

@@ -1,14 +1,10 @@
 """Golden parity test: the compiled ticket state is produced by ONE reducer.
 
-After the single-reducer refactor (bug f026), `show`, `list`, `search`, the
-native `reduce_ticket`, and the `--output llm` path all derive state from the
-Python `ticket_reducer`. This test pins that invariant by comparing the FULL
-top-level key set AND values across interfaces for a ticket that exercises every
-event type — the check the retired jq/Python schema-parity test could not make
-(it only compared selected fields, which is why the show-vs-list drift went
-unnoticed). It also asserts internal-only keys never leak to the interface, and
-that `verify_commands` (previously emitted only by the jq `show` reducer) is now
-present everywhere and survives compaction.
+After the single-reducer refactor (bug f026), every read derives state from the
+Python reducer before applying its presentation projection. This test pins full
+show/list parity and the intentionally bounded search projection for a ticket
+that exercises every event type. It also asserts internal-only keys never leak,
+and that `verify_commands` survives compaction on full-state reads.
 """
 
 from __future__ import annotations
@@ -56,7 +52,7 @@ def _elem(items: list[dict], tid: str) -> dict:
     return next(t for t in items if t["ticket_id"] == tid)
 
 
-def test_show_list_search_share_one_shape(rebar_repo: Path) -> None:
+def test_show_and_full_list_share_one_shape_search_is_bounded(rebar_repo: Path) -> None:
     tid = _rich_ticket(rebar_repo)
     r = str(rebar_repo)
 
@@ -64,15 +60,25 @@ def test_show_list_search_share_one_shape(rebar_repo: Path) -> None:
     lst = _elem(rebar.list_tickets(repo_root=r), tid)
     srch = _elem(rebar.search("Rich", repo_root=r), tid)
 
-    # Identical top-level key sets across all three interfaces.
-    assert set(show) == set(lst) == set(srch), (
-        f"show={sorted(show)}\nlist={sorted(lst)}\nsearch={sorted(srch)}"
-    )
-    # Identical values too (not just keys).
-    assert show == lst == srch
+    # Show and full list retain the same complete reducer-backed state. Search is
+    # intentionally a separate bounded discovery projection.
+    assert show == lst
+    assert srch["ticket_id"] == tid
+    assert srch["title"] == show["title"]
+    assert set(srch) == {
+        "ticket_id",
+        "alias",
+        "title",
+        "ticket_type",
+        "status",
+        "priority",
+        "summary",
+        "snippet",
+    }
 
     # Internal-only reducer keys never leak to the interface.
     assert not (INTERNAL_KEYS & set(show))
+    assert not (INTERNAL_KEYS & set(srch))
 
     # verify_commands flows everywhere and survived compaction (SNAPSHOT).
     assert show["verify_commands"] == [{"dd_id": "D1", "dd_text": "t", "command": "echo"}]
