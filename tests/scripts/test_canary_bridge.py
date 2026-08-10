@@ -10,7 +10,7 @@ Subcommands (argv[0]):
   ``stale`` / ``last_run_ago`` / ``status_msg`` to $GITHUB_OUTPUT.
 - ``heartbeat-alert``    — find/open/comment/close the ``heartbeat-alert``
   bug-ticket lifecycle against the rebar CLI (via the runner).
-- ``check-binding-drift`` — run ``rebar bridge-fsck --output json``, tolerate
+- ``check-binding-drift`` — run ``rebar bridge fsck --output json``, tolerate
   its designed exit-1-on-drift, classify the ``binding_drift`` section; emit
   ``drift_found`` / ``drift_total`` / ``drift_summary`` to $GITHUB_OUTPUT.
 - ``binding-drift-alert`` — same lifecycle shape for ``binding-drift-alert``.
@@ -24,7 +24,7 @@ Seams (keyword-only params of ``main``):
 Failure dispositions (each preserved from the YAML, NOT a blanket rule):
 - alert-lifecycle WRITES (create/comment/transition) fail LOUD -> exit != 0;
 - dedup FINDs (``rebar list``) fail SOFT -> treated as "no existing alert";
-- ``bridge-fsck`` exit 1 with valid JSON is DRIFT DATA (the signal), never an
+- ``bridge fsck`` exit 1 with valid JSON is DRIFT DATA (the signal), never an
   error; unparseable/empty stdout degrades to empty drift data.
 """
 
@@ -428,7 +428,7 @@ def test_heartbeat_alert_green_with_no_ticket_is_noop(mod: ModuleType, tmp_path:
 
 
 def test_check_binding_drift_exit1_with_json_is_drift_data(mod: ModuleType, tmp_path: Path) -> None:
-    """bridge-fsck exits 1 BY DESIGN on drift: capture stdout, report the drift."""
+    """bridge fsck exits 1 BY DESIGN on drift: capture stdout, report the drift."""
     fsck = json.dumps(
         {
             "binding_drift": {
@@ -440,7 +440,7 @@ def test_check_binding_drift_exit1_with_json_is_drift_data(mod: ModuleType, tmp_
             }
         }
     )
-    runner = FakeRunner({("rebar", "bridge-fsck"): (1, fsck, "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (1, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -454,7 +454,7 @@ def test_check_binding_drift_exit1_with_json_is_drift_data(mod: ModuleType, tmp_
 def test_check_binding_drift_clean(mod: ModuleType, tmp_path: Path) -> None:
     """Exit 0 + empty binding_drift -> drift_found=false, summary 'none'."""
     fsck = json.dumps({"binding_drift": {}})
-    runner = FakeRunner({("rebar", "bridge-fsck"): (0, fsck, "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (0, fsck, "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -469,7 +469,7 @@ def test_check_binding_drift_garbage_output_degrades_to_empty(
     mod: ModuleType, tmp_path: Path
 ) -> None:
     """Unparseable fsck stdout degrades to empty drift data (YAML parity)."""
-    runner = FakeRunner({("rebar", "bridge-fsck"): (1, "not json {", "")})
+    runner = FakeRunner({("rebar", "bridge", "fsck"): (1, "not json {", "")})
     env = {"GITHUB_OUTPUT": str(tmp_path / "gh_out")}
     (tmp_path / "gh_out").touch()
     rc = mod.main(["check-binding-drift"], runner=runner, environ=env, now_epoch=NOW)
@@ -508,7 +508,7 @@ def test_binding_drift_alert_opens_with_drift_title(mod: ModuleType, tmp_path: P
     creates = [c for c in runner.rebar_calls() if c[1] == "create"]
     assert len(creates) == 1
     argv = creates[0]
-    assert argv[3] == "[binding-drift] bridge-fsck found 3 unhealed binding drift(s)"
+    assert argv[3] == "[binding-drift] bridge fsck found 3 unhealed binding drift(s)"
     assert "--tags" in argv and argv[argv.index("--tags") + 1] == "binding-drift-alert"
     assert "--detected-by" in argv
     assert argv[argv.index("--detected-by") + 1] == "binding-drift-canary"

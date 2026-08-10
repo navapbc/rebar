@@ -17,6 +17,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Added
 
+- **Canonical bridge maintenance vocabulary:** use `rebar bridge fsck`,
+  `rebar bridge check-access`, and `rebar bridge setup` for mapping audits, the live Jira
+  capability round-trip, and interactive onboarding. The historical `bridge-fsck`,
+  `bridge-probe`, and `jira-onboard` spellings remain fully functional compatibility aliases
+  routed through the same implementations, output, state changes, and exit policy.
+
 - **Canonical reconciler status:** `rebar bridge status` reads the durable last-pass, pause, and
   live-lease refs and reports `PAUSED`, `RUNNING`, `FOREIGN`, `FAILED`, `STALE`, `HEALTHY`, or
   `NEVER_RUN`. Age-based staleness is opt-in with `--max-age`; `rebar bridge-status` is retained

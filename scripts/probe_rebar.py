@@ -503,7 +503,7 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_rc_ne(0, "unsupported -o value rejected")
     assert_contains("unsupported output format", "canonical error text")
 
-    section("report --output json — summary/check-ac/quality-check/fsck/bridge-fsck")
+    section("report --output json — summary/check-ac/quality-check/fsck/bridge fsck")
     run_rb("check-ac", task, "--output", "json")
     assert_contains('"verdict"', "check-ac json verdict")
     assert_contains('"criteria_count"', "check-ac json criteria_count")
@@ -513,8 +513,8 @@ def _probe() -> None:  # deliberately one linear probe script
     assert_contains('"blocking_summary"', "summary json shape")
     run_rb("fsck", "--output", "json")
     assert_contains('"issue_count"', "fsck json shape")
-    run_rb("bridge-fsck", "-o", "json")
-    assert_contains('"orphaned"', "bridge-fsck json shape")
+    run_rb("bridge", "fsck", "-o", "json")
+    assert_contains('"orphaned"', "bridge fsck json shape")
 
     section("lifecycle --output json — create/claim/transition/reopen/delete result shapes")
     # Parse STDOUT ONLY: `create` prints an advisory warning to STDERR, which the

@@ -690,7 +690,7 @@ jobs:
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI
         # for cross-process concurrency + reconciler coverage. Live-Jira validation
-        # stays a manual probe (bridge-probe / reconcile dry-run).
+        # stays a manual probe (bridge check-access / reconcile dry-run).
         # Parallelized (story 8d36) with `--dist loadgroup` so xdist_group-marked
         # tests (the live reconciler E2E) co-locate on one worker and stay serial.
         env:

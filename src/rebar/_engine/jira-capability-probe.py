@@ -4,7 +4,7 @@
 Verifies that all Jira operations required by the rebar Jira bridge (reconciler)
 are functional: create, label, property-write, JQL-search, property-read, delete.
 
-Run it as a preflight before relying on Jira sync (`rebar bridge-probe`). It
+Run it as a preflight before relying on Jira sync (`rebar bridge check-access`). It
 creates a throwaway Jira issue and deletes it again in the same run.
 
 Exit codes:

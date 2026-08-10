@@ -1,8 +1,8 @@
 """Tests for the CLI-reference generator (ticket e866).
 
 The generator (scripts/gen_cli_reference.py) emits docs/cli-reference.md from the CLI's
-own help data: the 50 help-backed subcommands (rebar._cli._help) with full usage text,
-plus the 17 intercept-arm commands with curated one-liners whose key set is drift-gated
+own help data: the help-backed subcommands (rebar._cli._help) with full usage text,
+plus intercept-arm commands with curated one-liners whose key set is drift-gated
 against the intercept ladder in rebar._cli.__init__.
 """
 
@@ -69,7 +69,7 @@ def test_render_lists_every_help_backed_command():
 
 
 def test_render_lists_every_intercept_command():
-    """All 17 intercept-arm commands appear, backtick-wrapped, in the output."""
+    """Every intercept-arm command appears, backtick-wrapped, in the output."""
     doc = gen.render()
     for cmd in _LADDER:
         assert f"`{cmd}`" in doc, f"intercept command {cmd!r} missing from reference"
@@ -147,7 +147,7 @@ def test_generate_writes_full_doc(tmp_path: Path, monkeypatch):
 
 
 def test_render_expands_the_staged_bridge_group():
-    """The generated reference documents the current four functional nested verbs."""
+    """The generated reference documents every canonical bridge operation."""
     text = gen.render()
     assert "### `bridge`" in text
     assert "Usage: rebar bridge <command>" in text
@@ -155,5 +155,8 @@ def test_render_expands_the_staged_bridge_group():
     assert "sync      Apply the staged Jira synchronization" in text
     assert "\n  pause" in text
     assert "\n  resume" in text
-    for future_verb in ("status", "resolve", "probe", "fsck", "bind", "unbind"):
+    assert "\n  fsck" in text
+    assert "\n  check-access" in text
+    assert "\n  setup" in text
+    for future_verb in ("resolve", "probe", "bind", "unbind"):
         assert f"rebar bridge {future_verb}" not in text

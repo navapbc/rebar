@@ -397,8 +397,9 @@ The established `rebar reconcile` adapter remains available: no arguments still 
 dry-run, every historical `--mode` value is retained, and `--filter-local-ids` keeps
 its write-only filtering semantics. Direct argument-less `python -m rebar_reconciler`
 still means live synchronization, including its historical uncapped LIVE tally/no-manifest
-behavior. The `rebar jira-onboard`, `rebar bridge-probe`,
-`rebar bridge-fsck`, and `rebar doctor` spellings and workflows remain available.
+behavior. The canonical spellings are `rebar bridge setup`, `rebar bridge check-access`,
+`rebar bridge fsck`, and `rebar doctor`. The legacy `jira-onboard`, `bridge-probe`, and
+`bridge-fsck` spellings remain available as compatibility aliases.
 Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 

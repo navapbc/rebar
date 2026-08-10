@@ -1,4 +1,4 @@
-"""Held-out oracle for bridge-fsck over narrowed key-set snapshots."""
+"""Held-out oracle for bridge fsck over narrowed key-set snapshots."""
 
 from __future__ import annotations
 
@@ -169,7 +169,8 @@ def _run_cli(tracker: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
             sys.executable,
             "-m",
             "rebar.cli",
-            "bridge-fsck",
+            "bridge",
+            "fsck",
             "--tickets-tracker",
             str(tracker),
             "--output",
@@ -181,7 +182,7 @@ def _run_cli(tracker: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
         check=False,
         env=env,
     )
-    assert cp.stdout, f"bridge-fsck emitted no JSON (rc={cp.returncode}, stderr={cp.stderr!r})"
+    assert cp.stdout, f"bridge fsck emitted no JSON (rc={cp.returncode}, stderr={cp.stderr!r})"
     return cp, json.loads(cp.stdout)
 
 
