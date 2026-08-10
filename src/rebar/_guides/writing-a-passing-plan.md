@@ -203,6 +203,9 @@ lives **outside the codebase** (a deploy, a live drill, an access review), tag t
 `[operator-attested]` and name the concrete evidence — a change id, a vote outcome, a
 timestamp — that will be recorded on the ticket. The completion verifier accepts that recorded
 attestation in place of an in-session proof.
+Classify the criterion before plan review by adding the [operator-attested] tag to its checkbox text.
+Record that evidence in a ticket comment; comments are non-material and do not invalidate the
+plan review.
 
 - **Before:** "- [ ] The new LaunchAgent is running in production."
 - **After:** "- [ ] [operator-attested] The new LaunchAgent is running: the operator records

@@ -36,6 +36,10 @@ as a tool) and without opening a loophole that lets incomplete work self-certify
    **admissible evidence is a concrete attestation recorded in the ticket system** (a comment
    / recorded artifact the verifier can read via `show_ticket`).
 
+Operator-attested describes the evidence location, not the identity of the actor.
+Agents may freely record truthful, concrete operator-attested evidence they observed.
+The verifier applies the same evidence-quality rules regardless of who records the attestation.
+
 An author marks a criterion operator-attested with an inline tag at the start of the
 checkbox text: `- [ ] [operator-attested] …`. Matching is **exact and case-insensitive** on
 the token `operator-attested`; anything else — untagged, an explicit `[codebase]`, or a
