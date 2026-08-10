@@ -130,10 +130,10 @@ class RemoteRef:
 # ---------------------------------------------------------------------------
 
 
-#: The transport members the core requires of EVERY backend: the six original
-#: CRUD members plus the twelve story J9 measured the core calling while no
-#: Protocol declared them. ``isinstance(x, TicketTransport)`` is defined against
-#: exactly this set — see :class:`_TransportPortMeta`.
+#: The transport members the core requires of EVERY backend: the original CRUD
+#: surface plus every additional operation the core calls unconditionally.
+#: ``isinstance(x, TicketTransport)`` is defined against exactly this set — see
+#: :class:`_TransportPortMeta`.
 _REQUIRED_TRANSPORT_MEMBERS = (
     "create_issue",
     "get_issue",
@@ -149,6 +149,7 @@ _REQUIRED_TRANSPORT_MEMBERS = (
     "get_parent_map",
     "set_parent",
     "remove_label",
+    "get_issue_property",
     "set_issue_property",
     "set_entity_property",
     "set_reporter",
@@ -220,13 +221,13 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
     optional capabilities a backend advertises.
 
     **This Protocol must state what the CORE actually requires, not a comfortable
-    subset of it.** It declared six members while the core reaches for TWENTY-ONE distinct
-    transport members; the eighteen below are the always-required subset, and the
-    remaining four (``set_relationship`` / ``get_issuelinks_map`` /
+    subset of it.** It originally declared six members while the core reached for
+    many more. The methods below are the always-required subset, and the remaining
+    four (``set_relationship`` / ``get_issuelinks_map`` /
     ``add_comment`` / ``get_comment_map``) are the opt-in capability surface, so a
-    links-less transport still conforms. Twelve of the twenty-one were undeclared;
-    the twelve it omitted were therefore unchecked by every conformance test, and
-    a transport missing all twelve passed ``isinstance``, the backend contract
+    links-less transport still conforms. The omitted methods were unchecked by
+    every conformance test, and a transport missing all of them passed
+    ``isinstance``, the backend contract
     suite, and 1600+ unit tests while being unable to complete a single writing
     pass (story J9, epic ``e369``). Conformance to an incomplete port proves less
     than it appears to — so a member the core calls belongs HERE, even when only
@@ -254,7 +255,7 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
         self, jql: str, start_at: int = 0, max_results: int = 50
     ) -> list[dict[str, Any]]: ...
 
-    # -- the twelve the core also reaches for (J9) ------------------------
+    # -- additional operations the core also reaches for -----------------
     # Grouped, not merged into the block above, so the audit trail stays legible:
     # every member below has at least one call site in a core module, and most of
     # those sites swallow ``Exception``, which is why their absence degraded
@@ -295,6 +296,10 @@ class TicketTransport(Protocol, metaclass=_TransportPortMeta):
 
     def remove_label(self, remote_id: str, label: str) -> None:
         """Remove ONE label, leaving the issue's other labels intact."""
+        ...
+
+    def get_issue_property(self, remote_id: str, property_key: str) -> Any:
+        """Return the stored JSON value for one issue property."""
         ...
 
     def set_issue_property(self, remote_id: str, property_key: str, value: Any) -> None:

@@ -60,8 +60,8 @@ class FakeTransport:
         self.calls.append(("search_issues", (jql,)))
         return []
 
-    # The twelve members J9 added to ``TicketTransport``. Present here because the
-    # fake is the contract suite's stand-in and must satisfy the WIDENED port: a
+    # The additional members the core requires from ``TicketTransport``. Present
+    # here because the fake is the contract suite's stand-in and must satisfy the widened port: a
     # fake that mirrors only the members its author remembered is exactly the
     # oracle that let a transport missing twelve of them pass every test.
     def get_issue_by_rest(self, remote_id: str) -> dict[str, Any]:
@@ -94,6 +94,10 @@ class FakeTransport:
 
     def remove_label(self, remote_id: str, label: str) -> None:
         self.calls.append(("remove_label", (remote_id, label)))
+
+    def get_issue_property(self, remote_id: str, property_key: str) -> Any:
+        self.calls.append(("get_issue_property", (remote_id, property_key)))
+        return self.store.get(remote_id, {}).get(property_key)
 
     def set_issue_property(self, remote_id: str, property_key: str, value: Any) -> None:
         self.calls.append(("set_issue_property", (remote_id, property_key, value)))

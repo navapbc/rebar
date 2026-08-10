@@ -13,7 +13,10 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | Tool | Summary |
 |------|---------|
 | `audit_trail` | The full audit read surface for a ticket (story 46f0): its FULL retained |
+| `bridge_check_access` | Run the six-step live Jira capability check and return its typed verdict. |
 | `bridge_fsck` | Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}. |
+| `bridge_preview` | Compute proposed Jira changes without applying them. |
+| `bridge_status` | Read the durable bridge status snapshot and optional freshness assertion. |
 | `check_ac` | Check the ticket has an Acceptance Criteria block |
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
 | `explain_criterion` | Explain a plan-review criterion — its authoring-guide section (epic cite-stone-sea / |
@@ -51,11 +54,14 @@ Registered by `register_llm_tools` and always present, but each makes a live, bi
 
 ## Write-gated (`REBAR_MCP_READONLY`)
 
-Registered by `register_write_tools`, which is skipped entirely when the server is read-only — so these mutation tools are ABSENT under `REBAR_MCP_READONLY`: Set to 1 to expose only the read tools (no write/mutation tools). (`sign_review` is registered by the LLM registrar but is write-gated, so it is listed here.)
+Registered by `register_write_tools`, which is skipped entirely when the server is read-only — so these mutation tools are ABSENT under `REBAR_MCP_READONLY`: Set to 1 to expose only the read tools (no write/mutation tools). (`sign_review` is registered by the LLM registrar but write-gated; bridge control/sync tools are conditionally omitted by the read registrar in read-only mode and enforce Jira-sync authorization at call time.)
 
 | Tool | Summary |
 |------|---------|
 | `archive_ticket` | Archive a ticket (excludes it from the default list). |
+| `bridge_pause` | Persist a durable reconciliation pause with its operator reason. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
+| `bridge_resume` | Clear the durable reconciliation pause. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
+| `bridge_sync` | Apply proposed Jira changes, optionally with an explicit change limit. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
 | `claim_ticket` | Atomically claim an OPEN ticket (-> in_progress + assignee). |
 | `comment_ticket` | Append a comment to a ticket. |
 | `compact_ticket` | Compact a ticket's event log (or all tickets if id omitted). |
@@ -117,4 +123,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_50 tools._
+_56 tools._

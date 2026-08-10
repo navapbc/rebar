@@ -15,9 +15,15 @@ tool's return annotation against THIS module's globals).
 
 from __future__ import annotations
 
+from functools import partial
+
 import rebar
 from rebar._mcp_models import (
+    BridgeAccessCheckOut,
+    BridgeControlOut,
     BridgeFsckOut,
+    BridgeRunOut,
+    BridgeStatusOut,
     ClarityResultOut,
     DepsGraphOut,
     FileImpactItemOut,
@@ -33,10 +39,101 @@ from rebar._mcp_models import (
 )
 
 
+def _gate_value(gate: object) -> bool:
+    """Read either a live gate callback or its legacy boolean value."""
+    return bool(gate() if callable(gate) else gate)
+
+
+def _context_gate(ctx, name: str) -> bool:
+    """Resolve one named gate without requiring a particular context shape."""
+    return _gate_value(getattr(ctx, name))
+
+
+def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
+    """Register bridge mutations on servers that expose write tools."""
+
+    @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
+    def bridge_sync(
+        only: list[str] | None = None,
+        exclude: list[str] | None = None,
+        max_changes: int | None = None,
+    ) -> BridgeRunOut:
+        """Apply proposed Jira changes, optionally with an explicit change limit."""
+        if _gate_value(ctx.readonly):
+            raise ValueError(
+                "bridge sync is disabled: this server is read-only (REBAR_MCP_READONLY)"
+            )
+        if not _gate_value(ctx.allow_jira_sync):
+            raise ValueError("bridge sync is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
+        values = {"only": only, "exclude": exclude, "max_changes": max_changes}
+        kwargs: dict = {key: value for key, value in values.items() if value is not None}
+        return BridgeRunOut.model_validate(rebar.bridge_sync(**kwargs))
+
+    @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
+    def bridge_pause(reason: str) -> BridgeControlOut:
+        """Persist a durable reconciliation pause with its operator reason."""
+        if _gate_value(ctx.readonly):
+            raise ValueError(
+                "bridge pause is disabled: this server is read-only (REBAR_MCP_READONLY)"
+            )
+        if not _gate_value(ctx.allow_jira_sync):
+            raise ValueError("bridge pause is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
+        return BridgeControlOut.model_validate(rebar.bridge_pause(reason=reason))
+
+    @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
+    def bridge_resume() -> BridgeControlOut:
+        """Clear the durable reconciliation pause."""
+        if _gate_value(ctx.readonly):
+            raise ValueError(
+                "bridge resume is disabled: this server is read-only (REBAR_MCP_READONLY)"
+            )
+        if not _gate_value(ctx.allow_jira_sync):
+            raise ValueError("bridge resume is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
+        return BridgeControlOut.model_validate(rebar.bridge_resume())
+
+
+def register_bridge_tools(mcp, ctx) -> None:
+    """Register additive bridge reads and the permitted mutation tools."""
+    annotations = tool_annotation_presets()
+
+    @mcp.tool(annotations=annotations["READ_ONLY"])
+    def bridge_preview(
+        only: list[str] | None = None, exclude: list[str] | None = None
+    ) -> BridgeRunOut:
+        """Compute proposed Jira changes without applying them."""
+        kwargs = {
+            key: value
+            for key, value in {"only": only, "exclude": exclude}.items()
+            if value is not None
+        }
+        return BridgeRunOut.model_validate(rebar.bridge_preview(**kwargs))
+
+    @mcp.tool(annotations=annotations["READ_ONLY"])
+    def bridge_status(
+        target_environment_id: str | None = None,
+        max_age_seconds: int | None = None,
+    ) -> BridgeStatusOut:
+        """Read the durable bridge status snapshot and optional freshness assertion."""
+        values = {
+            "target_environment_id": target_environment_id,
+            "max_age_seconds": max_age_seconds,
+        }
+        kwargs: dict = {key: value for key, value in values.items() if value is not None}
+        return BridgeStatusOut.model_validate(rebar.bridge_status(**kwargs))
+
+    @mcp.tool(annotations=annotations["READ_ONLY_OPEN_WORLD"])
+    def bridge_check_access() -> BridgeAccessCheckOut:
+        """Run the six-step live Jira capability check and return its typed verdict."""
+        return BridgeAccessCheckOut.model_validate(rebar.bridge_check_access())
+
+    if not _gate_value(ctx.readonly):
+        _register_bridge_mutation_tools(mcp, ctx, annotations)
+
+
 def register_read_tools(mcp, ctx) -> None:
     """Register the always-available read tools on ``mcp`` (see module docstring)."""
-    _readonly = ctx.readonly
-    _allow_jira_sync = ctx.allow_jira_sync
+    _readonly = partial(_context_gate, ctx, "readonly")
+    _allow_jira_sync = partial(_context_gate, ctx, "allow_jira_sync")
     _cap_workflow_payload = ctx.cap_workflow_payload
     MODE_CAPS = ctx.MODE_CAPS
     Mode = ctx.Mode
@@ -270,6 +367,8 @@ def register_read_tools(mcp, ctx) -> None:
     def bridge_fsck() -> BridgeFsckOut:
         """Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}."""
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
+
+    register_bridge_tools(mcp, ctx)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:

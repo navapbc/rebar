@@ -12,18 +12,29 @@ public attributes but (as before) are deliberately NOT listed in ``rebar.__all__
 
 from __future__ import annotations
 
+import datetime
+import importlib
+import importlib.util
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from rebar import config
-from rebar._engine import engine_env
+from rebar._engine import engine_dir, engine_env
 from rebar._errors import RebarError
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
-    from rebar.types import BridgeFsck, WorkflowRun
+    from rebar.types import (
+        BridgeAccessCheck,
+        BridgeControl,
+        BridgeFsck,
+        BridgeRun,
+        BridgeStatus,
+        WorkflowRun,
+    )
 
 
 # ── Workflow engine (epic a88f) — sync library entrypoints (WS-C4) ────────────
@@ -89,6 +100,206 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
     return cast("BridgeFsck", findings)
 
 
+def _engine_module(module_name: str):
+    """Import one embedded reconciler module under its supported package name."""
+    package = "rebar_reconciler"
+    if package not in sys.modules:
+        package_dir = engine_dir() / package
+        spec = importlib.util.spec_from_file_location(
+            package, package_dir / "__init__.py", submodule_search_locations=[str(package_dir)]
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[package] = module
+        spec.loader.exec_module(module)
+    return importlib.import_module(module_name)
+
+
+def _invalid_bridge(message: str) -> RebarError:
+    return RebarError(message, returncode=2, stderr=message)
+
+
+def _validate_positive(name: str, value: int | None) -> None:
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value <= 0):
+        raise ValueError(f"{name} must be a positive integer")
+
+
+def _validate_selection_args(only: list[str] | None, exclude: list[str] | None) -> None:
+    """Reject malformed local selection arguments before repository discovery."""
+    if only is not None and exclude is not None:
+        raise ValueError("only and exclude are mutually exclusive")
+    selected = only if only is not None else exclude
+    if selected is not None and (
+        not selected or any(not isinstance(item, str) or not item.strip() for item in selected)
+    ):
+        raise ValueError("only/exclude must contain non-empty identifiers")
+
+
+def _bridge_selection(
+    root: Path, only: list[str] | None, exclude: list[str] | None
+) -> tuple[str | None, set[str] | None]:
+    _validate_selection_args(only, exclude)
+    selected = only if only is not None else exclude
+    if selected is None:
+        return None, None
+    helpers = _engine_module("rebar_reconciler.reconcile_helpers")
+    try:
+        resolved = helpers.resolve_selection(root, tuple(item.strip() for item in selected))
+    except helpers.SelectionError as exc:
+        raise _invalid_bridge(str(exc)) from exc
+    return ("only" if only is not None else "except"), resolved
+
+
+def _bridge_run(
+    route: str,
+    *,
+    only: list[str] | None,
+    exclude: list[str] | None,
+    max_changes: int | None,
+    repo_root,
+) -> BridgeRun:
+    _validate_positive("max_changes", max_changes)
+    _validate_selection_args(only, exclude)
+    root = Path(config.repo_root(repo_root))
+    selection_kind, selection_ids = _bridge_selection(root, only, exclude)
+    orchestrator = _engine_module("rebar_reconciler.__main__")
+    mode_mod = _engine_module("rebar_reconciler.mode")
+    result = orchestrator.run_pass_result(
+        repo_root=root,
+        target_mode=mode_mod.Mode.DRY_RUN if route == "preview" else mode_mod.Mode.LIVE,
+        selection_kind=selection_kind,
+        selection_ids=selection_ids,
+        max_changes=max_changes,
+        route=route,
+    )
+    returncode = result.disposition.canonical_exit
+    payload = {
+        "route": route,
+        "state": result.disposition.state,
+        "returncode": returncode,
+        "details": result.details,
+    }
+    if returncode:
+        message = result.canonical_message or result.legacy_message or f"bridge {route} failed"
+        raise RebarError(message, returncode=returncode, stderr=message)
+    return cast("BridgeRun", payload)
+
+
+def bridge_preview(
+    *,
+    only: list[str] | None = None,
+    exclude: list[str] | None = None,
+    repo_root=None,
+) -> BridgeRun:
+    """Compute proposed Jira changes without mutating Jira or bridge state."""
+    return _bridge_run("preview", only=only, exclude=exclude, max_changes=None, repo_root=repo_root)
+
+
+def bridge_sync(
+    *,
+    only: list[str] | None = None,
+    exclude: list[str] | None = None,
+    max_changes: int | None = None,
+    repo_root=None,
+) -> BridgeRun:
+    """Apply proposed Jira changes, optionally limiting the applied plan."""
+    return _bridge_run(
+        "sync", only=only, exclude=exclude, max_changes=max_changes, repo_root=repo_root
+    )
+
+
+def bridge_status(
+    *,
+    target_environment_id: str | None = None,
+    max_age_seconds: int | None = None,
+    repo_root=None,
+) -> BridgeStatus:
+    """Read the durable last-pass, pause, and live-lock status snapshot."""
+    _validate_positive("max_age_seconds", max_age_seconds)
+    root = Path(config.repo_root(repo_root))
+    last_pass = _engine_module("rebar_reconciler.last_pass")
+    try:
+        result = last_pass.snapshot(
+            root,
+            target_environment_id=target_environment_id,
+            max_age_seconds=max_age_seconds,
+        )
+    except Exception as exc:
+        raise RebarError(f"cannot read bridge status: {exc}", stderr=str(exc)) from exc
+    return cast("BridgeStatus", result)
+
+
+def _bridge_remote(root: Path) -> str:
+    remote = config.tickets_remote(root)
+    completed = subprocess.run(
+        ["git", "-C", str(root), "remote", "get-url", remote],
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode:
+        raise RebarError(f"bridge control requires configured remote {remote!r}")
+    return remote
+
+
+def bridge_pause(reason: str, *, repo_root=None) -> BridgeControl:
+    """Persist an idempotent reconciliation pause through the shared CAS ref."""
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("pause reason must be a non-empty string")
+    root = Path(config.repo_root(repo_root))
+    remote = _bridge_remote(root)
+    from rebar._commands.identity import _git_email
+
+    who = _git_email(str(root))
+    if who is None:
+        raise RebarError("bridge pause requires a configured git user.email")
+    paused_at = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    ref_lock = _engine_module("rebar_reconciler._ref_lock")
+    try:
+        ref_lock.set_pause(
+            root,
+            reason=reason,
+            who=who,
+            paused_at=paused_at.isoformat().replace("+00:00", "Z"),
+            remote=remote,
+        )
+        pause = ref_lock.read_pause(root, remote=remote)
+    except (ref_lock.RefLockError, ref_lock.RefLockTimeoutError) as exc:
+        raise RebarError(f"cannot pause bridge: {exc}", stderr=str(exc)) from exc
+    assert pause is not None
+    return cast(
+        "BridgeControl",
+        {"state": "paused", **{key: pause[key] for key in ("reason", "who", "paused_at")}},
+    )
+
+
+def bridge_resume(*, repo_root=None) -> BridgeControl:
+    """Clear the reconciliation pause through its observed-OID CAS operation."""
+    result, _changed = _bridge_resume_operation(repo_root=repo_root)
+    return result
+
+
+def _bridge_resume_operation(*, repo_root=None) -> tuple[BridgeControl, bool]:
+    """Internal resume result plus whether an active gate was actually cleared."""
+    root = Path(config.repo_root(repo_root))
+    remote = _bridge_remote(root)
+    ref_lock = _engine_module("rebar_reconciler._ref_lock")
+    try:
+        changed = ref_lock.clear_gate(root, remote=remote)
+    except (ref_lock.RefLockError, ref_lock.RefLockTimeoutError) as exc:
+        raise RebarError(f"cannot resume bridge: {exc}", stderr=str(exc)) from exc
+    return cast("BridgeControl", {"state": "resumed"}), changed
+
+
+def bridge_check_access() -> BridgeAccessCheck:
+    """Run the live six-step Jira capability check and return its typed verdict."""
+    access_check = _engine_module("rebar_reconciler.access_check")
+    result, _lines, returncode = access_check.run_access_check()
+    if returncode == 2:
+        message = "bridge access check requires JIRA_URL, JIRA_USER, and JIRA_API_TOKEN"
+        raise RebarError(message, returncode=2, stderr=message)
+    return cast("BridgeAccessCheck", result)
+
+
 # ── Reconciler (Jira sync) ────────────────────────────────────────────────────
 def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     """Run the Jira reconciler. Defaults to a non-mutating ``dry-run``.
@@ -115,7 +326,7 @@ def reconcile(mode: str = "dry-run", *, repo_root=None) -> dict:
     cp = subprocess.run(cmd, env=engine_env(root), text=True, capture_output=True, check=False)
     # Intentionally consume the direct-engine --mode compatibility contract:
     # 75 is its historical benign reschedule sentinel. Canonical bridge adapters
-    # are owned by follow-up ticket f789 and must not change this public facade yet.
+    # use separate in-process adapters and deliberately do not change this public facade.
     if cp.returncode not in (0, 75):
         raise RebarError(
             f"reconcile ({mode}) failed (exit {cp.returncode}): {cp.stderr.strip()}",

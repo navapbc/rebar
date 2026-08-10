@@ -30,7 +30,11 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "BRIDGE_ACCESS_CHECK",
+    "BRIDGE_CONTROL",
     "BRIDGE_FSCK",
+    "BRIDGE_RUN",
+    "BRIDGE_STATUS",
     "CLAIM_RESULT",
     "CLARITY_RESULT",
     "CODE_REVIEW_VERDICT",
@@ -94,6 +98,10 @@ VERIFY_COMMANDS = "verify_commands"
 SCRATCH_ENVELOPE = "scratch_envelope"
 ERROR_ENVELOPE = "error_envelope"
 BRIDGE_FSCK = "bridge_fsck"
+BRIDGE_RUN = "bridge_run"
+BRIDGE_STATUS = "bridge_status"
+BRIDGE_CONTROL = "bridge_control"
+BRIDGE_ACCESS_CHECK = "bridge_access_check"
 CREATE_RESULT = "create_result"
 CLAIM_RESULT = "claim_result"
 TRANSITION_RESULT = "transition_result"
@@ -302,6 +310,12 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "scratch": SCRATCH_ENVELOPE,
     "show.not_found": ERROR_ENVELOPE,
     "bridge_fsck": BRIDGE_FSCK,
+    "bridge_preview": BRIDGE_RUN,
+    "bridge_sync": BRIDGE_RUN,
+    "bridge_status": BRIDGE_STATUS,
+    "bridge_pause": BRIDGE_CONTROL,
+    "bridge_resume": BRIDGE_CONTROL,
+    "bridge_check_access": BRIDGE_ACCESS_CHECK,
     "create": CREATE_RESULT,
     "idea": CREATE_RESULT,
     "create_idea": CREATE_RESULT,

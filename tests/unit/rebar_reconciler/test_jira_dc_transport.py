@@ -65,6 +65,11 @@ class _LibComment:
         self.raw = {"id": cid, "body": body}
 
 
+class _LibProperty:
+    def __init__(self, value: Any) -> None:
+        self.value = value
+
+
 class FakeJiraClient:
     """A minimal, stateful stand-in for ``jira.JIRA``."""
 
@@ -96,6 +101,11 @@ class FakeJiraClient:
 
     def add_comment(self, key: str, body: str) -> _LibComment:
         return _LibComment("10002", body)
+
+    def issue_property(self, key: str, property_key: str) -> _LibProperty:
+        assert key in self.issues
+        assert property_key == "local_id"
+        return _LibProperty({"ticket": "local-123"})
 
 
 @pytest.fixture
@@ -206,3 +216,8 @@ def test_add_label_appends_without_clobbering_existing_labels(transport) -> None
     assert labels == ["pre-existing", "rebar-added"], (
         f"add_label must append without resetting existing labels; got {labels!r}"
     )
+
+
+def test_get_issue_property_unwraps_the_pycontribs_value(transport) -> None:
+    """The access-check core consumes the stored JSON value, not a resource wrapper."""
+    assert transport.get_issue_property("DC-1", "local_id") == {"ticket": "local-123"}

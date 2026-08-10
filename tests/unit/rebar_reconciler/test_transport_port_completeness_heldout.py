@@ -107,17 +107,8 @@ def test_a_transport_missing_a_member_fails_isinstance() -> None:
     class _Incomplete:
         pass
 
-    for name in _REQUIRED:
+    for name in _backend._REQUIRED_TRANSPORT_MEMBERS:
         setattr(_Incomplete, name, lambda self, *a, **k: None)
-    for m in (
-        "create_issue",
-        "get_issue",
-        "update_issue",
-        "transition_issue_by_name",
-        "add_label",
-        "search_issues",
-    ):
-        setattr(_Incomplete, m, lambda self, *a, **k: None)
     assert isinstance(_Incomplete(), TicketTransport) is True
 
     delattr(_Incomplete, "set_entity_property")

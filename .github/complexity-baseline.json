@@ -20,7 +20,6 @@
     "src/rebar/_commands/verify_authorship.py::_verify_signed": 16,
     "src/rebar/_commands/verify_authorship.py::cli": 18,
     "src/rebar/_commands/verify_opcert.py::cli": 20,
-    "src/rebar/_engine/rebar_reconciler/__main__.py::main": 16,
     "src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py::_diff_fields": 32,
     "src/rebar/_engine/rebar_reconciler/applier.py::apply": 22,
     "src/rebar/_engine/rebar_reconciler/binding_walk.py::compute_binding_walk_mutations": 27,

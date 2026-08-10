@@ -33,7 +33,7 @@ Protocols in ``_backend.py``.** ``TicketTransport`` -> ``_issues.py``,
 ``SupportsLinks``/``SupportsComments`` -> ``_links.py`` (co-located: each is
 too small alone to clear the module-size policy's 100-LOC floor),
 ``SupportsAbsenceProbe`` -> ``probe_remote`` below (small enough to live on
-the composition root), plus the ungated "twelve members" clusters
+the composition root), plus the additional always-required clusters
 ``_hierarchy.py`` (parent/Epic Link, ticket 9bb9's shared
 ``_resolve_epic_link_field_id``) and ``_people.py`` (identity + properties).
 ``_base.py`` holds the shared substrate (construction, the unwrap boundary,

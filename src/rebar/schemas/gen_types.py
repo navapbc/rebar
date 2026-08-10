@@ -58,6 +58,10 @@ TOP_LEVEL_OBJECTS: list[str] = [
     "deps_graph",
     "next_batch",
     "bridge_fsck",
+    "bridge_run",
+    "bridge_status",
+    "bridge_control",
+    "bridge_access_check",
     "workflow_run",
     # NOT a facade return shape: the reconciler's per-issue Jira snapshot-entry CONTRACT
     # (ADR 0004) — the shape the fetcher writes and the differs read. It is generated here

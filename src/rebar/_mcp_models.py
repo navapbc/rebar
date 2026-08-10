@@ -187,6 +187,63 @@ try:
         binding_drift: dict
         store_integrity: list[dict]
 
+    class BridgeRunOut(_Out):
+        route: Literal["preview", "sync"]
+        state: Literal[
+            "converged",
+            "paused",
+            "in-flight",
+            "legacy-gated",
+            "reschedule",
+            "operational_failure",
+            "invalid_invocation",
+        ]
+        returncode: Literal[0, 1, 2]
+        details: dict[str, Any]
+
+    class BridgeStatusOut(_HealthOut):
+        verdict: Literal["HEALTHY", "PAUSED", "RUNNING", "NEVER_RUN", "FOREIGN", "FAILED", "STALE"]
+        target_environment_id: str
+        record_oid: str | None = None
+        detail_status: Literal["missing", "mismatched", "matching"] | None = None
+        pause: dict[str, Any] | None = None
+        lock: dict[str, Any] | None = None
+        pass_id: str | None = None
+        environment_id: str | None = None
+        outcome: str | None = None
+        failure_kind: str | None = None
+        completed_at: str | None = None
+        lock_fence: int | None = None
+        detail: dict[str, Any] | None = None
+        lock_oid: str | None = None
+        lock_holder: str | None = None
+        lock_lease_secs: float | None = None
+        live_lock_fence: int | None = None
+
+    class BridgeControlOut(_HealthOut):
+        state: Literal["paused", "resumed"]
+        reason: str | None = None
+        who: str | None = None
+        paused_at: str | None = None
+
+    class BridgeAccessStepOut(_HealthOut):
+        step: Literal[
+            "STEP_CREATE",
+            "STEP_LABEL",
+            "STEP_PROPERTY_WRITE",
+            "STEP_JQL_SEARCH",
+            "STEP_PROPERTY_READ",
+            "STEP_DELETE",
+        ]
+        passed: bool
+        reason: str | None = None
+        detail: str | None = None
+
+    class BridgeAccessCheckOut(_HealthOut):
+        verdict: Literal["PASS", "FAIL", "INVALID"]
+        steps: list[BridgeAccessStepOut]
+        reason: str | None = None
+
     class SignResultOut(_Out):
         # Contract phase (story 8f1d): the
         # dual-shape window is closed — `sign_manifest` mints ONLY the op-cert record, so envelope/
@@ -261,6 +318,8 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     NextBatchOut = FileImpactItemOut = VerifyCommandItemOut = None  # type: ignore[assignment,misc]
     CreateResultOut = ClaimResultOut = GateResultOut = None  # type: ignore[assignment,misc]
     BridgeFsckOut = None  # type: ignore[assignment,misc]
+    BridgeRunOut = BridgeStatusOut = BridgeControlOut = None  # type: ignore[assignment,misc]
+    BridgeAccessStepOut = BridgeAccessCheckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]

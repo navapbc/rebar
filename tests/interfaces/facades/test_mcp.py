@@ -14,6 +14,7 @@ import pytest
 pytest.importorskip("mcp")
 
 import asyncio
+import importlib.util
 
 import rebar
 from rebar.mcp_server import build_server
@@ -37,6 +38,9 @@ def test_readonly_hides_write_tools(monkeypatch: pytest.MonkeyPatch) -> None:
         "reopen_ticket",
         "set_file_impact",
         "set_verify_commands",
+        "bridge_sync",
+        "bridge_pause",
+        "bridge_resume",
     ):
         assert write_tool not in names, write_tool
     # WS5d: quality-gate + file-impact READ tools stay exposed in readonly mode.
@@ -472,6 +476,37 @@ def test_absent_mcp_extra_raises_systemexit(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(SystemExit) as exc:
         m.build_server()
     assert "mcp" in str(exc.value).lower()
+
+
+def test_absent_pydantic_declares_every_mcp_model_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A core-only wheel must import mcp_server far enough to show its install hint."""
+    import rebar._mcp_models as installed_models
+
+    spec = importlib.util.spec_from_file_location(
+        "rebar_mcp_models_without_pydantic", installed_models.__file__
+    )
+    assert spec is not None and spec.loader is not None
+    fallback_models = importlib.util.module_from_spec(spec)
+    real_import = builtins.__import__
+
+    def _fail_pydantic(name, *args, **kwargs):
+        if name == "pydantic" or name.startswith("pydantic."):
+            raise ImportError("No module named 'pydantic'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fail_pydantic)
+    spec.loader.exec_module(fallback_models)
+
+    for name in (
+        "BridgeRunOut",
+        "BridgeStatusOut",
+        "BridgeControlOut",
+        "BridgeAccessStepOut",
+        "BridgeAccessCheckOut",
+    ):
+        assert getattr(fallback_models, name) is None
 
 
 # ── bug-close over MCP requires a bounded close_class (ticket 376d) ──────────

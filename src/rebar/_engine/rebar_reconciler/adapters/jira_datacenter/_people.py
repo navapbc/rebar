@@ -1,11 +1,11 @@
 """Identity + property mixins for the Jira Data Center transport (ticket 465d,
 epic e369) — assignment, reporter, assignee validation, and the
-issue/entity-property writes.
+issue-property reads and issue/entity-property writes.
 
 Co-located in one module: read against the current method inventory, the
-property-write cluster alone (one shared helper + two thin public callers)
+property-operation cluster alone (one read + one shared write helper + two thin callers)
 falls under the module-size policy's 100-LOC floor for a split fragment, and
-both clusters are single-field outbound writes against ``self._client`` with
+both clusters are single-field operations against ``self._client`` with
 no capability Protocol of their own in ``_backend.py`` (unlike
 ``SupportsLinks``/``SupportsComments``) — so they stand together rather than
 as a full module plus a sub-100-line fragment.
@@ -21,7 +21,12 @@ from __future__ import annotations
 from typing import Any
 
 from rebar_reconciler._backend import BackendAssigneeNotFoundError, BackendHTTPError
-from rebar_reconciler.adapters.jira_datacenter._base import _call_logged, _TransportBase, _user_attr
+from rebar_reconciler.adapters.jira_datacenter._base import (
+    _call_logged,
+    _TransportBase,
+    _unwrap,
+    _user_attr,
+)
 from rebar_reconciler.adapters.jira_datacenter.retry import _with_connection_retry
 
 
@@ -142,7 +147,16 @@ class _PeopleMixin(_TransportBase):
 
 
 class _PropertiesMixin(_TransportBase):
-    """Issue-property and entity-property writes, both PUT-verbatim."""
+    """Issue-property reads and issue/entity-property writes."""
+
+    def get_issue_property(self, remote_id: str, property_key: str) -> Any:
+        """Return the JSON value stored under one issue-property key."""
+        prop = _call_logged(
+            "get_issue_property",
+            remote_id,
+            lambda: self._client.issue_property(remote_id, property_key),
+        )
+        return _unwrap(prop.value)
 
     def _put_property(self, member: str, remote_id: str, property_key: str, value: Any) -> None:
         """PUT ``value`` to ``issue/{remote_id}/properties/{property_key}`` via the

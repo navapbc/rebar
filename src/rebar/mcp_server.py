@@ -36,7 +36,11 @@ import rebar
 from rebar._deprecations import RemovedInputError
 from rebar._mcp_llm import register_llm_tools
 from rebar._mcp_models import (
+    BridgeAccessCheckOut,
+    BridgeControlOut,
     BridgeFsckOut,
+    BridgeRunOut,
+    BridgeStatusOut,
     ClaimResultOut,
     ClarityResultOut,
     CreateResultOut,
@@ -60,7 +64,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "MCP_ENV_VARS",
+    "BridgeAccessCheckOut",
+    "BridgeControlOut",
     "BridgeFsckOut",
+    "BridgeRunOut",
+    "BridgeStatusOut",
     "ClaimResultOut",
     "ClarityResultOut",
     "CreateResultOut",
