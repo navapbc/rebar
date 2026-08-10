@@ -130,8 +130,12 @@ def _cli_tracker(root: Path, snapshot: dict) -> Path:
     root.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     tracker = root / ".tickets-tracker"
+    tracker.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "tickets"], cwd=tracker, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tracker, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tracker, check=True)
     ticket_dir = tracker / "loc-a"
-    ticket_dir.mkdir(parents=True)
+    ticket_dir.mkdir()
     _write_event(
         ticket_dir,
         1_742_605_200,
@@ -150,6 +154,8 @@ def _cli_tracker(root: Path, snapshot: dict) -> Path:
     (tracker / ".bridge_state" / "prev_snapshot.json").write_text(
         json.dumps(snapshot), encoding="utf-8"
     )
+    subprocess.run(["git", "add", "."], cwd=tracker, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "fixture"], cwd=tracker, check=True)
     return tracker
 
 
@@ -164,6 +170,7 @@ def _file_bytes(root: Path) -> dict[str, bytes]:
 def _run_cli(tracker: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
     env = os.environ.copy()
     env["REBAR_ROOT"] = str(tracker.parent)
+    env["REBAR_TRACKER_DIR"] = str(tracker)
     cp = subprocess.run(
         [
             sys.executable,
@@ -203,13 +210,12 @@ def test_cli_keyset_is_informational_and_keeps_json_envelope_read_only(tmp_path)
         set(keyset)
         == set(full)
         == {
-            "orphaned",
-            "duplicates",
-            "stale",
             "unknown_event_types",
             "binding_drift",
+            "store_integrity",
         }
     )
+    assert full["store_integrity"] == keyset["store_integrity"] == []
     assert full["binding_drift"]["would_terminal"] == [{"local_id": "loc-a", "jira_key": "REB-464"}]
     assert keyset["binding_drift"]["would_terminal"] == []
     assert keyset["binding_drift"]["indeterminate"][0]["local_id"] == "loc-a"
