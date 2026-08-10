@@ -81968,7 +81968,7 @@
         "assignee": null,
         "description": "Code-review artifact for Gerrit change rebar~main~Igap (revision rev-gap). Decision: PASS. change_fingerprint=a7d8568d0eeae42d.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "code-review: rebar~main~Igap @ rev-gap"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
