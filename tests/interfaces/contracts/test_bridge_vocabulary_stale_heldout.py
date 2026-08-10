@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
+from adapters import _unwrap
+
+import rebar
 
 pytestmark = pytest.mark.unit
 
@@ -86,3 +90,34 @@ def test_primary_docs_present_the_canonical_spellings() -> None:
     )
     for spelling in ("bridge fsck", "bridge check-access", "bridge setup"):
         assert spelling in primary
+
+
+@pytest.mark.parametrize(
+    ("legacy", "primary"),
+    [
+        ("bridge-fsck", "bridge fsck"),
+        ("bridge-probe", "bridge check-access"),
+        ("jira-onboard", "bridge setup"),
+    ],
+)
+def test_release_notes_map_each_compatibility_spelling_to_its_primary(
+    legacy: str, primary: str
+) -> None:
+    """The migration contract pairs each retained alias with its replacement."""
+    release_notes = (_REPO_ROOT / "docs/release-notes.md").read_text(encoding="utf-8")
+    assert "primary operator spellings" in release_notes.lower()
+    assert re.search(
+        rf"`rebar {re.escape(legacy)}`\s*->\s*`rebar {re.escape(primary)}`",
+        release_notes,
+    )
+
+
+def test_library_and_mcp_bridge_fsck_entrypoints_remain_callable(rebar_repo: Path) -> None:
+    """The CLI rename does not rename or detach either public programmatic surface."""
+    from rebar.mcp_server import build_server
+
+    expected = {"orphaned": [], "duplicates": [], "stale": []}
+    assert rebar.bridge_fsck(repo_root=rebar_repo) == expected
+
+    result = _unwrap(asyncio.run(build_server().call_tool("bridge_fsck", {})))
+    assert {key: result[key] for key in expected} == expected
