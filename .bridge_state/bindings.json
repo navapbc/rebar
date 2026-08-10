@@ -104291,7 +104291,7 @@
         "assignee": null,
         "description": "Code-review artifact for Gerrit change rebar~main~Imerge (revision mrev). Decision: PASS. change_fingerprint=ee2bbc382304f6df.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "code-review: rebar~main~Imerge @ mrev"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -118871,7 +118871,7 @@
         "assignee": null,
         "description": "Code-review artifact for Gerrit change rebar~main~Iabc (revision rev1). Decision: PASS. change_fingerprint=001b99afad6a5455.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "code-review: rebar~main~Iabc @ rev1"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
