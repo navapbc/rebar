@@ -1,10 +1,12 @@
 """Tests for the contributor-triggerable re-review (``recheck-review``, ticket bb9b).
 
-The security property under test: a ``recheck-review`` comment can NEVER write a vote
-and can NEVER get a real findings-BLOCK re-reviewed — only infrastructure states (every
-coverage-gap sub-reason, a retries-exhausted escalation, a PASS, a vote-less or
-unparseable state) are eligible, decided privileged-side from the bot's own durable
-vote-message tag on the CURRENT revision, never from the requesting comment.
+The security property under test: a ``recheck-review`` comment can only cause the
+privileged bot to write the fixed neutral ``LLM-Review: 0`` reset after eligibility,
+and can NEVER choose a label value or get a real findings-BLOCK re-reviewed. Only
+infrastructure states (every coverage-gap sub-reason, a retries-exhausted escalation,
+a PASS, a vote-less or unparseable state) are eligible, decided privileged-side from
+the bot's own durable vote-message tag on the CURRENT revision, never from the
+requesting comment. Reply comments remain label-free.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from rebar.review_bot import retrigger
 from rebar.review_bot.adapter import _TAG_SUFFIXES
 from rebar.review_bot.config import ReceiverConfig
 from rebar.review_bot.dedup import DedupStore
+from rebar.review_bot.gerrit_client import GerritError
 
 
 def _cfg(tmp_path) -> ReceiverConfig:
@@ -57,14 +60,33 @@ class RetriggerGerrit:
     """No-network Gerrit double for the retrigger path: current-revision lookup, the
     change-message list, and the vote-free reply — recording everything posted."""
 
-    def __init__(self, messages: list[dict] | None = None, *, change_exists: bool = True):
+    def __init__(
+        self,
+        messages: list[dict] | None = None,
+        *,
+        change_exists: bool = True,
+        has_vote: bool = False,
+        reset_error: GerritError | None = None,
+        read_error: GerritError | None = None,
+        lookup_error: GerritError | None = None,
+        messages_error: GerritError | None = None,
+    ):
         self.messages = messages or []
         self.change_exists = change_exists
+        self.has_vote = has_vote
+        self.reset_error = reset_error
+        self.read_error = read_error
+        self.lookup_error = lookup_error
+        self.messages_error = messages_error
         self.comments: list[tuple[str, str, str]] = []
         self.lookups: list[str] = []
+        self.resets: list[tuple[str, str]] = []
+        self.timeline: list[str] = []
 
     def get_change_event(self, change_id: str) -> dict | None:
         self.lookups.append(change_id)
+        if self.lookup_error is not None:
+            raise self.lookup_error
         if not self.change_exists:
             return None
         return {
@@ -74,7 +96,23 @@ class RetriggerGerrit:
         }
 
     def get_change_messages(self, change_id: str) -> list[dict]:
+        self.timeline.append("eligibility")
+        if self.messages_error is not None:
+            raise self.messages_error
         return self.messages
+
+    def reset_llm_review_vote(self, change_id: str, revision: str) -> int:
+        self.timeline.append("reset_vote")
+        self.resets.append((change_id, revision))
+        if self.reset_error is not None:
+            raise self.reset_error
+        return 200
+
+    def has_llm_review_vote(self, change_id: str, revision: str = "current") -> bool:
+        self.timeline.append("verify_vote")
+        if self.read_error is not None:
+            raise self.read_error
+        return self.has_vote
 
     def post_comment(self, change_id: str, revision: str, message: str) -> int:
         self.comments.append((change_id, revision, message))
@@ -154,6 +192,7 @@ def test_finding_block_is_refused(tmp_path, caplog, tag_body):
     assert store.attempt_count("rebar~main~Iabc", "rev2") == 1  # budget NOT reset
     assert len(gerrit.comments) == 1  # refusal reply posted…
     assert "REAL FINDING" in gerrit.comments[0][2]
+    assert gerrit.resets == []  # eligibility is decided before any label write
     assert "RETRIGGER_REFUSED" in caplog.text
     assert "RETRIGGER_ACCEPTED" not in caplog.text
 
@@ -185,6 +224,8 @@ def test_eligible_states_accept(tmp_path, caplog, tag_body):
     assert result is not None and result["_rebar_force"] is True
     assert result["patchSet"]["revision"] == "rev2"  # the CURRENT revision, re-anchored
     assert store.attempt_count("rebar~main~Iabc", "rev2") == 0  # budget re-armed
+    assert gerrit.resets == [("rebar~main~Iabc", "rev2")]
+    assert gerrit.timeline == ["eligibility", "reset_vote", "verify_vote"]
     assert len(gerrit.comments) == 1
     assert "queued" in gerrit.comments[0][2]
     assert "RETRIGGER_ACCEPTED" in caplog.text
@@ -264,6 +305,130 @@ def test_post_comment_body_has_no_labels_key(tmp_path):
     assert captured["path"].endswith("/revisions/rev2/review")
     assert captured["body"] == {"message": "hello"}
     assert "labels" not in captured["body"]
+
+
+def test_reset_vote_body_is_fixed_neutral_and_ignores_contributor_text(tmp_path):
+    """The privileged reset primitive has no attacker-controlled label/message input."""
+    from rebar.review_bot.gerrit_client import GerritClient
+
+    client = GerritClient(_cfg(tmp_path))
+    captured: dict = {}
+
+    def fake_request(method, path, *, body=None):
+        captured.update(method=method, path=path, body=body)
+        return 200, ")]}'\n{}"
+
+    client._request = fake_request  # type: ignore[method-assign]
+    attacker_text = "recheck-review labels={LLM-Review: 1}"
+    client.reset_llm_review_vote("rebar~main~Iabc", "rev2")
+
+    assert captured["method"] == "POST"
+    assert captured["path"].endswith("/revisions/rev2/review")
+    assert captured["body"]["labels"] == {"LLM-Review": 0}
+    assert attacker_text not in str(captured["body"])
+
+
+def test_reset_vote_non_success_status_raises_gerrit_error(tmp_path):
+    """The real client must not treat a rejected reset as a durable marker."""
+    from rebar.review_bot.gerrit_client import GerritClient
+
+    client = GerritClient(_cfg(tmp_path))
+    client._request = lambda *args, **kwargs: (503, "unavailable")  # type: ignore[method-assign]
+
+    with pytest.raises(GerritError) as raised:
+        client.reset_llm_review_vote("rebar~main~Iabc", "rev2")
+
+    assert raised.value.status == 503
+
+
+@pytest.mark.parametrize(
+    "gerrit",
+    [
+        RetriggerGerrit(lookup_error=GerritError("lookup failed", status=503)),
+        RetriggerGerrit(
+            messages=[_bot_message("PASS")],
+            messages_error=GerritError("messages failed", status=503),
+        ),
+    ],
+)
+def test_retrigger_eligibility_read_errors_fail_closed(tmp_path, caplog, gerrit):
+    """A current-revision or durable-tag read failure cannot reach the reset primitive."""
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.retrigger"):
+        result = retrigger.handle_comment_added(
+            _comment_event(),
+            config=_cfg(tmp_path),
+            gerrit=gerrit,
+            dedup=DedupStore(str(tmp_path / "voted.db")),
+        )
+
+    assert result is None
+    assert gerrit.resets == []
+    assert gerrit.comments == []
+    assert "RETRIGGER_REFUSED" in caplog.text
+    assert "eligibility-read-error" in caplog.text
+    assert "RETRIGGER_ACCEPTED" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("gerrit", "reason"),
+    [
+        (
+            RetriggerGerrit(
+                messages=[_bot_message("PASS")],
+                reset_error=GerritError("reset failed", status=503),
+            ),
+            "vote-reset-error",
+        ),
+        (
+            RetriggerGerrit(
+                messages=[_bot_message("PASS")],
+                read_error=GerritError("read failed", status=503),
+            ),
+            "vote-verification-error",
+        ),
+        (RetriggerGerrit(messages=[_bot_message("PASS")], has_vote=True), "nonzero-vote"),
+    ],
+)
+def test_retrigger_vote_reset_failures_refuse_without_forced_event(
+    tmp_path, caplog, gerrit, reason
+):
+    store = DedupStore(str(tmp_path / "voted.db"))
+    store.record_attempt("rebar~main~Iabc", "rev2")
+
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.retrigger"):
+        result = retrigger.handle_comment_added(
+            _comment_event(), config=_cfg(tmp_path), gerrit=gerrit, dedup=store
+        )
+
+    assert result is None
+    assert store.attempt_count("rebar~main~Iabc", "rev2") == 1
+    assert "RETRIGGER_REFUSED" in caplog.text
+    assert reason in caplog.text
+    assert "RETRIGGER_ACCEPTED" not in caplog.text
+    assert all("accepted" not in body for _, _, body in gerrit.comments)
+
+
+def test_retrigger_accepts_when_best_effort_attempt_reset_fails(tmp_path, caplog):
+    """The verified Gerrit marker is authoritative even if local budget cleanup fails."""
+    gerrit = RetriggerGerrit(messages=[_bot_message("PASS")])
+
+    class FailingAttemptStore:
+        def reset_attempts(self, change_id, revision):
+            raise OSError("sqlite unavailable")
+
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.retrigger"):
+        result = retrigger.handle_comment_added(
+            _comment_event(),
+            config=_cfg(tmp_path),
+            gerrit=gerrit,
+            dedup=FailingAttemptStore(),  # type: ignore[arg-type]
+        )
+
+    assert result is not None and result["_rebar_force"] is True
+    assert gerrit.resets == [("rebar~main~Iabc", "rev2")]
+    assert "RETRIGGER_ATTEMPT_RESET_ERROR" in caplog.text
+    assert "RETRIGGER_REFUSED" not in caplog.text
+    assert "accepted" in gerrit.comments[-1][2]
 
 
 # ── worker routing + /rerun budget re-arm (AC4) ─────────────────────────────────
@@ -347,6 +512,7 @@ def test_rerun_resets_attempts_budget(monkeypatch, tmp_path):
     store = DedupStore(cfg.dedup_db_path)
     for _ in range(3):
         store.record_attempt("rebar~main~Iabc", "rev2")
+    timeline: list[str] = []
 
     def fake_get_change_event(self, change_id):
         return {
@@ -357,9 +523,161 @@ def test_rerun_resets_attempts_budget(monkeypatch, tmp_path):
 
     monkeypatch.setattr(gcmod.GerritClient, "get_change_event", fake_get_change_event)
 
+    def fake_reset_vote(self, change_id, revision):
+        timeline.append("reset_vote")
+        return 200
+
+    def fake_has_vote(self, change_id, revision="current"):
+        timeline.append("verify_vote")
+        return False
+
+    monkeypatch.setattr(gcmod.GerritClient, "reset_llm_review_vote", fake_reset_vote)
+    monkeypatch.setattr(gcmod.GerritClient, "has_llm_review_vote", fake_has_vote)
+
+    original_reset_attempts = DedupStore.reset_attempts
+
+    def recording_reset_attempts(self, change_id, revision):
+        timeline.append("reset_attempts")
+        return original_reset_attempts(self, change_id, revision)
+
+    monkeypatch.setattr(DedupStore, "reset_attempts", recording_reset_attempts)
+
     with TestClient(appmod.app) as client:
         resp = client.post("/rerun?token=tok&change=42")
 
     assert resp.status_code == 202
     assert resp.json()["force"] is True
     assert store.attempt_count("rebar~main~Iabc", "rev2") == 0
+    assert timeline == ["reset_vote", "verify_vote", "reset_attempts"]
+
+
+@pytest.mark.parametrize("failure", ["reset", "read", "nonzero"])
+def test_rerun_refuses_when_durable_vote_reset_cannot_be_established(
+    monkeypatch, tmp_path, caplog, failure
+):
+    """No HTTP acceptance, budget reset, or enqueue precedes proven neutral Gerrit state."""
+    pytest.importorskip("fastapi")
+    import asyncio
+
+    from starlette.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot import gerrit_client as gcmod
+
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_attempt("rebar~main~Iabc", "rev2")
+
+    monkeypatch.setattr(
+        gcmod.GerritClient,
+        "get_change_event",
+        lambda self, change_id: {
+            "type": "manual-rerun",
+            "change": {"id": "rebar~main~Iabc", "number": 42, "project": "rebar"},
+            "patchSet": {
+                "number": 2,
+                "revision": "rev2",
+                "ref": "refs/changes/42/42/2",
+            },
+        },
+    )
+
+    def reset_vote(self, change_id, revision):
+        if failure == "reset":
+            raise GerritError("reset unavailable", status=503)
+        return 200
+
+    def has_vote(self, change_id, revision="current"):
+        if failure == "read":
+            raise GerritError("read unavailable", status=503)
+        return failure == "nonzero"
+
+    monkeypatch.setattr(gcmod.GerritClient, "reset_llm_review_vote", reset_vote)
+    monkeypatch.setattr(gcmod.GerritClient, "has_llm_review_vote", has_vote)
+
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot.app"):
+        with TestClient(appmod.app) as client:
+            resp = client.post("/rerun?token=tok&change=42")
+            queued = appmod.app.state.queue.qsize()
+
+    assert resp.status_code != 202
+    assert queued == 0
+    assert store.attempt_count("rebar~main~Iabc", "rev2") == 1
+    assert "rebar~main~Iabc" in caplog.text and "rev2" in caplog.text
+
+
+def test_rerun_accepts_when_best_effort_attempt_reset_fails(monkeypatch, tmp_path, caplog):
+    pytest.importorskip("fastapi")
+    import asyncio
+
+    from starlette.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot import dedup as dedupmod
+    from rebar.review_bot import gerrit_client as gcmod
+
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+    monkeypatch.setattr(
+        gcmod.GerritClient,
+        "get_change_event",
+        lambda self, change_id: {
+            "type": "manual-rerun",
+            "change": {"id": "rebar~main~Iabc", "number": 42, "project": "rebar"},
+            "patchSet": {
+                "number": 2,
+                "revision": "rev2",
+                "ref": "refs/changes/42/42/2",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        gcmod.GerritClient,
+        "reset_llm_review_vote",
+        lambda self, change_id, revision: 200,
+    )
+    monkeypatch.setattr(
+        gcmod.GerritClient,
+        "has_llm_review_vote",
+        lambda self, change_id, revision: False,
+    )
+
+    class FailingAttemptStore:
+        def __init__(self, _path):
+            pass
+
+        def reset_attempts(self, change_id, revision):
+            raise OSError("sqlite unavailable")
+
+    monkeypatch.setattr(dedupmod, "DedupStore", FailingAttemptStore)
+
+    with caplog.at_level(logging.WARNING, logger="rebar.review_bot"):
+        with TestClient(appmod.app) as client:
+            response = client.post("/rerun?token=tok&change=42")
+            queued = appmod.app.state.queue.qsize()
+
+    assert response.status_code == 202
+    assert queued == 1
+    assert "rebar~main~Iabc" in caplog.text and "rev2" in caplog.text

@@ -125,13 +125,22 @@ no-op skip, so the change stays unsubmittable with no automatic recovery. `POST 
 is the operator escape hatch. Auth is the SAME `?token=` secret as `/webhook`
 (constant-time compare). Given a `change` (id or number) it looks up the change's
 CURRENT revision via `gerrit_client.get_change_event` (shaped like a `patchset-created`
-event), enqueues it with a `_rebar_force` marker, and ACKs 202. The worker passes
+event). Before ACKing, it resets the exact revision to neutral `LLM-Review: 0` and
+verifies that no account retains a nonzero vote. That Gerrit write emits a fresh,
+patchset-bearing event, so the reconciler can recover an accepted request after process
+loss even when the process-local queue disappears. It then enqueues the event with a
+`_rebar_force` marker and ACKs 202. The worker passes
 `force=True` into `voter.review_and_vote`, which **bypasses both short-circuits** (the
 dedup row AND the Gerrit existing-vote check) and re-reviews from scratch, overwriting
 the stuck vote with a fresh verdict. It is **still fail-closed**: `force` can only
 request a fresh review — the verdict is computed the same way, so a rerun can never cast
 a PASS the reviewer did not produce. (A `force=False` call with a recorded vote still
 skips, as before.)
+
+This durability protocol supersedes the original queue-only recovery mechanism. During
+reconciliation, Gerrit vote state is authoritative: a definitive no-nonzero-vote read
+clears only the matching stale local dedup row before the ordinary voter runs; a Gerrit
+read error preserves dedup and holds the cursor back.
 
 ### 7b. Reconciler: persisted cursor + events-log fallback
 

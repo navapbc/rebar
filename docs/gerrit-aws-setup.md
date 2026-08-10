@@ -430,9 +430,11 @@ Recovery paths:
 
 - **`POST /rerun`** (same `?token=` auth) is the operator escape hatch for a stuck
   fail-closed `-1` (e.g. a transient LLM outage): it looks up the change's current
-  revision and re-reviews from scratch, **bypassing both short-circuits**, but is
-  **still fail-closed** — a rerun can only request a fresh review, never cast a PASS
-  the reviewer did not produce.
+  revision, resets that exact revision to neutral `LLM-Review: 0`, verifies no account
+  retains a nonzero vote, and re-reviews from scratch. The reset's Gerrit event lets the
+  reconciler recover the request if the process-local queue is lost. It is **still
+  fail-closed** — a rerun can only request a fresh review, never cast a PASS the reviewer
+  did not produce.
 - **The backfill reconciler** (`reconcile.py`) runs on startup and every
   `RECONCILE_INTERVAL_SECONDS` (default 300): it queries `events-log` (with a
   persisted, resumable cursor) for patchsets whose current revision has no

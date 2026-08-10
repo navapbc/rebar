@@ -60,7 +60,7 @@ i.e. the public `/review/rerun` path maps to the receiver's internal `POST /reru
 `X-Rebar-Token` HTTP header, NOT in the URL** — uvicorn's access log records the
 request line (path + query string) but not headers, so a URL-embedded `?token=` writes
 the bot's Gerrit credential to journald in clear text on every request (ticket 66af).
-Pass the change as an id or number. A successful enqueue ACKs **202**:
+Pass the change as an id or number. A successful durable reset and enqueue ACKs **202**:
 
 ```bash
 TOKEN=$(aws ssm get-parameter --name /rebar/prod/gerrit-bot-token \
@@ -88,14 +88,16 @@ full Change-Id. After the worker runs, confirm the `LLM-Review` vote flipped on 
 change's current revision.
 
 **WHEN.** Use `/rerun` to recover a change stuck at a fail-closed `-1` **without
-amending the patchset** (no new patchset needed). Contrast the two automatic paths,
-neither of which clears a stuck `-1`:
+amending the patchset** (no new patchset needed). Before acknowledging, `/rerun` clears
+the bot's exact-revision vote to neutral `0` and verifies no account retains a nonzero
+vote. Contrast the two paths before that reset:
 
 - **Webhook re-delivery** — the dedup ledger + the Gerrit existing-vote guard make
   a re-delivered event a **no-op skip** once any non-zero vote exists.
-- **The 5-minute backfill reconciler** (`reconcile.py`) — only re-reviews **vote-LESS**
-  changes (a gap a dropped webhook left). It will **NOT** retry a change that already
-  carries a `-1`.
+- **The 5-minute backfill reconciler** (`reconcile.py`) — re-reviews **vote-LESS** changes.
+  It will not retry a change that still carries a `-1`; after an accepted `/rerun` or
+  `recheck-review` resets that vote, the reset's Gerrit event durably admits the revision
+  to reconciliation even if the process-local queue is lost.
 
 So a transient outage that produced a `-1` will sit there until you `/rerun` it (or
 push a new patchset). Contributors also have a self-service path: commenting
@@ -107,10 +109,14 @@ operator-side equivalent and additionally works when the bot cannot read comment
 `infra/gerrit/service-user.sh` to push the rendered config to `refs/meta/config`.)
 
 **SEMANTICS (budget).** Both `/rerun` and an accepted `recheck-review` trigger also
-**reset the change's retry-budget row** in the dedup store, so a change that
-previously exhausted its automatic retries gets a fresh budget for the forced run.
+best-effort **reset the change's retry-budget row** in the dedup store, so a change that
+previously exhausted its automatic retries gets a fresh budget for the forced run. A local
+budget-reset failure is logged but cannot undo the already-durable Gerrit reset.
 
-**SEMANTICS.** `/rerun` enqueues the change's current revision with a force marker;
+**SEMANTICS.** `/rerun` first resets the exact revision to neutral, verifies no account
+retains a nonzero vote, and only then ACKs. The resulting Gerrit `comment-added` event is
+the durable review-owed marker. `/rerun` also enqueues the current revision with a force
+marker;
 the worker calls `voter.review_and_vote(force=True)`, which **bypasses both
 short-circuits** — the dedup row AND the Gerrit existing-vote check — and re-reviews
 from scratch, overwriting the stuck vote with a fresh verdict. It is **still

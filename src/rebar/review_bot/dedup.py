@@ -104,6 +104,22 @@ class DedupStore:
         finally:
             conn.close()
 
+    def clear_voted(self, change_id: str, revision: str) -> None:
+        """Delete only the stale vote row for this exact Gerrit revision.
+
+        Reconciliation calls this only after Gerrit definitively reports no nonzero
+        ``LLM-Review`` vote. It is intentionally separate from :meth:`reset_attempts`,
+        which operates on the retry-budget table.
+        """
+        conn = self._connect()
+        try:
+            conn.execute(
+                "DELETE FROM voted WHERE change_id=? AND revision=?",
+                (change_id, revision),
+            )
+        finally:
+            conn.close()
+
     # ── retryable-gap attempt budget (ticket 0347) ──────────────────────────
     # A RETRYABLE coverage-gap review defers vote-less (the backfill reconciler re-drives
     # it) and burns one attempt here; at RETRYABLE_GAP_MAX_ATTEMPTS the voter escalates to

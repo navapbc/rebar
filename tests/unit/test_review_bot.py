@@ -456,6 +456,19 @@ def test_dedup_write_on_success_and_already_voted(tmp_path):
     assert store.already_voted("c1", "r1") is True
 
 
+def test_clear_voted_deletes_only_the_exact_change_revision(tmp_path):
+    store = DedupStore(str(tmp_path / "voted.db"))
+    store.record_vote("c1", "r1", "patchset-created", -1)
+    store.record_vote("c1", "r2", "patchset-created", 1)
+    store.record_vote("c2", "r1", "patchset-created", 1)
+
+    store.clear_voted("c1", "r1")
+
+    assert store.already_voted("c1", "r1") is False
+    assert store.already_voted("c1", "r2") is True
+    assert store.already_voted("c2", "r1") is True
+
+
 # ── voter ───────────────────────────────────────────────────────────────────
 def test_voter_skips_other_project(monkeypatch, tmp_path):
     g = FakeGerrit()
@@ -705,6 +718,11 @@ class ReconcileGerrit(FakeGerrit):
         self.has_vote_calls += 1
         return revision in self._voted
 
+    def post_vote(self, change_id, revision, value, message, robot_comments=None):
+        status = super().post_vote(change_id, revision, value, message, robot_comments)
+        self._voted.add(revision)
+        return status
+
 
 def test_reconcile_once_reviews_only_the_gap_change_and_persists_cursor(monkeypatch, tmp_path):
     """One change already voted, one vote-less (the gap): only the gap is reviewed, and
@@ -756,6 +774,166 @@ def test_reconcile_once_second_pass_is_idempotent_via_dedup_and_cursor(monkeypat
     # The 2nd pass passed the persisted cursor (not None) as the since window.
     assert g.list_since_calls[0] is None
     assert g.list_since_calls[1] is not None
+
+
+def test_reconcile_clears_stale_local_vote_after_definitive_gerrit_no_vote(monkeypatch, tmp_path):
+    """A reset-emitted event recovers after restart even when SQLite retained the old vote."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_vote("rebar~main~Istale", "rev-stale", "patchset-created", -1)
+    store.record_vote("rebar~main~Iother", "rev-other", "patchset-created", 1)
+    g = ReconcileGerrit(
+        events=[_events_log_event("rebar~main~Istale", "rev-stale", number=12, created_on=2_000)]
+    )
+
+    result = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert result == {"scanned": 1, "reviewed": 1}
+    assert [vote[:3] for vote in g.votes] == [("rebar~main~Istale", "rev-stale", 1)]
+    assert store.already_voted("rebar~main~Istale", "rev-stale") is True
+    assert store.already_voted("rebar~main~Iother", "rev-other") is True
+    # Reconciler checks once, then the ordinary voter re-checks under its per-revision lock.
+    assert g.has_vote_calls == 2
+
+
+def test_reconcile_preserves_stale_local_vote_when_gerrit_still_has_nonzero_vote(
+    monkeypatch, tmp_path
+):
+    """Contrast: Gerrit's nonzero vote remains authoritative and local dedup is retained."""
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_vote("rebar~main~Ivoted", "rev-voted", "patchset-created", -1)
+    g = ReconcileGerrit(
+        events=[_events_log_event("rebar~main~Ivoted", "rev-voted", created_on=2_000)],
+        voted_revisions={"rev-voted"},
+    )
+
+    result = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert result == {"scanned": 1, "reviewed": 0}
+    assert store.already_voted("rebar~main~Ivoted", "rev-voted") is True
+    assert g.has_vote_calls == 1
+    assert g.votes == []
+
+
+def test_reconcile_vote_read_error_preserves_dedup_and_holds_cursor(monkeypatch, tmp_path, caplog):
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    store.record_vote("rebar~main~Ierror", "rev-error", "patchset-created", -1)
+
+    class VoteReadErrorGerrit(ReconcileGerrit):
+        def has_llm_review_vote(self, change_id, revision="current"):
+            raise GerritError("vote read unavailable", status=503)
+
+    g = VoteReadErrorGerrit(
+        events=[_events_log_event("rebar~main~Ierror", "rev-error", created_on=2_000)]
+    )
+
+    with caplog.at_level(logging.INFO, logger="rebar.review_bot.reconcile"):
+        result = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert result == {"scanned": 1, "reviewed": 0}
+    assert store.already_voted("rebar~main~Ierror", "rev-error") is True
+    assert g.votes == []
+    assert "reconcile_check_error" in caplog.text
+    assert "rebar~main~Ierror" in caplog.text and "rev-error" in caplog.text
+
+
+def test_accepted_rerun_survives_restart_via_gerrit_reconcile(monkeypatch, tmp_path):
+    """Production-shaped restart path: Gerrit, not the discarded queue, preserves work."""
+    pytest.importorskip("fastapi")
+    from pathlib import Path
+
+    from starlette.testclient import TestClient
+
+    from rebar.review_bot import app as appmod
+    from rebar.review_bot import gerrit_client as gcmod
+
+    _patch_review(monkeypatch, [])
+    cfg = _cfg(tmp_path)
+    store = DedupStore(cfg.dedup_db_path)
+    change_id = "rebar~main~Irestart"
+    revision = "rev-restart"
+    store.record_vote(change_id, revision, "patchset-created", -1)
+    store.record_vote("rebar~main~Iunrelated", "rev-other", "patchset-created", 1)
+    for _ in range(cfg.retryable_gap_max_attempts):
+        store.record_attempt(change_id, revision)
+    assert store.attempt_count(change_id, revision) == cfg.retryable_gap_max_attempts
+
+    # The original patchset event is already behind the persisted window.
+    Path(cfg.cursor_path).write_text(reconcile._to_t1(1_500), encoding="utf-8")
+
+    class DurableRerunGerrit(ReconcileGerrit):
+        def get_change_event(self, requested_change):
+            return {
+                "type": "manual-rerun",
+                "change": {"id": change_id, "number": 42, "project": "rebar"},
+                "patchSet": {
+                    "number": 2,
+                    "revision": revision,
+                    "ref": "refs/changes/42/42/2",
+                },
+            }
+
+        def reset_llm_review_vote(self, reset_change, reset_revision):
+            assert (reset_change, reset_revision) == (change_id, revision)
+            self._voted.discard(reset_revision)
+            self._events.append(
+                {
+                    "type": "comment-added",
+                    "eventCreatedOn": 2_000,
+                    "change": {"id": change_id, "number": 42, "project": "rebar"},
+                    "patchSet": {
+                        "number": 2,
+                        "revision": revision,
+                        "ref": "refs/changes/42/42/2",
+                    },
+                    "comment": "Patch Set 2: LLM-Review0",
+                }
+            )
+            return 200
+
+    g = DurableRerunGerrit(
+        events=[_events_log_event(change_id, revision, number=42, created_on=1_000)],
+        voted_revisions={revision},
+    )
+
+    async def _idle_worker(queue, cfg):
+        await asyncio.Event().wait()
+
+    async def _idle_loop(*, config):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(appmod, "_worker", _idle_worker, raising=True)
+    monkeypatch.setattr(appmod._reconcile, "reconcile_loop", _idle_loop, raising=True)
+    monkeypatch.setattr(appmod.app.state, "config", cfg, raising=False)
+    monkeypatch.setattr(gcmod, "GerritClient", lambda _cfg: g)
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.1")
+
+    with TestClient(appmod.app) as client:
+        response = client.post("/rerun?token=tok&change=42")
+        assert response.status_code == 202
+        assert appmod.app.state.queue.qsize() == 1
+        assert store.attempt_count(change_id, revision) == 0
+
+    # Simulate replacement-process state: the accepted live queue is gone.
+    replacement_queue: asyncio.Queue = asyncio.Queue()
+    assert replacement_queue.empty()
+    reset_event = g._events[-1]
+    assert reset_event["type"] == "comment-added"
+    assert reset_event["eventCreatedOn"] > 1_500
+    assert reset_event["patchSet"]["revision"] == revision
+
+    result = asyncio.run(reconcile.reconcile_once(config=cfg, gerrit=g, dedup=store))
+
+    assert result == {"scanned": 1, "reviewed": 1}
+    assert [vote[:3] for vote in g.votes] == [(change_id, revision, 1)]
+    assert len(g.votes) == 1
+    assert store.already_voted(change_id, revision) is True
+    assert store.already_voted("rebar~main~Iunrelated", "rev-other") is True
 
 
 def test_reconcile_once_events_log_error_does_not_crash_or_vote(monkeypatch, tmp_path):

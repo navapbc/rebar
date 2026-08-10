@@ -44,9 +44,10 @@ BEST-EFFORT partner: Gerrit's ``webhooks`` plugin is at-most-once (it logs SEVER
 DISCARDS after ``maxTries``, and loses pending deliveries on restart), so this reconciler
 is the only recovery path — which is exactly why its cursor must not skip work (9f63).
 
-The reconciler reuses one ``GerritClient`` + ``DedupStore`` so the run is cheap; the
-per-patchset Gerrit-side ``has_llm_review_vote`` check is done inside the voter (the
-authoritative skip), but we also pre-filter here to avoid spawning needless reviews.
+The reconciler reuses one ``GerritClient`` + ``DedupStore`` so the run is cheap. For
+each bounded events-log candidate it queries Gerrit FIRST. A definitive vote-less read
+invalidates any stale local dedup row before the ordinary voter runs; a Gerrit read error
+preserves local state and holds the cursor back for retry.
 """
 
 from __future__ import annotations
@@ -256,19 +257,24 @@ async def reconcile_once(
             ev_time = int(ev.get("eventCreatedOn") or 0)
         except (TypeError, ValueError):
             ev_time = 0
-        # Pre-filter: skip if locally recorded OR already voted on Gerrit (cheap skip
-        # before spawning a review). The voter re-checks under the lock authoritatively.
-        if store.already_voted(change_id, revision):
-            continue
+        # Gerrit is authoritative and MUST be checked before local dedup. A neutral reset
+        # deliberately leaves the old SQLite row behind; the reset-emitted event reaches
+        # this candidate and a definitive no-vote read invalidates only that stale row.
         try:
             if await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision):
                 continue
         except GerritError as exc:
             # We could not even establish whether a vote is needed — the candidate is still
             # OWED one. Hold the cursor back to it so the next pass re-checks (9f63).
-            _emit("reconcile_check_error", change_id=change_id, error=str(exc))
+            _emit(
+                "reconcile_check_error",
+                change_id=change_id,
+                revision_id=revision,
+                error=str(exc),
+            )
             held_back[change_id] = ev_time
             continue
+        store.clear_voted(change_id, revision)
         # Bound the backfill review with the SAME per-review timeout the live worker uses
         # (app._worker). Without this a single hung review (blocked clone/subprocess/LLM) would
         # freeze the ENTIRE reconcile loop indefinitely — the backfill safety-net having no

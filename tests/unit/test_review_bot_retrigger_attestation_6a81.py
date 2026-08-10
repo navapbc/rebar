@@ -83,12 +83,13 @@ def _finding_message(
 
 
 class RetriggerGerrit:
-    """No-network Gerrit double: current-revision lookup, messages, commit, vote-free reply."""
+    """No-network Gerrit double for eligibility, fixed-neutral reset, and reply."""
 
     def __init__(self, messages: list[dict], *, commit_ticket: str | None = _TICKET):
         self.messages = messages
         self.commit_ticket = commit_ticket
         self.comments: list[tuple[str, str, str]] = []
+        self.resets: list[tuple[str, str, int]] = []
 
     def get_change_event(self, change_id: str) -> dict | None:
         return {
@@ -103,6 +104,13 @@ class RetriggerGerrit:
     def get_commit(self, change_id: str, revision: str = "current") -> dict:
         trailer = f"\n\nrebar-ticket: {self.commit_ticket}" if self.commit_ticket else ""
         return {"message": f"738a: attest a disposition close{trailer}"}
+
+    def reset_llm_review_vote(self, change_id: str, revision: str) -> int:
+        self.resets.append((change_id, revision, 0))
+        return 200
+
+    def has_llm_review_vote(self, change_id: str, revision: str = "current") -> bool:
+        return False
 
     def post_comment(self, change_id: str, revision: str, message: str) -> int:
         self.comments.append((change_id, revision, message))
@@ -165,14 +173,17 @@ def test_an_attested_bugfix_size_block_is_ACCEPTED(tmp_path, accepted_attestatio
     assert result.get("_rebar_force") is True
 
 
-def test_the_accept_path_writes_no_vote(tmp_path, accepted_attestation):
-    """The module's no-`labels` invariant must survive the new arm."""
+def test_the_accept_path_only_resets_to_fixed_neutral_then_posts_reply(
+    tmp_path, accepted_attestation
+):
+    """Attestation eligibility permits only the fixed neutral reset, never a verdict."""
     cfg = _cfg(tmp_path)
     gerrit = RetriggerGerrit([_finding_message()])
 
     result = _run(_comment_event(), cfg, gerrit)
 
     assert result is not None
+    assert gerrit.resets == [("rebar~main~Iabc", "rev2", 0)]
     assert gerrit.comments, "acceptance must still reply to the contributor"
     assert "accepted" in gerrit.comments[-1][2]
     assert "REAL FINDING" not in gerrit.comments[-1][2]

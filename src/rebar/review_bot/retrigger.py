@@ -17,13 +17,21 @@ SECURITY MODEL (must hold — tested, not just implemented):
   coverage-gap sub-reason, a retries-exhausted escalation, a PASS, a vote-less change,
   even an unparseable tag — is eligible, because a re-review is always safe: it can only
   produce a fresh fail-closed verdict, never mint an unearned PASS.
-* Nothing in this path writes a vote. Replies go through
-  :meth:`GerritClient.post_comment`, whose request body has NO ``labels`` key at all.
+* Only AFTER eligibility succeeds may this path call the distinct privileged reset
+  primitive. Its label value is fixed at exactly neutral ``LLM-Review: 0``; contributor
+  text cannot choose a value, mint a PASS, or create a findings-BLOCK. The reset is then
+  verified with the all-accounts vote reader before acceptance.
+* Affirmative/refusal replies still go through :meth:`GerritClient.post_comment`, whose
+  request body has NO ``labels`` key at all. Ineligible, malformed, and failed-eligibility
+  requests perform no label write.
 * The bot's own comments never trigger (loop guard), so the reply cannot re-trigger.
 
-On acceptance the 0347 retry budget is re-armed (``reset_attempts`` — the row DELETE)
-before the forced re-review is enqueued, so a change that already exhausted its automatic
-retries gets a fresh bounded budget once the human says the underlying failure is fixed.
+On acceptance the exact revision's vote is reset and verified first, then the bot
+best-effort re-arms the 0347 retry budget (``reset_attempts`` — the row DELETE) before
+the forced re-review is enqueued. A local budget-reset failure is logged but cannot
+reject a request after its authoritative Gerrit marker already exists. The reset's
+Gerrit event is the durable recovery marker if the process-local queue is lost before
+the worker consumes it.
 """
 
 from __future__ import annotations
@@ -252,6 +260,23 @@ _ACCEPTED_MESSAGE = (
 )
 
 
+def _durable_reset_failure(
+    gerrit: GerritClient, change_id: str, revision: str
+) -> tuple[str, str] | None:
+    """Reset to neutral and verify all accounts; return refusal reason/detail on failure."""
+    try:
+        gerrit.reset_llm_review_vote(change_id, revision)
+    except GerritError as exc:
+        return "vote-reset-error", str(exc)
+    try:
+        has_vote = gerrit.has_llm_review_vote(change_id, revision)
+    except GerritError as exc:
+        return "vote-verification-error", str(exc)
+    if has_vote:
+        return "nonzero-vote", "a nonzero LLM-Review vote remains after reset"
+    return None
+
+
 def handle_comment_added(
     event: dict,
     *,
@@ -264,8 +289,9 @@ def handle_comment_added(
 
     Order of checks (each earlier check sees strictly less attacker-controlled input):
     loop guard (bot's own comments) → token word-match → project guard → eligibility
-    from the bot's own durable vote-message tag. Replies are best-effort — a failed
-    reply must not lose the accepted re-review or crash the worker."""
+    from the bot's own durable vote-message tag → fixed-neutral reset → all-accounts
+    verification → local budget reset. Replies are best-effort — a failed reply must
+    not lose the accepted re-review or crash the worker."""
     if not isinstance(event, dict):
         return None
     cfg = config or ReceiverConfig.from_env()
@@ -289,7 +315,18 @@ def handle_comment_added(
 
     # Re-anchor on the CURRENT revision (the comment may sit on an older patchset view;
     # the /rerun path re-anchors identically via the same helper).
-    fresh = gc.get_change_event(str(change_key))
+    try:
+        fresh = gc.get_change_event(str(change_key))
+    except GerritError as exc:
+        _emit(
+            logging.WARNING,
+            "RETRIGGER_REFUSED",
+            change_id=str(change_key),
+            reason="eligibility-read-error",
+            error=str(exc),
+            requested_by=author,
+        )
+        return None
     if fresh is None:
         _emit(
             logging.WARNING,
@@ -304,7 +341,19 @@ def handle_comment_added(
     revision = str(fresh["patchSet"]["revision"])
     patchset_number = fresh["patchSet"].get("number")
 
-    state = latest_bot_tag_state(gc, change_id, patchset_number)
+    try:
+        state = latest_bot_tag_state(gc, change_id, patchset_number)
+    except GerritError as exc:
+        _emit(
+            logging.WARNING,
+            "RETRIGGER_REFUSED",
+            change_id=change_id,
+            revision_id=revision,
+            reason="eligibility-read-error",
+            error=str(exc),
+            requested_by=author,
+        )
+        return None
     if state == "finding":
         # ONE exception to the findings-block refusal (ticket 6a81): a block that is ONLY the
         # bugfix-size-attestation criterion, whose remedy is a ticket action rather than a code
@@ -338,12 +387,35 @@ def handle_comment_added(
             requested_by=author,
         )
 
-    # Eligible: re-arm the 0347 automatic-retry budget, then hand back a forced event.
+    # Eligible: create and verify the durable Gerrit marker before touching local state.
+    reset_failure = _durable_reset_failure(gc, change_id, revision)
+    if reset_failure is not None:
+        reason, error = reset_failure
+        _emit(
+            logging.WARNING,
+            "RETRIGGER_REFUSED",
+            change_id=change_id,
+            revision_id=revision,
+            reason=reason,
+            error=error,
+            requested_by=author,
+        )
+        return None
+
+    # Durable neutral state is proven: best-effort re-arm the 0347 automatic-retry
+    # budget, then hand back a forced live event for the fast path.
     store = dedup or DedupStore(cfg.dedup_db_path)
     try:
         store.reset_attempts(change_id, revision)
-    except Exception:
-        logger.exception("retrigger: reset_attempts failed for %s (continuing)", change_id)
+    except Exception as exc:  # noqa: BLE001 — durable Gerrit marker already established
+        _emit(
+            logging.WARNING,
+            "RETRIGGER_ATTEMPT_RESET_ERROR",
+            change_id=change_id,
+            revision_id=revision,
+            error=str(exc),
+            requested_by=author,
+        )
 
     fresh["_rebar_force"] = True
     _emit(

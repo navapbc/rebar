@@ -92,14 +92,17 @@ from the requesting comment:
   The bot replies explaining this and emits `RETRIGGER_REFUSED`.
 * **Accepted** — everything else: every `coverage-gap (…)` sub-reason (including the
   terminal `merge-review` and an exhausted-budget escalation), a PASS, and a vote-less
-  revision. The bot re-arms the automatic retry budget, queues a forced fresh review
-  through the same fail-closed pipeline, replies "queued", and emits
-  `RETRIGGER_ACCEPTED`.
+  revision. After eligibility succeeds, the bot resets its exact-revision vote to neutral
+  `0`, verifies that no account retains a nonzero vote, best-effort re-arms the automatic
+  retry budget, queues a forced fresh review through the same fail-closed pipeline, replies
+  "queued", and emits `RETRIGGER_ACCEPTED`. The neutral Gerrit event is durable: if the
+  process loses its queue, reconciliation still discovers and completes the owed review.
 
-The trigger can only ever request a **fresh fail-closed review** — it never writes a
-vote itself and can flip a PASS to a BLOCK but never mint an unearned PASS. The
-operator `/rerun` endpoint keeps its unrestricted semantics (it may force even a
-finding re-review) and also re-arms the retry budget.
+The trigger can only ever request a **fresh fail-closed review**. Contributor text cannot
+choose a label value or mint a PASS/BLOCK; the only pre-review write is the privileged,
+fixed neutral `0` after eligibility succeeds. The operator `/rerun` endpoint keeps its
+unrestricted semantics (it may force even a finding re-review) and uses the same durable
+reset-before-acknowledgement protocol.
 
 > **Drift-guard.** If you see an `LLM-Review` tag that is **not** listed above, treat
 > it as coverage-gap-class (an infra veto, not a code finding) and ping the

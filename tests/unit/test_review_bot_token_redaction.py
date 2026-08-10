@@ -118,9 +118,24 @@ def test_rerun_authenticates_via_header_and_token_never_logged(monkeypatch, capl
 
     monkeypatch.setattr(gerrit_client.GerritClient, "get_change_event", fake_get_change_event)
     monkeypatch.setattr(
-        "rebar.review_bot.dedup.DedupStore.reset_attempts",
-        lambda self, *a, **k: None,
+        gerrit_client.GerritClient,
+        "reset_llm_review_vote",
+        lambda self, change_id, revision: 200,
     )
+    monkeypatch.setattr(
+        gerrit_client.GerritClient,
+        "has_llm_review_vote",
+        lambda self, change_id, revision: False,
+    )
+
+    class NoopStore:
+        def __init__(self, _path):
+            pass
+
+        def reset_attempts(self, *args):
+            pass
+
+    monkeypatch.setattr("rebar.review_bot.dedup.DedupStore", NoopStore)
 
     with caplog.at_level(logging.DEBUG):
         resp = client.post(

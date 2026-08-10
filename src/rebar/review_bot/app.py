@@ -316,10 +316,12 @@ async def rerun(request: Request) -> JSONResponse:
     header (preferred — keeps it out of the access log) or the legacy ``?token=`` query param.
     Body/query supplies
     ``change`` (a Gerrit change id/number). The receiver looks up the change's CURRENT
-    revision, enqueues it with the force marker, and ACKs 202; the worker re-reviews it
-    bypassing the dedup + existing-vote short-circuits — so a stuck fail-closed ``-1``
-    (e.g. from a transient LLM outage) is re-reviewed without amending. Still fail-closed:
-    a rerun can only request a FRESH review, never force a PASS.
+    revision, resets exactly that revision's ``LLM-Review`` vote to neutral, verifies
+    that no account retains a nonzero vote, then best-effort re-arms the attempt budget
+    and enqueues it with the force marker. The neutral Gerrit write is the durable
+    review-owed marker: its patchset-bearing event lets reconciliation recover after
+    process loss. Still fail-closed: a rerun can only request a FRESH review, never force
+    a PASS.
     """
     cfg: ReceiverConfig = request.app.state.config
     token = _request_token(request)
@@ -338,8 +340,9 @@ async def rerun(request: Request) -> JSONResponse:
     # Look up the change's current revision (off the event loop) to shape an event.
     from rebar.review_bot.gerrit_client import GerritClient, GerritError
 
+    gc = GerritClient(cfg)
     try:
-        event = await asyncio.to_thread(GerritClient(cfg).get_change_event, str(change))
+        event = await asyncio.to_thread(gc.get_change_event, str(change))
     except GerritError as exc:
         # Log the Gerrit error detail server-side; keep it OUT of the client
         # response body (py/stack-trace-exposure) — a generic status is enough.
@@ -348,20 +351,58 @@ async def rerun(request: Request) -> JSONResponse:
     if event is None:
         return JSONResponse(status_code=404, content={"status": "change not found"})
 
-    # Re-arm the 0347 automatic-retry budget (harmonized with the contributor
-    # `recheck-review` path): a force re-review on a stale exhausted budget would
-    # otherwise immediately re-escalate. Best-effort — a reset failure must not
-    # block the operator's rerun.
+    change_id = str(event["change"]["id"])
+    revision = str(event["patchSet"]["revision"])
+
+    # Establish the durable marker before changing any local state or acknowledging.
+    # The reset primitive fixes the only permissible value at neutral 0; this follow-up
+    # all-accounts read fails closed if an admin/concurrent nonzero vote survives.
+    try:
+        await asyncio.to_thread(gc.reset_llm_review_vote, change_id, revision)
+    except GerritError as exc:
+        logger.warning(
+            "review-bot rerun: vote reset failed change=%s revision=%s: %s",
+            change_id,
+            revision,
+            exc,
+        )
+        return JSONResponse(status_code=502, content={"status": "vote reset failed"})
+
+    try:
+        has_vote = await asyncio.to_thread(gc.has_llm_review_vote, change_id, revision)
+    except GerritError as exc:
+        logger.warning(
+            "review-bot rerun: vote verification failed change=%s revision=%s: %s",
+            change_id,
+            revision,
+            exc,
+        )
+        return JSONResponse(status_code=502, content={"status": "vote verification failed"})
+    if has_vote:
+        logger.warning(
+            "review-bot rerun: vote reset refused change=%s revision=%s: nonzero vote remains",
+            change_id,
+            revision,
+        )
+        return JSONResponse(status_code=409, content={"status": "nonzero vote remains"})
+
+    # Best-effort re-arm only after durable neutral state is proven. A local failure
+    # cannot undo or reject the authoritative Gerrit marker already created above.
     try:
         from rebar.review_bot.dedup import DedupStore
 
         await asyncio.to_thread(
             DedupStore(cfg.dedup_db_path).reset_attempts,
-            str(event["change"]["id"]),
-            str(event["patchSet"]["revision"]),
+            change_id,
+            revision,
         )
-    except Exception:  # noqa: BLE001 — best-effort budget re-arm
-        logger.warning("review-bot rerun: attempts-budget reset failed (continuing)")
+    except Exception as exc:  # noqa: BLE001 — durable Gerrit marker already established
+        logger.warning(
+            "review-bot rerun: attempts reset failed change=%s revision=%s: %s",
+            change_id,
+            revision,
+            exc,
+        )
 
     event["_rebar_force"] = True
     queue: asyncio.Queue | None = getattr(request.app.state, "queue", None)
