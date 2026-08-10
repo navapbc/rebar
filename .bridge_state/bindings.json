@@ -130433,6 +130433,20 @@
       "state": "confirmed",
       "updated_at": "2026-08-04T14:11:55Z"
     },
+    "jira-reb-2711": {
+      "baseline": {
+        "assignee": null,
+        "description": "",
+        "priority": "Medium",
+        "status": "IDEA",
+        "summary": "Navigate large volume of rivers"
+      },
+      "created_at": "2026-08-10T05:07:09Z",
+      "jira_key": "REB-2711",
+      "peer_parent": "",
+      "state": "confirmed",
+      "updated_at": "2026-08-10T05:07:09Z"
+    },
     "jira-reb-529": {
       "baseline": {
         "assignee": null,
@@ -132089,6 +132103,7 @@
     "REB-2709": "ed5c-42fc-bb7f-4cf4",
     "REB-271": "ab74-b205-72af-4ce1",
     "REB-2710": "2fa6-e3cb-a11f-4e3d",
+    "REB-2711": "jira-reb-2711",
     "REB-272": "acc1-1c4d-5ac4-44e0",
     "REB-273": "acdd-a711-64e7-47fe",
     "REB-274": "add5-54b2-bff4-42cd",
