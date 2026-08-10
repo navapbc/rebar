@@ -8,6 +8,8 @@ Runs five checks over the tracker:
   4. SNAPSHOT ``source_event_uuids`` consistency (4a still-on-disk, 4b orphans)
   4.5 Tracker-vs-origin status: PUSH_PENDING (local ahead; informational) or
       DIVERGED (no shared history / cannot fast-forward; a real integrity issue)
+  4.6 Configured-vs-mounted ``tracker.branch`` mismatch (informational)
+  4.7 FOREIGN_STORE_PATH: source paths polluting the tracker (bug 2fa6)
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the
@@ -50,9 +52,13 @@ from rebar._commands.fsck_repair import (
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store import compat
-from rebar._store.gitutil import _reclaim_if_stale_index_lock, run_git
+from rebar._store.gitutil import (
+    _reclaim_if_stale_index_lock,
+    path_is_foreign_to_branch,
+    run_git,
+)
 from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
-from rebar.reducer._cache import is_active_event
+from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
 # Watchdog on fsck's read-only local git calls (bug 9305): NOT a latency budget — these
 # are sub-second rev-parse/log/symbolic-ref reads, so 120s only distinguishes a wedged
@@ -206,16 +212,10 @@ def _scan(
     # (bug 01e8). _store/sync.py already refuses to absorb such a store and logs a
     # best-effort warning; fsck must surface it as a COUNTED issue so the operator
     # sees it from the dedicated health check.
-    pp, pp_is_issue = _tracker_sync_status(tracker)
-    if pp:
-        lines.append(pp)
-        if pp_is_issue:
-            issue_count += 1
-
-    # ── Check 4.6: configured-vs-mounted branch mismatch (informational) ──────
-    bm = _branch_mismatch(tracker, repo_root)
-    if bm:
-        lines.append(bm)
+    # ── Checks 4.5–4.7 (tracker-level, not per-ticket) ───────────────────────
+    tracker_lines, tracker_issues = _tracker_health(tracker, repo_root)
+    lines.extend(tracker_lines)
+    issue_count += tracker_issues
 
     # ── Check 5: forward-compat — event types newer than this binary (P2.3) ───
     # Informational WARN (no issue_count, like push-pending): an unknown event_type is
@@ -366,6 +366,89 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
         f"WARN: configured tracker.branch '{configured}' does not match the mounted "
         f"branch '{mounted}' — the store was initialized on '{mounted}' and is NOT "
         "auto-migrated. Revert the config, or re-init on the new branch."
+    )
+
+
+def _tracker_health(tracker: str, repo_root=None) -> tuple[list[str], int]:
+    """The three TRACKER-level checks (4.5–4.7), as ``(lines, issue_count)``.
+
+    Grouped out of ``_scan`` because they share a shape the per-ticket checks do not:
+    each inspects the tracker as a whole, each yields at most one line, and each decides
+    for itself whether that line is a counted integrity issue or informational. Keeping
+    them inline grew ``_scan`` — already the largest branch cluster in this module — for
+    every check added.
+
+    * 4.5 tracker-vs-origin: PUSH_PENDING informational, DIVERGED a counted issue;
+    * 4.6 configured-vs-mounted ``tracker.branch``: informational;
+    * 4.7 source paths polluting the store (bug 2fa6): a counted issue, because
+      ``origin/tickets`` holds no source tree, so any such path means something wrote to
+      the store outside the event-append path.
+    """
+    lines: list[str] = []
+    issues = 0
+    sync_line, sync_is_issue = _tracker_sync_status(tracker)
+    for line, is_issue in (
+        (sync_line, sync_is_issue),
+        (_branch_mismatch(tracker, repo_root), False),
+        (_foreign_store_paths(tracker), True),
+    ):
+        if not line:
+            continue
+        lines.append(line)
+        issues += int(is_issue)
+    return lines, issues
+
+
+def _foreign_store_paths(tracker: str) -> str | None:
+    """Report top-level tracker entries that cannot be ticket data (bug 2fa6).
+
+    ``origin/tickets`` legitimately holds NOTHING but ticket directories and the store's
+    own dotfiles, so a ``src/``, ``tests/`` or ``.rebar/…`` path in the tracker is
+    pollution — the signature of raw git run in the store, or of a foreign ``git stash``
+    applied there. The push recovery now HEALS such a path when it strands the index; this
+    check exists so the condition is also REPORTED, because silent healing would hide the
+    fact that something is writing source files into the store.
+
+    Classification is deliberately structural rather than a filename denylist, and it uses
+    the same "is this a ticket?" test as the rest of fsck: a top-level entry is ticket data
+    if it is a directory holding at least one event file. Matching on the ticket-id SHAPE
+    instead would be wrong — ticket directories are not required to be id-shaped, and doing
+    so reports healthy stores as polluted. Store artifacts (``.git``, ``.bridge_state``,
+    ``.env-id``, ``.opcert-key``…) all begin with a dot and are skipped. Entries the branch
+    actually TRACKS are called out separately: those were committed into the tickets branch
+    and will propagate on the next push, which is strictly worse than a working-tree stray."""
+
+    def _holds_events(path: str) -> bool:
+        try:
+            return any(
+                n.endswith(".json") or n.endswith(RETIRED_SUFFIX)
+                for n in os.listdir(path)
+                if not n.startswith(".")
+            )
+        except OSError:
+            return False
+
+    try:
+        entries = sorted(os.listdir(tracker))
+    except OSError:
+        return None
+    strays = [
+        n for n in entries if not n.startswith(".") and not _holds_events(os.path.join(tracker, n))
+    ]
+    if not strays:
+        return None
+    committed = [n for n in strays if not path_is_foreign_to_branch(tracker, n)]
+    shown = ", ".join(strays[:10]) + (" …" if len(strays) > 10 else "")
+    detail = (
+        f" {len(committed)} of them are COMMITTED to the tickets branch "
+        f"({', '.join(committed[:10])}) and will propagate on the next push."
+        if committed
+        else " None are committed — they are working-tree strays."
+    )
+    return (
+        f"FOREIGN_STORE_PATH: the tickets tracker holds {len(strays)} top-level "
+        f"path(s) that are not ticket data: {shown}.{detail} The store must be mutated "
+        "through rebar, never by raw git or a stash applied in the tracker worktree."
     )
 
 
