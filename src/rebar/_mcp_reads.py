@@ -30,6 +30,7 @@ from rebar._mcp_models import (
     GateResultOut,
     GroundingInfoOut,
     NextBatchOut,
+    SearchResultOut,
     TicketStateOut,
     ValidateReportOut,
     VerifyCommandItemOut,
@@ -268,8 +269,8 @@ def register_read_tools(mcp, ctx) -> None:
         has_tag: str | None = None,
         include_archived: bool = False,
         sort: str | None = None,
-    ) -> list[TicketStateOut]:
-        """Full-text search over titles/descriptions/comments/tags (replay-derived).
+    ) -> list[SearchResultOut]:
+        """Search titles/descriptions/comments/tags with bounded discovery results.
 
         ``query`` accepts field predicates — ``status:``/``type:``/``priority:``/
         ``assignee:``/``tag:``/``parent:`` (comma = OR within a field; ``priority``
@@ -278,7 +279,7 @@ def register_read_tools(mcp, ctx) -> None:
         orders by ``priority|created|updated|id|status`` (``-`` prefix = descending;
         unset values last)."""
         return [
-            TicketStateOut.model_validate(t)
+            SearchResultOut.model_validate(t)
             for t in rebar.search(
                 query,
                 status=status,

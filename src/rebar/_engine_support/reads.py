@@ -49,6 +49,7 @@ from rebar.reducer import (
     search_states,
 )
 from rebar.reducer._present import public_state
+from rebar.reducer.search import project_search_result
 
 # ───────────────────────────── result sorting (P1.1) ─────────────────────────
 # Caller-facing sort key -> reduced/public-state field. Default (no --sort) keeps
@@ -496,6 +497,7 @@ def search_state(
     has_tag: str | None = None,
     include_archived: bool = False,
     sort: str = "",
+    full: bool = False,
 ) -> list[dict]:
     states = reduce_all_tickets(
         tracker, exclude_archived=not include_archived, exclude_deleted=True
@@ -521,7 +523,10 @@ def search_state(
         has_tag=has_tag,
         parent_resolver=lambda v: resolve_ticket_id(v, tracker) or v,
     )
-    return sort_states([public_state(t) for t in results], sort)
+    public_results = sort_states([public_state(t) for t in results], sort)
+    if full:
+        return public_results
+    return [project_search_result(t, query) for t in public_results]
 
 
 def recent_session_logs_state(tracker: str, *, limit: int = 5) -> list[dict]:

@@ -64,6 +64,8 @@ __all__ = [
     "PLAN_REVIEW_VERDICT",
     "REVIEW_RESULT",
     "SCRATCH_ENVELOPE",
+    "SEARCH_RESULT",
+    "SEARCH_RESULT_LLM",
     "SIGN_RESULT",
     "SUMMARY",
     "TICKET_DIGEST",
@@ -88,6 +90,8 @@ __all__ = [
 COMMON = "common"
 TICKET_STATE = "ticket_state"
 TICKET_STATE_LLM = "ticket_state_llm"
+SEARCH_RESULT = "search_result"
+SEARCH_RESULT_LLM = "search_result_llm"
 DEPS_GRAPH = "deps_graph"
 NEXT_BATCH = "next_batch"
 LIST_DESCENDANTS = "list_descendants"
@@ -293,13 +297,14 @@ CONTRACT_SCHEMAS: frozenset[str] = frozenset(
 OUTPUT_SCHEMAS: dict[str, str] = {
     "show": TICKET_STATE,
     "list": TICKET_STATE,
-    "search": TICKET_STATE,
+    "search": SEARCH_RESULT,
     "ready": TICKET_STATE,
     "session_logs": TICKET_STATE,
     "show.llm": TICKET_STATE_LLM,
     "list.llm": TICKET_STATE_LLM,
     "ready.llm": TICKET_STATE_LLM,
     "session_logs.llm": TICKET_STATE_LLM,
+    "search.llm": SEARCH_RESULT_LLM,
     "deps": DEPS_GRAPH,
     "next_batch": NEXT_BATCH,
     "list_descendants": LIST_DESCENDANTS,

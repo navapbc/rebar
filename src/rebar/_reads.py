@@ -162,6 +162,7 @@ def search(
     has_tag: str | None = None,
     include_archived: bool = False,
     sort: str | None = None,
+    full: bool = False,
     repo_root=None,
 ) -> list:
     tracker = _tracker(repo_root)
@@ -174,6 +175,7 @@ def search(
         has_tag=has_tag,
         include_archived=include_archived,
         sort=sort or "",
+        full=full,
     )
 
 

@@ -28,6 +28,7 @@ from rebar._engine_support.reads import (
 )
 from rebar._engine_support.ticket_query import TicketQuery
 from rebar.reducer.llm_format import to_llm
+from rebar.reducer.search import search_result_to_llm
 
 
 def _reject_unknown_option(arg: str, usage: str) -> int:
@@ -190,9 +191,8 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
         else:
             # Cross-ticket overlap (epic only-crave-art): render the digest freshness flag in
             # the human `show` output ONLY. The flag is added to the dict THIS arm prints — it
-            # never enters the library `show_ticket`/`list`/`search` returns (which share one
-            # shape, test_show_list_search_share_one_shape) nor the `--output llm` arm. Lazy
-            # import + fail-safe so `rebar show` never breaks on it.
+            # never enters library read results nor the `--output llm` arm. Lazy import +
+            # fail-safe so `rebar show` never breaks on it.
             out = dict(state)
             try:
                 from rebar.llm.overlap import digest_sidecar
@@ -245,7 +245,7 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
         "with_children_count": False,
         "sort": "",
         # Lean by default: drop the bulky description/comments bodies. `--full`
-        # opts back into the full ticket shape (matching show/search).
+        # opts back into the full ticket shape (matching show and search --full).
         "include_body": False,
     }
     rest = _coalesce_value_opts(rest, _LIST_VALUE_OPTS)
@@ -469,10 +469,31 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
     return 0
 
 
+def _print_search_results(results: list[dict], fmt: str) -> None:
+    if fmt == "llm":
+        for result in results:
+            print(
+                json.dumps(search_result_to_llm(result), ensure_ascii=False, separators=(",", ":"))
+            )
+        return
+    print(json.dumps(results, ensure_ascii=False))
+
+
 def _cmd_search(argv: list[str], tracker: str) -> int:
+    usage = (
+        "Usage: ticket search <query> [--output json|llm] [--full] "
+        "[--status=S] [--type=T] [--has-tag=TAG] [--include-archived] "
+        "[--sort=<priority|created|updated|id|status>]"
+    )
+    try:
+        fmt, argv = parse_output(argv, "reader")
+    except OutputFormatError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
     query = None
     status = ticket_type = has_tag = None
     include_archived = False
+    full = False
     sort = ""
     argv = _coalesce_value_opts(argv, _SEARCH_VALUE_OPTS)
     for arg in argv:
@@ -486,21 +507,20 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
             sort = arg[len("--sort=") :]
         elif arg == "--include-archived":
             include_archived = True
+        elif arg == "--full":
+            full = True
         elif arg.startswith("-"):
-            return _reject_unknown_option(
-                arg,
-                "Usage: ticket search <query> [--status=S] [--type=T] "
-                "[--has-tag=TAG] [--include-archived] "
-                "[--sort=<priority|created|updated|id|status>]",
-            )
+            return _reject_unknown_option(arg, usage)
         elif query is None:
             query = arg
     if query is None:
         print(
-            "Usage: ticket search <query> [--status=S] [--type=T] [--has-tag=TAG] "
-            "[--sort=<priority|created|updated|id|status>]",
+            usage,
             file=sys.stderr,
         )
+        return 2
+    if full and fmt == "llm":
+        print("Error: --full is incompatible with --output llm", file=sys.stderr)
         return 2
     if not sort_key_valid(sort):
         print(
@@ -517,8 +537,9 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
         has_tag=has_tag,
         include_archived=include_archived,
         sort=sort,
+        full=full,
     )
-    print(json.dumps(results, ensure_ascii=False))
+    _print_search_results(results, fmt)
     return 0
 
 

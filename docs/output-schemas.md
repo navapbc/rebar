@@ -13,7 +13,7 @@ selector. The legacy `--json` and `--format=*` flags were removed (pre-1.0).
 |--------|---------------------------------------------------------------------------|
 | `text` | human/default rendering (id-list for `ready`, human report for the rest)  |
 | `json` | the structured machine shape (documented by a schema below)               |
-| `llm`  | token-minified short-key NDJSON (`show`/`list`/`ready` only)              |
+| `llm`  | token-minified short-key NDJSON (`show`/`list`/`ready`/`search`)          |
 
 Accepted spellings: `-o json`, `--output json`, `--output=json`. Per-command the
 allowed set differs (a *profile*): `show`/`list`/`search`/`session-logs` default
@@ -34,8 +34,11 @@ Structured via `--output json`:
 
 | command(s)                       | schema                    |
 |----------------------------------|---------------------------|
-| `show` / `list` / `search` / `ready` / `session-logs` | `ticket_state` |
+| `show` / `list` / `ready` / `session-logs` | `ticket_state` |
+| `search` (default JSON; CLI/library/MCP) | `search_result` |
+| `search --full`                  | `ticket_state`              |
 | `show`/`list`/`ready`/`session-logs` `--output llm` | `ticket_state_llm` |
+| `search --output llm`            | `search_result_llm`         |
 | `deps`                           | `deps_graph`              |
 | `next-batch`                     | `next_batch`              |
 | `list-descendants`               | `list_descendants`        |
@@ -73,7 +76,7 @@ The `rebar bridge fsck` result is a strict three-field object:
 
 ### `creation_channel` in `ticket_state`
 
-`show` / `list` / `search` / `ready` carry an optional **`creation_channel`** field on
+`show` / `list` / `ready` carry an optional **`creation_channel`** field on
 every ticket (epic jira-reb-977, story 6fe2): the public interface that produced the
 ticket's genesis `CREATE`, from a closed six-value enum
 (`common.schema.json#/$defs/creation_channel`):
@@ -110,7 +113,7 @@ only imported ones. The generated `rebar.types` names it
 
 **Same value regardless of how state was compiled.** These two fields are produced
 identically by full-log replay, **SNAPSHOT-only replay**, and a **snapshot rebuild**, so
-`show` / `list` / `search` / `export` report the same `creation_channel` /
+`show` / `list` / `export` report the same `creation_channel` /
 `creation_channel_inferred` no matter whether a ticket has been compacted (story 568c). A
 post-feature `SNAPSHOT` restores the recorded value verbatim from its `compiled_state`; a
 pre-feature `SNAPSHOT` (compacted before the field existed) re-infers it at restore time from
