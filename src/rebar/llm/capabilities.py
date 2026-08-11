@@ -287,6 +287,15 @@ _REBAR_OVERRIDES: tuple[tuple[Any, dict[str, Any]], ...] = (
 _MODEL_ID_CAPABILITY_OVERRIDES: dict[str, Mapping[str, object]] = {
     # The DIRECT-ANTHROPIC forms. The table keys on the BARE id (`_model_id_of` strips the
     # provider prefix), so these cover both `anthropic:claude-opus-4-8` and the bare string.
+    # MEASURED on ticket 8fbd-e9d5-326e-40d8: direct `claude-sonnet-4-6` accepted native JSON
+    # schema output both without thinking and with a 1024-token thinking budget, returning a
+    # valid structured result and a thinking part. This exact-id row makes that measured arm
+    # symmetric with the separately measured Bedrock inference-profile row below; unmeasured
+    # direct Claude ids still inherit the conservative family default.
+    "claude-sonnet-4-6": {
+        "native_structured_output": True,
+        "native_output_with_thinking": True,
+    },
     # OBSERVED IN PRODUCTION on the code-review bot: pydantic-ai's Anthropic adapter emits
     # "Sampling parameters ['temperature'] are not supported by 'claude-opus-4-8'. These settings
     # will be ignored." on essentially EVERY call (models/anthropic.py:641, via

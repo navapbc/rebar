@@ -75,17 +75,6 @@ def _drop_prompted_directive(messages: list[tuple[str, str]]) -> tuple[list[tupl
     return out, False
 
 
-def _prompted_directive_schema(messages: list[tuple[str, str]]) -> dict | None:
-    """Parse the JSON schema out of a prompted arm's appended directive, or None if absent."""
-    for _role, content in messages:
-        marker = "\n\n" + _SCHEMA_DIRECTIVE_LEADIN + "\n"
-        idx = content.find(marker)
-        if idx != -1:
-            schema_line = content[idx + len(marker) :].split("\n", 1)[0]
-            return json.loads(schema_line)
-    return None
-
-
 def _bedrock_native_schema(payload: dict) -> dict | None:
     """Parse the out-of-band JSON schema a Bedrock native-output arm carries in `outputConfig`,
     or None if the request carries no native structured-output config."""
@@ -98,12 +87,21 @@ def _bedrock_native_schema(payload: dict) -> dict | None:
     return json.loads(schema) if isinstance(schema, str) else schema
 
 
+def _anthropic_native_schema(payload: dict) -> dict | None:
+    """Return the direct-Anthropic native JSON schema, or None when output is prompted."""
+    spec = (payload.get("output_config") or {}).get("format") or {}
+    if spec.get("type") != "json_schema":
+        return None
+    schema = spec.get("schema")
+    return json.loads(schema) if isinstance(schema, str) else schema
+
+
 # Presentation/strictness envelope keys that the native serializer normalizes but the prompted
-# directive (a raw `model_json_schema()`) leaves as-is: `title` (native strips), the root
-# `description` (native lifts it into `jsonSchema.description`), and `additionalProperties: False`
-# (native adds it). Stripping these compares the schemas' MEANING -- properties, `$defs`, `$ref`s,
-# `required`, types, `anyOf`, defaults -- so an omitted or corrupted native schema still fails.
-_SCHEMA_ENVELOPE_KEYS = frozenset({"title", "description", "additionalProperties"})
+# provider serializers leave differently: `title`, descriptions, defaults, and
+# `additionalProperties`. Rebar applies defaults during Pydantic validation, so stripping these
+# compares the schema's accepted shape -- properties, `$defs`, `$ref`s, `required`, types, and
+# `anyOf` -- while an omitted or corrupted field still fails.
+_SCHEMA_ENVELOPE_KEYS = frozenset({"title", "description", "default", "additionalProperties"})
 
 
 def _schema_shape(schema: object) -> object:
@@ -714,21 +712,8 @@ def test_the_outbound_payload_is_equivalent_across_providers(slot, monkeypatch) 
     v1_model, v2_model = pp.CLASS_SLOTS[slot]
     a, b = _compare(v1_model, v2_model, monkeypatch)
     assert a["system_text"] == b["system_text"] and a["system_text"]
-    if slot == "standard":
-        # 18ae: `us.anthropic.claude-sonnet-4-6` (v2, Bedrock) is measured-native, so it carries
-        # the schema out-of-band and appends NO schema_directive; its direct-Anthropic twin
-        # (v1) DELIBERATELY stays prompted (capabilities._REBAR_OVERRIDES) and appends it. That
-        # one id-scoped, measured difference is asserted in full by
-        # test_the_native_output_capability_difference_is_measured_and_id_scoped; strip it here
-        # so this test still proves EVERYTHING ELSE in the stream is identical.
-        a_msgs, a_dir = _drop_prompted_directive(a["messages"])
-        b_msgs, b_dir = _drop_prompted_directive(b["messages"])
-        assert (a_dir, b_dir) == (True, False)
-        assert a_msgs == b_msgs and a_msgs
-        skip = {"model_id", "messages"}
-    else:
-        assert a["messages"] == b["messages"] and a["messages"]
-        skip = {"model_id"}
+    assert a["messages"] == b["messages"] and a["messages"]
+    skip = {"model_id"}
     assert a["max_tokens"] == b["max_tokens"]
     assert a["temperature"] == b["temperature"]
     differing = [f for f in a if f not in skip and a[f] != b[f]]
@@ -769,19 +754,18 @@ def test_the_temperature_capability_difference_is_symmetric_and_explicit(monkeyp
     assert [f for f in o1 if f != "model_id" and o1[f] != o2[f]] == []
 
 
-def test_the_native_output_capability_difference_is_measured_and_id_scoped(monkeypatch) -> None:
-    """The SECOND capability difference that legitimately alters the payload, made explicit.
+def test_the_native_output_capability_is_measured_and_symmetric_for_sonnet(monkeypatch) -> None:
+    """Both measured Sonnet arms carry structured output natively.
 
     18ae enabled `native_structured_output` for `us.anthropic.claude-sonnet-4-6` (the Bedrock
     inference-profile id) in `capabilities._MODEL_ID_CAPABILITY_OVERRIDES`, from a MEASURED
     Converse PASS (E1). A native-output arm carries the JSON schema out-of-band (NativeOutput),
     so `structured.schema_directive` is NOT appended to the user turn; a prompted arm appends it.
 
-    Unlike the temperature withdrawal, this difference is asymmetric BY DESIGN, and legitimately
-    so: only the exact Bedrock id is MEASURED-native, and its direct-Anthropic twin
-    (`claude-sonnet-4-6`) DELIBERATELY stays PromptedOutput (`capabilities._REBAR_OVERRIDES`,
-    'Do not reintroduce it'). Opus (frontier) was enabled on NEITHER arm, so it stays symmetric.
-    The divergence is confined to the appended directive -- strip it and the streams are equal."""
+    The direct-Anthropic twin has now also been live-measured with native structured output both
+    with and without thinking. Its exact-id capability row must therefore override the same
+    conservative Claude-family default as the Bedrock row. Opus remains prompted on both arms.
+    """
     sonnet_v1, sonnet_v2 = pp.CLASS_SLOTS["standard"]
     opus_v1, opus_v2 = pp.CLASS_SLOTS["frontier"]
     raw_s1 = _capture(sonnet_v1, monkeypatch)["payload"]
@@ -789,25 +773,20 @@ def test_the_native_output_capability_difference_is_measured_and_id_scoped(monke
     s1 = _normalize(raw_s1, provider="anthropic")
     s2 = _normalize(raw_s2, provider="bedrock")
     o1, o2 = _compare(opus_v1, opus_v2, monkeypatch)
-    s1_msgs, s1_dir = _drop_prompted_directive(s1["messages"])
-    s2_msgs, s2_dir = _drop_prompted_directive(s2["messages"])
+    _, s1_dir = _drop_prompted_directive(s1["messages"])
+    _, s2_dir = _drop_prompted_directive(s2["messages"])
     _, o1_dir = _drop_prompted_directive(o1["messages"])
     _, o2_dir = _drop_prompted_directive(o2["messages"])
-    # sonnet: direct-Anthropic prompted (directive present), Bedrock native (directive absent).
-    assert (s1_dir, s2_dir) == (True, False)
+    # sonnet: both measured arms carry the schema out-of-band, with no prompted directive.
+    assert (s1_dir, s2_dir) == (False, False)
     # opus: prompted on BOTH arms -- native was not enabled for it, so no asymmetry.
     assert (o1_dir, o2_dir) == (True, True)
-    # The divergence is confined to the directive: strip it and sonnet's streams are identical.
-    assert s1_msgs == s2_msgs and s1_msgs
-    # The Bedrock native arm did not merely DROP the schema: it carries it out-of-band in
-    # `outputConfig`, semantically EQUAL to the schema the direct-Anthropic arm states in prose.
-    # (Without this a native arm that omitted or corrupted its schema would slip through.)
-    directive_schema = _prompted_directive_schema(s1["messages"])
-    native_schema = _bedrock_native_schema(raw_s2)
-    assert directive_schema and native_schema
-    assert _schema_shape(native_schema) == _schema_shape(directive_schema)
-    # ...and the prompted arm carries NO out-of-band native config (it is PromptedOutput).
-    assert _bedrock_native_schema(raw_s1) is None
+    assert s1["messages"] == s2["messages"] and s1["messages"]
+    # Neither arm merely DROPPED the schema: both carry it out-of-band in their provider envelope.
+    direct_schema = _anthropic_native_schema(raw_s1)
+    bedrock_schema = _bedrock_native_schema(raw_s2)
+    assert direct_schema and bedrock_schema
+    assert _schema_shape(direct_schema) == _schema_shape(bedrock_schema)
 
 
 def test_the_enumerated_envelope_differences_are_the_only_ones_normalized() -> None:

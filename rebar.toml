@@ -182,26 +182,19 @@ enforce_since = "f9f38d0c6c4255ae3a6ecd7858fe98813c46ee4f"
 # `ANTHROPIC_API_KEY` is EXPECTED to be present and VALID. Recorded here explicitly so the scope
 # of that blanking is not re-litigated a third time.
 #
-# NO `fallback` CHAIN IS CONFIGURED BELOW YET, AND THAT IS DELIBERATE — two blockers, both
-# MEASURED on [rebar:2876-7958-8dee-4882], must clear first; see that ticket for the split.
-#  1. A chain makes the runner resolve capabilities as the CONSERVATIVE INTERSECTION across its
-#     candidates (`runner.py:441`, `_intersect_capabilities`). `us.anthropic.claude-sonnet-4-6`
-#     is MEASURED native-structured-output-capable ([rebar:18ae], a Converse PASS) while its
-#     direct-Anthropic twin `claude-sonnet-4-6` deliberately stays PromptedOutput
-#     (`capabilities._REBAR_OVERRIDES`, "Do not reintroduce it"). Adding the arm therefore moves
-#     EVERY standard-class call from NativeOutput to PromptedOutput project-wide — undoing a
-#     measured decision as a side effect. `tests/unit/test_provider_parity.py` catches it.
-#  2. The credential has to actually work. Enabling an arm whose key 401s buys no redundancy and
-#     converts a legible Bedrock error into a misleading auth error.
+# Direct Anthropic is the approved fallback for frontier and standard
+# ([rebar:esthetical-earthborn-vervet]); direct Sonnet native output is live-measured. Trivial has
+# no fallback until direct Haiku parity is measured. Mixed-provider chains disable prompt caching
+# because their provider-specific cache keys do not intersect.
 #
-# When those clear, note that `fallback` FIRES NARROWLY: `should_fall_back` moves to the next
-# candidate only for the availability classes. A CREDENTIAL failure (`CHANGE_SETTINGS`)
+# `fallback` FIRES NARROWLY: `should_fall_back` moves to the next candidate only for the
+# availability classes. A CREDENTIAL failure (`CHANGE_SETTINGS`)
 # deliberately does NOT fail over — "a credential error must not be masked by shopping for a
 # provider whose key happens to work" — so a chain can never paper over absent AWS credentials.
 [llm]
 model = "bedrock:us.anthropic.claude-opus-4-8"
 
 [llm.model_classes]
-frontier = { model = "bedrock:us.anthropic.claude-opus-4-8" }
-standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
+frontier = { model = "bedrock:us.anthropic.claude-opus-4-8", fallback = [{ model = "anthropic:claude-opus-4-8" }] }
+standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6", fallback = [{ model = "anthropic:claude-sonnet-4-6" }] }
 trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }

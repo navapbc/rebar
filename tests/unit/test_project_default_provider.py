@@ -33,7 +33,13 @@ import pytest
 import tomllib
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.model_classes import CLASS_NAMES, load_class_slots, resolve_class
+from rebar.llm.model_classes import (
+    CLASS_NAMES,
+    load_class_slots,
+    parse_class_slots,
+    resolve_class,
+    resolve_fallback_chain,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -71,6 +77,17 @@ def _class_models(path: Path) -> dict[str, str]:
     """The `[llm.model_classes]` `model` value per class, as written in `path`."""
     table = tomllib.loads(path.read_text())["llm"]["model_classes"]
     return {cls: str(slot["model"]) for cls, slot in table.items()}
+
+
+def _resolved_chains(path: Path) -> dict[str, list[str]]:
+    """The ordered primary + fallback targets resolved from ``path``."""
+    table = tomllib.loads(path.read_text())
+    slots = load_class_slots(str(_REPO)) if path == _REBAR_TOML else None
+    if slots is None:
+        slots = parse_class_slots(table["llm"]["model_classes"])
+    return {
+        cls: [resolve_class(cls, slots), *resolve_fallback_chain(cls, slots)] for cls in CLASS_NAMES
+    }
 
 
 def test_clean_checkout_resolves_every_class_to_bedrock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -153,6 +170,40 @@ def test_project_default_ids_are_byte_equal_to_the_bedrock_overlay() -> None:
         f"rebar.toml's `[llm] model` is {project_scalar!r} but the overlay's is "
         f"{overlay_scalar!r}; the second resolution path must name the same frontier id."
     )
+
+
+def test_project_fallback_ids_are_pinned_to_the_anthropic_overlay() -> None:
+    """The enabled direct fallbacks use the exact corresponding matrix-overlay ids.
+
+    Frontier and standard are the measured fallback classes. Trivial deliberately remains a
+    single Bedrock arm until direct Haiku native-output parity is measured.
+    """
+    project_chains = _resolved_chains(_REBAR_TOML)
+    anthropic = _class_models(_ANTHROPIC_TOML)
+
+    configured = {cls: chain[1:] for cls, chain in project_chains.items() if len(chain) > 1}
+    assert set(configured) == {"frontier", "standard"}
+    assert configured == {
+        "frontier": [anthropic["frontier"]],
+        "standard": [anthropic["standard"]],
+    }
+
+
+def test_clean_checkout_resolves_the_approved_candidate_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bedrock remains primary, direct Anthropic is next, and trivial has no fallback."""
+    _clean_llm_env(monkeypatch)
+
+    project = _resolved_chains(_REBAR_TOML)
+    bedrock = _class_models(_BEDROCK_TOML)
+    anthropic = _class_models(_ANTHROPIC_TOML)
+
+    assert project == {
+        "frontier": [bedrock["frontier"], anthropic["frontier"]],
+        "standard": [bedrock["standard"], anthropic["standard"]],
+        "trivial": [bedrock["trivial"]],
+    }
 
 
 def test_documented_opt_out_returns_resolution_to_anthropic(
