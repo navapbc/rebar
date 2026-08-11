@@ -28,6 +28,8 @@ _WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 _EXPECTED_NAMES: dict[str, str] = {
     "gerrit-verify.yaml": "Gerrit Verified Gate",
     "jira-dc-epic-link-probe.yml": "Jira DC Epic-Link Clear Probe",
+    "_mutation.yml": "Mutation Testing (reusable)",
+    "mutation.yml": "Mutation Testing Sweep",
     "release.yml": "Release",
     "_optionality.yml": "Optional-Dependency Isolation (reusable)",
     "optionality.yml": "Optional-Dependency Isolation (mirror)",

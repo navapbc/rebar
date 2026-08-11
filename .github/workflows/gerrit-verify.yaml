@@ -130,6 +130,17 @@ jobs:
       gerrit-project: ${{ inputs.GERRIT_PROJECT }}
       gerrit-url: https://${{ vars.GERRIT_SERVER }}
 
+  mutation:
+    # Targeted mutation evidence is part of Verified. Waiting for the ticket check avoids
+    # spending the bounded runner on a patchset that cannot land.
+    name: mutation (changed behavioral shards on the patchset)
+    needs: [clear-vote, require-ticket]
+    uses: ./.github/workflows/_mutation.yml
+    with:
+      gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+      gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+      gerrit-url: https://${{ vars.GERRIT_SERVER }}
+
   optionality:
     # Run the clean-core-wheel + optional-extras (per-extra venvs + union) contract ON THE PATCHSET,
     # so a no-extras import leak or packaging regression BLOCKS Verified pre-merge (build-and-test
@@ -314,7 +325,7 @@ jobs:
     # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
     # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, build-and-test, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
+    needs: [clear-vote, require-ticket, build-and-test, mutation, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
