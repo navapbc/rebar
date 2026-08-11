@@ -854,6 +854,75 @@ def test_a3_repair_aborts_when_a_reconciler_pass_is_in_flight(two_clones):
     assert "SNAPSHOT_INCONSISTENT" not in _engine_run(repo_a, "fsck", check=False).stdout
 
 
+def test_a3_repair_replacement_cannot_clear_foreign_pause_and_blocks_sync(two_clones, monkeypatch):
+    """A repair owns the remote pause while mutating and cannot clear its replacement."""
+    from rebar._commands import fsck_repair
+
+    _remote, repo_a, repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    _craft_inconsistent_snapshot(tracker_a, seed)
+    advisory = _reconciler_advisory()
+    ref_lock = advisory._load_ref_lock()
+
+    def replace_during_mutation(*_args, **_kwargs):
+        observed = ref_lock.read_pause_with_oid(repo_a, remote="origin")
+        assert observed is not None
+        pause, owned_oid = observed
+        assert str(pause["reason"]).startswith("repair:fsck:")
+
+        blocked = _engine_run(repo_b, "reconcile", "--mode", "live", check=False)
+        assert blocked.returncode == 0
+        assert blocked.stdout == ""
+        assert blocked.stderr.startswith("BRIDGE_PAUSED: ")
+
+        assert ref_lock.release(repo_b, ref_lock.GATE_REF, oid=owned_oid, remote="origin")
+        ref_lock.set_pause(
+            repo_b,
+            reason="operator took over",
+            who="other@example.com",
+            paused_at="2026-08-09T19:00:00Z",
+            remote="origin",
+        )
+        return {}
+
+    monkeypatch.setattr(fsck_repair, "_repair_ticket", replace_during_mutation)
+
+    lines, unresolved = fsck_repair._repair_run(str(tracker_a), dry_run=False, repo_root=repo_a)
+
+    assert unresolved == -1, lines
+    remaining = ref_lock.read_pause(repo_a, remote="origin")
+    assert remaining is not None
+    assert remaining["reason"] == "operator took over"
+
+
+def test_a3_repair_bare_remote_pause_is_owned_during_mutation_and_cleared(two_clones, monkeypatch):
+    """The normal bare-remote path owns the canonical pause and clears it once."""
+    from rebar._commands import fsck_repair
+
+    _remote, repo_a, _repo_b, seed = two_clones
+    tracker_a = _tracker(repo_a)
+    _craft_inconsistent_snapshot(tracker_a, seed)
+    advisory = _reconciler_advisory()
+    ref_lock = advisory._load_ref_lock()
+    observed = False
+
+    def observe_during_mutation(*_args, **_kwargs):
+        nonlocal observed
+        pause = ref_lock.read_pause(repo_a, remote="origin")
+        assert pause is not None
+        assert str(pause["reason"]).startswith("repair:fsck:")
+        observed = True
+        return {}
+
+    monkeypatch.setattr(fsck_repair, "_repair_ticket", observe_during_mutation)
+
+    lines, unresolved = fsck_repair._repair_run(str(tracker_a), dry_run=False, repo_root=repo_a)
+
+    assert unresolved >= 0, lines
+    assert observed
+    assert ref_lock.read_pause(repo_a, remote="origin") is None
+
+
 def test_a3_marker_is_optimization_not_authority_crash_before_marker(two_clones):
     """A3 safety (34b1): the per-ticket ``a3-repaired`` marker is a LOCAL, uncommitted
     optimization — fsck itself is the authoritative resumability check. A crash AFTER the

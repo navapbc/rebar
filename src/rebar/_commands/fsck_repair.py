@@ -21,6 +21,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
 from rebar._store import compat, lock
 from rebar._store.gitutil import run_git
 from rebar.reducer import KNOWN_EVENT_TYPES
@@ -278,27 +279,10 @@ def _has_remote(tracker: str) -> bool:
     return bool(_git(tracker, "remote").stdout.strip())
 
 
-def _reconciler_pause(_repo_root=None) -> bool:
-    """Best-effort: disable the reconcile-bridge GHA schedule for the repair window (the
-    leased CAS ``refs/reconciler/lock`` expires, so it is not the pause mechanism). Returns
-    True iff we disabled it (→ re-enable in a failsafe); a missing/unauthenticated ``gh``
-    returns False (the batched, pre-tagged, committed design keeps a stray write recoverable)."""
-    cp = subprocess.run(
-        ["gh", "workflow", "disable", "reconcile-bridge.yml"], capture_output=True, text=True
-    )
-    return cp.returncode == 0
-
-
-def _reconciler_resume() -> None:
-    subprocess.run(
-        ["gh", "workflow", "enable", "reconcile-bridge.yml"], capture_output=True, text=True
-    )
-
-
 def _reconciler_in_flight(repo_root=None) -> bool:
     """Return True if a reconciler pass is (or may be) mid-flight — the in-flight guard the
-    destructive live repair runs AFTER disabling the schedule (which stops the NEXT pass, not
-    one already running). The pass holds the leased CAS ``refs/reconciler/lock``, so
+    destructive live repair runs AFTER acquiring its durable pause (which stops the NEXT pass,
+    not one already running). The pass holds the leased CAS ``refs/reconciler/lock``, so
     ``check_pass_lock`` is the probe. Fail-CLOSED: an unreadable lock (``ReconcileLockError``)
     or an un-importable advisory module reports in-flight=True so an indeterminate state aborts
     the repair rather than writing under a possibly-live reconciler; a never-reconciled repo
@@ -327,13 +311,15 @@ def _repair_run(
     limit: int | None = None,
     repo_root=None,
     only: str | None = None,
+    _pause_owned: bool = False,
 ) -> tuple[list[str], int]:
     """A3 remediation: drive the store to fsck-zero, safely and resumably.
 
     fsck itself is the authoritative resumability check (only tickets it still flags are
     repaired); a ``.git/a3-repaired/<id>`` marker is a local, never-committed optimization.
-    The live run pre-tags for rollback, pauses the reconciler, and commits+pushes each
-    batch — a push failure ABORTS and surfaces the error. Dry-run writes nothing.
+    The caller-owned durable pause covers the live run, which pre-tags for rollback and
+    commits+pushes each batch — a push failure ABORTS and surfaces the error. Dry-run
+    writes nothing.
     Returns (report_lines, unresolved_fault_count).
     """
     lines: list[str] = []
@@ -382,6 +368,20 @@ def _repair_run(
         )
         return lines, triage
 
+    if not _pause_owned:
+        try:
+            with owned_repair_pause("fsck", repo_root, in_flight_probe=_reconciler_in_flight):
+                return _repair_run(
+                    tracker,
+                    dry_run=False,
+                    limit=limit,
+                    repo_root=repo_root,
+                    only=only,
+                    _pause_owned=True,
+                )
+        except RepairPauseError as exc:
+            return [exc.legacy_report_line or exc.message], -1
+
     # ── LIVE run ──
     pre_oid = _git(tracker, "rev-parse", "HEAD").stdout.strip()
     _git(tracker, "tag", "-f", "pre-a3-remediation", pre_oid)
@@ -396,57 +396,41 @@ def _repair_run(
     except OSError:
         marker_dir = ""
 
-    paused = _reconciler_pause(repo_root)
-    lines.append(f"a3-remediation: reconciler {'paused' if paused else 'pause skipped'}")
+    lines.append("a3-remediation: reconciler paused")
     batch = 200
-    try:
-        # In-flight guard: disabling the schedule stops the NEXT pass, not one already
-        # running. Abort BEFORE any write if a pass holds refs/reconciler/lock (or its
-        # state is indeterminate) — the finally re-enables the schedule we just disabled.
-        if _reconciler_in_flight(repo_root):
-            lines.append(
-                "ABORT: a reconciler pass is in flight (refs/reconciler/lock held or "
-                "unreadable) — refusing to repair; retry once the pass completes"
-            )
-            return lines, -1
-        for i, (tid, _plan) in enumerate(flagged):
-            disp = _repair_ticket(
-                tracker,
-                tid,
-                os.path.join(tracker, tid),
-                dry_run=False,
-                repair_stale_channel=only == "stale-channel",
-                no_commit=True,
-            )
-            if disp.get("error"):
-                lines.append(f"SKIP {tid}: {disp['error']}")  # per-ticket failure: log + skip
-            elif marker_dir:
-                try:
-                    open(os.path.join(marker_dir, tid), "w").close()
-                except OSError:
-                    pass
-            if (i + 1) % batch == 0 or i == len(flagged) - 1:
-                add = _git(tracker, "add", "-A")
-                if add.returncode != 0:
-                    lines.append("ABORT: git add failed")
+    for i, (tid, _plan) in enumerate(flagged):
+        disp = _repair_ticket(
+            tracker,
+            tid,
+            os.path.join(tracker, tid),
+            dry_run=False,
+            repair_stale_channel=only == "stale-channel",
+            no_commit=True,
+        )
+        if disp.get("error"):
+            lines.append(f"SKIP {tid}: {disp['error']}")  # per-ticket failure: log + skip
+        elif marker_dir:
+            try:
+                open(os.path.join(marker_dir, tid), "w").close()
+            except OSError:
+                pass
+        if (i + 1) % batch == 0 or i == len(flagged) - 1:
+            add = _git(tracker, "add", "-A")
+            if add.returncode != 0:
+                lines.append("ABORT: git add failed")
+                return lines, -1
+            if _git(tracker, "diff", "--cached", "--quiet").returncode != 0:
+                n = i // batch + 1
+                commit = _git(tracker, "commit", "--no-verify", "-m", f"a3-remediation: batch {n}")
+                if commit.returncode != 0:
+                    lines.append("ABORT: commit failed while holding batch")
                     return lines, -1
-                if _git(tracker, "diff", "--cached", "--quiet").returncode != 0:
-                    n = i // batch + 1
-                    commit = _git(
-                        tracker, "commit", "--no-verify", "-m", f"a3-remediation: batch {n}"
-                    )
-                    if commit.returncode != 0:
-                        lines.append("ABORT: commit failed while holding batch")
+                if _has_remote(tracker):
+                    push = _git_push(tracker, "push", "origin", "HEAD:tickets")
+                    if push.returncode != 0:
+                        lines.append(f"ABORT: push failed for batch {n}: {push.stderr.strip()}")
                         return lines, -1
-                    if _has_remote(tracker):
-                        push = _git_push(tracker, "push", "origin", "HEAD:tickets")
-                        if push.returncode != 0:
-                            lines.append(f"ABORT: push failed for batch {n}: {push.stderr.strip()}")
-                            return lines, -1
-    finally:
-        if paused:
-            _reconciler_resume()
-            lines.append("a3-remediation: reconciler re-enabled")
+    lines.append("a3-remediation: reconciler re-enabled")
 
     if only == "stale-channel":
         remaining = sum(
