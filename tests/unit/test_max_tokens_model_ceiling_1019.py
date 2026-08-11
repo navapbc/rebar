@@ -128,3 +128,26 @@ def test_an_unmapped_model_keeps_the_conservative_fallback(resolved) -> None:
 
     assert settings["max_tokens"] <= max(fallback, 128_000), "sanity: no inflation"
     assert settings["max_tokens"] > 0
+
+
+@pytest.mark.parametrize(
+    ("resolved", "expected"),
+    [
+        ("bedrock:us.amazon.nova-pro-v1:0", 10_000),
+        ("us.amazon.nova-2-lite-v1:0", 10_000),
+        ("nova-lite", 10_000),
+        ("nova-micro", 10_000),
+        # The Claude entries and the fallback must be untouched by the Nova rows.
+        ("claude-sonnet-4-6", 128_000),
+        ("some-unmapped-model", 16_000),
+    ],
+)
+def test_nova_models_get_their_10k_bedrock_ceiling(resolved, expected) -> None:
+    """Amazon Nova accepts at most 10k output tokens on Bedrock (ticket e800-c107-d4ac-463b).
+
+    Without a table entry the 16k conservative fallback exceeds Nova's hard limit, so Bedrock
+    rejects every review call with ``ValidationException`` before it runs. ``nova-2-lite`` is
+    pinned separately from ``nova-lite`` because the lookup is a plain substring match and
+    ``nova-lite`` is NOT a substring of ``nova-2-lite``.
+    """
+    assert model_max_output_tokens(resolved) == expected

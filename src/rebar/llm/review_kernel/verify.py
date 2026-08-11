@@ -295,6 +295,15 @@ MODEL_MAX_OUTPUT_TOKENS = (
     ("claude-haiku-4-5", 64_000),
     ("claude-sonnet-4-6", 128_000),
     ("claude-opus-4-8", 128_000),
+    # Amazon Nova on Bedrock rejects any request above 10k output tokens outright
+    # (`ValidationException: The maximum tokens you requested exceeds the model limit of
+    # 10000`), so without an entry the 16k fallback makes every review call fail before it
+    # runs. `nova-2-lite` is listed alongside `nova-lite` because the lookup is a plain
+    # substring match and the `-2-` breaks containment.
+    ("nova-pro", 10_000),
+    ("nova-2-lite", 10_000),
+    ("nova-lite", 10_000),
+    ("nova-micro", 10_000),
 )
 
 
