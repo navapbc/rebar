@@ -148,6 +148,8 @@ def _validate_https_url(
 
 @dataclass
 class VerifyConfig:
+    # Gate-wide admission limit; historical p99 is 7,500 chars, so 8,000 protects only the tail.
+    max_ticket_description_chars: int = 8_000
     # Opt-in enforcement for related-ticket material pinned into plan-review attestations.
     # Disabled by default so pre-feature projects and attestations remain compatible.
     enforce_plan_material_pins: bool = False
@@ -181,7 +183,6 @@ class VerifyConfig:
     # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
     # rebar.toml. Turning it off is the rollback. See docs/commit-ticket-trailer.md.
     require_ticket_for_commit: bool = False
-
     # Opt-in agentic code-review capability (epic b744): when true, the public
     # `review_code()` (CLI `rebar review-code` / MCP `review_code`) runs the four-pass
     # code-review GATE (`gates/code-review.yaml`) and `produce_code_review_verdict` is live.
@@ -189,7 +190,6 @@ class VerifyConfig:
     # 'capability disabled' note), zero LLM calls. Source-separated + off-by-default so it has
     # no effect when disabled. Env override: REBAR_VERIFY_ENABLE_CODE_REVIEW.
     enable_code_review: bool = False
-
     # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
     # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,
     # REFRESH the attestation instead of a full re-review. Always on (operator-authorized
@@ -600,6 +600,7 @@ _SECTION_CLASSES: dict[str, type] = {
 # section -> {key -> coercer(value, dotted_key) -> coerced value (raises ConfigError)}
 _SECTIONS: dict[str, dict] = {
     "verify": {
+        "max_ticket_description_chars": lambda v, k: _as_int(v, k, minimum=1),
         "enforce_plan_material_pins": lambda v, k: _as_bool(v, k),
         "require_completion_verification_for_close": lambda v, k: _as_bool(v, k),
         "require_plan_review_for_close": lambda v, k: _as_bool(v, k),

@@ -3,10 +3,12 @@
 Before R4, the plan-review gate short-circuited EVERY bug to a bare exempt-PASS
 (`workflow_ops.plan_review_precheck` → `orchestrator._exempt_verdict`), so a bug got no
 substantive review. The bug tier instead runs the DET floor + the advisory `necessity` probe
-(`registry.BUG_TIER_CRITERIA`) and NEVER blocks a bug. These tests pin, with NO live LLM:
+(`registry.BUG_TIER_CRITERIA`) and blocks only when P4's description admission limit is exceeded.
+These tests pin, with NO live LLM:
 
-* precheck: a bug emits ``run_llm=True`` + ``det_blocking==[]`` + ``coverage.bug_tier`` (and is
-  NOT the bare exempt short-circuit), while session_log/code_review/identity STAY exempt;
+* precheck: an ordinarily sized bug emits ``run_llm=True`` + ``det_blocking==[]`` +
+  ``coverage.bug_tier`` (and is NOT the bare exempt short-circuit), while
+  session_log/code_review/identity STAY exempt;
 * routing: a bug's included LLM criteria are restricted to ``BUG_TIER_CRITERIA`` (= necessity),
   and every bug-tier criterion is advisory (so the tier is structurally non-blocking);
 * an end-to-end OFFLINE run on a bug produces a PASS verdict with ``runner != "exempt"``, no
@@ -77,14 +79,14 @@ def test_bug_tier_criteria_are_necessity_and_advisory():
 
 
 # ── precheck: a bug gets the light tier, not the bare exempt short-circuit ───────────────────
-def test_precheck_bug_runs_light_tier_never_blocking(monkeypatch):
+def test_precheck_clean_bug_runs_light_tier_without_blocking(monkeypatch):
     op = STEP_REGISTRY["plan_review_precheck"]
     _patch_reads(monkeypatch, _state(ttype="bug"))
     out = op(_ctx(_state(ttype="bug"), step_id="precheck"))
     # The LLM tier runs (not the exempt short-circuit) ...
     assert out["run_llm"] is True
     assert out["verdict"] is None
-    # ... but a bug is NEVER blocked: all DET findings are downgraded to advisory.
+    # ... and this ordinarily sized, well-formed bug has no deterministic block.
     assert out["det_blocking"] == []
     assert out["det_coverage"].get("bug_tier") is True
 
@@ -176,7 +178,7 @@ def _terminal_verdict(rec) -> dict | None:
 
 def test_e2e_offline_bug_gets_advisory_review_not_exempt(monkeypatch):
     """The whole point of R4 piece (b): a bug now gets a substantive advisory review
-    (runner != 'exempt') instead of the bare exempt-PASS, and is never blocked."""
+    (runner != 'exempt') instead of the bare exempt-PASS, and has no blocking finding."""
     state = _state(ttype="bug")
     _patch_reads(monkeypatch, state)
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner

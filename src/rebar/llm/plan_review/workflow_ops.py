@@ -71,7 +71,8 @@ _OUTPUT_SCHEMA = "plan_review_verdict"
     description=(
         "The deterministic Layer-1 floor (P1-P11) of the plan-review gate. Emits `run_llm` "
         "(true → the four-pass LLM review should run) and, when it should NOT (an exempt "
-        "ticket type, or a P1/P5-cycle/P8/P10/P11 DET block), the terminal short-circuit "
+        "ticket type, or a P1/P4-description/P5-cycle/P8/P10/P11 DET block), the terminal "
+        "short-circuit "
         "plan_review_verdict so the billable LLM passes never run. Wraps rebar.llm.plan_review "
         "without duplicating it."
     ),
@@ -110,8 +111,9 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     # BUG REVIEW TIER (epic 6982 / R4): a bug no longer short-circuits to a bare exempt-PASS.
     # It gets a LIGHT ADVISORY review — the DET floor + the necessity probe (see
     # registry.BUG_TIER_CRITERIA; the assemble step restricts a bug's included LLM criteria to
-    # it) — but is NEVER BLOCKED: every DET finding is downgraded to advisory (det_blocking=[])
-    # so the bug always PASSes. run_llm=True so the (restricted) LLM tier runs. The CLI claim-time
+    # it) — and every DET finding EXCEPT P4's description admission limit is downgraded to
+    # advisory, so an ordinarily sized bug always PASSes. run_llm=True so the restricted LLM tier
+    # runs. The CLI claim-time
     # bug exemption (rebar._commands.gates) is unchanged — a bug still needs no signed attestation
     # to be claimed; this only makes an explicit review / gate run substantive instead of exempt.
     #
@@ -126,24 +128,22 @@ def plan_review_precheck(ctx: StepContext) -> dict[str, Any]:
     )
     if pctx.ticket_type == "bug" and not escalated_bug:
         det_results = det_floor.run_det_floor(pctx)
+        all_det_blocks = det_floor.det_blocking_findings(det_results)
+        det_advisories = det_floor.det_advisory_findings(det_results)
+        det_cov = det_floor.det_coverage(det_results)
+        # The light tier remains advisory except for P4's hard description admission limit.
+        # Preserve that one deterministic block and downgrade every other DET block as before.
+        det_blocks = [finding for finding in all_det_blocks if finding["criteria"] == ["P4"]]
+        downgraded = [finding for finding in all_det_blocks if finding["criteria"] != ["P4"]]
+        det_advisories = [*downgraded, *det_advisories]
+        det_cov = {**det_cov, "bug_tier": True}
+    else:
+        det_results = det_floor.run_det_floor(pctx)
         det_blocks = det_floor.det_blocking_findings(det_results)
         det_advisories = det_floor.det_advisory_findings(det_results)
         det_cov = det_floor.det_coverage(det_results)
-        return {
-            **base,
-            "det_blocking": [],  # a bug is never blocked (light advisory tier)
-            "det_advisory": [*det_blocks, *det_advisories],
-            "det_coverage": {**det_cov, "bug_tier": True},
-            "run_llm": True,
-            "verdict": None,
-        }
-
-    det_results = det_floor.run_det_floor(pctx)
-    det_blocks = det_floor.det_blocking_findings(det_results)
-    det_advisories = det_floor.det_advisory_findings(det_results)
-    det_cov = det_floor.det_coverage(det_results)
-    if escalated_bug:
-        det_cov = {**det_cov, "bug_tier": False, "bug_blast_escalated": True}
+        if escalated_bug:
+            det_cov = {**det_cov, "bug_tier": False, "bug_blast_escalated": True}
     base = {
         **base,
         "det_blocking": det_blocks,
