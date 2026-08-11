@@ -4,8 +4,10 @@
 # project (JIRA_PROJECT) and the local rebar `tickets` store in sync.
 #
 # This is a TEMPLATE: client projects copy this file verbatim and set the repo
-# variables/secrets listed in docs/jira-sync-setup.md. The only project-specific
-# inputs are GitHub repo Variables/Secrets — nothing in this file changes.
+# variables/secrets listed in docs/jira-sync-setup.md. The runner is part of the
+# installed nava-rebar package, so no repository-local helper script is needed.
+# The only project-specific inputs are GitHub repo Variables/Secrets — nothing
+# in this file changes.
 #
 # Single-flight concurrency (cancel-in-progress: false) ensures a running pass
 # completes before the next scheduled invocation starts; the reconciler's own
@@ -239,9 +241,12 @@ jobs:
 
       - name: Run reconciler
         id: reconcile
-        # Canonical exit contract: 0 success/benign, 1 operational failure,
-        # 2 invalid invocation/configuration.
+        # The runner-neutral adapter owns mode routing, pause recognition, canonical
+        # provider exits, timeout enforcement, and strict tickets-store delivery.
         env:
+          BRIDGE_RUN_ID: ${{ github.run_id }}
+          BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
+          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
           JIRA_URL: ${{ vars.JIRA_URL }}
           JIRA_USER: ${{ vars.JIRA_USER }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
@@ -254,76 +259,7 @@ jobs:
           # have failed the job continuously. The machinery landed default-off in
           # df0ac80be (change 785); this flip turns it on for the live reconciler.
           REBAR_RECONCILER_FAIL_SILENT_NOOP: "1"
-        run: |
-          set -uo pipefail
-          echo "Reconciling with bridge profile: $MODE"
-          reconcile_logs="$(mktemp -d)"
-          case "$MODE" in
-            reconcile-check) command=(rebar reconcile --mode reconcile-check) ;;
-            dry-run) command=(rebar bridge preview) ;;
-            bootstrap-strict) command=(rebar bridge sync --max-changes 10) ;;
-            bootstrap-throttle) command=(rebar bridge sync --max-changes 100) ;;
-            live) command=(rebar bridge sync) ;;
-            *) echo "::error::Unknown bridge profile: $MODE"; exit 2 ;;
-          esac
-          set +e
-          "${command[@]}" > "$reconcile_logs/stdout" 2> "$reconcile_logs/stderr"
-          rc=$?
-          set -e
-          cat "$reconcile_logs/stdout"
-          cat "$reconcile_logs/stderr" >&2
-          paused=false
-          if [ "$rc" -eq 0 ]; then
-            paused="$(python -c '
-          import json
-          import sys
-
-          prefix = "BRIDGE_PAUSED: "
-          expected = ["paused", "reason", "who", "paused_at"]
-          with open(sys.argv[1], encoding="utf-8") as stream:
-              markers = [line[len(prefix) :] for line in stream.read().splitlines() if line.startswith(prefix)]
-          try:
-              payload = json.loads(markers[0]) if len(markers) == 1 else None
-          except json.JSONDecodeError:
-              payload = None
-          valid = (
-              isinstance(payload, dict)
-              and list(payload) == expected
-              and payload["paused"] is True
-              and all(isinstance(payload[key], str) and payload[key] for key in expected[1:])
-          )
-          print("true" if valid else "false")
-          ' "$reconcile_logs/stderr")"
-          fi
-          rm -rf "$reconcile_logs"
-          if [ "$paused" = "true" ]; then
-            echo "paused=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Reconcile bridge is paused; skipping ticket commit and push."
-          fi
-          if [ "$rc" -ne 0 ]; then
-            echo "::error::Reconcile failed (exit $rc)"
-            exit "$rc"
-          fi
-          [ "$paused" = "true" ] || echo "Reconcile converged."
-
-      - name: Commit reconciler events back and push to origin/tickets
-        if: steps.reconcile.outputs.paused != 'true'
-        # rebar-specific: the reconciler leaves inbound events UNCOMMITTED and makes
-        # its own binding-store commit WITHOUT pushing. So we (a) commit any dirty
-        # state, then (b) push whenever the local tickets branch is ahead of origin
-        # — a clean worktree does NOT imply nothing to push.
-        env:
-          BRIDGE_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
-          # Same Rebar Bot authorship email default as the "Configure git identity" step
-          # above (story 9e76) — both BRIDGE_BOT_EMAIL fallbacks must agree so the identity
-          # resolver sees the bot email on this commit path too.
-          BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
-        run: |
-          set -euo pipefail
-          # The strict, synchronous store core owns commit, CAS recovery, and clean-ahead
-          # delivery; this workflow remains a thin adapter with the reconciler bot identity.
-          cd .tickets-tracker
-          REBAR_SYNC_PUSH=always python -m rebar._store.push commit-and-push --tracker . --message "chore: sync events from rebar reconciler [run ${{ github.run_id }}]" --strict --author-name "$BRIDGE_BOT_NAME" --author-email "$BRIDGE_BOT_EMAIL"
+        run: rebar bridge run
 
       - name: Notify on bridge failure
         if: failure()

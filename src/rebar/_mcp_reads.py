@@ -54,6 +54,17 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
     """Register bridge mutations on servers that expose write tools."""
 
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
+    def bridge_run(profile: str = "dry-run") -> BridgeRunOut:
+        """Run one scheduled bridge profile and strictly deliver its ticket events."""
+        if _gate_value(ctx.readonly):
+            raise ValueError(
+                "bridge run is disabled: this server is read-only (REBAR_MCP_READONLY)"
+            )
+        if not _gate_value(ctx.allow_jira_sync):
+            raise ValueError("bridge run is disabled; set REBAR_MCP_ALLOW_JIRA_SYNC=1 to enable")
+        return BridgeRunOut.model_validate(rebar.bridge_run(profile=profile))
+
+    @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
     def bridge_sync(
         only: list[str] | None = None,
         exclude: list[str] | None = None,

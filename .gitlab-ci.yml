@@ -1,0 +1,67 @@
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: never
+
+stages:
+  - reconcile
+
+variables:
+  GIT_DEPTH: "0"
+  MODE: "live"
+  REBAR_ENV_ID: "reconciler"
+  BRIDGE_BOT_NAME: "rebar-bridge[bot]"
+  BRIDGE_BOT_EMAIL: "joeoakhart+bot@navapbc.com"
+
+reconcile_bridge:
+  stage: reconcile
+  image: python:3.12
+  resource_group: reconcile-bridge
+  timeout: 1h
+  before_script:
+    - python -m pip install .
+    - |
+      if [ -z "${ACLI_VERSION:-}" ] || [ "$ACLI_VERSION" = "latest" ]; then
+        echo "ACLI_VERSION must pin a concrete release" >&2
+        exit 2
+      fi
+      mkdir -p .ci-acli
+      curl --fail --silent --show-error --location \
+        "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_amd64.tar.gz" \
+        --output .ci-acli/acli.tar.gz
+      if [ -n "${ACLI_SHA256:-}" ]; then
+        printf '%s  %s\n' "$ACLI_SHA256" .ci-acli/acli.tar.gz | sha256sum -c --strict
+      else
+        echo "ACLI_SHA256 unset; downloaded acli was not checksum-verified" >&2
+      fi
+      tar xzf .ci-acli/acli.tar.gz -C .ci-acli --strip-components=1
+      rm .ci-acli/acli.tar.gz
+      test -x .ci-acli/acli
+      export PATH="$CI_PROJECT_DIR/.ci-acli:$PATH"
+    - git fetch --filter=blob:none origin '+tickets:refs/remotes/origin/tickets'
+    - git worktree add -B tickets .tickets-tracker origin/tickets
+    - git config merge.ours.driver true
+    - git fetch origin '+refs/reconciler/*:refs/reconciler/*' || true
+  script:
+    - |
+      set -eu
+      signing_key=""
+      if [ -n "${REBAR_BOT_SIGNING_KEY:-}" ]; then
+        signing_key="$(mktemp)"
+        trap 'rm -f "$signing_key"' EXIT
+        chmod 600 "$signing_key"
+        printf '%s\n' "$REBAR_BOT_SIGNING_KEY" > "$signing_key"
+        export REBAR_IDENTITY_SIGNING_KEY="$signing_key"
+      fi
+      printf '%s\n' "$JIRA_API_TOKEN" | acli jira auth login \
+        --site "$JIRA_URL" \
+        --email "$JIRA_USER" \
+        --token
+      export BRIDGE_RUN_ID="$CI_PIPELINE_ID"
+      rebar bridge run
+  artifacts:
+    when: always
+    paths:
+      - .tickets-tracker/.bridge_state/last-pass.json
+    expire_in: 7 days

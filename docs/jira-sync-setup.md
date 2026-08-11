@@ -7,8 +7,9 @@ observably** in GitHub Actions, the way this repo does, so a client project can
 stand the same thing up by copying two workflow files and setting a handful of repo
 variables/secrets.
 
-Two workflows do the job — they are designed to be copied **verbatim**; everything
-project-specific lives in GitHub repo Variables/Secrets, not in the files:
+Two workflows do the job. Copy them as templates; the only code edit is the
+client's pinned `nava-rebar` install described in [§ Copy the workflows](#4-copy-the-workflows).
+Everything else project-specific lives in GitHub repo Variables/Secrets:
 
 | Workflow | File | Cadence | Purpose |
 |----------|------|---------|---------|
@@ -135,21 +136,26 @@ client makes is the install step — this repo installs itself from source:
 ```
 
 Pin a released version (`pip install nava-rebar==X.Y.Z`) so the reconciler code is
-reproducible across runs. Reconcile does **not** need the `[agents]` extra.
+reproducible across runs. Reconcile does **not** need the `[agents]` extra. The
+runner invoked by the workflow ships in the same wheel as the library and CLI,
+so pip, Homebrew, and MCP Registry/uvx installs use the same Python core.
 
 ### Refreshing existing copied templates
 
 Workflow copies are yours to maintain: upgrading rebar does not change an existing
 `.github/workflows/reconcile-bridge.yml` or `reconcile-bridge-canary.yml`. Refresh is
 an explicit opt-in action: copy the current templates into your repository, review the
-diff, and merge it on your normal change-control path. The current templates delegate
-delivery to the strict synchronous store core. After a clean recovery merge it re-pushes
+diff, and merge it on your normal change-control path. Refresh the primary workflow
+and its pinned `nava-rebar==X.Y.Z` version atomically: the selected release must provide
+`rebar bridge run` before the refreshed workflow invokes it. That installed entrypoint
+owns strict synchronous delivery. After a clean recovery merge it re-pushes
 immediately, rather than waiting in a workflow-local retry loop.
 
-No store cleanup is needed to roll this template change back. Set
-`REBAR_CANARY_HEARTBEAT_SOURCE=github-api` for the one-release heartbeat rollback. For the reconciler template,
-remove `--strict` from the core call site to return to best-effort delivery; do not rewrite
-the tickets worktree or its event history.
+No store cleanup is needed to roll this template change back. Existing inline
+workflows can remain on their previous package pin because the legacy command
+spellings and benign exit codes `3`, `4`, and `75` retain their prior behavior. Set
+`REBAR_CANARY_HEARTBEAT_SOURCE=github-api` for the one-release heartbeat rollback;
+do not rewrite the tickets worktree or its event history.
 
 ## 5. Validate safely, then enable
 

@@ -401,13 +401,28 @@ behavior. The canonical spellings are `rebar bridge setup`, `rebar bridge check-
 `rebar bridge fsck`, and `rebar doctor`. The legacy `jira-onboard`, `bridge-probe`, and
 `bridge-fsck` spellings remain available as compatibility aliases.
 
+Repository-scheduled synchronization is portable across GitHub Actions, Jenkins, and GitLab.
+Each provider prepares a full-history checkout and `.tickets-tracker`, then invokes
+the installed `rebar bridge run` command. The adapter retains the established `MODE` values
+(`reconcile-check`, `dry-run`, `bootstrap-strict`, `bootstrap-throttle`, and `live`) while
+routing new work through the noun-based `bridge preview` / `bridge sync` commands. It requires
+the Jira variables, `REBAR_ENV_ID`, `BRIDGE_RUN_ID`, and the bridge bot name/email before the
+pass starts; a shallow checkout is rejected because it cannot reconcile ticket history safely.
+This shared CI adapter does not remove or change direct legacy `rebar reconcile` and
+`python -m rebar_reconciler` entrypoints.
+
+For an explicit one-off selection, use `rebar bridge run --profile dry-run`. Provider
+templates normally omit `--profile` and supply the established `MODE` environment
+compatibility boundary instead.
+
 Python and MCP callers have the same noun-based machine operations:
-`bridge_preview`, `bridge_sync`, `bridge_status`, `bridge_pause`, `bridge_resume`,
-`bridge_check_access`, and the existing `bridge_fsck`. Their inputs are explicit—there
-is no mode string on the new tools—and their results are schema-backed dictionaries.
-`bridge_preview` cannot write; `bridge_sync` is explicitly mutating. The legacy library
-and MCP `reconcile(mode=...)` interfaces remain supported with the dry-run default and
-historical mode/return/error contracts. Interactive `bridge setup` remains CLI-only.
+`bridge_preview`, `bridge_run`, `bridge_sync`, `bridge_status`, `bridge_pause`,
+`bridge_resume`, `bridge_check_access`, and the existing `bridge_fsck`. Their results are
+schema-backed dictionaries. `bridge_run(profile=...)` accepts the same compatibility profile as
+the installed CLI and returns captured streams without printing, so it is safe for MCP stdio.
+`bridge_preview` cannot write; `bridge_run` and `bridge_sync` are explicitly mutating. The
+legacy library and MCP `reconcile(mode=...)` interfaces remain supported with the dry-run
+default and historical mode/return/error contracts. Interactive `bridge setup` remains CLI-only.
 Setting up Jira is an operator task — see
 [jira-sync-setup.md](jira-sync-setup.md).
 

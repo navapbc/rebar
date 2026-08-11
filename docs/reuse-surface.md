@@ -25,6 +25,7 @@ Use the noun-based facade for programmatic Jira bridge work:
 ```python
 bridge_preview(*, only: list[str] | None = None, exclude: list[str] | None = None,
                repo_root=None) -> BridgeRun
+bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun
 bridge_sync(*, only: list[str] | None = None, exclude: list[str] | None = None,
             max_changes: int | None = None, repo_root=None) -> BridgeRun
 bridge_status(*, target_environment_id: str | None = None,
@@ -36,11 +37,14 @@ bridge_fsck(*, repo_root=None) -> BridgeFsck
 ```
 
 `bridge_preview` selects the dry-run route and never applies changes;
-`bridge_sync` selects the live route and may cap work with `max_changes`.
+`bridge_run` selects one scheduled compatibility profile, strictly delivers ticket events,
+and returns captured stdout/stderr without printing; `bridge_sync` selects the live route and
+may cap work with `max_changes`.
 `only` and `exclude` are mutually exclusive. Status reads the durable witnesses,
 pause/resume use the shared observed-OID CAS control ref, and access checking returns
 the six-step provider result without invoking the CLI. Canonical invalid/operational
-run outcomes raise `RebarError` with return code 2/1.
+preview/sync outcomes raise `RebarError` with return code 2/1. `bridge_run` instead returns its
+canonical 0/1/2 result so CLI and MCP adapters can render or transport the same structured value.
 
 The compatibility facade `reconcile(mode="dry-run", *, repo_root=None) -> dict`
 remains supported with its subprocess-visible return and exception contract. MCP

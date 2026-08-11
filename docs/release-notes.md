@@ -8,6 +8,22 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Scheduled bridge execution is runner-neutral
+
+GitHub Actions, Jenkins, and GitLab now invoke the same
+installed `rebar bridge run` command. Provider configuration retains checkout,
+credentials, signing material, schedules, notifications, and time limits; profile routing,
+pause recognition, exit translation, and strict ticket delivery live in the packaged Python core.
+All providers therefore use the same five `MODE` values and 0/1/2 automation result contract.
+The pip wheel, Homebrew formula virtualenv, and MCP Registry/uvx installation all carry that
+same core; a checkout-relative script is no longer required.
+
+This is an automation-wrapper change, not a legacy CLI contraction. Noun-based
+`rebar bridge preview` and `rebar bridge sync` remain primary, while direct
+`rebar reconcile --mode ...` and `python -m rebar_reconciler` callers retain their published
+defaults, messages, mutation behavior, and benign 3/4/75 sentinels. Only the shared provider
+adapter translates those benign sentinels to provider success.
+
 ## Destructive repairs now own a durable reconciler pause
 
 Live `rebar fsck --repair` and `rebar doctor --repair` no longer depend on GitHub
@@ -27,11 +43,12 @@ clear it explicitly with `rebar bridge resume`.
 
 ## Bridge operations are now first-class library and MCP APIs
 
-The public library and MCP server now expose typed `bridge_preview`, `bridge_sync`,
+The public library and MCP server now expose typed `bridge_preview`, `bridge_run`, `bridge_sync`,
 `bridge_status`, `bridge_pause`, `bridge_resume`, and `bridge_check_access` operations.
-The new inputs describe the operation directly and never accept the legacy mode vocabulary.
-Preview remains strictly non-mutating; sync is explicitly mutating. MCP gates sync, pause,
-and resume through both the read-only policy and `mcp.allow_jira_sync`, while status,
+The new inputs describe the operation directly and never accept the legacy mode vocabulary;
+scheduled execution selects `profile=...` in Python/MCP or `--profile` in the CLI.
+Preview remains strictly non-mutating; run and sync are explicitly mutating. MCP gates run,
+sync, pause, and resume through both the read-only policy and `mcp.allow_jira_sync`, while status,
 preview, fsck, and access checking remain available without that sync authorization.
 
 This is additive. `rebar.reconcile(mode=...)`, MCP `reconcile(mode=...)`, and

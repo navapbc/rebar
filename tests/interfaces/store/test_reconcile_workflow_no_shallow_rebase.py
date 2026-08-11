@@ -48,8 +48,17 @@ def test_no_shallow_fetch_of_tickets(workflow: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("workflow", RECONCILE_WORKFLOWS, ids=lambda p: p.name)
-def test_reconcile_delegates_merge_not_rebase_to_core_push(workflow: Path) -> None:
+@pytest.mark.parametrize(
+    ("workflow", "delegate"),
+    [
+        (RECONCILE_WORKFLOWS[0], "rebar bridge run"),
+        (RECONCILE_WORKFLOWS[1], "python -m rebar._store.push"),
+    ],
+    ids=lambda value: value.name if isinstance(value, Path) else value,
+)
+def test_reconcile_delegates_merge_not_rebase_to_supported_seam(
+    workflow: Path, delegate: str
+) -> None:
     """Workflow delivery delegates to the merge-based core and never rebases."""
     text = workflow.read_text(encoding="utf-8")
     rebase_hits = re.findall(r"git rebase[^\n]*origin/tickets", text)
@@ -57,9 +66,9 @@ def test_reconcile_delegates_merge_not_rebase_to_core_push(workflow: Path) -> No
         f"{workflow.name} must reconcile with 'git merge', not 'git rebase "
         f"origin/tickets' (bug f193); found:\n{rebase_hits}"
     )
-    assert "python -m rebar._store.push" in text, (
-        f"{workflow.name} must delegate tickets reconvergence to the core push entrypoint; "
-        "the executable core suite owns merge-vs-rebase behavior"
+    assert delegate in text, (
+        f"{workflow.name} must delegate tickets reconvergence through {delegate!r}; "
+        "the executable runner/core suite owns merge-vs-rebase behavior"
     )
 
 

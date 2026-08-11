@@ -202,7 +202,7 @@ try:
         store_integrity: list[dict]
 
     class BridgeRunOut(_Out):
-        route: Literal["preview", "sync"]
+        route: Literal["preview", "run", "sync"]
         state: Literal[
             "converged",
             "paused",
