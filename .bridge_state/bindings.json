@@ -27535,9 +27535,17 @@
       "updated_at": "2026-07-13T23:36:18Z"
     },
     "3939-d68c-6e99-498d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nCommit 7fa8102477 (2026-08-08, \"Bound malformed overlap judge calls\") bounded `judge_batch` with `output_token_limit=1024`, `structured_retry_limit=0`, `transport_attempt_limit=1`, `request_timeout_limit_s=60`. The sibling call site `judge_one` in `src/rebar/llm/overlap/judge.py` \u2014 the VOLUME site (~18 of 23 LLM calls in one measured plan review, per the module's own comment) \u2014 was not given the same bounds.\n\nMeasured consequence (local usage logs, 2026-08-06\u219208-11): 322 terminal `overlap-judge` failures with `finish_reason=length`, each burning 48,000 output tokens = 3 attempts (pydantic-ai `OUTPUT_RETRIES=2` default) x the 16,000 default `max_tokens` cap, ~$132 of pure waste; 20+ occurrences after the 08-08 fix landed, and 7 more reproduced during replay experiments on 2026-08-11. An overlap verdict is ~100 output tokens, so an unbounded retry ladder buys nothing.\n\n## Plan\n\nMirror `judge_batch`'s bounds onto `judge_one`'s `RunRequest` (same values, same rationale comment): `output_token_limit=1024`, `structured_retry_limit=0`, `transport_attempt_limit=1`, `request_timeout_limit_s=60`. The overlap step is advisory and already abstains on any error, so tighter bounds cannot change a review verdict \u2014 a bounded failure degrades to the same abstain as an unbounded one, at ~2% of the cost.\n\nAdd a unit test pinning the bounds on the `judge_one` request (mirroring whatever pins judge_batch's; if none pins judge_batch's, add both in one test module touch).\n\n## Acceptance Criteria\n\n- [ ] `judge_one` builds its `RunRequest` with `output_token_limit=1024`, `structured_retry_limit=0`, `transport_attempt_limit=1`, and `request_timeout_limit_s=60`, matching `judge_batch`. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -c \"import inspect, rebar.llm.overlap.judge as j; s=inspect.getsource(j.judge_one); assert 'output_token_limit=1024' in s and 'structured_retry_limit=0' in s\"` exits 0.\n- [ ] A unit test asserts the bounds appear on the request `judge_one` submits (via a stub runner capturing the `RunRequest`). Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"judge_one and bound\" -x` passes.\n- [ ] An error path still returns the abstain verdict (existing behavior unchanged). Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"overlap and judge\" -x` passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "overlap-judge: judge_one lacks the malformed-output bounds judge_batch got \u2014 48k retry storms continue"
+      },
       "created_at": "2026-08-11T18:04:47Z",
       "jira_id": "4587978",
       "jira_key": "REB-2735",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-11T18:04:51Z"
     },
@@ -114842,9 +114850,17 @@
       "updated_at": "2026-07-10T04:58:14Z"
     },
     "e800-c107-d4ac-463b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n`model_max_output_tokens` (`src/rebar/llm/review_kernel/verify.py`, `MODEL_MAX_OUTPUT_TOKENS`) knows only the three Claude ladder models and falls back to `DEFAULT_MAX_TOKENS` (16,000) for an unmapped model. Amazon Nova models on Bedrock accept at most 10,000 output tokens, so every review call that rides the \"raise to model max\" seam with a Nova model is rejected by Bedrock with `ValidationException: The maximum tokens you requested exceeds the model limit of 10000` before it runs \u2014 measured live during the 2026-08-11 model-comparison experiments (rebar ticket b902-18af-14ed-4da1), where the whole plan-review LLM phase collapsed to INDETERMINATE until the table was patched in-process. Nova Pro subsequently completed 8/8 end-to-end plan-review replays, so the ceiling entry is the only blocker to running these models through rebar.\n\n## Plan\n\nAdd three entries to `MODEL_MAX_OUTPUT_TOKENS`: `(\"nova-pro\", 10_000)`, `(\"nova-lite\", 10_000)`, `(\"nova-micro\", 10_000)` (substring match covers the Bedrock inference-profile ids like `us.amazon.nova-pro-v1:0`, and `nova-lite` covers `nova-2-lite`). Values per the AWS Bedrock model documentation: Nova family max output tokens = 10,000. No behavior change for any currently-configured model: the table is consulted only when the resolved model matches an entry, and the existing conservative fallback stays for everything else.\n\nExtend the existing unit coverage of `model_max_output_tokens` with the Nova ids (full Bedrock profile-id form and bare form).\n\n## Acceptance Criteria\n\n- [ ] `model_max_output_tokens(\"bedrock:us.amazon.nova-pro-v1:0\")` returns 10000. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -c \"import sys; sys.path.insert(0,'src'); from rebar.llm.review_kernel.verify import model_max_output_tokens as f; assert f('bedrock:us.amazon.nova-pro-v1:0')==10000 and f('us.amazon.nova-2-lite-v1:0')==10000 and f('claude-sonnet-4-6')==128000\"` exits 0.\n- [ ] A unit test pins the Nova entries alongside the existing Claude entries. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"max_output\" -x` passes.\n- [ ] Unknown models still fall back to the configured default (existing behavior pinned by an assertion in the same test). Verify: same pytest run passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Teach MODEL_MAX_OUTPUT_TOKENS the Amazon Nova output ceilings (10k) so Bedrock Nova calls stop 400ing"
+      },
       "created_at": "2026-08-11T18:04:51Z",
       "jira_id": "4587979",
       "jira_key": "REB-2736",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-11T18:04:55Z"
     },
