@@ -339,7 +339,7 @@ class BridgeFsck(TypedDict):
 class BridgeRun(TypedDict):
     """Return shape of the `bridge_run` output schema."""
 
-    route: Literal["preview", "sync"]
+    route: Literal["preview", "run", "sync"]
     state: Literal[
         "converged",
         "paused",

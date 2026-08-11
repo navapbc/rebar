@@ -70,6 +70,16 @@ jobs:
           uv sync --locked --extra dev
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
+      # shellcheck-py is exactly pinned in the dev extra; fail closed if packaging or
+      # PATH drift exposes a different ShellCheck than provider-wrapper tests expect.
+      - name: ShellCheck 0.11.0 smoke check (gating)
+        run: |
+          actual="$(shellcheck --version | awk '/^version:/ {print $2}')"
+          if [ "$actual" != "0.11.0" ]; then
+            echo "Expected ShellCheck 0.11.0, found ${actual:-missing}" >&2
+            exit 1
+          fi
+
       # GATING: the flake8 "real-bug" smoke set (configured in pyproject
       # [tool.ruff.lint]) — syntax errors + undefined names — plus formatting
       # consistency (ruff format --check). Routed through `make lint` (the single

@@ -64,6 +64,7 @@ CANONICAL: dict[str, str] = {
     "bridge_fsck": schemas.BRIDGE_FSCK,
     "bridge_pause": schemas.BRIDGE_CONTROL,
     "bridge_preview": schemas.BRIDGE_RUN,
+    "bridge_run": schemas.BRIDGE_RUN,
     "bridge_resume": schemas.BRIDGE_CONTROL,
     "bridge_status": schemas.BRIDGE_STATUS,
     "bridge_sync": schemas.BRIDGE_RUN,
@@ -295,6 +296,7 @@ def _call_args(name: str, s: dict) -> dict:
         "bridge_fsck": {},
         "bridge_pause": {"reason": "schema coverage"},
         "bridge_preview": {},
+        "bridge_run": {"profile": "dry-run"},
         "bridge_resume": {},
         "bridge_status": {},
         "bridge_sync": {},
@@ -325,6 +327,12 @@ def test_canonical_tool_result_validates(
             "state": "converged",
             "returncode": 0,
             "details": {"no_write": True},
+        },
+        "bridge_run": {
+            "route": "run",
+            "state": "converged",
+            "returncode": 0,
+            "details": {"profile": "dry-run", "delivery_attempted": True},
         },
         "bridge_resume": {"state": "resumed"},
         "bridge_status": {

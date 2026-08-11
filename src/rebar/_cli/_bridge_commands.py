@@ -20,7 +20,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-_BRIDGE_MODES = {"preview", "sync"}
+_BRIDGE_ROUTES = {"preview", "sync"}
 
 
 def launch_reconciler(argv: Sequence[str], *, default_mode: str | None = "dry-run") -> int:
@@ -56,7 +56,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{preview,sync,status,pause,resume,fsck,check-access,setup}",
+        metavar="{preview,run,sync,status,pause,resume,fsck,check-access,setup}",
     )
     preview = commands.add_parser(
         "preview",
@@ -67,6 +67,16 @@ def _parser() -> argparse.ArgumentParser:
         "sync",
         help="Apply proposed Jira changes.",
         description="Apply proposed Jira changes.",
+    )
+    run = commands.add_parser(
+        "run",
+        help="Run one scheduled bridge profile and strictly deliver ticket events.",
+        description="Run one scheduled bridge profile and strictly deliver ticket events.",
+    )
+    run.add_argument(
+        "--profile",
+        metavar="PROFILE",
+        help="Scheduled compatibility profile; defaults to the provider configuration.",
     )
     for command in (preview, sync):
         selection = command.add_mutually_exclusive_group()
@@ -159,7 +169,7 @@ def _group_help() -> str:
 
 def _launch_bridge_command(command: str, parsed: argparse.Namespace) -> int:
     """Launch the reconciler for a parser-validated bridge command."""
-    if command not in _BRIDGE_MODES:
+    if command not in _BRIDGE_ROUTES:
         raise AssertionError(f"unhandled bridge command: {command!r}")
     args = [command]
     if getattr(parsed, "max_changes", None) is not None:
@@ -285,6 +295,21 @@ def _status(parsed: argparse.Namespace) -> int:
     return 0 if result["verdict"] in last_pass.HEALTHY_VERDICTS else 1
 
 
+def _run_profile(parsed: argparse.Namespace) -> int:
+    """Render the packaged bridge runner's captured streams exactly once."""
+    import rebar
+
+    result = rebar.bridge_run(profile=parsed.profile)
+    details = result["details"]
+    stdout = details.get("stdout", "")
+    stderr = details.get("stderr", "")
+    if isinstance(stdout, str):
+        sys.stdout.write(stdout)
+    if isinstance(stderr, str):
+        sys.stderr.write(stderr)
+    return result["returncode"]
+
+
 def bridge_cli(argv: Sequence[str]) -> int:
     """Run the primary bridge command group.
 
@@ -308,8 +333,10 @@ def bridge_cli(argv: Sequence[str]) -> int:
         exit_code = exc.code
         return 1 if exit_code is None else int(exit_code)
 
-    if parsed.command in _BRIDGE_MODES:
+    if parsed.command in _BRIDGE_ROUTES:
         return _launch_bridge_command(parsed.command, parsed)
+    if parsed.command == "run":
+        return _run_profile(parsed)
     if parsed.command == "status":
         return _status(parsed)
     return _pause_or_resume(parsed.command, getattr(parsed, "reason", None))

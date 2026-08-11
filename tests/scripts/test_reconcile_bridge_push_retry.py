@@ -9,7 +9,6 @@ message, and persisted git state all participate.
 from __future__ import annotations
 
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -24,7 +23,6 @@ pytestmark = pytest.mark.unit
 REPO = Path(__file__).resolve().parents[2]
 RECONCILER_WORKFLOW = REPO / ".github" / "workflows" / "reconcile-bridge.yml"
 CANARY_WORKFLOW = REPO / ".github" / "workflows" / "reconcile-bridge-canary.yml"
-RECONCILER_STEP = "Commit reconciler events back and push to origin/tickets"
 CANARY_STEP = "Flush any unpushed ticket changes to origin/tickets"
 RECONCILER_MESSAGE = "chore: sync events from rebar reconciler [run test-run-id]"
 
@@ -56,12 +54,7 @@ def _extract_step(path: Path, job: str, name: str) -> str:
         if isinstance(step, dict) and step.get("name") == name
     ]
     assert len(matches) == 1, f"expected one {name!r} step in {path.name}, found {len(matches)}"
-    block = matches[0].replace("${{ github.run_id }}", "test-run-id")
-    leftovers = re.findall(r"\$\{\{[^}]*\}\}", block)
-    assert not leftovers, (
-        f"{path.name}'s delivery block gained an unsubstituted Actions expression: {leftovers}"
-    )
-    return block
+    return matches[0]
 
 
 def _core_invocation(block: str) -> list[str]:
@@ -89,6 +82,12 @@ def _seed_case(base: Path, *, dirty: bool = False, ahead: bool = False) -> GitCa
     origin = base / "origin.git"
     root.mkdir()
     tracker.mkdir()
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.name", "Runner")
+    _git(root, "config", "user.email", "runner@example.test")
+    (root / "README").write_text("full history\n", encoding="utf-8")
+    _git(root, "add", "README")
+    _git(root, "commit", "-q", "-m", "seed runner")
     _git(base, "init", "-q", "--bare", "-b", "tickets", str(origin))
     _git(tracker, "init", "-q", "-b", "tickets")
     _git(tracker, "config", "user.name", "Ambient Author")
@@ -149,32 +148,53 @@ def _run_block(case: GitCase, block: str, label: str) -> subprocess.CompletedPro
     )
 
 
+def _run_reconciler(case: GitCase, label: str) -> subprocess.CompletedProcess[str]:
+    bin_dir = case.root / f"{label}-bin"
+    bin_dir.mkdir()
+    rebar = bin_dir / "rebar"
+    rebar.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    rebar.chmod(0o755)
+    env = dict(os.environ)
+    env.update(
+        {
+            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
+            "MODE": "live",
+            "BRIDGE_RUN_ID": "test-run-id",
+            "BRIDGE_BOT_NAME": "Bridge Bot",
+            "BRIDGE_BOT_EMAIL": "bridge-bot@example.test",
+            "JIRA_URL": "https://jira.example.test",
+            "JIRA_USER": "bridge@example.test",
+            "JIRA_API_TOKEN": "secret",
+            "JIRA_PROJECT": "RB",
+            "REBAR_ENV_ID": "reconciler",
+            "XDG_CONFIG_HOME": str(case.root / ".isolated-config"),
+        }
+    )
+    return subprocess.run(
+        [sys.executable, "-m", "rebar.cli", "bridge", "run"],
+        cwd=case.root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+
 def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None:
-    """The exact reconciler block preserves dirty-state, identity, and red failure outcomes."""
-    block = _extract_step(RECONCILER_WORKFLOW, "reconcile", RECONCILER_STEP)
-    expected = [
-        "REBAR_SYNC_PUSH=always",
-        "python",
-        "-m",
-        "rebar._store.push",
-        "commit-and-push",
-        "--tracker",
-        ".",
-        "--message",
-        RECONCILER_MESSAGE,
-        "--strict",
-        "--author-name",
-        "$BRIDGE_BOT_NAME",
-        "--author-email",
-        "$BRIDGE_BOT_EMAIL",
+    """The shared runner preserves dirty-state, identity, and red failure outcomes."""
+    workflow = yaml.safe_load(RECONCILER_WORKFLOW.read_text(encoding="utf-8"))
+    invocations = [
+        step.get("run")
+        for step in workflow["jobs"]["reconcile"]["steps"]
+        if step.get("name") == "Run reconciler"
     ]
-    assert _core_invocation(block) == expected
-    _assert_no_inline_git_mutation(block)
+    assert invocations == ["rebar bridge run"]
 
     success = _seed_case(tmp_path / "success", dirty=True)
     assert "?? inbound.json" in _git(success.tracker, "status", "--porcelain").stdout
     remote_before = _remote_head(success.origin)
-    result = _run_block(success, block, "reconciler-success")
+    result = _run_reconciler(success, "reconciler-success")
     assert result.returncode == 0, result.stderr
     assert _remote_head(success.origin) != remote_before
     assert _remote_head(success.origin) == _git(success.tracker, "rev-parse", "HEAD").stdout.strip()
@@ -195,7 +215,7 @@ def test_reconciler_workflow_commits_and_pushes_strictly(tmp_path: Path) -> None
     rejected = _seed_case(tmp_path / "rejected", dirty=True)
     remote_before = _remote_head(rejected.origin)
     _reject_all_pushes(rejected.origin)
-    result = _run_block(rejected, block, "reconciler-rejected")
+    result = _run_reconciler(rejected, "reconciler-rejected")
     assert result.returncode != 0
     assert "push-policy-declined" in result.stderr
     local_head = _git(rejected.tracker, "rev-parse", "HEAD").stdout.strip()

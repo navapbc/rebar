@@ -15,9 +15,9 @@ unaffected, but flipping them keeps the enumeration environment unambiguous.
 Classification: three gate-tier sections — Read-only (always) / LLM-gated
 (``REBAR_MCP_ALLOW_LLM``) / Write-gated (``REBAR_MCP_READONLY``). The default gate is the
 registrar, with a closed set of hybrid special-cases annotated inline (``reconcile`` /
-``fsck`` in the read section, ``run_workflow`` in the write section, and ``sign_review``
-which lives in the LLM registrar but is write-gated and is therefore placed in the
-Write-gated section).
+``fsck`` in the read section, ``run_workflow`` in the write section, ``sign_review``
+which lives in the LLM registrar but is write-gated, and the bridge run/control/sync
+tools which live in the read registrar but are write-gated).
 
 Usage:
     python scripts/gen_mcp_reference.py           # regenerate docs/mcp-reference.md
@@ -36,9 +36,11 @@ DOC_PATH = REPO_ROOT / "docs" / "mcp-reference.md"
 
 # ``sign_review`` is registered by the LLM registrar but writes a SIGNATURE event and is
 # gated by ``REBAR_MCP_READONLY`` (not the LLM gate), so it is documented under the
-# Write-gated section. This is the ONLY tool whose section differs from its registrar.
+# Write-gated section.
 _LLM_REGISTRAR_BUT_WRITE_GATED = "sign_review"
-_READ_REGISTRAR_BUT_WRITE_GATED = frozenset({"bridge_sync", "bridge_pause", "bridge_resume"})
+_READ_REGISTRAR_BUT_WRITE_GATED = frozenset(
+    {"bridge_run", "bridge_sync", "bridge_pause", "bridge_resume"}
+)
 
 # Inline annotations for the closed set of hybrid special-cases (verified against the
 # registrar source: _mcp_reads.reconcile/fsck, _mcp_llm.sign_review, _mcp_writes.run_workflow).
@@ -47,6 +49,7 @@ _ANNOTATIONS: dict[str, str] = {
         "live/mutating modes are blocked by `REBAR_MCP_READONLY` first, then require "
         "`REBAR_MCP_ALLOW_JIRA_SYNC`; dry-run/check are always available"
     ),
+    "bridge_run": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_sync": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_pause": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
     "bridge_resume": "requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only",
@@ -112,7 +115,7 @@ def enumerate_by_registrar() -> dict[str, list[str]]:
     """Return the RAW registrar grouping ``{"read"|"llm"|"write": [sorted names]}``.
 
     This is the ground-truth grouping BY REGISTRAR — the section placement in
-    ``render()`` differs only for ``sign_review`` (llm registrar -> Write-gated section)."""
+    ``render()`` differs for the closed sets declared above."""
     tools = _registrar_tools()
     return {key: sorted(tools[key]) for key in ("read", "llm", "write")}
 
@@ -207,7 +210,7 @@ def render() -> str:
         f"server is read-only — so these mutation tools are ABSENT under "
         f"`REBAR_MCP_READONLY`: {env.get('REBAR_MCP_READONLY', '')} "
         f"(`sign_review` is registered by the LLM registrar but write-gated; bridge "
-        f"control/sync tools are conditionally omitted by the read registrar in read-only "
+        f"run/control/sync tools are conditionally omitted by the read registrar in read-only "
         f"mode and enforce Jira-sync authorization at call time.)"
     )
     lines.append("")

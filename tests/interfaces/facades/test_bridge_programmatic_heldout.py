@@ -37,6 +37,9 @@ def test_new_library_signatures_are_explicit_and_legacy_signatures_are_unchanged
         "(*, only: 'list[str] | None' = None, exclude: 'list[str] | None' = None, "
         "repo_root=None) -> 'BridgeRun'"
     )
+    assert str(inspect.signature(rebar.bridge_run)) == (
+        "(profile: 'str | None' = None, *, repo_root=None) -> 'BridgeRun'"
+    )
     assert str(inspect.signature(rebar.bridge_sync)) == (
         "(*, only: 'list[str] | None' = None, exclude: 'list[str] | None' = None, "
         "max_changes: 'int | None' = None, repo_root=None) -> 'BridgeRun'"
@@ -76,6 +79,7 @@ def test_library_validates_inputs_before_operational_work(call, message: str) ->
 def test_new_mcp_input_schemas_are_explicit_and_mode_free() -> None:
     tools = _tool_map()
     assert set(tools["bridge_preview"].inputSchema["properties"]) == {"only", "exclude"}
+    assert set(tools["bridge_run"].inputSchema["properties"]) == {"profile"}
     assert set(tools["bridge_sync"].inputSchema["properties"]) == {
         "only",
         "exclude",
@@ -91,7 +95,6 @@ def test_new_mcp_input_schemas_are_explicit_and_mode_free() -> None:
     assert tools["bridge_check_access"].inputSchema.get("properties", {}) == {}
     for name in (
         "bridge_preview",
-        "bridge_sync",
         "bridge_status",
         "bridge_pause",
         "bridge_resume",
@@ -100,7 +103,7 @@ def test_new_mcp_input_schemas_are_explicit_and_mode_free() -> None:
         assert "mode" not in tools[name].inputSchema.get("properties", {})
 
 
-@pytest.mark.parametrize("name", ["bridge_sync", "bridge_pause", "bridge_resume"])
+@pytest.mark.parametrize("name", ["bridge_run", "bridge_sync", "bridge_pause", "bridge_resume"])
 def test_mutating_mcp_tools_are_gated_before_the_library_call(
     name: str,
     monkeypatch: pytest.MonkeyPatch,
@@ -111,9 +114,12 @@ def test_mutating_mcp_tools_are_gated_before_the_library_call(
     monkeypatch.delenv("REBAR_MCP_READONLY", raising=False)
     monkeypatch.delenv("REBAR_MCP_ALLOW_JIRA_SYNC", raising=False)
     monkeypatch.setattr(rebar, name, lambda **kwargs: calls.append(kwargs) or {})
-    arguments = {"bridge_sync": {}, "bridge_pause": {"reason": "maintenance"}, "bridge_resume": {}}[
-        name
-    ]
+    arguments = {
+        "bridge_run": {"profile": "live"},
+        "bridge_sync": {},
+        "bridge_pause": {"reason": "maintenance"},
+        "bridge_resume": {},
+    }[name]
 
     with pytest.raises(Exception, match="disabled"):
         asyncio.run(build_server().call_tool(name, arguments))

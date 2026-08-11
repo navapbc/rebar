@@ -30,6 +30,14 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **Portable scheduled bridge runner:** GitHub Actions, Jenkins, and GitLab now delegate profile
+  routing, pause handling, strict ticket delivery, and canonical provider exits to one
+  installed `rebar bridge run` command backed by the public `rebar.bridge_run` API. The pip
+  wheel, Homebrew formula virtualenv, and MCP Registry/uvx install the same Python core.
+  Scheduled profiles use `--profile` in the CLI and `profile=` in library/MCP calls.
+  Noun-based `rebar bridge preview` / `bridge sync` remain primary; direct legacy reconcile
+  entrypoints retain their existing defaults and 3/4/75 compatibility sentinels.
+
 - **`bridge fsck` now audits real offline bridge state.** Its JSON result contains
   `unknown_event_types`, `binding_drift`, and `store_integrity`; the permanently empty
   SYNC-derived `orphaned`, `duplicates`, and `stale` keys are removed. Binding-index

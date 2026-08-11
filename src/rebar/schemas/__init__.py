@@ -316,6 +316,7 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "show.not_found": ERROR_ENVELOPE,
     "bridge_fsck": BRIDGE_FSCK,
     "bridge_preview": BRIDGE_RUN,
+    "bridge_run": BRIDGE_RUN,
     "bridge_sync": BRIDGE_RUN,
     "bridge_status": BRIDGE_STATUS,
     "bridge_pause": BRIDGE_CONTROL,

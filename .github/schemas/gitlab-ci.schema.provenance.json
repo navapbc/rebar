@@ -1,0 +1,11 @@
+{
+  "source_url": "https://gitlab.com/api/v4/projects/gitlab-org%2Fgitlab/repository/files/app%2Fassets%2Fjavascripts%2Feditor%2Fschema%2Fci.json/raw?ref=776c20ad5675eecea0c2010433a94d98d745e921",
+  "requested_github_raw_url": "https://raw.githubusercontent.com/gitlab-org/gitlab/776c20ad5675eecea0c2010433a94d98d745e921/app/assets/javascripts/editor/schema/ci.json",
+  "requested_github_raw_result": "HTTP 404",
+  "repository": "gitlab-org/gitlab",
+  "path": "app/assets/javascripts/editor/schema/ci.json",
+  "revision": "776c20ad5675eecea0c2010433a94d98d745e921",
+  "retrieved_at": "2026-08-10",
+  "dialect": "http://json-schema.org/draft-07/schema#",
+  "sha256": "7568b544b4b95102f21e9fd89d769d54ee6f86b35d2fbb7f7b947d6fa9fc4dda"
+}
