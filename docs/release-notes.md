@@ -8,6 +8,23 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Destructive repairs now own a durable reconciler pause
+
+Live `rebar fsck --repair` and `rebar doctor --repair` no longer depend on GitHub
+Actions workflow disable/enable calls. Before any repair mutation, both commands now
+CAS-create a uniquely owned pause on `refs/reconciler/gate`, then fail closed unless
+`refs/reconciler/lock` is provably free. The same contract therefore applies to local,
+GitHub Actions, Jenkins, GitLab, and bare-repository environments. A configured Git
+`user.email` is required, and an existing pause always belongs to another operation and
+is never replaced or cleared by repair.
+
+Cleanup re-reads the pause document and OID as one snapshot and deletes only the exact
+pause created by that invocation. Missing, changed, or concurrently replaced state—and
+any transport, authentication, timeout, or CAS uncertainty—leaves the durable pause in
+place for operator recovery. Inspect its owner and reason with `rebar bridge status`;
+after confirming that no repair is still running and that the pause is safe to remove,
+clear it explicitly with `rebar bridge resume`.
+
 ## Bridge operations are now first-class library and MCP APIs
 
 The public library and MCP server now expose typed `bridge_preview`, `bridge_sync`,
