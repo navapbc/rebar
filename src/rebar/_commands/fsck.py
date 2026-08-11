@@ -27,6 +27,7 @@ import sys
 import time
 
 from rebar import config
+from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
 
 # ``--repair`` cluster extracted to the ``fsck_repair`` leaf module (module-size
 # split, epic 716f). The two shared filesystem helpers ``_ticket_dirs`` and
@@ -38,6 +39,7 @@ from rebar._commands.fsck_repair import (  # noqa: F401
     _HUMAN_TRIAGE_ORPHAN_TYPES,
     _has_retired_create,
     _is_stale_channel_snapshot,
+    _reconciler_in_flight,
     _repair_plan,
     _repair_run,
     _repair_ticket,
@@ -575,6 +577,81 @@ def _transform_json(text: str, compat_error: dict | None = None) -> str:
     return json.dumps(payload)
 
 
+def _run_live_repair(
+    tracker: str,
+    *,
+    limit: int | None,
+    repo_root,
+    only: str | None,
+) -> tuple[list[str], list[str]]:
+    """Run both mutating fsck repair phases under one durable pause."""
+    with owned_repair_pause("fsck", repo_root, in_flight_probe=_reconciler_in_flight):
+        repair_lines, _unresolved = _repair_run(
+            tracker,
+            dry_run=False,
+            limit=limit,
+            repo_root=repo_root,
+            only=only,
+            _pause_owned=True,
+        )
+        ensure_lines: list[str] = []
+        if only is None:
+            from rebar._store import ensures as _ensures
+
+            outcomes = _ensures.run_ensures(tracker)
+            changed = [outcome.id for outcome in outcomes if outcome.status == "changed"]
+            failed = [outcome.id for outcome in outcomes if outcome.status == "failed"]
+            ensure_lines.append(
+                f"ensures: swept {len(outcomes)} unit(s); "
+                f"{len(changed)} changed, {len(failed)} failed"
+            )
+            ensure_lines += [
+                f"  ensure {outcome.id}: {outcome.status} ({outcome.detail})"
+                for outcome in outcomes
+                if outcome.status != "ok"
+            ]
+        return repair_lines, ensure_lines
+
+
+def _repair_cli(
+    tracker: str,
+    *,
+    dry_run: bool,
+    limit: int | None,
+    repo_root,
+    only: str | None,
+    no_mutate: bool,
+    fmt: str,
+) -> int:
+    """Drive the repair surface and render its preserved report contract."""
+    if no_mutate and not dry_run:
+        sys.stderr.write("Error: --repair requires mutation; use --dry-run for a preview\n")
+        return 2
+    ensure_lines: list[str] = []
+    if dry_run:
+        repair_lines, _unresolved = _repair_run(
+            tracker, dry_run=True, limit=limit, repo_root=repo_root, only=only
+        )
+    else:
+        try:
+            repair_lines, ensure_lines = _run_live_repair(
+                tracker, limit=limit, repo_root=repo_root, only=only
+            )
+        except RepairPauseError as exc:
+            sys.stderr.write(f"{exc.message}\n")
+            return exc.returncode
+    scan_lines, issue_count = _scan(tracker, no_mutate or dry_run, repo_root)
+    summary = (
+        "fsck complete: no issues found"
+        if issue_count == 0
+        else f"fsck complete: {issue_count} issues found"
+    )
+    rc = 0 if issue_count == 0 else 1
+    full = "\n".join(repair_lines + ensure_lines + scan_lines + [summary])
+    sys.stdout.write((_transform_json(full) if fmt == "json" else full) + "\n")
+    return rc
+
+
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     # RC2b Option 1: --repair-snapshots opts into rebuilding a stale SNAPSHOT that has
     # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
@@ -643,42 +720,15 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
 
     # ── A3 remediation (--repair): drive the store to fsck-zero ──────────────
     if do_repair:
-        if no_mutate and not dry_run:
-            sys.stderr.write("Error: --repair requires mutation; use --dry-run for a preview\n")
-            return 2
-        repair_lines, _unresolved = _repair_run(
-            tracker, dry_run=dry_run, limit=limit, repo_root=repo_root, only=only
+        return _repair_cli(
+            tracker,
+            dry_run=dry_run,
+            limit=limit,
+            repo_root=repo_root,
+            only=only,
+            no_mutate=no_mutate,
+            fmt=fmt,
         )
-        # Fold the idempotent ensure-sweep into the existing "drive healthy" verb
-        # (epic odd-vortex-elbow / WS3): a DISTINCT phase from the A3 data-repair —
-        # run_ensures takes + releases the store write lock itself (no nesting), and
-        # is log-and-continue (a failed unit never rolls back committed ticket data).
-        # Only on a live run; --dry-run stays read-only and does not sweep.
-        ensure_lines: list[str] = []
-        if not dry_run and only is None:
-            from rebar._store import ensures as _ensures
-
-            outcomes = _ensures.run_ensures(tracker)
-            changed = [o.id for o in outcomes if o.status == "changed"]
-            failed = [o.id for o in outcomes if o.status == "failed"]
-            ensure_lines.append(
-                f"ensures: swept {len(outcomes)} unit(s); "
-                f"{len(changed)} changed, {len(failed)} failed"
-            )
-            ensure_lines += [
-                f"  ensure {o.id}: {o.status} ({o.detail})" for o in outcomes if o.status != "ok"
-            ]
-        # Re-scan for the residual state (read-only in dry-run so it writes nothing).
-        scan_lines, issue_count = _scan(tracker, no_mutate or dry_run, repo_root)
-        summary = (
-            "fsck complete: no issues found"
-            if issue_count == 0
-            else f"fsck complete: {issue_count} issues found"
-        )
-        rc = 0 if issue_count == 0 else 1
-        full = "\n".join(repair_lines + ensure_lines + scan_lines + [summary])
-        sys.stdout.write((_transform_json(full) if fmt == "json" else full) + "\n")
-        return rc
 
     # ``no_mutate`` is passed by the caller (the library's read-only fsck surface),
     # not read from the environment: read paths (list/show via rebar.fsck(report_only=

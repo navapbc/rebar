@@ -172,6 +172,45 @@ def test_pause_blob_retains_the_legacy_gate_field(
     }
 
 
+def test_read_pause_with_oid_uses_one_observation_and_preserves_legacy_read(
+    ref_lock: ModuleType,
+    repo: Path,
+    ref_backend,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_oid = ref_lock.set_pause(
+        repo,
+        reason="repair:fsck:owned",
+        who="operator@example.com",
+        paused_at="2026-08-09T17:00:00Z",
+    )
+    legacy = ref_lock.read_pause(repo)
+    observed: list[str | None] = []
+    original_ref_oid = ref_lock._ref_oid
+
+    def one_observation(*args, **kwargs):
+        observed.append(original_ref_oid(*args, **kwargs))
+        return observed[-1]
+
+    monkeypatch.setattr(ref_lock, "_ref_oid", one_observation)
+
+    pause, oid = ref_lock.read_pause_with_oid(repo)
+
+    assert observed == [first_oid]
+    assert oid == first_oid
+    assert (
+        pause
+        == legacy
+        == {
+            "gated_mode": "reconcile-check",
+            "paused": True,
+            "reason": "repair:fsck:owned",
+            "who": "operator@example.com",
+            "paused_at": "2026-08-09T17:00:00Z",
+        }
+    )
+
+
 def _legacy_decode_gate(raw: bytes) -> str:
     """Verbatim pre-pause decoder shipped by the previous binary."""
     if not raw:

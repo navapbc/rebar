@@ -11,10 +11,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Module-level logger
-# ---------------------------------------------------------------------------
-
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -63,11 +59,6 @@ DEFAULT_LEASE_SECS = 120
 
 # Blob field contract (Design decision 3): the closed set + their runtime types.
 _REQUIRED_FIELDS = ("holder", "lease_secs", "heartbeat_ns", "fence")
-
-
-# ---------------------------------------------------------------------------
-# Exceptions
-# ---------------------------------------------------------------------------
 
 
 class RefLockError(RuntimeError):
@@ -662,8 +653,19 @@ def read_pause(
     repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None
 ) -> dict[str, object] | None:
     """Return a validated pause document; legacy gated-mode blobs remain readable."""
+    snapshot = read_pause_with_oid(repo_root, ref, remote=remote)
+    return None if snapshot is None else snapshot[0]
+
+
+def read_pause_with_oid(
+    repo_root: Path, ref: str = GATE_REF, *, remote: str | None = None
+) -> tuple[dict[str, object], str] | None:
+    """Read one pause snapshot, keeping its observed OID as the CAS anchor."""
     oid = _ref_oid(repo_root, ref, remote=remote)
-    return None if oid is None else _decode_pause(_read_blob_bytes(repo_root, ref, oid))
+    if oid is None:
+        return None
+    pause = _decode_pause(_read_blob_bytes(repo_root, ref, oid))
+    return None if pause is None else (pause, oid)
 
 
 def _pause_conflict(repo_root: Path, ref: str, remote: str | None) -> RefLockError:

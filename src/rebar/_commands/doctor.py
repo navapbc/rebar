@@ -32,6 +32,7 @@ import json
 import sys
 from typing import Any
 
+from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store.gitutil import run_git
@@ -223,23 +224,18 @@ def run_repair(
     findings: list[dict[str, Any]], tracker: str, *, repo_root=None
 ) -> tuple[list[dict[str, Any]], str]:
     """Repair every finding under the write lock. Returns (findings, pre_oid)."""
-    if _reconciler_in_flight(repo_root):
-        raise CommandError(
-            "Error: a reconciler pass is in flight (refs/reconciler/lock held or "
-            "unreadable) — refusing to repair; retry once the pass completes"
-        )
-
-    # NO outer write lock. Every event write already takes the tracker write lock
-    # for itself (append_event -> write_and_push -> stage_and_commit -> write_lock),
-    # and that lock is NOT re-entrant: an outer hold made each inner acquisition
-    # block until its 60s timeout and fail, so a repair pass completed nothing while
-    # serialising the tracker for every other writer. Repair is resumable by design
-    # (the replacement link is written before the stale unlink), so it needs no
-    # cross-item atomicity — per-write locking is both correct and the only thing
-    # that works.
-    pre_oid = _pre_tag(tracker)
-    for finding in findings:
-        repair_finding(finding, tracker, repo_root=repo_root)
+    with owned_repair_pause("doctor", repo_root, in_flight_probe=_reconciler_in_flight):
+        # NO outer write lock. Every event write already takes the tracker write lock
+        # for itself (append_event -> write_and_push -> stage_and_commit -> write_lock),
+        # and that lock is NOT re-entrant: an outer hold made each inner acquisition
+        # block until its 60s timeout and fail, so a repair pass completed nothing while
+        # serialising the tracker for every other writer. Repair is resumable by design
+        # (the replacement link is written before the stale unlink), so it needs no
+        # cross-item atomicity — per-write locking is both correct and the only thing
+        # that works.
+        pre_oid = _pre_tag(tracker)
+        for finding in findings:
+            repair_finding(finding, tracker, repo_root=repo_root)
 
     return findings, pre_oid
 

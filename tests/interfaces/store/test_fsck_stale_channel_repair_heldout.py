@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -95,7 +96,7 @@ def test_default_orphan_rebuild_is_committed_and_pushed_by_batch_driver(
 
     pushes: list[tuple[str, ...]] = []
     monkeypatch.setattr("rebar._commands.compact.rebuild_snapshot_from_full_log", _rebuild)
-    monkeypatch.setattr(fsck_repair, "_reconciler_pause", lambda repo_root=None: False)
+    monkeypatch.setattr(fsck_repair, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
     monkeypatch.setattr(fsck_repair, "_has_remote", lambda _tracker: True)
     monkeypatch.setattr(
@@ -129,7 +130,7 @@ def test_stale_only_cli_skips_unrelated_ensure_sweep(tmp_path: Path, monkeypatch
         return True
 
     monkeypatch.setattr("rebar._commands.compact.rebuild_snapshot_from_full_log", _rebuild)
-    monkeypatch.setattr(fsck_repair, "_reconciler_pause", lambda repo_root=None: False)
+    monkeypatch.setattr(fsck, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
 
     def _unexpected_ensure(_tracker):
@@ -187,7 +188,7 @@ def test_stale_only_push_failure_keeps_pretag_for_disposable_rollback(
         return True
 
     monkeypatch.setattr("rebar._commands.compact.rebuild_snapshot_from_full_log", _rebuild)
-    monkeypatch.setattr(fsck_repair, "_reconciler_pause", lambda repo_root=None: False)
+    monkeypatch.setattr(fsck_repair, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
     monkeypatch.setattr(fsck_repair, "_has_remote", lambda _tracker: True)
     monkeypatch.setattr(
@@ -229,7 +230,7 @@ def test_failed_stale_rebuild_is_reported_as_remaining(tmp_path: Path, monkeypat
         "rebar._commands.compact.rebuild_snapshot_from_full_log",
         lambda *_args, **_kwargs: False,
     )
-    monkeypatch.setattr(fsck_repair, "_reconciler_pause", lambda repo_root=None: False)
+    monkeypatch.setattr(fsck_repair, "owned_repair_pause", lambda *_args, **_kwargs: nullcontext())
     monkeypatch.setattr(fsck_repair, "_reconciler_in_flight", lambda repo_root=None: False)
 
     lines, unresolved = fsck._repair_run(str(tracker), dry_run=False, only="stale-channel")
