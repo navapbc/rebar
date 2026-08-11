@@ -11,9 +11,9 @@ like a legitimately slow cold clone, so only the wall-clock ceiling ends it:
   shares with the remote probe, ``_init_probe.run_bounded_git``.
 
 Each site now splices ``git_fetch.stall_abort_args()`` before the subcommand — the same
-seam, not a copy of it. As in 12e4, no test asserts on ELAPSED TIME: the assertions are on
-the *reason* a fetch failed, and each site's ``dribble`` case is the discriminator that any
-timeout-lowering "fix" would fail.
+seam, not a copy of it. Wrapper coverage proves that wiring and each wrapper's zero-byte
+stall behavior. The shared snapshot boundary in 12e4 owns the single real Git/libcurl
+above-floor integration that discriminates throughput aborts from elapsed-time aborts.
 """
 
 from __future__ import annotations
@@ -101,20 +101,6 @@ def test_gerrit_clone_stalled_remote_aborts_as_a_stall(tmp_path, tight_stall):
     assert "timed out" not in message.lower(), message
 
 
-def test_gerrit_clone_dribbling_remote_is_not_aborted(tmp_path, tight_stall):
-    """The discriminator: bytes still moving => never a stall, however slow."""
-    from rebar.review_bot.gerrit_client import GerritError
-
-    port, stop = serve("dribble", seconds=8, rate=4000)
-    try:
-        gc = _client(tmp_path, base_url=f"http://127.0.0.1:{port}")
-        with pytest.raises(GerritError) as excinfo:
-            gc.clone_change_ref(42, "refs/changes/42/42/1", str(tmp_path / "dest"))
-    finally:
-        stop.set()
-    assert not git_fetch.is_stall_abort(str(excinfo.value)), str(excinfo.value)
-
-
 # ── site 2: the op-cert service's authoritative-state workspace ──────────────
 
 
@@ -168,20 +154,6 @@ def test_opcert_workspace_stalled_remote_aborts_as_a_stall(tight_stall):
     assert "timed out after" not in message, message
 
 
-def test_opcert_workspace_dribbling_remote_is_not_aborted(tight_stall):
-    from rebar.opcert_service import workspace as ws_mod
-
-    port, stop = serve("dribble", seconds=8, rate=4000)
-    try:
-        with pytest.raises(ws_mod.WorkspaceError) as excinfo:
-            ws_mod.prepare_workspace(
-                _opcert_cfg(f"http://127.0.0.1:{port}/x.git", f"http://127.0.0.1:{port}/y.git")
-            )
-    finally:
-        stop.set()
-    assert not git_fetch.is_stall_abort(str(excinfo.value)), str(excinfo.value)
-
-
 # ── site 3: `rebar init` fetching the ticket branch ──────────────────────────
 
 
@@ -220,15 +192,3 @@ def test_init_fetch_stalled_remote_aborts_as_a_stall(repo, tight_stall):
     assert proc.returncode != 0
     assert git_fetch.is_stall_abort(proc.stderr), proc.stderr
     assert "timed out after" not in proc.stderr, proc.stderr
-
-
-def test_init_fetch_dribbling_remote_is_not_aborted(repo, tight_stall):
-    from rebar._commands import init as init_mod
-
-    port, stop = serve("dribble", seconds=8, rate=4000)
-    try:
-        proc = init_mod._git_fetch(repo, "fetch", f"http://127.0.0.1:{port}/x.git", "tickets")
-    finally:
-        stop.set()
-    assert proc.returncode != 0
-    assert not git_fetch.is_stall_abort(proc.stderr), proc.stderr

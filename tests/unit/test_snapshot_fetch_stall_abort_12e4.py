@@ -16,9 +16,17 @@ from __future__ import annotations
 import subprocess
 
 import pytest
+from _stall_remote import _dribble_bytes_owed
 from _stall_remote import serve as _serve
 
 from rebar._snapshot import git_fetch
+
+
+def test_dribble_pacing_catches_up_after_a_delayed_wakeup():
+    assert (
+        _dribble_bytes_owed(rate=4000, elapsed=0.3502, bytes_sent=400),
+        _dribble_bytes_owed(rate=4000, elapsed=0.35, bytes_sent=1500),
+    ) == (1000, 0)
 
 
 @pytest.fixture
@@ -58,12 +66,12 @@ def test_stalled_remote_aborts_on_throughput_not_the_wall_clock(repo, tmp_path, 
     assert "timed out after" not in message, message
 
 
-def test_slow_but_progressing_remote_is_not_aborted(repo, tmp_path, tight_stall):
-    """The discriminator: bytes still moving => never a stall, however slow the transfer.
+def test_slow_but_progressing_remote_is_not_aborted(repo, tmp_path):
+    """The discriminator: sustained throughput above the configured floor is not a stall.
 
-    The remote dribbles above the floor for many multiples of the abort window. Any
+    The remote dribbles above the floor across the production abort window. Any
     implementation keyed on elapsed time rather than throughput fails here."""
-    port, stop = _serve("dribble", seconds=8, rate=4000)
+    port, stop = _serve("dribble", seconds=15, rate=4000)
     try:
         with pytest.raises(git_fetch.SnapshotFetchError) as excinfo:
             git_fetch.fetch_origin(

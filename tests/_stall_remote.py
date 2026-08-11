@@ -18,6 +18,11 @@ import threading
 import time
 
 
+def _dribble_bytes_owed(*, rate: int, elapsed: float, bytes_sent: int) -> int:
+    """Return bytes needed to reach the cumulative target for ``elapsed``."""
+    return max(0, int(rate * elapsed) - bytes_sent)
+
+
 def serve(mode: str, *, seconds: float, rate: int = 0) -> tuple[int, threading.Event]:
     """Bind a local HTTP-ish remote and return its port plus a shutdown flag.
 
@@ -43,9 +48,24 @@ def serve(mode: str, *, seconds: float, rate: int = 0) -> tuple[int, threading.E
             )
             deadline = time.monotonic() + seconds
             chunk = b"x" * max(1, rate // 10)
+            bytes_sent = 0
+            pacing_started = time.monotonic()
             while not stop.is_set() and time.monotonic() < deadline:
                 if mode == "dribble":
-                    conn.sendall(chunk)
+                    now = time.monotonic()
+                    if bytes_sent == 0:
+                        bytes_owed = len(chunk)
+                        if rate > 0:
+                            pacing_started = now - bytes_owed / rate
+                    else:
+                        bytes_owed = _dribble_bytes_owed(
+                            rate=rate,
+                            elapsed=now - pacing_started,
+                            bytes_sent=bytes_sent,
+                        )
+                    if bytes_owed:
+                        conn.sendall(b"x" * bytes_owed)
+                        bytes_sent += bytes_owed
                 time.sleep(0.1)
         except OSError:
             pass
