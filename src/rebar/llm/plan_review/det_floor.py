@@ -21,8 +21,9 @@ The checks
 * **P3 package existence** — probes explicit dependency references against the
   oracle's T0 deps lane. Coverage only, **never blocks**.
 * **P4 oversize signals** — a plan-size heuristic (AC count / file-impact count /
-  description length). Advisory finding, **never blocks**. (``scc``/``lizard``
-  code metrics apply to code-review, epic ``9da1`` — a plan has no diff to size.)
+  description length). Description overflow **BLOCKS**; AC count and file-impact
+  remain advisory. (``scc``/``lizard`` code metrics apply to code-review, epic
+  ``9da1`` — a plan has no diff to size.)
 * **P5 task-DAG validity + interference** — for a container, detects dependency
   **cycles** among children (**BLOCKS** — sound + unambiguous) and file-impact
   interference between unordered children (advisory).
@@ -45,8 +46,8 @@ The checks
   both word boundaries, code-span aware) over AC item lines only. **BLOCKS.**
   (ticket 49b8; :mod:`det_clarity`; P6's advisory lexicon shares the matcher.)
 
-The only sound, unambiguous blockers are therefore **P1, P5 (cycle), P8, P10,
-and P11**. Everything else is advisory or coverage-only, consistent with "the
+The only sound, unambiguous blockers are therefore **P1, P4 (description), P5 (cycle),
+P8, P10, and P11**. Everything else is advisory or coverage-only, consistent with "the
 DET floor blocks only on sound, unambiguous checks and fails open on everything
 else".
 """
@@ -59,6 +60,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from rebar._plan_clarity import evaluate_plan_clarity
+from rebar.config import ConfigError
 
 from .det_clarity import (
     p10_verification_presence,
@@ -100,9 +102,9 @@ class DetResult:
 
     ``status`` is ``pass`` (check ran, clean), ``fail`` (check ran, found a
     defect), or ``abstain`` (check could not run — fail-open, treated as pass).
-    ``blocking`` is True only for a *blocking* fail (P1/P5-cycle/P8/P10/P11). ``finding``
-    carries the structured defect on a fail. ``coverage`` records whether the
-    check actually ran and why (so the attestation can report completeness)."""
+    ``blocking`` is True only for a *blocking* fail (P1/P4-description/P5-cycle/P8/P10/P11).
+    ``finding`` carries the structured defect on a fail. ``coverage`` records whether the check
+    actually ran and why (so the attestation can report completeness)."""
 
     id: str
     name: str
@@ -362,42 +364,65 @@ def p3_package_existence(ctx: PlanContext) -> DetResult:
     )
 
 
-# ── P4 oversize signals (plan-size heuristic, advisory) ────────────────────────
+# ── P4 oversize signals ────────────────────────────────────────────────────────
 P4_AC_SOFT_CAP = 25  # checklist items
 P4_FILE_IMPACT_SOFT_CAP = 30  # file-impact entries
-P4_DESC_SOFT_CAP_CHARS = 24_000
+
+
+def _description_limit(repo_root: str | None) -> int:
+    """Resolve the shared typed gate limit (including its packaged default)."""
+    from rebar import config as _config
+
+    return _config.load_config(repo_root).verify.max_ticket_description_chars
 
 
 def p4_oversize(ctx: PlanContext) -> DetResult:
-    """Advisory. A plan-size heuristic: an unusually large AC count / file-impact
-    set / description length is a *signal* the unit may be too big for one session
-    (the deterministic precursor to the G5 decomposition judgment). Never blocks —
-    sizing is ultimately a judgment call P8 backstops with a hard limit."""
+    """Report one size finding; only a description above the configured limit blocks."""
     ac = _count_ac_items(ctx.plan_text)
     fi = len(ctx.state.get("file_impact") or [])
     chars = len(ctx.description)
+    desc_limit = _description_limit(ctx.repo_root)
+    description_over_limit = chars > desc_limit
     signals = []
     if ac > P4_AC_SOFT_CAP:
         signals.append(f"{ac} acceptance-criteria items (> {P4_AC_SOFT_CAP})")
     if fi > P4_FILE_IMPACT_SOFT_CAP:
         signals.append(f"{fi} file-impact entries (> {P4_FILE_IMPACT_SOFT_CAP})")
-    if chars > P4_DESC_SOFT_CAP_CHARS:
-        signals.append(f"description is {chars} chars (> {P4_DESC_SOFT_CAP_CHARS})")
-    cov = {"ran": True, "ac_items": ac, "file_impact": fi, "desc_chars": chars}
+    if description_over_limit:
+        signals.append(f"description is {chars} chars (> {desc_limit})")
+    cov = {
+        "ran": True,
+        "ac_items": ac,
+        "file_impact": fi,
+        "desc_chars": chars,
+        "desc_limit_chars": desc_limit,
+    }
     if not signals:
         return DetResult("P4", "oversize", "pass", coverage=cov)
     return DetResult(
         "P4",
         "oversize",
         "fail",
+        blocking=description_over_limit,
         finding={
-            "finding": "Oversize signals suggest this unit may be too large for one session.",
+            "finding": (
+                "Ticket description exceeds the review admission limit."
+                if description_over_limit
+                else "Oversize signals suggest this unit may be too large for one session."
+            ),
             "evidence": signals,
             "impact": (
-                "Large units compound early errors and are hard to one-shot; "
-                "consider G5 decomposition."
+                "Oversized tickets exhaust plan-review and completion-verifier resources."
+                if description_over_limit
+                else (
+                    "Large units compound early errors and are hard to one-shot; "
+                    "consider G5 decomposition."
+                )
             ),
-            "suggested_fix": "Split into smaller child tickets, each a coherent single outcome.",
+            "suggested_fix": (
+                f"Reduce the description to at most {desc_limit} characters, usually by splitting "
+                "independent work into coherent child tickets."
+            ),
         },
         coverage=cov,
     )
@@ -691,11 +716,13 @@ def run_det_floor(ctx: PlanContext) -> list[DetResult]:
        results, so the floor is byte-identical for a repo with no project DET criterion).
 
     An unexpected error in a check becomes an ``abstain`` (logged), never an exception that aborts
-    the floor — for both phases."""
+    the floor — for both phases. Invalid operator configuration still fails fast."""
     results: list[DetResult] = []
     for check in DET_CHECKS:
         try:
             results.append(check(ctx))
+        except ConfigError:
+            raise
         except Exception as exc:
             # A DET check raising is an internal bug (not an expected fail-open like an
             # absent oracle): record the abstain in-band AND log it with the traceback so
@@ -730,7 +757,7 @@ def det_finding_has_subject(finding: dict) -> bool:
 
 
 def det_blocking_findings(results: list[DetResult]) -> list[dict]:
-    """The blocking findings from a DET run (P1/P5-cycle/P8/P10/P11), each tagged with its
+    """Blocking findings (P1/P4-description/P5-cycle/P8/P10/P11), each tagged with its
     criterion id — the orchestrator surfaces these as the gate's hard blocks. Subject-less
     DET findings are dropped by the hygiene backstop (:func:`det_finding_has_subject`)."""
     out = []
@@ -744,9 +771,9 @@ def det_blocking_findings(results: list[DetResult]) -> list[dict]:
 
 
 def det_advisory_findings(results: list[DetResult]) -> list[dict]:
-    """The non-blocking DET findings (P4/P6/P7 + P5 interference), surfaced as advisory
-    coaching alongside the LLM-tier advisory set. Subject-less DET findings are dropped by the
-    hygiene backstop (:func:`det_finding_has_subject`) — this is DET-scoped by construction
+    """Non-blocking DET findings (P4 AC/file signals, P6/P7, P5 interference), surfaced as
+    advisory coaching alongside the LLM-tier advisory set. Subject-less DET findings are dropped
+    by the hygiene backstop (:func:`det_finding_has_subject`) — this is DET-scoped by construction
     (LLM-tier findings never flow through this function)."""
     out = []
     for r in results:

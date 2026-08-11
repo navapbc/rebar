@@ -84,11 +84,12 @@ The gate has **two layers**:
 * **Layer 1 — the deterministic floor (P1–P11)** — `det_floor.py`. The *only* tier
   that blocks **by default**. Frozen, deterministic, polyglot, fail-open. The
   sound, unambiguous blockers are **P1** (missing `## Acceptance Criteria`
-  checklist), **P5** (a dependency *cycle* among children), **P8** (the ticket
+  checklist), **P4** (description above `verify.max_ticket_description_chars`, default 8,000),
+  **P5** (a dependency *cycle* among children), **P8** (the ticket
   is too big to review in full even one criterion at a time → "reduce/decompose"),
   **P10** (verification-presence), and **P11** (AC vagueness).
   P2/P3 (file/package resolution via the grounding oracle) are coverage-only;
-  P4/P6/P7 (oversize / AC-quality / destructive-op sniff) are advisory.
+  P4's AC-count and file-impact signals, P6, and P7 are advisory.
 
   **Clarity floor P10 + P11 (ticket 49b8; `det_clarity.py`, the same module-size
   seam as `det_lint`).** Two BLOCKING checks added after backtests over the 7-day

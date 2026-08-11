@@ -8,7 +8,7 @@ prompt/contract model) and the sibling modules (:mod:`.det_floor`, :mod:`.passes
    — content is ALWAYS whole; never truncated, never content-chunked (the gate-context-
    never-elided invariant; ADR 0066 records why eliding it is a signed-false-PASS attack).
 2. **DET tier** — run the deterministic floor (P1–P11) via the code executor; its
-   blocking findings (P1/P5-cycle/P8/P10/P11) are the gate's only default blocks.
+   blocking findings (P1/P4-description/P5-cycle/P8/P10/P11) are the gate's default blocks.
 3. **Route** the LLM criteria: ``applies_at`` proportionate scrutiny + overlay
    triggering; only the code-grounding set greps the codebase.
 4. **Pass 1** — facet-chunked single-turn finders + one agent per code-grounding

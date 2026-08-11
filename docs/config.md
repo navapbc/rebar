@@ -96,6 +96,8 @@ by `rebar -c SECTION.KEY=VALUE`. Each is consumed by routing through `load_confi
 verify.verify_window_headroom      = 0.8     # plan-review Pass-2 verify: fraction of the verifier
                                              # model window a single verify request may use before
                                              # the findings are split into multiple calls (0.1–1.0)
+verify.max_ticket_description_chars = 8000   # blocking plan-review and completion admission limit;
+                                             # 8,000 is allowed, 8,001 blocks. Positive integer.
 # Progressive drift-refresh of drifted findings during plan review is now
 # always-on (unconditional; no config toggle).
 verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
@@ -184,6 +186,14 @@ ensure.hint_interval_secs = 86400    # min seconds between write-path "store is 
 ensure.hint_enabled       = true     # kill-switch: false silences the nudge entirely
                                       # (env REBAR_ENSURE_HINT_ENABLED)
 ```
+
+The default description limit is calibrated just above the historical p99 (7,500 characters):
+8,000 affected 18 of 2,202 work tickets (0.82%) while capturing the tail with materially slower
+plan reviews and less reliable completion verification. This is admission control, not content
+transformation: rebar does not truncate, summarize, or elide the ticket to fit. Reduce the
+description, usually by moving independent work into child tickets. A human operator can still use
+the existing lifecycle `--force=<reason>` escape hatch to claim or close without the corresponding
+attestation; force does not make the oversized description pass either review gate.
 
 > **Resolution change (tracker.dir).** `tracker_dir()` (and the new `tickets_branch()`) now
 > resolve through the full precedence chain (`-c` flag > `REBAR_<KEY>` env > project > user >

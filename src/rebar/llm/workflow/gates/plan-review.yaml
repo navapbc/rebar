@@ -4,7 +4,7 @@ description: >-
   The plan-review gate expressed as a v3 engine workflow (epic B, stories B2 + B5; the SOLE
   plan-review gate since the bespoke driver was retired in B-RETIRE). Its control flow is a
   deterministic Layer-1 floor (P1-P11) that SHORT-CIRCUITS (an exempt ticket type, or ANY DET
-  blocking finding — P1/P5-cycle/P8/P10/P11, widened from the old P8-only branch by story 228b,
+  blocking finding — P1/P4-description/P5-cycle/P8/P10/P11, widened from the old P8-only branch,
   yields a terminal verdict with NO LLM call; a DET-passing plan runs the four-pass review),
   then the four-pass review:
   route_criteria assembles the INCLUDED criteria (proportionate scrutiny + overlay
