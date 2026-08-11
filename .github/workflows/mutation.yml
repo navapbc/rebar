@@ -1,0 +1,20 @@
+name: Mutation Testing Sweep
+
+on:
+  schedule:
+    # Weekly rather than per-push: changed shards already block in Gerrit Verified.
+    - cron: "23 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-sweep-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mutation:
+    uses: ./.github/workflows/_mutation.yml
+    with:
+      all-shards: true

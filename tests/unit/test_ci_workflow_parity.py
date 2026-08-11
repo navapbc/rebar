@@ -33,6 +33,7 @@ _REUSABLE_OPTIONALITY = "./.github/workflows/_optionality.yml"
 # The reusable gate+suite workflow both CI lanes now delegate to (this refactor). Its presence
 # in BOTH caller files is what makes the two lanes share one definition — no drift by construction.
 _REUSABLE_BAT = "./.github/workflows/_build-and-test.yml"
+_REUSABLE_MUTATION = "./.github/workflows/_mutation.yml"
 
 # Pre-commit hooks whose PASS/FAIL depends on the current git branch / HEAD state rather
 # than on file content. `pre-commit run --all-files` therefore behaves DIFFERENTLY between
@@ -106,6 +107,30 @@ def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
         f"gerrit-verify.yaml no longer delegates to the shared gate workflow ({_REUSABLE_BAT}) — "
         "the Verified gate would drift from branch CI. Call the reusable, don't inline the gates."
     )
+
+
+def test_mutation_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
+    """Targeted mutation checks must run on branch/PR plus the exact Gerrit patchset."""
+    test_yml = _read(_TEST_YML)
+    gerrit_yml = _read(_GERRIT_YML)
+
+    assert _REUSABLE_MUTATION in test_yml
+    assert _REUSABLE_MUTATION in gerrit_yml
+    assert "gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}" in gerrit_yml
+    assert "mutation" in gerrit_yml.split("  vote:", 1)[1].split("runs-on:", 1)[0]
+
+
+def test_mutation_workflows_are_bounded_and_publish_results() -> None:
+    reusable = _read(_ROOT / ".github" / "workflows" / "_mutation.yml")
+    broad = _read(_ROOT / ".github" / "workflows" / "mutation.yml")
+
+    assert "timeout-minutes: 30" in reusable
+    assert "if: always()" in reusable
+    assert "upload-artifact" in reusable
+    assert "--all-shards" in reusable
+    assert _REUSABLE_MUTATION in broad
+    assert "schedule:" in broad
+    assert "workflow_dispatch:" in broad
 
 
 def test_shared_gate_signatures_live_in_the_reusable() -> None:
@@ -229,10 +254,10 @@ def test_optionality_contract_gates_the_verified_path() -> None:
         "patchset (a plain checkout under workflow_dispatch resolves to main → silent false PASS)."
     )
     # The vote must wait for optionality so the run-conclusion snapshot sees a terminal result.
-    vote_needs_optionality = (
-        "build-and-test, optionality" in gerrit_yml or "optionality, build-and-test" in gerrit_yml
-    )
-    assert vote_needs_optionality, (
+    import yaml
+
+    vote_needs = yaml.safe_load(gerrit_yml)["jobs"]["vote"]["needs"]
+    assert "optionality" in vote_needs, (
         "the `vote` job must list `optionality` in its `needs` so its conclusion is folded into "
         "the Verified vote (otherwise the run-conclusion snapshot can miss it)."
     )

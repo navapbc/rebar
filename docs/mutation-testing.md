@@ -1,186 +1,93 @@
 # Mutation testing
 
-Mutation testing measures whether the test suite actually *constrains* behavior:
-a tool rewrites small pieces of the source (a `>=` becomes `>`, a `+` becomes `-`,
-a string or dict key is altered) and re-runs the tests against each mutant. A
-mutant the tests catch is **killed**; one the tests pass anyway **survives** — a
-survivor marks a line whose behavior no test pins. The kill rate (the *mutation
-score*) is a sharper signal than line coverage: a line can be executed yet have
-nothing asserted about it.
+Mutation testing checks whether tests constrain behavior rather than merely execute code.
+mutmut makes small source changes; a useful test suite kills those mutants by failing.
 
-rebar uses [mutmut](https://github.com/boxed/mutmut) (3.x). The configuration is
-committed in `pyproject.toml` under `[tool.mutmut]`; this document records the
-scope, the invocation, and the recorded scores (2026-06-14).
+## Source of truth
 
-## Scope
+`.github/mutation-shards.toml` is authoritative for protected source modules, selected tests,
+support inputs, score/count ceilings, and accepted equivalent-mutant fingerprints. Do not copy
+those mappings or numbers into this document or `pyproject.toml`. `scripts/mutation_gate.py`
+generates the effective mutmut configuration for each run.
 
-mutmut walks every `.py` under `source_paths` and mutates only the files matched
-by `only_mutate`. The scope is the highest-value behavioral cores rather than the
-whole tree, so a full run finishes in a few minutes:
+The runtime contract is Python 3.12 and `mutmut==3.7.0`, locked in `uv.lock`. Mutation runs use
+one child, a 30-minute job limit, and mutmut's `(clean-test duration + 1 second) x 15` per-mutant
+timeout. The selected clean tests must pass before mutation starts.
 
-| Module | Role |
-|--------|------|
-| `src/rebar/signing.py` | HMAC manifest signing + verdict logic |
-| `src/rebar/_engine_support/gates.py` | per-ticket quality gates (clarity / check-ac / quality) |
-| `src/rebar/_engine_support/next_batch.py` | conflict-aware next-batch selector |
-| `src/rebar/_engine_support/validate.py` | repo-wide tracker-health scoring |
-| `src/rebar/reducer/_processors.py` | per-event reducer processors |
-| `src/rebar/_commands/_compact_policy.py` | pure compaction fold predicate (`is_foldable`) |
-| `src/rebar/_store/_push_policy.py` | pure push-policy classifier (`normalize_push_mode`) |
+## CI cadence
 
-**Scope caveat — selective concurrency-path expansion (story 25aa).** The last two
-rows are **narrow, noise-free shards** over the *pure decision logic* of two
-concurrency paths that now have behavioral tests: the compaction **fold selection**
-(`is_foldable`) and the outbound **push-policy classification** (`normalize_push_mode`).
-Each was extracted into a small pure helper module so mutmut mutates **only** the
-decision, not the subprocess-heavy orchestration around it (that orchestration is what
-generates the no-test / equivalent-mutant noise this scoping avoids — we deliberately do
-**not** add whole `compact.py` / `push.py` to `only_mutate`).
+The Gerrit `Verified` workflow compares `HEAD^` with the exact patchset and runs only shards
+selected by changed source, tests, or support inputs. Changes to global mutation infrastructure
+select every shard. Renames inspect both old and new paths. An unresolved ref or diff fails; an
+empty selection is an explicit successful skip. Changed Python tests that map to no protected
+shard produce an advisory so mapping gaps stay visible without making all tests mutation-gated.
 
-The rest of the concurrency / durability decision logic remains **DESCOPED** pending a
-follow-up story: `src/rebar/_store/sync.py`'s **sync branch selection** and
-`src/rebar/_store/lock.py`'s **stale-owner / reclamation** logic (and the reconciler
-orchestration) are still subprocess- and clone-heavy and are not in `only_mutate`. So a
-high mapped score here now covers the fold-selection and push-policy decisions, but still
-says nothing about mutation coverage of the sync-branch-selection or
-lock-stale-owner/reclamation paths.
+The push/PR mirror invokes the same reusable workflow. Its recurring main-health run skips the
+targeted check because `.github/workflows/mutation.yml` performs the broad all-shard sweep weekly
+and on manual request. Newer runs cancel older runs.
 
-The test selection (`pytest_add_cli_args_test_selection`) is scoped to the tests
-that exercise these cores, so each mutant is evaluated against a small, fast suite
-rather than the full ~5k-test run. The per-module mapping is:
+This split keeps the merge gate proportional to the change while the broad sweep detects stale
+mappings, tool drift, and cross-shard assumptions.
 
-| Module | Selected tests |
-|--------|----------------|
-| `signing.py` | `tests/unit/test_signing.py`, `tests/interfaces/lifecycle/test_signature.py` |
-| `reducer/_processors.py` | `tests/scripts/reducer/`, `tests/interfaces/store/test_reducer_single_source.py` |
-| `next_batch.py` | `tests/interfaces/queries/test_next_batch_compute.py`, `tests/interfaces/queries/test_next_batch_behavior.py` |
-| `validate.py` | `tests/interfaces/queries/test_validate_compute.py` |
-| `gates.py` | `tests/interfaces/lifecycle/test_gate_rubric_consistency.py`, `queries/test_ws5d_quality_fileimpact.py`, `lifecycle/test_close_gate_story_epic.py` |
-| `_compact_policy.py` | `tests/unit/test_compact_policy.py` |
-| `_push_policy.py` | `tests/unit/test_push_policy.py` |
+## Comparison and accepted outcomes
 
-## Invocation
+Base and head run from separate git archives. Mutation verdict state is never restored; only
+dependency downloads may be cached. This avoids treating a stale mutmut result as evidence.
 
-From the repo root, with the dev venv interpreter:
+Comparison is per mutation unit (module plus qualified function):
+
+- When the unit's AST is identical, every mutant killed on base must still exist and be killed
+  on head. This catches weakened tests even in a mixed source/test patch.
+- Added, removed, renamed, or edited units are reported as source changes. Mutant IDs can move
+  after a legitimate edit, so these units use the head shard budgets instead of an exact-ID
+  comparison.
+- A surviving mutant is accepted only when its normalized `mutmut show` diff matches a
+  checked-in fingerprint and the shard remains within its survivor ceiling.
+- `no tests` has a separate ceiling. Rebar has interface tests that exercise behavior through a
+  subprocess, which mutmut's in-process coverage map cannot attribute. The mapped score is
+  therefore `killed / (killed + survived + timeout)` while unattributed mutants remain visible
+  and bounded.
+- Timeouts have a zero ceiling. Zero parsed mutants, unknown fingerprints, unknown or incomplete
+  statuses, and any exceeded ceiling fail closed.
+
+## Flakiness and false positives
+
+Only an independently identified setup operation may retry. Mutation failures are not retried
+into a pass. When head has a non-killed result, the driver reruns it once for diagnosis; a changed
+outcome is labeled nondeterministic, but the gate remains red. This preserves evidence without
+letting a lucky rerun merge a regression.
+
+Equivalent mutants are handled narrowly with normalized diff fingerprints rather than by
+ignoring a file or lowering its whole score. Location headers are excluded so line movement does
+not invalidate the fingerprint; the actual mutation remains part of it.
+
+Every driver outcome writes `mutation-results/summary.json`. Clean-test logs, raw mutmut output,
+parsed results, and diagnostic output are uploaded when available.
+
+## Updating a shard
+
+A relaxed budget must accompany the affected source or mapping, measured base/head results, and
+a rationale explaining why the additional outcome is not a behavioral gap. A budget-only
+relaxation is invalid. Add an equivalent fingerprint only after inspecting the exact normalized
+diff and proving that no observable contract can distinguish it. Never lower a threshold merely
+to make CI pass.
+
+When adding a behavioral test for protected code, add it to that shard. A new production core
+needs its own focused shard and measured baseline. Keep source selection narrow enough that the
+blocking run remains bounded.
+
+## Local use
+
+From the repository virtualenv:
 
 ```sh
-/tmp/rebar-dev/bin/mutmut run        # mutate + score every mutant in scope
-/tmp/rebar-dev/bin/mutmut results    # list non-killed mutants (survived / no-tests / timeout)
-/tmp/rebar-dev/bin/mutmut show <id>  # the diff for one mutant
+python scripts/mutation_gate.py run --base HEAD^ --head HEAD
+python scripts/mutation_gate.py run --base HEAD^ --head HEAD --all-shards
+python scripts/mutation_gate.py smoke --shard compact-policy --base HEAD^ --head HEAD
 ```
 
-mutmut copies the project into a `mutants/` working directory (gitignored) and
-runs the selected tests from there. The runner is configured fail-fast and
-deterministic — `-x -q -p no:randomly --basetemp=/tmp/rebar-pytest-mut` — so a
-mutant is declared killed at the first failing test, the run order is stable for
-debugging, and the macOS temp-dir reuse race is avoided with a fixed basetemp.
+Use the first command to reproduce the merge gate and the second to reproduce the scheduled
+sweep. Inspect `mutation-results/summary.json` before the raw logs.
 
-To score a subset, narrow `only_mutate` (and the matching test selection) to the
-module(s) of interest before `mutmut run`.
-
-## Score interpretation: mapped vs no-tests
-
-mutmut attributes each mutant to its covering tests using a coverage map built
-**in-process**. Several of the cores are additionally exercised by interface
-tests that drive the CLI in a **subprocess**; coverage collected in the parent
-process cannot attribute those lines, so mutmut files them as **no tests** even
-though the behavior is pinned by the subprocess assertions. The honest score for
-the in-process test contract is therefore *killed / (killed + survived +
-timeout)* — the **mapped** mutants — with no-tests reported separately rather than
-folded into the denominator.
-
-## Scores (2026-06-14)
-
-Full-scope run: 3796 mutants total, 22.9 mutants/second.
-
-| Module | Killed | Survived | No-tests | Timeout | Mapped score |
-|--------|-------:|---------:|---------:|--------:|-------------:|
-| `signing.py` | 378 | 3 | 110 | 0 | 99.2% |
-| `reducer/_processors.py` | 774 | 5 | 0 | 0 | 99.4% |
-| `next_batch.py` | 713 | 6 | 208 | 0 | 99.2% |
-| `gates.py` | 557 | 0 | 376 | 0 | 100.0% |
-| `validate.py` | 443 | 0 | 223 | 0 | 100.0% |
-
-The large no-tests counts on `gates.py` and `validate.py` reflect that their
-behavior is characterized through subprocess-driven interface tests
-(`test_validate_compute.py`, the gate-rubric/close-gate tests), which the
-coverage map cannot attribute; the mapped mutants those modules *do* expose
-in-process are fully killed.
-
-### Concurrency-path shards (2026-07-12, story 25aa)
-
-The two selective concurrency-path shards were run scoped to their own
-`only_mutate` entry + focused kill-suite (each is small enough that a run finishes
-in under a second). Both are fully killed — the direct in-process unit tests pin
-every operator, branch, and constant, so there are no no-tests / equivalent-mutant
-survivors to explain:
-
-| Module | Killed | Survived | No-tests | Timeout | Mapped score |
-|--------|-------:|---------:|---------:|--------:|-------------:|
-| `_commands/_compact_policy.py` | 7 | 0 | 0 | 0 | 100.0% |
-| `_store/_push_policy.py` | 8 | 0 | 0 | 0 | 100.0% |
-
-### Remaining survivors are equivalent or cosmetic
-
-The handful of survivors left are mutants that cannot change observable behavior,
-and adding a test for them would only pin an implementation detail:
-
-- **`signing.py` (3)** — `encoding="utf-8"` → `encoding="UTF-8"`/`None` (codec
-  aliases of the default), and `SigningError(...)` message-text edits reached only
-  on an OS-error path that needs an unreadable-yet-existing key file. The message
-  string is not part of the certify/verdict contract.
-- **`next_batch.py` (6)** — all in `render_conflict_matrix`: column-width
-  arithmetic (`+1` → `+2`/`-1`), `ljust` → `rjust`, and `i < j` → `i <= j` (the
-  diagonal pair shares no files, so the overlap set is unchanged). These alter
-  whitespace alignment in a human-readable matrix, not its meaning.
-- **`reducer/_processors.py` (5)** — `process_verify_commands(state, None, data)`
-  (the `event` parameter is unused, so passing `None` is provably equivalent), the
-  `or ""` reason default (mutating an empty string to an empty string), and the
-  `alert_uuid` fallback key in `process_bridge_alert`, which is only consulted when
-  `resolves_uuid` is absent — a branch no realistic resolve event takes.
-
-## Change-detector tests
-
-A *change-detector* test fails when the implementation changes but not when the
-behavior breaks — it asserts too little (only that a rich object is non-None or a
-collection is non-empty), asserts a literal it just set (tautology), or asserts
-private structure / exact log strings rather than the observable result. Mutation
-survivors over an *executed* line are the signature of one: the line runs, but the
-assertions don't constrain it.
-
-The catalogue found by this pass, and the rewrite applied:
-
-- **`tests/interfaces/queries/test_next_batch_compute.py::test_library_and_mcp_shape`** —
-  *assertion-light.* The only in-process driver of the next-batch `compute`
-  asserted just `batch_size == 2` plus schema validity, leaving the field mapping,
-  the output key set, the per-candidate values, and the skip-bucket classification
-  unpinned (160 `compute` + 38 `to_json_dict` survivors traced to this gap). Now
-  asserts the resolved epic id/title, the exact selected ids, the full batch-item
-  dict (`id`/`title`/`priority`/`type`/`files`/`files_likely_read`) with values,
-  and the blocked-story skip entry — while keeping the MCP schema validation.
-
-The byte-level CLI goldens those modules also carry (`test_next_batch_compute.py`,
-`test_validate_compute.py`) are *not* change-detectors — they pin observable
-stdout/stderr/exit contracts — but they run in a subprocess, so they cannot kill
-in-process mutants. The remedy is added in-process behavioral coverage, not the
-removal of the goldens.
-
-## Tests added to kill high-value survivors
-
-- **`tests/interfaces/queries/test_next_batch_behavior.py`** — drives `compute` /
-  `to_json_dict` / `render_text` / `render_conflict_matrix` in-process against
-  hand-built trackers and asserts observable output: the exact JSON key set and
-  values, per-candidate field mapping, the blocked-story / in-progress /
-  needs-planning / design-awaiting skip buckets (object and JSON projection), the
-  file-overlap decision and conflict record, the `limit` default (unlimited) and
-  an explicit cap, the conflict matrix, and the tombstone-status override that
-  unblocks a task whose deleted dependency does not count as a blocker. (`next_batch.py`
-  mapped score 62.7% → 99.2%; survivors 236 → 6.)
-- **`tests/scripts/reducer/test_reducer_record_fields.py`** — reduces REVERT,
-  BRIDGE_ALERT, and VERIFY_COMMANDS events through `reduce_ticket` and asserts the
-  exact compiled record (every field name and value): the revert entry and its
-  empty-reason default, the unarchive-on-revert-of-ARCHIVED behavior, the
-  bridge-alert reason-normalization order, the resolve-matches-existing and
-  resolve-with-no-match-appends branches, and the verify-commands replace /
-  null-becomes-empty-list semantics. (`reducer/_processors.py` survivors 19 → 5,
-  mapped score → 99.4%.)
+If the gate itself blocks all changes, follow `infra/runbooks/two-vote-gate-rollback.md`. The
+rollback is an operator recovery path, not a contributor bypass.

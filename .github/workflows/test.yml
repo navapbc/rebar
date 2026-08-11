@@ -62,6 +62,12 @@ jobs:
   build-and-test:
     uses: ./.github/workflows/_build-and-test.yml
 
+  # Mirror the exact targeted gate used by Gerrit. The scheduled main-health run skips this
+  # job because the independent weekly sweep supplies the broad drift signal.
+  mutation:
+    if: github.event_name != 'schedule'
+    uses: ./.github/workflows/_mutation.yml
+
   # External-integration tier (tests/external/): live, billable, real-mutation
   # tests (live Jira via the `acli` SUBPROCESS, live LLM calls). This is the ONLY
   # job that:

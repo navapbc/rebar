@@ -1,0 +1,72 @@
+name: Mutation Testing (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      gerrit-refspec:
+        description: "Gerrit refspec. Empty means use the branch or PR checkout."
+        required: false
+        type: string
+        default: ""
+      gerrit-project:
+        description: "Gerrit project, required when gerrit-refspec is set."
+        required: false
+        type: string
+        default: ""
+      gerrit-url:
+        description: "Gerrit base URL, required when gerrit-refspec is set."
+        required: false
+        type: string
+        default: ""
+      all-shards:
+        description: "Run every configured shard instead of selecting from the diff."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: bounded mutation gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout branch or PR head
+        if: inputs.gerrit-refspec == ''
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Checkout the Gerrit patchset
+        if: inputs.gerrit-refspec != ''
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.gerrit-refspec }}
+          gerrit-project: ${{ inputs.gerrit-project }}
+          gerrit-url: ${{ inputs.gerrit-url }}
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv with dependency caching
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install the pinned development environment
+        run: uv sync --locked --extra dev
+      - name: Run changed mutation shards
+        if: ${{ !inputs.all-shards }}
+        run: uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD
+      - name: Run every mutation shard
+        if: ${{ inputs.all-shards }}
+        run: uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD --all-shards
+      - name: Publish mutation evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: mutation-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: mutation-results/
+          if-no-files-found: warn
+          retention-days: 30

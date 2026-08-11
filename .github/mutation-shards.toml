@@ -1,0 +1,97 @@
+version = 1
+global_support = [
+    ".github/mutation-shards.toml",
+    ".github/workflows/_mutation.yml",
+    ".github/workflows/mutation.yml",
+    ".github/workflows/gerrit-verify.yaml",
+    ".github/workflows/test.yml",
+    "pyproject.toml",
+    "scripts/mutation_gate.py",
+    "tests/conftest.py",
+    "tests/**/conftest.py",
+    "uv.lock",
+]
+
+[[shards]]
+name = "signing"
+source = "src/rebar/signing.py"
+tests = ["tests/unit/test_signing.py", "tests/interfaces/lifecycle/test_signature.py"]
+support = []
+survivors_max = 3
+no_tests_max = 110
+timeouts_max = 0
+score_floor = 99.2
+equivalent_fingerprints = []
+
+[[shards]]
+name = "reducer-processors"
+source = "src/rebar/reducer/_processors.py"
+tests = ["tests/scripts/reducer/", "tests/interfaces/store/test_reducer_single_source.py"]
+support = []
+survivors_max = 5
+no_tests_max = 0
+timeouts_max = 0
+score_floor = 99.4
+equivalent_fingerprints = []
+
+[[shards]]
+name = "next-batch"
+source = "src/rebar/_engine_support/next_batch.py"
+tests = [
+    "tests/interfaces/queries/test_next_batch_compute.py",
+    "tests/interfaces/queries/test_next_batch_behavior.py",
+]
+support = []
+survivors_max = 6
+no_tests_max = 208
+timeouts_max = 0
+score_floor = 99.2
+equivalent_fingerprints = []
+
+[[shards]]
+name = "gates"
+source = "src/rebar/_engine_support/gates.py"
+tests = [
+    "tests/interfaces/lifecycle/test_gate_rubric_consistency.py",
+    "tests/interfaces/queries/test_ws5d_quality_fileimpact.py",
+    "tests/interfaces/lifecycle/test_close_gate_story_epic.py",
+]
+support = []
+survivors_max = 0
+no_tests_max = 376
+timeouts_max = 0
+score_floor = 100.0
+equivalent_fingerprints = []
+
+[[shards]]
+name = "validate"
+source = "src/rebar/_engine_support/validate.py"
+tests = ["tests/interfaces/queries/test_validate_compute.py"]
+support = []
+survivors_max = 0
+no_tests_max = 223
+timeouts_max = 0
+score_floor = 100.0
+equivalent_fingerprints = []
+
+[[shards]]
+name = "compact-policy"
+source = "src/rebar/_commands/_compact_policy.py"
+tests = ["tests/unit/test_compact_policy.py"]
+support = []
+survivors_max = 0
+no_tests_max = 0
+timeouts_max = 0
+score_floor = 100.0
+equivalent_fingerprints = []
+
+[[shards]]
+name = "push-policy"
+source = "src/rebar/_store/_push_policy.py"
+tests = ["tests/unit/test_push_policy.py"]
+support = []
+survivors_max = 0
+no_tests_max = 0
+timeouts_max = 0
+score_floor = 100.0
+equivalent_fingerprints = []
