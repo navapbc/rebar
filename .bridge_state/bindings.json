@@ -64429,9 +64429,17 @@
       "updated_at": "2026-07-06T01:22:20Z"
     },
     "81ca-9443-3443-4d27": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nWhen a ticket records no `file_impact`, attestation currency falls back to invalidating on ANY code-SHA change \u2014 a deliberate fail-safe, but measured to over-trigger badly: 307 of 1,457 full-LLM plan re-reviews (21%) ran on byte-identical material fingerprints, 171 of them triggered by base-SHA drift alone (analysis ticket b902-18af-14ed-4da1). Allowing drift without re-review and requiring file_impact universally are both rejected; the approved design scopes the fail-safe instead.\n\n## Plan (approved components a + b)\n\n(a) **Record the review's read-set.** The agentic passes already observe which repository files they open (`distinct_fetches` in the usage telemetry). Persist that read-set (paths only) into the plan-review sidecar payload alongside `verified_at_sha`, as the review's measured dependency basis.\n\n(b) **Diff-intersect on drift.** When the attestation's SHA no longer matches and no `file_impact` is recorded, compute `git diff --name-only <attested_sha>..<current>` and invalidate ONLY when a changed path intersects (read-set \u222a plan-cited paths \u222a a small fixed blast-radius list: criteria registry, reviewer prompts, gate config). Empty intersection \u2192 attestation stays current. Any failure to compute the diff or read the recorded set falls back to today's invalidate-on-any-change, so the fail-safe is never weaker than the status quo.\n\nA review that read no code and cites no code (a genuinely no-code ticket) has an empty basis and stops re-triggering on unrelated code motion \u2014 the original complaint \u2014 while a review that DID consult code is invalidated exactly when consulted or cited material moves.\n\n## Acceptance Criteria\n\n- [ ] The plan-review sidecar payload records the agentic passes' distinct repository read paths for reviews where any agentic pass ran (absent/empty otherwise). Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"sidecar and read\" -x` passes with a new test pinning the field.\n- [ ] With no file_impact recorded and a moved SHA, currency evaluation invalidates iff `git diff --name-only` between the attested and current SHA intersects read-set \u222a cited paths \u222a the blast-radius list; a disjoint diff leaves the attestation current. Verify: unit tests cover both directions.\n- [ ] Diff-computation failure, missing read-set on a pre-change attestation, and unreadable recorded paths each fall back to invalidate (fail-safe preserved). Verify: unit tests cover each fallback.\n- [ ] `rebar review-plan <id> --status` reports which basis (file_impact | read-set | fail-safe) currency was decided on. Verify: CLI output assertion in tests.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Scope no-file-impact SHA-drift invalidation to the review read-set and cited paths (approved design a+b)"
+      },
       "created_at": "2026-08-11T22:19:27Z",
       "jira_id": "4588393",
       "jira_key": "REB-2739",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-11T22:19:30Z"
     },
@@ -100886,9 +100894,17 @@
       "updated_at": "2026-06-25T23:16:01Z"
     },
     "cec6-0a0e-38a9-4234": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nAgents sometimes botch the `rebar-ticket:` trailer, leaving a ticket's change unlinkable at close time. The `COMMITS` event type and `attach_commits` reducer already exist (used by the code-review workflow) \u2014 what is missing is an author-facing repair surface and a consumer. Approved design (analysis ticket b902-18af-14ed-4da1): expose retroactive commit linking on ALL THREE surfaces (CLI, Python library, MCP), document it clearly, and then add a cheap deterministic close-gate check that the linked change's diff is consistent with the recorded file_impact. Explicitly OUT of scope: using the linked commits as a completion-verifier diff basis \u2014 linked commits may be incomplete even when they match file_impact, and CV already prefetches from file_impact.\n\n## Plan\n\n1. CLI verb `rebar attach-commits <ticket> <sha>...` wrapping the existing `rebar.attach_commits` seam (validate each SHA resolves in the repo; union-add semantics unchanged).\n2. Library re-export (`rebar.attach_commits` already importable \u2014 confirm and document) and MCP tool (`attach_commits`) with outputSchema, following the existing write-tool pattern.\n3. DET close check: when a ticket records `file_impact` AND linked/referencing commits are found, compare the union of those commits' changed paths against the recorded file_impact; a changed path outside the declared impact (allowing tests/docs conventions per existing gate rules) is a deterministic close BLOCK naming the mismatched paths. No LLM.\n4. Documentation: `docs/cli-reference.md`, `docs/mcp-reference.md`, and the commit-trailer guide (`rebar explain commit-trailer` source) each name the repair verb and when to use it.\n\n## Acceptance Criteria\n\n- [ ] `rebar attach-commits <ticket> <sha>` records a COMMITS event and `rebar show` reflects it; invalid SHAs are rejected with a clear error. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"attach_commits\" -x` passes.\n- [ ] The MCP server exposes `attach_commits` with an outputSchema and the Python library documents the call; both route through the same seam as the CLI. Verify: MCP tool-inventory test updated and passing.\n- [ ] With file_impact recorded and linked commits present, a commit touching a path outside the declared impact deterministically blocks close with the offending paths named; a conforming diff does not block. Verify: unit tests cover both directions.\n- [ ] The three docs name the verb and the repair workflow. Verify: grep assertions in the docs test tier.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "attach-commits repair verb on all three surfaces + DET file-impact-vs-diff close check"
+      },
       "created_at": "2026-08-11T22:19:30Z",
       "jira_id": "4588394",
       "jira_key": "REB-2740",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-11T22:19:33Z"
     },
