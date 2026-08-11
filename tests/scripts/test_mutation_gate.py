@@ -43,6 +43,13 @@ def test_manifest_is_canonical_and_complete() -> None:
     assert "scripts/mutation_gate.py" in manifest.global_support
 
 
+def test_all_manifest_shards_start_in_advisory_mode() -> None:
+    gate = _load()
+    manifest = gate.load_manifest(MANIFEST)
+
+    assert all(shard.mode is gate.EnforcementMode.ADVISORY for shard in manifest.shards.values())
+
+
 def test_name_status_parser_keeps_both_sides_of_renames() -> None:
     gate = _load()
     changed = gate.parse_name_status(
@@ -71,6 +78,7 @@ global_support = ["uv.lock"]
 
 [[shards]]
 name = "alpha"
+mode = "advisory"
 source = "src/alpha.py"
 tests = ["tests/test_alpha.py"]
 support = ["tests/conftest.py"]
@@ -82,6 +90,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "beta"
+mode = "advisory"
 source = "src/beta.py"
 tests = ["tests/beta/"]
 support = []
@@ -111,6 +120,7 @@ version = 1
 global_support = []
 [[shards]]
 name = "alpha"
+mode = "advisory"
 source = "src/alpha.py"
 tests = ["tests/test_alpha.py"]
 support = []
@@ -154,6 +164,7 @@ def test_results_parser_accepts_every_mutmut_370_status() -> None:
 def _shard(gate, **overrides):
     values = {
         "name": "demo",
+        "mode": gate.EnforcementMode.ADVISORY,
         "source": "src/demo.py",
         "tests": ("tests/test_demo.py",),
         "support": (),

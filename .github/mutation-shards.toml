@@ -14,6 +14,7 @@ global_support = [
 
 [[shards]]
 name = "signing"
+mode = "advisory"
 source = "src/rebar/signing.py"
 tests = ["tests/unit/test_signing.py", "tests/interfaces/lifecycle/test_signature.py"]
 support = []
@@ -25,6 +26,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "reducer-processors"
+mode = "advisory"
 source = "src/rebar/reducer/_processors.py"
 tests = ["tests/scripts/reducer/", "tests/interfaces/store/test_reducer_single_source.py"]
 support = []
@@ -36,6 +38,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "next-batch"
+mode = "advisory"
 source = "src/rebar/_engine_support/next_batch.py"
 tests = [
     "tests/interfaces/queries/test_next_batch_compute.py",
@@ -50,6 +53,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "gates"
+mode = "advisory"
 source = "src/rebar/_engine_support/gates.py"
 tests = [
     "tests/interfaces/lifecycle/test_gate_rubric_consistency.py",
@@ -65,6 +69,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "validate"
+mode = "advisory"
 source = "src/rebar/_engine_support/validate.py"
 tests = ["tests/interfaces/queries/test_validate_compute.py"]
 support = []
@@ -76,6 +81,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "compact-policy"
+mode = "advisory"
 source = "src/rebar/_commands/_compact_policy.py"
 tests = ["tests/unit/test_compact_policy.py"]
 support = []
@@ -87,6 +93,7 @@ equivalent_fingerprints = []
 
 [[shards]]
 name = "push-policy"
+mode = "advisory"
 source = "src/rebar/_store/_push_policy.py"
 tests = ["tests/unit/test_push_policy.py"]
 support = []

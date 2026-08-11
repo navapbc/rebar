@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -42,12 +43,19 @@ ALL_STATUSES = frozenset(
 DECISIVE_STATUSES = frozenset({"killed", "survived", "no tests", "timeout"})
 
 
+class EnforcementMode(StrEnum):
+    ADVISORY = "advisory"
+    RATCHET = "ratchet"
+    STRICT = "strict"
+
+
 @dataclass(frozen=True)
 class Shard:
     name: str
     source: str
     tests: tuple[str, ...]
     support: tuple[str, ...]
+    mode: EnforcementMode
     survivors_max: int
     no_tests_max: int
     timeouts_max: int
@@ -124,6 +132,15 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
             raise GateError("manifest", f"shards[{index}].source must be unique and non-empty")
         tests = _string_tuple(row.get("tests", []), f"{name}.tests")
         support = _string_tuple(row.get("support", []), f"{name}.support")
+        mode_value = row.get("mode")
+        try:
+            mode = EnforcementMode(mode_value) if isinstance(mode_value, str) else None
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in EnforcementMode)
+            raise GateError("manifest", f"{name}.mode must be one of: {allowed}") from exc
+        if mode is None:
+            allowed = ", ".join(member.value for member in EnforcementMode)
+            raise GateError("manifest", f"{name}.mode must be one of: {allowed}")
         equivalents = frozenset(
             _string_tuple(row.get("equivalent_fingerprints", []), f"{name}.equivalent_fingerprints")
         )
@@ -141,6 +158,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
             source=source,
             tests=tests,
             support=support,
+            mode=mode,
             survivors_max=survivors_max,
             no_tests_max=no_tests_max,
             timeouts_max=timeouts_max,
