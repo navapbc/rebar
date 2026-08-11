@@ -31,6 +31,7 @@ Synchronize rebar tickets with Jira.
 
 Commands:
   preview   Show proposed Jira changes without applying them
+  run       Run one scheduled profile and strictly deliver ticket events
   sync      Apply the staged Jira synchronization
   status    Show the reconciler's durable status snapshot
   pause     Temporarily stop scheduled reconciliation
@@ -43,6 +44,10 @@ Commands:
 Preview and sync options:
   --only IDS       Examine only the named local IDs or bound Jira keys
   --except IDS     Exclude the named local IDs or bound Jira keys
+
+Run option:
+  --profile PROFILE
+                   Scheduled compatibility profile; defaults to the provider configuration
 
 Sync option:
   --max-changes N  Apply at most N proposed changes and retain the audit manifest

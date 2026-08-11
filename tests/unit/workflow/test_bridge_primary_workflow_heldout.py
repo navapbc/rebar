@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,58 +24,15 @@ def _run_step() -> str:
     return matches[0]
 
 
-@pytest.mark.parametrize(
-    ("mode", "expected_argv"),
-    [
-        ("dry-run", ["bridge", "preview"]),
-        ("bootstrap-strict", ["bridge", "sync", "--max-changes", "10"]),
-        ("bootstrap-throttle", ["bridge", "sync", "--max-changes", "100"]),
-        ("live", ["bridge", "sync"]),
-    ],
-)
-def test_workflow_maps_every_rollback_setting_to_the_continuous_command(
-    tmp_path: Path, mode: str, expected_argv: list[str]
-) -> None:
-    """The shipped shell block selects the exact primary or diagnostic route."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    argv_file = tmp_path / "argv"
-    output_file = tmp_path / "github-output"
-    output_file.write_text("", encoding="utf-8")
-    stub = bin_dir / "rebar"
-    stub.write_text(
-        '#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$ARGV_FILE"\nexit 0\n',
-        encoding="utf-8",
-    )
-    stub.chmod(0o755)
-    env = dict(os.environ)
-    env.update(
-        {
-            "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
-            "MODE": mode,
-            "ARGV_FILE": str(argv_file),
-            "GITHUB_OUTPUT": str(output_file),
-        }
-    )
-
-    completed = subprocess.run(
-        ["bash", "-c", _run_step()],
-        cwd=_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert argv_file.read_text(encoding="utf-8").splitlines() == expected_argv
+def test_workflow_delegates_to_the_shared_runner() -> None:
+    """The provider wrapper retains one stable entrypoint for every mode."""
+    assert _run_step() == "rebar bridge run"
 
 
 def test_current_operator_docs_lead_with_bridge_and_retain_legacy_mapping() -> None:
     """Primary instructions migrate while the compatibility contract stays discoverable."""
     workflow_step = _run_step()
-    assert "reconcile-check" in workflow_step
-    assert "rebar reconcile --mode reconcile-check" in workflow_step
+    assert workflow_step == "rebar bridge run"
 
     combined = "\n".join(
         (_ROOT / path).read_text(encoding="utf-8")

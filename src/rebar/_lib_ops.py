@@ -195,6 +195,13 @@ def bridge_preview(
     return _bridge_run("preview", only=only, exclude=exclude, max_changes=None, repo_root=repo_root)
 
 
+def bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun:
+    """Run one scheduled bridge profile with captured output and strict delivery."""
+    from rebar._bridge_runner import run_bridge
+
+    return run_bridge(profile, repo_root=repo_root)
+
+
 def bridge_sync(
     *,
     only: list[str] | None = None,

@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/bridge/run.schema.json",
   "title": "BridgeRun",
-  "description": "Structured result of a canonical bridge preview or sync pass.",
+  "description": "Structured result of a canonical bridge preview, scheduled run, or sync pass.",
   "type": "object",
   "additionalProperties": true,
   "required": ["route", "state", "returncode", "details"],
   "properties": {
-    "route": { "enum": ["preview", "sync"] },
+    "route": { "enum": ["preview", "run", "sync"] },
     "state": {
       "enum": ["converged", "paused", "in-flight", "legacy-gated", "reschedule", "operational_failure", "invalid_invocation"]
     },

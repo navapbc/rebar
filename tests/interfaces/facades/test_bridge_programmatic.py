@@ -18,6 +18,7 @@ LAST_PASS_REF = "refs/reconciler/last-pass"
 
 _NEW_TOOLS = {
     "bridge_preview",
+    "bridge_run",
     "bridge_sync",
     "bridge_status",
     "bridge_pause",
@@ -83,6 +84,8 @@ def test_mcp_registers_typed_bridge_tools_without_removing_compatibility() -> No
     assert _NEW_TOOLS | {"bridge_fsck", "reconcile"} <= set(tools)
     for name in _NEW_TOOLS:
         assert tools[name].outputSchema, name
+    assert set(tools["bridge_run"].inputSchema.get("properties", {})) == {"profile"}
+    for name in _NEW_TOOLS - {"bridge_run"}:
         assert "mode" not in tools[name].inputSchema.get("properties", {})
 
 
@@ -100,6 +103,12 @@ def test_mcp_bridge_tools_return_the_public_library_results(
             "state": "converged",
             "returncode": 0,
             "details": {"mutation_count": 2, "no_write": True},
+        },
+        "bridge_run": {
+            "route": "run",
+            "state": "converged",
+            "returncode": 0,
+            "details": {"profile": "live", "delivery_attempted": True},
         },
         "bridge_sync": {
             "route": "sync",
@@ -139,6 +148,7 @@ def test_mcp_bridge_tools_return_the_public_library_results(
     server = build_server()
     calls = {
         "bridge_preview": {"only": ["ticket-a"]},
+        "bridge_run": {"profile": "live"},
         "bridge_sync": {"exclude": ["ticket-b"], "max_changes": 10},
         "bridge_status": {"target_environment_id": "worker-a", "max_age_seconds": 60},
         "bridge_pause": {"reason": "maintenance"},
