@@ -4,9 +4,10 @@ When the ticket store's remote is an ``s3://`` URL served by ``git-remote-s3``, 
 legacy pushes can leave TWO ``<sha>.bundle`` objects for one ref. ``git ls-remote`` then returns
 the ref at two SHAs, a fresh clone hard-fails (``multiple updates for ref not allowed``), and the
 push path stalls. Upstream's ``git-s3 doctor`` is interactive-only AND discards a divergent head
-(data loss). :func:`heal_multi_bundle` instead folds every head into HEAD by iterated 2-parent
-merges under rebar's write lock, writes the merged tip as a NEW bundle FIRST, then deletes the
-originals — so at every instant ≥1 bundle carrying the full merged history exists remotely.
+(data loss). :func:`heal_multi_bundle` instead folds every head into the PUBLISHED ref
+(``refs/heads/<ref>``, never the tracker's checked-out HEAD) by iterated 2-parent merges under
+rebar's write lock, writes the merged tip as a NEW bundle FIRST, then deletes the originals — so
+at every instant ≥1 bundle carrying the full merged history exists remotely.
 
 This module is OPTIONAL and import-safe: ``git_remote_s3`` / boto3 are imported ONLY lazily
 inside functions, guarded by :func:`rebar._optional.require_s3_helper`.
@@ -133,7 +134,7 @@ def _heal_locked(base_path: str, ref: str, s3: Any) -> dict:
             "deleted_keys": [],
         }
 
-    _require_tracker_on_ref(base_path, ref)
+    _require_clean_worktree_on_ref(base_path, ref)
 
     original_keys = [b["Key"] for b in bundles]
     scratch_refs: list[str] = []
@@ -164,33 +165,43 @@ def _heal_locked(base_path: str, ref: str, s3: Any) -> dict:
     }
 
 
-def _require_tracker_on_ref(base_path: str, ref: str) -> None:
-    """Refuse the heal unless the tracker actually has *ref* checked out.
+def _on_published_ref(base_path: str, ref: str) -> bool:
+    """True when the tracker's worktree has *ref* itself checked out (not a side branch or a
+    detached HEAD). The fold no longer depends on this — it targets ``refs/heads/<ref>``
+    directly — but publishing does: moving a branch that a worktree is sitting on has to take
+    the index and worktree with it."""
+    return _git(base_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip() == ref
 
-    The fold merges every fetched head into the WORKTREE's HEAD and then force-moves
-    ``refs/heads/<ref>`` onto the result, so the published tip is a function of whichever
-    branch the tracker happens to be on. When that is not *ref*, the checked-out branch's
-    commits are merged into the ticket history and published under *ref* — proven
-    experimentally on the doctor's own harness (bug gnarled-acardiac-bettong). Nothing
-    downstream can detect that after the fact, so the doctor refuses rather than silently
-    publishing unrelated history; a detached HEAD is refused too, since there is no branch to
-    check. Raised as :class:`S3DoctorConflict` because that is the module's established loud
-    channel: the sole caller already logs it with its hint and escalates under ``strict``.
 
-    This is the SAFE half of the fix. Teaching the fold to target ``refs/heads/<ref>`` — which
-    needs ``merge-tree``/``commit-tree`` or a scratch worktree, since ``git merge`` only merges
-    into the checked-out branch — is ticket envious-metal-budgie; this guard retires with it.
+def _require_clean_worktree_on_ref(base_path: str, ref: str) -> None:
+    """Refuse the heal when *ref* IS checked out and its worktree is dirty.
+
+    This is all that survives of the blanket refusal from bug gnarled-acardiac-bettong, which
+    rejected every tracker not sitting on the published ref. The fold now merges into
+    ``refs/heads/<ref>`` itself (see :func:`_fold_heads`), so a side branch or a detached HEAD
+    heals normally and cannot leak its commits into the ticket history.
+
+    The one case still worth refusing is narrow: when *ref* is checked out the heal advances the
+    worktree onto the merged tip, and uncommitted changes there would be destroyed. Today's
+    ``git merge`` fold already fails on such a tracker — this only makes the refusal EARLY (before
+    any bundle is downloaded) and explicit, and keeps it on the module's established loud channel,
+    which the sole caller in ``_store/push.py`` logs with its hint and escalates under ``strict``.
     Runs AFTER the single-bundle no-op check, so a store with nothing to heal is unaffected.
     """
-    current_branch = _git(base_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
-    if current_branch == ref:
+    if not _on_published_ref(base_path, ref):
         return
-    on = f"branch {current_branch!r}" if current_branch else "a detached HEAD"
+    # TRACKED changes only: ``reset --hard`` overwrites those, but never removes untracked
+    # files — and the tracker legitimately carries untracked runtime debris such as the write
+    # lock, which must not be mistaken for work at risk.
+    dirty = _git(base_path, "status", "--porcelain", "--untracked-files=no").stdout.strip()
+    if not dirty:
+        return
     raise S3DoctorConflict(
-        f"refusing to heal ref {ref}: the tracker at {base_path} has {on} checked out, not {ref}",
+        f"refusing to heal ref {ref}: the tracker at {base_path} has {ref} checked out with "
+        f"uncommitted changes, which the heal would overwrite",
         hint=(
-            f"the heal merges into the checked-out branch, so healing from here would publish "
-            f"unrelated commits into {ref}; check out {ref} in the tracker and retry"
+            f"the heal advances the {ref} worktree onto the merged tip; commit or discard the "
+            f"local changes in {base_path} and retry"
         ),
     )
 
@@ -230,35 +241,89 @@ def _fetch_heads(
 
 
 def _fold_heads(base_path: str, ref: str, head_refs: list[str]) -> str:
-    """Fold every head into HEAD by iterated 2-parent merges under rebar's write lock.
+    """Fold every head into ``refs/heads/<ref>`` by iterated 2-parent merges, under the lock.
 
-    Reuses rebar's existing merge policy (the tickets branch's ``.gitattributes`` maps
-    ``.bridge_state/* merge=ours``; UUID-named event dirs never collide) so a plain multi-parent
-    merge is lossless. On a real conflict: abort and raise :class:`S3DoctorConflict`.
+    The fold starts from the PUBLISHED ref's tip and never consults the worktree's HEAD, so the
+    result no longer depends on which branch the tracker happens to have checked out — the defect
+    bug gnarled-acardiac-bettong proved and papered over with a blanket refusal. ``git merge``
+    cannot do this (it only merges into the checked-out branch), so each step is
+    ``merge-tree --write-tree`` + ``commit-tree``: a worktree-free merge that still applies the
+    tickets branch's merge policy (``.gitattributes`` maps ``.bridge_state/* merge=ours``, and
+    the tracker configures the ``ours`` driver; UUID-named event dirs never collide), so the fold
+    stays lossless. Both flags used here are inside rebar's declared Git floor of 2.38.
+
+    A real conflict exits non-zero and raises :class:`S3DoctorConflict`; unlike the old ``git
+    merge`` there is no worktree or index state to abort, so the tracker is untouched by a failed
+    fold. An empty ``head_refs``, or heads already reachable from the tip, leave the tip as-is.
+    Returns the folded sha; the caller publishes it.
     """
+    branch = f"refs/heads/{ref}"
     with _lock.write_lock(base_path, timeout=_WRITE_LOCK_TIMEOUT, attempts=1, dual_window=True):
+        probe = _git(base_path, "rev-parse", "--verify", "--quiet", f"{branch}^{{commit}}")
+        # No local ref yet (a tracker whose branch is unborn): the first head BECOMES the tip,
+        # exactly as the old fold's `git merge` fast-forwarded an unborn HEAD.
+        tip = probe.stdout.strip() if probe.returncode == 0 else ""
         for head_ref in head_refs:
-            # Already reachable from HEAD → nothing to merge for this head.
-            if _git(base_path, "merge-base", "--is-ancestor", head_ref, "HEAD").returncode == 0:
+            if not tip:
+                tip = _git(base_path, "rev-parse", "--verify", head_ref).stdout.strip()
+                continue
+            # Already reachable from the ref's tip → nothing to merge for this head.
+            if _git(base_path, "merge-base", "--is-ancestor", head_ref, tip).returncode == 0:
                 continue
             extra: list[str] = []
-            if _git(base_path, "merge-base", "HEAD", head_ref).stdout.strip() == "":
+            if _git(base_path, "merge-base", tip, head_ref).stdout.strip() == "":
                 extra = ["--allow-unrelated-histories"]
-            merge = _git(
+            merged = _git(base_path, "merge-tree", "--write-tree", *extra, tip, head_ref)
+            if merged.returncode != 0:
+                raise S3DoctorConflict(
+                    f"tickets store heads conflict merging {head_ref} for ref {ref}: "
+                    f"{merged.stderr or merged.stdout}"
+                )
+            tree = merged.stdout.strip().splitlines()[0].strip()
+            commit = _git(
                 base_path,
-                "merge",
-                *extra,
+                "commit-tree",
+                tree,
+                "-p",
+                tip,
+                "-p",
                 head_ref,
-                "--no-edit",
                 "-m",
                 f"Merge {head_ref} (s3 doctor auto-heal of ref {ref})",
             )
-            if merge.returncode != 0:
-                _git(base_path, "merge", "--abort")
+            if commit.returncode != 0:
                 raise S3DoctorConflict(
-                    f"tickets store heads conflict merging {head_ref} for ref {ref}: {merge.stderr}"
+                    f"could not build the merge commit folding {head_ref} into {ref}: "
+                    f"{commit.stderr}"
                 )
-        return _git(base_path, "rev-parse", "HEAD").stdout.strip()
+            tip = commit.stdout.strip()
+        _publish_ref(base_path, ref, tip)
+        return tip
+
+
+# raw-git-ok: locked store seam internal (the doctor's ref-publish step, under the fold's lock)
+def _publish_ref(base_path: str, ref: str, merged_sha: str) -> None:
+    """Move ``refs/heads/<ref>`` onto *merged_sha*, keeping the worktree consistent.
+
+    Two shapes, differing only in how the branch moves. When *ref* is NOT checked out the branch
+    is a plain ref: ``update-ref`` moves it, and the worktree (whatever branch it is on) is left
+    completely alone — that is what stops a side branch's commits from reaching the ticket
+    history. When *ref* IS checked out, moving the ref alone would strand the index and worktree
+    at the old tip and make every merged file look deleted, so ``reset --hard`` moves branch,
+    index and worktree together — the same end state the old ``git merge`` fold produced.
+    :func:`_require_clean_worktree_on_ref` has already established there is nothing to lose.
+    """
+    branch = f"refs/heads/{ref}"
+    if _on_published_ref(base_path, ref):
+        # Advances the ref's own checked-out worktree: branch, index and worktree together.
+        moved = _git(base_path, "reset", "--hard", merged_sha, "--quiet")
+    else:
+        # Publishes the folded tip onto the ticket ref, leaving the worktree untouched.
+        moved = _git(base_path, "update-ref", branch, merged_sha)
+    if moved.returncode != 0:
+        raise S3DoctorConflict(
+            f"could not publish the folded tip {merged_sha} onto {branch}: {moved.stderr}"
+        )
 
 
 def _publish_and_prune(
@@ -270,19 +335,23 @@ def _publish_and_prune(
 ) -> list[str]:
     """Write the merged tip as a NEW bundle FIRST, then delete the original bundles.
 
-    :func:`_require_tracker_on_ref` has already established that ``ref`` IS the tracker's
-    checked-out branch, so ``refs/heads/<ref>`` and ``HEAD`` both already point at
-    ``merged_sha`` (the fold merged into HEAD) and the bundle carries the two names for the
-    one commit. The former ``git branch -f`` fallback for a differently-checked-out tracker
-    is gone with that guard: it was what published the wrong history in the first place, by
-    force-moving the ref onto an unrelated branch's merge (bug gnarled-acardiac-bettong).
+    The bundle is built from ``refs/heads/<ref>`` — the ref the fold just published — and NEVER
+    from a bare ``HEAD``, which off the published ref names the tracker's own checked-out branch
+    and would put its unrelated commits into the ticket store (bug gnarled-acardiac-bettong).
+    ``HEAD`` is still listed alongside it in the case where it genuinely resolves to the same
+    commit, preserving the historical two-name bundle for the ordinary on-ref tracker; the S3
+    remote's own HEAD marker is written separately by ``init_remote_head``, so a bundle without
+    the ``HEAD`` entry still advertises correctly.
     """
     merged_key = f"{s3.prefix}/{ref}/{merged_sha}.bundle"
+    bundle_refs = [f"refs/heads/{ref}"]
+    if _git(base_path, "rev-parse", "--verify", "--quiet", "HEAD").stdout.strip() == merged_sha:
+        bundle_refs.insert(0, "HEAD")
 
     with tempfile.NamedTemporaryFile(suffix=".bundle", dir=base_path, delete=False) as tmp:
         bundle_path = tmp.name
     try:
-        create = _git(base_path, "bundle", "create", bundle_path, "HEAD", f"refs/heads/{ref}")
+        create = _git(base_path, "bundle", "create", bundle_path, *bundle_refs)
         if create.returncode != 0:
             # A bundle failure that survived the seam's retries is NOT a heads conflict, so
             # the default hint's "run rebar fsck-recover" would be the wrong tool: the merge
