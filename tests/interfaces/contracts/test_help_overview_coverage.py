@@ -140,24 +140,111 @@ def test_retired_bridge_commands_are_absent_from_top_level_help() -> None:
         assert command not in completed.stdout
 
 
-def test_shipped_surfaces_name_no_retired_bridge_command() -> None:
-    """The shipped package and active command-contract docs contain no stale token."""
-    package_files = [
+def _shipped_package_files(repo_root: Path = _REPO_ROOT) -> list[Path]:
+    """Files under ``src/rebar`` that ship with the package.
+
+    The enumeration source is ``git ls-files`` — deterministically the tracked set,
+    which is what the sdist and wheel are built from. Untracked working-tree
+    artifacts (vendored ``editor_assets/node_modules`` payloads, editor build
+    outputs) do not ship, so a token inside one is not a shipped-surface defect.
+    If git is unavailable the scan falls back to walking the whole tree: a
+    *superset* of the tracked set, so the oracle is never silently narrowed.
+    """
+    package_root = repo_root / "src" / "rebar"
+    completed = subprocess.run(
+        ["git", "-C", str(repo_root), "ls-files", "-z", "--", "src/rebar"],
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode == 0:
+        tracked = [
+            repo_root / name for name in completed.stdout.decode("utf-8").split("\0") if name
+        ]
+        return [path for path in tracked if path.is_file()]
+    return [
         path
-        for path in (_REPO_ROOT / "src" / "rebar").rglob("*")
+        for path in package_root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     ]
+
+
+def _scan_for_retired_tokens(
+    paths: list[Path], repo_root: Path = _REPO_ROOT
+) -> dict[str, list[str]]:
+    """Map each scanned file that names a retired command to the commands it names.
+
+    Files are matched as **bytes**, never decoded: the retired command tokens are
+    ASCII, so a byte-substring search finds every occurrence a UTF-8 decode would
+    have found, while a non-textual file (an ``esbuild`` Mach-O binary vendored
+    under the package tree) merely fails to match instead of raising
+    ``UnicodeDecodeError``. No decode error is caught or swallowed — none is
+    possible.
+    """
+    needles = {command: command.encode("utf-8") for command in _RETIRED_BRIDGE_COMMANDS}
+    matches: dict[str, list[str]] = {}
+    for path in paths:
+        data = path.read_bytes()
+        found = [command for command, needle in needles.items() if needle in data]
+        if found:
+            matches[str(path.relative_to(repo_root))] = found
+    return matches
+
+
+def test_shipped_surfaces_name_no_retired_bridge_command() -> None:
+    """The shipped package and active command-contract docs contain no stale token."""
+    package_files = _shipped_package_files()
     active_docs = [
         _REPO_ROOT / "docs" / "cli-reference.md",
         _REPO_ROOT / "docs" / "exit-codes.md",
         _REPO_ROOT / "docs" / "output-schemas.md",
     ]
+    # Guard the enumeration itself: an empty/garbled tracked set would make the
+    # scan vacuously pass.
+    assert any(path.name == "cli.py" for path in package_files), (
+        "shipped-package enumeration lost the package sources"
+    )
 
-    matches: dict[str, list[str]] = {}
-    for path in [*package_files, *active_docs]:
-        text = path.read_text(encoding="utf-8")
-        found = [command for command in _RETIRED_BRIDGE_COMMANDS if command in text]
-        if found:
-            matches[str(path.relative_to(_REPO_ROOT))] = found
+    assert _scan_for_retired_tokens([*package_files, *active_docs]) == {}
 
-    assert matches == {}
+
+def _init_repo(root: Path) -> None:
+    for args in (
+        ["git", "init", "-q", "--initial-branch=main"],
+        ["git", "config", "user.email", "t@e.com"],
+        ["git", "config", "user.name", "t"],
+    ):
+        subprocess.run(args, cwd=root, check=True, capture_output=True)
+
+
+def test_scan_tolerates_undecodable_file_but_still_reports_token(tmp_path: Path) -> None:
+    """Negative control: a non-UTF-8 file is scanned without error; text still trips."""
+    binary = tmp_path / "esbuild"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe\x00\x80\xff\xfe binary payload")
+    clean = tmp_path / "clean.py"
+    clean.write_text("bridge probe\n", encoding="utf-8")
+    stale = tmp_path / "stale.md"
+    stale.write_text(f"run `rebar {_RETIRED_BRIDGE_COMMANDS[0]}`\n", encoding="utf-8")
+
+    assert _scan_for_retired_tokens([binary, clean], repo_root=tmp_path) == {}
+    assert _scan_for_retired_tokens([binary, clean, stale], repo_root=tmp_path) == {
+        "stale.md": [_RETIRED_BRIDGE_COMMANDS[0]]
+    }
+
+
+def test_shipped_enumeration_excludes_untracked_build_artifacts(tmp_path: Path) -> None:
+    """Negative control: an ignored binary under src/rebar is not a shipped surface."""
+    _init_repo(tmp_path)
+    package = tmp_path / "src" / "rebar"
+    (package / "editor_assets" / "node_modules" / ".bin").mkdir(parents=True)
+    (package / "cli.py").write_text("# shipped\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(
+        "src/rebar/editor_assets/node_modules/\n", encoding="utf-8"
+    )
+    artifact = package / "editor_assets" / "node_modules" / ".bin" / "esbuild"
+    artifact.write_bytes(b"\xcf\xfa\xed\xfe\x00\x80\xff\xfe")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True)
+
+    found = _shipped_package_files(repo_root=tmp_path)
+
+    assert [path.relative_to(tmp_path).as_posix() for path in found] == ["src/rebar/cli.py"]
+    assert artifact not in found
