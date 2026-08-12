@@ -723,6 +723,12 @@ _POPULATION_MOVE_TEMPLATE = (
     "a machine-checkable acceptance criterion that fails while any instance remains."
 )
 
+_OUT_OF_LOOP_PROOF_TEMPLATE = (
+    "Build an out-of-loop proof of {subject} into the plan — an execution step that confirms "
+    "the implementation works via the fastest local run or manual probe against the real "
+    "target, before it is committed to the slow delivery loop."
+)
+
 
 def test_population_move_template_is_locked() -> None:
     # Ticket e3cf: move 15 reframes a named instance as a sample and demands a machine-checkable
@@ -758,6 +764,90 @@ def test_population_move_applicability_is_off_until_a_trigger_fires() -> None:
         assert kcoach.move_applies(m15, active_triggers=[trigger]), trigger
     assert "15" not in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, [])
     assert "15" in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["G1G2"])
+
+
+def test_out_of_loop_proof_move_is_locked_and_validated() -> None:
+    m16 = orchestrator.load_move_registry()["16"]
+    assert m16["name"] == "out-of-loop proof"
+    assert m16["template"] == _OUT_OF_LOOP_PROOF_TEMPLATE
+    assert m16["template"].count("{subject}") == 1
+    assert m16["applies_when"] == ["T15"]
+    assert m16["template"].format(subject="the service startup path") == (
+        "Build an out-of-loop proof of the service startup path into the plan — an execution "
+        "step that confirms the implementation works via the fastest local run or manual probe "
+        "against the real target, before it is committed to the slow delivery loop."
+    )
+
+
+def test_out_of_loop_proof_move_is_scoped_to_t15() -> None:
+    import importlib
+
+    kcoach = importlib.import_module("rebar.llm.review_kernel.coach")
+    m16 = orchestrator.MOVE_REGISTRY["16"]
+    assert not kcoach.move_applies(m16, active_triggers=[])
+    assert not kcoach.move_applies(m16, active_triggers=["E6", "F1", "T14"])
+    assert kcoach.move_applies(m16, active_triggers=["T15"])
+    assert "16" not in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["E6"])
+    assert "16" in kcoach.applicable_moves(orchestrator.MOVE_REGISTRY, ["T15"])
+
+
+def test_t15_finding_can_select_and_render_out_of_loop_proof() -> None:
+    from rebar.llm.runner import FakeRunner
+
+    runner = FakeRunner(
+        structured={
+            "notes": [
+                {
+                    "move_id": "16",
+                    "subject": "the service startup path",
+                    "finding_refs": ["t15-finding"],
+                }
+            ]
+        }
+    )
+    notes = passes.pass4_coach(
+        runner,
+        _fake_cfg(),
+        plan="p",
+        surviving=[{"id": "t15-finding", "finding": "x", "criteria": ["T15"]}],
+        move_registry=orchestrator.MOVE_REGISTRY,
+    )
+    assert notes == [
+        {
+            "move_id": "16",
+            "move_name": "out-of-loop proof",
+            "subject": "the service startup path",
+            "finding_refs": ["t15-finding"],
+            "coaching": _OUT_OF_LOOP_PROOF_TEMPLATE.format(subject="the service startup path"),
+            "decision": "advisory",
+        }
+    ]
+
+
+@pytest.mark.parametrize("criteria", [[], ["E6"], ["T14"]])
+def test_non_t15_finding_cannot_select_out_of_loop_proof(criteria: list[str]) -> None:
+    from rebar.llm.runner import FakeRunner
+
+    assert orchestrator.MOVE_REGISTRY["16"]["applies_when"] == ["T15"]
+    runner = FakeRunner(
+        structured={
+            "notes": [
+                {
+                    "move_id": "16",
+                    "subject": "the service startup path",
+                    "finding_refs": ["other-finding"],
+                }
+            ]
+        }
+    )
+    notes = passes.pass4_coach(
+        runner,
+        _fake_cfg(),
+        plan="p",
+        surviving=[{"id": "other-finding", "finding": "x", "criteria": criteria}],
+        move_registry=orchestrator.MOVE_REGISTRY,
+    )
+    assert notes == []
 
 
 def test_move_registry_matches_docs_table() -> None:

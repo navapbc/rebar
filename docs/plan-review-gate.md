@@ -334,6 +334,7 @@ and fills a bounded noun-phrase `{subject}`). The built-in registry
 | 12 | generalize the finding | "Generalize {subject} across the rest of the work." |
 | 13 | realign to parent plan | "Realign {subject} to the parent's plan — the parent wins on conflict; if the parent is genuinely wrong, update the PARENT first (which forces its re-review), never silently diverge the leaf." |
 | 15 | sample, not the population | "Treat {subject} as one sample from a population, not a single item to fix — enumerate the whole population by the distinct ways the pattern occurs, then add a machine-checkable acceptance criterion that fails while any instance remains." |
+| 16 | out-of-loop proof | "Build an out-of-loop proof of {subject} into the plan — an execution step that confirms the implementation works via the fastest local run or manual probe against the real target, before it is committed to the slow delivery loop." |
 
 Move **15** is scoped to `G1G2`, `E4`, `G6`, `A1` — the criteria where a finding names one
 member of a population. It exists because coaching is rendered per finding, so a broken
