@@ -589,6 +589,7 @@ def shed_to_budget(
     agent: list[dict],
     container: list[dict],
     coverage: dict[str, Any],
+    cap_override: float | None = None,
 ) -> tuple[list[dict], list[dict], list[dict]]:
     """Shed the lowest-priority AGENT/overlay criteria first when projected spend
     exceeds the per-plan budget cap. Returns (kept_agent, kept_container, shed).
@@ -601,8 +602,15 @@ def shed_to_budget(
     floor recorded for observability but never traded away. (This is the correct fix —
     correcting the COST MODEL — rather than inverting the centrality scaling of the cap,
     which would have shed G3/G4 first.) Within the sheddable set we still shed overlays
-    (T*) before the core code-grounding set."""
-    cap = plan_budget_cap(ctx)
+    (T*) before the core code-grounding set.
+
+    ``cap_override`` is the caller's explicit per-plan cap in USD, used VERBATIM — it is NOT
+    centrality-scaled. That is the whole point of the seam: ``REBAR_PLAN_REVIEW_BUDGET`` is read
+    by :func:`plan_budget_cap` as the BASE and then scaled by centrality, so it can never express
+    "this run costs at most $X". Selection is on ``is None``, not falsiness, so an explicit
+    ``0.0`` is a real cap ("shed everything sheddable") rather than a request for the computed
+    one."""
+    cap = plan_budget_cap(ctx) if cap_override is None else float(cap_override)
 
     def project_sheddable(ag: list[dict]) -> float:
         """Projected SHEDDABLE spend (the single-turn chunks + AGENT/overlay criteria)
@@ -640,6 +648,10 @@ def shed_to_budget(
     container_floor_usd = round(container_calls * COST_AGENT_USD, 4)
     coverage["budget"] = {
         "cap_usd": cap,
+        # Which cap governed this run: an explicit caller override, or the centrality-scaled
+        # computed one. `centrality` below is still recorded either way, but it did NOT scale
+        # an overridden cap — so without this the two are indistinguishable in the journal.
+        "cap_source": "computed" if cap_override is None else "override",
         "centrality": ctx.centrality,
         "projected_usd_initial": projected_initial,
         "projected_usd_final": project_sheddable(agent),

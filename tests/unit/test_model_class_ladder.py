@@ -133,7 +133,7 @@ def _production_entry_model(monkeypatch, ladder: tuple[str, ...]) -> str:
 
     captured: dict[str, str] = {}
 
-    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):
+    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage, cap_override=None):
         captured["model"] = cfg.model
         return []
 

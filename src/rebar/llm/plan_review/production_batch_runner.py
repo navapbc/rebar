@@ -20,10 +20,10 @@ Key design points it embodies:
   offline/parity-test seam (B4 passes a fake ``rebar.llm.Runner``); when absent it is
   constructed per-run via :func:`get_runner`.
 * **D4 — budget.** The per-plan cap is computed inside ``run_pass1`` (via
-  ``sizing.plan_budget_cap``); ``req.usd_budget`` is meant to override it. There is no
-  clean override seam in today's ``pass1``/``sizing`` API (see :meth:`run`), so the
-  requested override is journaled and the computed cap is used — a documented follow-up
-  (ticket ``e907-8dbd-7627-4725``).
+  ``sizing.plan_budget_cap``), and ``req.usd_budget`` overrides it through the explicit
+  ``cap_override`` seam threaded ``run_pass1`` → ``sizing.shed_to_budget``. The override is
+  the FINAL cap, used verbatim rather than centrality-scaled (see :meth:`run`); ``None``
+  leaves the computed cap in force.
 * **D5 — prompt-id IS the registry id.** Each ``criteria`` entry's ``prompt`` is its
   registry criterion id; the runner resolves descriptors via ``registry.by_id()`` and
   splits single/agent by ``registry.exec_tier`` (NOT ``route_criteria`` — ``req.criteria``
@@ -134,28 +134,16 @@ class ProductionBatchRunner(BatchRunner):
             }
         }
 
-        # D4 budget override: there is NO clean seam in today's pass1/sizing API to
-        # override the per-plan cap — `run_pass1` calls `sizing.shed_to_budget`, which
-        # computes the cap internally via `sizing.plan_budget_cap(ctx)` (reading
-        # REBAR_PLAN_REVIEW_BUDGET as the *base*, then centrality-scaling it), with no
-        # injection point. The only "overrides" available are (a) mutating that env var —
-        # which is process-global AND centrality-scaled, so it is NOT a true cap override —
-        # or (b) adding a cap-override parameter to shed_to_budget/run_pass1, which is gate
-        # code outside this thin adapter. Rather than hack it, we JOURNAL the requested
-        # override and fall back to the computed cap.
-        # FOLLOW-UP (ticket e907-8dbd-7627-4725): thread an explicit `cap_override` through
-        # run_pass1 → shed_to_budget.
+        # D4 budget override: `req.usd_budget` is the caller's explicit per-plan cap, applied
+        # through the `cap_override` seam on run_pass1 → sizing.shed_to_budget. It is used
+        # VERBATIM — deliberately NOT centrality-scaled, unlike REBAR_PLAN_REVIEW_BUDGET, which
+        # plan_budget_cap reads as the *base* before scaling and so can never mean "this run
+        # costs at most $X". Absent (None) → the computed, centrality-scaled cap, unchanged.
         if req.usd_budget is not None:
             coverage["requested_usd_budget"] = req.usd_budget
-            coverage["budget_override_applied"] = False
-            logger.warning(
-                "ProductionBatchRunner: req.usd_budget=%s requested but there is no clean "
-                "cap-override seam in pass1/sizing yet; using the computed plan_budget_cap "
-                "(documented follow-up).",
-                req.usd_budget,
-            )
+            coverage["budget_override_applied"] = True
 
-        findings = run_pass1(ctx, cfg, runner, single, agent, coverage)
+        findings = run_pass1(ctx, cfg, runner, single, agent, coverage, req.usd_budget)
         prerequisite_coverage: list[dict[str, Any]] = []
         prerequisite_findings: list[dict[str, Any]] = []
         snapshot_value = req.with_inputs.get("relation_snapshot")
