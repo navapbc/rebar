@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -42,12 +43,35 @@ ALL_STATUSES = frozenset(
 DECISIVE_STATUSES = frozenset({"killed", "survived", "no tests", "timeout"})
 
 
+class EnforcementMode(StrEnum):
+    ADVISORY = "advisory"
+    RATCHET = "ratchet"
+    STRICT = "strict"
+
+
+class FailureCode(StrEnum):
+    ZERO_MUTANTS = "zero-mutants"
+    UNEXPECTED_STATUS = "unexpected-status"
+    SURVIVOR_BUDGET = "survivor-budget"
+    UNKNOWN_SURVIVOR = "unknown-survivor"
+    NO_TESTS_BUDGET = "no-tests-budget"
+    TIMEOUT_BUDGET = "timeout-budget"
+    SCORE_BUDGET = "score-budget"
+    MISSING_MUTANT = "missing-mutant"
+    KILLED_REGRESSION = "killed-regression"
+
+    @property
+    def blocks_advisory(self) -> bool:
+        return self in {FailureCode.ZERO_MUTANTS, FailureCode.UNEXPECTED_STATUS}
+
+
 @dataclass(frozen=True)
 class Shard:
     name: str
     source: str
     tests: tuple[str, ...]
     support: tuple[str, ...]
+    mode: EnforcementMode
     survivors_max: int
     no_tests_max: int
     timeouts_max: int
@@ -76,7 +100,7 @@ class RunResults:
 
 @dataclass(frozen=True)
 class Failure:
-    code: str
+    code: FailureCode
     detail: str
 
 
@@ -85,6 +109,7 @@ class Comparison:
     failures: tuple[Failure, ...]
     removed_units: tuple[str, ...]
     added_units: tuple[str, ...]
+    advisories: tuple[Failure, ...] = ()
 
 
 class GateError(RuntimeError):
@@ -124,6 +149,15 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
             raise GateError("manifest", f"shards[{index}].source must be unique and non-empty")
         tests = _string_tuple(row.get("tests", []), f"{name}.tests")
         support = _string_tuple(row.get("support", []), f"{name}.support")
+        mode_value = row.get("mode")
+        try:
+            mode = EnforcementMode(mode_value) if isinstance(mode_value, str) else None
+        except ValueError as exc:
+            allowed = ", ".join(mode.value for mode in EnforcementMode)
+            raise GateError("manifest", f"{name}.mode must be one of: {allowed}") from exc
+        if mode is None:
+            allowed = ", ".join(member.value for member in EnforcementMode)
+            raise GateError("manifest", f"{name}.mode must be one of: {allowed}")
         equivalents = frozenset(
             _string_tuple(row.get("equivalent_fingerprints", []), f"{name}.equivalent_fingerprints")
         )
@@ -141,6 +175,7 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
             source=source,
             tests=tests,
             support=support,
+            mode=mode,
             survivors_max=survivors_max,
             no_tests_max=no_tests_max,
             timeouts_max=timeouts_max,
@@ -237,29 +272,74 @@ def fingerprint_diff(text: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
 
 
-def evaluate_runs(shard: Shard, base: RunResults, head: RunResults) -> Comparison:
-    failures = list(_head_budget_failures(shard, head))
+def evaluate_runs(shard: Shard, base: RunResults | None, head: RunResults) -> Comparison:
+    if shard.mode is EnforcementMode.ADVISORY:
+        return Comparison(
+            failures=tuple(
+                failure
+                for failure in _head_budget_failures(shard, head)
+                if failure.code.blocks_advisory
+            ),
+            removed_units=(),
+            added_units=(),
+        )
+    assert base is not None
+    base_units = set(base.unit_hashes)
+    head_units = set(head.unit_hashes)
     unchanged_units = {
         unit
         for unit in base.unit_hashes.keys() & head.unit_hashes.keys()
         if base.unit_hashes[unit] == head.unit_hashes[unit]
     }
+    head_failures = tuple(
+        _strict_head_failures(shard, head)
+        if shard.mode is EnforcementMode.STRICT
+        else _head_budget_failures(shard, head)
+    )
+    if shard.mode is EnforcementMode.RATCHET:
+        failures = [failure for failure in head_failures if failure.code.blocks_advisory]
+        for mutant, status in head.statuses.items():
+            if (
+                status == "survived"
+                and head.fingerprints.get(mutant) not in shard.equivalent_fingerprints
+                and not (
+                    unit_name(mutant) in unchanged_units and base.statuses.get(mutant) == "survived"
+                )
+            ):
+                failures.append(Failure(FailureCode.UNKNOWN_SURVIVOR, f"{mutant}: new survivor"))
+            elif status == "timeout":
+                failures.append(Failure(FailureCode.TIMEOUT_BUDGET, f"{mutant}: timeout"))
+        advisories = [
+            Failure(FailureCode.NO_TESTS_BUDGET, f"{mutant}: no tests")
+            for mutant, status in head.statuses.items()
+            if status == "no tests"
+            and not (
+                unit_name(mutant) in unchanged_units and base.statuses.get(mutant) == "no tests"
+            )
+        ]
+    else:
+        failures = list(head_failures)
+        advisories = []
     for mutant, status in base.statuses.items():
         if status != "killed" or unit_name(mutant) not in unchanged_units:
             continue
         head_status = head.statuses.get(mutant)
         if head_status is None:
             failures.append(
-                Failure("missing-mutant", f"{mutant} was killed on base but is absent on head")
+                Failure(
+                    FailureCode.MISSING_MUTANT,
+                    f"{mutant} was killed on base but is absent on head",
+                )
             )
         elif head_status != "killed":
-            failures.append(Failure("killed-regression", f"{mutant}: killed -> {head_status}"))
-    base_units = set(base.unit_hashes)
-    head_units = set(head.unit_hashes)
+            failures.append(
+                Failure(FailureCode.KILLED_REGRESSION, f"{mutant}: killed -> {head_status}")
+            )
     return Comparison(
         failures=tuple(failures),
         removed_units=tuple(sorted(base_units - head_units)),
         added_units=tuple(sorted(head_units - base_units)),
+        advisories=tuple(advisories),
     )
 
 
@@ -267,31 +347,55 @@ def compare_runs(shard: Shard, base: RunResults, head: RunResults) -> tuple[Fail
     return evaluate_runs(shard, base, head).failures
 
 
+def _strict_head_failures(shard: Shard, head: RunResults) -> Iterable[Failure]:
+    if not head.statuses:
+        yield Failure(FailureCode.ZERO_MUTANTS, f"{shard.name}: no mutants were parsed")
+        return
+    for mutant, status in head.statuses.items():
+        if status not in DECISIVE_STATUSES:
+            yield Failure(FailureCode.UNEXPECTED_STATUS, f"{mutant}: {status}")
+        elif (
+            status == "survived"
+            and head.fingerprints.get(mutant) not in shard.equivalent_fingerprints
+        ):
+            yield Failure(FailureCode.UNKNOWN_SURVIVOR, f"{mutant}: unreviewed survivor")
+        elif status == "no tests":
+            yield Failure(FailureCode.NO_TESTS_BUDGET, f"{mutant}: no tests")
+        elif status == "timeout":
+            yield Failure(FailureCode.TIMEOUT_BUDGET, f"{mutant}: timeout")
+
+
 def _head_budget_failures(shard: Shard, head: RunResults) -> Iterable[Failure]:
     if not head.statuses:
-        yield Failure("zero-mutants", f"{shard.name}: no mutants were parsed")
+        yield Failure(FailureCode.ZERO_MUTANTS, f"{shard.name}: no mutants were parsed")
         return
     counts = {status: 0 for status in ALL_STATUSES}
     for mutant, status in head.statuses.items():
         if status not in DECISIVE_STATUSES:
-            yield Failure("unexpected-status", f"{mutant}: {status}")
+            yield Failure(FailureCode.UNEXPECTED_STATUS, f"{mutant}: {status}")
         counts[status] = counts.get(status, 0) + 1
     if counts["survived"] > shard.survivors_max:
-        yield Failure("survivor-budget", f"{counts['survived']} > {shard.survivors_max}")
+        yield Failure(
+            FailureCode.SURVIVOR_BUDGET,
+            f"{counts['survived']} > {shard.survivors_max}",
+        )
     for mutant, status in head.statuses.items():
         if (
             status == "survived"
             and head.fingerprints.get(mutant) not in shard.equivalent_fingerprints
         ):
-            yield Failure("unknown-survivor", f"{mutant}: unrecognized equivalent fingerprint")
+            yield Failure(
+                FailureCode.UNKNOWN_SURVIVOR,
+                f"{mutant}: unrecognized equivalent fingerprint",
+            )
     if counts["no tests"] > shard.no_tests_max:
-        yield Failure("no-tests-budget", f"{counts['no tests']} > {shard.no_tests_max}")
+        yield Failure(FailureCode.NO_TESTS_BUDGET, f"{counts['no tests']} > {shard.no_tests_max}")
     if counts["timeout"] > shard.timeouts_max:
-        yield Failure("timeout-budget", f"{counts['timeout']} > {shard.timeouts_max}")
+        yield Failure(FailureCode.TIMEOUT_BUDGET, f"{counts['timeout']} > {shard.timeouts_max}")
     denominator = counts["killed"] + counts["survived"] + counts["timeout"]
     score = 100.0 * counts["killed"] / denominator if denominator else 0.0
     if score + 1e-9 < shard.score_floor:
-        yield Failure("score-budget", f"{score:.3f}% < {shard.score_floor:.3f}%")
+        yield Failure(FailureCode.SCORE_BUDGET, f"{score:.3f}% < {shard.score_floor:.3f}%")
 
 
 def render_mutmut_config(shard: Shard, *, basetemp: str) -> str:
@@ -346,6 +450,27 @@ def changed_paths(repo: Path, base: str, head: str) -> set[str]:
     _git(repo, "cat-file", "-e", f"{base}^{{commit}}")
     _git(repo, "cat-file", "-e", f"{head}^{{commit}}")
     return parse_name_status(_git(repo, "diff", "--name-status", "--find-renames", base, head))
+
+
+def run_select(args: argparse.Namespace) -> int:
+    manifest = load_manifest(Path(args.manifest).resolve())
+    paths = changed_paths(Path(args.repo).resolve(), args.base, args.head)
+    selection = select_shards(manifest, paths)
+    names = tuple(manifest.shards) if args.all_shards else selection.names
+    print(
+        json.dumps(
+            {
+                "base": args.base,
+                "head": args.head,
+                "changed_paths": sorted(paths),
+                "selected_shards": list(names),
+                "unmatched_tests": list(selection.unmatched_tests),
+                "empty_selection": not names,
+            },
+            indent=2,
+        )
+    )
+    return 0
 
 
 def _extract_ref(repo: Path, ref: str, destination: Path) -> None:
@@ -528,9 +653,12 @@ def run_gate(args: argparse.Namespace) -> int:
             shard_artifacts = output / name
             base_root = temp / f"{name}-base"
             head_root = temp / f"{name}-head"
-            _extract_ref(repo, args.base, base_root)
+            if shard.mode is not EnforcementMode.ADVISORY:
+                _extract_ref(repo, args.base, base_root)
             _extract_ref(repo, args.head, head_root)
-            base_run = execute_shard(base_root, shard, shard_artifacts, "base")
+            base_run: RunResults | None = None
+            if shard.mode is not EnforcementMode.ADVISORY:
+                base_run = execute_shard(base_root, shard, shard_artifacts, "base")
             head_run = execute_shard(head_root, shard, shard_artifacts, "head")
             comparison = evaluate_runs(shard, base_run, head_run)
             diagnostic = "not-needed"
@@ -538,7 +666,8 @@ def run_gate(args: argparse.Namespace) -> int:
                 failed = True
                 diagnostic = _diagnose_non_killed(head_root, head_run, shard_artifacts)
             shard_summaries[name] = {
-                "base_counts": _status_counts(base_run.statuses),
+                "base_collected": base_run is not None,
+                "base_counts": None if base_run is None else _status_counts(base_run.statuses),
                 "head_counts": _status_counts(head_run.statuses),
                 "head_survivor_fingerprints": dict(sorted(head_run.fingerprints.items())),
                 "removed_units": list(comparison.removed_units),
@@ -564,12 +693,15 @@ def _status_counts(statuses: Mapping[str, str]) -> dict[str, int]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("run", "smoke"):
+    for command in ("select", "run", "smoke"):
         child = subparsers.add_parser(command)
         child.add_argument("--repo", default=str(ROOT))
         child.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
         child.add_argument("--base", default="HEAD^")
         child.add_argument("--head", default="HEAD")
+        if command == "select":
+            child.add_argument("--all-shards", action="store_true")
+            continue
         child.add_argument("--output-dir", default="mutation-results")
         child.add_argument("--shard", action="append")
         child.add_argument("--all-shards", action="store_true")
@@ -579,7 +711,7 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        return run_gate(args)
+        return run_select(args) if args.command == "select" else run_gate(args)
     except GateError as exc:
         output = Path(getattr(args, "output_dir", "mutation-results"))
         output.mkdir(parents=True, exist_ok=True)
