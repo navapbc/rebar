@@ -169,10 +169,10 @@
       "attempts": 1,
       "digest": "34f7cd48bb9333a75c8e692b2e4572c3dcf10b112faba2ac51ff4abb6bc64146",
       "first_seen": 1786524475.5611343,
-      "last_seen": 1786574884.037306,
+      "last_seen": 1786575143.0115042,
       "reason": "redundant_ancestry",
       "relation": "blocks",
-      "skips": 155,
+      "skips": 156,
       "source_id": "c7c5-12ea-ad68-4690",
       "target_id": "316c-6c42-32d3-4f9b"
     },
