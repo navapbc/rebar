@@ -190,6 +190,27 @@ def describe_inventory(status: int, body: object) -> str:
     )
 
 
+def customfield_count(status: int, body: object) -> int | None:
+    """How many ``customfield_*`` ids the inventory holds, or ``None`` when unusable.
+
+    The number :func:`describe_inventory` shows a human, made available to code. It is the
+    discriminator this module's docstring names: **zero** custom fields means no Jira
+    Software project has ever been created on the instance (GreenHopper provisions them on
+    the first Software project create — bug 941b-f049-5f29-4410, run 30981084637), so
+    "the Epic fields are absent"
+    cannot yet be distinguished from "nothing has provisioned them yet"; a **non-zero**
+    count means provisioning DID happen, so the same absence is a real degrade.
+
+    ``None`` (an unusable read — non-200, or a body that is not a field list) is NOT folded
+    into ``0``: "we could not see the inventory" is a different claim from "we saw it and it
+    was empty", and only the caller knows which of the two its decision may treat as fatal.
+    """
+    entries = _field_dicts(status, body)
+    if entries is None:
+        return None
+    return sum(1 for entry in entries if str(entry.get("id", "")).startswith("customfield_"))
+
+
 def field_ids(status: int, body: object, names: Sequence[str]) -> dict[str, str | None]:
     """Map each requested field NAME to its instance field id, or ``None``."""
     entries = _field_dicts(status, body)

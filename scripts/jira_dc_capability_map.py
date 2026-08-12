@@ -49,6 +49,17 @@ from typing import Any
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The Epic-field readiness vocabulary is SHARED with the live harness fixture and the
+# deterministic probe (bugs 9790-cafa-dffa-462e / 941b-f049-5f29-4410). This script imports
+# it for its DISCRIMINATOR only (`customfield_count`) — it must NOT call
+# `await_required_fields`, which is post-create-only and would deadlock here (see
+# `epic_field_report_problem`). It lives next to this file; the insert is defensive so the
+# import also works when this script is invoked from elsewhere.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+import jira_dc_field_readiness  # noqa: E402
+
 # Reach the vendored reconciler engine the same way every live_jira_dc conftest does: the
 # engine lives at <repo>/src/rebar/_engine and is not importable as `rebar_reconciler` unless
 # that directory is put on sys.path first. `tests/_engine_path.py` is the single place that
@@ -504,6 +515,98 @@ def _instructions(base_url: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────────────
+# Post-run validation of the Epic-field half of the report (bug 4a6d-5bbc-44f4-4a56)
+# ─────────────────────────────────────────────────────────────────────────────────────
+
+#: The contract fields whose absence this validation refuses to take on trust.
+_EPIC_FIELD_KEYS = ("epic_link_field_id", "epic_name_field_id")
+
+
+def _last_field_inventory(evidence: list[dict[str, Any]]) -> tuple[int, object] | None:
+    """The most recent USABLE ``GET /rest/api/2/field`` in the evidence log.
+
+    "Usable" is exactly ``jira_dc_field_readiness``'s definition — a 200 whose body is a
+    list of field dicts. A 401/503 or an error string is skipped rather than counted as an
+    empty inventory, so a transport failure never masquerades as "this instance has no
+    custom fields". Returns ``None`` when the run captured no usable field read at all.
+    """
+    for entry in reversed(evidence):
+        if str(entry.get("method", "")).upper() != "GET":
+            continue
+        path = str(entry.get("path", "")).split("?", 1)[0].rstrip("/")
+        if path != jira_dc_field_readiness.FIELD_PATH:
+            continue
+        status = entry.get("status")
+        body = entry.get("response_body")
+        status_int = status if isinstance(status, int) else 0
+        if jira_dc_field_readiness.customfield_count(status_int, body) is None:
+            continue
+        return status_int, body
+    return None
+
+
+def epic_field_report_problem(result: dict[str, Any], evidence: list[dict[str, Any]]) -> str | None:
+    """Why the run's Epic-field answer cannot be vouched for — or ``None`` if it can.
+
+    THE DEFECT THIS CLOSES (bug 4a6d-5bbc-44f4-4a56). This script's report is the authority
+    a human uses to update ``_REQUIRED_FIELDS`` / ``_PROJECT_TEMPLATE`` in
+    ``tests/external/live_jira_dc/conftest.py``. ``Epic Link``/``Epic Name`` are GreenHopper
+    custom fields provisioned on the FIRST Jira Software project create, not at plugin start
+    (run 30981084637 — bug 941b-f049-5f29-4410). An agent that read ``/rest/api/2/field``
+    before creating its first project therefore sees a perfectly healthy instance with 27
+    system fields and zero ``customfield_*`` entries, and can truthfully report "no Epic Link
+    id" — which a reader will read as "this image dropped the Epic fields". The report does
+    not fail, so nothing makes them notice.
+
+    THE DISCRIMINATOR IS THE INVENTORY, NOT THE CLOCK, so this is a post-run check on
+    recorded evidence and NOT a pre-run wait. A pre-run ``await_required_fields`` would wait
+    for a thing only the agent's own project creates can produce — the deadlock 941b landed
+    to remove — and that module bans the call site in terms.
+
+    * Epic ids reported **and** non-empty → nothing to check.
+    * An id reported absent while the inventory holds **other** ``customfield_*`` entries →
+      provisioning demonstrably happened, so the absence is a real degrade. Accepted.
+    * An id reported absent while the inventory holds **zero** ``customfield_*`` entries, or
+      while no usable field read was captured at all → the claim is indistinguishable from
+      "no Jira Software project existed yet". UNVERIFIED; the caller fails the job.
+
+    A null optional dumps OUT of the structured payload entirely (``model_dump
+    (exclude_none=True)`` in ``rebar.llm.findings.finalize_outcome``), so "reported absent"
+    means a missing key just as much as an explicit ``None`` or ``""`` — all three are read
+    the same way here.
+    """
+    absent = [key for key in _EPIC_FIELD_KEYS if not result.get(key)]
+    if not absent:
+        return None
+
+    observation = _last_field_inventory(evidence)
+    if observation is None:
+        inventory = (
+            f"no usable GET {jira_dc_field_readiness.FIELD_PATH} was captured in this run's "
+            f"evidence ({len(evidence)} REST call(s) recorded)"
+        )
+    else:
+        status, body = observation
+        count = jira_dc_field_readiness.customfield_count(status, body)
+        if count:
+            return None
+        inventory = jira_dc_field_readiness.describe_inventory(status, body)
+
+    return (
+        f"UNVERIFIED: the run reports {', '.join(absent)} absent, but the field inventory it "
+        f"recorded holds NO customfield_* entries — so this answer cannot distinguish 'this "
+        f"image no longer ships the Epic fields' from 'no Jira Software project had been "
+        f"created yet when the inventory was read'. GreenHopper provisions Epic Link/Epic "
+        f"Name on the FIRST Jira Software project create, measured at "
+        f"{jira_dc_field_readiness.PROVISIONING_TO_FIELDS_VISIBLE_S:.4f}s after the 201 on "
+        f"run 30981084637 (bug 941b-f049-5f29-4410); before that create a healthy instance "
+        f"shows 27 system fields and zero customfield_* entries. Do NOT record this answer as "
+        f"the environment contract. Re-run the map and have the agent re-read the field "
+        f"inventory AFTER its first successful project create. Last observation: {inventory}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -596,6 +699,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::the mapping run failed: {exc}", file=sys.stderr)
         exit_code = 1
     finally:
+        # Bug 4a6d-5bbc-44f4-4a56: an answer that declares the Epic fields absent is only
+        # believable if the recorded inventory shows provisioning already happened. Checked
+        # HERE, on the evidence the run captured, because the fields' precondition is the
+        # agent's own first project create — nothing before the run could have produced them.
+        epic_problem = None if result is None else epic_field_report_problem(result, _EVIDENCE)
+        if epic_problem is not None:
+            print(f"::error::{epic_problem}", file=sys.stderr)
+            exit_code = 1
         (out_dir / "evidence.json").write_text(json.dumps(_EVIDENCE, indent=2, default=str))
         if result is not None:
             (out_dir / "capability_map.json").write_text(json.dumps(result, indent=2, default=str))
@@ -607,6 +718,16 @@ def main(argv: list[str] | None = None) -> int:
                     "model": cfg.model,
                     "rest_call_count": len(_EVIDENCE),
                     "run_succeeded": result is not None,
+                    # "verified" | "unverified" | "not_run" — recorded in the artifact
+                    # itself, so a human reading capability_map.json out of the CI zip
+                    # (where the ::error:: annotation is not attached) still learns that
+                    # the Epic-field answer was refused.
+                    "epic_field_report": (
+                        "not_run"
+                        if result is None
+                        else ("unverified" if epic_problem is not None else "verified")
+                    ),
+                    "epic_field_report_detail": epic_problem,
                 },
                 indent=2,
             )

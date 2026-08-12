@@ -15,6 +15,7 @@ digest" per the ticket's caveat.
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -299,4 +300,263 @@ def test_probe_does_not_invoke_the_capability_map() -> None:
     )
     assert "ANTHROPIC_API_KEY" not in text, (
         "the probe requires no LLM key — its presence suggests an agentic path crept in"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Post-run validation of the Epic-field answer (bug 4a6d-5bbc-44f4-4a56).
+#
+# The map's report is the authority a human uses to update _REQUIRED_FIELDS /
+# _PROJECT_TEMPLATE in tests/external/live_jira_dc/conftest.py. "Epic Link absent"
+# read before the agent's first Jira Software project create is indistinguishable
+# from "this image dropped the Epic fields" — GreenHopper provisions those custom
+# fields ON that create (run 30981084637, bug 941b-f049-5f29-4410). These cells pin
+# that such an answer is REFUSED, and that a genuine degrade still passes through.
+# ---------------------------------------------------------------------------
+
+_SYSTEM_ONLY_FIELDS = [
+    {"id": "summary", "name": "Summary"},
+    {"id": "description", "name": "Description"},
+    {"id": "issuetype", "name": "Issue Type"},
+]
+
+_PROVISIONED_FIELDS = [
+    *_SYSTEM_ONLY_FIELDS,
+    {"id": "customfield_10100", "name": "Sprint"},
+    {"id": "customfield_10101", "name": "Story Points"},
+]
+
+
+def _map_module():
+    """Import scripts/jira_dc_capability_map.py as a module (scripts/ is not a package)."""
+    import importlib.util
+
+    scripts_dir = str(_ROOT / "scripts")
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    spec = importlib.util.spec_from_file_location("_jira_dc_capability_map_uut", _MAP_SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _field_read(body: object, status: int = 200) -> dict:
+    return {
+        "id": "req-0001",
+        "method": "GET",
+        "path": "/rest/api/2/field",
+        "request_body": None,
+        "status": status,
+        "response_body": body,
+    }
+
+
+def test_absent_epic_ids_with_no_customfields_is_unverified() -> None:
+    """The bug's own scenario: a system-only inventory cannot support an 'absent' claim."""
+    mod = _map_module()
+    problem = mod.epic_field_report_problem(
+        {"image_digest": "sha256:abc", "jira_version": "9.4.0"},
+        [_field_read(_SYSTEM_ONLY_FIELDS)],
+    )
+    assert problem is not None, (
+        "a run that reports the Epic fields absent while its recorded inventory holds ZERO "
+        "customfield_* entries must be refused — that inventory is the normal state of an "
+        "instance with no Jira Software project yet (bug 941b-f049-5f29-4410), not evidence "
+        "that the image dropped the fields"
+    )
+    assert "UNVERIFIED" in problem
+    assert "epic_link_field_id" in problem and "epic_name_field_id" in problem
+    # The verdict must carry the observation a human needs to act, not just a label.
+    assert "Summary" in problem, f"the observed inventory is not quoted: {problem}"
+    assert "30981084637" in problem, f"the measurement is not cited: {problem}"
+
+
+def test_absent_epic_ids_with_other_customfields_is_accepted() -> None:
+    """A genuine degrade must still pass: provisioning happened, the fields really are gone."""
+    mod = _map_module()
+    assert (
+        mod.epic_field_report_problem(
+            {"image_digest": "sha256:abc"}, [_field_read(_PROVISIONED_FIELDS)]
+        )
+        is None
+    ), (
+        "an inventory carrying OTHER customfield_* entries proves GreenHopper already "
+        "provisioned, so absent Epic fields are a real image change — this run must not be "
+        "refused"
+    )
+
+
+def test_reported_epic_ids_are_accepted_whatever_the_inventory() -> None:
+    mod = _map_module()
+    assert (
+        mod.epic_field_report_problem(
+            {"epic_link_field_id": "customfield_10102", "epic_name_field_id": "customfield_10103"},
+            [_field_read(_SYSTEM_ONLY_FIELDS)],
+        )
+        is None
+    ), "an answer that RESOLVED both Epic ids has nothing to validate"
+
+
+def test_explicit_nulls_read_the_same_as_missing_keys() -> None:
+    """`model_dump(exclude_none=True)` drops a null id, so both shapes must be equivalent."""
+    mod = _map_module()
+    explicit = mod.epic_field_report_problem(
+        {"epic_link_field_id": None, "epic_name_field_id": None},
+        [_field_read(_SYSTEM_ONLY_FIELDS)],
+    )
+    omitted = mod.epic_field_report_problem({}, [_field_read(_SYSTEM_ONLY_FIELDS)])
+    assert explicit is not None and omitted is not None
+    assert explicit == omitted
+
+
+def test_one_absent_id_is_enough_to_refuse() -> None:
+    mod = _map_module()
+    problem = mod.epic_field_report_problem(
+        {"epic_link_field_id": "customfield_10102"}, [_field_read(_SYSTEM_ONLY_FIELDS)]
+    )
+    assert problem is not None and "epic_name_field_id" in problem
+    assert "epic_link_field_id" not in problem, (
+        "only the id actually reported absent should be named in the verdict"
+    )
+
+
+def test_no_field_read_at_all_is_unverified() -> None:
+    """Nothing observed is not the same as 'observed and healthy' — it is still unvouchable."""
+    mod = _map_module()
+    problem = mod.epic_field_report_problem(
+        {}, [{"id": "req-0000", "method": "GET", "path": "/rest/api/2/serverInfo", "status": 200}]
+    )
+    assert problem is not None and "no usable GET /rest/api/2/field" in problem
+
+
+def test_unusable_field_read_is_not_mistaken_for_an_empty_inventory() -> None:
+    """A 401/503 must not read as 'this instance has no custom fields'."""
+    mod = _map_module()
+    problem = mod.epic_field_report_problem(
+        {}, [_field_read({"errorMessages": ["denied"]}, status=401)]
+    )
+    assert problem is not None and "no usable GET /rest/api/2/field" in problem
+
+
+def test_latest_field_read_wins() -> None:
+    """The agent reads the inventory repeatedly; the post-create read is the authoritative one."""
+    mod = _map_module()
+    assert (
+        mod.epic_field_report_problem(
+            {}, [_field_read(_SYSTEM_ONLY_FIELDS), _field_read(_PROVISIONED_FIELDS)]
+        )
+        is None
+    ), "the LAST usable inventory read must decide, not the first"
+
+
+def test_script_adds_no_pre_create_field_wait() -> None:
+    """The 941b ban holds: await_required_fields has no call site in this script.
+
+    main() creates no Jira Software project before the agent run, so a wait here would poll
+    for something only the blocked run can produce — the deadlock that bug 941b-f049-5f29-4410
+    landed to remove (runs 30975323866, 30978613228).
+    """
+    text = _MAP_SCRIPT.read_text()
+    assert "await_required_fields(" not in text, (
+        "scripts/jira_dc_capability_map.py calls await_required_fields — that wait is "
+        "post-project-create ONLY, and nothing in this script creates a project before the "
+        "agent run, so it would burn its whole budget and abort every run "
+        "(bug 941b-f049-5f29-4410)"
+    )
+
+
+def _drive_main(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, answer: dict, inventory: list):
+    """Run ``main()`` with the LLM runtime, the PAT mint and the gate session faked out.
+
+    Everything that needs a network, a model credential or a live Jira instance is replaced;
+    what remains real is the code under test — the post-run validation and its effect on the
+    exit code and the artifacts. Returns ``(exit_code, run_metadata)``.
+    """
+    import contextlib
+    from types import SimpleNamespace
+
+    mod = _map_module()
+    cfg = SimpleNamespace(model="fake-model")
+
+    monkeypatch.setattr(mod, "LLMConfig", SimpleNamespace(from_env=lambda **_: cfg))
+    monkeypatch.setattr(mod, "RunRequest", lambda **kwargs: SimpleNamespace(**kwargs))
+    monkeypatch.setattr(
+        mod,
+        "gate_source",
+        SimpleNamespace(
+            resolve_gate_handle=lambda **_: object(),
+            apply_handle=lambda config, _handle: config,
+            gate_read_root=lambda _handle: contextlib.nullcontext(),
+        ),
+    )
+    monkeypatch.setattr(mod, "_mint_admin_pat", lambda *_a, **_k: "pat-token")
+    monkeypatch.setattr(
+        mod,
+        "get_runner",
+        lambda _cfg: SimpleNamespace(preflight=lambda: None, run=lambda _req: answer),
+    )
+    # The agent's field reads, as the evidence log would have recorded them.
+    monkeypatch.setattr(mod, "_EVIDENCE", list(inventory))
+
+    out = tmp_path / "out"
+    code = mod.main(["--output-dir", str(out), "--base-url", "http://jira.invalid"])
+    return code, json.loads((out / "run_metadata.json").read_text()), out
+
+
+def test_main_fails_and_records_unverified_on_an_unvouchable_absence(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The job must FAIL, and say so inside the artifact a human downloads."""
+    code, metadata, out = _drive_main(
+        monkeypatch, tmp_path, {"image_digest": "sha256:abc"}, [_field_read(_SYSTEM_ONLY_FIELDS)]
+    )
+    assert code != 0, (
+        "a run whose Epic-field answer cannot be vouched for must fail the job — reporting it "
+        "as a clean success is the whole defect (bug 4a6d-5bbc-44f4-4a56)"
+    )
+    assert metadata["epic_field_report"] == "unverified"
+    assert "UNVERIFIED" in (metadata["epic_field_report_detail"] or "")
+    # The artifacts still land: refusing the CLAIM must not destroy the EVIDENCE.
+    assert (out / "capability_map.json").exists() and (out / "evidence.json").exists()
+
+
+def test_main_succeeds_and_records_verified_on_a_vouchable_answer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Every other answer shape keeps today's behaviour: exit 0, same artifacts."""
+    code, metadata, out = _drive_main(
+        monkeypatch,
+        tmp_path,
+        {"image_digest": "sha256:abc"},
+        [_field_read(_PROVISIONED_FIELDS)],
+    )
+    assert code == 0, "a genuine degrade (provisioned inventory, no Epic fields) must still pass"
+    assert metadata["epic_field_report"] == "verified"
+    assert metadata["epic_field_report_detail"] is None
+    assert (out / "capability_map.json").exists()
+
+
+def test_customfield_count_discriminates_the_two_causes() -> None:
+    """The shared helper the verdict rests on, pinned directly.
+
+    Zero vs non-zero is what separates "no Software project existed yet" from "this image
+    dropped the fields"; an UNUSABLE read is neither, and must not collapse into zero.
+    """
+    mod = _map_module()
+    readiness = mod.jira_dc_field_readiness
+    assert readiness.customfield_count(200, _SYSTEM_ONLY_FIELDS) == 0
+    assert readiness.customfield_count(200, _PROVISIONED_FIELDS) == 2
+    assert readiness.customfield_count(401, {"errorMessages": ["denied"]}) is None, (
+        "an unusable read must stay distinguishable from an inventory observed to be empty"
+    )
+    assert readiness.customfield_count(200, "not a list") is None
+
+
+def test_capability_map_uses_the_shared_readiness_module() -> None:
+    """Anti-drift: the discriminator must come from the module of record, not a local copy."""
+    mod = _map_module()
+    assert getattr(mod, "jira_dc_field_readiness", None) is not None, (
+        "the capability map defines its own customfield_* discriminator instead of importing "
+        "the shared scripts/jira_dc_field_readiness.py definition, so the two can drift"
     )
