@@ -360,6 +360,55 @@ def test_transport_classifier_is_subtractive(stderr: str, retriable: bool) -> No
     assert push_classify._is_transport_retriable(stderr) is retriable
 
 
+_CANNOT_LOCK_REF_STDERR = (
+    "! [remote rejected] HEAD -> tickets (cannot lock ref 'refs/heads/tickets': "
+    "is at e45f61a9ef9f8a570e257079e51c9f39fa061240 but "
+    "expected 9ecaaa40a28e992b060da61ef5969d425f94d1fe)"
+)
+
+
+def test_lost_cas_race_backs_off_between_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug ebee, run 31244501098: 5 retries all lost the SAME race, back-to-back.
+
+    `cannot lock ref ... is at <a> but expected <b>` is correctly classified retriable, so
+    the budget was spent — but with no pause the retries kept colliding with the same
+    concurrent tickets writer and 6 commits were left unpushed. The attempt COUNT is
+    unchanged; only the spacing is.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    monkeypatch.setattr(lock, "write_lock", _open_lock)
+    monkeypatch.setattr(lock, "check_no_rebase_in_progress", lambda _base: None)
+    monkeypatch.setattr(
+        compat, "store_epoch_merge_target", lambda _base, _ref: ("origin/tickets", None)
+    )
+    slept: list[float] = []
+    calls: list[tuple[str, ...]] = []
+    results = [1, 1, 0]
+
+    def racing_git(_base: str, *args: str, **_kwargs: object):
+        calls.append(args)
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="local-origin\n")
+        if args and args[0] == "push":
+            rc = results.pop(0) if results else 1
+            return _completed(args, rc, err=_CANNOT_LOCK_REF_STDERR if rc else "")
+        if args[:2] == ("rev-list", "--count"):
+            return _completed(args, out="6\n")
+        return _completed(args)
+
+    monkeypatch.setattr(push, "_git", racing_git)
+
+    assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append) is None
+    assert len([call for call in calls if call and call[0] == "push"]) == 3
+    # One backoff per recovery that preceded a re-push, escalating rather than back-to-back.
+    assert slept == list(push_classify._CAS_BACKOFF_SECONDS[:2])
+    assert slept == sorted(slept)
+    assert all(delay > 0 for delay in slept)
+
+
 _PROMISOR_TLS_STDERR = (
     "fatal: unable to access 'https://github.com/navapbc/rebar/': "
     "server certificate verification failed. CAfile: none CRLfile: none\n"

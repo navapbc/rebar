@@ -29,6 +29,7 @@ from rebar._store.push_classify import (
     _MAX_RETRIES,
     _MAX_TRANSPORT_ATTEMPTS,
     PushDeliveryError,
+    _cas_backoff,
     _heal_multi_bundle_or_stop,
     _is_multi_bundle,
     _is_non_fast_forward,
@@ -369,6 +370,10 @@ def _recover_non_fast_forward(
             recovered = _merge_remote_under_lock(
                 base_path, remote_ref, attempt, strict, _lock, sleep_fn
             )
+        if recovered:
+            # Bug ebee: back off before the caller re-pushes, so a lost CAS race gets a
+            # window to converge instead of re-colliding with the same concurrent writer.
+            _cas_backoff(attempt, sleep_fn)
         return recovered
     except _lock.LockTimeout:
         _raise_if_strict(

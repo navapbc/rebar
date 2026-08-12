@@ -150,6 +150,20 @@ _MAX_TRANSPORT_ATTEMPTS = 3
 _TRANSPORT_BACKOFF_SECONDS = (0.5, 2.0)
 
 
+# Bug ebee: run 31244501098 lost `cannot lock ref 'refs/heads/tickets': is at <a> but
+# expected <b>` — a genuine CAS race against a concurrent tickets writer. That rejection IS
+# classified retriable, so the loop spent its whole budget; it still lost every attempt
+# because the retries fired BACK-TO-BACK and kept colliding with the same writer, leaving 6
+# unpushed commits. Escalating backoff gives the competing write a window to land.
+_CAS_BACKOFF_SECONDS = (0.25, 0.5, 1.0, 2.0)
+
+
+def _cas_backoff(attempt: int, sleep_fn: Callable[[float], None] | None = None) -> None:
+    """Sleep after non-fast-forward recovery *attempt* (1-based) before the next push."""
+    delay = _CAS_BACKOFF_SECONDS[min(attempt, len(_CAS_BACKOFF_SECONDS)) - 1]
+    (time.sleep if sleep_fn is None else sleep_fn)(delay)
+
+
 def _transport_backoff(attempt: int, sleep_fn: Callable[[float], None] | None = None) -> None:
     """Sleep before transport retry *attempt* (1-based), clamped to the declared schedule."""
     delay = _TRANSPORT_BACKOFF_SECONDS[min(attempt, len(_TRANSPORT_BACKOFF_SECONDS)) - 1]
