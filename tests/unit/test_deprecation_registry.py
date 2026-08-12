@@ -34,9 +34,16 @@ def test_registry_entries_well_formed() -> None:
         assert isinstance(entry, Deprecation)
         # keyed by its own key (map integrity)
         assert entry.key == key
-        # every entry names a surface + a replacement
+        # every entry names a surface
         assert entry.name and entry.name.strip(), f"{key}: empty name"
-        assert entry.replacement and entry.replacement.strip(), f"{key}: empty replacement"
+        # A replacement is required for a SUPERSESSION or a rename, and must be absent for a
+        # RETIREMENT — a scheduled surface whose behaviour is simply gone, with nothing to
+        # migrate to (task 549c's `cfg:*.resolved_statuses` rows). Permitting empty for a
+        # permanent alias would be meaningless: an alias with nothing to alias.
+        if entry.permanent:
+            assert entry.replacement and entry.replacement.strip(), f"{key}: empty replacement"
+        else:
+            assert entry.replacement is not None
         assert entry.kind in dep._KINDS, f"{key}: bad kind {entry.kind!r}"
 
 

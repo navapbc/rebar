@@ -272,7 +272,6 @@ def test_a_dc_created_ticket_carries_the_shared_jira_provenance(
         project=jira_dc_project,
         allow_insecure=True,
         ca_bundle="",
-        resolved_statuses=frozenset({"Resolved", "Done", "Cancelled"}),
         pat=jira_dc_pat,
     )
     transport = JiraDataCenterTransport(

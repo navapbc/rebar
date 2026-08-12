@@ -370,7 +370,7 @@ def test_the_dc_factory_asserts_conformance_at_construction(monkeypatch) -> None
     monkeypatch.setattr(
         dc_settings,
         "resolve_jira_datacenter_settings",
-        lambda: type("_S", (), {"project": "DC", "resolved_statuses": frozenset({"Done"})})(),
+        lambda: type("_S", (), {"project": "DC"})(),
     )
     monkeypatch.setattr(dc_transport, "build_client_from_settings", lambda s: object())
     monkeypatch.setattr(dc_transport, "JiraDataCenterTransport", _Incomplete)

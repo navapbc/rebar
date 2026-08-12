@@ -62,7 +62,6 @@ def dc_transport(jira_dc_pat: str, jira_dc_base_url: str) -> Any:
         project="",  # overridden per-test via jira_dc_project
         allow_insecure=True,
         ca_bundle="",
-        resolved_statuses=frozenset({"Resolved", "Done", "Cancelled"}),
         pat=jira_dc_pat,
     )
     client = build_client_from_settings(settings)

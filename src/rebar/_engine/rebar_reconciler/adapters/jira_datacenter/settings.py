@@ -10,7 +10,7 @@ degrade into a confusing downstream connection failure.
 
 Where each setting comes from:
 
-* ``url`` / ``allow_insecure`` / ``ca_bundle`` / ``resolved_statuses`` — the
+* ``url`` / ``allow_insecure`` / ``ca_bundle`` — the
   vendor-neutral ``[tool.rebar.reconciler]`` section (``rebar._config_schema``).
   These are Data-Center-only reconciler concerns (Cloud drives an ACLI
   subprocess and never resolves a base URL or a TLS/CA setting here), so they
@@ -30,22 +30,19 @@ from __future__ import annotations
 import os
 from typing import NamedTuple
 
-#: DC's default resolved-status set — the sensible default for an unconfigured
-#: `[tool.rebar.reconciler].resolved_statuses`, overridable per self-hosted
-#: workflow.
-DEFAULT_RESOLVED_STATUSES: frozenset[str] = frozenset({"Resolved", "Done", "Cancelled"})
-
 
 class JiraDataCenterSettings(NamedTuple):
     """Resolved DC connection settings: the non-secret ``url``/``project``/
-    ``allow_insecure``/``ca_bundle``/``resolved_statuses`` (typed config) plus the
-    secret ``pat`` (env-only)."""
+    ``allow_insecure``/``ca_bundle`` (typed config) plus the secret ``pat`` (env-only).
+
+    A ``resolved_statuses`` member was dropped by task 549c: it carried
+    ``reconciler.resolved_statuses`` to a transport attribute that nothing ever read, once
+    task f020 deleted the inbound absence probe."""
 
     url: str
     project: str
     allow_insecure: bool
     ca_bundle: str
-    resolved_statuses: frozenset[str]
     pat: str
 
 
@@ -98,11 +95,6 @@ def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
 
     config = load_config()
     reconciler = config.reconciler
-    resolved_statuses = (
-        frozenset(reconciler.resolved_statuses)
-        if reconciler.resolved_statuses
-        else DEFAULT_RESOLVED_STATUSES
-    )
     # NOTE — the missing-PAT guard deliberately does NOT live here, and that is not an
     # oversight. This function is reached from PROPERTIES (`JiraDataCenterBackend.
     # query_project`), and on Python <= 3.11 `isinstance(x, SomeRuntimeCheckableProtocol)`
@@ -119,6 +111,5 @@ def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
         project=config.jira.project,
         allow_insecure=reconciler.allow_insecure,
         ca_bundle=reconciler.ca_bundle,
-        resolved_statuses=resolved_statuses,
         pat=pat,
     )

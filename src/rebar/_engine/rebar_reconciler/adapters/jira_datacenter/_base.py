@@ -6,9 +6,9 @@ Extracted from ``transport.py`` under the module-size cap (see ADR 0058); no beh
 Every capability mixin (``_issues.py``, ``_hierarchy.py``, ``_links.py``,
 ``_comments.py``, ``_people.py``, ``_properties.py``) inherits from
 :class:`_TransportBase` so mypy sees ``self._client`` / ``self.project`` /
-``self._epic_link_field_id`` / ``self._resolved_statuses`` without each mixin
-re-declaring them, and so ``__init__`` exists exactly once regardless of how
-many mixins ``JiraDataCenterTransport`` composes.
+``self._epic_link_field_id`` without each mixin re-declaring them, and so
+``__init__`` exists exactly once regardless of how many mixins
+``JiraDataCenterTransport`` composes.
 """
 
 from __future__ import annotations
@@ -80,11 +80,11 @@ def _user_attr(user: Any, key: str) -> Any:
 class _TransportBase:
     """Construction + the shared pager every capability mixin is built on.
 
-    ``resolved_statuses`` defaults to Cloud/DIG's ``{Resolved, Done, Cancelled}``
-    (``settings.DEFAULT_RESOLVED_STATUSES``) so a transport built directly with a
-    fake client (as the unit tests do) never needs a loaded config; production
-    construction threads the configured set through from
-    ``resolve_jira_datacenter_settings`` (``reconciler.resolved_statuses``).
+    This carried a ``resolved_statuses`` parameter and ``_resolved_statuses`` attribute for
+    the inbound absence probe's classifier. That port was deleted with task f020, leaving the
+    attribute write-only — stored on every transport and read by nothing — so task 549c
+    removed it. The config keys that fed it survive as deprecated no-ops; see
+    ``_config_schema.JiraConfig.resolved_statuses``.
     """
 
     # Declared at class level (type-only) so every capability mixin that inherits
@@ -95,28 +95,14 @@ class _TransportBase:
     _client: Any
     project: str
     _epic_link_field_id: Any
-    _resolved_statuses: frozenset[str]
 
-    def __init__(
-        self,
-        *,
-        client: Any,
-        project: str,
-        resolved_statuses: frozenset[str] | None = None,
-    ) -> None:
+    def __init__(self, *, client: Any, project: str) -> None:
         self._client = client
         self.project = project
         # Ticket 39c1 (follow-up): cache the discovered "Epic Link" field id across calls —
         # `_MISSING` (not yet looked up) is distinguished from `None` (looked up, this instance
         # has no such field), so a fieldless instance is not re-probed on every `set_parent`.
         self._epic_link_field_id = _MISSING
-        if resolved_statuses is None:
-            from rebar_reconciler.adapters.jira_datacenter.settings import (
-                DEFAULT_RESOLVED_STATUSES,
-            )
-
-            resolved_statuses = DEFAULT_RESOLVED_STATUSES
-        self._resolved_statuses = resolved_statuses
 
     def _paged_search(
         self,
