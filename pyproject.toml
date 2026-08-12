@@ -169,6 +169,15 @@ grounding = [
 ]
 # Code-health metrics use lizard in-process; scc and jscpd are external CLIs.
 metrics = ["lizard>=1.23"]
+# Markdown-aware Jira Cloud ADF conversion (story e59d, epic 708d). OPTIONAL — never
+# required by core rebar. `marklas` (MIT) over `mistune` (BSD-3-Clause) converts
+# Markdown<->ADF so Cloud renders real headings/lists/code instead of literal source.
+# Pinned EXACTLY, not floored: this depends on a specific API surface (`to_adf`/`to_md`)
+# and on measured output shape, which the corpus tests assert, so an unpinned floor
+# would let local and CI diverge. adapters/jira/adf.py imports it LAZILY inside the
+# three conversion functions and returns its plain-text results when absent, so the
+# reconciler engine stays importable with no extras installed.
+adf = ["marklas==0.8.6", "mistune==3.3.4"]
 # The opt-in T2 semantic-resolution backend (epic 850f, ADR 0030): a self-contained
 # pyright the oracle shells out to. Absent it, the T2 tier abstains (no_tool) — it is
 # never on a deterministic blocking path, so a non-adopting client pays nothing.
@@ -231,6 +240,9 @@ dev = [
     # test even when a worker is blocked in a C-level flock/socket/subprocess call. Pinned
     # exactly for the same local↔CI parity reason as xdist.
     "pytest-timeout==2.4.0",
+    # Markdown<->ADF engine (the `adf` extra) so the Cloud conversion tests actually
+    # RUN in CI instead of skipping; adf.py itself degrades safely without it.
+    "marklas==0.8.6",
     # Mutation-gate runtime. Pinned exactly because result/status semantics and mutant IDs
     # are part of the checked-in comparison contract; upgrade only with a measured baseline.
     "mutmut==3.7.0",

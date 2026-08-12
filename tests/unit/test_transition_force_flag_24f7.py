@@ -145,6 +145,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # including a new frozen corpus under the same directory — must fail this test and force a
 # conscious decision rather than inheriting an exemption it was never weighed for.
 EXEMPT = {
+    # The Cloud ADF corpus generator NAMES the retired flag because its scrub MAPS it to
+    # the current spelling when freezing captured ticket prose into a fixture, so the
+    # committed fixture itself is clean. Removing the mapping would let the retired
+    # spelling back into a tracked file.
+    "scripts/build_cloud_adf_corpus.py",
     # Frozen LLM-experiment corpora. Their content is recorded experiment INPUT; rewriting
     # them would corrupt the record the experiments' conclusions rest on.
     "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",

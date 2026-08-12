@@ -42,7 +42,14 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
     }
 )
 EXCLUDED_PREFIXES = (Path("docs/archive"), Path("docs/experiments"))
-EXCLUDED_FILES = (Path("src/rebar/llm/workflow/editor_assets/dist/editor.js"),)
+# ``scripts/build_cloud_adf_corpus.py`` NAMES the retired vocabulary because its
+# scrub MAPS it to the canonical spellings when freezing captured ticket prose into
+# a fixture — the same reason ``scripts/gen_cli_reference.py`` is a compatibility
+# file for the bridge-vocabulary contract.
+EXCLUDED_FILES = (
+    Path("src/rebar/llm/workflow/editor_assets/dist/editor.js"),
+    Path("scripts/build_cloud_adf_corpus.py"),
+)
 ABBREVIATION_DIRECTORIES = (Path("src/rebar/llm/reviewers"), Path("src/rebar/_guides"))
 ABBREVIATION_FILES = (
     Path(".rebar/criteria_routing.json"),
