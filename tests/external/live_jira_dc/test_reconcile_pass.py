@@ -47,6 +47,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _bridge_output import converged_pass_problem, wrote_nothing_problem
 from _dc_support import run_bridge as _run_bridge
 
 _BASE = os.environ.get("JIRA_DC_BASE_URL", "http://localhost:2990/jira")
@@ -158,31 +159,34 @@ def _envelope(cp: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 
 def _assert_converged_writing_pass(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
-    """Assert a WRITING-mode pass converged, reading the shape the reconciler actually emits.
+    """Assert a WRITING pass settled, reading the shape the CANONICAL route actually emits.
 
-    Writing modes do NOT emit a JSON envelope. ``__main__.py:444`` says so in a comment —
-    "Writing-mode output shape is unchanged (OK line on stdout, no JSON)" — and only the
-    ``no_write`` branch calls ``json.dumps``. An earlier draft of this file used
-    ``_envelope()`` here and could NEVER have passed; the bug was masked because the pass
-    crashed on a missing transport member first and failed the exception assertion instead.
+    Writing passes emit no JSON envelope — only the ``no_write`` branch calls ``json.dumps``.
+    They used to be read off the ``OK: …`` stdout summary, but the canonical ``preview`` /
+    ``sync`` routes suppress that line by design (``__main__.py`` guards it with
+    ``route not in {"preview", "sync"}``) and report ``BRIDGE_STATE: converged`` on stderr
+    instead — see ``docs/exit-codes.md`` §"Bridge routes" and ADR 0092. These cells were
+    re-pointed at ``sync`` by ``c87afedba8``, so the ``OK:`` form asserted on output the
+    invoked route never prints. Parsing lives in ``_bridge_output.py``, which
+    ``tests/unit/test_bridge_output_parsing.py`` covers without the live harness.
     """
-    assert "OK:" in cp.stdout, (
-        f"{what}: no OK line on stdout:\n{cp.stdout}\n--stderr--\n{cp.stderr}"
-    )
+    problem = converged_pass_problem(cp.stdout, cp.stderr)
+    assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
 
 
 def _assert_wrote_nothing(cp: subprocess.CompletedProcess[str], *, what: str) -> None:
-    """Idempotence, read off the reconciler's own convergence line.
+    """Idempotence, read off the reconciler's own counters.
 
-    ``__main__.py:456`` prints "OK: steady-state pass converged — 0 mutations" exactly when
-    ``computed == 0 and applied == 0``; otherwise it prints "applied N of M". So the
-    converged line IS the zero-write assertion — a stronger signal than a parsed count,
-    because it is the program's own verdict.
+    NOT just ``BRIDGE_STATE: converged``: ``__main__.py`` classifies a pass that applied N
+    mutations as CONVERGED too, so that line means "settled", not "wrote nothing". Asserting
+    on it alone would leave this cell green while a pass thrashed the remote every run — the
+    exact failure it exists to catch. Zero-write evidence therefore comes from the
+    unconditional ``RECON:`` stderr telemetry: both differ totals zero
+    (``run_differs.py``) and no per-mutation ``batch_outcome`` line (``applier.py``).
     """
-    converged = "steady-state pass converged" in cp.stdout
-    applied_zero = "applied 0 of 0" in cp.stdout
-    assert converged or applied_zero, (
-        f"{what}: the repeated pass did NOT report convergence — it wrote something:\n"
+    problem = wrote_nothing_problem(cp.stdout, cp.stderr)
+    assert problem is None, (
+        f"{what}: the repeated pass was not a no-op — {problem}:\n"
         f"{cp.stdout}\n--stderr--\n{cp.stderr}"
     )
 
@@ -210,9 +214,11 @@ def test_dc_reconcile_pass_raises_no_unhandled_exception(dc_rebar_repo: Path) ->
     cp = _run_bridge(dc_rebar_repo, "preview")
     _assert_no_unhandled_exception(cp, what="preview")
 
-    # Preview IS a no_write operation, so it DOES emit a JSON envelope (__main__.py:445-452
-    # calls json.dumps only on the no_write branch). Keep the stronger assertion here;
-    # only the WRITING-mode tests below had to change.
+    # Preview IS a no_write operation, so it DOES emit a JSON envelope: ``__main__.py``
+    # calls json.dumps only on the no_write branch, and that call is NOT route-gated (only
+    # the ``OK:`` summary beside it is). So this cell survived the move to the canonical
+    # routes unchanged — keep the stronger assertion here; only the two WRITING-pass
+    # helpers above had to change.
     envelope = _envelope(cp)
     assert envelope.get("mutation_failures", 0) == 0, (
         f"the preview reported mutation failures: {envelope}"
