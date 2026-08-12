@@ -260,6 +260,87 @@ def _apply_caused_by(
         )
 
 
+def _sign_completion_and_report(
+    verified_result: dict, ticket_id: str, repo_root, ref: str | None
+) -> dict:
+    """Sign the completion verdict for a just-closed ticket and report what became of it.
+
+    Extracted from :func:`close_ticket` (bug silvern-dewy-damselfly): this tail is a decision
+    of its own — drift refusal vs sign vs sign failure — and inlining it pushed the caller past
+    the complexity ratchet.
+
+    Returns the ``completion_signature`` block the close payload carries:
+    ``{"signed": bool, "cause": str, "error": str}`` with ``cause`` one of ``signed`` /
+    ``material_drifted`` / ``sign_failed``. NEVER raises: the close has ALREADY committed by the
+    time this runs, so a failure here can only be reported, never undone. Warnings go to stderr
+    and the caller's exit code is unaffected.
+    """
+    import sys
+
+    from rebar import signing as _signing
+
+    # Pre-sign fingerprint recheck (story blackbear): the verifier ran OUTSIDE the write lock,
+    # and transport retries + timeouts widen the verify -> close -> sign window. The close gate
+    # verifies an attested snapshot of HEAD, so the manifest's `verified-at-sha:` IS the HEAD
+    # SHA at verify time; re-read HEAD now and, if it MOVED, the code drifted under us — do NOT
+    # attest stale state. The ticket already closed (the transition committed above), so this is
+    # the same closed-without-signature outcome as --force: warn on stderr and skip
+    # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
+    _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
+    _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
+    # bug 80af: a --ref-targeted close verifies (and must sign against) THAT ref, not HEAD.
+    # So the drift guard must resolve the SAME ref for the fresh sha — otherwise a stacked-story
+    # close (--ref=<story-sha> while the worktree sits at the epic tip) would compare the story
+    # sha against the tip HEAD and be spuriously treated as drifted, landing UNSIGNED. For a
+    # concrete commit the tree is immutable, so resolving the same ref makes the check a stable
+    # no-op and a legitimately-targeted close lands SIGNED.
+    if ref and ref != "HEAD":
+        from rebar._snapshot.repo_snapshot import resolve_ref
+
+        _fresh_sha = resolve_ref(ref, str(config.repo_root(repo_root)), fetch=False)
+    else:
+        _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
+    if _material_drifted(_verified_sha, _fresh_sha):
+        completion_signature = {"signed": False, "cause": "material_drifted", "error": ""}
+        sys.stderr.write(
+            f"Warning: closed {ticket_id} WITHOUT a completion signature — the code drifted "
+            f"between verify ({str(_verified_sha)[:12]}) and sign ({str(_fresh_sha)[:12]}); "
+            "not attesting stale state. To certify, reopen and re-close against the verified "
+            f"commit: `rebar reopen {ticket_id}`, move it back to in_progress, then re-close "
+            f"with `--ref {_verified_sha}`. (A plain re-close of an already-closed ticket is a "
+            "no-op — reopen first.)\n"
+        )
+    else:
+        try:
+            # The shared producer step (story ee0b) — same seam call the trusted op-cert gate
+            # service uses on a PASS verdict, so both producers mint the cert identically.
+            sign_completion_verdict(verified_result, ticket_id, repo_root)
+            completion_signature = {"signed": True, "cause": "signed", "error": ""}
+        except _signing.SigningError as exc:
+            # DEGRADE, never wedge (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH
+            # >= 8.9) and a writable tracker. When neither can produce a key the close ALREADY
+            # committed, so this is the same closed-without-signature outcome as --force:
+            # warn and skip signing (exit 0). Re-close once OpenSSH >= 8.9 is installed.
+            completion_signature = {
+                "signed": False,
+                "cause": "sign_failed",
+                "error": exc.message,
+            }
+            # Lead with what actually happened. The old text appended the raw signing error
+            # to the warning, so a lock timeout read as "flock: could not acquire lock after
+            # 60s" and an agent reasonably concluded the CLOSE had failed — while the close
+            # had in fact committed ~60s earlier (bug silvern-dewy-damselfly). Say plainly
+            # that the close LANDED and only the signature did not.
+            sys.stderr.write(
+                f"Warning: {ticket_id} IS CLOSED — the close committed. Only the completion "
+                f"signature failed, so the ticket is closed WITHOUT one. Do NOT re-run the "
+                f"transition (it would be a no-op). The signing error was: {exc.message} "
+                f"Once signing is available, `rebar reopen {ticket_id}`, move it back to "
+                "in_progress, and re-close to certify.\n"
+            )
+    return completion_signature
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -320,6 +401,14 @@ def close_ticket(
     # when the from-status is `idea`. The open-children structural guard above still
     # ran unconditionally (integrity, not completion), so an idea parent over
     # non-closed children is still refused.
+    # Machine-readable record of what became of the completion signature (bug
+    # silvern-dewy-damselfly). The close COMMITS before signing is attempted, so a signing
+    # failure leaves a ticket closed-without-signature while the command still succeeds. Left
+    # unreported, the only evidence was a stderr line whose text described the CLOSE as having
+    # failed. Consumers branch on `cause` without parsing English; see the vocabulary below.
+    # Stays None on any path where no completion signature is in play (a non-close transition,
+    # and `idea -> closed`), and is omitted from the payload entirely in that case.
+    completion_signature: dict[str, object] | None = None
     verified_result = None
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
@@ -392,56 +481,9 @@ def close_ticket(
     # (reads as "bypassed", never a false "validated"). Errors surface: we WANT a hard signal if
     # the trustworthy record can't be written.
     if target_status == "closed" and verified_result is not None:
-        import sys
-
-        from rebar import signing as _signing
-
-        # Pre-sign fingerprint recheck (story blackbear): the verifier ran OUTSIDE the write lock,
-        # and transport retries + timeouts widen the verify -> close -> sign window. The close gate
-        # verifies an attested snapshot of HEAD, so the manifest's `verified-at-sha:` IS the HEAD
-        # SHA at verify time; re-read HEAD now and, if it MOVED, the code drifted under us — do NOT
-        # attest stale state. The ticket already closed (the transition committed above), so this is
-        # the same closed-without-signature outcome as --force: warn on stderr and skip
-        # signing (the close still succeeds, exit 0). Re-close to certify against the current tree.
-        _manifest = _verdict_manifest(verified_result, ticket_id, repo_root)
-        _verified_sha = _signing.verified_at_sha_from_manifest(_manifest)
-        # bug 80af: a --ref-targeted close verifies (and must sign against) THAT ref, not HEAD.
-        # So the drift guard must resolve the SAME ref for the fresh sha — otherwise a stacked-story
-        # close (--ref=<story-sha> while the worktree sits at the epic tip) would compare the story
-        # sha against the tip HEAD and be spuriously treated as drifted, landing UNSIGNED. For a
-        # concrete commit the tree is immutable, so resolving the same ref makes the check a stable
-        # no-op and a legitimately-targeted close lands SIGNED.
-        if ref and ref != "HEAD":
-            from rebar._snapshot.repo_snapshot import resolve_ref
-
-            _fresh_sha = resolve_ref(ref, str(config.repo_root(repo_root)), fetch=False)
-        else:
-            _fresh_sha = _signing.head_sha(config.repo_root(repo_root))
-        if _material_drifted(_verified_sha, _fresh_sha):
-            sys.stderr.write(
-                f"Warning: closed {ticket_id} WITHOUT a completion signature — the code drifted "
-                f"between verify ({str(_verified_sha)[:12]}) and sign ({str(_fresh_sha)[:12]}); "
-                "not attesting stale state. To certify, reopen and re-close against the verified "
-                f"commit: `rebar reopen {ticket_id}`, move it back to in_progress, then re-close "
-                f"with `--ref {_verified_sha}`. (A plain re-close of an already-closed ticket is a "
-                "no-op — reopen first.)\n"
-            )
-        else:
-            try:
-                # The shared producer step (story ee0b) — same seam call the trusted op-cert gate
-                # service uses on a PASS verdict, so both producers mint the cert identically.
-                sign_completion_verdict(verified_result, ticket_id, repo_root)
-            except _signing.SigningError as exc:
-                # DEGRADE, never wedge (story 8d8e): op-cert signing needs ssh-keygen (OpenSSH
-                # >= 8.9) and a writable tracker. When neither can produce a key the close ALREADY
-                # committed, so this is the same closed-without-signature outcome as --force:
-                # warn and skip signing (exit 0). Re-close once OpenSSH >= 8.9 is installed.
-                sys.stderr.write(
-                    f"Warning: closed {ticket_id} WITHOUT a completion signature — {exc.message} "
-                    f"Once signing is available, `rebar reopen {ticket_id}`, move it back to "
-                    "in_progress, and re-close to certify (a plain re-close of a closed ticket is "
-                    "a no-op).\n"
-                )
+        completion_signature = _sign_completion_and_report(
+            verified_result, ticket_id, repo_root, ref
+        )
 
     # Blame-Hunt Advisory (ticket 555e): on a BUG close, draw a best-effort caused_by link
     # from the (now-closed) bug to the culprit change/ticket. An explicit --caused-by <id>
@@ -461,6 +503,9 @@ def close_ticket(
 
     # Force-close audit comment (best-effort, silenced — matches bash || true).
     if target_status == "closed" and force_close:
+        # A deliberate bypass, not a failure — but still closed-without-signature, so it gets
+        # its own cause rather than being reported as if a signature had been attempted.
+        completion_signature = {"signed": False, "cause": "force_bypassed", "error": ""}
         session = _resolve_session(tracker)
         body = (
             "FORCE_CLOSE: close gate(s) bypassed by user approval — no completion/signature "
@@ -489,13 +534,16 @@ def close_ticket(
 
     push.push_after_commit(tracker)
 
-    return {
+    result: dict = {
         "ticket_id": ticket_id,
         "from": current_status,
         "to": target_status,
         "newly_unblocked": newly_unblocked,
         "noop": False,
     }
+    if completion_signature is not None:
+        result["completion_signature"] = completion_signature
+    return result
 
 
 def _resolve_session(tracker: str) -> str:

@@ -411,12 +411,19 @@ def transition(
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
-    return {
+    out: TransitionResult = {
         "ticket_id": result["ticket_id"],
         "from": result["from"],
         "to": result["to"],
         "newly_unblocked": result["newly_unblocked"],
     }
+    # Forward the completion-signature marker when the close path produced one. This dict is
+    # rebuilt field by field, so an unforwarded key is silently dropped — which would leave
+    # library and MCP callers unable to detect a close that landed WITHOUT its signature
+    # (bug silvern-dewy-damselfly). Absent for transitions with no signature in play.
+    if "completion_signature" in result:
+        out["completion_signature"] = result["completion_signature"]
+    return out
 
 
 def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> ClaimResult:
