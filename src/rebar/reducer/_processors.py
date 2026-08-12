@@ -200,8 +200,9 @@ def _fold_claimed_session(state: dict, data: dict) -> None:
         state["claim_remote_session"] = data.get("remote_session")
 
 
-def _fold_close_class(state: dict, data: dict) -> None:
-    """Record the bug-close classification on a winning ``*->closed`` STATUS fold (ticket ed13).
+def _fold_close_metadata(state: dict, data: dict) -> None:
+    """Record the close metadata carried on a winning ``*->closed`` STATUS fold (ticket ed13;
+    extended with ``force_close_reason`` by bug defiant-orthoclase-buck).
 
     ``close_class`` records WHY a bug closed — the bounded ``--class`` enum the close write
     stamped onto the ``*->closed`` STATUS event's ``data`` (see
@@ -215,6 +216,13 @@ def _fold_close_class(state: dict, data: dict) -> None:
     ignore the additive ``data["close_class"]`` key (forward-compatible)."""
     if data.get("status") == "closed" and data.get("close_class"):
         state["close_class"] = data["close_class"]
+    # The `--force=<reason>` bypass reason travels with the same edge, under the same
+    # present-only rule and the same winner-only application, so a losing concurrent close
+    # cannot overwrite the winner's reason (bug defiant-orthoclase-buck). Folded here rather
+    # than in its own function because it is the same datum shape on the same edge; splitting
+    # would duplicate the winner-only call sites for no gain.
+    if data.get("status") == "closed" and data.get("force_close_reason"):
+        state["force_close_reason"] = data["force_close_reason"]
 
 
 def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None:
@@ -271,7 +279,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
             _fold_plan_review_phase(state, state["status"])
             state["parent_status_uuid"] = incoming_uuid  # winner's own UUID
             _fold_claimed_session(state, data)  # only when THIS (winning) event is applied
-            _fold_close_class(state, data)  # bug-close class on the *->closed winning edge
+            _fold_close_metadata(state, data)  # close metadata on the *->closed winning edge
         else:
             # Existing chain wins; keep state as-is.
             winner_uuid = existing_uuid
@@ -298,7 +306,7 @@ def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None
         state["status"] = data.get("status", state["status"])
         _fold_plan_review_phase(state, state["status"])
         _fold_claimed_session(state, data)  # normal (non-fork) update — this event is applied
-        _fold_close_class(state, data)  # bug-close class on the *->closed edge
+        _fold_close_metadata(state, data)  # close metadata on the *->closed edge
         # Advance to THIS event's OWN UUID (not its data parent-pointer) so a
         # subsequent concurrent sibling forks against this event's identity and
         # resolves by the lexical-UUID rule above — deterministically and

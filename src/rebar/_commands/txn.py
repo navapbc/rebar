@@ -286,6 +286,16 @@ def transition_core(
         # to the pre-feature close event for the (non-bug / no-class) paths.
         if target_status == "closed" and close_class:
             status_data["close_class"] = close_class
+        # The operator's `--force=<reason>` for bypassing the close gates. Same present-only
+        # discipline as `close_class` above, so an ordinary close omits the key and stays
+        # byte-identical to the pre-feature event. This parameter was previously accepted and
+        # DISCARDED (bug defiant-orthoclase-buck): the only durable trace of a bypass reason
+        # was a best-effort FORCE_CLOSE audit comment written afterwards via a SECOND lock
+        # acquisition and swallowed on failure — least reliable under exactly the contention
+        # that makes force-closing attractive. Recording it here costs no extra lock: this
+        # write already holds one.
+        if target_status == "closed" and force_close_reason:
+            status_data["force_close_reason"] = force_close_reason
         event = {
             "timestamp": timestamp,
             "uuid": event_uuid,
