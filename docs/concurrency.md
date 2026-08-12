@@ -313,6 +313,40 @@ they cannot prove synchronous delivery. The private process boundary
 `python -m rebar._store.push push --tracker <path> [--strict]` catches that error,
 reports it on stderr, and returns a nonzero status.
 
+#### The push-pending marker — how a failure reaches a caller that cannot see stderr
+
+The warning above is only DELIVERABLE to a caller watching this process's stderr. Three
+supported surfaces are not: a `sync.push = async` push runs in a detached child whose
+stderr is `/dev/null`; a **library** embedder gets rebar's `NullHandler`; and an **MCP**
+client reads only the tool result. On those paths the warning was not merely
+uninformative, it never arrived at all (bug `vapoury-attack-lamb`).
+
+So every terminal delivery failure is ALSO recorded as durable state: `rebar-push-pending`
+in the tracker's **git dir**, written by `rebar._store.push_state`. It records the
+classification `reason`, the git rejection `detail`, the `remote_ref`, the `unpushed`
+backlog count and `since`.
+
+The git dir, not the working tree, is load-bearing: it puts the marker outside everything
+git sees, so it can never be committed (a record that the remote is unreachable must not
+itself need the remote), it cannot perturb the stash-aside/merge/restore dance a
+non-fast-forward triggers, and it never appears as an untracked file in `git status`. It is
+cleared by the next push that lands, so the signal cannot latch on past the outage it
+describes.
+
+Read it with `rebar.push_status()` from the library (no logging handler required), or from
+the `push_status` field every MCP write tool now returns. The four reasons that mean *no
+push was attempted* — `push-disabled`, `async-delivery-unobservable`, `remote-not-found`
+and `invalid-destination` — are deliberately NOT recorded, so a local-only store (a
+supported mode) never reports a phantom outage.
+
+On the `async` policy the marker is written by the detached CHILD, so a failure can land
+after the parent's call returns. The guarantee is that the failure becomes visible to a
+subsequent write or read, not that it is visible within the same call.
+
+This is a SIGNAL, never an exception: the best-effort contract above is unchanged, and a
+marker that cannot be written (an unwritable tracker) degrades to "no status" rather than
+failing the write.
+
 **Push policy — `REBAR_SYNC_PUSH`** (read at the `_push_tickets_branch` chokepoint, so
 CLI / library / MCP honour it uniformly; case/space-insensitive; default
 `always`):

@@ -136,6 +136,13 @@ from rebar._native import (
     to_llm,
 )
 
+# Bug vapoury-attack-lamb: the tickets-branch push is best-effort and warns on failure —
+# but a library embedder gets the NullHandler installed below, so that warning goes
+# nowhere and a rejected push is invisible in-process. This is the read side of the
+# durable marker ``rebar._store.push_state`` records: it needs no logging handler and no
+# git subprocess, so an embedder can check delivery after a write.
+from rebar._store.push_state import read_status as push_status
+
 # Library hygiene — quiet by default. Attach a NullHandler to the ``rebar`` root logger
 # so importing rebar as a library never emits to stderr or warns about a missing
 # handler. Entrypoints install a real stderr handler via
@@ -205,6 +212,7 @@ __all__ = [
     "link",
     "list_tickets",
     "next_batch",
+    "push_status",
     "quality_check",
     "ready",
     "recent_session_logs",

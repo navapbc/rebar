@@ -55,11 +55,20 @@ def _collect_tools(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def test_link_tickets_returns_plain_ok_when_nothing_was_escalated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The unchanged shape, so existing consumers keep working."""
+    """The ack text is unchanged, so existing consumers keep working.
+
+    Bug vapoury-attack-lamb widened the return from a bare ``"ok"`` string to the shared
+    ``WriteAckOut`` — a strict SUPERSET, since FastMCP already advertised these tools as
+    ``{"result": <str>}``. This pins that the widening did not change the TEXT, and that the
+    added delivery field is present rather than silently omitted.
+    """
     monkeypatch.setattr(_mcp_writes.rebar, "link", lambda *_a, **_k: None)
     tools = _collect_tools(monkeypatch)
 
-    assert tools["link_tickets"]("a", "b", "depends_on") == "ok"
+    out = tools["link_tickets"]("a", "b", "depends_on")
+
+    assert out.result == "ok"
+    assert out.push_status is not None, "the write ack dropped its push-delivery status"
 
 
 @pytest.mark.unit
@@ -77,4 +86,4 @@ def test_link_tickets_names_both_pairs_when_it_escalated(
 
     out = tools["link_tickets"]("leaf-a", "epic-b", "depends_on")
 
-    assert out == "ok (escalated: leaf-a->epic-b recorded as epic-a->epic-b)", out
+    assert out.result == "ok (escalated: leaf-a->epic-b recorded as epic-a->epic-b)", out
