@@ -223,9 +223,10 @@ T6/T5b/E5/E6/F4 and the confident-but-routinely-ignored T3/T10. The DET floor
 (P1/P5/P8/P10/P11) still blocks unconditionally.
 
 **The hard-override floor is oracle-graded for `ac_unverifiable` (plan-v3, story
-`large-sleepful-needlefish`).** `impact_plan` floors a finding at 0.85 when
-`dod_uncertifiable` / `undecomposed` is present at any
-grade — but `ac_unverifiable` is graded by ORACLE KIND, a closed vocabulary enforced at
+`large-sleepful-needlefish`).** `impact_plan` floors a finding at 0.85 when a hard-override axis
+is graded at one of its GENUINE-GAP kinds. As of plan-v5 all four override axes are closed kind
+sets (see below for `undecomposed` / `dod_uncertifiable`, which were the last two on the ordinal
+ladder); `ac_unverifiable` was the first, graded by ORACLE KIND, a closed vocabulary enforced at
 verification-parse time (`review_kernel.verify.PlanSeverityAttrs`): **`missing_oracle`**
 (no verification method exists as phrased) and **`broken_oracle`** (a stated proving
 command/symbol/count is factually wrong, so the stated verification cannot pass) keep
@@ -262,6 +263,38 @@ provably under-scoped reality scored impact **0.0** and could not block, even at
 0.60 threshold. Grading rather than merely widening the axis follows the calibration-3 lesson: a
 blunt widening would have routed 113 corpus findings into the 0.85 floor at once (4.3% of runs
 flipping PASS→BLOCK), the same over-fire the oracle split had to walk back.
+
+**`undecomposed` and `dod_uncertifiable` are kind-graded too — the last two off the ladder
+(plan-v5, story `fixable-angular-caribou`).** Ordinal severity labels are an LLM anti-pattern:
+models do not apply `none|low|medium|high` reliably enough for deterministic gate behavior, so
+each remaining ladder became narrow semantic kinds that map to a consequence in code.
+
+- **`undecomposed`** — **`missing_required_child`** (work the plan or its parent explicitly
+  commits to has no corresponding child/sibling; the decomposition is incomplete against its own
+  declared scope) and **`no_executable_breakdown`** (no executable step sequence for the unit's
+  own scope, or an all-or-nothing build whose riskiest unknown is never de-risked first) keep the
+  0.85 floor; **`bundles_separable_slices`** (the unit is executable as written but packs several
+  outcomes that could each ship alone) contributes `UNDECOMPOSED_BUNDLED_CONTRIB` (0.55) and never
+  floors. The test between the first and third kind is **commitment, not size**: did the plan
+  already promise the missing piece as separate work?
+- **`dod_uncertifiable`** — **`uncertifiable_outcome`** (a committed outcome has no acceptance
+  criterion, test, or proving mechanism at all) and **`certification_cannot_prove`** (a stated
+  mechanism cannot establish the outcome — it names something that does not exist or cannot detect
+  what it claims, or a trivially broken implementation satisfies it) keep the floor;
+  **`underspecified_certification`** (the outcome is certifiable and an oracle exists, the plan
+  just doesn't spell out the exact command/path/assertion) contributes
+  `DOD_UNDERSPECIFIED_CONTRIB` (0.55) and never floors. Any non-none kind still forces the
+  detection amplifier to full weight.
+
+The evidence is a zero-LLM re-score of the recorded corpus (22,631 findings), reported as a
+**bound** because the grade→kind mapping over historical prose is inexact: 15–47 of 2,891
+at-threshold findings lose their block and 35–64 gain one (gains are recorded grades outside the
+old ordinal vocabulary, which `_SEV01` silently scored 0.0). Every loss surviving the optimistic
+bound was read individually and is either a bundling observation or a specificity/framing
+complaint — **no committed-outcome-without-an-oracle and no broken oracle loses its block**. Method,
+mapping rules and the audited loss list: `docs/calibration/plan_v5_kind_sets.md`. Pre-plan-v5
+sidecars keep their ordinal grades and are read as-is; `impact_plan` scores a stale ordinal on
+these axes as 0.0, so replay MUST segment by `impact_model_version` (ADR 0036).
 
 > **Constraint on any future impact change — loop termination.** A rejected alternative was a
 > `prod_impact` floor (lift impact whenever production severity is medium+). It was rejected

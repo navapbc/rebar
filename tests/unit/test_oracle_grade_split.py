@@ -98,6 +98,7 @@ def test_attestation_clears_missing_and_underspecified_but_never_broken() -> Non
 
 # ── sidecar persistence + legacy read-as-is ────────────────────────────────────────────────
 def test_grade_persists_in_sidecar_payload() -> None:
+    from rebar.llm.plan_review import sidecar
     from rebar.llm.plan_review.sidecar import build_payload
 
     verdict = {
@@ -117,9 +118,11 @@ def test_grade_persists_in_sidecar_payload() -> None:
     payload = build_payload(verdict, material="m")
     sa = payload["findings"][0]["verification"]["severity_attributes"]
     assert sa["ac_unverifiable"] == "underspecified_oracle"
-    # plan-v4 after the divergence-kind split rode the same bump (story
-    # doggish-nonorganic-tsetsefly); the oracle-kind grades themselves are unchanged.
-    assert payload["impact_model_version"] == "plan-v4"
+    # The payload carries WHATEVER cohort tag is current — the oracle-kind grades themselves are
+    # unchanged by later bumps (plan-v4 divergence split, plan-v5 undecomposed/dod kind sets), so
+    # this asserts against the constant rather than re-pinning a literal on every bump. The
+    # authoritative literal pin lives in test_impact_model_versioning.py.
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION
 
 
 def test_legacy_plan_v2_sidecar_reads_as_is(rebar_repo: Path) -> None:

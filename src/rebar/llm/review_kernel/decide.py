@@ -355,10 +355,71 @@ DIVERGENCE_GRADE01: dict[str | None, float] = {
     "omits_required_site": 1.0,
 }
 _DIVERGENCE_FLOOR_GRADES = ("contradicts_reality", "omits_required_site")
-# The two axes graded by a CLOSED KIND SET rather than the ordinal none|low|medium|high ladder.
-# Both are hard-override axes whose floor is decided by grade, so both are special-cased out of the
+# undecomposed is graded by DECOMPOSITION KIND, not the ordinal ladder (story
+# fixable-angular-caribou, plan-v5). Ordinal labels are an LLM anti-pattern: models do not apply
+# none|low|medium|high reliably enough for deterministic gate behavior, so the ladder is replaced
+# by narrow semantic kinds that map to floor-vs-advisory in code. Field evidence from the recorded
+# corpus: all 30 gradings were read, and 23 say "this plan bundles N independently-releasable
+# outcomes" — a right-sizing observation on a plan that is executable as written — yet EVERY
+# non-none grade floored to 0.85 and 4 of those blocked. missing_required_child (the plan or its
+# parent commits to work that has no corresponding child/sibling) and no_executable_breakdown (no
+# executable step sequence for the unit's own scope, or an all-or-nothing build whose riskiest
+# unknown is never de-risked first) are genuine gaps and keep the floor; bundles_separable_slices
+# is coached, never auto-blocked.
+# INVARIANT: UNDECOMPOSED_BUNDLED_CONTRIB stays strictly below the lowest blocking block_threshold
+# in plan_review/criteria_routing.json (0.60) — pinned by test_impact_plan.py, same as
+# UNDERSPECIFIED_ORACLE_CONTRIB, so a future recalibration below it fails loudly.
+UNDECOMPOSED_BUNDLED_CONTRIB = 0.55
+UNDECOMPOSED_GRADE01: dict[str | None, float] = {
+    "none": 0.0,
+    "bundles_separable_slices": UNDECOMPOSED_BUNDLED_CONTRIB,
+    "missing_required_child": 1.0,
+    "no_executable_breakdown": 1.0,
+}
+_UNDECOMPOSED_FLOOR_GRADES = ("missing_required_child", "no_executable_breakdown")
+# dod_uncertifiable is graded by CERTIFICATION KIND, not the ordinal ladder (same story, plan-v5).
+# Its 1,413 recorded gradings mix three semantically distinct defects under one grade-blind floor:
+# no oracle exists at all (uncertifiable_outcome), a stated oracle is factually broken or
+# vacuously satisfiable (certification_cannot_prove), and an oracle exists but its exact
+# command/path/assertion is not spelled out (underspecified_certification). The first two are
+# genuine gaps and keep the floor; the third is a specificity demand and is coached, exactly as
+# underspecified_oracle is on the ac_unverifiable axis.
+# INVARIANT: DOD_UNDERSPECIFIED_CONTRIB stays strictly below the lowest blocking block_threshold
+# in plan_review/criteria_routing.json (0.60) — pinned by test_impact_plan.py.
+DOD_UNDERSPECIFIED_CONTRIB = 0.55
+DOD_GRADE01: dict[str | None, float] = {
+    "none": 0.0,
+    "underspecified_certification": DOD_UNDERSPECIFIED_CONTRIB,
+    "uncertifiable_outcome": 1.0,
+    "certification_cannot_prove": 1.0,
+}
+_DOD_FLOOR_GRADES = ("uncertifiable_outcome", "certification_cannot_prove")
+# The axes graded by a CLOSED KIND SET rather than the ordinal none|low|medium|high ladder.
+# All are hard-override axes whose floor is decided by grade, so all are special-cased out of the
 # generic _SEV01 loops in impact_plan.
-_PLAN_GRADED_AXES = ("ac_unverifiable", "divergent_implementation")
+_PLAN_GRADED_AXES = (
+    "ac_unverifiable",
+    "divergent_implementation",
+    "undecomposed",
+    "dod_uncertifiable",
+)
+# Every graded axis's kind->contribution map, keyed by axis. `_SEV01` maps ONLY the ordinal
+# vocabulary, so it returns 0.0 for any kind name — reading a graded axis through it silently
+# scores the axis at zero. Membership in `_PLAN_GRADED_AXES` keeps them out of the generic
+# `_SEV01` loops in impact_plan; this table is how they are scored instead.
+_PLAN_GRADE_MAPS: dict[str, dict[str | None, float]] = {
+    "ac_unverifiable": ORACLE_GRADE01,
+    "divergent_implementation": DIVERGENCE_GRADE01,
+    "undecomposed": UNDECOMPOSED_GRADE01,
+    "dod_uncertifiable": DOD_GRADE01,
+}
+# Per-axis floor grades, same keying — the kinds that trigger the 0.85 hard override.
+_PLAN_FLOOR_GRADES: dict[str, tuple[str, ...]] = {
+    "ac_unverifiable": _ORACLE_FLOOR_GRADES,
+    "divergent_implementation": _DIVERGENCE_FLOOR_GRADES,
+    "undecomposed": _UNDECOMPOSED_FLOOR_GRADES,
+    "dod_uncertifiable": _DOD_FLOOR_GRADES,
+}
 
 
 def impact_plan(attrs: dict[str, Any]) -> float:
@@ -369,17 +430,28 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     2. DETECTION AMPLIFIER: ``mult`` = 0.8 for a ``self_revealing`` finding, else 1.0; a present
        ``dod_uncertifiable`` forces 1.0 (a DoD you cannot certify is never "self-revealing").
        ``amplified = min(1.0, impact_sev * mult)``;
-    3. HARD OVERRIDE (applied LAST, as a floor): if either of {dod_uncertifiable, undecomposed}
-       is present (non-none), OR ac_unverifiable is graded broken_oracle/missing_oracle, OR
-       divergent_implementation is graded contradicts_reality/omits_required_site, the result is
-       floored at 0.85. TWO axes are graded by a CLOSED KIND SET instead of the ordinal ladder
-       (``_PLAN_GRADED_AXES``): ac_unverifiable by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story
-       large-sleepful-needlefish) — an underspecified_oracle contributes
-       ``UNDERSPECIFIED_ORACLE_CONTRIB`` and never floors; divergent_implementation by
-       DIVERGENCE KIND (``DIVERGENCE_GRADE01``, plan-v4, story doggish-nonorganic-tsetsefly) — an
-       incomplete_enumeration contributes ``DIVERGENCE_INCOMPLETE_CONTRIB`` and never floors. Both
-       contributions sit below every blocking threshold, so each axis's cosmetic grade is coached
-       rather than auto-blocked.
+    3. HARD OVERRIDE (applied LAST, as a floor): the result is floored at 0.85 when any
+       hard-override axis is graded at a FLOOR kind. As of plan-v5 all four override axes are
+       graded by a CLOSED KIND SET rather than the ordinal ladder (``_PLAN_GRADED_AXES``), each
+       with one below-threshold kind that is coached instead of auto-blocked:
+
+       * ac_unverifiable by ORACLE KIND (``ORACLE_GRADE01``, plan-v3, story
+         large-sleepful-needlefish) — broken/missing floor; underspecified_oracle contributes
+         ``UNDERSPECIFIED_ORACLE_CONTRIB``;
+       * divergent_implementation by DIVERGENCE KIND (``DIVERGENCE_GRADE01``, plan-v4, story
+         doggish-nonorganic-tsetsefly) — contradicts_reality/omits_required_site floor;
+         incomplete_enumeration contributes ``DIVERGENCE_INCOMPLETE_CONTRIB``;
+       * undecomposed by DECOMPOSITION KIND (``UNDECOMPOSED_GRADE01``, plan-v5, story
+         fixable-angular-caribou) — missing_required_child/no_executable_breakdown floor;
+         bundles_separable_slices contributes ``UNDECOMPOSED_BUNDLED_CONTRIB``;
+       * dod_uncertifiable by CERTIFICATION KIND (``DOD_GRADE01``, plan-v5, same story) —
+         uncertifiable_outcome/certification_cannot_prove floor; underspecified_certification
+         contributes ``DOD_UNDERSPECIFIED_CONTRIB``.
+
+       Every one of those contributions sits below every blocking threshold, so each axis's
+       specificity-only grade is coached rather than auto-blocked. Ordinal labels were retired
+       here because models do not apply none|low|medium|high reliably enough for deterministic
+       gate behavior; a kind maps to its consequence in code.
 
     The override is floored AFTER the amplifier on purpose. The ticket's stated compose
     (``impact_sev = max(impact_sev, 0.85)`` THEN ``× mult``) lets a self-revealing override
@@ -390,21 +462,24 @@ def impact_plan(attrs: dict[str, Any]) -> float:
     contribs = [
         _SEV01.get(attrs.get(a), 0.0) for a in _PLAN_SEVERITY_AXES if a not in _PLAN_GRADED_AXES
     ]
-    contribs.append(ORACLE_GRADE01.get(attrs.get("ac_unverifiable"), 0.0))
-    contribs.append(DIVERGENCE_GRADE01.get(attrs.get("divergent_implementation"), 0.0))
+    contribs.extend(
+        _PLAN_GRADE_MAPS[a].get(attrs.get(a), 0.0)
+        for a in _PLAN_SEVERITY_AXES
+        if a in _PLAN_GRADED_AXES
+    )
     impact_sev = max(contribs) if contribs else 0.0
     mult = 0.8 if attrs.get("silent_vs_self_revealing") == "self_revealing" else 1.0
-    if _SEV01.get(attrs.get("dod_uncertifiable"), 0.0) > 0.0:
-        mult = 1.0  # a DoD you cannot certify forces full detection weight
+    # A DoD you cannot certify forces full detection weight. dod_uncertifiable is KIND-graded
+    # (plan-v5), so this reads DOD_GRADE01 — `_SEV01` would return 0.0 for every kind name and
+    # the force would silently stop firing.
+    if DOD_GRADE01.get(attrs.get("dod_uncertifiable"), 0.0) > 0.0:
+        mult = 1.0
     amplified = min(1.0, impact_sev * mult)
-    has_override = (
-        any(
-            _SEV01.get(attrs.get(a), 0.0) > 0.0
-            for a in _PLAN_HARD_OVERRIDE_AXES
-            if a not in _PLAN_GRADED_AXES
-        )
-        or attrs.get("ac_unverifiable") in _ORACLE_FLOOR_GRADES
-        or attrs.get("divergent_implementation") in _DIVERGENCE_FLOOR_GRADES
+    has_override = any(
+        _SEV01.get(attrs.get(a), 0.0) > 0.0
+        if a not in _PLAN_GRADED_AXES
+        else attrs.get(a) in _PLAN_FLOOR_GRADES[a]
+        for a in _PLAN_HARD_OVERRIDE_AXES
     )
     result = max(amplified, _PLAN_HARD_OVERRIDE_FLOOR) if has_override else amplified
     return round(result, 4)

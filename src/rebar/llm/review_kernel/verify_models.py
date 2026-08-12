@@ -226,16 +226,43 @@ def plan_review_verification_model(*, strict: bool = False) -> type:
             " is not spelled out. HARD-OVERRIDE for missing/broken ONLY (floors impact to 0.85);"
             " underspecified scores below every blocking threshold and never floors.",
         )
-        dod_uncertifiable: str = Field(
+        dod_uncertifiable: Literal[
+            "none",
+            "underspecified_certification",
+            "uncertifiable_outcome",
+            "certification_cannot_prove",
+        ] = Field(
             default="none",
-            description="none|low|medium|high — a definition-of-done / success criterion cannot be "
-            "certified true. HARD-OVERRIDE axis; also forces the detection multiplier to x1.0.",
+            description="Certification-kind grade (closed set — NOT the ordinal ladder): a"
+            " definition-of-done / success criterion cannot be certified true."
+            " uncertifiable_outcome = an outcome the plan commits to has NO acceptance criterion,"
+            " test or proving mechanism at all; certification_cannot_prove = a stated mechanism"
+            " cannot establish the outcome — it names a command/symbol/ticket that does not exist"
+            " or cannot detect what is claimed, or a trivially broken implementation satisfies it;"
+            " underspecified_certification = the outcome IS certifiable and an oracle exists, but"
+            " its exact command/path/assertion is not spelled out. HARD-OVERRIDE for"
+            " uncertifiable_outcome/certification_cannot_prove ONLY (floors impact to 0.85);"
+            " underspecified_certification scores below every blocking threshold and never floors."
+            " Any non-none grade also forces the detection multiplier to x1.0.",
         )
-        undecomposed: str = Field(
+        undecomposed: Literal[
+            "none",
+            "bundles_separable_slices",
+            "missing_required_child",
+            "no_executable_breakdown",
+        ] = Field(
             default="none",
-            description="none|low|medium|high — work is left undecomposed (a flat plan that should "
-            "be broken down). Grade only a GENUINE gap: the deterministic G5 signal already "
-            "suppresses false 'flat' findings on tickets that have children. HARD-OVERRIDE axis.",
+            description="Decomposition-kind grade (closed set — NOT the ordinal ladder): work is"
+            " left undecomposed. missing_required_child = work the plan or its parent explicitly"
+            " commits to has NO corresponding child/sibling, so the decomposition is incomplete"
+            " against its own declared scope; no_executable_breakdown = the unit gives no"
+            " executable step sequence for its own scope (outcomes stated but not the work), or"
+            " commits to a large all-or-nothing build whose riskiest unknown is never de-risked"
+            " first; bundles_separable_slices = the unit is executable as written but packs"
+            " several outcomes that could each ship alone, so splitting only improves clarity."
+            " HARD-OVERRIDE for missing_required_child/no_executable_breakdown ONLY (floors impact"
+            " to 0.85); bundles_separable_slices scores below every blocking threshold and never"
+            " floors — do not use a floor grade for a right-sizing preference.",
         )
         divergent_implementation: Literal[
             "none", "contradicts_reality", "omits_required_site", "incomplete_enumeration"

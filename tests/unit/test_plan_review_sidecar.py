@@ -72,3 +72,44 @@ def test_v2_reader_preserves_legacy_payload_when_additive_material_is_present(
         key: value for key, value in read_payload.items() if key != "reviewed_related_material"
     } == legacy_payload
     assert read_payload["reviewed_related_material"] == additive
+
+
+# ── decision-margin telemetry (story fixable-angular-caribou, C11 P0.2) ──────────────────
+def test_sidecar_records_decision_margin_against_the_real_block_line() -> None:
+    """The margin is measured on PRIORITY, not impact: pass3_decide blocks on
+    `priority >= block_threshold`, so an impact-based margin would not describe the boundary
+    the decision actually used."""
+    from rebar.llm.plan_review import sidecar
+
+    verdict = {
+        "verdict": "BLOCK",
+        "ticket_id": "T-margin",
+        "blocking": [
+            {"finding": "over", "criteria": ["G6"], "priority": 0.72, "block_threshold": 0.6}
+        ],
+        "advisory": [
+            {"finding": "under", "criteria": ["E5"], "priority": 0.40, "block_threshold": 0.95}
+        ],
+    }
+    findings = {f["finding"]: f for f in sidecar.build_payload(verdict, material="m")["findings"]}
+    # at/above the line -> positive; below -> negative. Both are priority-based.
+    assert findings["over"]["decision_margin"] == 0.12
+    assert findings["under"]["decision_margin"] == -0.55
+
+
+def test_decision_margin_is_none_when_either_side_is_missing() -> None:
+    """Absent -> None, never 0.0: an offline reader must be able to tell 'not recorded' from
+    'landed exactly on the line'."""
+    from rebar.llm.plan_review import sidecar
+
+    verdict = {
+        "verdict": "PASS",
+        "ticket_id": "T-margin-none",
+        "advisory": [
+            {"finding": "no-threshold", "criteria": ["E5"], "priority": 0.4},
+            {"finding": "no-priority", "criteria": ["E5"], "block_threshold": 0.6},
+        ],
+    }
+    findings = {f["finding"]: f for f in sidecar.build_payload(verdict, material="m")["findings"]}
+    assert findings["no-threshold"]["decision_margin"] is None
+    assert findings["no-priority"]["decision_margin"] is None

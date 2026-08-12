@@ -250,7 +250,8 @@ def test_attestation_clears_cosmetic_but_never_a_floor_grade() -> None:
 
 
 # ── sidecar persistence + legacy read-as-is ────────────────────────────────────────────────
-def test_grade_persists_in_sidecar_payload_and_stamps_plan_v4() -> None:
+def test_grade_persists_in_sidecar_payload_and_stamps_the_cohort() -> None:
+    from rebar.llm.plan_review import sidecar
     from rebar.llm.plan_review.sidecar import build_payload
 
     verdict = {
@@ -270,8 +271,10 @@ def test_grade_persists_in_sidecar_payload_and_stamps_plan_v4() -> None:
     payload = build_payload(verdict, material="m")
     sa = payload["findings"][0]["verification"]["severity_attributes"]
     assert sa["divergent_implementation"] == "omits_required_site"
-    # The bump that closes the plan-v3 cohort (ADR 0036 no-pooling; ADR 0054 batching rule).
-    assert payload["impact_model_version"] == "plan-v4"
+    # The payload carries WHATEVER cohort tag is current (ADR 0036 no-pooling; ADR 0054 batching).
+    # Asserted against the constant so a later bump does not need to edit this grade-persistence
+    # test; the authoritative literal pin lives in test_impact_model_versioning.py.
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION
 
 
 def test_legacy_ordinal_sidecar_reads_as_is(rebar_repo: Path) -> None:
