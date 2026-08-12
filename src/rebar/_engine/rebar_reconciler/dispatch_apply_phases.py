@@ -25,6 +25,7 @@ re-import the three phase functions back without a cycle. ``dispatch_one`` re-ex
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -521,12 +522,44 @@ def _log_link_delete_failure(issue_key, to_key, link_type, exc: BaseException) -
     )
 
 
+def _confirm_link_add(link_confirm, entry, to_key, result) -> None:
+    """Hand an ACCEPTED link ADD to the peer-confirmation sink (epic a4bd).
+
+    Every failure here is swallowed. The link already landed on the vendor, so
+    losing the evidence costs one un-declined removal (strictly the pre-a4bd
+    behaviour), whereas raising would fail an outbound write that actually
+    succeeded and would corrupt the applied/computed/failed counts — the very
+    conflation between "did not land" and "reported fine" that ticket 5528 closed.
+    """
+    if link_confirm is None:
+        return
+    try:
+        # The vendor's stable link id when it supplies one. ``set_relationship`` is
+        # typed ``-> dict[str, Any]``, but a backend may legitimately return no id
+        # (or a non-mapping); ``None`` is recorded and is NOT an error.
+        link_id = result.get("id") if isinstance(result, dict) else None
+        link_confirm(to_key=to_key, relation=entry.get("relation"), link_id=link_id)
+    except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never fail a landed write
+        print(f"update_one: peer-confirmation record failed for {to_key}: {exc!r}", file=sys.stderr)
+
+
 def _update_one_dispatch_links(
-    mutation, client: TicketTransport, issue_key
+    mutation,
+    client: TicketTransport,
+    issue_key,
+    *,
+    link_confirm: Callable[..., None] | None = None,
 ) -> tuple[int, int, int]:
     """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
     counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
     (computed, applied, failed) counts.
+
+    ``link_confirm`` (epic a4bd) is an optional sink invoked after a link ADD is
+    ACCEPTED by the vendor, so the peer-confirmation store can record the evidence
+    that the peer now carries this link. It is a callback rather than a store handle
+    because this function has neither a binding store nor a pass id and must not grow
+    knowledge of either — the production caller (``apply_handlers.handle_update``)
+    closes over both. ``None`` (the default) preserves the pre-a4bd behaviour exactly.
 
     ``failed`` counts link ops that did NOT reach their desired end-state. It exists because
     a failure that is neither counted nor surfaced is indistinguishable from success: the
@@ -588,8 +621,11 @@ def _update_one_dispatch_links(
             _links_computed += 1
             frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
+                _link_result = _call_with_retry(
+                    cast("SupportsLinks", client).set_relationship, frm, to, link_type
+                )
                 _links_applied += 1
+                _confirm_link_add(link_confirm, entry, to_key, _link_result)
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, counted
                 _links_failed += 1
                 print(

@@ -36,6 +36,7 @@ import sys
 # the attribute resolves here. Kept deliberately; do not drop as "unused".
 import time  # noqa: F401
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -397,6 +398,7 @@ def update_one(
     comment_errors: list[str] | None = None,
     subop_applied: dict[str, int] | None = None,
     fields_synced: dict[str, Any] | None = None,
+    link_confirm: Callable[..., None] | None = None,
 ) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
@@ -455,7 +457,7 @@ def update_one(
         mutation, client, issue_key, comment_errors
     )
     _links_computed, _links_applied, _links_failed = _update_one_dispatch_links(
-        mutation, client, issue_key
+        mutation, client, issue_key, link_confirm=link_confirm
     )
 
     if subop_applied is not None:
