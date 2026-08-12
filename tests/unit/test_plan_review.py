@@ -1896,6 +1896,71 @@ def test_budget_cap_never_sheds_container_criteria() -> None:
         del os.environ["REBAR_PLAN_REVIEW_BUDGET"]
 
 
+# ── explicit cap_override seam (ticket e907): the FINAL cap, not a scaled base ────
+def _cap_override_ctx():
+    """A ctx with NON-ZERO centrality — the whole point of the seam is that an override is
+    NOT scaled by it, which is invisible on a centrality-0 ticket."""
+    ctx = _ctx(
+        _GOOD_AC,
+        ttype="epic",
+        children=[{"ticket_id": f"c{i}"} for i in range(4)],
+        centrality=0.4,
+    )
+    assert ctx.centrality > 0, "fixture must have centrality to prove the no-scaling claim"
+    return ctx
+
+
+def test_cap_override_is_used_verbatim_and_never_centrality_scaled() -> None:
+    ctx = _cap_override_ctx()
+    chunks = [[{"id": "E2"}]]
+    cov: dict = {}
+    sizing.shed_to_budget(ctx, chunks, [], [], cov, 0.25)
+    assert cov["budget"]["cap_usd"] == 0.25  # NOT 0.25 * (1 + centrality)
+    assert cov["budget"]["cap_source"] == "override"
+    # ...and the computed cap for the same ctx IS scaled, so the two genuinely differ.
+    cov_computed: dict = {}
+    sizing.shed_to_budget(ctx, chunks, [], [], cov_computed)
+    assert cov_computed["budget"]["cap_usd"] == sizing.plan_budget_cap(ctx)
+    assert cov_computed["budget"]["cap_source"] == "computed"
+
+
+def test_cap_override_below_computed_cap_sheds_what_the_computed_cap_kept() -> None:
+    ctx = _cap_override_ctx()
+    chunks = [[{"id": "E2"}]]
+    agent = [{"id": "T8"}, {"id": "G6"}]
+    cov_computed: dict = {}
+    kept_computed, _c, shed_computed = sizing.shed_to_budget(ctx, chunks, agent, [], cov_computed)
+    assert shed_computed == [] and len(kept_computed) == 2  # the generous computed cap keeps both
+    cov: dict = {}
+    kept, _c2, shed = sizing.shed_to_budget(ctx, chunks, agent, [], cov, 0.0)
+    assert kept == [] and {c["id"] for c in shed} == {"T8", "G6"}
+
+
+def test_cap_override_zero_is_a_real_cap_not_absent() -> None:
+    """`0.0` is falsy; selecting on it rather than `is None` would silently fall back to the
+    computed cap — the exact trap this seam exists to avoid."""
+    ctx = _cap_override_ctx()
+    cov: dict = {}
+    sizing.shed_to_budget(ctx, [[{"id": "E2"}]], [], [], cov, 0.0)
+    assert cov["budget"]["cap_usd"] == 0.0
+    assert cov["budget"]["cap_source"] == "override"
+
+
+def test_run_pass1_forwards_cap_override_to_shed_to_budget(monkeypatch) -> None:
+    from rebar.llm.plan_review import pass1
+
+    seen: dict = {}
+
+    def _capture(ctx, chunks, agent, container, coverage, cap_override=None):
+        seen["cap_override"] = cap_override
+        coverage["budget"] = {"cap_usd": cap_override}
+        return [], [], []
+
+    monkeypatch.setattr(pass1, "_shed_to_budget", _capture)
+    pass1.run_pass1(_ctx(_GOOD_AC), _fake_cfg(), _PairingRunner(), [], [], {}, 0.42)
+    assert seen["cap_override"] == 0.42
+
+
 def test_isf_excluded_from_normal_routing() -> None:
     # ISF is fed the session log separately; it must never enter the rubric chunks.
     single, agent = orchestrator.route_criteria(_ctx(_GOOD_AC, ttype="story"))

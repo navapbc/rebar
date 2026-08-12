@@ -93,7 +93,7 @@ def _run_batch(monkeypatch, ladder: list[str], with_inputs: dict[str, Any] | Non
 
     captured: dict[str, str] = {}
 
-    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage):
+    def _fake_run_pass1(ctx, cfg, runner, single, agent, coverage, cap_override=None):
         captured["model"] = cfg.model
         return []
 

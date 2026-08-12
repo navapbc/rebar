@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -163,7 +164,7 @@ def test_target_ticket_required():
         ProductionBatchRunner(runner=FakeRunner()).run(req, None)
 
 
-# ── budget: default computed cap; override journaled but not applied (follow-up) ─
+# ── budget: default computed cap; an explicit req.usd_budget overrides it ────────
 def test_budget_default_computed_cap(_stub_reads):
     from rebar.llm.plan_review import sizing
 
@@ -176,16 +177,19 @@ def test_budget_default_computed_cap(_stub_reads):
 
     plan = result.outputs["batch_plan"]
     assert plan["budget"]["cap_usd"] == expected_cap
+    assert plan["budget"]["cap_source"] == "computed"
     assert "requested_usd_budget" not in plan  # no override requested
 
 
-def test_budget_override_is_journaled_but_not_yet_applied(_stub_reads):
-    # Documents the D4 follow-up: req.usd_budget is recorded, but the computed cap is
-    # still used (no clean override seam in pass1/sizing yet).
+def test_budget_override_is_applied_through_the_cap_override_seam(_stub_reads):
+    """req.usd_budget now REACHES the cap via run_pass1 -> shed_to_budget's `cap_override`
+    (ticket e907). Previously it was journaled with budget_override_applied=False and the
+    computed cap was used regardless."""
     from rebar.llm.plan_review import sizing
 
     ctx = assemble_context(_TARGET, repo_root=None)
-    expected_cap = sizing.plan_budget_cap(ctx)
+    computed_cap = sizing.plan_budget_cap(ctx)
+    assert computed_cap != 0.01, "override must differ from the computed cap to be observable"
 
     fake = FakeRunner(structured={"analysis": "", "findings": []})
     req = _make_req([{"prompt": "E2"}, {"prompt": "E4"}], usd_budget=0.01)
@@ -193,8 +197,24 @@ def test_budget_override_is_journaled_but_not_yet_applied(_stub_reads):
 
     plan = result.outputs["batch_plan"]
     assert plan["requested_usd_budget"] == 0.01
-    assert plan["budget_override_applied"] is False
-    assert plan["budget"]["cap_usd"] == expected_cap  # computed cap, not the override
+    assert plan["budget_override_applied"] is True
+    assert plan["budget"]["cap_usd"] == 0.01  # the override, NOT the computed cap
+    assert plan["budget"]["cap_source"] == "override"
+
+
+def test_plan_review_gate_sets_no_usd_budget_so_live_runs_are_unchanged():
+    """The seam is latent for the live gate: the plan-review workflow does not declare a
+    `usd_budget` on its finders batch, so req.usd_budget is None on every gate run and the
+    computed cap still governs. Starting to set one is a separate cost-policy decision."""
+    import yaml
+
+    from rebar.llm.workflow import gate_dispatch
+
+    gate = Path(gate_dispatch.__file__).resolve().parent / "gates" / "plan-review.yaml"
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    (review,) = [s for s in doc["steps"] if s["id"] == "review"]
+    (finders,) = [s for s in review["branch"]["then"] if s["id"] == "finders"]
+    assert "usd_budget" not in finders["batch"]
 
 
 def test_resolve_criteria_excludes_isf_and_dedupes():

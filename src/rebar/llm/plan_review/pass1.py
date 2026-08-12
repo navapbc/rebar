@@ -429,10 +429,12 @@ def run_pass1(
     single: list[dict],
     agent: list[dict],
     coverage: dict[str, Any],
+    cap_override: float | None = None,
 ) -> list[dict[str, Any]]:
     """Pass-1 (parallel single-turn chunks + per-criterion agent finders + container
     + ISF). Returns the raw findings list (the too-big/shed routing + Pass-2/Pass-3
-    are applied by the orchestrator)."""
+    are applied by the orchestrator). ``cap_override`` is the explicit per-plan cap passed to
+    :func:`sizing.shed_to_budget`, used verbatim rather than centrality-scaled."""
     plan = ctx.plan_text
     # G5 decomposition signal (spangly-beggarly-blackrhino): the authoritative,
     # store-derived child summary, injected into ONLY the chunk that carries G5 (below) so
@@ -450,7 +452,7 @@ def run_pass1(
     # Single-turn chunks (cheap) + DET (free) always run; if the projected spend
     # exceeds the cap, shed AGENT/overlay criteria (the 85× calls) lowest-priority
     # first — overlays before core code-grounding — recording each as INDETERMINATE.
-    agent, container, shed = _shed_to_budget(ctx, chunks, agent, container, coverage)
+    agent, container, shed = _shed_to_budget(ctx, chunks, agent, container, coverage, cap_override)
     budget_indeterminate = [
         {
             "finding": f"Criterion {c['id']} was not evaluated: per-plan budget cap reached.",
