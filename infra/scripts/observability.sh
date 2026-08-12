@@ -100,7 +100,18 @@ if [ -f "$REPL_LOG" ]; then
   total=${total:-0}
   prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || echo 0)
   case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
-  new=$(( total - prev )); [ "$new" -lt 0 ] && new=$total
+  new=$(( total - prev ))
+  # NEGATIVE DELTA = LOST HISTORY -> SUPPRESS, NEVER REPUBLISH (bug 2dc7-31b7-ecbb-4cd2).
+  # total < prev only when the source LOST entries it previously had (journald vacuuming by
+  # SystemMaxUse/MaxRetentionSec, `journalctl --vacuum-*`, a truncated/rotated log). The
+  # offset is monotonic evidence that those entries were already published, so every
+  # surviving entry is at-or-older-than something already counted: republishing $total would
+  # be guaranteed DOUBLE-counting, and on a 1-datapoint alarm (review_interrupts) that is a
+  # false page whose evidence has just been deleted. Publishing 0 instead under-counts at
+  # most the markers emitted inside the single rotating interval, and self-heals immediately:
+  # the offset is rewritten to the new smaller $total below, so genuinely-new markers after
+  # the rotation publish normally on the next run.
+  [ "$new" -lt 0 ] && new=0
   # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s5.tf
   # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
   if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -131,7 +142,8 @@ vtotal=${vtotal:-0}
 vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$vprev" in '' | *[!0-9]*) vprev=0 ;; esac
 vnew=$((vtotal - vprev))
-[ "$vnew" -lt 0 ] && vnew=$vtotal
+# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
+[ "$vnew" -lt 0 ] && vnew=0
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_s4b.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
 if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
@@ -155,7 +167,8 @@ mtotal=${mtotal:-0}
 mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$mprev" in '' | *[!0-9]*) mprev=0 ;; esac
 mnew=$((mtotal - mprev))
-[ "$mnew" -lt 0 ] && mnew=$mtotal
+# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
+[ "$mnew" -lt 0 ] && mnew=0
 if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name review_bot_merge_change_errors --unit Count --value "$mnew" 2>/dev/null; then
   echo "$mtotal" >"$MERGE_OFFSET_FILE"
@@ -177,7 +190,8 @@ dtotal=${dtotal:-0}
 dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$dprev" in '' | *[!0-9]*) dprev=0 ;; esac
 dnew=$((dtotal - dprev))
-[ "$dnew" -lt 0 ] && dnew=$dtotal
+# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
+[ "$dnew" -lt 0 ] && dnew=0
 if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
   --metric-name deploy_errors --unit Count --value "$dnew" 2>/dev/null; then
   echo "$dtotal" >"$DEPLOY_OFFSET_FILE"
@@ -210,7 +224,8 @@ publish_autodeploy_marker_delta() {
   prev=$(cat "$offset_file" 2>/dev/null || echo 0)
   case "$prev" in '' | *[!0-9]*) prev=0 ;; esac
   new=$((total - prev))
-  [ "$new" -lt 0 ] && new=$total
+  # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
+  [ "$new" -lt 0 ] && new=0
   if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \
     --metric-name "$metric" --unit Count --value "$new" 2>/dev/null; then
     echo "$total" >"$offset_file"
@@ -257,7 +272,8 @@ gtotal=${gtotal:-0}
 gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || echo 0)
 case "$gprev" in '' | *[!0-9]*) gprev=0 ;; esac
 gnew=$((gtotal - gprev))
-[ "$gnew" -lt 0 ] && gnew=$gtotal
+# Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
+[ "$gnew" -lt 0 ] && gnew=0
 # Published WITHOUT dimensions to match the dimensionless alarm in monitoring_1fa8.tf
 # (CloudWatch keys a metric by namespace+name+dimensions; the alarm has none).
 if aws cloudwatch put-metric-data --region "$REGION" --namespace "$NS" \

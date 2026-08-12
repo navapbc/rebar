@@ -135,7 +135,14 @@ def test_failed_publish_retains_offset_and_retries_accumulated_delta(
     assert _values(paths["aws_log"], target) == [5, 5]
 
 
-def test_reset_count_is_retried_after_failed_publish(tmp_path: Path) -> None:
+def test_shrunken_journal_holds_the_offset_across_a_failed_publish(tmp_path: Path) -> None:
+    """A lost-history reset still obeys publish-then-persist, and publishes 0 (bug 2dc7).
+
+    The offset contract under test here is unchanged: a failed publish must NOT advance the
+    offset. The published VALUE is 0 rather than the surviving total — republishing the
+    survivors would double-count markers already counted under the larger offset. See
+    ``test_observability_rotation_2dc7.py`` for that behaviour's own coverage.
+    """
     env, paths = _environment(tmp_path, "voter_errors")
     paths["VOTER_OFFSET_FILE"].write_bytes(b"10\n")
 
@@ -145,7 +152,7 @@ def test_reset_count_is_retried_after_failed_publish(tmp_path: Path) -> None:
 
     assert first.returncode == second.returncode == 0
     assert (offset_after_failure, paths["VOTER_OFFSET_FILE"].read_bytes()) == (b"10\n", b"7\n")
-    assert _values(paths["aws_log"], "voter_errors") == [7, 7]
+    assert _values(paths["aws_log"], "voter_errors") == [0, 0]
 
 
 def test_zero_delta_remains_compatible(tmp_path: Path) -> None:
