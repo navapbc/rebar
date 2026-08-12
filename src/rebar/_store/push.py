@@ -22,8 +22,9 @@ import sys
 from typing import Any
 
 from rebar._optional import OptionalDependencyError
-from rebar._store import compat
+from rebar._store import compat, push_state
 from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch, run_git
+from rebar._store.push_state import unpushed_summary as _unpushed_summary
 
 logger = logging.getLogger(__name__)
 
@@ -124,28 +125,6 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
         )
 
 
-# raw-git-ok: locked store seam internal
-def _unpushed_summary(base: str, remote_ref: str) -> str:
-    """A ``" (N unpushed commits …)"`` suffix for a terminal push-failure warning.
-
-    Bug 2a76: without it every failed write logged a byte-identical line, so a
-    permanent outage looked like the same transient blip repeating. The count of
-    ``<remote_ref>..HEAD`` makes the backlog ESCALATE across successive failed
-    writes, which is the signal an operator (or fsck's PUSH_PENDING) acts on.
-    Best-effort by construction: a push failure must never be turned into a crash,
-    so an unresolvable count degrades to ``unknown`` (the remote-tracking ref can be
-    absent on a store that has never fetched).
-    """
-    try:
-        res = _git(base, "rev-list", "--count", f"{remote_ref}..HEAD")
-        count = (res.stdout or "").strip()
-        if res.returncode != 0 or not count.isdigit():
-            count = "unknown"
-    except Exception:  # noqa: BLE001 — diagnostics must never fail a best-effort push
-        count = "unknown"
-    return f" ({count} unpushed commits on {remote_ref}..HEAD)"
-
-
 class PushDeliveryError(RuntimeError):
     """A strict tickets-branch delivery failure with a stable classification."""
 
@@ -159,7 +138,14 @@ class PushDeliveryError(RuntimeError):
 def _raise_if_strict(
     strict: bool, reason: str, detail: str, base_path: str, remote_ref: str
 ) -> None:
-    """Raise a typed delivery failure while leaving default calls best-effort."""
+    """Record the delivery outcome, then raise only for a strict caller.
+
+    Every terminal exit in this module already routes through here carrying the closed set
+    of :class:`PushDeliveryError` reasons, which makes it the one place a failure cannot be
+    missed — so the durable marker is written HERE rather than at a dozen call sites. The
+    default (best-effort) path still returns ``None``: recording is a SIGNAL, not a raise.
+    """
+    push_state.record_failure(base_path, reason, detail, remote_ref)
     if strict:
         raise PushDeliveryError(reason, detail, base_path, remote_ref)
 
@@ -521,6 +507,9 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     for attempt in range(1, _MAX_RETRIES + 1):
         res = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
+            # The backlog is delivered: drop any marker an earlier failure left, so the
+            # pending signal cannot latch on past the outage it described.
+            push_state.clear(base_path)
             return
         stderr = res.stderr or ""
         # Heal git-remote-s3's multi-bundle state BEFORE the non-FF classification: the merge
@@ -574,6 +563,7 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     if fifth_merge_clean:
         terminal = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if terminal.returncode == 0:
+            push_state.clear(base_path)
             return
         terminal_detail = terminal.stderr or "terminal push after recovery was rejected"
         _raise_if_strict(

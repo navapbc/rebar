@@ -76,19 +76,22 @@ CANONICAL: dict[str, str] = {
     "plan_review_status": schemas.PLAN_REVIEW_STATUS,
 }
 
-# Advertisers with no canonical structured shape — they return a generic
-# {result: <str>} ack wrapper auto-derived from a `-> str` return annotation.
+# Advertisers with no canonical structured shape — they return the shared write ack
+# (`WriteAckOut`): the same `{result: <str>}` wrapper these tools have always advertised,
+# plus the `push_status` delivery field added by bug vapoury-attack-lamb. It stays EXEMPT
+# rather than canonical because a canonical schema pins a CLI/library `--output json`
+# shape, and these acks are MCP-only — `rebar comment` prints no JSON document.
 EXEMPT_GENERIC: dict[str, str] = {
-    "comment_ticket": "string ack ('Commented on …'); no canonical shape",
-    "tag_ticket": "string ack; no canonical shape",
-    "untag_ticket": "string ack; no canonical shape",
-    "archive_ticket": "string ack; no canonical shape",
-    "compact_ticket": "string ack; no canonical shape",
-    "edit_ticket": "string ack; no canonical shape",
-    "link_tickets": "string ack; no canonical shape",
-    "unlink_tickets": "string ack; no canonical shape",
-    "set_file_impact": "string ack; no canonical shape",
-    "set_verify_commands": "string ack; no canonical shape",
+    "comment_ticket": "write ack {result, push_status}; no canonical shape",
+    "tag_ticket": "write ack {result, push_status}; no canonical shape",
+    "untag_ticket": "write ack {result, push_status}; no canonical shape",
+    "archive_ticket": "write ack {result, push_status}; no canonical shape",
+    "compact_ticket": "write ack {result, push_status}; no canonical shape",
+    "edit_ticket": "write ack {result, push_status}; no canonical shape",
+    "link_tickets": "write ack {result, push_status}; no canonical shape",
+    "unlink_tickets": "write ack {result, push_status}; no canonical shape",
+    "set_file_impact": "write ack {result, push_status}; no canonical shape",
+    "set_verify_commands": "write ack {result, push_status}; no canonical shape",
     "fsck": "MCP fsck returns a human summary string; the canonical `fsck` schema "
     "describes the CLI/library `--output json` shape, not the MCP string",
     "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "

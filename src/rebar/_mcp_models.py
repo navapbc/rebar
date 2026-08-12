@@ -173,6 +173,37 @@ try:
         warnings: list = []
         suggestions: list = []
 
+    class PushStatusOut(_Out):
+        """Whether this store's ticket events reached the ``sync.remote``.
+
+        Bug ``vapoury-attack-lamb``: the tickets-branch push is best-effort and, on
+        failure, WARNS — but an MCP client reads only the tool result, so a rejected push
+        was undeliverable on this surface. Measured against a real declining origin, the
+        ``comment_ticket`` tool returned ``{"result": "ok"}`` with two commits stranded.
+        Read from the durable marker ``rebar._store.push_state`` writes, so it also
+        reports a failure from a DETACHED (``sync.push=async``) push whose own stderr went
+        to ``/dev/null``, and keeps reporting it on later calls until a push lands.
+        ``state`` is ``"ok"`` or ``"pending"``; the rest are present only when pending.
+        """
+
+        state: str
+        reason: str | None = None
+        detail: str | None = None
+        remote_ref: str | None = None
+        unpushed: str | None = None
+        since: float | None = None
+
+    class WriteAckOut(_Out):
+        """The shared ack for write tools that previously returned a bare ``"ok"``.
+
+        FastMCP already derived ``{"result": <str>}`` from their ``-> str`` annotation, so
+        this is a strict SUPERSET of the shape clients see today: ``result`` is unchanged
+        and ``push_status`` is added.
+        """
+
+        result: str
+        push_status: PushStatusOut | None = None
+
     class FileImpactItemOut(_Out):
         path: str
         reason: str | None = None
@@ -185,11 +216,13 @@ try:
     class CreateResultOut(_Out):
         id: str
         alias: str | None = None
+        push_status: PushStatusOut | None = None
 
     class ClaimResultOut(_Out):
         ticket_id: str
         status: str
         assignee: str | None = None
+        push_status: PushStatusOut | None = None
 
     class GateResultOut(_Out):
         verdict: str
@@ -273,6 +306,7 @@ try:
         material_fingerprint: str | None = None
         merged_log_commit: str | None = None
         head_sha: str | None = None
+        push_status: PushStatusOut | None = None
         # RETIRED legacy HMAC shape — never emitted now, nullable for pre-contract records.
         signature: str | None = None
         key_id: str | None = None
@@ -350,6 +384,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
     PlanReviewStatusOut = None  # type: ignore[assignment,misc]
+    PushStatusOut = WriteAckOut = None  # type: ignore[assignment,misc]
 
 
 def tool_annotation_presets() -> dict:

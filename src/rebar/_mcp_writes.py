@@ -26,8 +26,43 @@ from rebar._mcp_models import (
     FileImpactItemOut,
     SignResultOut,
     VerifyCommandItemOut,
+    WriteAckOut,
     tool_annotation_presets,
 )
+
+
+# Bug vapoury-attack-lamb. The tickets-branch push is best-effort: on failure it WARNS and
+# leaves the commits local. An MCP client never sees that warning — it reads the tool
+# result, and the server's stderr handler writes to the SERVER. Measured against a real
+# declining origin, comment_ticket returned {"result": "ok"} with two ticket commits
+# stranded. So every write result carries the store's delivery status, read from the
+# durable marker rebar._store.push_state records.
+#
+# These are module-level (not closures over the registrar): they capture nothing, and
+# nesting them inside register_write_tools pushed that already-large function past its
+# complexity ceiling.
+def _push_status() -> dict:
+    """The store's push-delivery status, or ``unknown`` if it cannot be read.
+
+    A plain file read (no git subprocess), deliberately taken AFTER the write. On
+    ``sync.push=async`` the detached child may not have finished, so a fresh failure can
+    land after this returns; the marker is DURABLE, so the next write reports it. The
+    guarantee is "you will be told", not "you will be told in the same call".
+    """
+    try:
+        return rebar.push_status()
+    except Exception:  # noqa: BLE001 — a status read must never fail a completed write
+        return {"state": "unknown"}
+
+
+def _ack(result: str = "ok") -> Any:
+    """The shared write ack: the pre-existing ``{"result": …}`` plus delivery status."""
+    return WriteAckOut.model_validate({"result": result, "push_status": _push_status()})
+
+
+def _with_push(payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach delivery status to a tool that returns a plain (schema-less) dict."""
+    return {**payload, "push_status": _push_status()}
 
 
 def register_write_tools(mcp, ctx) -> None:
@@ -56,19 +91,18 @@ def register_write_tools(mcp, ctx) -> None:
     ) -> CreateResultOut:
         """Create a ticket; returns {id, alias} (agents get the alias without
         a second show())."""
-        return CreateResultOut.model_validate(
-            rebar.create_ticket(
-                ticket_type,
-                title,
-                parent=parent,
-                priority=priority,
-                assignee=assignee,
-                description=description,
-                tags=tags,
-                return_alias=True,
-                _creation_channel="mcp",
-            )
+        created = rebar.create_ticket(
+            ticket_type,
+            title,
+            parent=parent,
+            priority=priority,
+            assignee=assignee,
+            description=description,
+            tags=tags,
+            return_alias=True,
+            _creation_channel="mcp",
         )
+        return CreateResultOut.model_validate(_with_push(cast("dict[str, Any]", created)))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def create_identity(
@@ -81,16 +115,15 @@ def register_write_tools(mcp, ctx) -> None:
         person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of
         {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the
         CREATE and surface in show_ticket. Returns {id, alias}."""
-        return CreateResultOut.model_validate(
-            rebar.create_identity(
-                name,
-                email,
-                mappings=mappings,
-                keys=keys,
-                return_alias=True,
-                _creation_channel="mcp",
-            )
+        created = rebar.create_identity(
+            name,
+            email,
+            mappings=mappings,
+            keys=keys,
+            return_alias=True,
+            _creation_channel="mcp",
         )
+        return CreateResultOut.model_validate(_with_push(cast("dict[str, Any]", created)))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def create_idea(title: str, description: str | None = None) -> CreateResultOut:
@@ -101,7 +134,14 @@ def register_write_tools(mcp, ctx) -> None:
         (reject) skips the completion gates. Promote a kept idea with
         transition_ticket(id, "idea", "open"). Returns {id, alias}."""
         return CreateResultOut.model_validate(
-            rebar.idea(title, description=description, return_alias=True, _creation_channel="mcp")
+            _with_push(
+                cast(
+                    "dict[str, Any]",
+                    rebar.idea(
+                        title, description=description, return_alias=True, _creation_channel="mcp"
+                    ),
+                )
+            )
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
@@ -127,9 +167,11 @@ def register_write_tools(mcp, ctx) -> None:
         ``undetermined``). It is IGNORED for non-bug closes and for non-closing
         transitions. There is deliberately NO ``force`` bypass — the no-force MCP
         policy stays; a bug close without a valid ``close_class`` is refused."""
-        return cast(
-            "dict[str, Any]",
-            rebar.transition(ticket_id, current_status, target_status, close_class=close_class),
+        return _with_push(
+            cast(
+                "dict[str, Any]",
+                rebar.transition(ticket_id, current_status, target_status, close_class=close_class),
+            )
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
@@ -139,19 +181,21 @@ def register_write_tools(mcp, ctx) -> None:
         Raises a tool error (ConcurrencyError) if the ticket is not open —
         i.e. another agent already claimed it.
         """
-        return ClaimResultOut.model_validate(rebar.claim(ticket_id, assignee=assignee))
+        return ClaimResultOut.model_validate(
+            _with_push(cast("dict[str, Any]", rebar.claim(ticket_id, assignee=assignee)))
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def reopen_ticket(ticket_id: str) -> dict:
         """Reopen a closed ticket (closed -> open). Optimistic-concurrency:
         raises a tool error if the ticket is not currently closed."""
-        return cast("dict[str, Any]", rebar.reopen(ticket_id))
+        return _with_push(cast("dict[str, Any]", rebar.reopen(ticket_id)))
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def comment_ticket(ticket_id: str, body: str) -> str:
+    def comment_ticket(ticket_id: str, body: str) -> WriteAckOut:
         """Append a comment to a ticket."""
         rebar.comment(ticket_id, body)
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def log_session(
@@ -171,7 +215,9 @@ def register_write_tools(mcp, ctx) -> None:
             discovered_from=discovered_from,
             _creation_channel="mcp",
         )
-        return CreateResultOut.model_validate({"id": res["id"], "alias": res.get("alias")})
+        return CreateResultOut.model_validate(
+            _with_push({"id": res["id"], "alias": res.get("alias")})
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def edit_ticket(
@@ -184,7 +230,7 @@ def register_write_tools(mcp, ctx) -> None:
         add_tags: list[str] | None = None,
         remove_tags: list[str] | None = None,
         set_tags: list[str] | None = None,
-    ) -> str:
+    ) -> WriteAckOut:
         """Edit ticket fields (title/priority/assignee/description/ticket_type).
 
         Tags mutate via convergent deltas: add_tags / remove_tags add/remove,
@@ -203,10 +249,10 @@ def register_write_tools(mcp, ctx) -> None:
             remove_tags=remove_tags,
             set_tags=set_tags,
         )
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def link_tickets(id1: str, id2: str, relation: str) -> str:
+    def link_tickets(id1: str, id2: str, relation: str) -> WriteAckOut:
         """Link two tickets (one of the seven canonical relations: blocks |
         depends_on | relates_to | duplicates | supersedes | discovered_from |
         caused_by).
@@ -218,53 +264,53 @@ def register_write_tools(mcp, ctx) -> None:
         """
         record = rebar.link(id1, id2, relation)
         if not record:
-            return "ok"
+            return _ack()
         original = record.get("original") or {}
         resolved = record.get("resolved") or {}
-        return (
+        return _ack(
             f"ok (escalated: {original.get('source')}->{original.get('target')} "
             f"recorded as {resolved.get('source')}->{resolved.get('target')})"
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def unlink_tickets(id1: str, id2: str) -> str:
+    def unlink_tickets(id1: str, id2: str) -> WriteAckOut:
         """Remove a link between two tickets."""
         rebar.unlink(id1, id2)
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def tag_ticket(ticket_id: str, tag: str) -> str:
+    def tag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Add a tag to a ticket."""
         rebar.tag(ticket_id, tag)
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def untag_ticket(ticket_id: str, tag: str) -> str:
+    def untag_ticket(ticket_id: str, tag: str) -> WriteAckOut:
         """Remove a tag from a ticket."""
         rebar.untag(ticket_id, tag)
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
-    def archive_ticket(ticket_id: str) -> str:
+    def archive_ticket(ticket_id: str) -> WriteAckOut:
         """Archive a ticket (excludes it from the default list)."""
         rebar.archive(ticket_id)
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["DESTRUCTIVE"])
-    def compact_ticket(ticket_id: str | None = None) -> str:
+    def compact_ticket(ticket_id: str | None = None) -> WriteAckOut:
         """Compact a ticket's event log (or all tickets if id omitted)."""
         rebar.compact(ticket_id)
-        return "ok"
+        return _ack()
 
     # ── File-impact / verify-commands writes (WS5d; feed next-batch) ───────
     # Typed item params so the tools advertise an inputSchema (the {path,reason}
     # / {dd_id,dd_text,command} shapes mirror the get_* output models + schemas).
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> str:
+    def set_file_impact(ticket_id: str, impact: list[FileImpactItemOut]) -> WriteAckOut:
         """Record file impact (list of {path, reason}) for conflict-aware
         next-batch scheduling."""
         rebar.set_file_impact(ticket_id, [_dump(e) for e in impact])
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"], structured_output=False)
     def declare_no_file_impact(ticket_id: str, reason: str) -> str:
@@ -273,10 +319,10 @@ def register_write_tools(mcp, ctx) -> None:
         return "ok"
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
-    def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> str:
+    def set_verify_commands(ticket_id: str, commands: list[VerifyCommandItemOut]) -> WriteAckOut:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
         rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
-        return "ok"
+        return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
@@ -290,7 +336,9 @@ def register_write_tools(mcp, ctx) -> None:
         completion-verifier) are signed and accepted ONLY as op-certs — the
         legacy symmetric HMAC scheme is retired for them (story 8f1d). Use
         verify_signature to certify it later."""
-        return SignResultOut.model_validate(rebar.sign_manifest(ticket_id, manifest))
+        return SignResultOut.model_validate(
+            _with_push(cast("dict[str, Any]", rebar.sign_manifest(ticket_id, manifest)))
+        )
 
     @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
     async def run_workflow(
