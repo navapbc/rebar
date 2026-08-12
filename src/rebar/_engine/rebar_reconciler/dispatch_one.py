@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import sys
 
 # ``_call_with_retry`` moved to dispatch_apply_phases (ticket a3fa, to make room for the
@@ -44,7 +43,7 @@ from typing import TYPE_CHECKING, Any, cast
 # ticket 744a); the two pure link-probe helpers joined them there (ticket cc77) to
 # make room for this module's port annotations. Re-imported here so update_one's
 # bare-name calls and ``dispatch_one.<name>`` attribute access resolve unchanged.
-from rebar_reconciler._backend import SupportsComments, SupportsLinks
+from rebar_reconciler._backend import SupportsComments
 from rebar_reconciler._errors import (
     JiraAPIError,
     RetryExhaustedError,  # noqa: F401 — re-export: tests reach for dispatch_one.RetryExhaustedError
@@ -54,16 +53,20 @@ from rebar_reconciler.binding_store import BindingPersistError
 from rebar_reconciler.dispatch_apply_phases import (
     _call_with_retry,
     _capability_present,
-    _find_link_id,
-    _index_existing_links,
+    # Re-exports: the link-probe helpers no longer have a caller in THIS module (the link
+    # phase moved to the sibling leaf, ticket 5528), but ``batch_dispatch`` imports them
+    # from here and its __all__ is what the reconciler tests reach for.
+    _find_link_id,  # noqa: F401 — re-export for batch_dispatch
+    _index_existing_links,  # noqa: F401 — re-export for batch_dispatch
     _update_one_apply_reporter,
     _update_one_dispatch_comments,
+    _update_one_dispatch_links,
     _update_one_filter_fields,
 )
 from rebar_reconciler.pass_io import _write_mapping_atomic, record_parent_divergence
 
 if TYPE_CHECKING:
-    from ._backend import SupportsComments, SupportsLinks, TicketTransport
+    from ._backend import SupportsComments, TicketTransport
 
 logger = logging.getLogger(__name__)
 
@@ -451,7 +454,9 @@ def update_one(
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
         mutation, client, issue_key, comment_errors
     )
-    _links_computed, _links_applied = _update_one_dispatch_links(mutation, client, issue_key)
+    _links_computed, _links_applied, _links_failed = _update_one_dispatch_links(
+        mutation, client, issue_key
+    )
 
     if subop_applied is not None:
         subop_applied.update(
@@ -462,6 +467,7 @@ def update_one(
                 "comments_applied": _comments_applied,
                 "links_computed": _links_computed,
                 "links_applied": _links_applied,
+                "links_failed": _links_failed,
             }
         )
 
@@ -649,116 +655,3 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
                     file=sys.stderr,
                 )
     return _labels_computed, _labels_applied
-
-
-def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
-    """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
-    counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
-    (computed, applied) counts."""
-    _links_computed = _links_applied = 0
-
-    # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
-    # The outbound differ emits these alongside changed scalar fields, but the
-    # batch path never applied them (the link entry was dropped + no dispatch
-    # here) — so outbound link sync was a silent no-op. Mirror the typed leaf
-    # ``_apply_outbound_update``: probe the issue's existing links ONCE and skip
-    # any add already present (either direction) so a re-issued POST after a
-    # timed-out-but-committed create does not duplicate the link. Failures are
-    # best-effort + logged (non-fatal — the scalar update already succeeded).
-    links = mutation.get("links", []) or []
-    # Ticket a3fa: the capability guard is folded INTO this condition rather than placed
-    # inside the loop, for the same two reasons as create_one's comment guard — the
-    # capability is invariant across the loop, and a boolean operand costs zero McCabe
-    # complexity, so the guard does not raise this function's LOCKED complexity baseline.
-    # Placing it here also keeps it AHEAD of _links_computed, which matters: a designed skip
-    # must increment neither _computed nor _applied, or apply_handlers' silent-no-op canary
-    # (a FAILURE detector) would report it as the bug-3f04 failure mode.
-    if (
-        isinstance(links, list)
-        and any(isinstance(e, dict) and e.get("action") == "add" for e in links)
-        and _capability_present(
-            client,
-            SupportsLinks,
-            "links",
-            "set_relationship",
-            "update_one.dispatch_links",
-            issue_key,
-        )
-    ):
-        existing_links: set[tuple[str, str]] | None = None
-        try:
-            existing_links = _index_existing_links(client.get_issue_links(issue_key))
-        except Exception as exc:  # noqa: BLE001 — dedup probe is best-effort; proceed without it
-            existing_links = None
-            print(
-                f"update_one: get_issue_links probe failed for {issue_key}: {exc!r}",
-                file=sys.stderr,
-            )
-        for entry in links:
-            if not isinstance(entry, dict) or entry.get("action") != "add":
-                continue
-            link_type = entry.get("type")
-            to_key = entry.get("to_key")
-            if not link_type or not to_key:
-                continue
-            if existing_links is not None and (link_type, to_key) in existing_links:
-                continue  # already present (either direction) — no duplicate add
-            # Counted AFTER the dedup skip so a fully-deduped mutation is computed==0 (no canary).
-            _links_computed += 1
-            frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
-            try:
-                _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
-                _links_applied += 1
-            except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
-                print(
-                    f"update_one: set_relationship failed for {frm} -> {to} ({link_type}): {exc!r}",
-                    file=sys.stderr,
-                )
-
-    # Symmetric link REMOVE dispatch (wake-inn-parse): a managed link the differ
-    # marked for removal (a deliberate local unlink) is deleted on Jira so the inbound
-    # differ stops re-adding it. The differ emits only (type, to_key); resolve the link
-    # id here by probing the issue's current links (mirrors the ADD dedup probe). A link
-    # already gone (no match / 404 / 409) is idempotent success. Best-effort + logged.
-    if isinstance(links, list) and any(
-        isinstance(e, dict) and e.get("action") == "remove" for e in links
-    ):
-        try:
-            link_objs = client.get_issue_links(issue_key)
-        except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
-            link_objs = None
-            print(
-                f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
-                file=sys.stderr,
-            )
-        if link_objs is not None:
-            for entry in links:
-                if not isinstance(entry, dict) or entry.get("action") != "remove":
-                    continue
-                link_type = entry.get("type")
-                to_key = entry.get("to_key")
-                if not link_type or not to_key:
-                    continue
-                link_id = _find_link_id(link_objs, link_type, to_key)
-                if link_id is None:
-                    continue  # already absent in Jira — idempotent success, nothing to do
-                _links_computed += 1
-                try:
-                    _call_with_retry(client.delete_issue_link, link_id)
-                    _links_applied += 1
-                except subprocess.CalledProcessError:
-                    # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT
-                    # an HTTPError). We only reach here after _find_link_id confirmed the link
-                    # exists in a fresh probe, so a failure now is dominated by a concurrent
-                    # removal (404) / concurrent change (409) — idempotent: the desired
-                    # end-state (link gone) is reached. A genuine persistent failure is
-                    # self-healing — the differ recomputes the REMOVE from managed_refs next
-                    # pass — so treat as non-fatal and don't unwind the pass.
-                    _links_applied += 1
-                except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
-                    print(
-                        f"update_one: delete_issue_link failed for {issue_key} -> "
-                        f"{to_key} ({link_type}): {exc!r}",
-                        file=sys.stderr,
-                    )
-    return _links_computed, _links_applied

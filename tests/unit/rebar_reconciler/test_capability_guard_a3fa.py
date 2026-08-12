@@ -183,11 +183,15 @@ def test_dispatch_links_absent_capability_is_a_designed_skip(alert_root, caplog)
     }
 
     with caplog.at_level(logging.INFO, logger=_GUARD_LOGGER):
-        computed, applied = dispatch_one._update_one_dispatch_links(mutation, client, "DIG-3")
+        computed, applied, failed = dispatch_one._update_one_dispatch_links(
+            mutation, client, "DIG-3"
+        )
 
     assert "outbound-links-capability-absent" in _kinds(alert_root)
     assert any("does not implement links" in r.getMessage() for r in caplog.records)
-    assert (computed, applied) == (0, 0), (
+    # Ticket 5528 added the `failed` counter. A DESIGNED skip is not a failure, so it stays
+    # zero here — the distinction the alert already draws, now visible in the counts too.
+    assert (computed, applied, failed) == (0, 0, 0), (
         "a capability-absent link skip must not feed the silent-no-op canary"
     )
 
@@ -261,9 +265,11 @@ def test_present_but_raising_link_is_a_failure_not_a_skip(alert_root):
         "links": [{"action": "add", "type": "Blocks", "to_key": "DIG-9"}],
     }
 
-    computed, applied = dispatch_one._update_one_dispatch_links(mutation, client, "DIG-6")
+    computed, applied, failed = dispatch_one._update_one_dispatch_links(mutation, client, "DIG-6")
 
-    assert (computed, applied) == (1, 0), (
+    # Ticket 5528: a REAL failure is now also counted in `failed` — the counter that
+    # separates it from the designed skip above, which the canary alone cannot do.
+    assert (computed, applied, failed) == (1, 0, 1), (
         "a real link failure MUST still feed the silent-no-op canary"
     )
     assert "outbound-links-capability-absent" not in _kinds(alert_root)

@@ -281,6 +281,12 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     outcome["labels_applied"] = _subop.get("labels_applied", 0)
     outcome["comments_applied"] = _subop.get("comments_applied", 0)
     outcome["links_applied"] = _subop.get("links_applied", 0)
+    # Ticket 5528: link ops that did NOT reach their end-state. Surfaced alongside
+    # links_applied because the canary below is a TOTAL-no-op detector and cannot see a
+    # PARTIAL drop — and because the delete arm used to score failures as applied, making
+    # applied==computed even when nothing was removed. A nonzero links_failed is the
+    # queryable signal that the applied count is not the whole story.
+    outcome["links_failed"] = _subop.get("links_failed", 0)
     # Silent-no-op canary: a kind with sub-ops COMPUTED (post-dedup) but ZERO
     # applied is exactly the bug-3f04 link-drop failure mode — it would otherwise
     # pass green with error=None. computed is counted post-dedup, so an
