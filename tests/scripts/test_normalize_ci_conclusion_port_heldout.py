@@ -16,6 +16,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.scripts
 
@@ -154,9 +155,22 @@ def test_no_repo_reference_to_deleted_shell_remains() -> None:
 
 def test_workflow_sparse_checkout_fetches_only_the_py(tmp_path: Path) -> None:
     """The trusted-fetch step's sparse-checkout names the .py path and keeps
-    cone-mode disabled (a single-FILE pattern needs cone-mode: false)."""
+    cone-mode disabled (a FILE pattern needs cone-mode: false).
+
+    The step now fetches more than one trusted script (ticket be9d added the CI-failure
+    summarizer), so the patterns are asserted structurally rather than as one literal line —
+    the invariant is that the normalizer is still named and cone-mode is still off, not how
+    the list is formatted.
+    """
     text = _WORKFLOW.read_text()
-    assert "sparse-checkout: scripts/normalize_ci_conclusion.py" in text
+    patterns = [
+        line.strip()
+        for step in yaml.safe_load(text)["jobs"]["vote"]["steps"]
+        for line in str(step.get("with", {}).get("sparse-checkout", "")).splitlines()
+        if line.strip()
+    ]
+    assert "scripts/normalize_ci_conclusion.py" in patterns
+    assert all(pattern.endswith(".py") for pattern in patterns), patterns
     assert "sparse-checkout-cone-mode: false" in text
 
 
