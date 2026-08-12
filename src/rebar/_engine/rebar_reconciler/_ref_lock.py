@@ -726,12 +726,13 @@ _PUSH_REJECT_MARKERS = ("stale info", "rejected", "cannot lock ref")
 # ``cannot lock ref`` also cover hook declines, rate limits, server errors and
 # ref.lock contention, which are not lease movement.
 _LEASE_MISMATCH_MARKER = "stale info"
-_NON_CAS_REJECT_MARKERS = (
+_NON_CAS_REJECT_MARKERS: tuple[str, ...] = (
     "file exists",  # server-side ref.lock contention
     "hook declined",
     "internal server error",
     "rate limit",
 )
+_NON_CAS_REJECT_MARKERS += ("fatal error in commit_refs", "(failure)")  # bug ebee: GH 5xx
 
 
 def _is_cas_mismatch_stderr(stderr: str) -> bool:
