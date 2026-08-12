@@ -610,6 +610,68 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
         return False
 
 
+def _open_impossible_link_store(repo_root):
+    """Open the durable impossible-link record, or None if it cannot be opened.
+
+    None disables the whole feature for this pass and restores the previous
+    attempt-every-time behaviour — the memory is an optimisation, never a
+    precondition for applying links.
+    """
+    try:
+        from rebar._commands._seam import tracker_dir
+        from rebar_reconciler.impossible_links import ImpossibleLinkStore
+
+        return ImpossibleLinkStore(str(tracker_dir(repo_root)))
+    except Exception as exc:  # noqa: BLE001 — fail-open: no memory is worse, not fatal
+        logger.debug("_apply_inbound_update: impossible-link store unavailable: %r", exc)
+        return None
+
+
+def _skip_impossible_link(skip_store, local_id, target_local_id, relation) -> bool:
+    """True when this link is already known impossible and the world has not moved."""
+    if skip_store is None:
+        return False
+    try:
+        reason = skip_store.should_skip(local_id, target_local_id, relation)
+    except Exception as exc:  # noqa: BLE001 — an unusable record must never block a write
+        logger.debug("_apply_inbound_update: impossible-link lookup failed: %r", exc)
+        return False
+    if reason is None:
+        return False
+    logger.debug(
+        "_apply_inbound_update: skipping %s -> %s (%s): recorded as impossible (%s)",
+        local_id,
+        target_local_id,
+        relation,
+        reason,
+    )
+    return True
+
+
+def _note_impossible_link(skip_store, local_id, target_local_id, relation, exc) -> str:
+    """Record a permanently-impossible link; return a suffix for the WARNING line.
+
+    An empty suffix means the failure was NOT classified as permanent, so it is
+    not recorded and will be retried next pass exactly as before.
+    """
+    if skip_store is None:
+        return ""
+    try:
+        from rebar_reconciler.impossible_links import classify
+
+        reason = classify(exc)
+        if reason is None:
+            return ""
+        skip_store.record(local_id, target_local_id, relation, reason)
+    except Exception as note_exc:  # noqa: BLE001 — recording is best-effort
+        logger.debug("_apply_inbound_update: could not record impossible link: %r", note_exc)
+        return ""
+    return (
+        f" — structurally impossible ({reason}); recorded, and not retried until the "
+        "deciding local state changes"
+    )
+
+
 def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
     """Phase: write each Jira-sourced relation change into rebar via the rebar facades."""
     # Cycle 3: inbound links — write each Jira-sourced relation into rebar via
@@ -629,6 +691,15 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
     if isinstance(inbound_links, list):
         import rebar
 
+        # Bug b8b1: three of the failures below are deterministic verdicts about the
+        # LOCAL graph (closed source / redundant with the hierarchy / cycle-forming),
+        # not faults. Without memory the differ re-emits the identical record every
+        # pass and we re-spend the write — measured at 19 doomed writes per live pass,
+        # a byte-identical set each time. Consult the durable record first, and record
+        # a permanent verdict after the fact so the next pass can skip it.
+        skip_store = _open_impossible_link_store(repo_root)
+        skipped: int = 0
+
         for entry in inbound_links:
             if not isinstance(entry, dict):
                 continue
@@ -638,16 +709,20 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
             if not target_local_id or not relation:
                 continue
             if action == "add":
+                if _skip_impossible_link(skip_store, local_id, target_local_id, relation):
+                    skipped += 1
+                    continue
                 try:
                     rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
                     links_applied += 1
                 except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
                     logger.warning(
-                        "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r",
+                        "_apply_inbound_update: rebar.link failed for %s -> %s (%s): %r%s",
                         local_id,
                         target_local_id,
                         relation,
                         exc,
+                        _note_impossible_link(skip_store, local_id, target_local_id, relation, exc),
                     )
             elif action == "remove":
                 if _inbound_unlink_one(local_id, target_local_id, relation, repo_root):
@@ -661,4 +736,19 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
                     target_local_id,
                     relation,
                 )
+
+        if skip_store is not None:
+            if skipped:
+                # INFO, not WARNING, and once per pass rather than once per link: the
+                # whole point is to drain the permanent error floor from the log while
+                # keeping the fact of the suppression visible. The individual records
+                # (and why each is impossible) live in the store file.
+                logger.info(
+                    "_apply_inbound_update: skipped %d structurally-impossible inbound "
+                    "link record(s) for %s; details in %s",
+                    skipped,
+                    local_id,
+                    skip_store.path,
+                )
+            skip_store.save()
     return links_applied

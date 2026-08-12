@@ -208,6 +208,10 @@ def _commit_binding_store_snapshot(
         git_adapter.BINDINGS_FILE,
         git_adapter.BINDINGS_RETIRED_FILE,
         git_adapter.GET_ROTATION_FILE,
+        # Bug b8b1: the impossible-inbound-link record. Every pass runs in a fresh
+        # checkout, so an uncommitted record is discarded between passes and the
+        # skip never takes effect in production.
+        git_adapter.IMPOSSIBLE_LINKS_FILE,
     ]
     _existing_rel = [rel for rel in _rel_files if (tracker_dir / rel).exists()]
     if not _existing_rel:
@@ -231,6 +235,7 @@ def _commit_binding_store_snapshot(
             os.path.basename(git_adapter.BINDINGS_FILE),
             os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
             os.path.basename(git_adapter.GET_ROTATION_FILE),
+            os.path.basename(git_adapter.IMPOSSIBLE_LINKS_FILE),
         }
         if not (_tracked_basenames & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.
