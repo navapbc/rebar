@@ -45,6 +45,11 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "run inside the fail-open worker boundary",
     ),
     "metrics": ("lizard", "code-health metrics analyzers"),
+    "adf": (
+        "marklas",
+        "Markdown-aware Jira Cloud ADF conversion (headings/lists/code/marks); "
+        "without it the Cloud rich-text functions return their plain-text results",
+    ),
     "s3": (
         "git_remote_s3",
         "the awslabs/git-remote-s3 remote helper for an s3:// ticket-store remote",
