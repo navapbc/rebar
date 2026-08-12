@@ -28,10 +28,33 @@ pytestmark = pytest.mark.unit
 TICKET = "aaaa-bbbb-cccc-dddd"
 
 
+class _GitFailed(subprocess.CalledProcessError):
+    """``CalledProcessError`` that RENDERS the captured output.
+
+    The base class stores ``stdout``/``stderr`` but its ``__str__`` prints only the argv and
+    the exit status, so a helper running with ``capture_output=True`` captures git's own
+    diagnosis and then discards it at the point it matters. A fixture-setup failure then
+    reaches CI as a bare "returned non-zero exit status 1" — which is why the merge failure in
+    bug warmthless-dermal-oropendola could not be attributed: ``git merge`` exits 1 for a
+    content conflict, a failing hook, AND an unresolvable argument alike. Subclassing keeps the
+    exception TYPE (existing ``except subprocess.CalledProcessError`` clauses still catch it)
+    and changes only what is rendered.
+    """
+
+    def __str__(self) -> str:
+        return (
+            f"{super().__str__()}\n"
+            f"argv:   {self.cmd}\n"
+            f"stdout:\n{self.output}\n"
+            f"stderr:\n{self.stderr}"
+        )
+
+
 def _git(repo: Path, *args: str) -> str:
-    proc = subprocess.run(
-        ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
-    )
+    argv = ["git", "-C", str(repo), *args]
+    proc = subprocess.run(argv, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise _GitFailed(proc.returncode, argv, output=proc.stdout, stderr=proc.stderr)
     return proc.stdout.strip()
 
 
@@ -251,3 +274,29 @@ def test_a_git_failure_falls_back_to_the_per_event_resolver(
 def test_map_is_empty_and_never_raises_when_git_fails(tmp_path: Path) -> None:
     assert authorship.build_ticket_position_commit_map("") == {}
     assert authorship.build_ticket_position_commit_map(str(tmp_path / "nope")) == {}
+
+
+def test_git_failure_surfaces_git_own_diagnostics(tmp_path: Path) -> None:
+    """A failing ``_git`` names the argv, the exit code, and git's OWN stdout/stderr.
+
+    The fixture helper captures git's output, and ``CalledProcessError.__str__`` does not
+    render it — so a fixture-setup failure reached CI as a bare "returned non-zero exit
+    status 1" with git's message captured and discarded. That is why the merge failure in
+    bug warmthless-dermal-oropendola could not be attributed: ``git merge`` exits 1 for a
+    content conflict, a failing hook, AND an unresolvable argument alike, and the record
+    kept nothing that distinguishes them.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "tickets")
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        _git(repo, "merge", "-q", "--no-edit", "no-such-branch")
+
+    rendered = str(excinfo.value)
+    assert "not something we can merge" in rendered, (
+        f"git's own stderr must be surfaced, got:\n{rendered}"
+    )
+    assert "merge" in rendered, "the failing argv must be named"
+    assert "no-such-branch" in rendered, "the failing argv must be named in full"
+    assert "1" in rendered, "the exit code must be named"
