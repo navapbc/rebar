@@ -706,88 +706,18 @@ def set_pause(
     return new_oid
 
 
-# ---------------------------------------------------------------------------
-# Remote (push/fetch) CAS — the authoritative-on-remote path (wired by C3).
-#
-# A rejected ``--force-with-lease`` push is the remote-side equivalent of an
-# update-ref CAS mismatch. git push does NOT exit 128 for that (it exits 1 with a
-# "stale info" / "rejected" stderr), so we translate a rejected push into the same
-# exit-128 update-ref CalledProcessError shape the shared _is_cas_mismatch/_cas_once
-# seam understands — keeping exactly one CAS discriminator.
-# ---------------------------------------------------------------------------
+# Remote (push/fetch) CAS — the authoritative-on-remote path (wired by C3). The
+# classifier and the lease pushes live in the sibling _ref_lock_push module; the
+# wrappers below bind THIS module as its ``core``, so _git/_REMOTE_TIMEOUT_SECS/
+# logger resolve at CALL time against the module callers patch.
 
-# A rejected ``--force-with-lease`` prints "stale info" (the lease mismatch) or a
-# "! [rejected]" / "cannot lock ref" line — distinct from a genuine transport
-# failure ("Authentication failed", "Could not resolve host"), which we do NOT
-# classify as a CAS mismatch (fail-closed).
-_PUSH_REJECT_MARKERS = ("stale info", "rejected", "cannot lock ref")
-
-# Bug 4afc: only "stale info" is the --force-with-lease signal; ``rejected`` and
-# ``cannot lock ref`` also cover hook declines, rate limits, server errors and
-# ref.lock contention, which are not lease movement.
-_LEASE_MISMATCH_MARKER = "stale info"
-_NON_CAS_REJECT_MARKERS: tuple[str, ...] = (
-    "file exists",  # server-side ref.lock contention
-    "hook declined",
-    "internal server error",
-    "rate limit",
-)
-_NON_CAS_REJECT_MARKERS += ("fatal error in commit_refs", "(failure)")  # bug ebee: GH 5xx
-
-
-def _is_cas_mismatch_stderr(stderr: str) -> bool:
-    """Whether *stderr* (lowercased) shows the LEASE moved, not merely a rejection.
-
-    "stale info" is conclusive; a broader marker counts only when nothing names a
-    non-lease cause, so ambiguity fails closed per the documented posture.
-    """
-    if _LEASE_MISMATCH_MARKER in stderr:
-        return True
-    if any(m in stderr for m in _NON_CAS_REJECT_MARKERS):
-        return False
-    return any(m in stderr for m in _PUSH_REJECT_MARKERS)
+_push = lazy_load("rebar_reconciler_ref_lock_push", "_ref_lock_push.py")
+_is_cas_mismatch_stderr = _push.is_cas_mismatch_stderr
 
 
 def _push_lease_cas(repo_root: Path, ref: str, old_oid: str, remote: str, refspec: str) -> None:
-    """Do a ``--force-with-lease=<ref>:<old>`` push of *refspec* to *remote*.
-
-    Shared by acquire (``<new-oid>:<ref>``) and release (``:<ref>`` delete). A
-    rejected lease (remote ref moved) is re-raised in the update-ref exit-128
-    shape so the shared :func:`_cas_once` seam classifies it as a CAS mismatch; a
-    genuine transport failure is logged and re-raised (fail-closed).
-    """
-    result = _git(
-        repo_root,
-        ["push", f"--force-with-lease={ref}:{old_oid}", remote, refspec],
-        timeout=_REMOTE_TIMEOUT_SECS,
-        check=False,
-    )
-    if result.returncode == 0:
-        return
-    stderr = (result.stderr or "").lower()
-    if _is_cas_mismatch_stderr(stderr):
-        # Remote-side CAS mismatch — same shape the update-ref discriminator reads.
-        # Bug 4afc: LOG the evidence — this branch aborts a pass by claiming the lease
-        # was stolen, and previously raised silently while fail-closed below logged.
-        logger.warning(
-            "ref-lock: push to %s %s (expected oid %s) classified as CAS mismatch "
-            "(lease moved) — stderr: %s",
-            remote,
-            ref,
-            old_oid,
-            (result.stderr or "").strip()[:200],
-        )
-        raise subprocess.CalledProcessError(128, ["git", "update-ref", ref])
-    logger.warning(
-        "ref-lock: git push to %s %s failed (exit %s) — fail-closed: %s",
-        remote,
-        ref,
-        result.returncode,
-        (result.stderr or "").strip()[:200],
-    )
-    raise subprocess.CalledProcessError(
-        result.returncode, result.args, result.stdout, result.stderr
-    )
+    """Lease-CAS push of *refspec*; see :mod:`_ref_lock_push` for the contract."""
+    _push.push_lease_cas(sys.modules[__name__], repo_root, ref, old_oid, remote, refspec)
 
 
 def _push_cas(repo_root: Path, ref: str, new_oid: str, old_oid: str, remote: str) -> None:
