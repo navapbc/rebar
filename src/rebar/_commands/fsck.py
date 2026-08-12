@@ -2,6 +2,8 @@
 
 Runs five checks over the tracker:
   1. JSON validity of event files
+  1.5 ENV_ID_MISMATCH: this environment's author(s) also wrote under another env id —
+      the signature of a tracker re-clone that dropped its git-ignored local state
   2. CREATE event presence (via the reducer)
   3. Stale ``.git/index.lock`` cleanup (>5min; the ONLY mutation, suppressed by
      the ``no_mutate=True`` argument for read-only surfaces)
@@ -56,7 +58,7 @@ from rebar._commands.fsck_repair import (
     repair_or_plan as _repair_or_plan,
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._store import compat
+from rebar._store import compat, env_identity
 from rebar._store.gitutil import (
     _reclaim_if_stale_index_lock,
     path_is_foreign_to_branch,
@@ -97,7 +99,11 @@ def _scan(
     # the store-wide authorship line it complements.
     env_authorship = EnvAuthorshipTally()
 
-    # ── Check 1: JSON validity ───────────────────────────────────────────────
+    # ── Check 1: JSON validity (+ identity collection) ───────────────────────
+    # Every event carries the `env_id` + `author` of whoever wrote it, so this pass — which
+    # already parses every event file — is also where the store's identity pairs are
+    # gathered for check 1.5. Two observers, one parse, no extra I/O.
+    seen_identities: set[tuple[str, str]] = set()
     for ticket_id in _ticket_dirs(tracker):
         ticket_dir = os.path.join(tracker, ticket_id)
         for filename in sorted(os.listdir(ticket_dir)):
@@ -105,10 +111,23 @@ def _scan(
                 continue
             try:
                 with open(os.path.join(ticket_dir, filename), encoding="utf-8") as f:
-                    env_authorship.observe(filename, json.load(f))
+                    event = json.load(f)
+                env_authorship.observe(filename, event)
             except (json.JSONDecodeError, ValueError, OSError):
                 lines.append(f"CORRUPT: {ticket_id}/{filename} — invalid JSON")
                 issue_count += 1
+                continue
+            env_identity.note_event_identity(event, seen_identities)
+
+    # ── Check 1.5: environment-identity divergence ───────────────────────────
+    # A re-clone that drops `.env-id` mints a fresh identity and every attestation signed
+    # by the old one silently dies. Nothing fails then — it surfaces much later as a
+    # per-ticket `foreign_key` verdict at a gate, so report it store-wide, where it
+    # actually lives. Author-scoped, so a shared store's several clones are not reported
+    # as a fault (bug gold-distinct-lacewing).
+    _divergence = env_identity.divergence_findings(tracker, seen_identities)
+    lines.extend(_divergence)
+    issue_count += len(_divergence)
 
     # ── Check 2: CREATE event presence ───────────────────────────────────────
     # The reducer warns to stderr on corrupt events; those warnings are noise here
