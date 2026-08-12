@@ -133,6 +133,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_PORT` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_BRANCH` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
+| `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_SSM_KEY_PARAM` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/llm/plan_review/sizing.py` |  |
@@ -169,7 +170,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_159 variables._
+_160 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
@@ -201,7 +202,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config.py:412` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/gate_source.py:70` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:641` — `os.environ.get(<non-literal>)`
-- `src/rebar/opcert_service/config.py:55` — `os.environ.get(<non-literal>)`
+- `src/rebar/opcert_service/config.py:66` — `os.environ.get(<non-literal>)`
 - `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:228` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:238` — `os.environ.get(<non-literal>)`

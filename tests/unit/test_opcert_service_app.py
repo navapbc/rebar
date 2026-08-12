@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import threading
 import time
 import types
 
@@ -161,10 +162,10 @@ def test_worker_records_job_timeout(monkeypatch):
             inner_started.set()
             await never_released.wait()
 
-        def barrier_to_thread(*args, **kwargs):
+        def barrier_offload(*args, **kwargs):
             return block_past_timeout()
 
-        monkeypatch.setattr(app_module.asyncio, "to_thread", barrier_to_thread)
+        monkeypatch.setattr(app_module, "_offload", barrier_offload)
         record = jobs.new_record("job", "t", "plan-review")
         fake_app = types.SimpleNamespace(
             state=types.SimpleNamespace(
@@ -210,10 +211,10 @@ def test_worker_cancellation_survives_job_completion_race(monkeypatch):
             await release_inner.wait()
             return _fake_completed(ticket_id="t", kind="plan-review")
 
-        def barrier_to_thread(*args, **kwargs):
+        def barrier_offload(*args, **kwargs):
             return complete_at_shutdown()
 
-        monkeypatch.setattr(app_module.asyncio, "to_thread", barrier_to_thread)
+        monkeypatch.setattr(app_module, "_offload", barrier_offload)
         record = jobs.new_record("job", "t", "plan-review")
         fake_app = types.SimpleNamespace(
             state=types.SimpleNamespace(
@@ -255,3 +256,55 @@ def test_invalid_kind_is_400(client):
 
 def test_unknown_job_is_404(client):
     assert client.get("/opcert/jobs/deadbeef").status_code == 404
+
+
+@pytest.mark.timeout(60)
+def test_shutdown_does_not_wait_for_an_in_flight_job(monkeypatch):
+    """Lifespan shutdown must NOT wait for an in-flight job (bug c89f).
+
+    The worker offloads ``run_job`` to a thread, and a thread cannot be force-cancelled. Before
+    the fix the job ran on the event loop's DEFAULT executor, whose teardown
+    (``loop.shutdown_default_executor()``) joins orphaned threads with NO timeout — so teardown
+    tracked the JOB's duration. On CI that let one slow job burn the whole ``--timeout=300``
+    budget, at which point pytest-timeout's ``thread`` method called ``os._exit(1)`` and the xdist
+    worker died with no traceback.
+
+    Asserted STRUCTURALLY, not against a wall-clock budget (an upper-bound timing assert is the
+    very flake class this file is fixing). The job parks on an event that is only released AFTER
+    the assertion, so ``finished`` can be set only if shutdown waited for the thread: the check is
+    an ordering fact, not a duration, and cannot flake under runner contention.
+
+    This is the ONLY shape in this module that reaches that path: every other test either polls to
+    a terminal status or enqueues nothing, so only a test that returns mid-job races teardown.
+    """
+    from rebar.opcert_service import app as app_module
+
+    started = threading.Event()
+    finished = threading.Event()
+    release = threading.Event()
+
+    def blocking_job(**kwargs):
+        started.set()
+        # Bounded so the PRE-fix path fails the assertion below instead of hanging the suite.
+        release.wait(30)
+        finished.set()
+        return _fake_completed(**kwargs)
+
+    monkeypatch.setattr(jobs, "run_job", blocking_job)
+    app_module.app.state.config = OpcertServiceConfig(
+        guard=GUARD, job_timeout_seconds=30.0, shutdown_cancel_seconds=1.0
+    )
+    try:
+        with TestClient(app_module.app) as c:
+            resp = c.post(
+                "/opcert/jobs",
+                json={"ticket_id": "t", "kind": "plan-review"},
+                headers={"X-Opcert-Guard": GUARD},
+            )
+            assert resp.status_code == 202
+            assert started.wait(10), "the worker never picked the job up"
+        # Shutdown has returned while the job is still parked on ``release``. Had shutdown joined
+        # the orphaned thread, the job would necessarily have run to completion first.
+        assert not finished.is_set(), "shutdown waited for the in-flight job to finish"
+    finally:
+        release.set()
