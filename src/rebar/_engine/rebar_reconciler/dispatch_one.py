@@ -26,28 +26,34 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import subprocess
 import sys
-import time
+
+# ``_call_with_retry`` moved to dispatch_apply_phases (ticket a3fa, to make room for the
+# capability guards under the 800-LOC module cap), but ``dispatch_one.time`` is a DOCUMENTED
+# retry patch point: test_error_taxonomy.py:61 and test_cloud_rate_limit_sweep_heldout.py:259
+# reach for it as ``monkeypatch.setattr(dispatch_one.time, "sleep", ...)``. That mutates the
+# SHARED ``time`` module object, so it still suppresses the relocated backoff — but only while
+# the attribute resolves here. Kept deliberately; do not drop as "unused".
+import time  # noqa: F401
 import urllib.error
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-
-from rebar_reconciler._errors import (
-    MAX_BACKOFF_S,
-    JiraAPIError,
-    RetryExhaustedError,
-    http_status,
-    parse_retry_after,
-)
-from rebar_reconciler.binding_store import BindingPersistError
 
 # Non-retrying update_one apply phases live in the sibling leaf (module-size split,
 # ticket 744a); the two pure link-probe helpers joined them there (ticket cc77) to
 # make room for this module's port annotations. Re-imported here so update_one's
 # bare-name calls and ``dispatch_one.<name>`` attribute access resolve unchanged.
+from rebar_reconciler._backend import SupportsComments, SupportsLinks
+from rebar_reconciler._errors import (
+    JiraAPIError,
+    RetryExhaustedError,  # noqa: F401 — re-export: tests reach for dispatch_one.RetryExhaustedError
+    http_status,
+)
+from rebar_reconciler.binding_store import BindingPersistError
 from rebar_reconciler.dispatch_apply_phases import (
+    _call_with_retry,
+    _capability_present,
     _find_link_id,
     _index_existing_links,
     _update_one_apply_reporter,
@@ -66,81 +72,6 @@ logger = logging.getLogger(__name__)
 # pass it defers further creates (back-pressure against Jira rate limits). Named here
 # so the threshold has one source instead of a bare literal in the guard + docstring.
 _REST_CALL_BUDGET = 200
-
-
-def _call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
-    """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
-
-    Retryable: TimeoutError; JiraAPIError 5xx/429; and (story 9622)
-    urllib.error.HTTPError 5xx/429 — the REST floor (acli_rest) raises raw
-    HTTPError, previously uncaught here, so the idempotent REST writes routed
-    through it got zero retry. 429 honors a present integer ``Retry-After``, else
-    ADR-0036 jittered backoff; 5xx uses that backoff.
-    Non-retryable: JiraAPIError / HTTPError 4xx (except 429) — re-raised raw
-    immediately (preserving the 404 / hierarchy-400 semantics). On exhaustion a
-    retried HTTPError re-raises raw; TimeoutError/JiraAPIError raise RetryExhaustedError.
-
-    Args:
-        fn:          Callable to invoke.
-        *args:       Positional arguments forwarded to fn.
-        max_retries: Maximum number of retry attempts after the first failure.
-        **kwargs:    Keyword arguments forwarded to fn.
-
-    Returns:
-        The return value of fn on success.
-
-    Raises:
-        RetryExhaustedError: When all retry attempts are exhausted.
-        JiraAPIError:        Immediately, for non-retryable 4xx (except 429) errors.
-    """
-    delays = [1, 2, 4]
-    last_exc: Exception | None = None
-
-    for attempt in range(max_retries + 1):
-        retry_after: float | None = None
-        try:
-            return fn(*args, **kwargs)
-        except JiraAPIError as exc:
-            # 429 and 5xx are retryable; all other 4xx fail fast
-            if exc.status_code != 429 and 400 <= exc.status_code < 500:
-                raise
-            last_exc = exc
-        except urllib.error.HTTPError as exc:
-            # REST-transport floor (acli_rest raises raw HTTPError): 429/5xx
-            # retryable, other 4xx fail fast (raw). HTTPError.code is the status.
-            if exc.code != 429 and 400 <= exc.code < 500:
-                raise
-            last_exc = exc
-            if exc.code == 429:
-                retry_after = parse_retry_after(
-                    exc.headers.get("Retry-After") if exc.headers else None
-                )
-        except TimeoutError as exc:
-            last_exc = exc
-
-        if attempt < max_retries:
-            if retry_after is not None:
-                delay: float = min(MAX_BACKOFF_S, retry_after)
-            elif isinstance(last_exc, urllib.error.HTTPError):
-                # ADR 0036: 2**(attempt+1) + jitter, capped.
-                delay = min(MAX_BACKOFF_S, 2 ** (attempt + 1) + random.random())
-            else:
-                delay = delays[min(attempt, len(delays) - 1)]
-            time.sleep(delay)
-
-    # On exhaustion of a retried HTTPError, re-raise the ORIGINAL raw HTTPError
-    # (story 9622): downstream catchers switch on raw HTTPError (e.g.
-    # apply_handlers.handle_update softens 404 but re-raises non-404 5xx as
-    # pass-fatal), so wrapping it would silently defeat them. TimeoutError /
-    # JiraAPIError keep the RetryExhaustedError contract.
-    if isinstance(last_exc, urllib.error.HTTPError):
-        raise last_exc
-    # CHAIN the cause (PEP 3134) — the prior `raise RetryExhaustedError(str(last_exc))` dropped
-    # __cause__, losing the underlying failure (epic romp-swath-wince). Populate last_exception /
-    # attempts for post-hoc inspection.
-    raise RetryExhaustedError(
-        str(last_exc), last_exception=last_exc, attempts=max_retries + 1
-    ) from last_exc
 
 
 def create_one(
@@ -402,7 +333,20 @@ def create_one(
                     )
 
         comments = mutation.get("comments", []) or []
-        if isinstance(comments, list):
+        # Ticket a3fa: the capability guard is folded INTO this condition rather than placed
+        # inside the loop. Two reasons: the capability is invariant across the loop (checking
+        # per entry would re-decide the same thing N times), and a boolean operand costs zero
+        # McCabe complexity, so the guard does not raise create_one's LOCKED complexity
+        # baseline. It fires only when the mutation actually carries comment sub-ops.
+        # A designed skip is NOT a failure: it does not reach comment_errors (that channel
+        # stays the failure channel) and the create itself still lands.
+        if (
+            isinstance(comments, list)
+            and comments
+            and _capability_present(
+                client, SupportsComments, "comments", "add_comment", "create_one", jira_key
+            )
+        ):
             for entry in comments:
                 if not isinstance(entry, dict):
                     continue
@@ -653,10 +597,18 @@ def _update_one_scalar_update(
                 raise
             new_status = _attempted_status
             comment = f"local status changed to {new_status}"
-            try:
-                cast("SupportsComments", client).add_comment(issue_key, comment)
-            except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
-                pass  # secondary failure must not mask the comment-fallback path
+            if _capability_present(
+                client,
+                SupportsComments,
+                "comments",
+                "add_comment",
+                "update_one.scalar_update_fallback",
+                issue_key,
+            ):
+                try:
+                    cast("SupportsComments", client).add_comment(issue_key, comment)
+                except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
+                    pass  # secondary failure must not mask the comment-fallback path
             log_entry = json.dumps(
                 {
                     "action": "comment_fallback",
@@ -714,8 +666,24 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
     # timed-out-but-committed create does not duplicate the link. Failures are
     # best-effort + logged (non-fatal — the scalar update already succeeded).
     links = mutation.get("links", []) or []
-    if isinstance(links, list) and any(
-        isinstance(e, dict) and e.get("action") == "add" for e in links
+    # Ticket a3fa: the capability guard is folded INTO this condition rather than placed
+    # inside the loop, for the same two reasons as create_one's comment guard — the
+    # capability is invariant across the loop, and a boolean operand costs zero McCabe
+    # complexity, so the guard does not raise this function's LOCKED complexity baseline.
+    # Placing it here also keeps it AHEAD of _links_computed, which matters: a designed skip
+    # must increment neither _computed nor _applied, or apply_handlers' silent-no-op canary
+    # (a FAILURE detector) would report it as the bug-3f04 failure mode.
+    if (
+        isinstance(links, list)
+        and any(isinstance(e, dict) and e.get("action") == "add" for e in links)
+        and _capability_present(
+            client,
+            SupportsLinks,
+            "links",
+            "set_relationship",
+            "update_one.dispatch_links",
+            issue_key,
+        )
     ):
         existing_links: set[tuple[str, str]] | None = None
         try:

@@ -122,6 +122,67 @@ def record_parent_divergence(
         logger.warning("could not record %s alert for %s: %r", kind, key, alert_exc)
 
 
+# Capability-absent alerts recur for the LIFE of a non-capable backend — a Data Center
+# transport that implements neither capability Protocol would otherwise append one record
+# per sub-op per pass, unbounded. The gap is a property of the (capability, site) pair, not
+# of the individual sub-op, so record it at most ONCE per process per pair. Losing the
+# per-sub-op multiplicity costs nothing: the operator's next move is identical whether one
+# comment or two hundred were skipped for the same missing capability.
+_CAPABILITY_GAPS_SEEN: set[tuple[str, str]] = set()
+
+
+def record_capability_gap(
+    capability: str,
+    member: str,
+    site: str,
+    key: str | None,
+    local_id: str | None = None,
+    repo_root: Path | None = None,
+) -> bool:
+    """Record that a DESIGNED capability skip happened (ticket a3fa).
+
+    This is the "capability absent" half of the skip-vs-failure split. It writes the SAME
+    ``bridge_alerts`` record ``record_parent_divergence`` uses for the parent-divergence
+    class, under a DISTINCT ``kind`` (``outbound-<capability>-capability-absent``), so a
+    skip surfaces wherever alerts already surface and is never mistaken for the
+    ``outbound-*-failed`` kinds a real exception produces.
+
+    Deduped per process per ``(capability, site)`` — see ``_CAPABILITY_GAPS_SEEN``. Returns
+    True when this call wrote the record, False when it was deduped, so callers can log the
+    INFO line on the same edge.
+
+    Fail-open by construction, exactly like ``record_parent_divergence``: an unwritable
+    state directory degrades to a warning rather than failing a mutation that would land.
+    """
+    kind = f"outbound-{capability}-capability-absent"
+    first = (capability, site) not in _CAPABILITY_GAPS_SEEN
+    _CAPABILITY_GAPS_SEEN.add((capability, site))
+    if not first:
+        return False
+    try:
+        if repo_root is None:
+            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        _load_alert_store().append(
+            {
+                "kind": kind,
+                "key": key,
+                "local_id": local_id,
+                "capability": capability,
+                "member": member,
+                "site": site,
+                "timestamp_ns": time.time_ns(),
+                "reason": (
+                    f"transport does not implement {capability}; "
+                    f"{member} skipped at {site} (designed skip, not a failure)"
+                ),
+            },
+            repo_root=repo_root,
+        )
+    except Exception as alert_exc:  # noqa: BLE001 — alerting is best-effort; never fail a pass
+        logger.warning("could not record %s alert for %s: %r", kind, key, alert_exc)
+    return True
+
+
 def _load_mapping(mapping_path: Path) -> dict:
     """Load mapping.json, returning an empty dict if missing or corrupt.
 
