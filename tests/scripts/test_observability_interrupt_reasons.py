@@ -77,6 +77,12 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
 
     offsets = tmp_path / "offsets"
     offsets.mkdir()
+    # Every offset starts at an EXPLICIT 0: these tests are about the reason SPLIT, and an
+    # absent offset file is a cold start, which seeds to the journal total and publishes 0
+    # instead of the inherited history (bug e2a6-9ee4-8d5c-4290, covered by
+    # test_observability_coldstart_e2a6.py). Pre-initialising keeps the split under test.
+    for name in _OFFSET_VARIABLES:
+        (offsets / name.lower()).write_text("0\n")
     env = dict(os.environ)
     env.update(
         {

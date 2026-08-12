@@ -98,8 +98,21 @@ if [ -f "$REPL_LOG" ]; then
   # single-line count and default-empty-to-0 instead.
   total=$(grep -cE 'REJECTED_NONFASTFORWARD|non-fast-forward|Giving up|giving up after|\[ERROR\]' "$REPL_LOG" 2>/dev/null) || true
   total=${total:-0}
-  prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || echo 0)
-  case "$prev" in ''|*[!0-9]*) prev=0 ;; esac
+  prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || true)
+  # NO OFFSET YET = COLD START -> SEED, NEVER REPUBLISH THE JOURNAL (bug e2a6-9ee4-8d5c-4290).
+  # An absent offset file means this counter has NEVER observed the source (a newly introduced
+  # counter, a fresh /var/lib/rebar, a host rebuild, a disk restore), so every marker already in
+  # the journal predates monitoring by it. Defaulting prev to 0 made the first run publish the
+  # ENTIRE retained journal as one interval delta — on 2026-08-12 that fabricated 7
+  # bound-exceeded + 1 signal-unavailable markers from history reaching back to 2026-08-04,
+  # against 1-datapoint threshold>0 alarms. Seeding prev to $total publishes 0 for the
+  # initialising run and the publish-then-persist block below writes $total to the offset, so the
+  # counter measures from the next interval on. This is the cold-start complement of the
+  # negative-delta clamp above: there lost history is already-counted, here inherited history is
+  # never-monitored. An empty or non-numeric offset takes the same branch — an unreadable offset
+  # is indistinguishable from none, and republishing on it fabricates identically. A file holding
+  # a real "0" still parses as 0 and is unaffected.
+  case "$prev" in ''|*[!0-9]*) prev=$total ;; esac
   new=$(( total - prev ))
   # NEGATIVE DELTA = LOST HISTORY -> SUPPRESS, NEVER REPUBLISH (bug 2dc7-31b7-ecbb-4cd2).
   # total < prev only when the source LOST entries it previously had (journald vacuuming by
@@ -139,8 +152,10 @@ mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
 # single-line count and default-empty-to-0 instead.
 vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'VOTER_ERROR') || true
 vtotal=${vtotal:-0}
-vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || echo 0)
-case "$vprev" in '' | *[!0-9]*) vprev=0 ;; esac
+vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || true)
+# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
+# replication_errors counter (§3).
+case "$vprev" in '' | *[!0-9]*) vprev=$vtotal ;; esac
 vnew=$((vtotal - vprev))
 # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
 [ "$vnew" -lt 0 ] && vnew=0
@@ -164,8 +179,10 @@ MERGE_OFFSET_FILE="${MERGE_OFFSET_FILE:-/var/lib/rebar/merge-change-fail-offset}
 mkdir -p "$(dirname "$MERGE_OFFSET_FILE")"
 mtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'MERGE_CHANGE_ERROR') || true
 mtotal=${mtotal:-0}
-mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || echo 0)
-case "$mprev" in '' | *[!0-9]*) mprev=0 ;; esac
+mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || true)
+# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
+# replication_errors counter (§3).
+case "$mprev" in '' | *[!0-9]*) mprev=$mtotal ;; esac
 mnew=$((mtotal - mprev))
 # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
 [ "$mnew" -lt 0 ] && mnew=0
@@ -187,8 +204,10 @@ DEPLOY_OFFSET_FILE="${DEPLOY_OFFSET_FILE:-/var/lib/rebar/autodeploy-fail-offset}
 mkdir -p "$(dirname "$DEPLOY_OFFSET_FILE")"
 dtotal=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE 'AUTODEPLOY_ERROR') || true
 dtotal=${dtotal:-0}
-dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || echo 0)
-case "$dprev" in '' | *[!0-9]*) dprev=0 ;; esac
+dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || true)
+# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
+# replication_errors counter (§3).
+case "$dprev" in '' | *[!0-9]*) dprev=$dtotal ;; esac
 dnew=$((dtotal - dprev))
 # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
 [ "$dnew" -lt 0 ] && dnew=0
@@ -239,8 +258,10 @@ publish_autodeploy_marker_delta() {
   local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
   total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
   total=${total:-0}
-  prev=$(cat "$offset_file" 2>/dev/null || echo 0)
-  case "$prev" in '' | *[!0-9]*) prev=0 ;; esac
+  prev=$(cat "$offset_file" 2>/dev/null || true)
+  # No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at
+  # the replication_errors counter (§3).
+  case "$prev" in '' | *[!0-9]*) prev=$total ;; esac
   new=$((total - prev))
   # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
   [ "$new" -lt 0 ] && new=0
@@ -299,8 +320,10 @@ mkdir -p "$(dirname "$G2P_OFFSET_FILE")"
 # single-line count and default-empty-to-0 instead.
 gtotal=$(journalctl CONTAINER_NAME="$G2P_CONTAINER" --no-pager -o cat 2>/dev/null | grep -ciE "$G2P_PATTERN") || true
 gtotal=${gtotal:-0}
-gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || echo 0)
-case "$gprev" in '' | *[!0-9]*) gprev=0 ;; esac
+gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || true)
+# No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
+# replication_errors counter (§3).
+case "$gprev" in '' | *[!0-9]*) gprev=$gtotal ;; esac
 gnew=$((gtotal - gprev))
 # Lost history -> publish 0, never $total; rationale at the replication_errors counter (§3).
 [ "$gnew" -lt 0 ] && gnew=0
