@@ -96,6 +96,9 @@ if [ -f "$REPL_LOG" ]; then
   # NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
   # (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
   # single-line count and default-empty-to-0 instead.
+  # NOT record-anchored, unlike the marker counters in §4/§4c/§4d (bug 8c2f-8377-5044-4650): this
+  # reads Gerrit's replication_log, which no LLM writes to, and the signatures are free-form
+  # phrases inside log lines rather than line-start records — an anchor would drop real failures.
   total=$(grep -cE 'REJECTED_NONFASTFORWARD|non-fast-forward|Giving up|giving up after|\[ERROR\]' "$REPL_LOG" 2>/dev/null) || true
   total=${total:-0}
   prev=$(cat "$REPL_OFFSET_FILE" 2>/dev/null || true)
@@ -150,7 +153,17 @@ mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
 # NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
 # (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
 # single-line count and default-empty-to-0 instead.
-vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'VOTER_ERROR') || true
+# ANCHOR TO THE EMITTED RECORD, NOT THE BARE TOKEN (bug 8c2f-8377-5044-4650).
+# The review-bot writes its LLM review output to the SAME journal stream it emits markers on, so an
+# unanchored 'VOTER_ERROR' counted any review whose text merely NAMED the marker. On 2026-08-12 a
+# review of this very file enumerated the marker vocabulary in prose and fired both the voter and
+# merge-change alarms; the merge-change counter had never seen a real error in the whole retained
+# journal. Real markers are emitted as `<TOKEN> {json}` at the start of the message (voter.py
+# prints "VOTER_ERROR " + json.dumps(record) to stderr; autodeploy.sh marker() does the same
+# shape), and journalctl -o cat prints the message alone — so `^<TOKEN> \{` matches every genuine
+# record (evidence: 221 line-start == 221 real) and no prose, whether the token appears mid-line or
+# opens one. A token is an alarm contract: keep this pattern in step with the emitter.
+vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE '^VOTER_ERROR \{') || true
 vtotal=${vtotal:-0}
 vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || true)
 # No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
@@ -177,7 +190,8 @@ fi
 # dimensionless alarm in monitoring_88ab.tf.
 MERGE_OFFSET_FILE="${MERGE_OFFSET_FILE:-/var/lib/rebar/merge-change-fail-offset}"
 mkdir -p "$(dirname "$MERGE_OFFSET_FILE")"
-mtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE 'MERGE_CHANGE_ERROR') || true
+# Record-anchored like the voter counter above; rationale at section 4 (bug 8c2f-8377-5044-4650).
+mtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE '^MERGE_CHANGE_ERROR \{') || true
 mtotal=${mtotal:-0}
 mprev=$(cat "$MERGE_OFFSET_FILE" 2>/dev/null || true)
 # No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
@@ -202,7 +216,10 @@ fi
 # backing off — the last-known-good stays live, but an operator should investigate.
 DEPLOY_OFFSET_FILE="${DEPLOY_OFFSET_FILE:-/var/lib/rebar/autodeploy-fail-offset}"
 mkdir -p "$(dirname "$DEPLOY_OFFSET_FILE")"
-dtotal=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE 'AUTODEPLOY_ERROR') || true
+# Record-anchored like the voter counter (§4). This unit's journal is not LLM-written, but it
+# DOES echo captured review-bot output (autodeploy.sh capture_bot_logs), which is why that function
+# redacts the token — the anchor makes the counter robust regardless (bug 8c2f-8377-5044-4650).
+dtotal=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE '^AUTODEPLOY_ERROR \{') || true
 dtotal=${dtotal:-0}
 dprev=$(cat "$DEPLOY_OFFSET_FILE" 2>/dev/null || true)
 # No offset yet -> seed to $total and publish 0, never the inherited journal; rationale at the
@@ -272,20 +289,23 @@ publish_autodeploy_marker_delta() {
   [ "$new" -gt 0 ] && logger -t rebar-health "${label} (new this interval)=${new}"
   return 0
 }
-publish_autodeploy_marker_delta AUTODEPLOY_DEFERRED deploy_deferrals \
+# The patterns are record-anchored (`^<TOKEN> \{`) so prose naming a marker is never counted;
+# rationale at section 4 (bug 8c2f-8377-5044-4650). The anchor lives at the CALL SITES because the
+# helper's first argument is an ERE the reason-scoped counters extend.
+publish_autodeploy_marker_delta '^AUTODEPLOY_DEFERRED \{' deploy_deferrals \
   "$DEFER_OFFSET_FILE" "auto-deploys deferred for an in-flight review"
-publish_autodeploy_marker_delta AUTODEPLOY_REVIEW_INTERRUPT review_interrupts \
+publish_autodeploy_marker_delta '^AUTODEPLOY_REVIEW_INTERRUPT \{' review_interrupts \
   "$INTERRUPT_OFFSET_FILE" "review-bot reviews interrupted by a deploy"
 # The first argument is an ERE handed to `grep -cE`, so the reason-scoped counters select on the
 # marker's JSON payload (autodeploy.sh `marker()` emits
 # `AUTODEPLOY_REVIEW_INTERRUPT {"ts": …, "reason": "<reason>", "detail": …}`). The `[[:space:]]*`
 # keeps the match independent of the JSON separator spacing.
 publish_autodeploy_marker_delta \
-  'AUTODEPLOY_REVIEW_INTERRUPT.*"reason":[[:space:]]*"bound-exceeded"' \
+  '^AUTODEPLOY_REVIEW_INTERRUPT \{.*"reason":[[:space:]]*"bound-exceeded"' \
   review_interrupts_bound_exceeded "$INTERRUPT_BOUND_OFFSET_FILE" \
   "reviews interrupted after the deferral bound was exhausted (review-bot chronically busy)"
 publish_autodeploy_marker_delta \
-  'AUTODEPLOY_REVIEW_INTERRUPT.*"reason":[[:space:]]*"signal-unavailable"' \
+  '^AUTODEPLOY_REVIEW_INTERRUPT \{.*"reason":[[:space:]]*"signal-unavailable"' \
   review_interrupts_signal_unavailable "$INTERRUPT_SIGNAL_OFFSET_FILE" \
   "reviews interrupted with the in-flight signal UNREADABLE (deploys are running blind)"
 
@@ -318,6 +338,8 @@ mkdir -p "$(dirname "$G2P_OFFSET_FILE")"
 # NOTE: `grep -c` prints 0 AND exits 1 on zero matches; do NOT add `|| echo 0`
 # (that would append a SECOND "0" line and corrupt the arithmetic). Capture the
 # single-line count and default-empty-to-0 instead.
+# NOT record-anchored (see §4, bug 8c2f-8377-5044-4650): the Gerrit container's journal is not
+# LLM-written and these are free-form phrase/level matches, not line-start records.
 gtotal=$(journalctl CONTAINER_NAME="$G2P_CONTAINER" --no-pager -o cat 2>/dev/null | grep -ciE "$G2P_PATTERN") || true
 gtotal=${gtotal:-0}
 gprev=$(cat "$G2P_OFFSET_FILE" 2>/dev/null || true)

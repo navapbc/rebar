@@ -78,8 +78,9 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], dict[str, Path]]:
         """
         n=$(cat "$MARKERS_FILE")
         for _ in $(seq 1 "$n"); do
-          printf '%s\\n' VOTER_ERROR MERGE_CHANGE_ERROR AUTODEPLOY_ERROR
-          printf '%s\\n' AUTODEPLOY_DEFERRED 'gerrit_to_platform error'
+          printf '%s\\n' 'VOTER_ERROR {"ts": 1}' 'MERGE_CHANGE_ERROR {"ts": 1}'
+          printf '%s\\n' 'AUTODEPLOY_ERROR {"ts": 1}' 'AUTODEPLOY_DEFERRED {"ts": 1}'
+          printf '%s\\n' 'gerrit_to_platform error'
           printf '%s\\n' 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "bound-exceeded"}'
           printf '%s\\n' 'AUTODEPLOY_REVIEW_INTERRUPT {"ts": 1, "reason": "signal-unavailable"}'
         done
