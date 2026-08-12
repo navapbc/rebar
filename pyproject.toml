@@ -11,7 +11,7 @@ version = "0.11.0"
 description = "Event-sourced ticket system with a Jira reconciler — CLI, Python library, and MCP server."
 readme = "README.md"
 # Floor is 3.11: the reconciler uses enum.StrEnum (new in 3.11) — see
-# rebar_reconciler/mutation.py / inbound_probe.py. (Was previously declared
+# rebar_reconciler/mutation.py. (Was previously declared
 # >=3.10, but that never actually worked; corrected here.)
 requires-python = ">=3.11"
 license = "Apache-2.0"

@@ -200,26 +200,6 @@ def test_comment_and_search_shapes_match_the_shared_contract(
 
 @_skip
 @_skip_no_extra
-def test_probe_remote_classifies_a_deleted_issue_as_archived_or_moved(
-    dc_transport: Any, jira_dc_project: str
-) -> None:
-    """Absence-probe edge case: a deleted issue classifies as ARCHIVED_OR_MOVED,
-    not merely "some error"."""
-    from rebar_reconciler.inbound_probe import ProbeBranch
-
-    dc_transport.project = jira_dc_project
-    created = dc_transport.create_issue(
-        {"summary": "rebar J6 live — to delete", "issuetype": "Task"}
-    )
-    key = created["key"]
-    dc_transport._client.issue(key).delete()
-
-    result = dc_transport.probe_remote(key)
-    assert result.branch == ProbeBranch.ARCHIVED_OR_MOVED
-
-
-@_skip
-@_skip_no_extra
 def test_name_identity_user_search_resolves_a_real_user_authoritatively(
     dc_transport: Any,
 ) -> None:

@@ -144,10 +144,6 @@ _ZERO_ADAPTER_IMPORT_SCALAR_CORE = (
     "fetcher.py",
     "applier.py",
     "apply_handlers.py",
-    # Ticket aff0: the inbound probe's Jira mechanics moved to adapters/jira/probe.py
-    # behind the SupportsAbsenceProbe capability; the root module keeps only the neutral
-    # vocabulary and imports no vendor symbol.
-    "inbound_probe.py",
     # Ticket 625b: the outbound differ now compares in canonical shape (snapshot mapped via
     # the injected InboundMapper), so it no longer imports the vendor field-diff helpers.
     "outbound_differ.py",

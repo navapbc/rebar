@@ -2,9 +2,9 @@
 e369).
 
 Wires the DC transport (``transport.py``) together with the Jira-family SHARED
-layer (``adapters/jira_family``) — the value maps, sanitizers, identity
-convention, and absence-probe classifier that Cloud and DC both consume from ONE
-implementation (PR #120's mistake was forking these per adapter). The only
+layer (``adapters/jira_family``) — the value maps, sanitizers, and identity
+convention that Cloud and DC both consume from ONE implementation (PR #120's
+mistake was forking these per adapter). The only
 DC-specific pieces are: the rich-text codec (``WikiTextCodec`` — plain
 text/wiki markup, not ADF) and the user-identity model (``NameIdentity`` — DC's
 ``name`` username, not Cloud's opaque ``accountId``).
@@ -312,7 +312,7 @@ def _build_jira_datacenter_backend(config: Any) -> JiraDataCenterBackend:
 
 
 class JiraDataCenterBackend:
-    """The Data Center backend: five role Protocols + links/comments/absence-probe
+    """The Data Center backend: five role Protocols + links/comments
     capabilities, built on ``JiraDataCenterTransport``."""
 
     vendor = "jira-datacenter"
@@ -460,7 +460,3 @@ class JiraDataCenterBackend:
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         return self.transport.get_comment_map(project_key)
-
-    # --- capability: SupportsAbsenceProbe (delegates to transport) ---
-    def probe_remote(self, remote_id: str) -> Any:
-        return self.transport.probe_remote(remote_id)

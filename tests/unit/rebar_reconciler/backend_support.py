@@ -137,16 +137,6 @@ class FakeTransport:
         self.calls.append(("get_comment_map", (project_key,)))
         return {}
 
-    # absence-probe surface (JiraDataCenterBackend.probe_remote delegates here).
-    # Returns a REAL ``ProbeResult``, not a bare sentinel: a stub returning None
-    # would let a delegation-via-``calls`` assertion pass while the backend's own
-    # probe_remote hands its caller an unusable value.
-    def probe_remote(self, remote_id: str) -> Any:
-        from rebar_reconciler.inbound_probe import ProbeBranch, ProbeResult
-
-        self.calls.append(("probe_remote", (remote_id,)))
-        return ProbeResult(branch=ProbeBranch.UNREACHABLE, issue_key=remote_id, detail={})
-
 
 # ---------------------------------------------------------------------------
 # FakeBackend — an in-memory Backend that deliberately does NOT support links or

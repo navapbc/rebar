@@ -108,16 +108,9 @@ from .backend_support import FakeTransport
 #   test_dc_map_fields_to_remote_maps_every_status_plus_unmapped_default
 # MUTATED: JiraIdentityConvention _CANONICAL_PREFIX "rebar-id:" -> "rebar-id=";
 #   FAILED: test_dc_identity_format_label_uses_canonical_colon_form
-# MUTATED: classify_probe_response archived tuple (404, 410, 403) -> (404, 410);
-#   FAILED: test_dc_classify_probe_response_pins_every_branch
 # MUTATED: DEFAULT_RESOLVED_STATUSES {"Resolved","Done","Cancelled"} ->
 #   {"Resolved","Done","Canceled"}; FAILED:
-#   test_dc_default_resolved_statuses_pinned,
-#   test_dc_classify_probe_response_pins_every_branch,
-#   test_dc_probe_binds_its_own_resolved_statuses_not_clouds
-# MUTATED: JiraDataCenterTransport.__init__ `self._resolved_statuses =
-#   resolved_statuses` -> `= DEFAULT_RESOLVED_STATUSES` (ignore the configured
-#   set); FAILED: test_dc_probe_binds_its_own_resolved_statuses_not_clouds
+#   test_dc_default_resolved_statuses_pinned
 #
 # TWO MUTATIONS INITIALLY SURVIVED, and fixing them changed the suite. Recorded
 # because a mutation ledger that only lists successes is not evidence:
@@ -147,11 +140,7 @@ WIKI_SUFFIX = " … [truncated by reconciler]"
 
 
 def _backend() -> JiraDataCenterBackend:
-    """DC's ``_backend()`` seam, mirroring the Cloud module's.
-
-    NOTE: this seam is deliberately NOT used for the probe pins — see the probe
-    section's comment. ``FakeTransport.probe_remote`` hard-codes a single branch.
-    """
+    """DC's ``_backend()`` seam, mirroring the Cloud module's."""
     return JiraDataCenterBackend(transport=FakeTransport())
 
 
@@ -540,178 +529,11 @@ def test_dc_identity_is_identity_label_tracks_parse():
 
 
 # ---------------------------------------------------------------------------
-# AC5/AC6 — the absence-probe branches, pinned through a seam that reaches the
-# REAL classifier.
-#
-# ``JiraDataCenterBackend(transport=FakeTransport())`` — the ``_backend()`` seam
-# every other pin in this module uses — is deliberately NOT used here.
-# ``FakeTransport.probe_remote`` returns
-# ``ProbeResult(branch=ProbeBranch.UNREACHABLE, ...)`` UNCONDITIONALLY, and DC's
-# backend merely delegates (``JiraDataCenterBackend.probe_remote`` is one line).
-# Pins written there would assert a delegation stub's static return and could
-# never observe PRESENT_RESOLVED, PRESENT_FILTERED or ARCHIVED_OR_MOVED.
-#
-# Two real seams are used instead: ``jira_family.classify_probe_response``
-# directly (the pure classifier), and a ``JiraDataCenterTransport`` over a stub
-# ``jira.JIRA``-shaped client (which proves the transport BINDS its configured
-# resolved-status set into that classifier).
+# The DC resolved-status default (still an operator-facing config default).
 # ---------------------------------------------------------------------------
-
-
-class _StubJiraClient:
-    """A stub shaped like ``jira.JIRA`` for the probe path only.
-
-    ``JiraDataCenterTransport.probe_remote`` calls ``client.issue(key)`` and
-    unwraps ``.raw``. Raising :class:`BackendHTTPError` models a translated HTTP
-    failure: it is neither a retryable connection fault nor a ``JIRAError``, so
-    ``_with_connection_retry`` re-raises it immediately with no backoff sleep.
-    """
-
-    def __init__(self, *, payload: dict | None = None, error_code: int | None = None) -> None:
-        self._payload = payload or {}
-        self._error_code = error_code
-
-    def issue(self, remote_id: str):
-        if self._error_code is not None:
-            from rebar_reconciler._backend import BackendHTTPError
-
-            raise BackendHTTPError(
-                f"https://dc.example/rest/api/2/issue/{remote_id}",
-                self._error_code,
-                "stub failure",
-                {},  # type: ignore[arg-type]
-                None,
-            )
-        return type("_StubIssue", (), {"raw": self._payload})()
-
-
-def _dc_transport(client: _StubJiraClient, resolved_statuses=None):
-    from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
-
-    return JiraDataCenterTransport(client=client, project="DC", resolved_statuses=resolved_statuses)
 
 
 def test_dc_default_resolved_statuses_pinned():
     from rebar_reconciler.adapters.jira_datacenter.settings import DEFAULT_RESOLVED_STATUSES
 
     assert DEFAULT_RESOLVED_STATUSES == frozenset({"Resolved", "Done", "Cancelled"})
-
-
-def test_dc_classify_probe_response_pins_every_branch():
-    from rebar_reconciler.adapters.jira_datacenter.settings import DEFAULT_RESOLVED_STATUSES
-    from rebar_reconciler.adapters.jira_family import classify_probe_response
-    from rebar_reconciler.inbound_probe import ProbeBranch
-
-    def _branch(status_code: int, payload: dict | None = None):
-        return classify_probe_response(
-            "DC-1", status_code, payload or {}, resolved_statuses=DEFAULT_RESOLVED_STATUSES
-        )
-
-    # ARCHIVED_OR_MOVED: 404, 410, 403
-    for code in (404, 410, 403):
-        result = _branch(code)
-        assert result.branch is ProbeBranch.ARCHIVED_OR_MOVED
-        assert result.issue_key == "DC-1"
-        assert result.detail == {"status_code": code}
-
-    # UNREACHABLE: 401 and any 5xx
-    for code in (401, 500, 503):
-        result = _branch(code)
-        assert result.branch is ProbeBranch.UNREACHABLE
-        assert result.detail == {"status_code": code}
-
-    # PRESENT_RESOLVED: 200 + a status name in DC's configured set
-    for status_name in ("Resolved", "Done", "Cancelled"):
-        result = _branch(200, {"fields": {"status": {"name": status_name}}})
-        assert result.branch is ProbeBranch.PRESENT_RESOLVED
-        assert result.detail == {"status": status_name}
-
-    # PRESENT_FILTERED: 200 + a status name outside the set
-    result = _branch(200, {"fields": {"status": {"name": "In Progress"}}})
-    assert result.branch is ProbeBranch.PRESENT_FILTERED
-    assert result.detail == {"status": "In Progress"}
-
-    # 200 with no status at all still classifies (empty name), not raises
-    assert _branch(200, {}).branch is ProbeBranch.PRESENT_FILTERED
-    assert _branch(200, {}).detail == {"status": ""}
-
-    # Unknown code falls through to UNREACHABLE and flags itself
-    result = _branch(302)
-    assert result.branch is ProbeBranch.UNREACHABLE
-    assert result.detail == {"status_code": 302, "unknown": True}
-
-
-def test_dc_transport_probe_reaches_every_branch():
-    """The same four branches through ``JiraDataCenterTransport``, the seam the
-    real backend's ``probe_remote`` delegation ultimately lands on."""
-    from rebar_reconciler.inbound_probe import ProbeBranch
-
-    resolved = _dc_transport(
-        _StubJiraClient(payload={"fields": {"status": {"name": "Done"}}})
-    ).probe_remote("DC-1")
-    assert resolved.branch is ProbeBranch.PRESENT_RESOLVED
-    assert resolved.detail == {"status": "Done"}
-
-    filtered = _dc_transport(
-        _StubJiraClient(payload={"fields": {"status": {"name": "In Progress"}}})
-    ).probe_remote("DC-2")
-    assert filtered.branch is ProbeBranch.PRESENT_FILTERED
-    assert filtered.detail == {"status": "In Progress"}
-
-    archived = _dc_transport(_StubJiraClient(error_code=404)).probe_remote("DC-3")
-    assert archived.branch is ProbeBranch.ARCHIVED_OR_MOVED
-    assert archived.detail == {"status_code": 404}
-
-    unreachable = _dc_transport(_StubJiraClient(error_code=503)).probe_remote("DC-4")
-    assert unreachable.branch is ProbeBranch.UNREACHABLE
-    assert unreachable.detail == {"status_code": 503}
-
-
-def test_dc_probe_binds_its_own_resolved_statuses_not_clouds():
-    """AC6's cross-set discriminator, with a NON-DEFAULT set.
-
-    DC's ``DEFAULT_RESOLVED_STATUSES`` is BYTE-IDENTICAL to Cloud's
-    ``RESOLVED_STATUS_NAMES`` — both ``frozenset({"Resolved", "Done",
-    "Cancelled"})`` — so at defaults the two are INDISTINGUISHABLE and a pin
-    claiming "DC binds its own set" would pass identically against Cloud's
-    constant. It would be a test that cannot fail. A custom set is therefore
-    load-bearing, not belt-and-braces: do not "simplify" this to the defaults.
-    """
-    from rebar_reconciler.adapters.jira.probe import RESOLVED_STATUS_NAMES
-    from rebar_reconciler.adapters.jira_datacenter.settings import DEFAULT_RESOLVED_STATUSES
-    from rebar_reconciler.adapters.jira_family import classify_probe_response
-    from rebar_reconciler.inbound_probe import ProbeBranch
-
-    # The premise the discriminator exists to work around.
-    assert DEFAULT_RESOLVED_STATUSES == RESOLVED_STATUS_NAMES
-
-    custom = frozenset({"Custom Resolved"})
-    payload = {"fields": {"status": {"name": "Custom Resolved"}}}
-
-    against_dc = classify_probe_response("DC-1", 200, payload, resolved_statuses=custom)
-    assert against_dc.branch is ProbeBranch.PRESENT_RESOLVED
-    assert against_dc.detail == {"status": "Custom Resolved"}
-
-    against_cloud = classify_probe_response(
-        "DC-1", 200, payload, resolved_statuses=RESOLVED_STATUS_NAMES
-    )
-    assert against_cloud.branch is ProbeBranch.PRESENT_FILTERED
-    assert against_cloud.detail == {"status": "Custom Resolved"}
-
-    # And the same discriminator through the transport, which is what actually
-    # threads the configured set: a transport built with the custom set resolves
-    # it, while one left on DC's defaults (== Cloud's) does not.
-    payload_client = _StubJiraClient(payload=payload)
-    assert (
-        _dc_transport(payload_client, resolved_statuses=custom).probe_remote("DC-1").branch
-        is ProbeBranch.PRESENT_RESOLVED
-    )
-    assert _dc_transport(payload_client).probe_remote("DC-1").branch is ProbeBranch.PRESENT_FILTERED
-
-    # Conversely, a DC workflow that does NOT call "Done" resolved must not have
-    # Cloud's vocabulary applied to it.
-    done_client = _StubJiraClient(payload={"fields": {"status": {"name": "Done"}}})
-    assert (
-        _dc_transport(done_client, resolved_statuses=custom).probe_remote("DC-1").branch
-        is ProbeBranch.PRESENT_FILTERED
-    )

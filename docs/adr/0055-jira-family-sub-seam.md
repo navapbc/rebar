@@ -28,7 +28,7 @@ opaque `accountId`.
 It says nothing about a second member of the *same* vendor family, and GitHub PR #120 showed
 what happens in that gap: a second adapter package that rode the `Backend` port correctly but
 reached into `adapters/jira/` privates (`_map_local_to_jira_fields`, `_LOCAL_TO_JIRA_STATUS`,
-`_LOCAL_TO_JIRA_PRIORITY`, `_sanitize_label`, `_RELATION_TO_JIRA_LINK`, `classify_probe_response`)
+`_LOCAL_TO_JIRA_PRIORITY`, `_sanitize_label`, `_RELATION_TO_JIRA_LINK`)
 and forked `map_fields_to_remote` as a verbatim copy with one line changed. That creates a
 de-facto Jira-family layer with **no contract**: `adapters/jira/` becomes simultaneously a
 concrete backend and a shared library, with nothing pinning what is shared and nothing stopping
@@ -66,8 +66,12 @@ rebar_reconciler/
 `jira_family/` holds the units that are Jira-family-*general* rather than Cloud-specific, under
 **public** names: the local↔Jira value maps (`LOCAL_STATUS_TO_JIRA`, `LOCAL_PRIORITY_TO_JIRA`),
 the link-relation vocabulary (`RELATION_TO_JIRA_LINK`), the field sanitizers, the `rebar-id:`
-identity convention (`JiraIdentityConvention`), and the absence-probe classifier
-(`classify_probe_response`).
+identity convention (`JiraIdentityConvention`).
+
+> **Superseded in part (task `f020`).** This layer originally also held the absence-probe
+> classifier `classify_probe_response`. Bug `3b5f` removed every consumer of the inbound
+> absence-probe chain, and `f020` deleted the dormant port together with the classifier, so
+> `jira_family/probe.py` no longer exists.
 
 **Dependency direction is one-way and machine-checked.** `jira_family/` imports nothing from
 `adapters/jira/` or `adapters/jira_datacenter/`; concrete backends import it and it never
@@ -113,12 +117,11 @@ resolver that silently goes missing makes every resolution non-authoritative, an
 non-authoritative assignee makes the outbound diff re-emit a change it can never converge (the
 churn class of PR #120's defect). A required constructor parameter makes that defect unwritable.
 
-One further unit is parameterized rather than shared verbatim: `classify_probe_response` takes
-the resolved-status set as a **required keyword-only** parameter. Cloud/DIG's
-`Resolved`/`Done`/`Cancelled` are workflow *names*, and a self-hosted DC workflow may name its
-resolved states anything; baking Cloud's names in would misclassify a resolved DC issue as
-`PRESENT_FILTERED`. Operators set `[tool.rebar.reconciler].resolved_statuses`, defaulting to the
-conventional three so a conventional workflow configures nothing.
+One further unit *was* parameterized rather than shared verbatim: `classify_probe_response`
+took the resolved-status set as a **required keyword-only** parameter, because a self-hosted DC
+workflow may name its resolved states anything. That classifier was deleted with the dormant
+absence-probe port by task `f020`; the parameterization principle it illustrated still governs
+any future Jira-family unit whose values are workflow *names* rather than protocol constants.
 
 ### (c) Provenance: Cloud and DC share ONE `jira` identity — deliberately
 
@@ -308,8 +311,8 @@ restricted create screen. So "live testing is the oracle" is necessary and still
   layer diagram in `0083-reconciler-vendor-adapter-seam.md` §(c) shows two levels; the family
   layer sits inside the adapter half and is one-way by machine-checked contract.
 - **A second Jira-family deployment is a configuration, not a fork.** A third one implements the
-  two contracts and registers a key; it writes no value maps, no sanitizers, no link vocabulary,
-  and no probe classifier of its own.
+  two contracts and registers a key; it writes no value maps, no sanitizers, and no link
+  vocabulary of its own.
 - **`0083-reconciler-vendor-adapter-seam.md`'s "first real second backend is out of scope"
   statement is superseded.** Epic `e369` landed Jira Data Center ahead of the GitHub adapter
   `be74` was reserved for. That file has been corrected in all three places the claim appeared

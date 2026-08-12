@@ -1,9 +1,8 @@
 """``JiraDataCenterTransport`` — the DC ``TicketTransport`` built on ``pycontribs/jira``
 (story J6, epic e369).
 
-Satisfies rebar's ``TicketTransport`` role plus the ``SupportsLinks``,
-``SupportsComments``, and ``SupportsAbsenceProbe`` capability Protocols
-(``_backend.py:80-282``). The underlying library client is a CONSTRUCTOR
+Satisfies rebar's ``TicketTransport`` role plus the ``SupportsLinks`` and
+``SupportsComments`` capability Protocols. The underlying library client is a CONSTRUCTOR
 PARAMETER (``JiraDataCenterTransport(client=..., project=...)``), so unit tests
 inject a stateful fake with no network and no need for the ``[jira-datacenter]``
 extra to be installed; ``build_client_from_settings`` constructs the REAL
@@ -31,9 +30,8 @@ response) is attempted EXACTLY ONCE, since retrying a mutation risks duplicates.
 **Organising principle (ticket 465d): one module per capability, aligned to the
 Protocols in ``_backend.py``.** ``TicketTransport`` -> ``_issues.py``,
 ``SupportsLinks``/``SupportsComments`` -> ``_links.py`` (co-located: each is
-too small alone to clear the module-size policy's 100-LOC floor),
-``SupportsAbsenceProbe`` -> ``probe_remote`` below (small enough to live on
-the composition root), plus the additional always-required clusters
+too small alone to clear the module-size policy's 100-LOC floor), plus the
+additional always-required clusters
 ``_hierarchy.py`` (parent/Epic Link, ticket 9bb9's shared
 ``_resolve_epic_link_field_id``) and ``_people.py`` (identity + properties).
 ``_base.py`` holds the shared substrate (construction, the unwrap boundary,
@@ -55,10 +53,9 @@ from typing import Any
 
 from rebar_reconciler._backend import (
     BackendEnvError,
-    BackendHTTPError,
     BackendPaginationStallError,
 )
-from rebar_reconciler.adapters.jira_datacenter._base import _call_logged, _unwrap
+from rebar_reconciler.adapters.jira_datacenter._base import _call_logged
 
 # The capability mixins (ticket 465d): one module per Protocol in ``_backend.py``
 # (``_links.py`` covers the two smallest, ``SupportsLinks`` + ``SupportsComments``,
@@ -101,7 +98,6 @@ from rebar_reconciler.adapters.jira_datacenter.transitions import (
     route_status_to_transition,
     transition_to_status,
 )
-from rebar_reconciler.adapters.jira_family import classify_probe_response
 
 # Re-export facade. The retry/error cluster moved to ``retry.py`` (story S1) to buy
 # headroom under the LOCKED 800-line module-size cap; these names are imported here
@@ -206,8 +202,8 @@ class JiraDataCenterTransport(
     _PeopleMixin,
     _PropertiesMixin,
 ):
-    """The DC ``TicketTransport`` + ``SupportsLinks``/``SupportsComments``/
-    ``SupportsAbsenceProbe`` capabilities, composed from one mixin per
+    """The DC ``TicketTransport`` + ``SupportsLinks``/``SupportsComments``
+    capabilities, composed from one mixin per
     capability (ticket 465d) on an injected ``jira.JIRA``-shaped client.
 
     ``__init__`` and the attributes every mixin depends on
@@ -216,22 +212,3 @@ class JiraDataCenterTransport(
     mixin above inherits — so construction happens exactly once regardless of
     how many capability mixins are composed.
     """
-
-    def probe_remote(self, remote_id: str) -> Any:
-        """Probe ``remote_id`` and classify via the SHARED ``jira_family``
-        classifier (bound to this transport's configured ``resolved_statuses`` —
-        never Cloud/DIG's hardcoded names, since a self-hosted DC workflow can
-        name its resolved states anything).
-
-        The failing read is caught as the translated ``BackendHTTPError``, whose
-        ``.code`` carries the same status the raw library error did — so the
-        classification is unchanged."""
-        try:
-            issue = _with_connection_retry(lambda: self._client.issue(remote_id))
-        except BackendHTTPError as exc:
-            return classify_probe_response(
-                remote_id, exc.code or 0, {}, resolved_statuses=self._resolved_statuses
-            )
-        return classify_probe_response(
-            remote_id, 200, _unwrap(issue), resolved_statuses=self._resolved_statuses
-        )

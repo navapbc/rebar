@@ -30,7 +30,6 @@ import pytest
 from rebar_reconciler._backend import (
     Backend,
     BackendEnvError,
-    SupportsAbsenceProbe,
     SupportsComments,
     SupportsLinks,
 )
@@ -74,11 +73,10 @@ def test_dc_backend_satisfies_the_backend_facade() -> None:
     assert isinstance(_backend(), Backend)
 
 
-def test_dc_backend_advertises_its_three_capabilities() -> None:
+def test_dc_backend_advertises_its_capabilities() -> None:
     backend = _backend()
     assert isinstance(backend, SupportsLinks)
     assert isinstance(backend, SupportsComments)
-    assert isinstance(backend, SupportsAbsenceProbe)
 
 
 # ---------------------------------------------------------------------------
@@ -152,19 +150,6 @@ def test_assert_env_ready_raises_the_neutral_error_type(monkeypatch) -> None:
     _pin(monkeypatch, _settings(pat=""))
     with pytest.raises(BackendEnvError):
         _backend().assert_env_ready()
-
-
-# ---------------------------------------------------------------------------
-# absence probe — the delegation is real, not a stub that swallows
-# ---------------------------------------------------------------------------
-
-
-def test_probe_remote_delegates_to_the_transport() -> None:
-    transport = FakeTransport()
-    backend = JiraDataCenterBackend(transport=transport)
-    result = backend.probe_remote("DC-42")
-    assert ("probe_remote", ("DC-42",)) in transport.calls
-    assert result.issue_key == "DC-42"
 
 
 # ---------------------------------------------------------------------------
