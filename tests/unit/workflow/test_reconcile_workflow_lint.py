@@ -141,3 +141,92 @@ def test_provider_shell_bodies_pass_pinned_shellcheck(
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+def _redispatch_script() -> str:
+    """The opt-in continuous-loop re-dispatch step's shell, with Actions templating bound.
+
+    Bug 8aed: this step is the LAST thing an already-converged pass runs, so its failure
+    policy decides whether a transient re-dispatch problem reds an otherwise-good run.
+    """
+    step = next(
+        step
+        for step in _steps(_GITHUB, "reconcile")
+        if str(step.get("name", "")).startswith("Re-dispatch to sustain the continuous loop")
+    )
+    return str(step["run"]).replace("${{ github.ref_name }}", "main")
+
+
+def _run_redispatch(tmp_path: Path, gh_body: str) -> subprocess.CompletedProcess[str]:
+    """Execute the re-dispatch step with a stubbed ``gh`` on PATH."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_stub = bin_dir / "gh"
+    gh_stub.write_text("#!/usr/bin/env bash\n" + gh_body + "\n", encoding="utf-8")
+    gh_stub.chmod(0o755)
+
+    script = tmp_path / "redispatch.sh"
+    script.write_text("#!/usr/bin/env bash\n" + _redispatch_script() + "\n", encoding="utf-8")
+    return subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "MODE": "live"},
+    )
+
+
+_DISABLED_422 = (
+    'echo "could not create workflow dispatch event: HTTP 422: Cannot trigger a "\n'
+    "echo \"'workflow_dispatch' on a disabled workflow\" >&2\n"
+    "exit 1"
+)
+
+
+def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
+    """A converged pass stays GREEN when the loop cannot re-seed onto a disabled workflow.
+
+    The */20 schedule documented in the workflow header is the backstop, so failing the
+    job adds no recovery — only a false red that trips heartbeat alerting (runs
+    31129551929 / 31129431096).
+    """
+    completed = _run_redispatch(tmp_path, _DISABLED_422)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    combined = completed.stdout + completed.stderr
+    assert "::warning::" in combined
+    assert "::error::" not in combined
+
+
+def test_redispatch_keeps_every_other_failure_fatal(tmp_path: Path) -> None:
+    """The downgrade is narrow: a non-disabled-workflow failure still reds the run."""
+    completed = _run_redispatch(
+        tmp_path, 'echo "HTTP 403: Resource not accessible by integration" >&2\nexit 1'
+    )
+
+    assert completed.returncode != 0
+    combined = completed.stdout + completed.stderr
+    assert "::error::" in combined
+    assert "::warning::" not in combined
+
+
+def test_redispatch_requires_both_the_422_and_the_disabled_workflow_signal(
+    tmp_path: Path,
+) -> None:
+    """An unrelated HTTP 422 must NOT be swallowed — both tokens are required."""
+    completed = _run_redispatch(
+        tmp_path, 'echo "HTTP 422: Unprocessable Entity: no ref found" >&2\nexit 1'
+    )
+
+    assert completed.returncode != 0
+    assert "::warning::" not in completed.stdout + completed.stderr
+
+
+def test_redispatch_succeeds_quietly_when_the_dispatch_is_accepted(tmp_path: Path) -> None:
+    """The happy path stays a silent success — no warning, no error."""
+    completed = _run_redispatch(tmp_path, 'echo "queued"\nexit 0')
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    combined = completed.stdout + completed.stderr
+    assert "::warning::" not in combined
+    assert "::error::" not in combined
