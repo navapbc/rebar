@@ -748,6 +748,7 @@ def _print_batch_recon(action: str, outcome: dict, *, soft_failed: bool) -> None
     if action == "update" and not soft_failed:
         _recon_subops = (
             f" links_applied={outcome.get('links_applied', 0)}"
+            f" links_failed={outcome.get('links_failed', 0)}"
             f" comments_applied={outcome.get('comments_applied', 0)}"
             f" labels_applied={outcome.get('labels_applied', 0)}"
             f" silent_noop={outcome.get('silent_noop', [])!r}"
