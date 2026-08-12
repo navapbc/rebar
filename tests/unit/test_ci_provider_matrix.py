@@ -38,6 +38,7 @@ What each group protects, and the specific way the matrix could be silently brok
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -425,4 +426,95 @@ def test_every_module_using_the_shared_live_gate_declares_the_marker_sentinel() 
         f"these external modules use the shared live-LLM gate but declare no "
         f"`_live_llm_ready` sentinel, so they are not auto-marked llm_live and the provider "
         f"matrix skips them entirely: {offenders}"
+    )
+
+
+# ── a module that PINS a provider is ready only on the arm that runs it ────────────────
+def _live_llm_module():
+    """Import tests/external/_live_llm.py by path (the external tier is not a package)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_live_llm_under_test", _EXTERNAL_TESTS / "_live_llm.py"
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_pinned_provider_module_is_not_ready_on_a_mismatched_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug 4f74. `test_completion_banking_behavior_0707.py` pins
+    `bedrock:us.anthropic.claude-sonnet-4-6`, so it calls Bedrock on EVERY arm — but the OIDC
+    credential step is gated to the bedrock arm. While its sentinel asked the plain probe
+    ('is the ARM's credential present'), the anthropic arm reported READY and then ran cells
+    against a provider it holds no credential for. Readiness must be asked about the pinned
+    provider, and the skip must NAME the mismatch rather than vanish silently."""
+    mod = _live_llm_module()
+    monkeypatch.setattr(mod, "agents_extra_installed", lambda: True)
+    monkeypatch.setattr(mod, "configured_provider", lambda repo_root=None: "anthropic")
+    monkeypatch.setattr(mod, "credential_present", lambda provider: True)
+
+    assert mod.live_llm_ready("bedrock") is False, (
+        "a bedrock-pinned module reports ready on the anthropic arm — the arm holds no AWS "
+        "credential, so every pinned cell would fail on a provider it never claimed to cover"
+    )
+    reason = mod._skip_reason("bedrock")
+    assert "bedrock" in reason and "anthropic" in reason, (
+        f"the skip reason must name BOTH the pinned provider and the arm's resolved one so the "
+        f"skip is visible and diagnosable (got {reason!r})"
+    )
+    # The unpinned probe is unchanged: modules that follow the arm keep their behaviour.
+    assert mod.live_llm_ready() is True
+
+
+def test_a_pinned_provider_module_is_ready_on_its_own_arm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The complement: the gate must not be a blanket disable. On the matching arm, with the
+    provider's credential present, the pinned module still runs — otherwise the eval would
+    silently stop covering anything."""
+    mod = _live_llm_module()
+    monkeypatch.setattr(mod, "agents_extra_installed", lambda: True)
+    monkeypatch.setattr(mod, "configured_provider", lambda repo_root=None: "bedrock")
+    monkeypatch.setattr(mod, "credential_present", lambda provider: provider == "bedrock")
+
+    assert mod.live_llm_ready("bedrock") is True, (
+        "the bedrock-pinned module does not run on the bedrock arm — the gate has disabled the "
+        "eval everywhere instead of routing it to the arm that can run it"
+    )
+
+
+def test_a_module_pinning_a_provider_asks_the_probe_about_that_provider() -> None:
+    """The invariant that failed in bug 4f74, pinned structurally so the NEXT module to pin a
+    model cannot reintroduce it.
+
+    A module whose source hard-codes a `<provider>:` model string does not follow the arm's
+    `standard` model class, so a bare `live_llm_ready()` — which reports the ARM's credential —
+    answers a question that module never asked. It must pass the provider it pins."""
+    known = ("bedrock", "anthropic", "openai")
+    offenders = []
+    for path in sorted(_EXTERNAL_TESTS.glob("test_*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "_live_llm_ready" not in text:
+            continue
+        # Only an ASSIGNMENT counts as a pin. A bare substring scan also matches prose in a
+        # module docstring — test_pydantic_ai_cutover_live.py discusses "anthropic:claude-..."
+        # in its history note without pinning anything.
+        pinned = {
+            p
+            for p in known
+            if re.search(rf'^\s*\w+\s*=\s*f?["\']{p}:', text, re.MULTILINE)
+            or re.search(rf'^\s*\w+\s*=\s*f?["\']\{{[^}}]*\}}{p}:', text, re.MULTILINE)
+        }
+        if not pinned:
+            continue
+        if re.search(r"live_llm_ready\(\s*\)", text):
+            offenders.append(f"{path.name} (pins {sorted(pinned)})")
+    assert not offenders, (
+        f"these external modules pin a provider in a model string but ask the readiness probe "
+        f"about the ARM's provider instead — on a mismatched arm they report ready and then "
+        f"call a provider that arm holds no credential for: {offenders}"
     )
