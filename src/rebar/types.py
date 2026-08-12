@@ -209,6 +209,14 @@ TransitionResult = TypedDict(
         "from": TicketStatus,
         "to": TicketStatus,
         "newly_unblocked": list[str],
+        # Present ONLY on a close where a completion signature was in play, so consumers must
+        # treat it as optional and read its absence as "not a completion close" (a plain
+        # transition, or `idea -> closed`, which is a REJECT/DROP rather than a completion).
+        # {"signed": bool, "cause": str, "error": str}; cause is one of "signed",
+        # "sign_failed", "material_drifted", "force_bypassed". The close COMMITS before signing
+        # is attempted, so `signed: False` means the ticket IS closed and only the attestation
+        # is missing — never that the close failed (bug silvern-dewy-damselfly).
+        "completion_signature": NotRequired[dict],
     },
 )
 

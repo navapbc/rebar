@@ -16,11 +16,15 @@ unrelated historical commit references. Contract (ticket af11-ac5f-4e86-4d1d):
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
+import rebar
+from rebar import signing as _signing
+from rebar._commands import transition_close
 from rebar._commands.transition_close import _referencing_commit_exists
 from rebar._ids import resolve_ticket_id
 
@@ -80,3 +84,172 @@ def test_explicit_ambiguous_prefix_keeps_its_diagnostic(scan_env, capsys) -> Non
     tracker, _repo = scan_env
     assert resolve_ticket_id(AMBIG_PREFIX, tracker) is None
     assert "Ambiguous prefix" in capsys.readouterr().err
+
+
+# ── completion-signature reporting (bug silvern-dewy-damselfly) ────────────────────────────
+# The close COMMITS, releases the lock, and only THEN attempts to sign. A signing failure
+# therefore leaves a ticket closed-WITHOUT-signature while the command still succeeds — and
+# used to say so only via a stderr line whose text ("flock: could not acquire lock after 60s")
+# described the CLOSE as having failed. These pin the machine-readable marker, its closed cause
+# vocabulary, and the corrected message.
+
+
+@pytest.fixture
+def repo(tmp_path: Path, monkeypatch) -> Path:
+    r = tmp_path / "repo"
+    r.mkdir()
+    for args in (
+        ("init", "-q"),
+        ("config", "user.email", "test@example.com"),
+        ("config", "user.name", "Test"),
+    ):
+        subprocess.run(["git", *args], cwd=r, check=True)
+    monkeypatch.setenv("REBAR_ROOT", str(r))
+    rebar.init_repo(repo_root=str(r))
+    return r
+
+
+def _open_ticket(repo: Path) -> str:
+    tid = rebar.create_ticket("task", "a task", repo_root=str(repo))
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+    return tid
+
+
+def _gate_on(monkeypatch, *, verdict=None):
+    """Force the completion gate to have produced a verdict, so the signing tail runs."""
+    monkeypatch.setattr(
+        transition_close,
+        "_completion_precheck",
+        lambda *a, **k: verdict if verdict is not None else {"verdict": "PASS", "findings": []},
+    )
+    monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: False)
+
+
+def test_a_failed_signature_reports_signed_false_with_the_cause(repo, monkeypatch):
+    """AC1: the loss is machine-readable. Before this, the payload carried no field at all
+    about the signature, so no caller could detect it."""
+    _gate_on(monkeypatch)
+
+    def _boom(*_a, **_kw):
+        raise _signing.SigningError("flock: could not acquire lock after 60s")
+
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", _boom)
+    tid = _open_ticket(repo)
+
+    result = rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert result["completion_signature"]["signed"] is False
+    assert result["completion_signature"]["cause"] == "sign_failed"
+    assert "60s" in result["completion_signature"]["error"]
+    assert rebar.show_ticket(tid, repo_root=str(repo))["status"] == "closed", (
+        "the close LANDED — that is the whole point of reporting it separately"
+    )
+
+
+def test_a_signed_close_reports_signed_true(repo, monkeypatch):
+    """AC2: the marker is present on success too, so a caller can branch on one field
+    unconditionally rather than testing for its presence."""
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", lambda *a, **k: {})
+    tid = _open_ticket(repo)
+
+    result = rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert result["completion_signature"] == {"signed": True, "cause": "signed", "error": ""}
+
+
+def test_the_message_says_the_close_landed_not_that_it_failed(repo, monkeypatch, capsys):
+    """AC3: the reported defect. An agent read the appended lock error and concluded its
+    transition had failed, when the close had committed ~60s earlier."""
+    _gate_on(monkeypatch)
+
+    def _boom(*_a, **_kw):
+        raise _signing.SigningError("flock: could not acquire lock after 60s")
+
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", _boom)
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+    err = capsys.readouterr().err
+
+    assert "IS CLOSED" in err and "the close committed" in err
+    assert "Do NOT re-run the transition" in err
+
+
+def test_material_drift_reports_its_own_cause(repo, monkeypatch):
+    """AC5: drift also lands unsigned, but for a DIFFERENT reason — a deliberate refusal to
+    attest stale state, not a failure — so it must not be reported as sign_failed."""
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: True)
+    tid = _open_ticket(repo)
+
+    result = rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert result["completion_signature"]["signed"] is False
+    assert result["completion_signature"]["cause"] == "material_drifted"
+
+
+def test_a_plain_transition_carries_no_marker(repo):
+    """The key is present only where a completion signature is in play, so its ABSENCE is
+    meaningful: consumers read it as 'not a completion close'."""
+    tid = rebar.create_ticket("task", "a task", repo_root=str(repo))
+
+    result = rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+
+    assert "completion_signature" not in result
+
+
+def test_idea_to_closed_carries_no_marker(repo):
+    """`idea -> closed` is a REJECT/DROP of an undesigned idea, not a completion: it is
+    excluded from the signing block entirely, so inventing a cause for it would misreport a
+    deliberate non-event as a signing result."""
+    tid = rebar.create_ticket("task", "an idea", repo_root=str(repo))
+    rebar.transition(tid, "open", "idea", repo_root=str(repo))
+
+    result = rebar.transition(tid, "idea", "closed", repo_root=str(repo))
+
+    assert "completion_signature" not in result
+
+
+def test_the_cli_json_output_forwards_the_marker(repo, monkeypatch, capsys):
+    """AC4, CLI surface. The CLI rebuilds the payload field by field, so without explicit
+    forwarding the marker never reaches a consumer parsing --output json."""
+    from rebar._cli import main
+
+    _gate_on(monkeypatch)
+
+    def _boom(*_a, **_kw):
+        raise _signing.SigningError("signing unavailable")
+
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", _boom)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    rc = main(["transition", tid, "in_progress", "closed", "-o", "json"])
+    out = capsys.readouterr().out
+
+    assert rc == 0, "exit code is deliberately unchanged — the marker carries the signal"
+    payload = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    assert payload["completion_signature"]["cause"] == "sign_failed"
+
+
+def test_a_force_close_reports_its_own_cause(repo, monkeypatch, capsys):
+    """`--force` is a deliberate bypass, not a failure, but it still lands
+    closed-without-signature — so it gets its own cause rather than being reported as though
+    a signature had been attempted and lost."""
+    from rebar._cli import main
+
+    _gate_on(monkeypatch)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+
+    rc = main(["transition", tid, "in_progress", "closed", "--force=operator call", "-o", "json"])
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    payload = json.loads([ln for ln in out.splitlines() if ln.startswith("{")][-1])
+    assert payload["completion_signature"] == {
+        "signed": False,
+        "cause": "force_bypassed",
+        "error": "",
+    }
