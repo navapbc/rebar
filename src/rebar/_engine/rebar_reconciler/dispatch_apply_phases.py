@@ -394,3 +394,23 @@ def _find_link_id(issuelinks, link_type: str, to_key: str) -> str | None:
                 link_id = link.get("id")
                 return str(link_id) if link_id is not None else None
     return None
+
+
+def _confirm_link_add(link_confirm, entry, to_key, result) -> None:
+    """Hand an ACCEPTED link ADD to the peer-confirmation sink (epic a4bd).
+
+    Every failure here is swallowed. The link already landed on the vendor; losing
+    the evidence costs one un-declined removal (strictly the pre-a4bd behaviour),
+    whereas raising would fail an outbound write that actually succeeded and would
+    corrupt the applied/computed counts the silent-no-op canary reads.
+    """
+    if link_confirm is None:
+        return
+    try:
+        # The vendor's stable link id when it supplies one. ``set_relationship`` is
+        # typed ``-> dict[str, Any]``, but a backend may legitimately return no id
+        # (or a non-mapping); ``None`` is recorded and is NOT an error.
+        link_id = result.get("id") if isinstance(result, dict) else None
+        link_confirm(to_key=to_key, relation=entry.get("relation"), link_id=link_id)
+    except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never fail a landed write
+        print(f"update_one: peer-confirmation record failed for {to_key}: {exc!r}", file=sys.stderr)

@@ -37,6 +37,7 @@ import sys
 # the attribute resolves here. Kept deliberately; do not drop as "unused".
 import time  # noqa: F401
 import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -54,6 +55,7 @@ from rebar_reconciler.binding_store import BindingPersistError
 from rebar_reconciler.dispatch_apply_phases import (
     _call_with_retry,
     _capability_present,
+    _confirm_link_add,
     _find_link_id,
     _index_existing_links,
     _update_one_apply_reporter,
@@ -394,6 +396,7 @@ def update_one(
     comment_errors: list[str] | None = None,
     subop_applied: dict[str, int] | None = None,
     fields_synced: dict[str, Any] | None = None,
+    link_confirm: Callable[..., None] | None = None,
 ) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
@@ -451,7 +454,9 @@ def update_one(
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
         mutation, client, issue_key, comment_errors
     )
-    _links_computed, _links_applied = _update_one_dispatch_links(mutation, client, issue_key)
+    _links_computed, _links_applied = _update_one_dispatch_links(
+        mutation, client, issue_key, link_confirm=link_confirm
+    )
 
     if subop_applied is not None:
         subop_applied.update(
@@ -651,10 +656,24 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
     return _labels_computed, _labels_applied
 
 
-def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
+def _update_one_dispatch_links(
+    mutation,
+    client: TicketTransport,
+    issue_key,
+    *,
+    link_confirm: Callable[..., None] | None = None,
+) -> tuple[int, int]:
     """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
     counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
-    (computed, applied) counts."""
+    (computed, applied) counts.
+
+    ``link_confirm`` (epic a4bd) is an optional sink invoked after a link ADD is
+    ACCEPTED by the vendor, so the peer-confirmation store can record the evidence
+    that the peer now carries this link. It is a callback rather than a store handle
+    because this function has neither a binding store nor a pass id and must not grow
+    knowledge of either — the production caller (``apply_handlers.handle_update``)
+    closes over both. ``None`` (the default) preserves the pre-a4bd behaviour exactly.
+    """
     _links_computed = _links_applied = 0
 
     # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
@@ -707,8 +726,11 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
             _links_computed += 1
             frm, to = (to_key, issue_key) if entry.get("swap") else (issue_key, to_key)
             try:
-                _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
+                _link_result = _call_with_retry(
+                    cast("SupportsLinks", client).set_relationship, frm, to, link_type
+                )
                 _links_applied += 1
+                _confirm_link_add(link_confirm, entry, to_key, _link_result)
             except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
                 print(
                     f"update_one: set_relationship failed for {frm} -> {to} ({link_type}): {exc!r}",
