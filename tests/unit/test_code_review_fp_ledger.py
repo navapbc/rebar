@@ -12,6 +12,7 @@ Two units, both offline (no live LLM):
 
 from __future__ import annotations
 
+import logging
 import subprocess
 
 import pytest
@@ -301,3 +302,129 @@ def test_enrichment_never_changes_the_verdict():
         # the notes are advisory, on coverage, not the verdict
         assert "grounding_note" in verdict["coverage"]
         assert "approach_viability_note" in verdict["coverage"]
+
+
+# ── verification_recorded — the missing-recording signal (bug abdominal-grieving-nandu) ───
+# The gap this pins: the sidecar persists each finding's Pass-2 `verification` by field-spread,
+# so a regression that stopped carrying the block would write reviews' worth of unverified
+# findings with nothing erroring. `verification_recorded` makes that absence measurable, and the
+# tier/decision scoping keeps it from firing on the populations that are blockless BY DESIGN.
+
+
+def _verified(fid: str, **over):
+    """An LLM-tier decided finding carrying a Pass-2 verification block."""
+    f = {
+        "id": fid,
+        "priority": 0.3,
+        "tier": "LLM",
+        "decision": "advise",
+        "verification": {"binary": {"is_real": "yes"}, "severity_attributes": {"blast": "narrow"}},
+    }
+    f.update(over)
+    return f
+
+
+def test_verification_recorded_true_when_every_expected_block_is_present():
+    advisory = [_verified("a"), _verified("b")]
+    verdict = {"verdict": "PASS", "blocking": [], "advisory": advisory, "coverage": {}}
+    rec = _rec(
+        changed_files=["a.py"],
+        context=_diff_context(5),
+        verify_requests=4,
+        dropped=[],
+        surfaced=advisory,
+    )
+    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    assert verdict["coverage"]["metrics"]["verification_recorded"] is True
+
+
+def test_verification_recorded_false_and_warns_when_an_expected_block_is_missing(caplog):
+    # One verified advisory + one LLM-tier decided finding whose block never made it through.
+    advisory = [_verified("a"), _verified("b", verification=None)]
+    verdict = {"verdict": "PASS", "blocking": [], "advisory": advisory, "coverage": {}}
+    rec = _rec(
+        changed_files=["a.py"],
+        context=_diff_context(5),
+        verify_requests=6,  # Pass-2 demonstrably ran
+        dropped=[],
+        surfaced=advisory,
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
+        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    assert verdict["coverage"]["metrics"]["verification_recorded"] is False
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("verification recording gap" in m for m in warnings), warnings
+    # The warning NAMES the missing count (1) — an operator must see the size of the gap.
+    assert any("1 LLM-tier finding(s)" in m for m in warnings), warnings
+    # Advisory only: the signal never touches the verdict.
+    assert verdict["verdict"] == "PASS"
+    assert verdict["blocking"] == []
+
+
+def test_verification_recorded_true_for_det_tier_and_indeterminate_findings(caplog):
+    """The standing-false-alarm guard.
+
+    DET-tier detector findings are injected after Pass-3 and never enter Pass-2, and an
+    `indeterminate` / `no-verification` finding is one the verifier deliberately produced nothing
+    for. Both are blockless on ROUTINE runs, so counting them would pin the signal to false
+    forever and make it worthless as an alert.
+    """
+    verdict = {
+        "verdict": "BLOCK",
+        "blocking": [{"id": "det", "tier": "DET", "decision": "block"}],  # fail-closed detector
+        "advisory": [{"id": "untiered", "decision": "advise"}],  # no tier at all
+        "indeterminate": [
+            {"id": "ind", "tier": "LLM", "decision": "indeterminate", "reason": "no-verification"}
+        ],
+        "coverage": {},
+    }
+    rec = _rec(
+        changed_files=["a.py"],
+        context=_diff_context(5),
+        verify_requests=5,  # Pass-2 ran — the signal is armed and must still not fire
+        dropped=[],
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
+        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    assert verdict["coverage"]["metrics"]["verification_recorded"] is True
+    assert not [r for r in caplog.records if "verification recording gap" in r.getMessage()]
+
+
+def test_verification_recorded_true_when_the_verifier_never_ran():
+    """`grounding_health` owns the zero-request outage; this signal must not double-count it."""
+    advisory = [_verified("a", verification=None)]
+    verdict = {"verdict": "PASS", "blocking": [], "advisory": advisory, "coverage": {}}
+    rec = _rec(
+        changed_files=["a.py", "b.py"],
+        context=_diff_context(30),
+        verify_requests=0,  # Pass-2 made no model requests at all
+        dropped=[],
+        surfaced=advisory,
+    )
+    gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    assert verdict["coverage"]["metrics"]["verification_recorded"] is True
+    # flagged by the other signal instead
+    assert verdict["coverage"]["metrics"]["grounding_health"] == "low"
+
+
+def test_advisory_and_surfaced_spellings_are_not_double_counted(caplog):
+    """A verdict carrying BOTH key spellings of the one advisory bucket must count it once."""
+    advisory = [_verified("a", verification=None)]
+    verdict = {
+        "verdict": "PASS",
+        "blocking": [],
+        "advisory": advisory,
+        "surfaced": advisory,  # same bucket, second spelling
+        "coverage": {},
+    }
+    rec = _rec(
+        changed_files=["a.py"],
+        context=_diff_context(5),
+        verify_requests=3,
+        dropped=[],
+        surfaced=advisory,
+    )
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.code_review.finalize"):
+        gate_dispatch._attach_code_review_metrics(verdict, rec, total_ms=1.0)
+    assert verdict["coverage"]["metrics"]["verification_recorded"] is False
+    assert any("1 LLM-tier finding(s)" in r.getMessage() for r in caplog.records)
