@@ -379,7 +379,7 @@ def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_ms
     paths = [r for r in relpaths if r]
     if not paths:
         return 0
-    with _lock.write_lock(tracker, dual_window=True):
+    with _lock.write_lock(tracker, dual_window=True, retries=_lock.write_path_retries()):
         _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
         rm = _git_rm(tracker, paths)
         if rm.returncode != 0:
@@ -417,7 +417,7 @@ def stage_and_commit(
     event_type = str(event["event_type"]).upper()
     commit_msg = f"ticket: {event_type} {ticket_id}"
     try:
-        with _lock.write_lock(tracker, dual_window=True):
+        with _lock.write_lock(tracker, dual_window=True, retries=_lock.write_path_retries()):
             _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
             if under_lock_check is not None:
                 under_lock_check()
@@ -529,7 +529,7 @@ def batch_stage_and_commit(
     relpaths = [rel for _s, _f, rel in prepared]
     renamed: list[tuple[str, str]] = []  # (final_path, relative_path) already in place
     try:
-        with _lock.write_lock(tracker, dual_window=True):
+        with _lock.write_lock(tracker, dual_window=True, retries=_lock.write_path_retries()):
             _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
             for staging, final_path, relative_path in prepared:
                 try:

@@ -651,7 +651,7 @@ def commit_and_push_tickets_branch(
         logger.warning("tickets branch commit skipped: %s", detail)
         return
     try:
-        with _lock.write_lock(canonical, dual_window=True):
+        with _lock.write_lock(canonical, dual_window=True, retries=_lock.write_path_retries()):
             try:
                 _lock.check_no_rebase_in_progress(canonical)
             except _lock.RebaseGuard:
