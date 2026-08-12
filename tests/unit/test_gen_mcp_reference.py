@@ -57,7 +57,7 @@ def test_render_lists_representative_tools():
     for tool in (
         "create_ticket",
         "show_ticket",
-        "review_ticket",
+        "review_plan",
         "sign_review",
         "reconcile",
         "run_workflow",

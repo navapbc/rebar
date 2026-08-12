@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "ceilings": {
-    "src/rebar/_cli/__init__.py::_main_dispatch": 36,
+    "src/rebar/_cli/__init__.py::_main_dispatch": 35,
     "src/rebar/_cli/_llm_commands.py::_render_plan_review_text": 16,
     "src/rebar/_commands/close_precheck.py::_completion_precheck": 16,
     "src/rebar/_commands/composer.py::create_cli": 22,
@@ -33,7 +33,6 @@
     "src/rebar/_engine_support/reads_cli.py::_cmd_list": 30,
     "src/rebar/_ids.py::resolve_ticket_id": 20,
     "src/rebar/_io/import_ndjson.py::import_tickets": 45,
-    "src/rebar/_mcp_llm.py::register_llm_tools": 16,
     "src/rebar/_mcp_reads.py::register_read_tools": 31,
     "src/rebar/_mcp_writes.py::register_write_tools": 29,
     "src/rebar/_plan_clarity.py::evaluate_plan_clarity": 17,

@@ -1,4 +1,4 @@
-"""Tests for the rebar.llm agent-operations framework + the review_ticket op.
+"""Tests for the rebar.llm agent-operations framework + the single-pass review engine.
 
 All offline: the agent run is exercised through a FakeRunner (the dependency-
 injection seam), so no model, network, or `agents` extra is needed. The live
@@ -663,7 +663,9 @@ def test_review_ticket_end_to_end(rebar_repo: Path) -> None:
         ],
         summary="one issue",
     )
-    result = llm.review_ticket(epic, "ticket-quality", repo_root=str(rebar_repo), runner=runner)
+    result = llm.operations._review_ticket_impl(
+        epic, "ticket-quality", repo_root=str(rebar_repo), runner=runner
+    )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["runner"] == "fake"
     assert result["reviewers"] == ["ticket-quality"]
@@ -712,7 +714,7 @@ dimension: {dimension}
             return super().run(req)
 
     runner = CapturingRunner()
-    llm.review_ticket(
+    llm.operations._review_ticket_impl(
         epic,
         "ticket-quality",
         source="local",
@@ -732,7 +734,9 @@ def test_review_ticket_graph_includes_children(rebar_repo: Path) -> None:
 
     epic = _seed(rebar_repo)
     runner = llm.FakeRunner(findings=[])
-    result = llm.review_ticket(epic, repo_root=str(rebar_repo), graph=True, runner=runner)
+    result = llm.operations._review_ticket_impl(
+        epic, repo_root=str(rebar_repo), graph=True, runner=runner
+    )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["target"]["kind"] == "ticket_graph"
     assert len(result["target"]["ticket_ids"]) >= 2  # epic + its task
@@ -743,7 +747,7 @@ def test_review_ticket_unknown_reviewer_is_llmerror(rebar_repo: Path) -> None:
 
     epic = _seed(rebar_repo)
     with pytest.raises(llm.LLMError):
-        llm.review_ticket(
+        llm.operations._review_ticket_impl(
             epic, "no-such-reviewer", repo_root=str(rebar_repo), runner=llm.FakeRunner()
         )
 
@@ -762,7 +766,7 @@ def test_cli_review_check(
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.chdir(repo)
-    rc = main(["review", "--check"])
+    rc = main(["review-plan", "--check"])
     out = capsys.readouterr().out
     assert rc == 0
     data = json.loads(out)
@@ -794,27 +798,12 @@ def test_cli_review_with_fake_runner(
     monkeypatch.setattr(rebar.llm, "review_plan", _fake_review_plan)
     from rebar._cli import main
 
-    rc = main(["review", epic, "--output", "json"])
+    rc = main(["review-plan", epic, "--output", "json"])
     out = capsys.readouterr().out
     assert rc == 0, out
     result = json.loads(out)
     schemas.validator(schemas.PLAN_REVIEW_VERDICT).validate(result)
     assert result["runner"] == "fake" and result["blocking"] == []
-
-
-def test_cli_review_bad_reviewer_is_graceful(
-    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    """A positional reviewer id has no counterpart on `rebar review-plan` — the shim
-    FAILS LOUDLY (argparse exit 2), naming `review-plan`, rather than silently
-    discarding it or reaching an LLM (story 316a)."""
-    epic = _seed(rebar_repo)
-    from rebar._cli import main
-
-    with pytest.raises(SystemExit) as exc:
-        main(["review", epic, "no-such-reviewer"])
-    err = capsys.readouterr().err
-    assert exc.value.code == 2 and "review-plan" in err  # clean, loud rejection, not a traceback
 
 
 # ── MCP surface ───────────────────────────────────────────────────────────────
@@ -832,7 +821,7 @@ def test_mcp_review_tool_registered_and_gated(
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
     # All three LLM tools are registered, plain-dict return → no advertised
     # outputSchema (NO_SCHEMA_EXEMPT contract).
-    for name in ("review_ticket", "review_code", "scan_spec"):
+    for name in ("review_plan", "review_code", "scan_spec"):
         assert name in tools, name
         assert not tools[name].outputSchema, name
 
@@ -841,7 +830,7 @@ def test_mcp_review_tool_registered_and_gated(
     # default MCP client can never trigger a billable LLM call.
     monkeypatch.delenv("REBAR_MCP_ALLOW_LLM", raising=False)
     gated_calls = {
-        "review_ticket": {"ticket_id": epic},
+        "review_plan": {"ticket_id": epic},
         "review_code": {},
         "scan_spec": {"spec_text": "the spec"},
     }

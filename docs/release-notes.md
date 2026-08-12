@@ -8,6 +8,39 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — single-pass review public surfaces removed
+
+Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, using the same
+operator-ruling lever as DE7 and the ticket-5899 sibling pass. Story 316a deprecated
+the single-pass review operation in v0.11.0 in favour of the plan-review gate; its
+three **public entry points are now gone**. Each old surface **now does nothing**
+(CLI subcommand unrecognized; library attribute absent; MCP tool absent) — switch to
+the replacement:
+
+| Removed surface | Kind | Use instead |
+|---|---|---|
+| CLI `rebar review` | CLI subcommand | `rebar review-plan` |
+| lib `rebar.llm.review_ticket()` | library function | `rebar.llm.review_plan()` |
+| MCP `review_ticket` tool | MCP tool | the `review_plan` tool |
+
+**The engine STAYS.** `rebar.llm.operations._review_ticket_impl` is untouched — the
+workflow-parity harness and the eval solver still call it — as does
+`schemas/review_result.schema.json`, which `review-code` still produces. The
+synthetic `OUTPUT_SCHEMAS` key that pinned `review_result` moved from
+`"review_ticket"` to `"review_code"`, its surviving producer, and the
+`"review": plan_review_verdict` key went with the CLI verb.
+
+**No tombstone row**, matching precedent: the tombstone registry covers only
+`env`/`cfg`/`file` inputs, so a removed CLI verb, library function, or MCP tool
+simply stops existing — exactly as `list-epics`, `--no-sync`, `rebar.list_epics()`
+and the `list_epics` MCP tool did. The three `rebar._deprecations` rows are deleted
+and the pass is recorded in that module's historical-record note.
+
+**Downstream warning:** an external importer of `rebar.llm.review_ticket` will break
+at import. This was announce-then-remove — the deprecation shipped in v0.11.0 and
+signalled on every call — and the early removal is an operator ruling.
+(ticket `97d4-3098-2fb6-4658`)
+
 ## BREAKING (pre-1.0) — dead `.reconciler-*` gitattributes strip arm removed
 
 Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12. `rebar init`'s

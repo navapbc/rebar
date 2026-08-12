@@ -130,85 +130,8 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     return indeterminate_code if verdict == "INDETERMINATE" else 1
 
 
-def _review(argv: list[str]) -> int:
-    """``rebar review`` → a LOUD DEPRECATION SHIM over ``rebar review-plan`` (story 316a).
-
-    The single-pass review op is retired as a CLI verb: this forwards to the
-    plan-review gate (``_review_plan``) and returns ITS exit code unchanged. It owns
-    its own ``--help`` (intercepted in main() before the bash-golden help system,
-    like ``reconcile``). ``--output``/``--check``/``--ref``/``--source`` exist on
-    both verbs and are forwarded verbatim; ``--no-sign`` is forwarded UNCONDITIONALLY
-    so the bare verb keeps its old read-only semantics (no attestation written) —
-    ``--force`` is never forwarded, it stays an explicit, audited escape hatch.
-    ``--graph`` and a positional ``reviewer_id`` have no counterpart on
-    ``review-plan`` and FAIL LOUDLY (argparse exit 2) rather than being silently
-    accepted and discarded."""
-    parser = argparse.ArgumentParser(
-        prog="rebar review",
-        description="DEPRECATED: this is a shim over `rebar review-plan`, the plan-review "
-        "gate. Four differences from the retired single-pass op: review-plan normally "
-        "signs an ATTESTATION (this shim passes --no-sign to keep the old read-only "
-        "behaviour); it enforces a BLOCKING-finding floor; it will FAST-FAIL with no LLM "
-        "call (exit 2) on a ticket that is not yet claimable (closed/idea/blocked, or "
-        "open-but-blocked); and it runs the gate's MULTI-PASS "
-        "(find -> verify -> decide -> coach) review instead of one pass. Use "
-        "`rebar review-plan` directly going forward.",
-    )
-    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
-    parser.add_argument(
-        "reviewer_id",
-        nargs="?",
-        default=None,
-        help="REMOVED: `rebar review-plan` has no reviewer-selection arg; passing this "
-        "fails loudly",
-    )
-    parser.add_argument(
-        "--graph",
-        action="store_true",
-        help="REMOVED: `rebar review-plan` reviews one ticket; passing this fails loudly",
-    )
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="print backend/credential availability and exit",
-    )
-    _add_ref_source(parser)
-    args = parser.parse_args(argv)
-
-    if args.graph:
-        parser.error(
-            "--graph is not supported by `rebar review-plan`, which reviews one "
-            "ticket. Review each ticket in dependency order instead."
-        )
-    if args.reviewer_id:
-        parser.error(
-            f"unrecognized positional argument: {args.reviewer_id!r} — `rebar "
-            "review-plan` has no reviewer-selection argument, it always runs the "
-            "gate's own multi-pass criteria."
-        )
-
-    from rebar._deprecations import warn_deprecated
-
-    warn_deprecated("cli:rebar review", via="stderr")
-
-    # DELEGATE rather than re-implement: forwarding the argv means the shim inherits
-    # whatever `review-plan` does today and tomorrow (exit codes, rendering, gate-source
-    # error handling) instead of drifting from a copied body.
-    if args.check:
-        return _review_plan(["--check"])
-    if not args.ticket_id:
-        parser.error("ticket_id is required")
-    forwarded = [args.ticket_id, "--no-sign", "--output", args.output]
-    if args.ref is not None:
-        forwarded += ["--ref", args.ref]
-    if args.source is not None:
-        forwarded += ["--source", args.source]
-    return _review_plan(forwarded)
-
-
 def _review_code(argv: list[str]) -> int:
-    """``rebar review-code`` → rebar.llm.review_code (native, like reconcile/review).
+    """``rebar review-code`` → rebar.llm.review_code (native, like reconcile).
 
     Reviews a git range (``--base``/``--head``) or a ``--diff-file`` with one or
     more reviewers; JSON output conforms to the ``review_result`` schema."""
@@ -340,7 +263,7 @@ def _scan_spec(argv: list[str]) -> int:
 
 
 def _verify_completion(argv: list[str]) -> int:
-    """``rebar verify-completion`` → rebar.llm.verify_completion (native; like review).
+    """``rebar verify-completion`` → rebar.llm.verify_completion (native; like reconcile).
 
     Intercepted in main() before the bash-golden help system, so it owns its own ``--help``
     and ships NO pinned help arm (which keeps it out of the live-driving ``--output`` coverage

@@ -188,7 +188,9 @@ def test_review_ticket_uses_the_operators_configured_model(monkeypatch: pytest.M
     # and has no business touching the network: the checkout the CI gate runs in has no `origin`
     # remote, so the fetch cannot succeed and blocks until the snapshot timeout. An explicit
     # `source` argument wins over the environment (see `gate_source.resolve_gate_handle`).
-    operations.review_ticket("abc123", "ticket-quality", config=cfg, runner=rec, source="local")
+    operations._review_ticket_impl(
+        "abc123", "ticket-quality", config=cfg, runner=rec, source="local"
+    )
     assert _only_model(rec) == cfg.model
 
 

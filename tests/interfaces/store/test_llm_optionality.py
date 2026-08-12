@@ -1,6 +1,6 @@
 """Exhaustive LLM-optionality guard: the ``rebar.llm`` stack must be **optional**
 for *every* interface (library / CLI / MCP) and *every* operation
-(``review_ticket`` / ``review_code`` / ``scan_epics_for_spec``).
+(``review_code`` / ``scan_epics_for_spec`` / ``verify_completion``).
 
 This is the single, deliberately-redundant contract test for the hard rule stated
 in the ``rebar.llm`` epic: core rebar stays stdlib-only; the agent runtime
@@ -69,7 +69,7 @@ def _gate_source_local(monkeypatch: pytest.MonkeyPatch) -> None:
 # The full operation matrix. The exhaustiveness test below asserts this stays in
 # lock-step with the public ops exported by rebar.llm, so a newly-added operation
 # cannot ship without an optionality entry here.
-OPERATIONS = ("review_ticket", "review_code", "scan_epics_for_spec", "verify_completion")
+OPERATIONS = ("review_code", "scan_epics_for_spec", "verify_completion")
 
 # review_code is the ONE FAIL-SAFE op (epic b744 / WS4): the code-review gate is OFF by default
 # (verify.enable_code_review) and, being a gated capability, its public `review_code` shim returns
@@ -79,17 +79,6 @@ OPERATIONS = ("review_ticket", "review_code", "scan_epics_for_spec", "verify_com
 # it; its real contract is pinned by test_review_code_is_fail_safe_without_extra (here) and by
 # tests/unit/test_code_review_ws4.py. It stays in OPERATIONS so the exhaustiveness check holds.
 _FAIL_SAFE = frozenset({"review_code"})
-
-# Ops whose CLI verb is no longer a 1:1 front-end for the library op, so the CLI-side
-# degradation contract below is the SHIM TARGET's, not the library op's. Story 316a
-# retired `rebar review`: it is now a shim over `rebar review-plan`, which runs a
-# deterministic floor BEFORE it needs the extra. So without the extra it still exits
-# non-zero (automation cannot mistake it for a successful review — the invariant this
-# suite exists to protect), but the missing-extra reason is reported INSIDE the emitted
-# plan_review_verdict (`coverage.llm_unavailable` + `coverage.llm_error`) rather than as
-# a bare `Error:` line on stderr. The LIBRARY op `rebar.llm.review_ticket` is unaffected
-# and is still pinned by test_library_operation_degrades_without_extra above.
-_CLI_SHIMMED = frozenset({"review_ticket"})
 
 
 # ── Import-cleanliness: every interface entrypoint imports lazily ──────────────
@@ -130,7 +119,6 @@ def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> 
     epic = _seed(rebar_repo)
     r = str(rebar_repo)
     calls = {
-        "review_ticket": lambda: rebar.llm.review_ticket(epic, repo_root=r),
         "review_code": lambda: rebar.llm.review_code(
             diff_text="--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+y\n", repo_root=r
         ),
@@ -181,9 +169,6 @@ def test_cli_operation_degrades_without_extra(
     diff = tmp_path / "change.diff"
     diff.write_text("--- a/x\n+++ b/x\n@@ -0,0 +1 @@\n+y\n", encoding="utf-8")
     argv = {
-        # No positional reviewer: `rebar review` is a shim over `review-plan`, which has
-        # no reviewer-selection argument and rejects one with exit 2 (story 316a).
-        "review_ticket": ["review", epic, "--source", "local"],
         "review_code": ["review-code", "--diff-file", str(diff)],
         "scan_epics_for_spec": ["scan-spec", "--spec-file", str(spec)],
         "verify_completion": ["verify-completion", epic],
@@ -192,19 +177,6 @@ def test_cli_operation_degrades_without_extra(
     rc = main(argv)
     captured = capsys.readouterr()
     err = captured.err
-    if op in _CLI_SHIMMED:
-        # The shim's degradation is its TARGET verb's: non-zero exit (so automation
-        # cannot read it as a successful review) and the missing extra named in the
-        # verdict's coverage, not on stderr. Asserting the reason — not merely the exit
-        # code — keeps this from degrading into "any non-zero will do".
-        assert rc != 0, f"{op} must not exit 0 when the extra is absent"
-        assert "Traceback" not in err, "degradation must not surface a raw traceback"
-        blob = captured.out + err
-        assert "agents" in blob.lower(), f"the missing extra must be named somewhere: {blob[:400]}"
-        assert '"llm_unavailable": true' in blob, (
-            "the verdict must record that the LLM tier could not run"
-        )
-        return
     if op in _FAIL_SAFE:  # review_code: off by default → inert clean exit, no traceback (WS4)
         assert rc == 0, f"{op} is fail-safe (off by default) → exit 0, not a degradation error"
         assert "Traceback" not in err, "fail-safe path must not surface a raw traceback"
@@ -217,13 +189,13 @@ def test_cli_operation_degrades_without_extra(
 def test_cli_review_check_is_offline_and_truthful(
     capsys: pytest.CaptureFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``rebar review --check`` is the offline preflight: it never imports the
+    """``rebar review-plan --check`` is the offline preflight: it never imports the
     stack, always exits 0, and reports the real availability of the extra."""
     import json
 
     from rebar._cli import main
 
-    # Sandbox: `review` is a real (mount-eligible) subcommand — from an unsandboxed cwd
+    # Sandbox: `review-plan` is a real (mount-eligible) subcommand — from an unsandboxed cwd
     # the central mount (bug ad9f) would attach `.tickets-tracker` into the REAL repo
     # root and trip the leak guard.
     repo = tmp_path / "repo"
@@ -231,7 +203,7 @@ def test_cli_review_check_is_offline_and_truthful(
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     monkeypatch.chdir(repo)
-    rc = main(["review", "--check"])
+    rc = main(["review-plan", "--check"])
     out = capsys.readouterr().out
     assert rc == 0
     data = json.loads(out)
@@ -260,7 +232,6 @@ def test_mcp_operations_registered_and_gated_off_by_default(
     tools = {t.name: t for t in asyncio.run(srv.list_tools())}
     epic = _seed(rebar_repo)
     gated = {
-        "review_ticket": {"ticket_id": epic},
         "review_code": {},
         "scan_spec": {"spec_text": "the spec"},
         "verify_completion": {"ticket_id": epic},
@@ -279,7 +250,7 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
 ) -> None:
     """Even with the gate explicitly opened, a missing extra must surface — never a
     billable call, never a silent empty result. The public tools split into two
-    contracts (story authorial-hated-blackbear): review_ticket/scan_spec RAISE the
+    contracts (story authorial-hated-blackbear): scan_spec RAISEs the
     typed LLMError (transport-wrapped); the gate-shaped tools (review_code,
     verify_completion, review_plan) instead RETURN a STRUCTURED degrade dict so the
     driving agent/close-gate can branch on it. Both surface the missing 'agents' extra;
@@ -300,7 +271,6 @@ def test_mcp_operations_error_cleanly_when_gated_on_but_extra_absent(
     # test_review_code_is_fail_safe_without_extra. verify_completion EXCLUDED: it is a
     # gate-shaped tool that returns a STRUCTURED degrade dict (Contract B, below), not a raise.
     forced = {
-        "review_ticket": {"ticket_id": epic},
         "scan_spec": {"spec_text": "the spec"},
     }
     for name, args in forced.items():

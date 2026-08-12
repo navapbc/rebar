@@ -421,7 +421,7 @@ def test_review_ticket_request_carries_model_max(monkeypatch) -> None:
         operations, "assemble_context", lambda tid, *, graph, repo_root: ("ctx", [tid])
     )
     runner = _Recorder({"findings": []})
-    operations.review_ticket("T-1", config=_cfg(), runner=runner)
+    operations._review_ticket_impl("T-1", config=_cfg(), runner=runner)
     assert _request_max_tokens(runner) == [_SONNET_MAX]
 
 

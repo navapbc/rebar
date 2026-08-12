@@ -1,6 +1,6 @@
 # Repo-snapshot isolation for the code-reading gates
 
-The rebar LLM **code-reading gates** — `review_plan`, `verify_completion`, `review_ticket`,
+The rebar LLM **code-reading gates** — `review_plan`, `verify_completion`,
 `review_code`, `scan_spec` (CLI: `rebar review-plan` / `verify-completion` / `review` /
 `review-code` / `scan-spec`; the same five MCP tools) — read PROJECT SOURCE CODE. The MCP
 server is a long-lived process pinned to ONE working directory, so reading that mutable,

@@ -43,13 +43,12 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 
 ## LLM-gated (`REBAR_MCP_ALLOW_LLM`)
 
-Registered by `register_llm_tools` and always present, but each makes a live, billable LLM call and is disabled at call time unless `REBAR_MCP_ALLOW_LLM` is set: Set to 1 to enable the billable LLM tools (review_ticket / review_code / scan_spec / verify_completion / review_plan); off by default.
+Registered by `register_llm_tools` and always present, but each makes a live, billable LLM call and is disabled at call time unless `REBAR_MCP_ALLOW_LLM` is set: Set to 1 to enable the billable LLM tools (review_code / scan_spec / verify_completion / review_plan); off by default.
 
 | Tool | Summary |
 |------|---------|
 | `review_code` | Run a multi-reviewer LLM code review of a git range (base..head) -> |
 | `review_plan` | Run the plan-review gate on a ticket -> a plan_review_verdict dict |
-| `review_ticket` | DEPRECATED (use review_plan) — LLM review of a ticket -> a review_result dict |
 | `scan_spec` | Batch-scan the store's open epics against a specification -> a |
 | `verify_completion` | Verify a ticket's completion requirements are met -> a completion_verdict dict |
 
@@ -91,7 +90,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | Variable | Meaning |
 |----------|---------|
 | `REBAR_MCP_READONLY` | Set to 1 to expose only the read tools (no write/mutation tools). |
-| `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_ticket / review_code / scan_spec / verify_completion / review_plan); off by default. |
+| `REBAR_MCP_ALLOW_LLM` | Set to 1 to enable the billable LLM tools (review_code / scan_spec / verify_completion / review_plan); off by default. |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | Set to 1 to allow the live (mutating) Jira reconcile mode; otherwise reconcile is dry-run only. |
 | `REBAR_MCP_TRANSPORT` | Transport for the MCP server: 'stdio' (default) or 'http' (the optional Streamable-HTTP transport). |
 | `REBAR_MCP_HTTP_HOST` | Bind host for the Streamable-HTTP transport (default 127.0.0.1). |
@@ -126,4 +125,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_59 tools._
+_58 tools._

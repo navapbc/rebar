@@ -99,16 +99,6 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # the parent epic decided the migration window explicitly. Within the window the
     # variable still works and fans out to all three classes; it only warns.
     _scheduled("env", "REBAR_LLM_MODEL", "the [tool.rebar.llm.model_classes] slots"),
-    # ── cli/lib/mcp: SCHEDULED (a SUPERSESSION, not a rename) — story 316a ─────
-    # `rebar review` / `rebar.llm.review_ticket` / the MCP `review_ticket` tool are
-    # retired in favour of the plan-review gate (`rebar review-plan` /
-    # `rebar.llm.review_plan` / the MCP `review_plan` tool). This is a SUPERSESSION,
-    # not a rename: the replacement is a materially different interface — it signs
-    # an attestation, enforces a blocking-finding floor, and fast-fails a
-    # not-yet-claimable ticket with no LLM call — so, per the rule above, it is
-    # `_scheduled` (removable) rather than `_permanent` (kept forever). The old
-    # surfaces are NOT deleted (announce-then-remove): `review_ticket` and its MCP
-    # tool keep working, they just signal on every call.
     # ── config keys: SCHEDULED RETIREMENTS (no replacement) — task 549c ────────
     # `resolved_statuses` configured the inbound absence probe, whose last consumer went
     # with task f020. Unlike the rows above these are not superseded by anything — there is
@@ -125,9 +115,6 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # which is blocked on operator sign-off.
     _scheduled("cfg", "jira.resolved_statuses", ""),
     _scheduled("cfg", "reconciler.resolved_statuses", ""),
-    _scheduled("cli", "rebar review", "rebar review-plan"),
-    _scheduled("lib", "rebar.llm.review_ticket", "rebar.llm.review_plan"),
-    _scheduled("mcp", "review_ticket", "the review_plan tool"),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the
@@ -140,6 +127,17 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # backend is the only backend), the CLI list-epics subcommand + --no-sync alias
     # (use `list --type=epic …` / --no-pull), and the MCP list_epics tool (use
     # list_tickets(ticket_type='epic', …)).
+    # NOTE (pre-1.0 pass #3, ticket 97d4 — operator-approved early removal,
+    # 2026-08-12): the third breaking removal dropped the single-pass review op's
+    # three PUBLIC entry points — the CLI verb `rebar review`, the library
+    # `rebar.llm.review_ticket`, and the MCP `review_ticket` tool (use
+    # `rebar review-plan` / `rebar.llm.review_plan` / the `review_plan` tool). They
+    # were removed AHEAD of their recorded remove_in=v1.0.0 by operator ruling, the
+    # same lever DE7 and the 5899 pass used. The ENGINE
+    # `rebar.llm.operations._review_ticket_impl` STAYS — the workflow-parity harness
+    # and the eval solver still call it. No TOMBSTONE row: the tombstone registry
+    # only covers env/cfg/file inputs, so a removed CLI verb / library function /
+    # MCP tool simply stops existing, exactly as list-epics and list_epics did.
 )
 
 REGISTRY: dict[str, Deprecation] = {d.key: d for d in _ENTRIES}

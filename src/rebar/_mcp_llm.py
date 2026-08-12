@@ -1,7 +1,7 @@
 """LLM-tool registrar for the rebar MCP server.
 
 ``register_llm_tools(mcp, ctx)`` registers the ``REBAR_MCP_ALLOW_LLM``-gated agent
-tools (review_ticket, review_code, scan_spec, verify_completion, review_plan). Split
+tools (review_code, scan_spec, verify_completion, review_plan). Split
 out of ``rebar.mcp_server.build_server`` as a pure structural refactor — names,
 signatures, docstrings, and gating are behaviour-identical to the in-line originals.
 
@@ -56,43 +56,6 @@ def register_llm_tools(mcp, ctx) -> None:
     _readonly = ctx.readonly
 
     _ANN = tool_annotation_presets()
-
-    @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
-    def review_ticket(
-        ticket_id: str,
-        reviewer_id: str | None = None,
-        graph: bool = False,
-        ref: str | None = None,
-        source: str | None = None,
-    ) -> dict:
-        """DEPRECATED (use review_plan) — LLM review of a ticket -> a review_result dict
-        {findings[], target, reviewers, runner, model, trace_id, summary, source,
-        verified_at_sha, signable}. Story 316a superseded this with the ``review_plan``
-        tool, which reviews a ticket's whole plan through the multi-pass plan-review
-        gate and signs an attestation; this tool is kept (announce-then-remove) but
-        signals a registered deprecation on every call.
-
-        ``ref``/``source`` select the verified code: ``source=attested`` (default) reads a
-        snapshot pinned at ``ref`` (default ``origin/main``) — NEVER the server's checked-out
-        branch — and records ``verified_at_sha``; ``source=local`` reads the in-place checkout
-        (unsigned). ``REBAR_ROOT`` only locates the object DB to fetch from.
-
-        DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes a live, billable LLM call
-        and reaches the network + filesystem (it is not a plain store read). It
-        needs the 'agents' extra + a model API key (provider per the model_classes slots,
-        e.g. ANTHROPIC_API_KEY or OPENAI_API_KEY). Returns a plain dict and
-        advertises NO outputSchema by design — the result is model-produced, so it
-        is a documented NO_SCHEMA_EXEMPT and is not auto-driven in CI."""
-        if not _allow_llm():
-            raise ValueError(
-                "review_ticket is disabled: it makes a live, billable LLM call. "
-                "Set REBAR_MCP_ALLOW_LLM=1 to enable it."
-            )
-        from rebar._deprecations import warn_deprecated
-        from rebar.llm.operations import _review_ticket_impl
-
-        warn_deprecated("mcp:review_ticket")
-        return _review_ticket_impl(ticket_id, reviewer_id, graph=graph, ref=ref, source=source)
 
     @mcp.tool(annotations=_ANN["READ_ONLY_OPEN_WORLD"])
     def review_code(

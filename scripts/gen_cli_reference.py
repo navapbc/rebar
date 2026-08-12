@@ -71,12 +71,6 @@ INTERCEPT_COMMANDS: dict[str, str] = {
     "reconcile": (
         "Reconcile the rebar store with Jira (dry-run by default; `live` performs the sync)."
     ),
-    "review": (
-        "**Deprecated** (story 316a; removal in v1.0.0) — a shim that forwards to "
-        "`review-plan` with `--no-sign`, so it writes no attestation. `--graph` and a "
-        "positional `reviewer_id` are rejected with exit 2: neither exists on the "
-        "replacement. Use `rebar review-plan` instead."
-    ),
     "review-code": (
         "Run the LLM code-review agent over a diff or commit range and emit structured findings."
     ),

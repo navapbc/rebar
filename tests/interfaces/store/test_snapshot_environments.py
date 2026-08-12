@@ -132,7 +132,7 @@ def test_attested_gate_against_non_rebar_sample_repo(tmp_path, monkeypatch):
     tid = rebar.create_ticket("task", "review the sample", repo_root=str(repo))
 
     runner = _Capturing()
-    result = rebar.llm.review_ticket(
+    result = rebar.llm.operations._review_ticket_impl(
         tid,
         "ticket-quality",
         ref="origin/main",

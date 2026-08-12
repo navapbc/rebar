@@ -172,7 +172,7 @@ base stays light (CI enforces that):
   - **`[mcp]`** — the [`rebar-mcp` server](https://modelcontextprotocol.io)
     (`mcp>=1.9`).
   - **`[agents]`** — the LLM agent-operations framework + agentic workflow steps
-    (`rebar review`, the `code_review` workflow): the provider-agnostic
+    (`rebar review-plan`, the `code_review` workflow): the provider-agnostic
     [pydantic-ai](https://ai.pydantic.dev) runtime (`pydantic-ai-slim[anthropic]`)
     plus [`json-repair`](https://github.com/mangiucugna/json_repair).
 - **Development & authoring extras** — not needed to run or serve rebar:
@@ -227,7 +227,7 @@ pip  install 'nava-rebar[agents,tracing]'        # the union, if you want it all
 ```
 
 The base install runs **scripted** workflows (`rebar workflow new/validate/show/run`)
-with no extra; **agentic** workflow steps and `rebar review` need `[agents]`. Authoring
+with no extra; **agentic** workflow steps and `rebar review-plan` need `[agents]`. Authoring
 a workflow **visually** — `rebar workflow edit <file>`, a local bpmn-js editor that
 round-trips the diagram back to the IR — also needs no extra and no Node/npm: the editor
 front-end ships pre-built in the wheel and is served locally (no CDN). For what the
@@ -238,7 +238,7 @@ three-pass review pattern, and the prompt-library + eval seam — see
 
 The `[agents]` extra adds the optional **LLM agent-operations framework**
 (`rebar.llm`) — tool-using agents that review tickets/code and emit structured
-findings, over library / CLI (`rebar review`) / MCP. It is multi-provider
+findings, over library / CLI (`rebar review-plan`) / MCP. It is multi-provider
 (**Claude** and **ChatGPT** out of the box, plus Gemini and OpenAI-compatible local
 servers like LMStudio/Ollama, configured per model class in
 `[tool.rebar.llm.model_classes]` — or via `REBAR_LLM_<CLASS>_MODEL` /
@@ -274,7 +274,7 @@ whitespace tolerated); anything else (incl. unset) is off.
 
 #### Private-repo fetch credentials (code-reading gates)
 
-The LLM code-reading gates (`review_plan`, `verify_completion`, `review_ticket`,
+The LLM code-reading gates (`review_plan`, `verify_completion`,
 `review_code`, `scan_spec`) default to **attested** mode: they `git fetch` the verified
 ref from `origin` and read an immutable snapshot at the pinned SHA — never the server's
 mutable checkout. So a server pointed (`REBAR_ROOT`) at a **private** repository needs

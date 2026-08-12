@@ -1,6 +1,6 @@
 """Resolve a code-reading gate's read-root from a client ``(ref, source)`` pair (S3).
 
-Every code-reading gate (`review_plan`, `verify_completion`, `review_ticket`,
+Every code-reading gate (`review_plan`, `verify_completion`,
 `review_code`, `scan_spec`) takes ONE ``ref`` (branch | tag | SHA, default ``origin/main``)
 and a ``source`` mode (``attested`` default | ``local``) and reads a snapshot materialized
 at the pinned SHA instead of the server's mutable checkout:

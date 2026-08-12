@@ -59,7 +59,9 @@ def test_review_ticket_applies_step_floor(rebar_repo: Path) -> None:
     assert cfg.max_iterations == 250  # the review-appropriate framework default (raised 50→250)
     fake = _RecordingRunner()
 
-    rebar.llm.review_ticket(tid, "ticket-quality", config=cfg, runner=fake, repo_root=r)
+    rebar.llm.operations._review_ticket_impl(
+        tid, "ticket-quality", config=cfg, runner=fake, repo_root=r
+    )
 
     assert fake.seen_max_iterations is not None
     assert fake.seen_max_iterations >= _FLOOR
@@ -81,6 +83,8 @@ def test_review_ticket_operator_higher_budget_wins(rebar_repo: Path) -> None:
     cfg = replace(LLMConfig.from_env(repo_root=r), max_iterations=500)
     fake = _RecordingRunner()
 
-    rebar.llm.review_ticket(tid, "ticket-quality", config=cfg, runner=fake, repo_root=r)
+    rebar.llm.operations._review_ticket_impl(
+        tid, "ticket-quality", config=cfg, runner=fake, repo_root=r
+    )
 
     assert fake.seen_max_iterations == 500

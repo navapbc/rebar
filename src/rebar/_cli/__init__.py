@@ -26,7 +26,6 @@ from rebar._cli._llm_commands import (
     _explain,
     _llm,
     _prompt,
-    _review,
     _review_code,
     _review_plan,
     _scan_spec,
@@ -47,7 +46,6 @@ _NO_AUTO_MOUNT = frozenset({"init", "scratch"})
 _INTERCEPTS = frozenset(
     {
         "reconcile",
-        "review",
         "review-code",
         "scan-spec",
         "verify-completion",
@@ -508,10 +506,6 @@ def _main_dispatch(argv: list[str]) -> int:
     # reconcile intercept (a native rebar op, not a per-ticket command arm).
     if argv and argv[0] == "reconcile":
         return _reconcile(argv[1:])
-
-    # review intercept (native rebar.llm op, like reconcile).
-    if argv and argv[0] == "review":
-        return _review(argv[1:])
 
     # review-code intercept (native rebar.llm code-review op).
     if argv and argv[0] == "review-code":

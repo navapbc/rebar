@@ -97,7 +97,7 @@ def test_attested_reads_pinned_ref_regardless_of_checkout_branch(repo_with_origi
     assert (repo / "sentinel.txt").read_text() == "from-other\n"
 
     runner = CapturingRunner()
-    result = rebar.llm.review_ticket(
+    result = rebar.llm.operations._review_ticket_impl(
         tid,
         "ticket-quality",
         ref="origin/main",
@@ -121,7 +121,7 @@ def test_attested_verdict_identical_across_checkout_branches(repo_with_origin, g
 
     def run() -> str:
         runner = CapturingRunner()
-        rebar.llm.review_ticket(
+        rebar.llm.operations._review_ticket_impl(
             tid,
             "ticket-quality",
             ref="origin/main",
@@ -145,7 +145,7 @@ def test_local_mode_reads_checkout_and_is_unsigned(repo_with_origin, gate_tmpdir
     repo, _main_sha = repo_with_origin
     tid = _ticket(repo)
     runner = CapturingRunner()
-    result = rebar.llm.review_ticket(
+    result = rebar.llm.operations._review_ticket_impl(
         tid,
         "ticket-quality",
         source="local",

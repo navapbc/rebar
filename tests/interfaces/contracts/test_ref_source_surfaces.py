@@ -20,12 +20,10 @@ from rebar._cli import _llm_commands as cli
 # KEYS are consumed below (they name the MCP tools that must expose ref + source); the
 # values record each tool's CLI counterpart.
 #
-# `review_ticket` is the one loose pairing, deliberately, since story 316a: the MCP tool
-# still runs the single-pass op, while its same-named CLI verb `rebar review` is a
-# deprecation shim that forwards to `review-plan`. Both surfaces still thread ref/source
-# — which is all this mapping is used to assert — but they no longer emit the same schema.
+# The single-pass `review_ticket` pairing was dropped when its CLI verb, library
+# function and MCP tool were removed in the pre-1.0 breaking pass; `review_plan` is
+# the review surface that threads ref/source now.
 _MAPPING = {
-    "review_ticket": cli._review,
     "review_code": cli._review_code,
     "scan_spec": cli._scan_spec,
     "verify_completion": cli._verify_completion,
@@ -70,7 +68,6 @@ def _patch_all(monkeypatch, capture: dict):
         return _fn
 
     for op in (
-        "review_ticket",
         "review_code",
         "scan_epics_for_spec",
         "verify_completion",
@@ -86,11 +83,6 @@ def test_cli_threads_ref_source(rebar_repo, monkeypatch, tmp_path):
     monkeypatch.chdir(rebar_repo)
     spec = tmp_path / "spec.txt"
     spec.write_text("spec")
-
-    # `rebar review` is a deprecation shim over `rebar review-plan` (story 316a): it
-    # threads ref/source into `rebar.llm.review_plan`, not `review_ticket`.
-    cli._review([tid, "--ref", "release/x", "--source", "local"])
-    assert cap["review_plan"] == ("release/x", "local")
 
     cli._review_code(["--diff-file", str(spec), "--ref", "feat/y", "--source", "attested"])
     assert cap["review_code"] == ("feat/y", "attested")
@@ -135,7 +127,7 @@ def test_adr_records_cli_mcp_mapping_and_cwd_decoupling():
         .lower()
     )
     assert "one-to-one" in adr and "cli" in adr
-    for op in ("review_plan", "verify_completion", "review_ticket", "review_code", "scan_spec"):
+    for op in ("review_plan", "verify_completion", "review_code", "scan_spec"):
         assert op in adr
     assert "cwd/branch decoupling" in adr
     assert "only locates the object db" in adr  # REBAR_ROOT only locates the object DB
@@ -145,7 +137,7 @@ def test_invalid_source_is_rejected(rebar_repo, monkeypatch):
     monkeypatch.chdir(rebar_repo)
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     with pytest.raises(SystemExit) as exc:  # argparse choices -> exit 2
-        cli._review([tid, "--source", "bogus"])
+        cli._review_plan([tid, "--source", "bogus"])
     assert exc.value.code == 2
 
 
@@ -171,10 +163,10 @@ def test_text_output_surfaces_verified_at_sha(rebar_repo, monkeypatch, capsys):
     _patch_all(monkeypatch, cap)
     tid = rebar.create_ticket("task", "t", repo_root=str(rebar_repo))
     monkeypatch.chdir(rebar_repo)
-    cli._review([tid, "--source", "attested", "-o", "text"])
+    cli._review_plan([tid, "--source", "attested", "-o", "text"])
     out = capsys.readouterr().out
     assert "source: attested" in out and "verified-at-sha deadbeef" in out
 
-    cli._review([tid, "--source", "local", "-o", "text"])
+    cli._review_plan([tid, "--source", "local", "-o", "text"])
     out2 = capsys.readouterr().out
     assert "source: local" in out2 and "unsigned" in out2
