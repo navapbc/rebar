@@ -90,6 +90,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
+| `REBAR_LOCK_RETRIES` | `src/rebar/_store/lock.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -171,7 +172,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_161 variables._
+_162 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

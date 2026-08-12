@@ -192,6 +192,41 @@ N concurrent writers lose **zero** events, because every writer takes both legs.
 Lost events fail the test. Callers may pass `dual_window=False` for an fcntl-only
 lock, but that is an opt-out, not the default.
 
+**An expired budget is retried, not discarded (`retries`).** One acquisition *pass*
+costs `timeout × attempts` seconds — note `attempts` multiplies a single deadline and
+is **not** itself a retry loop. Historically a pass that expired raised `LockTimeout`
+and the write was **thrown away**: measured against a clone of the live store, a 70s
+holder plus three `rebar comment`s produced 3/3 failures with **none** of the three
+comments present afterwards, and a `claim` behind a 45s holder died at exactly 30.30s
+because it passes `attempts=1`.
+
+`acquire()` / `write_lock()` therefore take a **`retries`** argument: after an expired
+pass they sleep a jittered exponential backoff (0.5s, 1.0s, capped at 2.0s — reusing
+`gitutil`'s `_jitter` / `_backoff_sleep` seams) and take another pass. The canonical
+write path opts in with 2 retries, giving a ceiling of roughly **180s** (3 × 60s plus
+backoff); holders measured at 88s, 103s and 163s all exceed one budget but fall inside
+that ceiling, so they now cost latency instead of a lost write. When every pass is
+spent the write still fails **loudly**, and the `LockTimeout` names the *cumulative*
+wait so the message cannot understate how long the caller waited.
+
+Retrying is safe — and cannot duplicate an append — only because it lives **inside**
+`acquire()`: the caller's write body has not run when a pass expires, and once
+`acquire()` returns the loop is finished and cannot re-enter. Retrying at any layer
+*above* the lock would not have that property and could double-write.
+
+`retries` defaults to **0**, so every call site that does not opt in keeps the exact
+historical fail-fast behaviour. That default is load-bearing: compaction, `fsck`
+repair, the S3 doctor, the reconciler pass and the best-effort sweeps (`sync`, the
+advisory push merge, `ensures`) deliberately stay fail-fast. Giving compaction retries
+in particular would undo its stand-aside and re-create the long holder that causes this
+contention in the first place. The opted-in set is exactly `event_append` (the three
+write-path sites), the `txn` critical section, and `push`'s locked commit-and-push.
+
+Set **`REBAR_LOCK_RETRIES`** to override the opted-in count (default `2`, clamped to
+`[0, 10]`; an unparseable value falls back to the default rather than breaking every
+write). `REBAR_LOCK_RETRIES=0` restores the historical single-budget fail-fast for CI
+or ops that prefer to fail immediately over waiting.
+
 ### I6 — No NEW cross-client lock; no shared mutable index
 Cross-client coordination is **only** git merge-as-union + optimistic
 concurrency. No feature may require a lock spanning clients/machines, nor a

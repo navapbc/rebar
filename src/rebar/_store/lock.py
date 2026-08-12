@@ -67,7 +67,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from rebar._store.compat import check_store_compat
-from rebar._store.gitutil import _jitter
+from rebar._store.gitutil import _backoff_sleep, _jitter
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,18 @@ _MKDIR_OWNER_FILE = "owner"
 # Bash parity: FLOCK_STAGE_COMMIT_TIMEOUT (default 30s) per attempt × max_retries(2).
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_ATTEMPTS = 2
+
+# Bounded retry PASSES for an expired budget (bug royal-weariless-zebrafish). ``attempts``
+# above is NOT a retry loop — it only multiplies ONE deadline — so a write whose budget expired
+# was DISCARDED. Default 0 keeps every existing caller bit-for-bit unchanged; the write path
+# opts in via :func:`write_path_retries`. Measured holders of 88s/103s/163s all exceed the 60s
+# budget yet sit inside 3 passes. NOT given to compaction/fsck/doctor: retrying there would undo
+# 7084's stand-aside and re-create the long holder that causes this contention.
+_DEFAULT_RETRIES = 0
+_WRITE_PATH_RETRIES = 2
+_MAX_RETRIES = 10
+_RETRY_BACKOFF_BASE_S = 0.5
+_RETRY_BACKOFF_CAP_S = 2.0
 
 # Wall-clock backstop for the refuse-without-proof branches of _mkdir_lock_is_stale (bug
 # yaw-gravel-linen). Those branches correctly decline to reclaim a lock whose owner MIGHT be
@@ -673,19 +685,50 @@ class LockHandle:
             pass
 
 
+def write_path_retries() -> int:
+    """Retry passes for the canonical write path: ``REBAR_LOCK_RETRIES`` (default 2),
+    clamped to ``[0, _MAX_RETRIES]``. ``REBAR_LOCK_RETRIES=0`` restores the historical
+    fail-fast-on-one-budget behaviour for CI/ops. An unparseable value falls back to the
+    default rather than raising — a malformed knob must not break every write.
+
+    The name is spelled as a LITERAL here, not lifted to a constant: ``gen_env_registry``
+    only resolves string-literal keys, so a constant would ship this var undocumented."""
+    raw = os.environ.get("REBAR_LOCK_RETRIES")
+    if raw is None or not raw.strip():
+        return _WRITE_PATH_RETRIES
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return _WRITE_PATH_RETRIES
+    return max(0, min(value, _MAX_RETRIES))
+
+
+def _retry_backoff_s(attempt: int) -> float:
+    """Nominal (pre-jitter) gap before retry *attempt* (1-based): exponential with cap."""
+    return min(_RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1)), _RETRY_BACKOFF_CAP_S)
+
+
 def acquire(
     tracker: str | os.PathLike,
     *,
     timeout: int = _DEFAULT_TIMEOUT,
     attempts: int = _DEFAULT_ATTEMPTS,
     dual_window: bool = True,
+    retries: int = _DEFAULT_RETRIES,
 ) -> LockHandle:
     """Acquire the exclusive tickets write lock; return a :class:`LockHandle` (I5).
 
-    Budget = ``timeout × attempts`` seconds (bash ``flock_timeout × max_retries``;
-    60s for the write path, 30s for ``ticket_txn`` via ``attempts=1``). fcntl first,
-    then (when ``dual_window``) the mkdir leg. Raises :class:`LockTimeout` if either
-    leg cannot be taken in budget."""
+    One PASS costs ``timeout × attempts`` seconds (bash ``flock_timeout × max_retries``).
+    ``retries`` extra passes follow, separated by a jittered backoff, so a holder outliving
+    a single budget costs LATENCY instead of a DISCARDED write (royal-weariless-zebrafish).
+    ``retries=0`` (the default) is exactly the historical single-budget behaviour.
+
+    The retry lives HERE, strictly inside acquisition, and that is what makes it safe: the
+    caller's write body has not run when a pass expires, and once this returns the loop is
+    finished and cannot re-enter — so nothing is replayed and no append is duplicated.
+    Retrying a layer ABOVE the lock would not have that property.
+
+    Raises :class:`LockTimeout` once every pass is spent, naming the CUMULATIVE wait."""
     tracker = canonical_tracker(tracker)
     # Story 21dd: fail CLOSED on a store whose committed .store-compat.json this rebar
     # cannot interpret, BEFORE any lock-held write. This single insertion at the write-
@@ -693,6 +736,30 @@ def acquire(
     # compact, fsck repair). Reads never acquire the write lock, so they stay available.
     check_store_compat(tracker)
     total_wait = timeout * attempts
+    started = time.monotonic()
+    for spent in range(retries + 1):
+        try:
+            return _acquire_once(tracker, total_wait, dual_window)
+        except LockTimeout as exc:
+            if spent == retries:
+                if retries == 0:
+                    raise
+                raise LockTimeout(int(time.monotonic() - started), exc.holder) from None
+            logger.warning(
+                "write lock still held after %ss (pass %d/%d) — retrying; holder: %s",
+                total_wait,
+                spent + 1,
+                retries + 1,
+                exc.holder or "unknown",
+            )
+            _backoff_sleep(_jitter(_retry_backoff_s(spent + 1)))
+    raise AssertionError("unreachable")  # pragma: no cover - loop always returns or raises
+
+
+def _acquire_once(tracker: str, total_wait: int, dual_window: bool) -> LockHandle:
+    """ONE acquisition pass against a ``total_wait``-second deadline: fcntl leg first,
+    then (when ``dual_window``) the mkdir leg. Raises :class:`LockTimeout` if either leg
+    cannot be taken in budget. *tracker* is already canonical."""
     lock_path = os.path.join(tracker, WRITE_LOCK_NAME)
     lock_dir = os.path.join(tracker, MKDIR_LOCK_NAME)
     deadline = time.monotonic() + total_wait
@@ -718,10 +785,13 @@ def write_lock(
     timeout: int = _DEFAULT_TIMEOUT,
     attempts: int = _DEFAULT_ATTEMPTS,
     dual_window: bool = True,
+    retries: int = _DEFAULT_RETRIES,
 ) -> Iterator[None]:
     """Hold the exclusive tickets write lock for the duration of the ``with`` block
     (I5). Thin wrapper over :func:`acquire`/:meth:`LockHandle.release`."""
-    handle = acquire(tracker, timeout=timeout, attempts=attempts, dual_window=dual_window)
+    handle = acquire(
+        tracker, timeout=timeout, attempts=attempts, dual_window=dual_window, retries=retries
+    )
     try:
         yield
     finally:

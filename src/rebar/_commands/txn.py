@@ -76,14 +76,26 @@ def _stamp_session(status_data: dict) -> None:
 
 
 def _acquire_write_lock(tracker_dir: str) -> lock.LockHandle:
-    """Acquire the unified write lock (fcntl + mkdir dual leg, 30s) for a txn
-    critical section — mutually exclusive with every other writer on every platform
-    class (the ``stiff-mop-lane`` fix). ``attempts=1`` bounds the wait to the 30s
-    budget. Held across the whole re-read → write → commit section."""
+    """Acquire the unified write lock (fcntl + mkdir dual leg) for a txn critical
+    section — mutually exclusive with every other writer on every platform class (the
+    ``stiff-mop-lane`` fix). Held across the whole re-read → write → commit section.
+
+    One pass is the historical 30s (``attempts=1``); ``retries`` extra passes follow so
+    the most CONTENDED verb stops being the first to lose its write — measured, a `claim`
+    behind a 45s holder died at exactly 30.30s while comments beside it survived
+    (royal-weariless-zebrafish). The :class:`~rebar._store.lock.LockTimeout` message is
+    PROPAGATED rather than replaced: the old generic string discarded both the cumulative
+    wait and the holder, leaving a starved caller unable to say what blocked it."""
     try:
-        return lock.acquire(tracker_dir, timeout=30, attempts=1, dual_window=True)
-    except lock.LockTimeout:
-        raise CommandError("Error: could not acquire lock", returncode=1) from None
+        return lock.acquire(
+            tracker_dir,
+            timeout=30,
+            attempts=1,
+            dual_window=True,
+            retries=lock.write_path_retries(),
+        )
+    except lock.LockTimeout as exc:
+        raise CommandError(f"Error: could not acquire lock — {exc}", returncode=1) from None
     except compat.StoreIncompatibleError as exc:
         # Story 21dd: the acquire() gate fails closed on an incompatible store — surface
         # it as a non-zero CommandError so the txn critical section never runs.
