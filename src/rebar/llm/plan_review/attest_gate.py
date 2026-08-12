@@ -188,6 +188,7 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
     from rebar import signing
 
     from .attest import _authoritative_head, _authoritative_manifest
+    from .manifest import manifest_currency_basis
 
     gate = claim_gate_check(ticket_id, repo_root=repo_root)
     status: dict[str, Any] = {
@@ -196,6 +197,10 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
         "reason": gate.get("reason", ""),
         "verified_at_sha": None,
         "signed_at": None,
+        # Which basis currency was decided on (ticket 81ca): ``file_impact`` (declared/inherited
+        # paths), ``read-set`` (the no-file-impact scoping) or ``fail-safe`` (whole-HEAD). None
+        # when no readable certified attestation exists.
+        "currency_basis": None,
     }
     try:
         sig = signing.verify_signature(ticket_id, kind=_MANIFEST_PREFIX, repo_root=repo_root)
@@ -203,10 +208,12 @@ def plan_review_status(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             # The code anchor the plan was reviewed against: the pinned verified-at-sha when the
             # review was scoped/attested (--source attested), else the signed HEAD for an
             # unscoped/local review (which has no pinned step but binds the head it saw).
+            manifest = _authoritative_manifest(sig)
             status["verified_at_sha"] = signing.verified_at_sha_from_manifest(
-                _authoritative_manifest(sig)
+                manifest
             ) or _authoritative_head(sig)
             status["signed_at"] = sig.get("signed_at")
+            status["currency_basis"] = manifest_currency_basis(manifest)
     except Exception:  # noqa: BLE001 — enrichment only; the gate verdict already stands
         logger.warning("plan_review_status: could not read bound sha for %s", ticket_id)
     return status
