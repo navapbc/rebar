@@ -238,6 +238,55 @@ def test_route_criteria_fans_in_activated_project_criterion(tmp_path):
     assert production_batch_runner._project_criteria(ctx, exclude={"project.no-print"}) == ([], [])
 
 
+def test_probe_allowlist_suppresses_project_criterion_fan_in(tmp_path):
+    """PROBE MODE (drift-refresh) forces the tiny E4+G1G2 allowlist, but the runner re-routes
+    ACTIVATED project criteria through route_criteria, which has no probe notion. The allowlist
+    is threaded in so a probe does not evaluate — and pay for — a project criterion outside it.
+    Same fixture as the fan-in test above, so the pair pins BOTH directions."""
+    from rebar.llm.plan_review import production_batch_runner
+    from rebar.llm.plan_review.det_floor import PlanContext
+
+    root = _make_repo(
+        tmp_path,
+        overlay={"plan_review": {"project.no-print": _ROUTING}, "activate": ["project.no-print"]},
+        prompts={"plan-review-project-no-print": _PROJECT_RUBRIC},
+    )
+    ctx = PlanContext(
+        ticket_id="abcd-0000-0000-0001",
+        ticket_type="task",
+        title="A task",
+        description="## Acceptance Criteria\n- [ ] do the thing\n" + "x" * 200,
+        repo_root=root,
+    )
+    # NOT probing (empty/absent allowlist) → the normal full-review fan-in is untouched.
+    assert {c["id"] for c in production_batch_runner._project_criteria(ctx, set())[0]} == {
+        "project.no-print"
+    }
+    assert production_batch_runner._project_criteria(ctx, set(), []) == (
+        [c for c in production_batch_runner._project_criteria(ctx, set())[0]],
+        [],
+    )
+    # Probing with the real E4+G1G2 allowlist → the project criterion is suppressed.
+    assert production_batch_runner._project_criteria(ctx, set(), ["E4", "G1G2"]) == ([], [])
+
+
+def test_finders_batch_step_passes_the_probe_allowlist():
+    """The suppression above only ever fires if the gate actually DELIVERS the allowlist to the
+    batch step, which travels via the generic `with_inputs` seam rather than the request
+    dataclass. Without this the unit test still passes while the wiring is silently gone."""
+    import yaml
+
+    from rebar.llm.workflow import gate_dispatch
+
+    # Resolved exactly as production does (gate_dispatch._gate_doc): the gates are PACKAGE
+    # data next to that module. `gates` itself is a namespace package with no `__file__`.
+    gate = Path(gate_dispatch.__file__).resolve().parent / "gates" / "plan-review.yaml"
+    doc = yaml.safe_load(gate.read_text(encoding="utf-8"))
+    (review,) = [s for s in doc["steps"] if s["id"] == "review"]
+    (finders,) = [s for s in review["branch"]["then"] if s["id"] == "finders"]
+    assert finders["batch"]["with"]["probe_criteria"] == "${{ inputs.probe_criteria }}"
+
+
 # ── MVP end-to-end: activate → runs through the runner → surfaces a finding ──────
 def test_mvp_end_to_end_activated_project_criterion_surfaces_finding(tmp_path, monkeypatch):
     """The MVP slice: activate ONE project LLM criterion in the overlay → it fans in through

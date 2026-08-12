@@ -140,7 +140,7 @@ def _production_entry_model(monkeypatch, ladder: tuple[str, ...]) -> str:
     monkeypatch.setattr(pbr, "run_pass1", _fake_run_pass1)
     monkeypatch.setattr(pbr, "assemble_context", lambda target, repo_root=None: _FakePlanContext())
     monkeypatch.setattr(pbr, "_resolve_criteria", lambda criteria: ([], [], []))
-    monkeypatch.setattr(pbr, "_project_criteria", lambda ctx, seen: ([], []))
+    monkeypatch.setattr(pbr, "_project_criteria", lambda ctx, seen, probe=None: ([], []))
 
     from rebar.llm.runner import FakeRunner
 

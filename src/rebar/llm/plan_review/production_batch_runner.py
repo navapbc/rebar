@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any, cast
 
 from rebar.llm.config import resolve_gate_config
@@ -108,8 +108,14 @@ class ProductionBatchRunner(BatchRunner):
         # through the SAME route_criteria applies()/overlay filter the built-ins use, keyed off
         # ctx.repo_root (== the assemble step's root, so the vocab never diverges). Built-ins
         # still come from req.criteria (the interpreter's when/probe-filtered set); only
-        # `project.`-prefixed ids are appended, deduped against the built-in set.
-        proj_single, proj_agent = _project_criteria(ctx, {c["id"] for c in (*single, *agent)})
+        # `project.`-prefixed ids are appended, deduped against the built-in set. Under PROBE
+        # MODE the allowlist arrives on the batch step's `with:` (the generic `with_inputs`
+        # seam) and filters this fan-in too, so a probe stays as cheap as its allowlist.
+        proj_single, proj_agent = _project_criteria(
+            ctx,
+            {c["id"] for c in (*single, *agent)},
+            req.with_inputs.get("probe_criteria"),
+        )
         single.extend(proj_single)
         agent.extend(proj_agent)
 
@@ -254,7 +260,9 @@ def _resolve_criteria(
     return single, agent, skipped
 
 
-def _project_criteria(ctx, exclude: set[str]) -> tuple[list[dict], list[dict]]:
+def _project_criteria(
+    ctx, exclude: set[str], probe: Iterable[Any] | None = None
+) -> tuple[list[dict], list[dict]]:
     """Fan in the ACTIVATED project criteria for the ticket (epic 3156). ``route_criteria``
     already returns the FULL routed set (built-ins ∪ activated `project.<name>` criteria, each
     past its ``applies()``/overlay filter); this picks out ONLY the ``project.``-prefixed ones
@@ -262,24 +270,28 @@ def _project_criteria(ctx, exclude: set[str]) -> tuple[list[dict], list[dict]]:
     did. Built-ins are intentionally NOT taken from here — they come from ``req.criteria`` so the
     interpreter's per-criterion ``when``/probe gating is preserved.
 
-    Caveat (documented follow-up, ticket 5623-9208-3d3b-4c31): under PROBE MODE (drift-refresh)
-    the built-in set is the tiny
-    probe allowlist, but route_criteria has no probe notion, so an activated project criterion is
-    also evaluated during a probe. Harmless (the drift comparison keys off E4/G1G2), but a future
-    change should thread the probe allowlist here to suppress it.
+    ``probe`` is the PROBE MODE (drift-refresh) allowlist, delivered from the gate's
+    ``probe_criteria`` input through the batch step's ``with:`` (``BatchRunRequest.with_inputs``,
+    the generic seam — no plan-review concept on the request dataclass). ``route_criteria`` has
+    no probe notion of its own, so without this an activated project criterion would be
+    evaluated during a probe that is meant to run only the cheap E4+G1G2 set. When non-empty the
+    fan-in is filtered to ids IN the allowlist, mirroring ``workflow_ops``' built-in probe
+    filter; empty/absent leaves the normal full-review fan-in untouched.
 
     No ``gate_log`` is passed (ticket 4ee2): this re-routes the same ticket the assemble
     step already routed, so recording its deterministic-gate skips here would duplicate
     the assemble step's ``coverage.routing.det_gated`` record — skips are captured once,
     at the assemble step's ``route_criteria`` call."""
     single, agent = route_criteria(ctx)
-    proj_single = [
-        c for c in single if str(c["id"]).startswith(_PROJECT_PREFIX) and c["id"] not in exclude
-    ]
-    proj_agent = [
-        c for c in agent if str(c["id"]).startswith(_PROJECT_PREFIX) and c["id"] not in exclude
-    ]
-    return proj_single, proj_agent
+    allowlist = {str(c) for c in (probe or ())}
+
+    def _keep(c: dict) -> bool:
+        cid = str(c["id"])
+        if not cid.startswith(_PROJECT_PREFIX) or c["id"] in exclude:
+            return False
+        return cid in allowlist if allowlist else True
+
+    return [c for c in single if _keep(c)], [c for c in agent if _keep(c)]
 
 
 __all__ = ["ProductionBatchRunner"]
