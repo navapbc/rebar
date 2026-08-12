@@ -74292,6 +74292,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-06T19:07:38Z"
     },
+    "97d4-3098-2fb6-4658": {
+      "created_at": "2026-08-12T20:52:34Z",
+      "jira_id": "4588526",
+      "jira_key": "REB-2799",
+      "state": "confirmed",
+      "updated_at": "2026-08-12T20:52:37Z"
+    },
     "97e7-cf42-5c00-462c": {
       "baseline": {
         "assignee": null,
@@ -92501,133 +92508,15 @@
     "bbc0-1dbd-d9cb-4917": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "The completion-verifier agent: adapt the DSO `completion-verifier` to rebar (epic/story/task/bug; bug \u21d2 resolved), and the `verify_completion` library operation. Read-only fs + read-only `show_ticket`; PASS/FAIL verdict; FAIL \u21d2 findings (criterion + explanation + citation). Prompt-injection hardened (PA1).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope (files)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/reviewers/completion_verifier.md` (NEW) + `catalog.json` entry (`completion-verifier`, dimension `completion`). Front-matter vars: ticket_id, ticket_context, repo_path. Findings = failures only; no-criteria \u21d2 PASS-with-note in summary; untrusted-input instruction-hierarchy clause.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/completion.py` (NEW): `verify_completion(ticket_id, *, graph=None, \u2026)`; module `__all__`; assemble via `operations._assemble_context`; fenced `<untrusted_ticket_context>`; `mode=\"structured\"`, `output_schema=\"completion_verdict\"`, `extra_tools=_scoped_ticket_tools(allow_comment=False)`; normalize\u2192resolve_citations\u2192`_reconcile` (normalize verdict; FAIL\u21d4findings)\u2192`validate_structured`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/__init__.py`: export `verify_completion`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] verify_completion returns a validated `completion_verdict` for epic/story/task/bug (offline FakeRunner)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] reconcile: PASS+[]\u2192PASS; FAIL+[]\u2192synthesized finding; PASS+[failing]\u2192FAIL; verdict casing normalized",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] bogus file citation downgraded to source; `criterion` preserved through normalize",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] prompt carries the untrusted-data instruction-hierarchy clause; context is delimited",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "The completion-verifier agent: adapt the DSO `completion-verifier` to rebar (epic/story/task/bug; bug \u21d2 resolved), and the `verify_completion` library operation. Read-only fs + read-only `show_ticket`; PASS/FAIL verdict; FAIL \u21d2 findings (criterion + explanation + citation). Prompt-injection hardened (PA1).\n\n## Scope (files)\n- `src/rebar/llm/reviewers/completion_verifier.md` (NEW) + `catalog.json` entry (`completion-verifier`, dimension `completion`). Front-matter vars: ticket_id, ticket_context, repo_path. Findings = failures only; no-criteria \u21d2 PASS-with-note in summary; untrusted-input instruction-hierarchy clause.\n- `src/rebar/llm/completion.py` (NEW): `verify_completion(ticket_id, *, graph=None, \u2026)`; module `__all__`; assemble via `operations._assemble_context`; fenced `<untrusted_ticket_context>`; `mode=\"structured\"`, `output_schema=\"completion_verdict\"`, `extra_tools=_scoped_ticket_tools(allow_comment=False)`; normalize\u2192resolve_citations\u2192`_reconcile` (normalize verdict; FAIL\u21d4findings)\u2192`validate_structured`.\n- `src/rebar/llm/__init__.py`: export `verify_completion`.\n\n## Acceptance Criteria\n- [ ] verify_completion returns a validated `completion_verdict` for epic/story/task/bug (offline FakeRunner)\n- [ ] reconcile: PASS+[]\u2192PASS; FAIL+[]\u2192synthesized finding; PASS+[failing]\u2192FAIL; verdict casing normalized\n- [ ] bogus file citation downgraded to source; `criterion` preserved through normalize\n- [ ] prompt carries the untrusted-data instruction-hierarchy clause; context is delimited",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "WS-2: completion-verifier prompt + verify_completion operation"
       },
       "baseline_advanced_at": "2026-07-19T14:12:26Z",
       "created_at": "2026-06-25T23:14:01Z",
       "jira_key": "REB-295",
+      "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:14:01Z"
     },
@@ -134298,6 +134187,7 @@
     "REB-2795": "5b74-5d8f-a6b4-4674",
     "REB-2797": "35de-cf0b-5b04-4f0b",
     "REB-2798": "e654-58e2-0d38-48c6",
+    "REB-2799": "97d4-3098-2fb6-4658",
     "REB-28": "1268-fe1d-d4da-4531",
     "REB-280": "b2ca-ab20-9aa9-430a",
     "REB-281": "b2e5-2eda-d6a4-47aa",
