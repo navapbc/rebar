@@ -403,14 +403,38 @@ def _with_index_lock_retry(
 # (only the proven ``could not parse HEAD`` signature) so it never masks a genuine error.
 # Bug childsafe-special-springtail.
 _TRANSIENT_HEAD_MARKERS = ("could not parse head",)
+# The object-DB analogue of the HEAD-parse transient above, and the SAME fault class: git
+# resolved the name to an OID but ``parse_object()`` returned NULL, so it aborts with
+# ``fatal: bad object <name>`` having read nothing and written nothing. Proven on this runner
+# fleet by three CI failures of the s3 doctor's bundle step (bug wrongful-chemic-squeaker),
+# where the merged tip's loose object — whose sha git had just printed — was briefly
+# unreadable, and the identical invocation succeeds on retry. The name in the message carries
+# no information: the same fault was raised as both ``bad object HEAD`` and ``bad object
+# <sha>``, so the marker matches the fault, not the argument. Deliberately does NOT cover
+# git's CORRUPT-object signatures (``loose object … is corrupt``, ``inflate: data stream
+# error``), which are real damage rather than a read blip; a genuinely broken object that
+# happens to also report ``bad object`` still surfaces once the bounded retries are spent.
+_TRANSIENT_OBJECT_MARKERS = ("bad object",)
 _TRANSIENT_HEAD_ATTEMPTS = 3
 _TRANSIENT_HEAD_BACKOFF_S = 0.1
 
 
+def is_transient_object_read_error(text: str) -> bool:
+    """True if *text* is git's transient object-DB read signature (case-insensitive).
+
+    Exposed so a caller that must distinguish this fault in the error it raises — an
+    unreadable object is not a data conflict, and sends the operator to a different tool —
+    classifies it against the SAME marker set the retry uses, never a second private copy."""
+    return any(marker in text.lower() for marker in _TRANSIENT_OBJECT_MARKERS)
+
+
 def _is_transient_head_error(text: str) -> bool:
-    """True if *text* is git's transient HEAD-parse read signature (case-insensitive)."""
+    """True if *text* is a transient git READ signature — the HEAD-parse fault or the
+    object-DB ``bad object`` fault (case-insensitive)."""
     low = text.lower()
-    return any(marker in low for marker in _TRANSIENT_HEAD_MARKERS)
+    return any(marker in low for marker in _TRANSIENT_HEAD_MARKERS) or (
+        is_transient_object_read_error(low)
+    )
 
 
 def _with_transient_head_retry(
@@ -449,6 +473,7 @@ def run_git_write(
     tracker: str | os.PathLike[str],
     *args: str,
     check: bool = False,
+    timeout: float = _LOCAL_GIT_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
     git's ``.git/index.lock`` / ref-lock contention AND the transient ``could not parse
@@ -468,17 +493,21 @@ def run_git_write(
     their own error get the result verbatim).
 
     Safe to route ANY tracker git op through: the lock and HEAD-parse signatures only
-    appear on index-mutating commands, so a read op simply never trips either retry."""
+    appear on index-mutating commands, so a read op simply never trips either retry.
+
+    ``timeout`` overrides the :data:`_LOCAL_GIT_TIMEOUT` watchdog for callers that declare
+    their own module-level bound (e.g. the s3 doctor's) — the bound travels with the caller
+    rather than being silently replaced when it adopts this seam."""
 
     def _bounded_once() -> subprocess.CompletedProcess:
         try:
-            return run_git(tracker, *args, check=False, timeout=_LOCAL_GIT_TIMEOUT)
+            return run_git(tracker, *args, check=False, timeout=timeout)
         except subprocess.TimeoutExpired:
             return subprocess.CompletedProcess(
                 ["git", "-C", str(tracker), *args],
                 124,
                 "",
-                f"git timed out after {_LOCAL_GIT_TIMEOUT}s",
+                f"git timed out after {timeout}s",
             )
 
     result = _with_index_lock_retry(

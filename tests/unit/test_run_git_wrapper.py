@@ -112,3 +112,77 @@ def test_bytes_input_with_text_true_raises_clear_type_error(tmp_path: Path) -> N
         run_git(repo, "hash-object", "--stdin", input_data=b"raw bytes")
     msg = str(exc.value).lower()
     assert "bytes" in msg and "text=false" in msg
+
+
+# ── transient read-fault classification (bug wrongful-chemic-squeaker, s3 doctor) ──
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fatal: bad object HEAD",
+        "fatal: bad object ae7d19a6f0a1b2c3d4e5f60718293a4b5c6d7e8f",
+        "FATAL: BAD OBJECT HEAD",
+    ],
+)
+def test_doctor_bad_object_stderr_is_classified_transient(stderr: str) -> None:
+    """The exact stderr shapes the s3 doctor's bundle step hit on CI classify as transient.
+
+    Both the ``HEAD`` and the bare-sha forms were observed for the SAME fault, so the marker
+    must match the fault rather than the argument git happened to name.
+    """
+    from rebar._store.gitutil import _is_transient_head_error, is_transient_object_read_error
+
+    assert is_transient_object_read_error(stderr)
+    assert _is_transient_head_error(stderr)
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "fatal: loose object 4b825dc6 is corrupt",
+        "error: inflate: data stream error (incorrect header check)",
+        "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.",
+        "fatal: Refusing to create empty bundle.",
+        "error: Unable to create '/repo/.git/index.lock': File exists.",
+    ],
+)
+def test_doctor_non_transient_stderr_is_not_classified_transient(stderr: str) -> None:
+    """Real damage and ordinary errors are NOT retried as a transient object read.
+
+    Corruption, an unresolvable revision and an empty-bundle refusal are all permanent: a
+    retry cannot change them, and masking them behind a backoff would hide the real fault.
+    (The index.lock case is a genuine transient, but it belongs to the SEPARATE lock retry.)
+    """
+    from rebar._store.gitutil import is_transient_object_read_error
+
+    assert not is_transient_object_read_error(stderr)
+
+
+def test_doctor_git_helper_routes_through_the_self_healing_seam() -> None:
+    """The s3 doctor reaches git through ``run_git_write``, not raw ``run_git``.
+
+    The defect this closes was structural — the module was the one store git caller outside
+    rebar's self-healing seam — so the seam membership itself is pinned, not just the
+    retry's effect.
+    """
+    from rebar._store import s3_doctor
+
+    assert not hasattr(s3_doctor, "run_git"), "s3_doctor still binds raw run_git"
+    assert hasattr(s3_doctor, "run_git_write")
+
+
+def test_run_git_write_honours_a_caller_supplied_timeout(tmp_path: Path, monkeypatch) -> None:
+    """A caller's own watchdog bound travels with it when it adopts the seam."""
+    from rebar._store import gitutil
+
+    seen: dict = {}
+
+    def _fake_run_git(cwd, *args, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(["git", *args], 0, "", "")
+
+    monkeypatch.setattr(gitutil, "run_git", _fake_run_git)
+    gitutil.run_git_write(str(tmp_path), "status", timeout=17)
+
+    assert seen["timeout"] == 17

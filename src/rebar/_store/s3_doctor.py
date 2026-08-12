@@ -23,7 +23,7 @@ from typing import Any
 
 from rebar._optional import require_s3_helper
 from rebar._store import lock as _lock
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import is_transient_object_read_error, run_git_write
 
 logger = logging.getLogger(__name__)
 
@@ -44,12 +44,19 @@ class S3DoctorConflict(Exception):
 
 # raw-git-ok: locked store seam internal
 def _git(base: str, *args: str) -> subprocess.CompletedProcess:
-    try:
-        return run_git(base, *args, check=False, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", "-C", base, *args], 124, "", f"git timed out after {_GIT_TIMEOUT}s"
-        )
+    """Run one doctor git invocation through rebar's SHARED self-healing git seam.
+
+    Routed through :func:`gitutil.run_git_write` rather than raw ``run_git`` (bug
+    wrongful-chemic-squeaker): the doctor was the one store git caller outside that seam, so
+    a transient runner-FS read blip that every other store write rides out unassisted instead
+    aborted the whole heal — three times on CI. Adopting the seam is reuse, not new policy:
+    the doctor inherits the per-store advisory git-op lock, the bounded index/ref-lock retry
+    and the transient read-fault retry from the one implementation, and keeps its own
+    :data:`_GIT_TIMEOUT` watchdog. Every op reached through here is idempotent — reads,
+    merges under the write lock, disposable scratch-ref updates, and a bundle write to a
+    caller-owned temp file — which is the precondition the retry wrappers document.
+    """
+    return run_git_write(base, *args, check=False, timeout=_GIT_TIMEOUT)
 
 
 def _default_factory(remote_url: str) -> Any:
@@ -247,8 +254,19 @@ def _publish_and_prune(
     try:
         create = _git(base_path, "bundle", "create", bundle_path, "HEAD", f"refs/heads/{ref}")
         if create.returncode != 0:
+            # A bundle failure that survived the seam's retries is NOT a heads conflict, so
+            # the default hint's "run rebar fsck-recover" would be the wrong tool: the merge
+            # already succeeded and it is the object store that could not be READ.
+            hint = None
+            if is_transient_object_read_error(create.stderr or create.stdout or ""):
+                hint = (
+                    "git could not read an object it had just resolved, and the read did not "
+                    "recover on retry; the merge itself succeeded. Re-run the heal, and if it "
+                    "persists check the tracker's object store with: git fsck"
+                )
             raise S3DoctorConflict(
-                f"could not bundle merged tip {merged_sha} for ref {ref}: {create.stderr}"
+                f"could not bundle merged tip {merged_sha} for ref {ref}: {create.stderr}",
+                hint=hint,
             )
         with open(bundle_path, "rb") as fh:
             s3.s3.put_object(Bucket=s3.bucket, Key=merged_key, Body=fh.read())
