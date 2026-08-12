@@ -291,6 +291,12 @@ try:
         steps: list[BridgeAccessStepOut]
         reason: str | None = None
 
+    class AttachCommitsResultOut(_Out):
+        """Result of ``attach_commits``: the resolved ticket and how many SHAs were recorded."""
+
+        ticket_id: str
+        attached: int
+
     class SignResultOut(_Out):
         # Contract phase (story 8f1d): the
         # dual-shape window is closed — `sign_manifest` mints ONLY the op-cert record, so envelope/
@@ -381,6 +387,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     BridgeRunOut = BridgeStatusOut = BridgeControlOut = None  # type: ignore[assignment,misc]
     BridgeAccessStepOut = BridgeAccessCheckOut = None  # type: ignore[assignment,misc]
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
+    AttachCommitsResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
     PlanReviewStatusOut = None  # type: ignore[assignment,misc]

@@ -744,11 +744,15 @@ def resolve_prompt(
 
 
 def _glob_match(path: str, pattern: str) -> bool:
-    from fnmatch import fnmatch
+    """Delegates to the single implementation in ``_engine_support.commit_impact``.
 
-    # `**/` should also match at the repo root, so try the pattern with the
-    # leading `**/` stripped too.
-    return fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch(path, pattern[3:]))
+    The `**/`-at-repo-root rule is shared with the deterministic close gate, which cannot
+    import this (optional ``[agents]``) package — so the rule lives there and this stays a
+    thin wrapper to keep existing callers and monkeypatch targets working.
+    """
+    from rebar._engine_support.commit_impact import glob_match
+
+    return glob_match(path, pattern)
 
 
 def select_reviewers(
