@@ -63,6 +63,15 @@ jobs:
   reconcile:
     name: Run rebar reconciler
     runs-on: ubuntu-latest
+    # A job-level block REPLACES the workflow-level one wholesale, so the two entries declared
+    # above must be restated here alongside id-token. Dropping either silently breaks the
+    # reconciler's commit-back / re-dispatch rather than the metric.
+    permissions:
+      contents: write   # push reconciler events back to the tickets orphan branch
+      actions: write    # re-dispatch this workflow to sustain the continuous loop
+      # Required for OIDC AssumeRoleWithWebIdentity by the CloudWatch metric steps below.
+      # Job-level for the same reason structured-output-baseline.yml puts it there.
+      id-token: write
     # A one-time initial sync creates one Jira issue per local ticket serially via
     # acli (~4s each), so a first-time bulk cutover of a few hundred tickets needs
     # well over the steady-state budget. 60 is a ceiling, not a duration: incremental
@@ -321,3 +330,64 @@ jobs:
           fi
           echo "::error::Re-dispatch failed (exit ${dispatch_rc}) — see the captured gh output above"
           exit "${dispatch_rc}"
+
+      # --- CloudWatch visibility for bridge failures -----------------------------------------
+      # The 2026-08-12 JIRA_API_TOKEN expiry took the bridge down for hours and produced ZERO
+      # CloudWatch signal: every rebar/host metric is published by the host probe
+      # (infra/scripts/observability.sh) running on the Gerrit box, and the bridge does not run
+      # there — it runs here. So the host probe structurally cannot see it, and the failure
+      # surfaced only as an ::error annotation nobody was looking at.
+      #
+      # These steps run LAST on purpose: placed here, failure() also covers a failed re-dispatch,
+      # so the metric answers "did this bridge run fail" rather than "did the reconcile step
+      # fail". They are continue-on-error so a metrics outage can never turn an otherwise
+      # converged reconcile pass red — telemetry must not become a new failure mode.
+      - name: Configure AWS credentials (OIDC → the scoped bridge-metrics role)
+        id: bridge_metrics_auth
+        # always(): the credentials are needed on BOTH the success and failure paths.
+        # Canonical repo only — a fork has no role to assume and must not fail trying.
+        if: ${{ always() && github.repository == 'navapbc/rebar' && vars.AWS_BRIDGE_METRICS_ROLE_ARN != '' }}
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_BRIDGE_METRICS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_BRIDGE_METRICS_REGION }}
+
+      # 1 on failure, 0 on success — the metric is published on EVERY run, not only on failure.
+      # Publishing the 0 is deliberate: with treat_missing_data = "notBreaching" a failure-only
+      # metric would still alarm correctly, but it would be ABSENT whenever the bridge is healthy,
+      # which is indistinguishable from "the publisher is broken / its role lost PutMetricData",
+      # and would leave the alarm sitting in INSUFFICIENT_DATA instead of OK. The steady 0 makes
+      # the publisher itself observable. This matches the host probe, which publishes
+      # gerrit_healthy / reviewbot_healthy as 0-or-1 every tick rather than only on failure.
+      #
+      # DIMENSIONLESS on both sides — CloudWatch keys a metric by namespace+name+dimensions, so a
+      # dimension present on only one side silently unmatches and the alarm goes permanently
+      # INSUFFICIENT_DATA (the monitoring_s4b.tf rationale).
+      - name: Publish bridge run failure to CloudWatch
+        if: ${{ failure() && steps.bridge_metrics_auth.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          AWS_REGION: ${{ vars.AWS_BRIDGE_METRICS_REGION }}
+        run: |
+          set -euo pipefail
+          aws cloudwatch put-metric-data \
+            --namespace rebar/host \
+            --metric-name bridge_run_failures \
+            --unit Count \
+            --value 1
+          echo "Published rebar/host:bridge_run_failures=1"
+
+      - name: Publish bridge run success to CloudWatch
+        if: ${{ success() && steps.bridge_metrics_auth.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          AWS_REGION: ${{ vars.AWS_BRIDGE_METRICS_REGION }}
+        run: |
+          set -euo pipefail
+          aws cloudwatch put-metric-data \
+            --namespace rebar/host \
+            --metric-name bridge_run_failures \
+            --unit Count \
+            --value 0
+          echo "Published rebar/host:bridge_run_failures=0"
