@@ -292,6 +292,17 @@ try:
         # (audit-only, epic jira-reb-596). None for pre-stamp / unsigned records.
         rebar_version: str | None = None
 
+    class PlanReviewStatusOut(_Out):
+        # The read-only plan-review attestation currency verdict, mirroring the
+        # dict rebar.llm.plan_review_status returns (the same answer the claim gate
+        # would give). verified_at_sha / signed_at are None when no readable
+        # certified attestation exists.
+        ok: bool
+        verdict: str
+        reason: str
+        verified_at_sha: str | None = None
+        signed_at: int | None = None
+
     class GroundingBackendOut(_Out):
         # One backend entry of GroundingInfoOut.backends.
         name: str
@@ -338,6 +349,7 @@ except ImportError:  # pragma: no cover - pydantic ships with the mcp extra
     SignResultOut = VerifySignatureResultOut = None  # type: ignore[assignment,misc]
     WorkflowRunOut = None  # type: ignore[assignment,misc]
     GroundingInfoOut = GroundingBackendOut = None  # type: ignore[assignment,misc]
+    PlanReviewStatusOut = None  # type: ignore[assignment,misc]
 
 
 def tool_annotation_presets() -> dict:

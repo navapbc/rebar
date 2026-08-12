@@ -61,6 +61,7 @@ __all__ = [
     "NEXT_BATCH",
     "OUTPUT_SCHEMAS",
     "OVERLAP_VERDICT",
+    "PLAN_REVIEW_STATUS",
     "PLAN_REVIEW_VERDICT",
     "REVIEW_RESULT",
     "SCRATCH_ENVELOPE",
@@ -149,6 +150,7 @@ EPIC_BUG_SCREEN_VERDICT = "epic_bug_screen_verdict"
 # completion_verdict; same exemption (the MCP `review_plan` tool is NO_SCHEMA_EXEMPT
 # — live LLM call → plain dict); the CLI/library JSON path is pinned via the
 # "review_plan" key below.
+PLAN_REVIEW_STATUS = "plan_review_status"
 PLAN_REVIEW_VERDICT = "plan_review_verdict"
 # rebar.llm.code_review — typed verdict of the four-pass code-review gate (epic b744),
 # produced by produce_code_review_verdict. Like plan_review_verdict it is the gate's internal
@@ -369,6 +371,12 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees
     # plan_review_verdict and the CLI/library --output json path is pinned.
     "review_plan": PLAN_REVIEW_VERDICT,
+    # Read-only plan-review attestation currency query (ticket 86c8): keyed by MCP tool
+    # name (like get_workflow_status / grounding_info) rather than a CLI arm — the CLI
+    # reaches it through `review-plan --status`, not its own subcommand, so the --output
+    # coverage guard never drives it. The MCP coverage guard drives the tool on a seeded
+    # store and validates the real output against this schema.
+    "plan_review_status": PLAN_REVIEW_STATUS,
     # code-review gate verdict (epic b744): like review_plan, no CLI help arm (the --output
     # coverage guard never drives it live — the public review_code surface returns review_result,
     # NO_SCHEMA_EXEMPT); registered so the every-schema-file-is-wired guard sees it.

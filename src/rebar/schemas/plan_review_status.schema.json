@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/plan_review_status.schema.json",
+  "title": "PlanReviewStatus",
+  "description": "Result of `rebar review-plan <ticket_id> --status --output json` (and the library rebar.llm.plan_review_status() / MCP plan_review_status): the read-only currency verdict for a ticket's plan-review attestation. It runs the EXACT local check the claim gate runs — no LLM and no network — so `ok` is precisely what a `claim` would decide. `verdict` classifies WHY, and `reason` names what changed. `verified_at_sha` is the code anchor the plan was reviewed against (the pinned verified-at-sha for a scoped/attested review, else the signed HEAD for an unscoped/local one) and `signed_at` the sign timestamp; both are null when no readable certified attestation exists.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "verdict", "reason", "verified_at_sha", "signed_at"],
+  "properties": {
+    "ok": { "type": "boolean", "description": "True iff the attestation is current right now — i.e. a claim would pass the plan-review gate. True iff verdict is `certified`." },
+    "verdict": { "type": "string", "enum": ["certified", "stale-code", "stale-head", "stale-material", "stale-reopened", "stale-pin-drift", "stale-pin-missing", "unsigned", "wrong-kind", "not-closed", "malformed-pin", "malformed-phase", "incompatible-phase", "unverifiable-material", "error"], "description": "The compute_validity classifier. `certified` when current; every other value is a non-current reason NAMED by `reason` (which material component, which dependency files, which two SHAs, which reopen). Criteria-registry drift is NOT among them — it is grandfathered (ADR 0053) and surfaces as the non-blocking registry_drift field on compute_validity's result." },
+    "reason": { "type": "string", "description": "Human-readable explanation naming what changed (bug 94a3), not a list of what might have." },
+    "verified_at_sha": { "type": ["string", "null"], "description": "The code anchor the plan was reviewed against. Null when no readable certified attestation exists." },
+    "signed_at": { "type": ["integer", "null"], "description": "Sign timestamp of the attestation. Null when no readable certified attestation exists." }
+  }
+}

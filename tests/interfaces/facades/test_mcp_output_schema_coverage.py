@@ -73,6 +73,7 @@ CANONICAL: dict[str, str] = {
     "get_workflow_status": schemas.WORKFLOW_RUN,
     "get_workflow_result": schemas.WORKFLOW_RUN,
     "grounding_info": schemas.GROUNDING_INFO,
+    "plan_review_status": schemas.PLAN_REVIEW_STATUS,
 }
 
 # Advertisers with no canonical structured shape — they return a generic
@@ -305,6 +306,9 @@ def _call_args(name: str, s: dict) -> dict:
         "get_workflow_status": {"run_id": s["run_id"], "ticket_id": s["task"]},
         "get_workflow_result": {"run_id": s["run_id"], "ticket_id": s["task"]},
         "grounding_info": {},
+        # No attestation on the seeded ticket -> the `unsigned` end of the verdict
+        # range; a pure local read (no LLM, no network), safe to drive in CI.
+        "plan_review_status": {"ticket_id": s["task"]},
     }[name]
 
 

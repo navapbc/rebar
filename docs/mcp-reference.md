@@ -28,6 +28,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `grounding_info` | The STATIC code-grounding oracle integration contract (epic 8f6c): the |
 | `list_tickets` | List tickets as a JSON array, with optional filters. |
 | `next_batch` | Next parallel batch of unblocked tickets under an epic's hierarchy. |
+| `plan_review_status` | Is this ticket's plan-review attestation current RIGHT NOW? Read-only. |
 | `quality_check` | Check ticket dispatch readiness ({verdict, line_count, keyword_count, |
 | `ready_tickets` | List tickets ready to work (all blockers closed). ``sort`` orders by |
 | `recent_session_logs` | The newest session_log tickets, newest first (by created_at; default |
@@ -124,4 +125,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_57 tools._
+_58 tools._
