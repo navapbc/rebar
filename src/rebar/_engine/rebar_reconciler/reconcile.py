@@ -526,6 +526,23 @@ def _apply_mutations(ctx: _PassContext) -> None:
     ctx.apply_tally = apply_tally
 
 
+def _confirm_peer_links(ctx: _PassContext, pass_id: str) -> int:
+    """Record peer-confirmation evidence from this pass's snapshot (epic a4bd).
+
+    Kept as a named seam rather than inlined so the persist phase reads as a list of
+    steps and so tests can drive it directly. Opening the store here (not once per
+    pass elsewhere) keeps the whole feature inside the ``persist`` branch: a no-write
+    pass must not write evidence any more than it writes bindings.
+    """
+    from rebar_reconciler.peer_confirmations import confirm_from_snapshot, open_store
+
+    store = open_store(ctx.repo_root)
+    written = confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store, pass_id)
+    if written:
+        store.save()
+    return written
+
+
 def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
     """Persist only Jira-key membership for the next pass's edge detection."""
     key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
@@ -568,6 +585,19 @@ def _persist_and_log(ctx: _PassContext) -> dict:
         except Exception as exc:  # noqa: BLE001 — baseline advance is best-effort; never break sync
             print(
                 f"reconcile: baseline advance failed ({exc})",
+                file=sys.stderr,
+            )
+        # Epic a4bd: learn peer-link evidence from THIS pass's authoritative fetch,
+        # so a link the peer carries is provably synchronized even when this clone
+        # never pushed it. Sits beside the baseline advance because it is the same
+        # kind of step — "record what the current snapshot proves" — and runs before
+        # save() for the same reason. Fail-open: losing evidence costs safety on a
+        # later removal, whereas raising would break a sync pass that succeeded.
+        try:
+            _confirm_peer_links(ctx, pass_id)
+        except Exception as exc:  # noqa: BLE001 — evidence is best-effort; never break sync
+            print(
+                f"reconcile: peer-link confirmation failed ({exc})",
                 file=sys.stderr,
             )
         try:
