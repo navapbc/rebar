@@ -33,6 +33,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from rebar.llm import step_failures as step_failure_sink
 from rebar.llm.workflow.executor import StepContext, StepResult, register_step
 from rebar.llm.workflow.plan_review_recovery import CRITERIA_CONFIG_FAILURE_KIND
 
@@ -518,6 +519,13 @@ def plan_review_coach(ctx: StepContext) -> dict[str, Any]:
     violations = orchestrator.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
+    # Same posture for LLM step calls that failed but did not fail this run (the overlap judge
+    # abstaining because every batch died, a novelty sub-call degrading to un-floored, ...):
+    # present ONLY when non-empty, so a clean run's coverage is byte-identical and the verdict
+    # string is untouched. Reaching this line at all means the run survived them.
+    step_failures = step_failure_sink.drain()
+    if step_failures:
+        coverage["llm_step_failures"] = step_failures
     # Carry the verify step's runner-stamped record (343b); never recomputed (it could diverge).
     verdict = orchestrator.finalize_verdict(
         pctx,
