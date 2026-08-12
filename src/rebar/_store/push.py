@@ -16,73 +16,32 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import subprocess
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from rebar._optional import OptionalDependencyError
 from rebar._store import compat, push_state
 from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch, run_git
+from rebar._store.push_classify import (
+    _DIRTY_WD,
+    _MAX_RETRIES,
+    _MAX_TRANSPORT_ATTEMPTS,
+    PushDeliveryError,
+    _heal_multi_bundle_or_stop,
+    _is_multi_bundle,
+    _is_non_fast_forward,
+    _is_transport_retriable,
+    _raise_if_strict,
+    _retry_transport_or_stop,
+    _transport_backoff,
+)
 from rebar._store.push_state import unpushed_summary as _unpushed_summary
 
 logger = logging.getLogger(__name__)
 
-_NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
 
-# Bug 2a76: the bare token ``rejected`` above is NOT specific to a non-fast-forward.
-# git prints ``! [remote rejected] HEAD -> tickets (pre-receive hook declined)`` for
-# EVERY server-side decline — GitHub push protection (GH013 secret scanning), a
-# pre-receive hook, branch protection, a rate limit, an internal server error. Those
-# are PERMANENT policy rejections: a fetch+merge cannot fix them, so classifying them
-# as non-fast-forward burned all three retries (three real hits on the remote's hook,
-# zero merge commits) and then reported only "failed after 3 retries" — the reason git
-# gave us was thrown away, making an 8-hour outage indistinguishable from transient
-# contention while commits piled up locally. The fix is the same SUBTRACTIVE exclusion
-# shape already proven in _engine/rebar_reconciler/_ref_lock.py (bug 4afc): a broad
-# marker counts only when nothing names a non-mergeable cause.
-_POLICY_DECLINE_MARKERS = (
-    "hook declined",  # pre-receive / update hook (incl. GitHub push protection GH013)
-    "push declined",
-    "protected branch",
-    "branch protection",
-    "internal server error",
-    "rate limit",
-    "gh0",  # GitHub push-protection / policy error codes: GH006, GH013, ...
-)
-
-
-def _is_policy_decline(stderr: str) -> bool:
-    """Whether the remote explicitly declined the push for a policy reason."""
-    return any(marker in stderr.lower() for marker in _POLICY_DECLINE_MARKERS)
-
-
-def _is_non_fast_forward(stderr: str) -> bool:
-    """Whether *stderr* shows a genuine non-fast-forward (retriable by fetch+merge).
-
-    A policy decline also carries the word ``rejected``, so it must be excluded
-    explicitly; ambiguity resolves to TERMINAL (report the reason once) rather than
-    to a retry loop that provably cannot converge (bug 2a76).
-    """
-    if _is_policy_decline(stderr):
-        return False
-    return bool(_NON_FF.search(stderr))
-
-
-def _is_multi_bundle(stderr: str) -> bool:
-    """Whether *stderr* shows the git-remote-s3 multi-bundle state (a ref with two bundles).
-
-    True when the message reports ``multiple bundles`` or ``multiple updates for ref``
-    (case-insensitive); False for a plain non-fast-forward or a transport error.
-    """
-    low = stderr.lower()
-    return "multiple bundles" in low or "multiple updates for ref" in low
-
-
-_DIRTY_WD = re.compile(
-    r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
-)
-_MAX_RETRIES = 5
 # Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
 # reconverge). A timeout means another writer holds the lock, so we skip the merge and
 # leave the push pending rather than racing.
@@ -123,31 +82,6 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
             "",
             f"git timed out after {_GIT_TIMEOUT}s",
         )
-
-
-class PushDeliveryError(RuntimeError):
-    """A strict tickets-branch delivery failure with a stable classification."""
-
-    def __init__(self, reason: str, detail: str, base_path: str, remote_ref: str) -> None:
-        self.reason = reason
-        self.detail = detail
-        self.message = f"{reason}: {detail}{_unpushed_summary(base_path, remote_ref)}"
-        super().__init__(self.message)
-
-
-def _raise_if_strict(
-    strict: bool, reason: str, detail: str, base_path: str, remote_ref: str
-) -> None:
-    """Record the delivery outcome, then raise only for a strict caller.
-
-    Every terminal exit in this module already routes through here carrying the closed set
-    of :class:`PushDeliveryError` reasons, which makes it the one place a failure cannot be
-    missed — so the durable marker is written HERE rather than at a dozen call sites. The
-    default (best-effort) path still returns ``None``: recording is a SIGNAL, not a raise.
-    """
-    push_state.record_failure(base_path, reason, detail, remote_ref)
-    if strict:
-        raise PushDeliveryError(reason, detail, base_path, remote_ref)
 
 
 # raw-git-ok: locked store seam internal
@@ -338,15 +272,48 @@ def _merge_remote_under_lock(
     return False
 
 
+def _fetch_for_recovery(
+    base_path: str, remote: str, branch: str, sleep_fn: Callable[[float], None] | None
+) -> subprocess.CompletedProcess:
+    """Fetch the remote branch for merge recovery, riding out transient transport faults.
+
+    Bug f61c: run 31420498173 lost recovery to `merge-recovery-blocked: ... server
+    certificate verification failed`, so the fetch leg needs the same bounded transport
+    retry as the push leg — a blob:none partial clone also fetches on demand here.
+    """
+    refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
+    for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
+        fetch = _git(base_path, "fetch", remote, refspec)
+        if fetch.returncode == 0 or transport_attempt == _MAX_TRANSPORT_ATTEMPTS:
+            return fetch
+        if not _is_transport_retriable(fetch.stderr or ""):
+            return fetch
+        logger.warning(
+            "push-recovery fetch hit a transient transport fault "
+            "(transport attempt %s/%s), retrying: %s",
+            transport_attempt,
+            _MAX_TRANSPORT_ATTEMPTS,
+            (fetch.stderr or "").strip()[:200],
+        )
+        _transport_backoff(transport_attempt, sleep_fn)
+    return fetch
+
+
 def _recover_non_fast_forward(
-    base_path: str, remote: str, branch: str, remote_ref: str, attempt: int, strict: bool
+    base_path: str,
+    remote: str,
+    branch: str,
+    remote_ref: str,
+    attempt: int,
+    strict: bool,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> bool | None:
     """Fetch and merge a genuine non-fast-forward rejection.
 
     ``True`` means a clean merge, ``False`` means a retryable local recovery
     failure, and ``None`` preserves the default path's terminal best-effort stop.
     """
-    fetch = _git(base_path, "fetch", remote, f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}")
+    fetch = _fetch_for_recovery(base_path, remote, branch, sleep_fn)
     if fetch.returncode != 0:
         _raise_if_strict(
             strict,
@@ -410,7 +377,12 @@ def _require_s3_helper_for_configured_remote(base_path: str) -> None:
         _require_s3_helper_if_s3_url(resolved.stdout.strip())
 
 
-def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
+def push_tickets_branch(
+    base_path: str,
+    *,
+    strict: bool = False,
+    sleep_fn: Callable[[float], None] | None = None,
+) -> None:
     """Push ``HEAD:tickets`` according to the configured delivery policy.
 
     The default remains best-effort: warnings leave the local commit and working
@@ -504,6 +476,9 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
     stderr = ""
     fifth_merge_clean = False
     healed_once = False
+    # Bug f61c: transport attempts are counted SEPARATELY from the non-fast-forward budget
+    # so a blip cannot silently consume the merge-recovery retries the non-FF path needs.
+    transport_attempts = 1
     for attempt in range(1, _MAX_RETRIES + 1):
         res = _git(base_path, "push", remote, f"HEAD:{branch}", env=push_env)
         if res.returncode == 0:
@@ -515,46 +490,28 @@ def push_tickets_branch(base_path: str, *, strict: bool = False) -> None:
         # Heal git-remote-s3's multi-bundle state BEFORE the non-FF classification: the merge
         # collapses the divergent bundles losslessly, then we retry the push once.
         if _is_multi_bundle(stderr) and not healed_once:
-            from rebar._store import s3_doctor
-
-            try:
-                s3_doctor.heal_multi_bundle(base_path, remote, branch)
-            except s3_doctor.S3DoctorConflict as exc:
-                logger.warning(
-                    "s3 doctor could not heal multi-bundle ref %s: %s (%s)%s",
-                    remote_ref,
-                    exc,
-                    exc.hint,
-                    _unpushed_summary(base_path, remote_ref),
-                )
-                _raise_if_strict(
-                    strict, "push-multi-bundle-conflict", str(exc), base_path, remote_ref
-                )
-                return
-            except OptionalDependencyError as exc:
-                logger.warning("s3 doctor unavailable for multi-bundle heal: %s", exc)
-                _raise_if_strict(strict, "push-transport-failed", stderr, base_path, remote_ref)
+            if not _heal_multi_bundle_or_stop(
+                base_path, remote, branch, remote_ref, stderr, strict
+            ):
                 return
             healed_once = True
             continue
         if not _is_non_fast_forward(stderr):
-            # Terminal: a transport failure OR a policy decline (bug 2a76). Report the
-            # reason git gave AND the backlog size, then stop — hitting the remote twice
-            # more cannot change a permanent rule violation.
-            reason = (
-                "push-policy-declined" if _is_policy_decline(stderr) else "push-transport-failed"
-            )
-            _raise_if_strict(strict, reason, stderr, base_path, remote_ref)
-            logger.warning(
-                "tickets branch push failed (exit %s): %s%s",
-                res.returncode,
+            if _retry_transport_or_stop(
+                base_path,
+                remote_ref,
                 stderr,
-                _unpushed_summary(base_path, remote_ref),
-            )
+                res.returncode,
+                strict,
+                transport_attempts,
+                sleep_fn,
+            ):
+                transport_attempts += 1
+                continue
             return  # non-retriable class — best-effort
 
         recovered = _recover_non_fast_forward(
-            base_path, remote, branch, remote_ref, attempt, strict
+            base_path, remote, branch, remote_ref, attempt, strict, sleep_fn
         )
         if recovered is None:
             return
