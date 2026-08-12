@@ -401,6 +401,18 @@ behavior. The canonical spellings are `rebar bridge setup`, `rebar bridge check-
 `rebar bridge fsck`, and `rebar doctor`. The legacy `jira-onboard`, `bridge-probe`, and
 `bridge-fsck` spellings remain available as compatibility aliases.
 
+`rebar bridge fsck` is audit-only with one exception: `rebar bridge fsck --repair` prunes
+reverse bindings that have no forward entry (`store_integrity` findings of kind
+`reverse_missing_forward`). Such a key is otherwise unremovable and makes the binding-drift
+canary alert indefinitely on a benign fault, masking real integrity problems behind a constant
+non-zero count. The prune acts on exactly the audited finding set and refuses — writing
+nothing — when any other integrity kind is present, when an orphaned key is tombstoned in
+`bindings-retired.json`, or when the store changed since the audit. Deletion goes through the
+binding store's own atomic write, the forward map is left untouched, and each run appends a
+durable record (actor, deleted keys, before/after counts) to
+`rebar-bridge-repair-audit.jsonl` in the tracker's git directory. It exits `0` when it healed
+the store or found nothing to do, `1` when a guard refused, and `2` on operational failure.
+
 Repository-scheduled synchronization is portable across GitHub Actions, Jenkins, and GitLab.
 Each provider prepares a full-history checkout and `.tickets-tracker`, then invokes
 the installed `rebar bridge run` command. The adapter retains the established `MODE` values

@@ -168,7 +168,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `SHUTDOWN_CANCEL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
-| `USER` | `src/rebar/_commands/tracker_maintenance.py` |  |
+| `USER` | `src/rebar/_commands/bridge_repair.py`, `src/rebar/_commands/tracker_maintenance.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 

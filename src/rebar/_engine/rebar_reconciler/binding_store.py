@@ -424,10 +424,23 @@ class BindingStore:
         self._data["reverse"][jira_key] = local_id
 
     def unbind(self, local_id: str) -> None:
-        """Remove binding (for cleanup/rollback)."""
+        """Remove binding (for cleanup/rollback), clearing BOTH indexes.
+
+        Gating the reverse pop on the forward entry's ``jira_key`` made cleanup
+        of one index depend on the other, which this method has just destroyed:
+        a keyless forward entry stranded its reverse key permanently, reported
+        by ``bridge fsck`` as ``reverse_missing_forward`` forever (874a). The
+        keyed pop stays an O(1) fast path; the sweep then clears any reverse key
+        still pointing at ``local_id`` — including one orphaned out of band (a
+        prune, a manual edit, a ``merge=ours`` artifact), which is what the
+        ``bridge fsck --repair`` prune verb relies on.
+        """
         entry = self._data["bindings"].pop(local_id, None)
+        reverse = self._data["reverse"]
         if entry is not None and entry.get("jira_key"):
-            self._data["reverse"].pop(entry["jira_key"], None)
+            reverse.pop(entry["jira_key"], None)
+        for jira_key in [key for key, value in reverse.items() if value == local_id]:
+            reverse.pop(jira_key, None)
 
     # Last-synced PEER STATE thin delegates — semantics + unit tests: peer_state.py (4522).
 
