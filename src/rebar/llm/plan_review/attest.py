@@ -14,6 +14,8 @@ from .manifest import (
     _MANIFEST_PREFIX,
     _REFRESHED_PREFIX,
     _REGVER_PREFIX,
+    CURRENCY_BASIS_FAIL_SAFE,
+    CURRENCY_BASIS_FILE_IMPACT,
     ManifestFormatError,
     _cited_paths,
     _hash_basis,
@@ -23,12 +25,14 @@ from .manifest import (
     classify_file_scope,
     dependency_hashes,
     is_plan_review_manifest,
+    manifest_currency_basis,
     manifest_deps,
     manifest_disabled_builtins,
     manifest_file_scope,
     manifest_material,
     manifest_pins,
     manifest_priority_floor,
+    manifest_read_set,
     manifest_rebar_version,
     manifest_regver,
     manifest_review_phase,
@@ -82,12 +86,14 @@ __all__ = [
     "delivered_now",
     "dependency_hashes",
     "is_plan_review_manifest",
+    "manifest_currency_basis",
     "manifest_deps",
     "manifest_disabled_builtins",
     "manifest_file_scope",
     "manifest_material",
     "manifest_pins",
     "manifest_priority_floor",
+    "manifest_read_set",
     "manifest_rebar_version",
     "manifest_regver",
     "manifest_review_phase",
@@ -156,8 +162,23 @@ def sign_plan_review(
         verdict.setdefault("coverage", {})["disabled_builtins"] = disabled
     from .material_diff import reviewed_material_parts
 
+    # Ticket 81ca: the agentic passes' read-set rides INSIDE the signed material (so tampering
+    # fails verification and resolves to the fail-safe), alongside the basis the dependency set
+    # was actually composed on. ``read_set=None`` — no agentic pass ran, or telemetry collection
+    # failed — records no marker and leaves the pre-change whole-HEAD fallback in force.
+    _raw_coverage = verdict.get("coverage")
+    _coverage: dict[str, Any] = _raw_coverage if isinstance(_raw_coverage, dict) else {}
+    signed_read_set = (
+        list(_coverage.get("read_set") or []) if _coverage.get("read_set_recorded") else None
+    )
+    currency_basis = _coverage.get("currency_basis") or (
+        CURRENCY_BASIS_FILE_IMPACT if deps else CURRENCY_BASIS_FAIL_SAFE
+    )
+
     manifest = build_manifest(
         verdict,
+        read_set=signed_read_set,
+        currency_basis=currency_basis,
         material=material,
         # Per-component fingerprints of the SAME basis (bug 94a3) — additive, deterministic,
         # and omitted entirely when they cannot be proven to reproduce ``material``, so the
@@ -202,10 +223,14 @@ def sign_plan_review(
 
 
 def _rehash(paths, *, repo_root=None) -> dict[str, str]:
-    """Re-hash the given dependency paths through the shared :func:`_hash_basis` boundary
-    (the active snapshot during a gate run, else the working tree)."""
+    """Re-hash the given dependency entries through the shared :func:`_hash_basis` boundary
+    (the active snapshot during a gate run, else the working tree) and the shared
+    :func:`read_set.hash_dep_entry` dispatcher — so a glob entry's membership digest is
+    computed exactly one way on both the signing and the re-check side (ticket 81ca)."""
+    from .read_set import hash_dep_entry
+
     base = _hash_basis(repo_root)
-    return {p: _hash_file(p, base=base) for p in sorted(paths)}
+    return {p: hash_dep_entry(p, base=base) for p in sorted(paths)}
 
 
 def drift_refresh_candidate(ticket_id: str, *, repo_root=None) -> dict[str, Any] | None:
@@ -306,6 +331,11 @@ def refresh_attestation(
         pins=snapshot.related_material,
         review_phase=manifest_review_phase(prior_manifest),
         priority_floor=manifest_priority_floor(prior_manifest),
+        # Carry the prior read-set/basis forward verbatim (ticket 81ca): a refresh re-binds the
+        # SAME paths to current hashes, so silently dropping the scoping record would demote a
+        # read-set-scoped attestation to the whole-HEAD fail-safe on its first refresh.
+        read_set=manifest_read_set(prior_manifest),
+        currency_basis=manifest_currency_basis(prior_manifest),
     )
     if initial_generation is not None:
         from . import generation
@@ -570,9 +600,13 @@ def compute_validity(
             if deps:
                 # Re-hash at the CURRENT gate ref, NOT the signature's own pinned SHA —
                 # that tautology made scoped drift undetectable in attested mode (72d9).
+                from .read_set import hash_dep_entry
+
                 base = _hash_basis(repo_root, at_current_gate_ref=True)
                 drifted = [
-                    p for p, digest in sorted(deps.items()) if _hash_file(p, base=base) != digest
+                    p
+                    for p, digest in sorted(deps.items())
+                    if hash_dep_entry(p, base=base) != digest
                 ]
                 if drifted:
                     shown = ", ".join(drifted[:5]) + (" …" if len(drifted) > 5 else "")
