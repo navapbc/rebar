@@ -159,11 +159,36 @@ def _cli_tracker(root: Path, snapshot: dict) -> Path:
     return tracker
 
 
-def _file_bytes(root: Path) -> dict[str, bytes]:
-    return {
+def _git_out(root: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=root, capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _store_snapshot(root: Path) -> dict[str, object]:
+    """Snapshot what "the store did not change" actually means, in two parts.
+
+    Payload: every file OUTSIDE ``.git/`` byte-for-byte -- the event files, ``.bridge_state/``
+    and bindings the store owns.
+
+    Git state: the LOGICAL ref state (``HEAD`` plus every ref) rather than the bytes of git's
+    object storage. Git's background auto-maintenance rewrites that storage on its own
+    schedule -- it takes ``.git/objects/maintenance.lock`` and repacks loose objects into a
+    packfile -- so comparing those bytes makes the oracle depend on git's scheduler rather than
+    on the command under test. Repacking cannot move a ref, so it is invisible here, while a
+    command that actually committed to the store would move ``HEAD`` and be caught.
+    """
+    payload = {
         str(path.relative_to(root)): path.read_bytes()
         for path in root.rglob("*")
-        if path.is_file() and path.name != ".cache.json"
+        if path.is_file()
+        and path.name != ".cache.json"
+        and path.relative_to(root).parts[0] != ".git"
+    }
+    return {
+        "payload": payload,
+        "head": _git_out(root, "rev-parse", "HEAD"),
+        "refs": _git_out(root, "for-each-ref", "--format=%(refname) %(objectname)"),
     }
 
 
@@ -198,8 +223,8 @@ def _run_cli(tracker: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
 def test_cli_keyset_is_informational_and_keeps_json_envelope_read_only(tmp_path):
     full_tracker = _cli_tracker(tmp_path / "full", {"REB-464": {"status": "To Do"}})
     keyset_tracker = _cli_tracker(tmp_path / "keyset", {"REB-464": {}})
-    full_before = _file_bytes(full_tracker)
-    keyset_before = _file_bytes(keyset_tracker)
+    full_before = _store_snapshot(full_tracker)
+    keyset_before = _store_snapshot(keyset_tracker)
 
     full_cp, full = _run_cli(full_tracker)
     keyset_cp, keyset = _run_cli(keyset_tracker)
@@ -219,5 +244,39 @@ def test_cli_keyset_is_informational_and_keeps_json_envelope_read_only(tmp_path)
     assert full["binding_drift"]["would_terminal"] == [{"local_id": "loc-a", "jira_key": "REB-464"}]
     assert keyset["binding_drift"]["would_terminal"] == []
     assert keyset["binding_drift"]["indeterminate"][0]["local_id"] == "loc-a"
-    assert _file_bytes(full_tracker) == full_before
-    assert _file_bytes(keyset_tracker) == keyset_before
+    assert _store_snapshot(full_tracker) == full_before
+    assert _store_snapshot(keyset_tracker) == keyset_before
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_store_snapshot_survives_git_maintenance_but_still_catches_mutation(tmp_path):
+    """The read-only oracle must answer "did the store change?", not "did git reorganise?".
+
+    Git auto-maintenance runs on its own schedule: it takes a lock under ``.git/objects/`` and
+    repacks loose objects. Neither is a store mutation, and both used to flip a byte-for-byte
+    snapshot of the whole tracker directory -- which is how this suite went intermittently red.
+    Both limbs are exercised here, and the second half of the test proves the oracle did not buy
+    that stability by going blind.
+    """
+    tracker = _cli_tracker(tmp_path / "churn", {"REB-464": {"status": "To Do"}})
+    before = _store_snapshot(tracker)
+
+    lock = tracker / ".git" / "objects" / "maintenance.lock"
+    lock.write_bytes(b"")
+    assert _store_snapshot(tracker) == before, "a maintenance lock file is not a store mutation"
+    lock.unlink()
+
+    subprocess.run(["git", "gc", "--quiet"], cwd=tracker, check=True)
+    assert _store_snapshot(tracker) == before, "repacking objects is not a store mutation"
+
+    payload_file = tracker / ".bridge_state" / "prev_snapshot.json"
+    payload_file.write_text(json.dumps({"REB-464": {"status": "Done"}}), encoding="utf-8")
+    mutated = _store_snapshot(tracker)
+    assert mutated != before, "a rewritten store payload file must be detected"
+
+    subprocess.run(["git", "add", "."], cwd=tracker, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "mutation"], cwd=tracker, check=True)
+    committed = _store_snapshot(tracker)
+    assert committed["head"] != before["head"], "a commit that moves HEAD must be detected"
+    assert committed["refs"] != before["refs"], "a commit that moves refs must be detected"
