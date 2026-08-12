@@ -59126,7 +59126,7 @@
         "assignee": null,
         "description": "",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "preflip-window-probe (local writer)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -80970,7 +80970,7 @@
         "assignee": null,
         "description": "",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "status-idea-probe"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -82904,7 +82904,7 @@
         "assignee": null,
         "description": "",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "deploy-check-probe"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -91185,7 +91185,7 @@
         "assignee": null,
         "description": "",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "global-build-signing-check"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -115215,7 +115215,7 @@
         "assignee": null,
         "description": "STATUS: TABLED \u2014 a sensitive reconciler-CORE change, deferred by decision. This idea is a resume pointer; the FULL raw record (measured facts, verified findings, 4 history dossiers on WHY the current design exists, options, open gates) is in session_log **bdc7-9256-ff48-4520** (felicific-hardheaded-elephant). Prior measured facts + cited prior-art research: session_log **b96a-15a5-1c0a-47c5**. Umbrella: **1270-b740**.\n\n## Problem\nThe rebar tickets git store (.tickets-tracker, `tickets` branch) grows UNBOUNDEDLY: ~443 MB / ~178k objects for ~15k tickets, of which ~85% (~375 MB) is the reconciler's `.bridge_state/` Jira-sync cache \u2014 bindings.json (219 MB / ~987 versions) + prev_snapshot.json (155 MB / ~4450 versions). By packed size the repo is 95.7% blobs, so tree/sharding/active-archive splits are the WRONG lever. Every ephemeral CI job and local clone pays the full history on clone.\n\n## Key findings (verified this session)\n1. Nothing reads the git HISTORY of .bridge_state \u2014 only the current worktree copy. Its history's sole value is debugging.\n2. prev_snapshot is NOT redundant (an earlier \"delete it\" hypothesis was disproven): its direction-arbitration role IS superseded by the per-binding baseline in bindings.json, but it remains the load-bearing EDGE-TRIGGER ancestor (run_differs.py:198 -> differ.py:299 inbound-create). It is, however, grossly OVER-PROVISIONED: its live consumers need only the SET of Jira keys, not the full ACLI payload -> can shrink 24 MB -> ~25 KB and stop churning every pass.\n3. bindings.json's dominant growth driver is `baseline_advanced_at`, a WRITE-ONLY timestamp bumped unconditionally on ~92% of entries every pass (never read) \u2014 so the file rewrites a scattered delta every pass (~987 versions ~= ~987 passes). Content is 97% baseline, 86% of which is the description stored as full ADF dict.\n4. Storage posture is settled (epic 6c9c): .bridge_state stays committed on-branch as a merge=ours derived cache; event-sourcing/re-homing it (WS-1) was explicitly dropped. Trust verification is ancestry-based (survives a consistent history rewrite) EXCEPT the absolute-SHA enforce_since pin (rebar.toml:105).\n\n## Plan (tabled; implement in order)\n1. prev_snapshot -> bare KEY-SET (dict {jira_key:{}}), after clearing the open gate G1. + dead-code cleanup of the fixture-only prev plumbing.\n2. bindings.json: CHURN GUARD (drop/guard baseline_advanced_at + write-when-changed in set_baseline; collapses version count) THEN TEXT NORMALIZE (adf_to_text + .name, -66%, no migration). DIGEST (-92%) optional, higher-risk, only behind a dual-write-shadow rollout, and EXCLUDE assignee (one-to-many match = REB-532 risk).\n3. DEBUG TRAIL: a separate bounded full-Jira-snapshot artifact, max 1/day, 15-day retention, on a dated disjoint path, never fail-closed.\n4. ONE-TIME coordinated history reclaim (filter-repo strip old .bridge_state blobs): a reconciler-paused, all-clones-converged 8-step flag-day with lockstep enforce_since re-pin. Do LAST.\n\n## Open gates (resolve before implementing) \u2014 see session log [10]\n- G1 (blocks step 1): resolve whether differ._compute_mutations_emit_both reaches Jira with a key-set prev (null-ancestor field-clear risk) via a corpus mutation-diff. THE critical fence.\n- G2 (blocks digest): normalization parity + extend direction-preservation property suite first.\n- G3: coordinate with the ACTIVE reconciler session (epic 58b0 sync-correctness) \u2014 shared differ/field contract; ride the proven dual-write-shadow -> N-divergent=0 -> flip rollout template.\n- G4: enforce_since re-pin + converge ALL auto-pushing clones or --allow-unrelated-histories drags the stripped blobs back.\n\n## Decisions already made\nDebug trail = 1/day x 15-day; existing 337 MB = one-time coordinated reclaim; bindings.json investigated now (folded in). .bridge_state stays committed (required for ephemeral CI + local consistency).",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "Bound tickets-repo growth: shrink reconciler .bridge_state on-branch (prev->key-set + bindings churn-guard/normalize) + one-time history reclaim"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
