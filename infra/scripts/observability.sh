@@ -214,9 +214,27 @@ fi
 # Counted from the UNIT journal with the same offset-delta shape as §4d, and published
 # dimensionless to match the alarms. Kept as distinct tokens from AUTODEPLOY_ERROR on purpose:
 # folding a routine, healthy deferral into deploy_errors would page on normal burst behaviour.
+#
+# SPLIT BY REASON (bug 613a). The interrupt marker carries a `reason` the rolled-up counter used
+# to discard, and the two reasons have OPPOSITE remediations:
+#   bound-exceeded      — DEPLOY_DEFER_MAX was spent with reviews still in flight. The bot is
+#                         chronically busy; the drain check itself is WORKING.
+#   signal-unavailable  — /health's in_flight was unreadable, so the deploy ran with NO drain
+#                         check. The probe is broken and every deploy is blind. The urgent one.
+# A CloudWatch-only sweep could not tell them apart, so answering [rebar:7b4a-0f39-1a45-4ce9]
+# needed SSM shell access to read the journal. Each reason is now counted into its OWN metric,
+# so the alarm carries the remediation. Done with distinct journal PATTERNS into distinct metric
+# names — not a CloudWatch dimension — mirroring how deploy_deferrals is already kept separate,
+# and keeping every side of this dimensionless (a dimension added on only one side silently
+# unmatches; see monitoring_s4b.tf). The rolled-up `review_interrupts` is still published so
+# pre-split history stays readable and any future third reason is still counted somewhere; only
+# the per-reason metrics are alarmed, so one interrupt never double-pages.
 DEFER_OFFSET_FILE="${DEFER_OFFSET_FILE:-/var/lib/rebar/autodeploy-defer-offset}"
 INTERRUPT_OFFSET_FILE="${INTERRUPT_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-offset}"
-mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")"
+INTERRUPT_BOUND_OFFSET_FILE="${INTERRUPT_BOUND_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-bound-offset}"
+INTERRUPT_SIGNAL_OFFSET_FILE="${INTERRUPT_SIGNAL_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-signal-offset}"
+mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")" \
+  "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")"
 publish_autodeploy_marker_delta() {
   local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
   total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
@@ -237,6 +255,18 @@ publish_autodeploy_marker_delta AUTODEPLOY_DEFERRED deploy_deferrals \
   "$DEFER_OFFSET_FILE" "auto-deploys deferred for an in-flight review"
 publish_autodeploy_marker_delta AUTODEPLOY_REVIEW_INTERRUPT review_interrupts \
   "$INTERRUPT_OFFSET_FILE" "review-bot reviews interrupted by a deploy"
+# The first argument is an ERE handed to `grep -cE`, so the reason-scoped counters select on the
+# marker's JSON payload (autodeploy.sh `marker()` emits
+# `AUTODEPLOY_REVIEW_INTERRUPT {"ts": …, "reason": "<reason>", "detail": …}`). The `[[:space:]]*`
+# keeps the match independent of the JSON separator spacing.
+publish_autodeploy_marker_delta \
+  'AUTODEPLOY_REVIEW_INTERRUPT.*"reason":[[:space:]]*"bound-exceeded"' \
+  review_interrupts_bound_exceeded "$INTERRUPT_BOUND_OFFSET_FILE" \
+  "reviews interrupted after the deferral bound was exhausted (review-bot chronically busy)"
+publish_autodeploy_marker_delta \
+  'AUTODEPLOY_REVIEW_INTERRUPT.*"reason":[[:space:]]*"signal-unavailable"' \
+  review_interrupts_signal_unavailable "$INTERRUPT_SIGNAL_OFFSET_FILE" \
+  "reviews interrupted with the in-flight signal UNREADABLE (deploys are running blind)"
 
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
