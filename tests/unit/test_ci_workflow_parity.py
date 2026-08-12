@@ -18,6 +18,7 @@ optionality wiring — are preserved, now checked against the reusable that owns
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
@@ -131,6 +132,293 @@ def test_mutation_workflows_are_bounded_and_publish_results() -> None:
     assert _REUSABLE_MUTATION in broad
     assert "schedule:" in broad
     assert "workflow_dispatch:" in broad
+
+
+def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard() -> None:
+    """One selector topology serves push, PR, Gerrit, and weekly mutation lanes."""
+    import re
+
+    import yaml
+
+    def trigger_map(document: dict[Any, Any]) -> dict[str, Any] | None:
+        # PyYAML's YAML-1.1 resolver parses an unquoted ``on`` key as boolean True.
+        key: str | bool | None = "on" if "on" in document else True if True in document else None
+        triggers = document.get(key) if key is not None else None
+        return triggers if isinstance(triggers, dict) else None
+
+    def normalized_expression(value: Any) -> str:
+        expression = str(value).strip()
+        if expression.startswith("${{") and expression.endswith("}}"):
+            expression = expression[3:-2]
+        return "".join(expression.split())
+
+    def executable_lines(run: Any) -> list[str]:
+        lines = []
+        for raw_line in str(run).splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            lines.append(line.split(" #", 1)[0].rstrip())
+        return lines
+
+    def selector_dataflow_contract(lines: list[str]) -> dict[str, Any]:
+        canonical = [
+            "selector_args=(select --base HEAD^ --head HEAD)",
+            'if [[ "${{ inputs.all-shards }}" == "true" ]]; then',
+            "selector_args+=(--all-shards)",
+            "fi",
+            'selection_json="$(uv run --locked python scripts/mutation_gate.py '
+            '"${selector_args[@]}")"',
+            'matrix="$(jq -c \'{shard: .selected_shards}\' <<<"$selection_json")"',
+            'has_shards="$(jq -r \'.empty_selection | not\' <<<"$selection_json")"',
+            'echo "matrix=$matrix" >> "$GITHUB_OUTPUT"',
+            'echo "has-shards=$has_shards" >> "$GITHUB_OUTPUT"',
+        ]
+        positions = [lines.index(line) if lines.count(line) == 1 else None for line in canonical]
+        present_positions = [position for position in positions if position is not None]
+        assignment_write = re.compile(
+            r"(?<![A-Za-z0-9_$\"'])"
+            r"(?:selector_args|selection_json|matrix|has_shards)"
+            r"(?:\[[^]\n]+\])?\+?=(?!=)"
+        )
+
+        return {
+            "canonical_sequence_is_unique_and_ordered": len(present_positions) == len(canonical)
+            and present_positions == sorted(present_positions),
+            "assignment_lines": [line for line in lines if assignment_write.search(line)],
+        }
+
+    def checkout_contract(steps: list[dict[str, Any]]) -> dict[str, bool]:
+        checkout_steps = [step for step in steps if "checkout" in str(step.get("uses", "")).lower()]
+        branch_or_pr = [
+            step
+            for step in checkout_steps
+            if str(step.get("uses", "")).startswith("actions/checkout@")
+            and normalized_expression(step.get("if")) == "inputs.gerrit-refspec==''"
+        ]
+        exact_patchset = [
+            step
+            for step in checkout_steps
+            if str(step.get("uses", "")).startswith(
+                "lfreleng-actions/checkout-gerrit-change-action@"
+            )
+            and normalized_expression(step.get("if")) == "inputs.gerrit-refspec!=''"
+        ]
+        destructive_ref_replacement = re.compile(r"\bgit\s+(?:checkout|switch|reset)\b")
+        return {
+            "complete_action_set": len(checkout_steps) == 2,
+            "branch_or_pr": len(branch_or_pr) == 1
+            and (branch_or_pr[0].get("with") or {}).get("fetch-depth") == 2
+            and (branch_or_pr[0].get("with") or {}).get("persist-credentials") is False,
+            "exact_patchset": len(exact_patchset) == 1
+            and all(
+                (exact_patchset[0].get("with") or {}).get(key) == f"${{{{ inputs.{key} }}}}"
+                for key in ("gerrit-refspec", "gerrit-project", "gerrit-url")
+            ),
+            "no_destructive_ref_replacement": not any(
+                destructive_ref_replacement.search(line)
+                for step in steps
+                for line in executable_lines(step.get("run", ""))
+            ),
+        }
+
+    github_expression = re.compile(r"\$\{\{(?P<body>.*?)\}\}", re.DOTALL)
+    secret_context = re.compile(r"\bsecrets\b")
+
+    def has_secret_expression(value: str) -> bool:
+        return any(
+            secret_context.search(match.group("body"))
+            for match in github_expression.finditer(value)
+        )
+
+    def secret_paths(node: Any, path: str = "$") -> list[str]:
+        found: list[str] = []
+        if isinstance(node, dict):
+            for key, value in node.items():
+                child_path = f"{path}.{key}"
+                if key == "secrets":
+                    found.append(child_path)
+                found.extend(secret_paths(value, child_path))
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                found.extend(secret_paths(value, f"{path}[{index}]"))
+        elif isinstance(node, str) and has_secret_expression(node):
+            found.append(path)
+        return found
+
+    def mutation_call_contract(job: Any) -> dict[str, Any]:
+        return {
+            "uses_reusable": isinstance(job, dict) and job.get("uses") == _REUSABLE_MUTATION,
+            "secret_paths": secret_paths(job),
+        }
+
+    def active_by_default(job: Any) -> bool:
+        return isinstance(job, dict) and (
+            "if" not in job or normalized_expression(job.get("if")).lower() == "true"
+        )
+
+    reusable_raw = _read(_ROOT / ".github" / "workflows" / "_mutation.yml")
+    workflow = yaml.safe_load(reusable_raw)
+    test_workflow = yaml.safe_load(_read(_TEST_YML))
+    gerrit_workflow = yaml.safe_load(_read(_GERRIT_YML))
+    sweep_workflow = yaml.safe_load(_read(_ROOT / ".github" / "workflows" / "mutation.yml"))
+
+    jobs = workflow.get("jobs") or {}
+    selector = jobs.get("selector") or {}
+    mutation = jobs.get("mutation") or {}
+    selector_steps = selector.get("steps") or []
+    mutation_steps = mutation.get("steps") or []
+    select_steps = [
+        step
+        for step in selector_steps
+        if any("scripts/mutation_gate.py" in line for line in executable_lines(step.get("run", "")))
+    ]
+    driver_steps = [
+        step for step in mutation_steps if "mutation_gate.py run" in str(step.get("run", ""))
+    ]
+    artifact_steps = [
+        step for step in mutation_steps if "actions/upload-artifact@" in str(step.get("uses", ""))
+    ]
+    workflow_triggers = trigger_map(workflow)
+    workflow_call = (
+        workflow_triggers.get("workflow_call") if workflow_triggers is not None else None
+    )
+    select_lines = executable_lines(select_steps[0].get("run")) if len(select_steps) == 1 else []
+    driver_run = str(driver_steps[0].get("run", "")) if len(driver_steps) == 1 else ""
+    artifact = artifact_steps[0] if len(artifact_steps) == 1 else {}
+    outputs = selector.get("outputs") or {}
+    strategy = mutation.get("strategy") or {}
+    needs = mutation.get("needs") or []
+    needs = [needs] if isinstance(needs, str) else needs
+    test_triggers = trigger_map(test_workflow)
+    test_mutation = (test_workflow.get("jobs") or {}).get("mutation")
+    gerrit_mutation = (gerrit_workflow.get("jobs") or {}).get("mutation")
+    gerrit_vote = (gerrit_workflow.get("jobs") or {}).get("vote") or {}
+    vote_needs = gerrit_vote.get("needs") or []
+    vote_needs = [vote_needs] if isinstance(vote_needs, str) else vote_needs
+    sweep_triggers = trigger_map(sweep_workflow)
+    sweep_mutation = (sweep_workflow.get("jobs") or {}).get("mutation")
+    contract = {
+        "reusable_workflow_call_mapping": isinstance(workflow_call, dict),
+        "selector_outputs_from_step": all(
+            outputs.get(name) == f"${{{{ steps.select.outputs.{name} }}}}"
+            for name in ("matrix", "has-shards")
+        ),
+        "selector_step_count": len(select_steps),
+        "selector_step_id": select_steps[0].get("id") if len(select_steps) == 1 else None,
+        "selector_json_dataflow": selector_dataflow_contract(select_lines),
+        "selector_checkout": checkout_contract(selector_steps),
+        "mutation_needs_selector": "selector" in needs,
+        "mutation_guarded_by_has_shards": normalized_expression(mutation.get("if"))
+        == "needs.selector.outputs.has-shards=='true'",
+        "matrix_from_selector_json": strategy.get("matrix")
+        == "${{ fromJSON(needs.selector.outputs.matrix) }}",
+        "fail_fast": strategy.get("fail-fast"),
+        "timeout_minutes": mutation.get("timeout-minutes"),
+        "mutation_checkout": checkout_contract(mutation_steps),
+        "driver_step_count": len(driver_steps),
+        "one_matrix_shard": driver_run.count("--shard") == 1
+        and "${{ matrix.shard }}" in driver_run
+        and "--all-shards" not in driver_run,
+        "per_shard_artifact": normalized_expression(artifact.get("if")) == "always()"
+        and "${{ matrix.shard }}" in str((artifact.get("with") or {}).get("name", "")),
+        "reusable_secret_paths": secret_paths(workflow),
+        "callers": {
+            "push_and_pull_request": isinstance(test_triggers, dict)
+            and "push" in test_triggers
+            and "pull_request" in test_triggers,
+            "test_mutation": {
+                **mutation_call_contract(test_mutation),
+                "eligible_on_push_and_pull_request": isinstance(test_mutation, dict)
+                and normalized_expression(test_mutation.get("if"))
+                == "github.event_name!='schedule'",
+            },
+            "gerrit_mutation": {
+                **mutation_call_contract(gerrit_mutation),
+                "active_by_default": active_by_default(gerrit_mutation),
+                "exact_inputs": isinstance(gerrit_mutation, dict)
+                and all(
+                    (gerrit_mutation.get("with") or {}).get(name) == value
+                    for name, value in {
+                        "gerrit-refspec": "${{ inputs.GERRIT_REFSPEC }}",
+                        "gerrit-project": "${{ inputs.GERRIT_PROJECT }}",
+                        "gerrit-url": "https://${{ vars.GERRIT_SERVER }}",
+                    }.items()
+                ),
+                "included_in_vote_needs": "mutation" in vote_needs,
+            },
+            "weekly_and_manual": isinstance(sweep_triggers, dict)
+            and "schedule" in sweep_triggers
+            and "workflow_dispatch" in sweep_triggers,
+            "sweep_mutation": {
+                **mutation_call_contract(sweep_mutation),
+                "active_by_default": active_by_default(sweep_mutation),
+                "all_shards": isinstance(sweep_mutation, dict)
+                and (sweep_mutation.get("with") or {}).get("all-shards") is True,
+            },
+        },
+    }
+
+    assert contract == {
+        "reusable_workflow_call_mapping": True,
+        "selector_outputs_from_step": True,
+        "selector_step_count": 1,
+        "selector_step_id": "select",
+        "selector_json_dataflow": {
+            "canonical_sequence_is_unique_and_ordered": True,
+            "assignment_lines": [
+                "selector_args=(select --base HEAD^ --head HEAD)",
+                "selector_args+=(--all-shards)",
+                'selection_json="$(uv run --locked python scripts/mutation_gate.py '
+                '"${selector_args[@]}")"',
+                'matrix="$(jq -c \'{shard: .selected_shards}\' <<<"$selection_json")"',
+                'has_shards="$(jq -r \'.empty_selection | not\' <<<"$selection_json")"',
+            ],
+        },
+        "selector_checkout": {
+            "complete_action_set": True,
+            "branch_or_pr": True,
+            "exact_patchset": True,
+            "no_destructive_ref_replacement": True,
+        },
+        "mutation_needs_selector": True,
+        "mutation_guarded_by_has_shards": True,
+        "matrix_from_selector_json": True,
+        "fail_fast": False,
+        "timeout_minutes": 30,
+        "mutation_checkout": {
+            "complete_action_set": True,
+            "branch_or_pr": True,
+            "exact_patchset": True,
+            "no_destructive_ref_replacement": True,
+        },
+        "driver_step_count": 1,
+        "one_matrix_shard": True,
+        "per_shard_artifact": True,
+        "reusable_secret_paths": [],
+        "callers": {
+            "push_and_pull_request": True,
+            "test_mutation": {
+                "uses_reusable": True,
+                "secret_paths": [],
+                "eligible_on_push_and_pull_request": True,
+            },
+            "gerrit_mutation": {
+                "uses_reusable": True,
+                "secret_paths": [],
+                "active_by_default": True,
+                "exact_inputs": True,
+                "included_in_vote_needs": True,
+            },
+            "weekly_and_manual": True,
+            "sweep_mutation": {
+                "uses_reusable": True,
+                "secret_paths": [],
+                "active_by_default": True,
+                "all_shards": True,
+            },
+        },
+    }
 
 
 def test_shared_gate_signatures_live_in_the_reusable() -> None:
