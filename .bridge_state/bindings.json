@@ -24225,7 +24225,7 @@
         },
         "description": "Update the author-facing documentation so writers know to de-risk risky runtime mechanisms out-of-loop before committing them to a slow delivery loop \u2014 the behavior T15 rewards.\n\n## Work\n- Edit `src/rebar/_guides/writing-a-passing-plan.md`, surfaced by `rebar explain plan`, to explain that when correctness only resolves after a slow codified delivery loop such as CI/CD, IaC apply, or provisioning, the plan names the risky mechanisms and commits to a concrete fast out-of-loop proof before codifying.\n- Identify the new packaged-guide guidance as T15 so authors can find the corresponding rubric.\n- State that the proof is either a local run or a manual probe against the real target.\n- State that throwaway experiments are cleaned up with teardown scoped only to resources they created.\n- Because the packaged guide will cite T15, regenerate `src/rebar/_guides/criterion-pins.json` with `.venv/bin/python -m rebar.llm.plan_review.guide_parity regenerate`.\n- Update the hand-authored overlay enumeration in `docs/plan-review-gate.md` from the stale T1\u2013T12 range to T1\u2013T15 and align its stated criterion count with the validated registry. The generated criteria guide itself is owned by the criterion story, not this story.\n- Keep all guidance stack-agnostic; CI/CD, IaC apply, and provisioning are mechanism classes, not product-specific instructions.\n\n- Update the stale registry module docstring in src/rebar/llm/plan_review/registry.py from 32 / T1\u2013T12 to the validated 44 / T1\u2013T15 vocabulary, keeping the implementation authority aligned with the author-facing docs.\n\n## Acceptance Criteria\n- [x] `rebar explain plan` renders guidance to name risky mechanisms whose correctness resolves only after a slow codified delivery loop.\n- [x] `rebar explain plan` identifies the new guidance as T15.\n- [x] `rebar explain plan` renders the two permitted fast proof forms: a local run or a manual probe against the real target.\n- [x] `rebar explain plan` renders cleanup guidance that limits teardown to resources created by the throwaway experiment.\n- [x] The new guidance does not hardcode Terraform, Docker, or another product-specific stack.\n- [x] `src/rebar/_guides/criterion-pins.json` contains the regenerated T15 pin for the packaged plan guide.\n- [x] `docs/plan-review-gate.md` describes the triggered overlay range as T1\u2013T15.\n- [x] `docs/plan-review-gate.md` states the criterion count reported by registry validation.\n- [x] Existing `rebar explain plan` guide rendering remains intact outside the new guidance.\n\n- [x] The registry module docstring states the same validated criterion count and T-overlay range as docs/plan-review-gate.md.\n\n## Testing\n- Run `.venv/bin/rebar explain plan` and verify the rendered T15 slow-loop, local-or-manual-proof, and scoped-cleanup guidance.\n- Run `.venv/bin/pytest tests/unit/test_guides.py tests/unit/test_guide_criterion_pins.py -q` to prove the packaged guide renders through the supported explain surface and the generated pin manifest is current.\n- Run `.venv/bin/python -m rebar.llm.plan_review.registry validate-routing` and confirm the reported registry count matches `docs/plan-review-gate.md`.\n- Inspect the changed prose to confirm it contains no product-specific Terraform or Docker instruction.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Update writing-a-passing-plan guide + gate docs for de-risk-before-slow-loop"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -83071,124 +83071,15 @@
     "a6ea-6a28-1d84-4626": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "Expose `verify_completion` on CLI + MCP, mirroring the `review` op so the CLI/MCP coverage guards pass.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope (files)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/_cli/__init__.py`: `rebar verify-completion <id> [--graph] [-o json|text] [--check]`; intercept in `main()`; **no pinned help `.txt`** (mirror review \u2014 avoids the live-driving CLI coverage guard, BL-4); `LLMError`\u2192`Error:`+exit 1.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/mcp_server.py`: `verify_completion(ticket_id, graph=False)` tool gated by `_allow_llm()`; plain dict, no advertised outputSchema; add to `NO_SCHEMA_EXEMPT` in the MCP coverage guard (BL-4).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `rebar verify-completion --check` exits 0; text + json output render verdict/findings",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] MCP tool gated by `REBAR_MCP_ALLOW_LLM`; absent \u2192 clean typed error",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] MCP coverage guard passes (`verify_completion` in `NO_SCHEMA_EXEMPT`); CLI coverage guard unaffected (no help arm)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] optionality matrix extended: `completion` in discovery tuple, `verify_completion` in OPERATIONS + per-interface degradation",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "Expose `verify_completion` on CLI + MCP, mirroring the `review` op so the CLI/MCP coverage guards pass.\n\n## Scope (files)\n- `src/rebar/_cli/__init__.py`: `rebar verify-completion <id> [--graph] [-o json|text] [--check]`; intercept in `main()`; **no pinned help `.txt`** (mirror review \u2014 avoids the live-driving CLI coverage guard, BL-4); `LLMError`\u2192`Error:`+exit 1.\n- `src/rebar/mcp_server.py`: `verify_completion(ticket_id, graph=False)` tool gated by `_allow_llm()`; plain dict, no advertised outputSchema; add to `NO_SCHEMA_EXEMPT` in the MCP coverage guard (BL-4).\n\n## Acceptance Criteria\n- [ ] `rebar verify-completion --check` exits 0; text + json output render verdict/findings\n- [ ] MCP tool gated by `REBAR_MCP_ALLOW_LLM`; absent \u2192 clean typed error\n- [ ] MCP coverage guard passes (`verify_completion` in `NO_SCHEMA_EXEMPT`); CLI coverage guard unaffected (no help arm)\n- [ ] optionality matrix extended: `completion` in discovery tuple, `verify_completion` in OPERATIONS + per-interface degradation",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "WS-3: CLI + MCP surfaces for verify_completion"
       },
       "baseline_advanced_at": "2026-07-19T03:03:39Z",
       "created_at": "2026-06-25T23:11:06Z",
       "jira_key": "REB-264",
+      "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:11:06Z"
     },
@@ -115563,7 +115454,7 @@
     "e59d-3418-67ff-4aff": {
       "baseline": {
         "assignee": null,
-        "description": "# Cloud Markdown\u2194ADF functions (pure capability; AdfCodec untouched)\n\n## Context / Problem\nJira Cloud stores rich text as ADF (structured JSON). The `RichTextCodec` seam (epic e369, story J3) routes Cloud rich text through `AdfCodec` (`adapters/jira/rich_text_codec.py`), a pass-through over the pinned `adapters/jira/adf.py`. **`adf.py`'s encode is plain-text-structured, not Markdown-aware:** `text_to_adf` (`adf.py:275`) splits on blank lines and emits each block as one `paragraph`, so headings, list markers, fenced code and inline bold/strike/link are carried as **literal characters** and Cloud renders raw source. `adf_to_text` (`adf.py:26`) already emits Markdown-ish text on decode; the missing half is a Markdown-aware **encode**.\n\n**Why this story ships pure functions, not a codec change.** On Cloud the codec ops are reachable on the LIVE send path (`AdfCodec.fit_outbound` fits the posted description; the compare sites call `adf.py` directly). Repointing `AdfCodec` here would change live truncation and comparison \u2014 a cutover that must land together with echo-safety in story 3388. So **this story adds the Markdown\u2194ADF functions and their tests, and leaves `AdfCodec` a plain pass-through** (`rich_text_codec.py:25/29/33/37`). Nothing observable changes on merge.\n\n## Engine: marklas as an OPTIONAL EXTRA, lazily imported (not vendored)\n`marklas` 0.8.6 (pure-Python, mistune-based, MIT; `github.com/byExist/marklas`), pinned as a new optional extra together with its transitive `mistune`. Encode is `marklas.to_adf`; decode is `marklas.to_md`.\n\n**Superseded plan + deviation record.** The earlier plan vendored marklas under `src/rebar/_vendor/marklas/`. A plan review BLOCKed that: marklas needs `mistune`, the engine importing `adf.py` is contractually dependency-free (`pyproject.toml:69`), and `src/rebar/_vendor/` is not importable from the reconciler subprocess. Chosen instead: **lazy-import inside the three function bodies, with `ImportError` routed to the plain-text `adf.py` fallback** \u2014 preserving the stdlib-only contract and mirroring the `agents`/`metrics`/`grounding` extras. Vendoring stays available later; this is the deviation record. The \"tolerate a no-extras install\" requirement belongs to story 3388's cutover and is recorded there.\n\n## Measured evidence (re-measured here; the prior figures did not survive)\nThe prior plan quoted a 2026-08-03 export and `files/parity_*.py` artifacts. **None of that survives** \u2014 not on disk, not in git history; rebar has no attachment store. Against the live store (4,996 unique bodies):\n- Idempotence **reproduces**: 99.65% claimed vs **99.75%** measured (fixed point\n  after one pass, 400-body random sample, 0 conversion errors).\n- \"5,730 bodies\" is **stale** \u2014 an exact-cardinality AC on it can never pass.\n- Structural richness does **NOT** reproduce: 56.7% claimed vs **22.8%** measured.\n  The AC bar is set from the measurement.\n- A vendored full corpus cannot land anyway: `check-added-large-files` caps files\n  at 500 KB, there is no LFS, and `.gitignore` records a decision not to raise it.\n  The fixture is a committed, scrubbed, sharded sample from a committed generator,\n  mirroring `scripts/capture_jira_fixtures.py` doctrine.\n\n## Two defects the functions must handle (both reproduced here)\n1. **Combined-mark 2-cycle.** `A **~~both~~** end` \u21c4 `A ~~**both**~~ end` alternates\n   forever under repeated round-trip \u2014 an exact 2-cycle. A deterministic\n   **mark-order canonicalizer** in `adf_to_markdown` is required.\n2. **HTML comments are dropped.** marklas removes them: `text <!-- x --> more`\n   becomes `text  more`, and a lone marker becomes the empty string. rebar's own\n   reconciler echo marker is an HTML comment. 8 of 4,996 live bodies carry one and\n   3 of the first 8 lose it. **Mechanism:** `markdown_to_adf` self-verifies \u2014 it\n   decodes its own result and, if any `<!-- \u2026 -->` present in the source is missing,\n   returns the plain `text_to_adf(md)` encode for that body instead. Same\n   verify-then-fall-back shape used on the DC side, so an engine quirk degrades\n   richness rather than losing content.\n\n## Approach (pure functions in `adf.py`)\nAdd three functions, **not referenced by any `AdfCodec` op or live send path here**:\n1. `markdown_to_adf(md) -> dict` \u2014 Markdown-aware encode via `marklas.to_adf`, with\n   the HTML-comment self-verification above.\n2. `adf_to_markdown(doc) -> str` \u2014 decode via `marklas.to_md`, applying the\n   mark-order canonicalizer.\n3. `fit_markdown_to_adf_limit(md, *, limit=\u2026) -> str` \u2014 length-fit measuring the\n   `markdown_to_adf` serialization.\nPlus a whole-codec **plain-text fallback helper** returning the existing plain `adf.py` functions as a set, which 3388 installs on conversion error \u2014 defined and unit-tested here, wired there. Existing plain functions stay untouched.\n\n## Scope\n- `adapters/jira/adf.py` \u2014 the three functions + canonicalizer + fallback helper.\n- `pyproject.toml` \u2014 pinned optional extra (marklas + mistune); `src/rebar/_optional.py`\n  \u2014 register it.\n- `scripts/build_cloud_adf_corpus.py` (new) + `tests/fixtures/cloud_adf_corpus/` (new).\n- **UNCHANGED:** `AdfCodec` and its four ops; the shared plain-text\n  `inbound_fields.normalize_rich_text`; every live Cloud send/compare site.\n\n## Acceptance Criteria\n- [ ] `adf.markdown_to_adf` emits Markdown-aware ADF nodes (heading/list/code plus\n  inline marks) rather than literal `#`/`-`/`**`; verified by\n  `test_cloud_adf_roundtrip` asserting node types.\n- [ ] `adf.adf_to_markdown` returns the source Markdown for a structured body;\n  verified by `test_cloud_adf_roundtrip` asserting decoded equality.\n- [ ] The combined strong+strikethrough 2-cycle is eliminated by the mark-order\n  canonicalizer; verified by `test_cloud_mark_order_converges` pinning the measured\n  `**~~x~~**` \u21c4 `~~**x**~~` oscillation as a regression.\n- [ ] An HTML comment present in the source survives the round-trip, falling back to\n  the plain encode when the engine would drop it; verified by\n  `test_cloud_html_comment_survives`.\n- [ ] `adf.fit_markdown_to_adf_limit` measures the `markdown_to_adf` serialization\n  rather than the plain encode; verified by\n  `test_adf_fit_measures_the_serialized_document_not_the_plain_text`.\n- [ ] With marklas absent, importing `adf` succeeds and each of the three functions\n  returns its plain-`adf.py` result rather than raising; verified by\n  `test_cloud_functions_degrade_without_marklas` simulating the ImportError.\n- [ ] The plain-text fallback helper returns the existing plain `adf.py` functions\n  as a set; verified by `test_cloud_plain_fallback_helper_returns_plain_functions`.\n- [ ] Over the committed `tests/fixtures/cloud_adf_corpus/`, the MD\u2192ADF\u2192MD\n  round-trip reaches a fixed point after one pass for \u226599.6% of bodies (measured\n  99.75%); verified by `test_cloud_corpus_idempotence`.\n- [ ] Over the same fixture, \u226520% of bodies encode to structurally rich ADF\n  (measured 22.8%); verified by `test_cloud_corpus_richness`.\n- [ ] The committed fixture cardinality is pinned, so a silent regeneration fails;\n  verified by `test_cloud_corpus_cardinality_is_pinned`.\n- [ ] The committed fixture carries no unscrubbed emails, tenant hostnames or URLs;\n  verified by `test_cloud_corpus_carries_no_unscrubbed_secrets`.\n- [ ] `AdfCodec` and its four ops remain a plain pass-through; verified by the\n  existing `test_adf_codec_is_a_pass_through_to_the_pinned_adf_module` staying green\n  unmodified.",
+        "description": "# Cloud Markdown\u2194ADF functions (pure capability; AdfCodec untouched)\n\n## Context / Problem\nJira Cloud stores rich text as ADF (structured JSON). The `RichTextCodec` seam (epic e369, story J3) routes Cloud rich text through `AdfCodec` (`adapters/jira/rich_text_codec.py`), a pass-through over the pinned `adapters/jira/adf.py`. **`adf.py`'s encode is plain-text-structured, not Markdown-aware:** `text_to_adf` (`adf.py:275`) splits on blank lines and emits each block as one `paragraph`, so headings, list markers, fenced code and inline bold/strike/link are carried as **literal characters** and Cloud renders raw source. `adf_to_text` (`adf.py:26`) already emits Markdown-ish text on decode; the missing half is a Markdown-aware **encode**.\n\n**Why pure functions, not a codec change.** On Cloud the codec ops are reachable on the LIVE send path (`AdfCodec.fit_outbound` fits the posted description; compare sites call `adf.py` directly), so repointing `AdfCodec` here would change live truncation and comparison \u2014 a cutover that must land with echo-safety in story 3388. This story adds the functions and tests only, leaving `AdfCodec` a plain pass-through (`rich_text_codec.py:25/29/33/37`). Nothing observable changes on merge.\n\n## Engine: marklas as an OPTIONAL EXTRA, lazily imported (not vendored)\n`marklas` (pure-Python, mistune-based; `github.com/byExist/marklas`) pinned EXACTLY at **0.8.6** as a new optional extra together with its transitive `mistune` 3.3.4. The pin is exact because this story depends on a specific API surface \u2014 encode `marklas.to_adf`, decode `marklas.to_md` \u2014 and on measured output shape. Licences: marklas is **MIT**, mistune is **BSD-3-Clause** (both OSI-approved, both permissive); the extra records each.\n\n**Superseded plan + deviation record.** The earlier plan vendored marklas under `src/rebar/_vendor/marklas/`. A plan review BLOCKed that: marklas needs `mistune`, the engine importing `adf.py` is contractually dependency-free (`pyproject.toml:69`), and `src/rebar/_vendor/` is not importable from the reconciler subprocess. Chosen instead: **lazy-import inside the three function bodies, with `ImportError` routed to the plain-text `adf.py` fallback** \u2014 preserving the stdlib-only contract and mirroring the `agents`/`metrics`/`grounding` extras. Vendoring stays available later; this is the deviation record. The \"tolerate a no-extras install\" requirement belongs to story 3388's cutover and is recorded there.\n\n## Measured evidence (re-measured here; the prior figures did not survive)\nThe prior plan quoted a 2026-08-03 export and `files/parity_*.py` artifacts. **None of that survives** \u2014 not on disk, not in git history; rebar has no attachment store. Re-measured against the live store (4,996 unique bodies): idempotence **reproduces** (99.65% claimed vs 99.75% measured); the \"5,730 bodies\" cardinality is **stale**; and structural richness does **NOT** reproduce (56.7% claimed vs 20.5% measured). AC bars are set from the committed fixture, not from the claims.\n\n**Richness predicate (explicit):** a body is structurally rich iff its encoded ADF contains at least one non-paragraph BLOCK node \u2014 `heading`, `bulletList`, `orderedList`, `codeBlock`, `taskList`, `blockquote`, `rule`, `table` or `panel`. Inline marks alone do NOT qualify (that looser predicate yields 25.2%).\n\nA full corpus cannot be committed: `check-added-large-files` caps files at 500 KB, there is no LFS, and `.gitignore` records a decision not to raise it. The fixture is a scrubbed, sharded sample from a committed generator, mirroring `scripts/capture_jira_fixtures.py` doctrine.\n\n## Two defects the functions must handle (both reproduced here)\n1. **Combined-mark 2-cycle.** `A **~~both~~** end` \u21c4 `A ~~**both**~~ end` alternates\n   forever under repeated round-trip \u2014 an exact 2-cycle. A deterministic\n   **mark-order canonicalizer** in `adf_to_markdown` is required.\n2. **HTML comments are dropped.** marklas removes them: `text <!-- x --> more`\n   becomes `text  more`, and a lone marker becomes the empty string. rebar's own\n   reconciler echo marker is an HTML comment. 8 of 4,996 live bodies carry one and\n   3 of the first 8 lose it. **Mechanism:** `markdown_to_adf` self-verifies \u2014 it\n   decodes its own result and, if any `<!-- \u2026 -->` present in the source is missing,\n   returns the plain `text_to_adf(md)` encode for that body instead \u2014 so an engine\n   quirk degrades richness rather than losing content. Exactly 1 of the 360\n   committed corpus bodies carries an HTML comment, and it loses that comment\n   without this mechanism.\n\n## Approach (pure functions in `adf.py`)\nAdd three functions, **not referenced by any `AdfCodec` op or live send path here**:\n1. `markdown_to_adf(md) -> dict` \u2014 Markdown-aware encode via `marklas.to_adf`, with\n   the HTML-comment self-verification above.\n2. `adf_to_markdown(doc) -> str` \u2014 decode via `marklas.to_md`, applying the\n   mark-order canonicalizer.\n3. `fit_markdown_to_adf_limit(md, *, limit=\u2026) -> str` \u2014 length-fit measuring the\n   `markdown_to_adf` serialization.\nPlus a whole-codec **plain-text fallback helper** returning the existing plain `adf.py` functions as a set, which 3388 installs on conversion error \u2014 defined and unit-tested here, wired there. Existing plain functions stay untouched.\n\n## Scope\n- `adapters/jira/adf.py` \u2014 the three functions + canonicalizer + fallback helper.\n- `pyproject.toml` \u2014 pinned optional extra (marklas + mistune); `src/rebar/_optional.py`\n  \u2014 register it.\n- `scripts/build_cloud_adf_corpus.py` (new) + `tests/fixtures/cloud_adf_corpus/` (new).\n- **UNCHANGED:** `AdfCodec` and its four ops; the shared plain-text\n  `inbound_fields.normalize_rich_text`; every live Cloud send/compare site.\n\n## Acceptance Criteria\n- [ ] `adf.markdown_to_adf` emits Markdown-aware ADF nodes (heading/list/code plus\n  inline marks) rather than literal `#`/`-`/`**`; verified by\n  `test_cloud_adf_roundtrip` asserting node types.\n- [ ] `adf.adf_to_markdown` returns the source Markdown for a structured body;\n  verified by `test_cloud_adf_roundtrip` asserting decoded equality.\n- [ ] The combined strong+strikethrough 2-cycle is eliminated by the mark-order\n  canonicalizer; verified by `test_cloud_mark_order_converges` pinning the measured\n  `**~~x~~**` \u21c4 `~~**x**~~` oscillation as a regression.\n- [ ] An HTML comment present in the source survives the round-trip, falling back to\n  the plain encode when the engine would drop it; verified by\n  `test_cloud_html_comment_survives`.\n- [ ] `adf.fit_markdown_to_adf_limit` measures the `markdown_to_adf` serialization\n  rather than the plain encode; verified by\n  `test_adf_fit_measures_the_serialized_document_not_the_plain_text`.\n- [ ] With marklas absent, importing `adf` succeeds and each of the three functions\n  returns its plain-`adf.py` result rather than raising; verified by\n  `test_cloud_functions_degrade_without_marklas` simulating the ImportError.\n- [ ] The plain-text fallback helper returns the existing plain `adf.py` functions\n  as a set; verified by `test_cloud_plain_fallback_helper_returns_plain_functions`.\n- [ ] Over the committed `tests/fixtures/cloud_adf_corpus/`, the MD\u2192ADF\u2192MD\n  round-trip reaches a fixed point after one pass for \u226599.6% of bodies (measured\n  100.00% over 360 bodies, 0 conversion errors); verified by\n  `test_cloud_corpus_idempotence`.\n- [ ] Over the same fixture, \u226515% of bodies encode to structurally rich ADF under\n  the block-node predicate defined above (measured 15.6%); verified by\n  `test_cloud_corpus_richness`.\n- [ ] The committed fixture cardinality is pinned at 360 bodies, so a silent\n  regeneration fails; verified by `test_cloud_corpus_cardinality_is_pinned`.\n- [ ] The committed fixture carries no unscrubbed emails, tenant hostnames or URLs;\n  verified by `test_cloud_corpus_carries_no_unscrubbed_secrets`.\n- [ ] `AdfCodec` and its four ops remain a plain pass-through; verified by the\n  existing `test_adf_codec_is_a_pass_through_to_the_pinned_adf_module` staying green\n  unmodified.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "Cloud ADF codec (marklas), truly bidirectional"
