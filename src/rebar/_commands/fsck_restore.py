@@ -179,13 +179,20 @@ def restore_deleted_sources(
     return restored
 
 
-def rebuild_with_restore(tracker: str, ticket_id: str, ticket_dir: str) -> tuple[bool, list[str]]:
+def rebuild_with_restore(
+    tracker: str, ticket_id: str, ticket_dir: str, *, no_commit: bool = False
+) -> tuple[bool, list[str]]:
     """Restore any deleted sources, then rebuild. Returns ``(rebuilt, restored_filenames)``.
 
     This is the repair path's single entrypoint. The b636 fail-closed guard inside
     :func:`rebar._commands.compact.rebuild_snapshot_from_full_log` still applies: if the
     restore could not complete the log, the rebuild refuses and the ticket is surfaced for
     human triage rather than rewritten from a partial history.
+
+    ``no_commit`` is forwarded verbatim to the rebuild. It defaults to ``False`` — the
+    behaviour ``repair_or_plan`` has always had — so only the caller that needs deferred
+    commits (``_repair_ticket`` under the ``--repair`` batch loop, which commits once per
+    batch rather than once per ticket) has to pass it.
     """
     from rebar._commands.fsck_repair import snapshot_missing_sources
 
@@ -201,4 +208,7 @@ def rebuild_with_restore(tracker: str, ticket_id: str, ticket_dir: str) -> tuple
 
     from rebar._commands.compact import rebuild_snapshot_from_full_log
 
-    return rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir), restored
+    return (
+        rebuild_snapshot_from_full_log(tracker, ticket_id, ticket_dir, no_commit=no_commit),
+        restored,
+    )

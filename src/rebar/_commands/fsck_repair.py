@@ -228,6 +228,7 @@ def _repair_ticket(
         "triage": [f"{n} ({t})" for n, t in plan["triage_orphans"]],
         "stale_channel": list(plan["stale_channel"]),
         "skipped": skipped,
+        "restored": [],
     }
     if dry_run:
         disp["rebuilt"] = bool(plan["auto_orphans"]) or (
@@ -267,11 +268,18 @@ def _repair_ticket(
             handle.release()
 
     if plan["auto_orphans"] or (repair_stale_channel and plan["stale_channel"]):
-        from rebar._commands.compact import rebuild_snapshot_from_full_log
+        # Task 08c8: go through the COMPOSED helper, not the bare rebuild — otherwise a
+        # ticket whose source a legacy (delete-style) compaction dropped is never
+        # recovered on this path and the b636 guard just refuses the rebuild. Imported
+        # locally because ``fsck_restore`` is imported at the BOTTOM of this module (it
+        # lazily imports ``snapshot_missing_sources`` back from here).
+        from rebar._commands.fsck_restore import rebuild_with_restore as _rebuild_with_restore
 
-        disp["rebuilt"] = rebuild_snapshot_from_full_log(
+        rebuilt, restored = _rebuild_with_restore(
             tracker, ticket_id, ticket_dir, no_commit=no_commit
         )
+        disp["rebuilt"] = rebuilt
+        disp["restored"] = restored
     return disp
 
 
