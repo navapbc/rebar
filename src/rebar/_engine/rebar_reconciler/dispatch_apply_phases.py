@@ -22,12 +22,28 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from ._backend import SupportsComments, TicketTransport
+    from ._backend import TicketTransport
 
+import logging
+import random
 import sys
 import time
 import urllib.error
 from pathlib import Path
+
+# Runtime (not TYPE_CHECKING) import: the capability guard needs the Protocol OBJECT for
+# isinstance, not just its name for annotations — ADR-0083 prescribes isinstance-guarded
+# capability detection and SupportsComments is @runtime_checkable for exactly that.
+from rebar_reconciler._backend import SupportsComments
+from rebar_reconciler._errors import (
+    MAX_BACKOFF_S,
+    JiraAPIError,
+    RetryExhaustedError,
+    parse_retry_after,
+)
+from rebar_reconciler.pass_io import record_capability_gap
+
+logger = logging.getLogger(__name__)
 
 # Bug 85a1: strip fields ACLI does not accept on `jira workitem edit`.
 # The legacy batch path here was unfiltered, so a local issuetype change
@@ -44,6 +60,143 @@ from pathlib import Path
 # ``transition_issue`` (bypasses ACLI's silent-exit-0 failure mode).
 # The typed leaf's REBAR_RECONCILER_STATUS_GATING gate is also gone.
 _OUTBOUND_BATCH_ALLOWLIST = frozenset({"summary", "description", "assignee", "priority", "status"})
+
+
+def _call_with_retry(fn, *args, max_retries: int = 3, **kwargs):
+    """Call fn(*args, **kwargs) with exponential backoff on retryable failures.
+
+    Retryable: TimeoutError; JiraAPIError 5xx/429; and (story 9622)
+    urllib.error.HTTPError 5xx/429 — the REST floor (acli_rest) raises raw
+    HTTPError, previously uncaught here, so the idempotent REST writes routed
+    through it got zero retry. 429 honors a present integer ``Retry-After``, else
+    ADR-0036 jittered backoff; 5xx uses that backoff.
+    Non-retryable: JiraAPIError / HTTPError 4xx (except 429) — re-raised raw
+    immediately (preserving the 404 / hierarchy-400 semantics). On exhaustion a
+    retried HTTPError re-raises raw; TimeoutError/JiraAPIError raise RetryExhaustedError.
+
+    Args:
+        fn:          Callable to invoke.
+        *args:       Positional arguments forwarded to fn.
+        max_retries: Maximum number of retry attempts after the first failure.
+        **kwargs:    Keyword arguments forwarded to fn.
+
+    Returns:
+        The return value of fn on success.
+
+    Raises:
+        RetryExhaustedError: When all retry attempts are exhausted.
+        JiraAPIError:        Immediately, for non-retryable 4xx (except 429) errors.
+    """
+    delays = [1, 2, 4]
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        retry_after: float | None = None
+        try:
+            return fn(*args, **kwargs)
+        except JiraAPIError as exc:
+            # 429 and 5xx are retryable; all other 4xx fail fast
+            if exc.status_code != 429 and 400 <= exc.status_code < 500:
+                raise
+            last_exc = exc
+        except urllib.error.HTTPError as exc:
+            # REST-transport floor (acli_rest raises raw HTTPError): 429/5xx
+            # retryable, other 4xx fail fast (raw). HTTPError.code is the status.
+            if exc.code != 429 and 400 <= exc.code < 500:
+                raise
+            last_exc = exc
+            if exc.code == 429:
+                retry_after = parse_retry_after(
+                    exc.headers.get("Retry-After") if exc.headers else None
+                )
+        except TimeoutError as exc:
+            last_exc = exc
+
+        if attempt < max_retries:
+            if retry_after is not None:
+                delay: float = min(MAX_BACKOFF_S, retry_after)
+            elif isinstance(last_exc, urllib.error.HTTPError):
+                # ADR 0036: 2**(attempt+1) + jitter, capped.
+                delay = min(MAX_BACKOFF_S, 2 ** (attempt + 1) + random.random())
+            else:
+                delay = delays[min(attempt, len(delays) - 1)]
+            time.sleep(delay)
+
+    # On exhaustion of a retried HTTPError, re-raise the ORIGINAL raw HTTPError
+    # (story 9622): downstream catchers switch on raw HTTPError (e.g.
+    # apply_handlers.handle_update softens 404 but re-raises non-404 5xx as
+    # pass-fatal), so wrapping it would silently defeat them. TimeoutError /
+    # JiraAPIError keep the RetryExhaustedError contract.
+    if isinstance(last_exc, urllib.error.HTTPError):
+        raise last_exc
+    # CHAIN the cause (PEP 3134) — the prior `raise RetryExhaustedError(str(last_exc))` dropped
+    # __cause__, losing the underlying failure (epic romp-swath-wince). Populate last_exception /
+    # attempts for post-hoc inspection.
+    raise RetryExhaustedError(
+        str(last_exc), last_exception=last_exc, attempts=max_retries + 1
+    ) from last_exc
+
+
+def _capability_present(
+    client: TicketTransport,
+    protocol: type,
+    capability: str,
+    member: str,
+    site: str,
+    key: str | None,
+) -> bool:
+    """Runtime capability guard for an OPT-IN capability member (ticket a3fa).
+
+    The four ``cast("SupportsComments"/"SupportsLinks", client)`` call sites are STATIC
+    assertions with no runtime effect, and every one of them sits inside a broad
+    ``except Exception``. So a transport that does not implement the capability raised an
+    ``AttributeError`` that was swallowed: the sub-op silently never applied and the pass
+    reported success — conflating "capability absent (designed, fine to skip)" with
+    "capability present but threw (a real failure)". This splits the two.
+
+    RELATION TO ``fetcher.py`` (AC4). ADR-0083 ("Reconciler vendor adapter seam") prescribes
+    ``isinstance``-guarded capability detection — "callers detect a capability by an
+    ``isinstance``-guarded check against the backend" — and ``SupportsComments``/
+    ``SupportsLinks`` are ``@runtime_checkable`` for exactly that. So ``isinstance`` is the
+    PRIMARY check here. It is backed by the ``hasattr(client, member)`` shape that
+    ``fetcher.py:597/647/688`` already uses, which makes the two subsystems consistent rather
+    than divergent, and is REQUIRED for correctness rather than merely permitted:
+
+    Since Python 3.12 (gh-102433) a ``@runtime_checkable`` ``isinstance`` resolves members
+    with ``inspect.getattr_static``, which deliberately does NOT see attributes served by
+    ``__getattr__``. Any dynamically-proxying transport — a decorator/wrapper that forwards
+    to an inner client, and every ``MagicMock`` test double — therefore HAS ``add_comment``
+    yet fails ``isinstance``. Trusting ``isinstance`` alone would declare such a transport
+    "capability absent" and skip the write **by design**, which is the exact silent-skip
+    defect this ticket exists to remove, only now blessed. The fallback closes that hole.
+
+    Checking the specific ``member`` (not the whole Protocol) is also the right granularity
+    for a WRITE dispatch site: the question here is "can this transport perform the call I am
+    about to make", not "does it also implement the read side" (``get_comment_map`` /
+    ``get_issuelinks_map``), which this code path never touches.
+
+    Returns True when the call may proceed. When absent, logs an INFO line naming the missing
+    capability and the site, records the designed skip on the EXISTING ``bridge_alerts``
+    channel under ``outbound-<capability>-capability-absent`` (deduped per process per
+    (capability, site) — see ``pass_io.record_capability_gap``), and returns False. Callers
+    must skip WITHOUT incrementing their ``*_computed``/``*_applied`` counters: those feed
+    ``apply_handlers``' silent-no-op canary, which is a FAILURE detector (it logs the
+    "bug-3f04 failure mode" warning and, under ``RECONCILER_FAIL_SILENT_NOOP=1``, records a
+    per-mutation failure), and routing a DESIGNED skip through it would re-conflate exactly
+    what this guard separates.
+    """
+    if isinstance(client, protocol) or hasattr(client, member):
+        return True
+    logger.info(
+        "%s: %s skipped for %s — transport does not implement %s "
+        "(designed capability skip, not a failure)",
+        site,
+        member,
+        key,
+        capability,
+    )
+    record_capability_gap(capability, member, site, key)
+    return False
 
 
 def _jira_account_id_for(local_ref):
@@ -152,7 +305,24 @@ def _update_one_dispatch_comments(
     _comments_computed = _comments_applied = 0
 
     comments = mutation.get("comments", []) or []
-    if isinstance(comments, list):
+    # Ticket a3fa: capability guard folded INTO the condition (same shape as create_one and
+    # _update_one_dispatch_links). It sits AHEAD of _comments_computed deliberately: a
+    # DESIGNED skip must increment neither _computed nor _applied, because apply_handlers'
+    # silent-no-op canary is a FAILURE detector — it logs the "bug-3f04 failure mode" warning
+    # and, under RECONCILER_FAIL_SILENT_NOOP=1, records a per-mutation failure. Routing a
+    # designed skip through it would re-conflate exactly what the guard separates.
+    if (
+        isinstance(comments, list)
+        and comments
+        and _capability_present(
+            client,
+            SupportsComments,
+            "comments",
+            "add_comment",
+            "update_one.dispatch_comments",
+            issue_key,
+        )
+    ):
         for entry in comments:
             if not isinstance(entry, dict):
                 continue

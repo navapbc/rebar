@@ -151,9 +151,12 @@ def test_add_label_transient_5xx_absorbed_by_retry_no_rollback(applier):
     mutation = _make_create_mutation(local_id)
 
     # Patch time.sleep to keep the retry backoff cheap in tests.
-    from rebar_reconciler import dispatch_one  # point-of-use: create_one retry lives here
+    # Ticket a3fa: _call_with_retry moved to dispatch_apply_phases (to make room under the
+    # 800-LOC cap for the capability guards), so patch ``time`` at its NEW point of use —
+    # patching dispatch_one.time would now be inert and reintroduce real backoff sleeps.
+    from rebar_reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
 
-    with patch.object(dispatch_one, "time") as mock_time:
+    with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()
         result = applier.create_one(mutation, client, rest_calls=0)
 
@@ -190,9 +193,9 @@ def test_set_entity_property_transient_5xx_absorbed_by_retry_no_rollback(applier
 
     mutation = _make_create_mutation(local_id)
 
-    from rebar_reconciler import dispatch_one  # point-of-use: create_one retry lives here
+    from rebar_reconciler import dispatch_apply_phases  # point-of-use: the retry lives here
 
-    with patch.object(dispatch_one, "time") as mock_time:
+    with patch.object(dispatch_apply_phases, "time") as mock_time:
         mock_time.sleep = MagicMock()
         result = applier.create_one(mutation, client, rest_calls=0)
 
