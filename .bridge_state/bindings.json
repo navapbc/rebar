@@ -90086,7 +90086,7 @@
     "b902-18af-14ed-4da1": {
       "baseline": {
         "assignee": null,
-        "description": "Analysis record (no code change). Measured gate economics 2026-08-03\u219208-11 from attested sidecars + usage logs; brainstormed and evaluated cost levers against history, OSS/academic research, and $52.70 of Bedrock experiments. Deliverables: reports/llm-gate-cost-2026-08-11/ (README + full HTML report + experiment arm outputs) and artifact https://claude.ai/code/artifact/a59a29df-f641-4c3f-b7b0-c6333314935f. Headline: plan-review $3.02/run (median $2.27), code-review $1.42/run, completion $2.24/run; $11.85 mean per ticket completed (2.1 plan + ~1.75 code + 1.2 completion runs); ~20% of spend on terminally-failed calls (overlap-judge 48k output overruns; completion-verifier ~190-request loop deaths). Top levers: fix the two failure pathologies (~15-20%, zero quality risk); ship the unshipped 696a AGENT\u21921-TURN demotion via ADR-0054 replay (15-30%); per-criterion incremental re-review (15-25%, moderate risk); Nova pilot for single-turn ops (Nova Pro 29/30 gold, Nova 2 Lite 27/28 with zero gold-regressing flips vs committed Opus/Sonnet arms). Refuted: Haiku for agentic ops (5 false-accepts + loop runaway \u2192 cost 6x Nova Pro); Sonnet-for-code-review (2 gold-regressing over-blocks).\n\n## Acceptance Criteria\n\n- [x] Cost analysis published with per-gate and per-ticket figures. Verify:  exits 0.\n- [x] Experiment arm outputs recorded. Verify: reports/llm-gate-cost-2026-08-11/round2/cv2_haiku-4-5-20251001.json exits 0.\n- [x] Ordinal-migration plan recorded. Verify:  exits 0.\n\n## Verification\n\nThe deliverables are committed report files; each AC names its proving command. Analysis-only ticket: no code change, no file_impact.",
+        "description": "Analysis record (no code change). Measured gate economics 2026-08-03\u219208-11 from attested sidecars + usage logs; brainstormed and evaluated cost levers against history, OSS/academic research, and $52.70 of Bedrock experiments. Deliverables: reports/llm-gate-cost-2026-08-11/ (README + full HTML report + experiment arm outputs) and artifact https://claude.ai/code/artifact/a59a29df-f641-4c3f-b7b0-c6333314935f. Headline: plan-review $3.02/run (median $2.27), code-review $1.42/run, completion $2.24/run; $11.85 mean per ticket completed (2.1 plan + ~1.75 code + 1.2 completion runs); ~20% of spend on terminally-failed calls (overlap-judge 48k output overruns; completion-verifier ~190-request loop deaths). Top levers as initially assessed: fix the two failure pathologies (~15-20%, zero quality risk); the 696a AGENT\u21921-TURN demotion (proposed 15-30%, later determined RESOLVED-NO by 696a's own closing ledger and rejected by the operator as a quality decrease); per-criterion incremental re-review (proposed 15-25%, later REJECTED by the 894-pair historical audit); Nova pilot for single-turn ops (Nova Pro 29/30 gold, Nova 2 Lite 27/28 with zero gold-regressing flips vs committed Opus/Sonnet arms). Refuted: Haiku for agentic ops (5 false-accepts + loop runaway \u2192 cost 6x Nova Pro); Sonnet-for-code-review (2 gold-regressing over-blocks).\n\nLater rounds (recorded in comments + the report artifact) extended the analysis to the ordinal-migration question: the zero-LLM decisiveness analysis over 22,503 plan findings and 3,230 code-review findings, the level-collapse sensitivity result, and the phased ordinal\u2192binary migration plan now recorded at reports/llm-gate-cost-2026-08-11/ordinal-migration-plan.md (AC3).\n\n## Acceptance Criteria\n\n- [x] Cost analysis published with per-gate and per-ticket figures. Verify:  exits 0.\n- [x] Experiment arm outputs recorded. Verify: reports/llm-gate-cost-2026-08-11/round2/cv2_haiku-4-5-20251001.json exits 0.\n- [x] Ordinal-migration plan recorded. Verify:  exits 0.\n\n## Verification\n\nThe deliverables are committed report files; each AC names its proving command. Analysis-only ticket: no code change, no file_impact.",
         "priority": "Medium",
         "status": "To Do",
         "summary": "LLM gate cost analysis since Bedrock switch: per-run/per-ticket costs, lever option book, cheap-model experiments (2026-08-11)"
@@ -91783,6 +91783,13 @@
       "peer_parent": "REB-1124",
       "state": "confirmed",
       "updated_at": "2026-07-14T00:00:48Z"
+    },
+    "bcfb-0d18-20fc-46b9": {
+      "created_at": "2026-08-12T04:44:29Z",
+      "jira_id": "4588407",
+      "jira_key": "REB-2752",
+      "state": "confirmed",
+      "updated_at": "2026-08-12T04:44:32Z"
     },
     "bd4c-78be-c37c-4ad0": {
       "baseline": {
@@ -132954,6 +132961,7 @@
     "REB-275": "ae52-52f3-94a3-4c8a",
     "REB-2750": "aff7-9e1f-ba3b-4a54",
     "REB-2751": "be9d-2f2d-47ca-45d2",
+    "REB-2752": "bcfb-0d18-20fc-46b9",
     "REB-276": "afe6-47e5-6469-43e2",
     "REB-277": "b156-481a-ddc0-453c",
     "REB-278": "b1eb-091c-206f-4769",
