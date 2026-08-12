@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/transition_result.schema.json",
   "title": "TransitionResult",
-  "description": "Result of `rebar transition … --output json` and `rebar reopen` (and the library transition()/reopen() / MCP transition_ticket/reopen_ticket): {ticket_id, from, to, newly_unblocked[]}. newly_unblocked lists tickets unblocked by a close (empty otherwise). Exit 10 (ConcurrencyError) on a stale current_status still applies and emits no JSON.",
+  "description": "Result of `rebar transition … --output json` and `rebar reopen` (and the library transition()/reopen() / MCP transition_ticket/reopen_ticket): {ticket_id, from, to, newly_unblocked[]}. newly_unblocked lists tickets unblocked by a close (empty otherwise). Exit 10 (ConcurrencyError) on a stale current_status still applies and emits no JSON. completion_signature is present ONLY on a close where a completion signature was in play — absent for a plain transition, for reopen, and for `idea -> closed` (a REJECT/DROP, not a completion). Because the close COMMITS before signing is attempted, signed=false means the ticket IS closed and only the attestation is missing; it never means the close failed.",
   "type": "object",
   "additionalProperties": true,
   "required": ["ticket_id", "from", "to", "newly_unblocked"],
@@ -10,6 +10,20 @@
     "ticket_id": { "type": "string" },
     "from": { "$ref": "common.schema.json#/$defs/ticket_status" },
     "to": { "$ref": "common.schema.json#/$defs/ticket_status" },
-    "newly_unblocked": { "type": "array", "items": { "type": "string" } }
+    "newly_unblocked": { "type": "array", "items": { "type": "string" } },
+    "completion_signature": {
+      "type": "object",
+      "description": "What became of the completion signature on a close. Optional: see the top-level description for when it is absent.",
+      "required": ["signed", "cause", "error"],
+      "properties": {
+        "signed": { "type": "boolean" },
+        "cause": {
+          "type": "string",
+          "enum": ["signed", "sign_failed", "material_drifted", "force_bypassed"],
+          "description": "signed: persisted. sign_failed: the append failed (transient lock timeout or a permanent signing degrade) — see error. material_drifted: the code moved between verify and sign, so stale state was deliberately not attested. force_bypassed: --force skipped signing by user approval."
+        },
+        "error": { "type": "string" }
+      }
+    }
   }
 }

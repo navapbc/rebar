@@ -578,17 +578,19 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         return 0
 
     if fmt == "json":
-        sys.stdout.write(
-            json.dumps(
-                {
-                    "ticket_id": ticket_id,
-                    "from": current_status,
-                    "to": target_status,
-                    "newly_unblocked": result["newly_unblocked"],
-                }
-            )
-            + "\n"
-        )
+        payload = {
+            "ticket_id": ticket_id,
+            "from": current_status,
+            "to": target_status,
+            "newly_unblocked": result["newly_unblocked"],
+        }
+        # Same field-by-field rebuild hazard as the library return: without this the
+        # completion-signature marker never reaches a CLI consumer parsing --output json,
+        # leaving a close that landed WITHOUT its signature undetectable except by reading
+        # English off stderr (bug silvern-dewy-damselfly).
+        if "completion_signature" in result:
+            payload["completion_signature"] = result["completion_signature"]
+        sys.stdout.write(json.dumps(payload) + "\n")
     elif target_status == "closed":
         ids = result["newly_unblocked"]
         sys.stdout.write(f"UNBLOCKED: {','.join(ids) if ids else 'none'}\n")
