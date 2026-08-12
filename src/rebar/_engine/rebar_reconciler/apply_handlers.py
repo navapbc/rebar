@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 import time
 import urllib.error
 from dataclasses import dataclass, field
@@ -184,6 +185,58 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     return HandlerResult(outcome)
 
 
+def _make_link_confirm(mutation: dict, ctx: BatchApplyContext):
+    """Build the peer-confirmation sink for one outbound UPDATE (epic a4bd), or None.
+
+    This is the PRODUCTION outbound-update path, and ``BatchApplyContext`` already
+    carries everything the record needs (``binding_store``, ``pass_id``,
+    ``repo_root``) — the same context-to-dispatch pattern ``synced_fields`` uses — so
+    no new plumbing is threaded through ``update_one``.
+
+    The store is keyed on LOCAL ids while the dispatched link entry carries JIRA
+    keys, so the target is reverse-mapped here. An UNBOUND target records NOTHING: a
+    Jira key must never be written into a local-id field, and the confirmation is
+    picked up on a later pass or from a fetched snapshot instead.
+
+    Returns ``None`` — disabling recording, i.e. exactly the pre-a4bd behaviour —
+    whenever the context is incomplete or the store cannot be opened.
+    """
+    binding_store = ctx.binding_store
+    local_id = mutation.get("local_id")
+    if binding_store is None or not local_id:
+        return None
+    try:
+        from rebar_reconciler.peer_confirmations import (
+            DIRECTION_OUTBOUND,
+            SOURCE_PUSH,
+            open_store,
+        )
+
+        store = open_store(ctx.repo_root)
+    except Exception as exc:  # noqa: BLE001 — fail-open: no evidence is worse, not fatal
+        print(f"handle_update: peer-confirmation store unavailable: {exc!r}", file=sys.stderr)
+        return None
+
+    def _confirm(*, to_key, relation, link_id) -> None:
+        if not to_key or not relation:
+            return
+        target_local_id = binding_store.get_local_id(to_key)
+        if not target_local_id:
+            return  # unbound target — nothing local to key the evidence on
+        store.record(
+            str(local_id),
+            str(target_local_id),
+            str(relation),
+            link_id=link_id,
+            direction=DIRECTION_OUTBOUND,
+            pass_id=ctx.pass_id,
+            source_kind=SOURCE_PUSH,
+        )
+        store.save()
+
+    return _confirm
+
+
 def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     """Dispatch an outbound UPDATE via ``update_one``, applying the per-mutation
     soft-fail, sub-op telemetry, silent-no-op canary, and provenance contracts.
@@ -207,6 +260,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     # record_backstop_failure path never reaches this function's tail at all, so a
     # mutation that did not land contributes nothing to the baseline advance.
     _fields_synced: dict[str, Any] = {}
+    _link_confirm = _make_link_confirm(mutation, ctx)
     try:
         result = update_one(
             mutation,
@@ -214,6 +268,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
             comment_errors=_comment_errors,
             subop_applied=_subop,
             fields_synced=_fields_synced,
+            link_confirm=_link_confirm,
         )
     except urllib.error.HTTPError as exc:
         # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound update against a
@@ -281,12 +336,6 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     outcome["labels_applied"] = _subop.get("labels_applied", 0)
     outcome["comments_applied"] = _subop.get("comments_applied", 0)
     outcome["links_applied"] = _subop.get("links_applied", 0)
-    # Ticket 5528: link ops that did NOT reach their end-state. Surfaced alongside
-    # links_applied because the canary below is a TOTAL-no-op detector and cannot see a
-    # PARTIAL drop — and because the delete arm used to score failures as applied, making
-    # applied==computed even when nothing was removed. A nonzero links_failed is the
-    # queryable signal that the applied count is not the whole story.
-    outcome["links_failed"] = _subop.get("links_failed", 0)
     # Silent-no-op canary: a kind with sub-ops COMPUTED (post-dedup) but ZERO
     # applied is exactly the bug-3f04 link-drop failure mode — it would otherwise
     # pass green with error=None. computed is counted post-dedup, so an

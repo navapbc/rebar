@@ -39,6 +39,7 @@ __all__ = [
     "BRIDGE_STATE_DIR",
     "GET_ROTATION_FILE",
     "IMPOSSIBLE_LINKS_FILE",
+    "PEER_CONFIRMATIONS_FILE",
     "TICKETS_BRANCH",
     "TICKETS_REF",
     "TRACKER_DIR",
@@ -86,6 +87,12 @@ GET_ROTATION_FILE = f"{BRIDGE_STATE_DIR}/get_rotation.json"
 # that lives only in the working tree is thrown away and every pass re-attempts the
 # same doomed links — exactly the defect the record exists to end.
 IMPOSSIBLE_LINKS_FILE = f"{BRIDGE_STATE_DIR}/impossible_links.json"
+# The per-link peer-confirmation record (epic a4bd), staged with the other bridge
+# state. It MUST be committed for the same reason as the impossible-link record:
+# each reconcile pass runs in a fresh CI checkout, so evidence that lives only in
+# the working tree is thrown away and every pass starts with nothing confirmed —
+# which would make the inbound removal path decline every legitimate deletion.
+PEER_CONFIRMATIONS_FILE = f"{BRIDGE_STATE_DIR}/peer_confirmations.json"
 
 RepoRoot = str | os.PathLike[str]
 

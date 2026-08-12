@@ -212,6 +212,9 @@ def _commit_binding_store_snapshot(
         # checkout, so an uncommitted record is discarded between passes and the
         # skip never takes effect in production.
         git_adapter.IMPOSSIBLE_LINKS_FILE,
+        # Epic a4bd: the per-link peer-confirmation record. Same fresh-checkout
+        # argument as the impossible-link record above.
+        git_adapter.PEER_CONFIRMATIONS_FILE,
     ]
     _existing_rel = [rel for rel in _rel_files if (tracker_dir / rel).exists()]
     if not _existing_rel:
@@ -236,6 +239,7 @@ def _commit_binding_store_snapshot(
             os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
             os.path.basename(git_adapter.GET_ROTATION_FILE),
             os.path.basename(git_adapter.IMPOSSIBLE_LINKS_FILE),
+            os.path.basename(git_adapter.PEER_CONFIRMATIONS_FILE),
         }
         if not (_tracked_basenames & _staged_basenames):
             return True  # Already up-to-date; nothing to commit.
