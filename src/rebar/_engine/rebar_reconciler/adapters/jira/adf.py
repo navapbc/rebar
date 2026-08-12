@@ -361,3 +361,139 @@ def fit_text_to_adf_limit(text: str, *, limit: int = _ADF_DESCRIPTION_LIMIT) -> 
         else:
             hi = mid - 1
     return best
+
+
+# ---------------------------------------------------------------------------
+# Markdown-aware ADF (story e59d, epic 708d)
+#
+# Everything above converts PLAIN text: ``text_to_adf`` emits one paragraph per
+# block, so Markdown syntax (headings, list markers, fences, ``**bold**``) reaches
+# Jira as literal characters and Cloud renders raw source. The functions below add
+# the missing Markdown-aware half, backed by ``marklas`` (MIT) over ``mistune``
+# (BSD-3-Clause).
+#
+# marklas is an OPTIONAL EXTRA, imported LAZILY inside each function. This module
+# ships as reconciler package data under ``rebar/_engine/`` and is contractually
+# stdlib-only, so ``import adf`` must keep working with no extras installed; when
+# marklas is absent each function returns its PLAIN counterpart's result rather
+# than raising. (The vendoring alternative was rejected: marklas needs mistune, and
+# ``src/rebar/_vendor/`` is not importable from the reconciler subprocess.)
+#
+# NOTHING here is wired into ``AdfCodec`` or any live send path — that cutover is
+# story 3388, which also owns tolerating a no-extras install.
+# ---------------------------------------------------------------------------
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _marklas() -> Any | None:
+    """Return the ``marklas`` module, or ``None`` when the extra is not installed."""
+    try:
+        import marklas
+    except ImportError:
+        return None
+    return marklas
+
+
+def _canonicalize_marks(node: Any) -> Any:
+    """Sort every text node's ``marks`` by type, in place, and return ``node``.
+
+    Co-located marks have no canonical order in ADF, so ``**~~x~~**`` and
+    ``~~**x**~~`` encode to the same node set in a different sequence — and
+    round-tripping alternates between the two spellings forever (a measured exact
+    2-cycle that never converges). Sorting by mark type collapses the pair to one
+    deterministic form, which is what makes repeated encode/decode a fixed point.
+    """
+    if isinstance(node, dict):
+        marks = node.get("marks")
+        if isinstance(marks, list):
+            node["marks"] = sorted(
+                marks, key=lambda m: m.get("type", "") if isinstance(m, dict) else ""
+            )
+        for child in node.get("content", []) or []:
+            _canonicalize_marks(child)
+    elif isinstance(node, list):
+        for child in node:
+            _canonicalize_marks(child)
+    return node
+
+
+def markdown_to_adf(md: str) -> dict[str, Any]:
+    """Convert Markdown to structurally rich ADF (headings, lists, code, marks).
+
+    Falls back to the plain :func:`text_to_adf` encode when the ``marklas`` extra is
+    absent, when conversion raises, or when the conversion would DROP an HTML
+    comment. That last case is a real content-loss defect, not a cosmetic one:
+    marklas removes HTML comments (``text <!-- x --> more`` becomes ``text  more``,
+    and a lone marker becomes the empty string), and rebar's own
+    ``<!-- rebar:reconciler-echo -->`` marker is an HTML comment. So the encode
+    verifies itself by decoding its own result and comparing the comments present in
+    the source; a body that would lose one degrades to the plain encode, trading
+    richness for content preservation.
+    """
+    engine = _marklas()
+    if engine is None or not isinstance(md, str):
+        return text_to_adf(md)
+    try:
+        doc = _canonicalize_marks(engine.to_adf(md))
+        comments = _HTML_COMMENT_RE.findall(md)
+        if comments:
+            decoded = engine.to_md(doc)
+            if any(comment not in decoded for comment in comments):
+                return text_to_adf(md)
+    except Exception:  # noqa: BLE001 - any engine failure degrades, never propagates
+        return text_to_adf(md)
+    return dict(doc)
+
+
+def adf_to_markdown(doc: dict[str, Any] | None) -> str:
+    """Convert an ADF document back to Markdown, canonicalizing mark order.
+
+    Falls back to the plain :func:`adf_to_text` decode when the ``marklas`` extra is
+    absent or conversion raises.
+    """
+    engine = _marklas()
+    if engine is None or not isinstance(doc, dict):
+        return adf_to_text(doc)
+    try:
+        return str(engine.to_md(_canonicalize_marks(doc)))
+    except Exception:  # noqa: BLE001 - any engine failure degrades, never propagates
+        return adf_to_text(doc)
+
+
+def fit_markdown_to_adf_limit(md: str, *, limit: int = _ADF_DESCRIPTION_LIMIT) -> str:
+    """Truncate ``md`` so its MARKDOWN-AWARE ADF serialization fits ``limit``.
+
+    The plain :func:`fit_text_to_adf_limit` measures ``text_to_adf``, which inflates
+    differently from ``markdown_to_adf`` — so a Markdown-aware wire fitted with the
+    plain function can still exceed the cap. Same binary search, measuring the real
+    document. Idempotent: a value already within ``limit`` is returned unchanged.
+    """
+    if not isinstance(md, str) or len(json.dumps(markdown_to_adf(md))) <= limit:
+        return md
+    lo, hi, best = 0, len(md), _ADF_TRUNCATION_SUFFIX
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = md[:mid] + _ADF_TRUNCATION_SUFFIX
+        if len(json.dumps(markdown_to_adf(candidate))) <= limit:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return best
+
+
+def plain_text_adf_functions() -> dict[str, Any]:
+    """Return the PLAIN (non-Markdown-aware) conversion functions as a set.
+
+    Story 3388 installs this whole-codec fallback when a conversion error makes the
+    Markdown-aware path untrustworthy: swapping the set atomically keeps encode,
+    decode and fit consistent with one another, which a per-call fallback cannot
+    guarantee. Defined and unit-tested here; wired there.
+    """
+    return {
+        "to_adf": text_to_adf,
+        "to_text": adf_to_text,
+        "fit": fit_text_to_adf_limit,
+        "normalize": normalize_description,
+    }

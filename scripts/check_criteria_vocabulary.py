@@ -41,7 +41,15 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
         "node_modules",
     }
 )
-EXCLUDED_PREFIXES = (Path("docs/archive"), Path("docs/experiments"))
+# ``tests/fixtures/cloud_adf_corpus`` is a FROZEN, scrubbed snapshot of historical
+# ticket prose (scripts/build_cloud_adf_corpus.py) used to prove the Markdown<->ADF
+# round-trip does not churn real bodies. It is captured data, not authored text, so
+# rewording it to satisfy the criteria vocabulary would falsify the fixture.
+EXCLUDED_PREFIXES = (
+    Path("docs/archive"),
+    Path("docs/experiments"),
+    Path("tests/fixtures/cloud_adf_corpus"),
+)
 EXCLUDED_FILES = (Path("src/rebar/llm/workflow/editor_assets/dist/editor.js"),)
 ABBREVIATION_DIRECTORIES = (Path("src/rebar/llm/reviewers"), Path("src/rebar/_guides"))
 ABBREVIATION_FILES = (
