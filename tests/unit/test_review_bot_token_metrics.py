@@ -177,7 +177,7 @@ class _FakeGerrit:
     def get_patch(self, change_id, revision="current"):
         return "diff --git a/x b/x\n+one\n"
 
-    def post_vote(self, change_id, revision, value, message, robot_comments=None):
+    def post_vote(self, change_id, revision, value, message, robot_comments=None, comments=None):
         self.votes.append((change_id, revision, value, message))
         return 200
 

@@ -37,6 +37,7 @@ from rebar.review_bot import adapter
 from rebar.review_bot.artifact_emit import emit_code_review_artifact
 from rebar.review_bot.config import ReceiverConfig
 from rebar.review_bot.dedup import DedupStore
+from rebar.review_bot.finding_publish import post_review
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
 
 logger = logging.getLogger("rebar.review_bot.voter")
@@ -696,8 +697,20 @@ async def _review_and_vote(
         value = cfg.llm_review_max_value if is_pass else cfg.llm_review_block_value
         message = decision.get("message") or "rebar code review."
 
+        # post_review casts the vote AND anchors findings inline where they resolve to a real
+        # revision path; a rejected comment retries message-only with an explicit notice rather
+        # than silently dropping the text (bug lacquer-grotesque-urson). Its GerritError
+        # contract is unchanged, so the handlers below are untouched.
         try:
-            http_status = await asyncio.to_thread(gc.post_vote, change_id, revision, value, message)
+            http_status = await asyncio.to_thread(
+                post_review,
+                gc,
+                change_id,
+                revision,
+                value,
+                message,
+                decision.get("findings") or [],
+            )
         except GerritError as exc:
             # A 409 "change is closed" is TERMINAL, not a retryable failure: the change was
             # merged/abandoned (a race past reconcile.py's open-status filter). Record it so

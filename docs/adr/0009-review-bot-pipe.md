@@ -79,6 +79,21 @@ receiver posts ONE patchset-level robot comment under the magic path
 `robot_run_id` is **deterministic** (`<change_id>-<revision>`) so a webhook and a
 backfill for the same patchset reference the same robot run.
 
+**Amended (bug `lacquer-grotesque-urson`).** The robot-comment payload alone is not a
+sufficient publishing surface: a Gerrit with robot comments disabled answers
+`/robotcomments` with `robot comments unsupported`, and the review message carried only a
+COUNT of advisory findings, so their text was retrievable nowhere on the change. The vote
+now additionally carries an ordinary `comments` map (`{path: [{line, message, unresolved:
+false}]}`) for findings whose `location` resolves to a path that really is in the revision's
+file map, and the message body enumerates **every** finding — blocking and advisory — so the
+text is readable even where inline comments are not. `unresolved` is always `false`, so an
+advisory can never hold up submission. Anchors are validated against
+`GerritClient.get_revision_files` before posting (a comment on an unknown path is a 400 that
+would take the whole vote with it); an unreadable file map degrades to body-only, and a
+rejected comment-bearing POST is retried message-only with an explicit notice naming the
+durable `code_review` artifact. Vote values, labels and the fail-closed rules above are
+unchanged. See `rebar.review_bot.finding_publish`.
+
 ### 4. Dedup: write-on-success + Gerrit-side authoritative check
 
 Gerrit's `webhooks` plugin delivers **at-most-once** (best-effort): its `PostTask.run()`
