@@ -105594,124 +105594,15 @@
     "d323-defb-b0d3-4a9f": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "Enable the feature for THIS project + docs + full test pass. Done LAST so build-time closes aren't gated.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope (files)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `rebar.toml` (NEW, TRACKED) enables `[verify] require_completion_verification_for_close = true` + `[mcp] allow_llm = true` for the project (`.rebar/config.conf` is git-ignored, so a tracked config is used so the setting is shared). The BL-1 regression test still verifies the dotted-`.conf` parsing (and that the INI form is dropped) via `REBAR_CONFIG`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `docs/llm-framework.md`: completion-verification section (op, contract, gate, trust model, force-close, pluggable contract). `CLAUDE.md`: add `verify_completion` to the LLM-ops list + gate flag. `docs/output-schemas.md`: add `completion_verdict` row.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Tests: config (BL-1 regression), gate behavior, schema coverage guard, optionality, BI-1.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] the tracked `rebar.toml` enables the gate for the project (verified via load_config); BL-1 regression test confirms dotted-`.conf` parsing + INI-form-dropped",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] docs updated (llm-framework / CLAUDE.md / output-schemas)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] full suite green (`-m \"not integration and not external\"`)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "Enable the feature for THIS project + docs + full test pass. Done LAST so build-time closes aren't gated.\n\n## Scope (files)\n- `rebar.toml` (NEW, TRACKED) enables `[verify] require_completion_verification_for_close = true` + `[mcp] allow_llm = true` for the project (`.rebar/config.conf` is git-ignored, so a tracked config is used so the setting is shared). The BL-1 regression test still verifies the dotted-`.conf` parsing (and that the INI form is dropped) via `REBAR_CONFIG`.\n- `docs/llm-framework.md`: completion-verification section (op, contract, gate, trust model, force-close, pluggable contract). `CLAUDE.md`: add `verify_completion` to the LLM-ops list + gate flag. `docs/output-schemas.md`: add `completion_verdict` row.\n- Tests: config (BL-1 regression), gate behavior, schema coverage guard, optionality, BI-1.\n\n## Acceptance Criteria\n- [ ] the tracked `rebar.toml` enables the gate for the project (verified via load_config); BL-1 regression test confirms dotted-`.conf` parsing + INI-form-dropped\n- [ ] docs updated (llm-framework / CLAUDE.md / output-schemas)\n- [ ] full suite green (`-m \"not integration and not external\"`)",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "WS-5: Enable for this project + docs + tests"
       },
       "baseline_advanced_at": "2026-07-19T22:11:22Z",
       "created_at": "2026-06-25T23:17:06Z",
       "jira_key": "REB-329",
+      "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:17:06Z"
     },
