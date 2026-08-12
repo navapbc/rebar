@@ -1,0 +1,173 @@
+"""Deterministic commit <-> file-impact utilities (no LLM, no ``rebar.llm`` import).
+
+Two responsibilities, both shared by every surface that needs them:
+
+* **Commit-SHA validation** for the ``attach-commits`` repair surface — used by the
+  ``rebar.attach_commits`` seam so the CLI, the Python library, and the MCP tool all
+  inherit identical, ALL-OR-NOTHING validation semantics.
+* **Path matching** for the close gate's file-impact-vs-diff check — the ``**/``-aware
+  glob semantics that previously lived only inside the optional ``[agents]`` LLM
+  package (``rebar.llm.prompting.prompts._glob_match``, mirrored in
+  ``rebar.llm.code_review.registry._glob_match``). They are hoisted here so the
+  deterministic close path can reuse ONE implementation without importing ``rebar.llm``;
+  both former copies now delegate to :func:`glob_match`.
+
+  (``rebar.grounding.oracle`` uses PLAIN ``fnmatch`` with no ``**/`` handling — it is a
+  different rule, not a copy of these semantics, and is deliberately left alone.)
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from fnmatch import fnmatch
+
+# Paths a change may touch WITHOUT being declared in a ticket's ``file_impact``.
+# Owned by the file-impact-vs-diff close check; deliberately NOT inherited from any
+# other gate's exemption list, so tightening one never silently tightens the other.
+EXEMPT_GLOBS: tuple[str, ...] = (
+    "tests/**",
+    "docs/**",
+    "**/*.md",
+    "CHANGELOG.md",
+)
+
+
+def glob_match(path: str, pattern: str) -> bool:
+    """Match ``path`` against ``pattern``, with ``**/`` also matching at the repo root.
+
+    ``fnmatch`` does not special-case ``/``, so a bare ``fnmatch("README.md", "**/*.md")``
+    is False even though the intent is "any markdown file". Retrying with the leading
+    ``**/`` stripped bridges that gap. This is the single implementation of the rule.
+    """
+    return fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch(path, pattern[3:]))
+
+
+def normalize(path: str) -> str:
+    """Normalize to a repo-relative POSIX path (no ``./`` prefix, no trailing ``/``)."""
+    cleaned = path.strip().replace("\\", "/")
+    while cleaned.startswith("./"):
+        cleaned = cleaned[2:]
+    return cleaned.rstrip("/")
+
+
+def is_exempt(path: str) -> bool:
+    """Whether a changed path is covered by this check's own exemption globs."""
+    normalized = normalize(path)
+    return any(glob_match(normalized, pattern) for pattern in EXEMPT_GLOBS)
+
+
+def _is_directory_entry(entry: str, repo_root: str | None) -> bool:
+    """Whether a ``file_impact`` entry denotes a directory (trailing ``/`` or on disk)."""
+    if entry.rstrip().endswith("/"):
+        return True
+    if repo_root is None:
+        return False
+    return os.path.isdir(os.path.join(repo_root, normalize(entry)))
+
+
+def impact_covers(entry: str, changed: str, *, repo_root: str | None = None) -> bool:
+    """Whether one ``file_impact`` entry covers a changed path.
+
+    Exact equality, or a directory-prefix match when the entry ends with ``/`` or names an
+    existing directory. NEVER a bare substring match — ``src/rebar/a.py`` must not cover
+    ``src/rebar/a.py.bak``.
+    """
+    normalized_entry = normalize(entry)
+    normalized_changed = normalize(changed)
+    if not normalized_entry or not normalized_changed:
+        return False
+    if normalized_entry == normalized_changed:
+        return True
+    if _is_directory_entry(entry, repo_root):
+        return normalized_changed.startswith(f"{normalized_entry}/")
+    return False
+
+
+def undeclared_paths(
+    changed: list[str], impact: list[str], *, repo_root: str | None = None
+) -> list[str]:
+    """Changed paths that are neither covered by ``impact`` nor exempt (sorted, deduped)."""
+    offending = {
+        normalize(path)
+        for path in changed
+        if normalize(path)
+        and not is_exempt(path)
+        and not any(impact_covers(entry, path, repo_root=repo_root) for entry in impact)
+    }
+    return sorted(offending)
+
+
+def is_merge_commit(sha: str, repo_root: str) -> bool:
+    """Whether ``sha`` has more than one parent.
+
+    Merges are skipped by the close check: ``git show --name-only`` renders a merge as a
+    combined diff (usually an EMPTY path list), so reading it as "touched nothing" would
+    silently pass. A merge authors no change of its own — its content arrives through the
+    parents' own commits, which are scanned in their own right.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-list", "--parents", "-n", "1", sha],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return False
+    return len(proc.stdout.split()) > 2
+
+
+def changed_paths(sha: str, repo_root: str) -> list[str] | None:
+    """Repo-relative paths ``sha`` touches, or ``None`` when git could not read it.
+
+    ``None`` is distinct from ``[]`` on purpose: the caller fails closed on an unreadable
+    commit it expected to be local, but treats a genuinely empty commit as clean.
+    """
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "show", "--name-only", "--pretty=format:", sha],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    return [normalize(line) for line in proc.stdout.splitlines() if line.strip()]
+
+
+def code_root_for(tracker: object) -> str:
+    """The code repo root that owns ``tracker``.
+
+    Mirrors the derivation the close precheck already uses: the tracker always resolves,
+    whereas a caller-supplied ``repo_root`` may be ``None`` (the CLI passes none), which
+    would turn into a literal ``git -C None``.
+    """
+    return os.path.dirname(str(tracker))
+
+
+def unresolvable_shas(shas: list[str], tracker: object) -> list[str]:
+    """:func:`invalid_commit_shas` against the code repo that owns ``tracker``."""
+    return invalid_commit_shas(shas, code_root_for(tracker))
+
+
+def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
+    """Which of ``shas`` do NOT resolve to a commit object in ``repo_root``.
+
+    Callers validate the WHOLE batch before recording anything, which is what makes
+    attach-commits all-or-nothing: one bad SHA records no event at all.
+    """
+    invalid = []
+    for sha in shas:
+        proc = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                f"{sha}^{{commit}}",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            invalid.append(sha)
+    return invalid

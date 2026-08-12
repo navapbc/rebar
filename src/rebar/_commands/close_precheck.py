@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import Mapping
 
 from rebar import config
 from rebar._commands import txn
@@ -183,9 +184,111 @@ def _ensure_duplicate_close_is_linked(
     )
 
 
-def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
-    """True if any commit reachable from the code repo's history references ANY of
-    ``accepted_ids`` via a ``rebar-ticket:`` trailer (or a leading ``<id>:`` subject token).
+def _check_work_landed(
+    ticket_id: str, resolved_id: str, accepted_ids: set[str], tracker: str, code_root: str
+) -> None:
+    """The two DET landing checks, kept out of ``_completion_precheck`` so that function
+    stays within its complexity ceiling: (1) a ticket recording ``file_impact`` must have a
+    referencing commit at all, and (2) the linked commits' diffs must stay inside the
+    declared impact."""
+    from rebar._engine_support import field_reads
+
+    referencing = _referencing_commits(accepted_ids, tracker, code_root)
+    if field_reads.file_impact(ticket_id, tracker) and not referencing:
+        raise CommandError(
+            f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
+            f"commit references it (nor any of its descendants). Add a "
+            f"'rebar-ticket: {resolved_id}' trailer to the commit "
+            'that implements it, then retry (or override with --force="<reason>"). '
+            "Completion verification cannot confirm the work landed without a referencing commit.",
+            returncode=1,
+        )
+    _check_file_impact_vs_diff(accepted_ids, referencing, tracker, code_root)
+
+
+def _attached_commit_shas(accepted_ids: set[str], tracker: str) -> list[str]:
+    """SHAs recorded on the ticket (or a descendant) by COMMITS events — the
+    ``rebar attach-commits`` repair surface."""
+    from rebar.reducer import reduce_ticket
+
+    shas: list[str] = []
+    for ticket in sorted(accepted_ids):
+        try:
+            state = reduce_ticket(os.path.join(tracker, ticket))
+        except Exception:  # noqa: BLE001 -- an unreadable sibling never blocks a close
+            continue
+        for record in (state or {}).get("commits") or []:
+            sha = record.get("sha") if isinstance(record, Mapping) else record
+            if isinstance(sha, str) and sha.strip():
+                shas.append(sha.strip())
+    return shas
+
+
+def _union_file_impact(accepted_ids: set[str], tracker: str) -> list[str]:
+    """``file_impact`` paths declared by the ticket OR any transitive descendant.
+
+    Deliberately the SAME id set the referencing-commit scan credits. Reading only THIS
+    ticket's impact would false-BLOCK a parent that declares ``file_impact`` when its
+    children's commits touch child-owned paths, because those commits ARE credited to the
+    parent. Unioning keeps the two scopes symmetric by construction.
+    """
+    from rebar._engine_support import field_reads
+
+    paths: list[str] = []
+    for ticket in sorted(accepted_ids):
+        for entry in field_reads.file_impact(ticket, tracker) or []:
+            path = entry.get("path") if isinstance(entry, Mapping) else entry
+            if isinstance(path, str) and path.strip():
+                paths.append(path.strip())
+    return paths
+
+
+def _check_file_impact_vs_diff(
+    accepted_ids: set[str], referencing: list[str], tracker: str, code_root: str
+) -> None:
+    """DET close check: every changed path of a linked commit must be declared or exempt.
+
+    Deterministic and LLM-free. Commit discovery unions the two sources that already exist:
+    the COMMITS events written by ``rebar attach-commits``, and the referencing-commit scan
+    above. Git errors are handled asymmetrically because the two sources differ in kind: a
+    scanned commit is local by construction, so failing to read it is anomalous and fails
+    CLOSED, whereas an attached SHA may legitimately live in another clone (or simply be
+    unfetched), so it is skipped rather than blocking a repair surface built to record it.
+    """
+    from rebar._engine_support import commit_impact
+
+    impact = _union_file_impact(accepted_ids, tracker)
+    if not impact:
+        return  # nothing declared anywhere in scope — out of scope for this check
+
+    for sha in _attached_commit_shas(accepted_ids, tracker) + list(referencing):
+        if commit_impact.is_merge_commit(sha, code_root):
+            continue  # a merge authors nothing of its own; its parents are scanned instead
+        paths = commit_impact.changed_paths(sha, code_root)
+        if paths is None:
+            if sha in referencing:
+                raise CommandError(
+                    f"Error: cannot close: commit {sha} references this ticket but could not "
+                    "be read from this repository, so its changed paths cannot be verified "
+                    'against the recorded file_impact (override with --force="<reason>").',
+                    returncode=1,
+                )
+            continue  # an attached SHA absent from this clone is not evidence of a problem
+        undeclared = commit_impact.undeclared_paths(paths, impact, repo_root=code_root)
+        if undeclared:
+            raise CommandError(
+                f"Error: cannot close: commit {sha} changes "
+                + ", ".join(undeclared)
+                + ", which the recorded file_impact does not declare. Declare them with "
+                "`rebar set-file-impact <ticket> ...` and retry "
+                '(or override with --force="<reason>").',
+                returncode=1,
+            )
+
+
+def _referencing_commits(accepted_ids: set[str], tracker: str, repo_root) -> list[str]:
+    """SHAs of commits referencing ANY of ``accepted_ids`` via a ``rebar-ticket:`` trailer
+    (or a leading ``<id>:`` subject token), newest first.
 
     Each extracted candidate is put through the SAME shared resolver the commit-ticket gate
     uses (:func:`resolve_ticket_id`), so every id form — full / short / alias / Jira key /
@@ -193,25 +296,38 @@ def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) 
     candidates the user never supplied, so an unrelated ambiguity is noise, not a diagnostic
     (bug af11); ambiguous candidates still resolve to ``None`` either way, so the decision is
     unchanged. Resolves are cached across commits. A git failure (not a repo, no commits)
-    yields ``False`` (no referencing commit found)."""
+    yields ``[]`` (no referencing commit found)."""
     from rebar._commands.verify_commit import extract_ticket_refs
     from rebar._engine_support.resolver import resolve_ticket_id
 
     proc = subprocess.run(
-        ["git", "-C", str(repo_root), "log", "--format=%B%x00"],
+        ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
         capture_output=True,
         text=True,
     )
     if proc.returncode != 0:
-        return False
+        return []
     resolved_cache: dict[str, str | None] = {}
-    for message in proc.stdout.split("\0"):
+    found: list[str] = []
+    for entry in proc.stdout.split("\0"):
+        sha, _, message = entry.partition("\x1f")
+        sha = sha.strip()
+        if not sha:
+            continue
         for ref in extract_ticket_refs(message):
             if ref not in resolved_cache:
                 resolved_cache[ref] = resolve_ticket_id(ref, tracker, quiet=True)
             if resolved_cache[ref] in accepted_ids:
-                return True
-    return False
+                found.append(sha)
+                break
+    return found
+
+
+def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:
+    """Whether ANY commit references one of ``accepted_ids`` — the long-standing bool
+    contract, preserved verbatim as a thin wrapper over :func:`_referencing_commits` so
+    existing call sites and the documented monkeypatch target keep working unchanged."""
+    return bool(_referencing_commits(accepted_ids, tracker, repo_root))
 
 
 def _emit_completion_sidecar(
@@ -345,7 +461,6 @@ def _completion_precheck(
     # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
     # not landed and completion cannot be confirmed — fail fast (no LLM call).
-    from rebar._engine_support import field_reads
     from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
@@ -365,17 +480,7 @@ def _completion_precheck(
             desc_resolved = resolve_ticket_id(desc_id, tracker)
             if desc_resolved is not None:
                 accepted_ids.add(desc_resolved)
-    if field_reads.file_impact(ticket_id, tracker) and not _referencing_commit_exists(
-        accepted_ids, tracker, code_root
-    ):
-        raise CommandError(
-            f"Error: cannot close {ticket_id}: it records file_impact (a code change) but no "
-            f"commit references it (nor any of its descendants). Add a "
-            f"'rebar-ticket: {resolved_id}' trailer to the commit "
-            'that implements it, then retry (or override with --force="<reason>"). '
-            "Completion verification cannot confirm the work landed without a referencing commit.",
-            returncode=1,
-        )
+    _check_work_landed(ticket_id, resolved_id, accepted_ids, tracker, code_root)
 
     try:
         from rebar import llm  # LAZY — preserves the optionality contract
