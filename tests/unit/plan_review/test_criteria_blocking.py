@@ -22,11 +22,13 @@ These tests pin:
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
 
 from rebar.llm.criteria.model import threshold_for
+from rebar.llm.evals import eval as _eval
 from rebar.llm.plan_review import orchestrator, registry
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.registry import _DET_OVERLAY_RULES
@@ -35,6 +37,18 @@ from rebar.llm.review_kernel import GRADED_BINARY
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).parents[3]
+
+_T10_SCOPE_CLAUSE = (
+    "This overlay evaluates the DURABLE infrastructure — the IaC/config that persists. "
+    "Transient, throwaway experiments used to de-risk a mechanism before committing it — "
+    "their creation, isolation, and teardown — are out of scope here."
+)
+_T10_MAJOR_SAFETY_QUALIFIER = (
+    "This exclusion does NOT waive the four MAJOR safety classes: a transient apply that is "
+    "destructive with no safeguard, grants wildcard-admin access, or commits a plaintext "
+    "secret remains in scope, as does an internet- or untrusted-network-reachable transient "
+    "service with unspecified human/admin authentication — flag each case."
+)
 
 # An all-"yes" graded binary: validity == 1.0, so the finding's priority equals the
 # impact scalar we inject — letting each test place a finding at an exact priority.
@@ -166,3 +180,98 @@ def test_t10_rubric_contains_major_class_severity_guidance() -> None:
         "unauthenticated internet-reachable service",
     ):
         assert phrase in text, phrase
+
+
+# ── T10 durable/transient partition contract (REB-1538 / REB-1540) ───────────
+def _t10_rubric() -> str:
+    return (_ROOT / "src/rebar/llm/reviewers/plan_review_T10.md").read_text(encoding="utf-8")
+
+
+def _assert_scope_then_safety(text: str) -> None:
+    assert _T10_SCOPE_CLAUSE in text
+    assert _T10_MAJOR_SAFETY_QUALIFIER in text
+    scope_end = text.index(_T10_SCOPE_CLAUSE) + len(_T10_SCOPE_CLAUSE)
+    safety_start = text.index(_T10_MAJOR_SAFETY_QUALIFIER)
+    assert text[scope_end:safety_start].strip() == ""
+
+
+def _t10_eval_spec() -> dict:
+    path = _ROOT / "src/rebar/llm/eval_specs/plan-review-T10.eval.yaml"
+    assert path.is_file(), "T10 durable/transient eval spec is missing"
+    return _eval.load_eval_spec("plan-review-T10", repo_root=str(_ROOT))
+
+
+def _normalized_case_text(case: dict) -> str:
+    return f"{case.get('note', '')} {case.get('input', '')}".lower().replace("-", " ")
+
+
+def _matching_case_ids(spec: dict, expect: str, terms: tuple[str, ...]) -> set[str]:
+    return {
+        str(case["id"])
+        for case in spec["dataset"]
+        if case.get("expect") == expect
+        and all(term in _normalized_case_text(case) for term in terms)
+    }
+
+
+def test_t10_rubric_co_locates_scope_and_major_safety_contract() -> None:
+    _assert_scope_then_safety(_t10_rubric())
+
+
+def test_t10_scope_partition_does_not_delegate_to_another_criterion() -> None:
+    text = _t10_rubric()
+    _assert_scope_then_safety(text)
+    assert set(re.findall(r"\bT\d+\b", text)) == {"T10"}
+
+
+def test_t10_eval_corpus_covers_each_pass_and_finding_boundary() -> None:
+    spec = _t10_eval_spec()
+    labels = [case.get("expect") for case in spec["dataset"]]
+    assert labels.count("pass") == 5
+    assert labels.count("finding") == 5
+
+    pass_boundaries = (
+        ("loopback", "teardown"),
+        ("durable", "specif"),
+        ("private", "scoped", "iam"),
+        ("secret manager",),
+        ("sandbox", "shared"),
+    )
+    finding_boundaries = (
+        ("durable", "state"),
+        ("destructive", "shared"),
+        ("wildcard", "admin"),
+        ("plaintext", "secret"),
+        ("untrusted", "auth"),
+    )
+    pass_ids = [_matching_case_ids(spec, "pass", terms) for terms in pass_boundaries]
+    finding_ids = [_matching_case_ids(spec, "finding", terms) for terms in finding_boundaries]
+    assert all(len(ids) == 1 for ids in pass_ids), pass_ids
+    assert all(len(ids) == 1 for ids in finding_ids), finding_ids
+    assert len(set().union(*pass_ids)) == 5
+    assert len(set().union(*finding_ids)) == 5
+
+
+def test_t10_eval_gold_set_is_balanced_and_well_formed() -> None:
+    gold = _t10_eval_spec()["gold_set"]
+    assert len(gold) == 10
+    assert [item.get("label") for item in gold].count("pass") == 5
+    assert [item.get("label") for item in gold].count("finding") == 5
+    assert all(isinstance(item.get("input"), str) and item["input"].strip() for item in gold)
+
+
+def test_t10_eval_scores_recall_and_false_fire() -> None:
+    scorer_names = {scorer["name"] for scorer in _t10_eval_spec()["scorers"]}
+    assert scorer_names == {
+        "no_fire_on_good_cases",
+        "recall_on_seeded_defects",
+    }
+
+
+def test_t10_explain_and_generated_guide_render_scope_partition() -> None:
+    explanation = registry.explain_criterion("T10")
+    _assert_scope_then_safety(explanation)
+    assert registry.validate_criteria_guide(str(_ROOT)) == []
+    guide = (_ROOT / "docs/plan-review-criteria-guide.md").read_text(encoding="utf-8")
+    t10_section = guide.split("## T10", maxsplit=1)[1].split("\n## ", maxsplit=1)[0]
+    _assert_scope_then_safety(t10_section)
