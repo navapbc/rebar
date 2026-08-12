@@ -22,7 +22,6 @@
     "src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py::_diff_fields": 32,
     "src/rebar/_engine/rebar_reconciler/applier.py::apply": 22,
     "src/rebar/_engine/rebar_reconciler/binding_walk.py::compute_binding_walk_mutations": 27,
-    "src/rebar/_engine/rebar_reconciler/dispatch_one.py::_update_one_dispatch_links": 17,
     "src/rebar/_engine/rebar_reconciler/dispatch_one.py::create_one": 36,
     "src/rebar/_engine/rebar_reconciler/fetcher.py::_build_snapshot": 27,
     "src/rebar/_engine/rebar_reconciler/inbound_differ.py::_diff_jira_vs_local": 16,
