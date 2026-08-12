@@ -584,6 +584,23 @@ def _sign_review(argv: list[str]) -> int:
     return 0 if result.get("ok") else 1
 
 
+def _render_step_failures(result: dict) -> None:
+    """Name the LLM step calls that failed but did not fail the run
+    (eclectic-industrial-argali). Absent from a clean run's coverage, so this prints only when
+    something actually degraded — which is the point: repeated silent degradation used to be
+    visible only by scraping the logs."""
+    tally = (result.get("coverage", {}) or {}).get("llm_step_failures") or {}
+    if not tally:
+        return
+    by_step = tally.get("by_step", {}) or {}
+    detail = ", ".join(f"{label}={n}" for label, n in sorted(by_step.items()))
+    sys.stdout.write(
+        f"  llm step failures: {tally.get('total', 0)}"
+        f"{f' ({detail})' if detail else ''} — non-fatal, the verdict is unaffected; "
+        "these steps contributed nothing to it\n"
+    )
+
+
 def _render_plan_review_text(result: dict) -> None:
     """Human-readable plan-review summary (verdict + blocking/advisory + coaching)."""
     v = result.get("verdict", "?")
@@ -604,6 +621,7 @@ def _render_plan_review_text(result: dict) -> None:
             "  reused: stored BLOCK verdict is still current (plan and code unchanged) — "
             "no LLM re-run (pass --force to re-review)\n"
         )
+    _render_step_failures(result)
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
     overflow = counts.get("advisory_overflow", 0)
     sys.stdout.write(

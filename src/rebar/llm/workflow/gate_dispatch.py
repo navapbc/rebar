@@ -110,6 +110,7 @@ def produce_plan_review_verdict(
     from rebar.llm.plan_review.prerequisites import focused_inputs
     from rebar.llm.plan_review.production_batch_runner import ProductionBatchRunner
     from rebar.llm.runner import get_runner
+    from rebar.llm.step_failures import collect_step_failures
 
     from . import executor as _ex
     from .recorder import MemoryRecorder
@@ -155,6 +156,11 @@ def produce_plan_review_verdict(
         with (
             assemble_context_cache(),
             collect_contract_violations(),
+            # Tally LLM step calls that fail but do not fail the run, so repeated silent
+            # degradation (the motivating case: every overlap-judge batch dying) is visible on
+            # the verdict coverage instead of only in the logs. Additive observability — see
+            # rebar.llm.step_failures.
+            collect_step_failures(),
             gate_config(cfg),
             focused_inputs(list(prerequisite_blocks or [])),
             # Mid-run cancellation (story 2c89): a run-scoped token the seam probes

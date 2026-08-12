@@ -22,7 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
-from rebar.llm import usage_log
+from rebar.llm import step_failures, usage_log
 from rebar.llm.agent_call import build_agent_kwargs, log_call_success, record_call_spend
 from rebar.llm.anthropic_model import (
     _DIRECT_ANTHROPIC_BASE_URL,  # noqa: F401  (re-exported for tests / back-compat)
@@ -587,6 +587,12 @@ class PydanticAIRunner:
                     duration_s=time.monotonic() - _t0,
                     ticket=req.target.get("ticket_id"),
                 )
+                # The spend row above goes to the JSONL usage log; this counts the SAME failure
+                # in memory so a run that survives it can report it on the verdict coverage
+                # (eclectic-industrial-argali). Most sub-steps swallow their failure and degrade
+                # silently, which made repeated degradation invisible to a JSON consumer. A
+                # no-op outside an active sink scope, and it cannot raise.
+                step_failures.record(_call_label)
                 interpret_failure(
                     exc,
                     run_messages,
