@@ -17,6 +17,7 @@ import sys
 from collections.abc import Callable
 from typing import NamedTuple
 
+from rebar._commands import attach_commits as _attach_commits
 from rebar._commands import composer, leaf
 from rebar._commands import doctor as _doctor
 from rebar._commands import idea as _idea
@@ -160,6 +161,7 @@ def _set_file_impact_cli(args: list[str]) -> int:
 # exit code directly — the heavier event-composers (docs/bash-migration.md §4).
 _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "set-file-impact": _set_file_impact_cli,
+    "attach-commits": _attach_commits.attach_commits_cli,
     "create": composer.create_cli,
     "idea": _idea.idea_cli,
     "edit": composer.edit_cli,

@@ -138,6 +138,7 @@ _WRITES_FULL = frozenset(
         "archive",
         "set-file-impact",
         "set-verify-commands",
+        "attach-commits",
         "session-log",
     }
 )
