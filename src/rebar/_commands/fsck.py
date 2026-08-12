@@ -10,6 +10,8 @@ Runs five checks over the tracker:
       DIVERGED (no shared history / cannot fast-forward; a real integrity issue)
   4.6 Configured-vs-mounted ``tracker.branch`` mismatch (informational)
   4.7 FOREIGN_STORE_PATH: source paths polluting the tracker (bug 2fa6)
+  4.8 UNSIGNED_ENV: an ``env_id`` still writing after the store adopted signing yet
+      signing nothing (bug ed5c; tallied in the ``fsck_authorship`` leaf module)
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the
@@ -28,6 +30,7 @@ import time
 
 from rebar import config
 from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
+from rebar._commands.fsck_authorship import EnvAuthorshipTally
 
 # ``--repair`` cluster extracted to the ``fsck_repair`` leaf module (module-size
 # split, epic 716f). The two shared filesystem helpers ``_ticket_dirs`` and
@@ -89,6 +92,11 @@ def _scan(
     lines: list[str] = []
     issue_count = 0
 
+    # Per-env authorship tally (bug ed5c): fed from the payloads Check 1 already parses, so the
+    # per-env signed-rate check costs no extra pass over the store. Reported at the end, next to
+    # the store-wide authorship line it complements.
+    env_authorship = EnvAuthorshipTally()
+
     # ── Check 1: JSON validity ───────────────────────────────────────────────
     for ticket_id in _ticket_dirs(tracker):
         ticket_dir = os.path.join(tracker, ticket_id)
@@ -97,7 +105,7 @@ def _scan(
                 continue
             try:
                 with open(os.path.join(ticket_dir, filename), encoding="utf-8") as f:
-                    json.load(f)
+                    env_authorship.observe(filename, json.load(f))
             except (json.JSONDecodeError, ValueError, OSError):
                 lines.append(f"CORRUPT: {ticket_id}/{filename} — invalid JSON")
                 issue_count += 1
@@ -262,6 +270,14 @@ def _scan(
     if unsigned_total:
         authorship_line += " — run `rebar verify-authorship`"
     lines.append(authorship_line)
+
+    # Per-env authorship health (bug ed5c): unlike the store-wide line above, a writer that
+    # signs NOTHING is a COUNTED issue — that asymmetry is the point. The store-wide tally
+    # hid beb1 for a month because one broken writer's unsigned events looked like ordinary
+    # legacy volume; per-env, a 0%-signed writer that is still active stands out.
+    env_findings = env_authorship.findings()
+    lines.extend(env_findings)
+    issue_count += len(env_findings)
 
     return lines, issue_count
 
