@@ -302,7 +302,8 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
     Signing is BEST-EFFORT: when a current identity resolves (``author_id`` is on the
     envelope) AND ``identity.signing_key`` is configured, sign the event's CANONICAL bytes
     (the envelope WITHOUT ``author_sig``) as an authorship attestation and store the DSSE
-    envelope under ``author_sig``. No identity / no key ⇒ the event is written UNSIGNED; a
+    envelope under ``author_sig``. No identity / no key ⇒ the SKIP is logged (bug ed5c) and the
+    event is written UNSIGNED; a
     signing FAILURE is logged and the event is written unsigned too — signing NEVER breaks a
     write.
 
@@ -348,7 +349,24 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
         # a MISSING identity/key, not on a signing failure when both are present, so return.
         return
 
-    # Cannot sign: no resolvable identity or no signing_key configured.
+    # Cannot sign: no resolvable identity or no signing_key configured. Say so OUT LOUD (bug
+    # ed5c-42fc-bb7f-4cf4): this branch used to return in SILENCE whenever the advisory gate was
+    # off, so a writer whose identity failed to resolve wrote unsigned events indefinitely with
+    # no signal anywhere — that is how a review bot emitted ~8900 unsigned, `Unknown`-authored
+    # events for a month before an unrelated fsck audit noticed (bug beb1). Only the signing
+    # FAILURE path above was audible; the SKIP path was not. Reached only when signing is
+    # configured or the gate is on (the unconfigured fast path returned above), so this warns
+    # about a genuine misconfiguration rather than every write on an unsigned store. Logging
+    # only — signing stays BEST-EFFORT and the event is still written unsigned below.
+    logger.warning(
+        "authorship: signing SKIPPED for event %s on %s — %s; writing unsigned",
+        event.get("uuid"),
+        ticket_id,
+        "no resolvable identity (author_id) for this writer"
+        if not author_id
+        else "no identity.signing_key configured",
+    )
+
     if require_auth:
         ttype = _event_ticket_type(ticket_id, event_type, data, tracker)
         if ttype not in _AUTHORSHIP_GATE_EXEMPT_TYPES:
