@@ -24061,133 +24061,15 @@
     "316c-6c42-32d3-4f9b": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "The close-time gate + signing integration. Optional (`verify.require_completion_verification_for_close`, default off). On a non-force close: verify \u2192 close \u2192 **sign on PASS** (verify\u2192close\u2192sign ordering, BL-5); FAIL/missing-LLM \u2192 fail-closed block; `--force-close` \u2192 close without sign (withhold the confirmation).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope (files)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/config.py`: `VerifyConfig.require_completion_verification_for_close: bool=False` + `_SECTIONS[\"verify\"]` coercer.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/_commands/txn.py`: factor `bug_close_reason_ok(reason)` shared predicate.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/_commands/transition.py`: read ticket_type; `_completion_precheck` (outside lock; lazy `rebar.llm` import; `except Exception`\u2192fail-closed; bug-reason precheck) BEFORE `transition_core`; sign via `signing.sign_manifest` AFTER a confirmed close; force-close skips verify+sign; update audit-comment wording.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] flag off \u2192 no verify call; flag on + PASS \u2192 close + SIGNATURE event (verify_signature==certified) AFTER the STATUS event",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] FAIL \u2192 CommandError, no SIGNATURE, ticket stays open; missing-extra/any-exception \u2192 fail-closed block",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `--force-close` \u2192 closes, no SIGNATURE; ConcurrencyMismatch \u2192 no orphan SIGNATURE",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] gate is alternatives-not-composed with `_signature_gate` (documented); when ENABLED but the LLM is unavailable it fails CLOSED; an UNREADABLE config fails this (opt-in) gate OFF with a warning \u2014 it must NOT preempt the signature gate or auto-enable across repos (refined during implementation; see commit)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "The close-time gate + signing integration. Optional (`verify.require_completion_verification_for_close`, default off). On a non-force close: verify \u2192 close \u2192 **sign on PASS** (verify\u2192close\u2192sign ordering, BL-5); FAIL/missing-LLM \u2192 fail-closed block; `--force-close` \u2192 close without sign (withhold the confirmation).\n\n## Scope (files)\n- `src/rebar/config.py`: `VerifyConfig.require_completion_verification_for_close: bool=False` + `_SECTIONS[\"verify\"]` coercer.\n- `src/rebar/_commands/txn.py`: factor `bug_close_reason_ok(reason)` shared predicate.\n- `src/rebar/_commands/transition.py`: read ticket_type; `_completion_precheck` (outside lock; lazy `rebar.llm` import; `except Exception`\u2192fail-closed; bug-reason precheck) BEFORE `transition_core`; sign via `signing.sign_manifest` AFTER a confirmed close; force-close skips verify+sign; update audit-comment wording.\n\n## Acceptance Criteria\n- [ ] flag off \u2192 no verify call; flag on + PASS \u2192 close + SIGNATURE event (verify_signature==certified) AFTER the STATUS event\n- [ ] FAIL \u2192 CommandError, no SIGNATURE, ticket stays open; missing-extra/any-exception \u2192 fail-closed block\n- [ ] `--force-close` \u2192 closes, no SIGNATURE; ConcurrencyMismatch \u2192 no orphan SIGNATURE\n- [ ] gate is alternatives-not-composed with `_signature_gate` (documented); when ENABLED but the LLM is unavailable it fails CLOSED; an UNREADABLE config fails this (opt-in) gate OFF with a warning \u2014 it must NOT preempt the signature gate or auto-enable across repos (refined during implementation; see commit)",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "WS-4: Close gate + config flag + signing integration"
       },
       "baseline_advanced_at": "2026-07-23T04:31:47Z",
       "created_at": "2026-06-25T22:58:56Z",
       "jira_key": "REB-75",
+      "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:58:56Z"
     },
