@@ -5750,9 +5750,17 @@
       "updated_at": "2026-07-16T23:37:23Z"
     },
     "0bf5-64aa-c185-4d79": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Context\nOperator-declared serious bug (2026-08-12): **advisory code-review findings are sometimes invisible on the Gerrit change.** The review-bot's vote message states a count (\"PASS. N advisory finding(s) (non-blocking)\") but on some changes the finding TEXT is retrievable nowhere on the change \u2014 no robot comments, no inline comments, nothing in the vote message body.\n\nObserved tonight (all RebarBotNava changes, LLM-Review +1):\n- change **1666** \u2014 \"4 advisory non-blocking findings \u2014 their text isn't exposed via the Gerrit API\"; agent could not inspect them.\n- change **1685** \u2014 \"Gerrit has no robot comments and no inline comments for 1685\"; only the count was published.\n- Counter-example: change **1636** \u2014 advisories WERE posted as inline comments (\"Advisories aren't in the message body (inline comments only)\"). So posting is INCONSISTENT, not uniformly absent.\n\nWhy it matters (operator, verbatim): \"if they're invisible it makes it difficult for us to determine which advisory findings should be promoted to blocking.\" This directly feeds the pending blocking-lane re-enable work (childsafe comment #10: 183 major/critical findings all landed advisory; deciding which criteria to blocking-enable requires the advisory corpus to be visible where reviewers look).\n\nThe finding data DOES exist in the tracker's REVIEW_RESULT sidecar events \u2014 the gap is on the Gerrit publishing surface (review-bot vote/comment posting path).\n\n# Acceptance criteria\n- [ ] AC1 \u2014 Root cause identified: under what conditions does the review-bot publish advisory finding text vs only a count (diff 1636's path vs 1666/1685's \u2014 e.g. inline-comment anchoring failure when a finding lacks a file/line anchor, comment-posting error swallowed, or a path/branch condition).\n- [ ] AC2 \u2014 Advisory findings are ALWAYS retrievable from the Gerrit change: each advisory posts as an inline/robot comment when anchorable, and falls back to enumerated text in the review message body when not (anchor-less findings must not be dropped from the surface).\n- [ ] AC3 \u2014 A posting failure is never silent: if publishing any finding fails, the vote message says so and names where the full set lives (the ticket's REVIEW_RESULT sidecar).\n- [ ] AC4 \u2014 Regression tests pin: anchorable finding \u2192 inline comment; anchor-less finding \u2192 message-body text; posting-error path \u2192 explicit notice. RED-verified against the reproduced 1666/1685 condition.\n- [ ] AC5 \u2014 make lint/typecheck pass; no change to vote semantics (labels, blocking behavior).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Advisory review findings sometimes invisible on the Gerrit change"
+      },
       "created_at": "2026-08-12T22:43:46Z",
       "jira_id": "4588532",
       "jira_key": "REB-2805",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-12T22:43:49Z"
     },
