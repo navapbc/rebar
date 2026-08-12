@@ -79,44 +79,97 @@ resource "aws_cloudwatch_metric_alarm" "deploy_errors" {
 # All 11 alarms read OK while the gate was live-locked. `rebar-gerrit-voter-errors`
 # (monitoring_s4b.tf) provably CANNOT observe this failure mode, which matters because the
 # Bedrock cutover (eb6e) names that alarm as its safety net. autodeploy.sh now defers a deploy
-# that would interrupt a review; this alarm watches the cases where it recreated anyway — the
+# that would interrupt a review; the alarms below watch the cases where it recreated anyway — the
 # DEPLOY_DEFER_MAX bound was exhausted (a chronically busy bot), or the /health in_flight signal
 # was unreadable so the deploy ran blind. Routine, healthy deferrals are a SEPARATE metric
 # (deploy_deferrals) and deliberately do not page.
 #
+# SPLIT BY REASON (bug 613a). One alarm on a rolled-up counter could not say WHICH of those two
+# causes fired, and they want opposite responses. A CloudWatch-only sweep therefore had to hedge:
+# [rebar:7b4a-0f39-1a45-4ce9] was filed unable to distinguish "the bot is busy" from "34cd has
+# regressed and every deploy is blind", and closing it needed SSM shell access to read the
+# journal. There is now ONE ALARM PER REASON, each carrying only its own remediation, so the
+# alarm itself answers the question. Split via distinct METRIC NAMES rather than a CloudWatch
+# dimension — every metric here stays dimensionless on both sides (monitoring_s4b.tf: a dimension
+# present on only one side silently unmatches and the alarm goes permanently INSUFFICIENT_DATA).
+#
 # Custom metric contract (what the host probe must PutMetricData):
 #   Namespace  = rebar/host
-#   MetricName = review_interrupts
+#   MetricName = review_interrupts_bound_exceeded     — alarmed below
+#                review_interrupts_signal_unavailable — alarmed below
+#                review_interrupts                    — rolled-up total, published but NOT
+#                                                       alarmed: it keeps pre-split history
+#                                                       readable and catches any future reason,
+#                                                       while leaving each firing to page once.
 #   Dimensions = NONE — dimensionless on BOTH sides (see monitoring_s4b.tf rationale).
-#   Unit       = Count  (per-period count of new AUTODEPLOY_REVIEW_INTERRUPT journal lines)
+#   Unit       = Count  (per-period count of new AUTODEPLOY_REVIEW_INTERRUPT journal lines
+#                        matching that reason)
+#
+# Both alarms keep the pre-split 900s / 1-datapoint / Sum > 0 / notBreaching cadence, so the
+# aggregate sensitivity is unchanged by the split. Making `bound-exceeded` less trigger-happy is
+# deliberately NOT bundled in here — that is a call to make with the DEPLOY_DEFER_MAX disposition.
 # ---------------------------------------------------------------------------
 
-resource "aws_cloudwatch_metric_alarm" "review_interrupts" {
-  alarm_name        = "rebar-autodeploy-review-interrupts"
+resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
+  alarm_name        = "rebar-autodeploy-review-interrupts-bound-exceeded"
   alarm_description = <<-EOT
-    A rebar auto-deploy recreated the review-bot container while a review was in flight, so an
-    LLM-Review was killed (AUTODEPLOY_REVIEW_INTERRUPT in the rebar-autodeploy.service journal:
-    either the DEPLOY_DEFER_MAX deferral bound was exhausted, or /health's in_flight signal was
-    unreadable and the deploy proceeded without a drain check). Published as
-    rebar/host:review_interrupts by the host observability probe (4e). Interrupted reviews are
-    retried by the backfill reconciler, so this is not itself an outage — but it is the ONLY
-    signal for a failure mode that leaves voter_errors, restarts and the deploy log all green,
-    and repeated interruptions live-lock the gate: changes reach `Verified +1` with
-    `LLM-Review = 0` and cannot submit. Investigate `journalctl -u rebar-autodeploy` for the
-    marker's reason field: `bound-exceeded` means the bot is chronically busy (reviews are
-    queueing faster than they complete), `signal-unavailable` means the drain check itself is
-    broken and every deploy is now running blind.
+    An auto-deploy recreated the review-bot mid-review, killing an LLM-Review: the
+    DEPLOY_DEFER_MAX deferral bound was exhausted with reviews STILL in flight and the deploy
+    proceeded anyway (AUTODEPLOY_REVIEW_INTERRUPT, reason `bound-exceeded`, in the
+    rebar-autodeploy.service journal; published as rebar/host:review_interrupts_bound_exceeded
+    by the host probe, observability.sh 4e). MEANING: the drain check is WORKING — the bot is
+    chronically busy and a deploy ran out of patience. The backfill reconciler retries killed
+    reviews, so a lone firing in a landing burst is not an outage. REMEDIATION: repeated
+    firings are a review-THROUGHPUT problem, not a probe problem — check review duration and
+    concurrency, and whether DEPLOY_DEFER_MAX is sized for them; left alone they live-lock the
+    gate (changes reach `Verified +1` with `LLM-Review = 0` and cannot submit). If
+    rebar-autodeploy-review-interrupts-signal-unavailable is also firing, that one is primary.
   EOT
 
   namespace   = "rebar/host"
-  metric_name = "review_interrupts"
+  metric_name = "review_interrupts_bound_exceeded"
   statistic   = "Sum"
 
-  # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=1800s): a
-  # bound-exceeded interrupt cannot recur faster than one per episode, so a single 900s
-  # period > 0 is enough to latch, and `signal-unavailable` recurs on EVERY tick while the
-  # probe is broken. One datapoint keeps the "deploys are running blind" case from waiting
-  # an hour to surface — the blindness is the thing being alarmed.
+  # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=1800s): a bound-exceeded
+  # interrupt cannot recur faster than one per episode, so a single 900s period > 0 latches.
+  period              = 900
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  threshold           = 0
+  comparison_operator = "GreaterThanThreshold"
+
+  treat_missing_data = "notBreaching"
+
+  alarm_actions = [aws_sns_topic.alerts.arn]
+  ok_actions    = [aws_sns_topic.alerts.arn]
+
+  tags = {
+    Project = "rebar"
+    Bug     = "34cd"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "review_interrupts_signal_unavailable" {
+  alarm_name        = "rebar-autodeploy-review-interrupts-signal-unavailable"
+  alarm_description = <<-EOT
+    An auto-deploy could not read the review-bot's /health `in_flight` signal and recreated the
+    container with NO drain check at all (AUTODEPLOY_REVIEW_INTERRUPT, reason
+    `signal-unavailable`, in the rebar-autodeploy.service journal; published as
+    rebar/host:review_interrupts_signal_unavailable by the host probe, observability.sh 4e).
+    MEANING: this is the URGENT one. The drain check itself is broken, so EVERY deploy is now
+    running blind and killing whatever review is in flight — the exact failure mode bug 34cd
+    exists to catch, silently regressed. It leaves voter_errors, restarts and the deploy log all
+    green, so no other alarm can see it. REMEDIATION: confirm the review-bot is up and its
+    /health is reachable FROM THE HOST and still returns an `in_flight` field — autodeploy.sh
+    bot_in_flight_reviews echoes -1 for unreachable/missing/unparseable and that fail-open path
+    is what fires this. It recurs on every deploy while broken, hence the 1-datapoint latch.
+  EOT
+
+  namespace   = "rebar/host"
+  metric_name = "review_interrupts_signal_unavailable"
+  statistic   = "Sum"
+
+  # One datapoint keeps the "deploys are running blind" case from waiting an hour to surface.
   period              = 900
   evaluation_periods  = 1
   datapoints_to_alarm = 1
