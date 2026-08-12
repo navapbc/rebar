@@ -151,6 +151,7 @@ guarantee `2`).
 | `search` | 0 | — | — | structured read (unknown option → 2); empty result still 0 |
 | `set-file-impact` | 0 | 1 | — | malformed JSON arg → 1 |
 | `set-verify-commands` | 0 | 1 | — | malformed JSON arg → 1 |
+| `attach-commits` | 0 | 1 | — | missing args → 2; an unresolvable SHA → 1 (nothing recorded) |
 | `show` | 0 | 1 | — | structured read (unknown option → 2); not-found also emits a parseable JSON error on stdout |
 | `summary` | 0 | 0 | — | tolerant read: unknown id renders `[unknown]`, still 0 |
 | `tag` | 0 | 1 | — | |

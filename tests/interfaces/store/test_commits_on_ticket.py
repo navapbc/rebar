@@ -22,24 +22,61 @@ def _tracker(repo: Path) -> Path:
     return _seam.tracker_dir(str(repo))
 
 
+def _real_shas(repo: Path, n: int) -> list[str]:
+    """``n`` real commit SHAs in ``repo``.
+
+    ``attach_commits`` validates that every SHA resolves to a commit in the repository
+    (all-or-nothing), so these store-semantics tests need genuine SHAs rather than
+    placeholder strings. Empty commits keep the working tree untouched.
+    """
+    shas = []
+    for i in range(n):
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@e",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                f"fixture commit {i}",
+            ],
+            check=True,
+        )
+        shas.append(
+            subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        )
+    return shas
+
+
 def test_attach_and_read_back(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    out = rebar.attach_commits(
-        tid, ["abc123", {"sha": "def456", "message": "fix"}], repo_root=str(rebar_repo)
-    )
+    a, b = _real_shas(rebar_repo, 2)
+    out = rebar.attach_commits(tid, [a, {"sha": b, "message": "fix"}], repo_root=str(rebar_repo))
     assert out["attached"] == 2
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     shas = [c["sha"] for c in state["commits"]]
-    assert shas == ["abc123", "def456"]
+    assert shas == [a, b]
     assert state["commits"][1]["message"] == "fix"
 
 
 def test_union_merge_dedups_by_sha(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    rebar.attach_commits(tid, ["a", "b"], repo_root=str(rebar_repo))
-    rebar.attach_commits(tid, ["b", "c"], repo_root=str(rebar_repo))  # b is a dup
+    a, b, c = _real_shas(rebar_repo, 3)
+    rebar.attach_commits(tid, [a, b], repo_root=str(rebar_repo))
+    rebar.attach_commits(tid, [b, c], repo_root=str(rebar_repo))  # b is a dup
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
-    assert [c["sha"] for c in state["commits"]] == ["a", "b", "c"]
+    assert [c_["sha"] for c_ in state["commits"]] == [a, b, c]
 
 
 def test_non_commit_ticket_has_no_commits_key(rebar_repo: Path) -> None:
@@ -72,7 +109,8 @@ def test_convergence_replay_order(rebar_repo: Path) -> None:
 
 def test_survives_compaction(rebar_repo: Path) -> None:
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    rebar.attach_commits(tid, ["s1", "s2"], repo_root=str(rebar_repo))
+    s1, s2 = _real_shas(rebar_repo, 2)
+    rebar.attach_commits(tid, [s1, s2], repo_root=str(rebar_repo))
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "compact", tid, "--threshold=0"],
         capture_output=True,
@@ -82,7 +120,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
     )
     assert cp.returncode == 0, cp.stderr
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
-    assert [c["sha"] for c in state["commits"]] == ["s1", "s2"]
+    assert [c["sha"] for c in state["commits"]] == [s1, s2]
 
 
 def test_fetch_commits_step_reads_it(rebar_repo: Path) -> None:
@@ -90,7 +128,8 @@ def test_fetch_commits_step_reads_it(rebar_repo: Path) -> None:
     from rebar.llm.workflow.executor import StepContext
 
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
-    rebar.attach_commits(tid, ["x", "y"], repo_root=str(rebar_repo))
+    x, y = _real_shas(rebar_repo, 2)
+    rebar.attach_commits(tid, [x, y], repo_root=str(rebar_repo))
     ctx = StepContext(
         run_id="r",
         step_id="s",
@@ -103,7 +142,7 @@ def test_fetch_commits_step_reads_it(rebar_repo: Path) -> None:
     )
     out = steps.fetch_commits(ctx)
     assert out["commit_count"] == 2
-    assert [c["sha"] for c in out["commits"]] == ["x", "y"]
+    assert [c["sha"] for c in out["commits"]] == [x, y]
 
 
 def test_commits_not_a_jira_synced_field() -> None:

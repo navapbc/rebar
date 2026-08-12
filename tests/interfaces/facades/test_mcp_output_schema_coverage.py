@@ -92,6 +92,9 @@ EXEMPT_GENERIC: dict[str, str] = {
     "unlink_tickets": "write ack {result, push_status}; no canonical shape",
     "set_file_impact": "write ack {result, push_status}; no canonical shape",
     "set_verify_commands": "write ack {result, push_status}; no canonical shape",
+    "attach_commits": "returns the small {ticket_id, attached} receipt of a union-add "
+    "write (how many SHAs were recorded); there is no canonical schema for it, and the "
+    "durable shape consumers read is the ticket's `commits` list, not this ack",
     "fsck": "MCP fsck returns a human summary string; the canonical `fsck` schema "
     "describes the CLI/library `--output json` shape, not the MCP string",
     "render_workflow": "workflow engine (WS-I): returns a Mermaid flowchart as a "
