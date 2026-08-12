@@ -396,8 +396,13 @@ def test_up_to_date_tick_clears_a_stale_deferral_episode(box: dict[str, object])
     )
 
 
+#: Multiple of the review-bot's per-review cap that ``DEPLOY_DEFER_MAX`` must clear. Raised from
+#: 1.0 to 2.0 on 2026-08-12 — see the test below for why the 1x floor proved too weak in practice.
+DEFER_BOUND_REVIEW_CAP_MULTIPLE = 2
+
+
 def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
-    """The bound must sit ABOVE the longest a single review can possibly take.
+    """The bound must sit at least 2x above the longest a single review can possibly take.
 
     The review-bot wraps every review in ``asyncio.wait_for(..., REVIEW_TIMEOUT_SECONDS)`` on
     BOTH paths (the queue worker and the backfill reconciler), so in-flight necessarily returns
@@ -405,6 +410,19 @@ def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
     through a review that was about to finish — all of the interruption, none of the protection.
     Reading the constant here rather than restating a literal keeps the two in lockstep: raising
     the app's per-review cap fails this test until the deploy bound follows.
+
+    WHY 2x AND NOT THE ORIGINAL 1x FLOOR (raised 2026-08-12). Bug 34cd shipped the bound at
+    1800s = 1.5x the cap while this test only pinned >= 1.0x, so the margin that actually mattered
+    lived in a comment where nothing enforced it. That margin turned out to be too thin: on
+    2026-08-12 all four ``bound-exceeded`` review interrupts cleared the bound by a hair —
+    ``deferred_for`` 1810s / 1820s / 1810s / 1930s against ``bound=1800s`` — during a 60+-merge
+    landing burst. Every one was a review that had finished, or was about to, when the budget
+    expired. Pinning 2.0x makes the margin the thing under test rather than the floor below it.
+
+    This does NOT claim to fix a SATURATED episode (bug 7b4a: ``in_flight`` oscillating 2 -> 1 -> 2
+    without ever reaching 0 for 30 minutes, the bound outlasted by pipelining rather than by any
+    one long review). Against saturation a larger bound only defers the same kill, which is why
+    the relationship stays a bounded multiple: an unbounded bound is a deploy that never lands.
     """
     from rebar.review_bot.config import DEFAULT_REVIEW_TIMEOUT_SECONDS
 
@@ -413,10 +431,14 @@ def test_defer_bound_default_outlasts_the_apps_own_per_review_cap() -> None:
     assert match, "autodeploy.sh must define a DEPLOY_DEFER_MAX default"
     bound = int(match.group(1))
 
-    assert bound >= DEFAULT_REVIEW_TIMEOUT_SECONDS, (
-        f"DEPLOY_DEFER_MAX default ({bound}s) must be >= the review-bot's own per-review cap "
-        f"REVIEW_TIMEOUT_SECONDS ({DEFAULT_REVIEW_TIMEOUT_SECONDS}s). Below it, the bound "
-        "expires while an ordinary review is still legitimately running and the deploy kills it."
+    floor = DEFER_BOUND_REVIEW_CAP_MULTIPLE * DEFAULT_REVIEW_TIMEOUT_SECONDS
+    assert bound >= floor, (
+        f"DEPLOY_DEFER_MAX default ({bound}s) must be >= "
+        f"{DEFER_BOUND_REVIEW_CAP_MULTIPLE}x the review-bot's own per-review cap "
+        f"REVIEW_TIMEOUT_SECONDS ({DEFAULT_REVIEW_TIMEOUT_SECONDS}s) = {floor}s. Below one whole "
+        "cap the bound expires while an ordinary review is still legitimately running and the "
+        "deploy kills it; below 2x the margin is too thin to absorb a landing burst (2026-08-12: "
+        "four interrupts overshot a 1.5x bound by 10-130s)."
     )
 
 

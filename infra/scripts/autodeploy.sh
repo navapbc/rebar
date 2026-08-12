@@ -74,12 +74,28 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-120}"
 # a single review is REVIEW_TIMEOUT_SECONDS (src/rebar/review_bot/config.py
 # DEFAULT_REVIEW_TIMEOUT_SECONDS = 1200): the worker and the backfill reconciler both wrap
 # review_and_vote in asyncio.wait_for at that value, so NO single review can outlive it —
-# in-flight necessarily falls to 0 within 1200s of the last review starting. 1800s is 1.5x that
-# ceiling (and ~3x the ~10-minute review measured on 2026-08-03), so the bound can only be
+# in-flight necessarily falls to 0 within 1200s of the last review starting. 2400s is 2.0x that
+# ceiling (and ~4x the ~10-minute review measured on 2026-08-03), so the bound can only be
 # reached by a bot that is CHRONICALLY busy — a standing queue of reviews — never by one
 # ordinary review. Keep this ABOVE the app's per-review cap if either side changes
 # (tests/scripts/test_autodeploy_review_drain.py asserts the relationship).
-DEPLOY_DEFER_MAX="${DEPLOY_DEFER_MAX:-1800}"
+#
+# RAISED 1800s -> 2400s (1.5x -> 2.0x) on 2026-08-12. 34cd's original 1.5x was marginally
+# undersized for real review durations: ALL FOUR bound-exceeded interrupts that day cleared the
+# bound by a hair — deferred_for 1810s / 1820s / 1810s / 1930s against bound=1800s, i.e. 10s, 20s,
+# 10s and 130s over — during a 60+-merge landing burst that ran the interrupt rate ~10x above the
+# 11-day baseline. Each was a review that had finished, or was about to, when the budget expired.
+# 2.0x clears the worst of them (1930s) by 470s, ~3.6x the largest overshoot.
+#
+# What this does NOT fix, deliberately: bug 7b4a traced a deferral episode where `in_flight`
+# oscillated 2 -> 1 -> 2 and NEVER reached 0 across 30 continuous minutes. No single review
+# outlived REVIEW_TIMEOUT_SECONDS there; the bound was outlasted by ordinary PIPELINING, because
+# in_flight is a concurrent GAUGE and this bound is reasoned about as if it were a single-review
+# timer. Against a saturated episode a bigger bound only defers the same kill — which is why the
+# raise stays a fixed MULTIPLE of the app's own cap rather than an open-ended increase: a deploy
+# that never lands is its own outage. Fixing saturation needs a drain signal that distinguishes
+# "a review is finishing" from "the queue is refilling", and is tracked on 7b4a's chain.
+DEPLOY_DEFER_MAX="${DEPLOY_DEFER_MAX:-2400}"
 INFLIGHT_TIMEOUT="${INFLIGHT_TIMEOUT:-5}"             # bound the in-flight probe itself
 HEALTH_FAIL_LOG_LINES="${HEALTH_FAIL_LOG_LINES:-100}"   # bounded stderr tail captured on bot-unhealthy
 HEALTH_FAIL_LOG_BYTES="${HEALTH_FAIL_LOG_BYTES:-20000}" # …and a hard byte cap on that tail
