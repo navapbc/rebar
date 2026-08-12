@@ -198,3 +198,93 @@ def test_persistent_bad_object_reports_an_object_read_failure_not_a_heads_confli
     hint = excinfo.value.hint
     assert "fsck-recover" not in hint, "an unreadable object is not a heads conflict"
     assert "object" in hint.lower()
+
+
+# ── the tracker must be ON the published ref (bug gnarled-acardiac-bettong) ──────────────
+
+
+def test_heal_refuses_when_the_tracker_is_not_on_the_published_ref(tmp_path: Path) -> None:
+    """A tracker sitting on a different branch is REFUSED, not healed into that branch.
+
+    The heal folds every fetched head into the worktree's HEAD and then force-moves
+    ``refs/heads/<ref>`` onto the result, so when the checked-out branch is not the published
+    ref, that branch's commits are merged into the ticket history and published — a silent
+    data-integrity failure no caller can detect afterwards. Until the fold targets the ref
+    itself (ticket envious-metal-budgie), the doctor refuses loudly instead.
+    """
+    remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+    h.git(base_path, "checkout", "-q", "-b", "sidebranch")
+    side = h.commit_file(base_path, "side.txt", "SIDE", "unrelated side commit")
+    keys_before = sorted(h.bundle_keys(remote, "tickets"))
+
+    from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
+
+    with pytest.raises(S3DoctorConflict) as excinfo:
+        heal_multi_bundle(
+            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+        )
+
+    # The remote is untouched: nothing merged, nothing published, nothing pruned.
+    assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
+    # And the side branch's commit never reached the published ref.
+    assert not h.reachable(base_path, "refs/heads/tickets", side)
+    assert "tickets" in str(excinfo.value)
+    assert excinfo.value.hint
+
+
+def test_heal_refuses_on_a_detached_head_tracker(tmp_path: Path) -> None:
+    """Detached HEAD is refused by the same guard — there is no branch to trust."""
+    remote, base_path, sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+    h.git(base_path, "checkout", "-q", "--detach", sha_base)
+    keys_before = sorted(h.bundle_keys(remote, "tickets"))
+
+    from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
+
+    with pytest.raises(S3DoctorConflict):
+        heal_multi_bundle(
+            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+        )
+
+    assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
+
+
+def test_heal_refuses_before_downloading_any_bundle(tmp_path: Path) -> None:
+    """The refusal is a precondition check, not a rollback: no bundle is ever fetched."""
+    remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+    h.git(base_path, "checkout", "-q", "-b", "sidebranch")
+
+    downloads: list[str] = []
+    real_download = remote.s3.download_file
+
+    def _spy(Bucket: str, Key: str, Filename: str) -> None:
+        downloads.append(Key)
+        real_download(Bucket=Bucket, Key=Key, Filename=Filename)
+
+    remote.s3.download_file = _spy  # type: ignore[method-assign]
+
+    from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
+
+    with pytest.raises(S3DoctorConflict):
+        heal_multi_bundle(
+            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+        )
+
+    assert downloads == [], "the guard must run before any bundle is fetched"
+
+
+def test_single_bundle_store_still_reports_noop_off_the_published_ref(tmp_path: Path) -> None:
+    """Nothing to heal stays a no-op: the guard must not turn a benign call into an error."""
+    remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+    for key in h.bundle_keys(remote, "tickets")[1:]:
+        remote.s3.delete_object(Bucket=remote.bucket, Key=key)
+    assert len(h.bundle_keys(remote, "tickets")) == 1
+    h.git(base_path, "checkout", "-q", "-b", "sidebranch")
+
+    from rebar._store.s3_doctor import heal_multi_bundle
+
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+    )
+
+    assert result["healed"] is False
+    assert result["reason"] == "noop"
