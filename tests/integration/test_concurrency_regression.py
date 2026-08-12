@@ -92,6 +92,56 @@ def _expire_sync_marker(tracker: Path) -> None:
         pass
 
 
+def _sync_from_origin(tracker: Path) -> None:
+    """Deterministically fast-forward *tracker*'s tickets branch onto ``origin/tickets``.
+
+    Deliberately NOT ``_engine_run(repo, "list")``. Production read-freshness
+    (``rebar._engine_support.reads.ensure_fresh``) is best-effort BY DESIGN: it is
+    throttled by a ``/tmp`` marker, reconverges under a deliberately short lock timeout,
+    and swallows every failure, because "a read must never fail because a fetch could not
+    run". The read therefore succeeds whether or not the pull landed, so driving a clone's
+    sync through it makes the sync an unasserted side effect — and any fixture precondition
+    built on it is flaky under load, not deterministic (bug 1647-19b3-cbec-4a17).
+
+    Both git calls are ``check=True``, so a sync that does not land raises HERE, at the
+    setup step that owns it, instead of surfacing later as a misleading invariant failure.
+
+    Which helper does a given site want? The two are NOT interchangeable:
+
+    * Use ``_sync_from_origin`` when the sync is a fixture PRECONDITION — the test needs
+      this clone to hold the peer's already-pushed state before the interesting divergence
+      begins. A precondition that does not land must fail loudly, here.
+    * Use ``_reconverge_by_read_sync`` when reconvergence THROUGH the production read path
+      is the property under test. There the best-effort behaviour is the subject, not an
+      incidental means, and the assertion that follows is the real oracle.
+    """
+    _git("fetch", "-q", "origin", "tickets", cwd=tracker)
+    _git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=tracker)
+
+
+def _reconverge_by_read_sync(repo: Path, tracker: Path, *, passes: int = 2) -> None:
+    """Drive *repo*'s reconvergence through the REAL read-side sync, ``passes`` times.
+
+    The counterpart to `_sync_from_origin`, and deliberately the best-effort path: these
+    call sites are the tests whose claim IS "a clone reconverges through the production
+    read path". Replacing the engine read with a raw checked fetch here would delete the
+    very invariant the test exists to prove, so the incidental sync is not a fixture
+    shortcut to be hardened away — it is the subject.
+
+    That also makes these sites safe in the way the precondition sites were not: the
+    assertion that follows each call is the convergence oracle, so a sync that fails to
+    land surfaces as a true, on-topic failure rather than as a misleading setup error.
+
+    ``_expire_sync_marker`` clears the once-a-minute throttle so the read actually
+    attempts a fetch. ``passes=2`` is the belt-and-suspenders form used where one read may
+    only have fetched without reconverging; reconvergence must be reached in a bounded
+    number of reads, so this must not loop.
+    """
+    for _ in range(passes):
+        _expire_sync_marker(tracker)
+        _engine_run(repo, "list")
+
+
 def _remote_remove(tracker: Path) -> None:
     _git("remote", "remove", "origin", cwd=tracker, check=False)
 
@@ -220,14 +270,10 @@ def test_two_clone_union_deterministic_replay_and_fork_tiebreak(two_clones):
     _remote_add(tracker_b, remote)
     _engine_run(repo_b, "comment", tb, "trigger reconverge push from B")
 
-    # A converges by the read-side sync (marker expired) — fetch + reconverge.
+    # A converges by the read-side sync (marker expired) — fetch + reconverge. The read
+    # path is the subject here, not a shortcut to a precondition (see the helper).
     _remote_add(tracker_a, remote)
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    # Belt-and-suspenders: a second expired-marker read in case the first only
-    # fetched. (Reconvergence must be reached; this must not loop forever.)
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    _reconverge_by_read_sync(repo_a, tracker_a)
 
     # ── Assertions ───────────────────────────────────────────────────────────
     events_a = _event_files(tracker_a)
@@ -316,10 +362,7 @@ def test_two_clone_concurrent_tag_adds_both_survive(two_clones):
     _remote_add(tracker_b, remote)
     _engine_run(repo_b, "edit", seed, "--add-tag=gamma")  # B's write triggers reconverge push
     _remote_add(tracker_a, remote)
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    _reconverge_by_read_sync(repo_a, tracker_a)
 
     # Union of events identical on both clones, and both adds (plus gamma) survive.
     assert _event_files(tracker_a) == _event_files(tracker_b)
@@ -340,10 +383,7 @@ def _reconverge(remote, repo_a, repo_b, tracker_a, tracker_b, *trigger):
     _remote_add(tracker_b, remote)
     _engine_run(repo_b, *trigger)  # B's write triggers the reconverge push
     _remote_add(tracker_a, remote)
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    _reconverge_by_read_sync(repo_a, tracker_a)
 
 
 def test_two_clone_set_tags_table_converges(two_clones):
@@ -375,9 +415,8 @@ def test_two_clone_set_tags_table_converges(two_clones):
     # the prior phase? no — re-establish). Both clones must converge identically.
     # Seed a shared 'm' first so B's remove targets a witnessed tag.
     _engine_run(repo_a, "edit", seed, "--set-tags=m,n")  # online; auto-push
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
-    assert "m" in _tags(repo_b, seed)
+    _sync_from_origin(tracker_b)  # SETUP precondition: B must witness 'm' before removing it
+    assert "m" in _tags(repo_b, seed), "SETUP (not the convergence claim): B did not witness 'm'"
     _diverge(tracker_a, tracker_b)
     _engine_run(repo_a, "edit", seed, "--set-tags=m,n,s")  # A keeps m, adds s
     _engine_run(repo_b, "edit", seed, "--remove-tag=m")  # B drops m concurrently
@@ -395,9 +434,10 @@ def test_two_clone_add_remove_converges(two_clones):
     # Establish a shared base tag on the pushed seed (both clones witness it).
     _engine_run(repo_a, "edit", seed, "--add-tag=shared")
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
-    _expire_sync_marker(tracker_b)  # B still has origin from the fixture -> re-sync
-    _engine_run(repo_b, "list")
-    assert "shared" in _tags(repo_b, seed)
+    _sync_from_origin(tracker_b)  # SETUP precondition: both clones must witness the base tag
+    assert "shared" in _tags(repo_b, seed), (
+        "SETUP (not the add‖remove claim): B did not witness the shared base tag"
+    )
 
     _diverge(tracker_a, tracker_b)
     _engine_run(repo_a, "edit", seed, "--remove-tag=shared")
@@ -456,20 +496,19 @@ def test_hlc_skewed_clock_edit_causality_convergence(two_clones):
     # A (fast clock) edits the shared title, and its write auto-pushes to origin.
     _engine_run_at(repo_a, "edit", seed, "--title=from-A", now=_FAST_NOW)
 
-    # B syncs so it OBSERVES A's edit before writing (the causal dependency).
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
-    assert _show_title(repo_b, seed) == "from-A", "B did not observe A's edit before writing"
+    # B syncs so it OBSERVES A's edit before writing (the causal dependency). This is the
+    # precondition the whole HLC claim rests on, so it is established by a checked sync.
+    _sync_from_origin(tracker_b)
+    assert _show_title(repo_b, seed) == "from-A", (
+        "SETUP (not the HLC claim): B did not observe A's edit before writing"
+    )
 
     # B (slow clock) now edits the SAME field. Its next_tick witnesses A's event
     # prefix (~_FAST_NOW) and ticks above it despite B's slow physical clock.
     _engine_run_at(repo_b, "edit", seed, "--title=from-B", now=_SLOW_NOW)
 
-    # A converges via read-side sync.
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    # A converges via read-side sync — the convergence asserted below is the oracle.
+    _reconverge_by_read_sync(repo_a, tracker_a)
 
     # Convergence: both clones agree, and on the causally-LATER value (from-B),
     # not the one with the larger wall clock (from-A).
@@ -503,9 +542,9 @@ def test_failed_push_never_drops_local_commit(two_clones):
     # The local-only ticket must be present despite the failed push.
     assert local_ticket in _list_status(repo_a)
 
-    # A sync against the (now broken) origin must not drop it either.
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    # A sync against the (now broken) origin must not drop it either. The best-effort read
+    # path is the subject: it must swallow the broken remote AND keep the local commit.
+    _reconverge_by_read_sync(repo_a, tracker_a, passes=1)
     assert local_ticket in _list_status(repo_a), "local commit dropped after failed-push sync"
 
 
@@ -1081,9 +1120,9 @@ def test_push_retry_merge_under_lock_preserves_events(two_clones):
     r2 = _engine_run(repo_b, "comment", seed, "from B two", check=False)
     assert r2.returncode == 0, f"second B write failed: {r2.stderr}"
 
-    # No event lost: after B converges, its store carries A's comment and both of B's.
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
+    # No event lost: after B converges, its store carries A's comment and both of B's. The
+    # convergence assertion below is the oracle, so the read path is the subject here.
+    _reconverge_by_read_sync(repo_b, tracker_b, passes=1)
     shown = json.loads(_engine_run(repo_b, "show", seed).stdout)
     bodies = " ".join(c.get("body", "") for c in shown.get("comments", []))
     for expected in ("from A", "from B one", "from B two"):
@@ -1114,8 +1153,7 @@ def test_two_clone_concurrent_claim_loser_detects_and_fork_surfaced(two_clones):
     assert "claim lost" in (b.stderr + b.stdout).lower()
 
     # Deterministic convergence: both clones agree the ticket is assigned to alice.
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    _reconverge_by_read_sync(repo_a, tracker_a, passes=1)
     assignee_a = json.loads(_engine_run(repo_a, "show", seed).stdout).get("assignee")
     assignee_b = json.loads(_engine_run(repo_b, "show", seed).stdout).get("assignee")
     assert assignee_a == assignee_b == "alice", f"assignees diverged: A={assignee_a} B={assignee_b}"
@@ -1233,12 +1271,15 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
     # B fetches the compacted ticket via the engine's read-side sync, then appends a
     # comment at REAL current time. current time >> the far-past snapshot ts, so the
     # append sorts AFTER the snapshot. The write auto-pushes to origin (real push).
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
+    # SETUP precondition: B must actually hold A's compacted ticket before it appends —
+    # an append onto a pre-compaction base would not exercise the scenario at all.
+    _sync_from_origin(tracker_b)
     _engine_run(repo_b, "comment", tid, "remote-append-from-B")
     assert "remote-append-from-B" in _engine_run(repo_b, "show", tid).stdout
 
-    # A reconverges through the read-side sync (fetch origin + union) — NO repair.
+    # A reconverges through the read-side sync (fetch origin + union) — NO repair. The
+    # `show` below BOTH drives that sync and asserts its result, so the read path is the
+    # subject and must stay: `_sync_from_origin` here would prove nothing about it.
     _expire_sync_marker(tracker_a)
     show_a = _engine_run(repo_a, "show", tid).stdout
     assert "remote-append-from-B" in show_a, (
@@ -1322,22 +1363,23 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
     # ── Remediation in the AC's prescribed (critical) sequence: A repairs FIRST. ──
     # A first fetches B's merged-in orphan (real fetch/merge), THEN rebuilds its snapshot
     # from the full log — folding the orphan back in — and PUBLISHES the repaired commit.
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")  # real fetch/merge: A now holds B's orphan
+    # SETUP precondition for the repair: a repair that ran without B's orphan in hand would
+    # "pass" while proving nothing, so the fetch is checked rather than incidental.
+    _sync_from_origin(tracker_a)  # A now holds B's orphan
     a_repair = _engine_run(repo_a, "fsck", "--repair-snapshots", check=False).stdout
     assert "rebuilt SNAPSHOT" in a_repair, a_repair
     assert "orphan-from-B" in _comment_bodies(repo_a), "A repair must fold in the orphan"
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
 
     # THEN B fetches+syncs A's repaired snapshot and runs `fsck --repair` to converge.
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")  # real fetch/merge of A's repaired commit
+    # SETUP precondition: B repairs against A's repaired snapshot, so that fetch must land.
+    _sync_from_origin(tracker_b)
     _engine_run(repo_b, "fsck", "--repair", check=False)
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b, check=False)
     assert "orphan-from-B" in _comment_bodies(repo_b), "B must hold the orphan after sync + repair"
-    # A reconverges onto any commit B published during its repair.
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    # A reconverges onto any commit B published during its repair — via the read path,
+    # whose convergence is asserted byte-equal below.
+    _reconverge_by_read_sync(repo_a, tracker_a, passes=1)
 
     # GREEN convergence oracle — concrete, not merely exit 0. Parse each clone's replayed
     # state and assert byte-equality. ``updated_at`` is a DERIVED presentation field
@@ -1473,10 +1515,13 @@ def test_parent_cascade_two_clone_offline_race_forks_resolved_independently(two_
         _engine_run(repo_a, "create", "task", "offline cascade child", "--parent", parent)
     )
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
-    assert _status_assignee(repo_b, parent)[0] == "open", "B must see parent open pre-race"
-    assert _status_assignee(repo_b, child)[0] == "open", "B must see child open pre-race"
+    _sync_from_origin(tracker_b)  # SETUP precondition: both clones start from the same base
+    assert _status_assignee(repo_b, parent)[0] == "open", (
+        "SETUP (not the cascade claim): B must see parent open pre-race"
+    )
+    assert _status_assignee(repo_b, child)[0] == "open", (
+        "SETUP (not the cascade claim): B must see child open pre-race"
+    )
 
     # Diverge offline; prime each read marker so neither re-syncs during the claims.
     _remote_remove(tracker_a)
@@ -1502,10 +1547,7 @@ def test_parent_cascade_two_clone_offline_race_forks_resolved_independently(two_
     _remote_add(tracker_b, remote)
     _engine_run(repo_b, "comment", child, "trigger reconverge push from B")
     _remote_add(tracker_a, remote)
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
-    _expire_sync_marker(tracker_a)
-    _engine_run(repo_a, "list")
+    _reconverge_by_read_sync(repo_a, tracker_a)
 
     # (1) Deterministic convergence: both clones agree, on the FAST-clock winner (alice),
     # for BOTH the parent and the child fork.
@@ -1577,8 +1619,8 @@ def test_enrichment_drain_preserves_two_clone_union(two_clones):
     base_result = enrich_drain.drain(str(tracker_a), repo_root=repo_a, runner=runner)
     assert base_result["processed"] == 1
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
+    # SETUP precondition: B must join the completed base cycle before the clones diverge.
+    _sync_from_origin(tracker_b)
 
     # Both clones become stale, then independently enqueue a replacement cycle.
     _remote_remove(tracker_a)
@@ -1675,24 +1717,6 @@ def _merge_tree(tracker_a: Path, tracker_b: Path, label: str) -> subprocess.Comp
         cwd=tracker_a,
         check=False,
     )
-
-
-def _sync_from_origin(tracker: Path) -> None:
-    """Deterministically fast-forward *tracker*'s tickets branch onto ``origin/tickets``.
-
-    Deliberately NOT ``_engine_run(repo, "list")``. Production read-freshness
-    (``rebar._engine_support.reads.ensure_fresh``) is best-effort BY DESIGN: it is
-    throttled by a ``/tmp`` marker, reconverges under a deliberately short lock timeout,
-    and swallows every failure, because "a read must never fail because a fetch could not
-    run". The read therefore succeeds whether or not the pull landed, so driving a clone's
-    sync through it makes the sync an unasserted side effect — and any fixture precondition
-    built on it is flaky under load, not deterministic (bug 1647-19b3-cbec-4a17).
-
-    Both git calls are ``check=True``, so a sync that does not land raises HERE, at the
-    setup step that owns it, instead of surfacing later as a misleading invariant failure.
-    """
-    _git("fetch", "-q", "origin", "tickets", cwd=tracker)
-    _git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=tracker)
 
 
 def _assert_emit_is_append_only(two_clones, *, emit, event_type: str, retain: int) -> None:
