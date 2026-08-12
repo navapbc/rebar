@@ -10,9 +10,11 @@ import pathlib
 import pytest
 
 import rebar
+from rebar.llm import pai_tools
+from rebar.llm.config import LLMConfig
 from rebar.llm.evals import eval_scorers as sc
 from rebar.llm.evals import eval_solver
-from rebar.llm.runner import FakeRunner
+from rebar.llm.runner import FakeRunner, PydanticAIRunner
 
 
 def test_completion_verifier_case_runs_and_scores() -> None:
@@ -162,3 +164,71 @@ def test_fixture_files_are_written_into_the_store() -> None:
 def test_unknown_prompt_raises() -> None:
     with pytest.raises(ValueError, match="no eval solver"):
         eval_solver.run_case("not-a-reviewer", {"id": "x", "expect": "pass"}, runner=FakeRunner())
+
+
+# ── Per-case rooting of an injected live-style runner (bug undyed-unheedful-conure) ──
+# `_live_solver` builds ONE PydanticAIRunner before any case fixture exists, so its config
+# points at the eval CHECKOUT. These pin that each disposable-store case re-roots that
+# runner at its own fixture, so the agent's file/ticket tools read fixture code.
+
+
+def _checkout_rooted_runner(checkout: str) -> PydanticAIRunner:
+    """A live-style runner rooted at a stand-in checkout — no network (never run)."""
+    return PydanticAIRunner(
+        LLMConfig(runner="pydantic_ai", repo_path=checkout, tickets_path=checkout)
+    )
+
+
+@pytest.mark.parametrize("prompt_id", ["completion-verifier", "ticket-quality", "spec-alignment"])
+def test_agentic_case_reroots_injected_runner_at_its_fixture(
+    prompt_id: str, monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    checkout = str(tmp_path / "checkout")
+    pathlib.Path(checkout).mkdir()
+    pathlib.Path(checkout, "src").mkdir()
+    pathlib.Path(checkout, "src", "cli.py").write_text("# the real checkout\n")
+    seen: dict = {}
+
+    def spy(*args, **kwargs) -> dict:
+        used: PydanticAIRunner = kwargs["runner"]
+        seen["repo_path"] = used._config.repo_path
+        seen["repo_root"] = kwargs["repo_root"]
+        # The agent's OWN file tools, built exactly as the runner builds them.
+        tools = pai_tools.filesystem_tools(used._config.repo_path)
+        read_file = next(t for t in tools if t.__name__ == "read_file")
+        seen["read"] = read_file("src/cli.py")
+        seen["tickets_path"] = used._config.tickets_path
+        return {"verdict": "PASS", "findings": [], "summary": ""}
+
+    monkeypatch.setattr("rebar.llm.completion.verify_completion", spy)
+    monkeypatch.setattr("rebar.llm.operations._review_ticket_impl", spy)
+    monkeypatch.setattr("rebar.llm.spec_scan.scan_epics_for_spec", spy)
+
+    case = {
+        "id": "root1",
+        "expect": "pass",
+        "ticket_context": "Title: T\n## Acceptance Criteria\n- [ ] x",
+        "spec": "s",
+        "epics": ["e"],
+        "files": {"src/cli.py": "# the disposable fixture\n"},
+    }
+    eval_solver.run_case(prompt_id, case, runner=_checkout_rooted_runner(checkout))
+
+    assert seen["repo_path"] == seen["repo_root"], "runner must be rooted at the case fixture"
+    assert seen["repo_path"] != checkout
+    assert "# the disposable fixture" in seen["read"]
+    assert "# the real checkout" not in seen["read"]
+    # Ticket tools fall back to the fixture's own seeded store, not a checkout snapshot.
+    assert seen["tickets_path"] is None
+
+
+def test_reroot_preserves_offline_model_override_and_is_noop_for_fake() -> None:
+    sentinel = object()
+    runner = PydanticAIRunner(
+        LLMConfig(runner="pydantic_ai", repo_path="/elsewhere"), model_override=sentinel
+    )
+    rerooted = eval_solver._rerooted(runner, "/fixture")
+    assert rerooted._config.repo_path == "/fixture"
+    assert rerooted._model_override is sentinel
+    fake = FakeRunner()
+    assert eval_solver._rerooted(fake, "/fixture") is fake

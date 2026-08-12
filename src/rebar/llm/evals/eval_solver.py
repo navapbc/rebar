@@ -17,6 +17,7 @@ import pathlib
 import subprocess
 import tempfile
 from contextlib import contextmanager
+from dataclasses import replace
 
 import rebar
 from rebar.llm.runner import Runner
@@ -245,6 +246,38 @@ def _run_code_review_case(
     return runner.run(req)
 
 
+def _rerooted(runner: Runner, root: str) -> Runner:
+    """Return ``runner`` rooted at the disposable case fixture ``root``.
+
+    The live solver builds ONE runner BEFORE any case fixture exists, so its
+    ``LLMConfig.repo_path`` is the eval CHECKOUT, and ``runner._effective_config``
+    substitutes only per-request model/limit tuning — it preserves that base path. An
+    injected live runner's agentic filesystem + ticket tools therefore searched the
+    checkout instead of the case's fixture repo, so every case needing fixture code
+    failed while operator-attested cases (which read none) passed (bug
+    undyed-unheedful-conure). Rebuild the SAME runner rooted at ``root`` — the rooting the
+    ops apply themselves when no runner is injected. ``tickets_path`` is cleared so the
+    ticket tools read the fixture's own seeded store rather than a pinned snapshot of the
+    checkout's. A runner carrying no config (``FakeRunner``, the offline seam) reads no
+    filesystem and is returned unchanged. Eval-only: production gate config resolution is
+    untouched.
+    """
+    from rebar.llm.runner import PydanticAIRunner
+
+    if not isinstance(runner, PydanticAIRunner):
+        return runner
+    # Sibling-module access to the runner's own construction inputs: rebuilding through the
+    # constructor preserves the offline ``model_override`` (TestModel) harness, which
+    # `get_runner(cfg)` would drop.
+    cfg = runner._config
+    if cfg.repo_path == root and cfg.tickets_path is None:
+        return runner
+    return PydanticAIRunner(
+        replace(cfg, repo_path=root, tickets_path=None),
+        model_override=runner._model_override,
+    )
+
+
 def run_case(
     prompt_id: str, case: dict, *, runner: Runner, graph: bool = False, repo_root: str | None = None
 ) -> dict:
@@ -294,6 +327,9 @@ def run_case(
     # the disposable fixture store has no origin, so always read its in-place checkout.
     src = "local"
     with case_store(case) as root:
+        # Root the agent's OWN file/ticket tools at this case's fixture, not the checkout
+        # the injected runner was built against (bug undyed-unheedful-conure).
+        runner = _rerooted(runner, root)
         if prompt_id == "completion-verifier":
             desc = case.get("ticket_context") or ""
             tt = case.get("ticket_type") or ("bug" if "bug:" in desc.lower() else "task")
