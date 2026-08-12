@@ -31,6 +31,7 @@ import importlib.util
 import subprocess
 import sys
 import types
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -515,38 +516,31 @@ def test_main_without_repo_root_does_not_pass_none_to_advisory(main_mod):
     )
 
 
-def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch):
-    """The Path passed to check_pass_lock when --repo-root is omitted must contain
-    the rebar_reconciler package, confirming it resolves to the actual project root.
+def _stub_main_advisory(main_mod, extra_patches=()):
+    """Stub EVERY advisory entry point ``main()`` reaches, plus the reconcile step.
 
-    The conftest sandbox sets REBAR_ROOT for isolation; clear it
-    here so the genuine depth-fallback runs. reconcile_once is mocked, so nothing
-    is written to the resolved root.
+    Returns ``(stack, check_pass_lock_mock, read_pause_mock)``; the caller enters *stack*.
 
-    This pins the default-resolution path: Path(__file__).resolve().parents[4]
-    from __main__.py should reach the repo root, which contains
-    src/rebar/_engine/rebar_reconciler/__main__.py.
+    ``read_pause`` is stubbed for the same reason the others are, and the reason is specific
+    to this pair of tests: they clear ``REBAR_ROOT`` deliberately, so ``main()`` resolves and
+    runs against the REAL checkout rather than the suite's sandbox (``tests/conftest.py``
+    defaults ``REBAR_ROOT`` for every other test — bug dd62 — and notes that a test which
+    ``delenv``s it escapes that default). An advisory call left unstubbed therefore reads
+    that checkout's live ``refs/reconciler/gate``. ``_pause_exit_code`` runs BEFORE
+    ``_post_pause_preflight``, so a gate ref that is corrupt (``ReconcileGateError``) or
+    merely carries a pause marker makes ``main()`` return before ``check_pass_lock`` is ever
+    called — failing the assertions below through no fault of the resolution under test.
+    That is the CI flake in bug b82c-7461-0d95-44b8.
     """
-    monkeypatch.delenv("REBAR_ROOT", raising=False)
     check_pass_lock_mock = MagicMock(return_value=False)
-
-    with (
-        patch(
-            f"{_ADVISORY_LOCK_KEY}.check_pass_lock",
-            check_pass_lock_mock,
-        ),
-        patch(
-            f"{_ADVISORY_LOCK_KEY}.check_phase_gate",
-            return_value=False,
-        ),
-        patch(
-            f"{_ADVISORY_LOCK_KEY}.acquire_pass_lock",
-            return_value=None,
-        ),
-        patch(
-            f"{_ADVISORY_LOCK_KEY}.release_pass_lock",
-            return_value=None,
-        ),
+    read_pause_mock = MagicMock(return_value=None)
+    stack = ExitStack()
+    stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.read_pause", read_pause_mock))
+    stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.check_pass_lock", check_pass_lock_mock))
+    stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.check_phase_gate", return_value=False))
+    stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.acquire_pass_lock", return_value=None))
+    stack.enter_context(patch(f"{_ADVISORY_LOCK_KEY}.release_pass_lock", return_value=None))
+    stack.enter_context(
         patch.object(
             main_mod,
             "_try_load_step",
@@ -559,22 +553,101 @@ def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch)
                     }
                 )
             ),
-        ),
-    ):
-        main_mod.main(["--mode=dry-run"])
+        )
+    )
+    for extra in extra_patches:
+        stack.enter_context(extra)
+    return stack, check_pass_lock_mock, read_pause_mock
 
-    assert check_pass_lock_mock.call_count >= 1, "check_pass_lock must be called when main() runs"
-    actual_repo_root_arg = check_pass_lock_mock.call_args[0][0]
-    assert isinstance(actual_repo_root_arg, Path), (
-        f"Expected a Path, got {type(actual_repo_root_arg).__name__!r}: {actual_repo_root_arg!r}"
+
+def _assert_resolved_repo_root(call_args) -> Path:
+    """Assert *call_args* carries the genuine depth-fallback repo root, and return it."""
+    resolved = call_args[0][0]
+    assert isinstance(resolved, Path), (
+        f"Expected a Path, got {type(resolved).__name__!r}: {resolved!r}"
     )
     # The resolved default must point at a directory containing the rebar_reconciler package,
     # confirming it is the actual project repo root (not an arbitrary or null path).
-    expected_marker = (
-        actual_repo_root_arg / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
-    )
-    assert expected_marker.exists(), (
-        f"Resolved repo_root {actual_repo_root_arg!r} does not contain "
+    marker = resolved / "src" / "rebar" / "_engine" / "rebar_reconciler" / "__main__.py"
+    assert marker.exists(), (
+        f"Resolved repo_root {resolved!r} does not contain "
         f"src/rebar/_engine/rebar_reconciler/__main__.py — default root resolution is wrong; "
         f"expected Path(__file__).resolve().parents[4] from __main__.py"
+    )
+    return resolved
+
+
+def test_main_resolves_repo_root_even_when_the_ambient_gate_ref_is_corrupt(main_mod, monkeypatch):
+    """The resolution assertions must not depend on the enclosing checkout's ref state.
+
+    This pins the fix for bug b82c-7461-0d95-44b8. The corruption is injected at the layer
+    BELOW the stub: ``_advisory_lock.read_pause`` loads ``_ref_lock`` lazily and converts
+    ``RefLockCorruptError`` into ``ReconcileGateError``, which is what made ``main()`` return
+    early in CI. With ``read_pause`` stubbed, that layer is never reached, so a corrupt
+    ambient gate ref cannot reach ``main()``. Without the stub this test fails with the
+    original message, so the guard is not bought by going blind.
+    """
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+
+    class _RefLockCorruptError(Exception):
+        pass
+
+    corrupt_ref_lock = types.SimpleNamespace(
+        RefLockCorruptError=_RefLockCorruptError,
+        RefLockTimeoutError=_RefLockCorruptError,
+        read_pause=MagicMock(side_effect=_RefLockCorruptError("refs/reconciler/gate is corrupt")),
+    )
+
+    stack, check_pass_lock_mock, _read_pause_mock = _stub_main_advisory(
+        main_mod,
+        extra_patches=[
+            patch(
+                f"{_ADVISORY_LOCK_KEY}._load_ref_lock",
+                return_value=corrupt_ref_lock,
+            )
+        ],
+    )
+    with stack:
+        main_mod.main(["--mode=dry-run"])
+
+    assert check_pass_lock_mock.call_count >= 1, (
+        "a corrupt ambient refs/reconciler/gate must not stop main() reaching the preflight; "
+        "read_pause is stubbed precisely so this test cannot read the enclosing repo's refs"
+    )
+    _assert_resolved_repo_root(check_pass_lock_mock.call_args)
+    assert corrupt_ref_lock.read_pause.call_count == 0, (
+        "the stub was bypassed: main() reached the real ref-lock layer, so this test still "
+        "depends on the enclosing checkout's refs"
+    )
+
+
+def test_main_without_repo_root_passes_resolved_repo_root(main_mod, monkeypatch):
+    """The Path passed to check_pass_lock when --repo-root is omitted must contain
+    the rebar_reconciler package, confirming it resolves to the actual project root.
+
+    The conftest sandbox sets REBAR_ROOT for isolation; clear it
+    here so the genuine depth-fallback runs. reconcile_once is mocked, so nothing
+    is written to the resolved root.
+
+    This pins the default-resolution path: Path(__file__).resolve().parents[4]
+    from __main__.py should reach the repo root, which contains
+    src/rebar/_engine/rebar_reconciler/__main__.py.
+
+    Every advisory call main() reaches is stubbed, read_pause included — see
+    _stub_main_advisory for why the ambient gate ref must not reach this test.
+    """
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+
+    stack, check_pass_lock_mock, read_pause_mock = _stub_main_advisory(main_mod)
+    with stack:
+        main_mod.main(["--mode=dry-run"])
+
+    assert check_pass_lock_mock.call_count >= 1, "check_pass_lock must be called when main() runs"
+    resolved = _assert_resolved_repo_root(check_pass_lock_mock.call_args)
+    # The pause read happens FIRST, so pin the resolution there too: this is the call that
+    # used to reach the enclosing checkout's refs.
+    assert read_pause_mock.call_count >= 1, "read_pause must be called before the preflight"
+    assert read_pause_mock.call_args[0][0] == resolved, (
+        "read_pause and check_pass_lock must receive the SAME resolved repo root; got "
+        f"{read_pause_mock.call_args[0][0]!r} vs {resolved!r}"
     )
