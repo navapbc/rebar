@@ -36,6 +36,36 @@ def _src(source: str) -> str:
     return f" ({source})" if source else ""
 
 
+# Set by ``rebar.llm.build_drift`` when a gate proves the RUNNING BUILD predates the ref it
+# pinned. Core config must not import the optional ``rebar.llm`` layer, so the high layer
+# pushes the fact down here rather than this module reaching up for it.
+_BUILD_MAY_PREDATE_KEYS = False
+
+
+def note_build_may_predate_config(*, behind: bool) -> None:
+    """Record whether the running build is known to predate the config being read.
+
+    When it is, an unknown key is far more likely to be one added AFTER this build than a
+    typo, so :func:`unknown_key_hint` says so. Advisory wording only — nothing about which
+    keys are accepted or ignored changes.
+    """
+    global _BUILD_MAY_PREDATE_KEYS
+    _BUILD_MAY_PREDATE_KEYS = behind
+
+
+def unknown_key_hint() -> str:
+    """The parenthetical on an unknown-key warning.
+
+    "typo?" actively misdirects when the build predates the key — the motivating incident
+    (ticket b273-e0ba-f719-4f1c) had a stale gate build report the current, correct key
+    ``verify.suggest_duplicate_tickets`` as a suspected typo, because it predated the
+    rename that introduced it.
+    """
+    if _BUILD_MAY_PREDATE_KEYS:
+        return "this build may predate it; see docs/config.md"
+    return "typo? see docs/config.md"
+
+
 def _as_bool(v: Any, key: str) -> bool:
     if isinstance(v, bool):
         return v
