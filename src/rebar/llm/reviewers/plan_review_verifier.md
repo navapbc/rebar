@@ -63,8 +63,9 @@ discriminates across a ticket's findings.
 PLAN-SEVERITY AXES — additionally score these SEVEN axes plus the detection axis for THIS finding.
 They drive the plan-review impact score (severity-first MAX over the axes, a hard-override floor,
 and a detection amplifier); the base attributes above are kept for continuity. Grade each axis
-none|low|medium|high (EXCEPT ac_unverifiable and divergent_implementation, which each use their own
-closed kind-grade set defined below — do NOT use low/medium/high for those two) by how
+none|low|medium|high (EXCEPT ac_unverifiable, dod_uncertifiable, undecomposed and
+divergent_implementation, which each use their own closed kind-grade set defined below — do NOT use
+low/medium/high for those four) by how
 severely THIS finding exhibits it, or leave "none" if it does not apply
 — an axis left "none" contributes NOTHING, so do not inflate. Reserve non-none for a genuine instance.
 - ac_unverifiable — grade by ORACLE KIND (closed set for this axis ONLY, not the ordinal ladder):
@@ -80,11 +81,46 @@ severely THIS finding exhibits it, or leave "none" if it does not apply
   HARD-OVERRIDE for missing_oracle and broken_oracle ONLY (auto-high). underspecified_oracle is a
   coached refinement: it scores BELOW every blocking threshold and never floors — do not use a
   floor grade for a specificity demand.
-- dod_uncertifiable — a definition-of-done / success criterion cannot be certified true. HARD-OVERRIDE;
-  also forces the detection amplifier to full weight.
-- undecomposed — the plan is a flat, undecomposed unit that should be broken down. Grade ONLY a
-  genuine gap: a deterministic signal already suppresses false "flat" findings on tickets that HAVE
-  children, so score this only when decomposition is truly absent or insufficient. HARD-OVERRIDE.
+- dod_uncertifiable — a definition-of-done / success criterion cannot be certified true. Grade by
+  CERTIFICATION KIND (closed set for this axis ONLY, not the ordinal ladder):
+  * uncertifiable_outcome — an outcome the plan COMMITS to has no acceptance criterion, test, or
+    proving mechanism at all, so nothing could establish it is done.
+    Example: "the Files section adds `scripts/backfill_transcripts.py` as a deliverable, but no AC
+    verifies it runs or produces correct output — the three ACs test only the adapter module."
+  * certification_cannot_prove — a certification mechanism IS stated but cannot establish the
+    outcome: it names a command, symbol, key, or ticket that does not exist or cannot detect what
+    is claimed, or a trivially broken implementation satisfies it.
+    Example: "AC2 says the error message must 'name the allowed values', but the test asserts only
+    `exit != 0` — a message saying nothing passes." Or: "the plan asserts idempotency, but the only
+    write path it uses is documented 'no idempotency'."
+  * underspecified_certification — the outcome IS certifiable and an oracle exists; the plan just
+    doesn't spell out the exact command / path / assertion.
+    Example: "the Verification section says 'run the registry and fidelity tests' without naming
+    the commands or paths."
+  HARD-OVERRIDE for uncertifiable_outcome and certification_cannot_prove ONLY (auto-high).
+  underspecified_certification is a coached refinement: it scores BELOW every blocking threshold
+  and never floors. Any non-none grade forces the detection amplifier to full weight.
+- undecomposed — grade by DECOMPOSITION KIND (closed set for this axis ONLY, not the ordinal
+  ladder): work is left undecomposed.
+  * missing_required_child — work the plan or its parent EXPLICITLY commits to has no
+    corresponding child or sibling; the decomposition is incomplete against its own declared scope.
+    Example: "the plan's own AC calls for 5 child tickets (P1, P2, observability, test-hardening,
+    Jira-cleanup), but the store records only 1 child — the other four are owned by nobody."
+  * no_executable_breakdown — the unit gives no executable step sequence for its own scope
+    (outcomes stated but not the work), or commits to a large all-or-nothing build whose riskiest
+    unknown is never de-risked first.
+    Example: "the plan is acceptance criteria only — no steps, no commands, no files — so no AC
+    maps to described work." Or: "it goes straight to a 13-mutation suite without the thin
+    vertical slice that would prove the harness works at all."
+  * bundles_separable_slices — the unit is executable as written, but packs several outcomes that
+    could each ship alone; splitting would improve clarity and reviewability, nothing more.
+    Example: "the plan bundles a bug fix, a dead-code sweep, and a type refactor — each
+    independently releasable, but all three are described and actionable."
+  HARD-OVERRIDE for missing_required_child and no_executable_breakdown ONLY (auto-high).
+  bundles_separable_slices is a coached refinement: it scores BELOW every blocking threshold and
+  never floors — do NOT use a floor grade for a right-sizing preference. The test between
+  missing_required_child and bundles_separable_slices is COMMITMENT, not size: ask whether the plan
+  (or its parent) already promised the missing piece as separate work.
 - divergent_implementation — grade by DIVERGENCE KIND (closed set for this axis ONLY, not the
   ordinal ladder): the plan diverges from the implementation or reality it claims to describe.
   * contradicts_reality — the plan asserts something about the code or system that is FALSE: a

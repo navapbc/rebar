@@ -36,7 +36,7 @@ EVENT_TYPE = "REVIEW_RESULT"
 # old-formula vs new-formula findings and never pool across versions (the same cohort-tagging
 # discipline as the per-finding `cohort` carrier; a MISSING tag reads as "unknown/skip" offline).
 # Bump this whenever `decide.impact_plan` changes shape → a fresh calibration cohort.
-IMPACT_MODEL_VERSION = "plan-v4"
+IMPACT_MODEL_VERSION = "plan-v5"
 
 # Retention bound (child db7b AC4). REVIEW_RESULT is reducer-IGNORED, so rebar's event
 # COMPACTION intentionally PRESERVES it (never snapshots/absorbs a non-KNOWN type) —
@@ -335,6 +335,25 @@ def fix_unit_key(finding: dict[str, Any]) -> str:
     return "g" + hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
+def _decision_margin(finding: dict[str, Any]) -> float | None:
+    """How far this finding landed from the block line it was judged against:
+    ``priority - block_threshold``, rounded to 4dp. Positive = at/above the line.
+
+    Measured on PRIORITY, not impact: ``pass3_decide`` blocks on
+    ``priority >= block_threshold`` (``priority = validity x impact``), so a margin computed from
+    impact alone would not describe the boundary the decision actually used.
+
+    Returns None — never 0.0 — when either side is missing or non-numeric, so an offline reader
+    can tell "no margin recorded" apart from "landed exactly on the line". Pure; never raises."""
+    priority = finding.get("priority")
+    threshold = finding.get("block_threshold")
+    if not isinstance(priority, (int, float)) or isinstance(priority, bool):
+        return None
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        return None
+    return round(float(priority) - float(threshold), 4)
+
+
 # ── recall: prior-review concerns re-surfaced POST-Pass-1 (story disused-unpoliced-solenodon) ──
 # Verdict-flips on identical material are a RECALL problem: the fresh finder MISSES a valid finding
 # a prior review caught. `prior_concerns()` returns the prior findings worth re-checking; run_pass1
@@ -593,6 +612,15 @@ def build_payload(
             "scenarios": f.get("scenarios", []),
             "block_threshold": f.get("block_threshold"),
             "blocking_enabled": f.get("blocking_enabled"),
+            # DECISION MARGIN (story fixable-angular-caribou, C11 P0.2): how far this finding
+            # landed from the line it was actually judged against. pass3_decide blocks on
+            # `priority >= block_threshold`, so the margin is measured on PRIORITY (= validity x
+            # impact), NOT on impact alone — an impact-based margin would not describe the real
+            # boundary. Positive = at/above the block line, negative = below it. Flap telemetry
+            # for a future hysteresis decision; nothing reads it to decide anything today.
+            # None when either side is absent (an older row, or a finding decided off-threshold),
+            # so offline readers MUST treat a missing/None margin as "unknown", never as 0.0.
+            "decision_margin": _decision_margin(f),
             # Blocking fix-unit grouping (story 5e64): the criteria-free group key + the
             # primary flag/criteria-union stamps, so offline replay can collapse one defect
             # co-cited by N criteria into one fix-unit. Absent (None) on ungrouped findings.
