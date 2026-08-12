@@ -300,11 +300,19 @@ def usage_record(criteria: list[str], usage: dict[str, Any] | None) -> dict[str,
     unrecoverable from the runner API — raising attempts get NO record (callers
     simply never mint one)."""
     u = usage or {}
-    return {
+    record = {
         "criteria": list(criteria),
         "requests": int(u.get("requests", 0) or 0),
         **{f: int(u.get(f, 0) or 0) for f in USAGE_TOKEN_FIELDS},
     }
+    # Ticket 81ca: carry the run-shape's ``distinct_fetches`` (the repository paths the agentic
+    # pass actually opened) through to the aggregate, where it becomes the signed read-set.
+    # Additive — absent from the record when the runner attached none, so every existing
+    # consumer (which reads named fields) is unchanged.
+    fetches = u.get("distinct_fetches")
+    if isinstance(fetches, list) and fetches:
+        record["distinct_fetches"] = [f for f in fetches if isinstance(f, dict)]
+    return record
 
 
 def is_context_limit_error(exc: Exception) -> bool:

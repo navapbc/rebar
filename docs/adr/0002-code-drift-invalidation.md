@@ -139,6 +139,59 @@ registers as drift, while an unrelated commit still does not (per-path content c
 the anti-false-positive property this ADR exists for). An uncommitted working-tree edit moves
 neither side, so the S4b false-positive protection is preserved.
 
+## Addendum — scoping the NO-`file_impact` case to the review read-set (ticket 81ca)
+
+Decision 5 above sends an EMPTY dependency set to the whole-HEAD fallback. That fail-safe was
+measured to over-trigger badly: 21% of full plan re-reviews ran on byte-identical material, most
+of them from base-SHA drift alone. This addendum scopes the fallback instead of removing it; the
+per-path comparison loop, the `{path: hash}` payload shape, and the ref-resolution boundary are
+all unchanged.
+
+- **The review's READ-SET rides inside the signed manifest.** The agentic passes already observe
+  which repository files they open (`distinct_fetches` in `rebar.llm.usage_log`). That telemetry
+  is projected onto repo-relative POSIX file paths by
+  `rebar.llm.plan_review.read_set.normalize_read_set` — `read_file` targets only (a `search_files`
+  target is a query string, a `list_directory` target is a directory), resolved against the hash
+  root, dropped when they escape it or do not name an existing regular file, then deduped and
+  sorted. The manifest records them as additive `read-path: <path>` lines under a
+  `read-set: <count>` marker. Because the signature covers the whole manifest, a tampered or
+  truncated read-set fails verification and resolves to the fail-safe.
+  The marker's presence is load-bearing: **no** `read-set:` line (a pre-81ca attestation, a
+  review where no agentic pass ran, or a telemetry failure) means the scoping was not applied and
+  whole-HEAD freshness still governs; `read-set: 0` means the review verifiably read nothing.
+
+  The marker is set ONLY when at least one repository fetch was OBSERVED and survived
+  normalization. An empty observation is deliberately not read as "the review verifiably read
+  nothing": a runner that reports no fetch telemetry is indistinguishable from one that genuinely
+  opened no files, and the stronger reading would scope in the fail-OPEN direction.
+
+- **Composition rule — and its two preconditions.** The scoping applies ONLY where this ADR
+  leaves a hole. All three must hold: the pre-existing dependency set (declared `file_impact` ∪
+  cited paths ∪ inherited child impact) is EMPTY; the container poison rule is NOT in effect; and
+  a read-set was recorded. The set then becomes read-set ∪ the blast-radius entries
+  (`read_set.BLAST_RADIUS_ENTRIES`: the criteria machinery, the routing overlays, the reviewer
+  rubrics, the gate workflows, and `rebar.toml`).
+
+  Both preconditions are load-bearing. Adding the blast radius to an ALREADY-scoped set would
+  only widen it and re-create the false positive this scoping exists to remove — an unrelated
+  commit touching `rebar.toml` would invalidate a container correctly scoped to its child's
+  files. And a poisoned container (decision 5's amendment: a live child with undeclared impact)
+  is deliberately fail-CLOSED at whole-HEAD, precisely because any partial scope is fail-OPEN
+  for that undeclared impact; read-set scoping is such a partial scope, so it must not apply.
+
+- **Globs: expansion + membership digest.** The currency check iterates the concrete entries
+  recorded at signing time, so a glob is handled twice. It is EXPANDED to its matching regular
+  files, each recorded as an ordinary `dep` line (content drift, named per file); and the glob
+  PATTERN itself is recorded as an entry whose digest is the SHA-256 of its sorted, newline-joined
+  match list. The second closes the addition/deletion blind spot a purely per-path expansion
+  leaves: a reviewer rubric added after signing has no baked per-file hash but moves the
+  membership digest. Both the signing side and the claim-gate re-check dispatch through the one
+  shared `read_set.hash_dep_entry`, so the two can never compute a glob digest differently.
+
+- **Reported basis.** The manifest records `currency-basis: file_impact | read-set | fail-safe`,
+  surfaced by `rebar review-plan <id> --status` (no LLM, no network). A pre-81ca manifest carries
+  no line and is derived conservatively: `file_impact` when dep lines exist, else `fail-safe`.
+
 **Back-out.** A configured `source=local` gate — or a gate ref/snapshot that cannot be
 resolved — degrades the claim-gate basis to the in-place checkout, exactly the per-site
 working-tree behavior that predated this consolidation (the conservative direction: the
