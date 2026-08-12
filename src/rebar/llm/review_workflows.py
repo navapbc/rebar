@@ -5,7 +5,7 @@ module expresses ``review_ticket`` as a one-step **agent workflow** that runs
 through the executor + the :class:`RunnerAgentStep` bridge, and provides a
 parallel-run-and-diff that proves the workflow path yields the SAME findings as the
 legacy path. Per the strangler-fig rule, the documented entry points
-(``rebar.llm.review_ticket`` etc.) are NOT changed here — they remain the legacy
+(the single-pass engine) are NOT changed here — they remain the legacy
 path; this adds the equivalent workflow path + the diff that gates a future cutover.
 """
 

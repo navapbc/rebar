@@ -118,20 +118,16 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "model). CLI/library JSON pinned to transition_result.",
     "reopen_ticket": "same {…, from, …} shape as transition; reserved word.",
     "reconcile": "no canonical schema for the reconcile plan/result shape.",
-    "review_ticket": "rebar.llm review op: makes a live LLM call, so it returns a "
-    "plain dict (review_result shape) and advertises NO outputSchema "
-    "by design — it must NOT be auto-driven on the fixture store in "
-    "CI. The CLI/library --output json path IS pinned to "
-    "review_result via OUTPUT_SCHEMAS['review'].",
     "review_code": "rebar.llm code-review op: live LLM call(s) over a git range, "
-    "returns an aggregated review_result as a plain dict (no "
-    "outputSchema) — same exemption rationale as review_ticket.",
+    "returns an aggregated review_result as a plain dict (no outputSchema) — it must "
+    "NOT be auto-driven on the fixture store in CI. The CLI/library --output json path "
+    "IS pinned to review_result via OUTPUT_SCHEMAS['review_code'].",
     "scan_spec": "rebar.llm batch spec-scan op: live LLM call(s) over the store's "
     "epics, returns a review_result as a plain dict (no outputSchema) "
-    "— same exemption rationale as review_ticket.",
+    "— same exemption rationale as review_code.",
     "verify_completion": "rebar.llm completion-verification op: live LLM call, returns a "
     "completion_verdict as a plain dict (no outputSchema) — same exemption rationale as "
-    "review_ticket. CLI/library --output json is pinned via OUTPUT_SCHEMAS['verify_completion'].",
+    "review_code. CLI/library --output json is pinned via OUTPUT_SCHEMAS['verify_completion'].",
     "review_plan": "rebar.llm plan-review gate (epic 5fd2): live LLM call(s), returns a "
     "plan_review_verdict as a plain dict (no outputSchema) — same model-produced exemption "
     "rationale as verify_completion. Inverse of the completion-verification close gate.",

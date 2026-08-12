@@ -60,6 +60,8 @@ def test_public_review_ticket_entry_point_unchanged(rebar_repo: Path) -> None:
     # The documented entry point still works via the legacy path (not deleted/cut over).
     r = str(rebar_repo)
     tid = rebar.create_ticket("task", "Legacy", repo_root=r)
-    result = rebar.llm.review_ticket(tid, "code-quality", runner=FakeRunner([]), repo_root=r)
+    result = rebar.llm.operations._review_ticket_impl(
+        tid, "code-quality", runner=FakeRunner([]), repo_root=r
+    )
     assert result["runner"] == "fake"
     assert result["target"]["kind"] == "ticket"  # legacy provenance preserved

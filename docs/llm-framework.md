@@ -2,7 +2,7 @@
 
 `rebar.llm` is a framework for running **tool-using LLM agents that emit structured
 findings**, exposed — like the rest of rebar — over a Python library, the CLI, and
-MCP. It ships one reference operation (`review_ticket`) and the seams to add more
+MCP. It ships the plan-review, code-review and spec-scan operations, and the seams to add more
 (code review, spec-vs-epic scans, …) reliably.
 
 It is **optional**: rebar's core runtime is tiny — its only dependency is `pyyaml`
@@ -18,14 +18,13 @@ Optionality holds across **every interface × every operation**, and when the
 `agents` extra is absent each surface **degrades cleanly** — never an
 `ImportError` traceback, never a silent success:
 
-- **Library** — each operation (`review_plan`, `review_code`, `scan_epics_for_spec`,
-  and the deprecated `review_ticket`) raises a typed `LLMError` (the `LLMConfigError`
-  subclass) whose message points at the extra.
+- **Library** — each operation (`review_plan`, `review_code`, `scan_epics_for_spec`)
+  raises a typed `LLMError` (the `LLMConfigError` subclass) whose message points at
+  the extra.
 - **CLI** — `rebar review-plan` / `review-code` / `scan-spec` print `Error: …` and exit
   non-zero (`rebar review-plan --check` is an import-free preflight that reports
-  availability and always exits 0). The **deprecated** `rebar review` forwards to
-  `review-plan` and inherits the same behaviour.
-- **MCP** — `review_ticket` / `review_code` / `scan_spec` are **gated off** unless
+  availability and always exits 0).
+- **MCP** — `review_plan` / `review_code` / `scan_spec` are **gated off** unless
   `REBAR_MCP_ALLOW_LLM=1`; even when the gate is opened with the extra absent they
   surface the typed error as a tool error, so a default client can never trigger a
   billable call.
@@ -94,7 +93,7 @@ The design was chosen after a research spike + two independent Opus design revie
   is never required by core rebar.
 
 ```
- operation (review_ticket)                      reviewer registry
+ operation (review_plan)                        reviewer registry
    │  assemble deterministic context              │ index.json (DERIVED: id, dimension,
    │  (rebar reads, sorted, no timestamps)        │   selection rules — from front-matter)
    │  resolve reviewer prompt ───────────────────▶│ prompt TEXT (git-canonical:
@@ -242,11 +241,11 @@ REBAR_LLM_BASE_URL=http://127.0.0.1:1234/v1
 
 A class slot only takes effect for an operation that **declares** that class — the gate
 workflows do so with a step-level `model: frontier` / `model: standard`. An operation that
-declares none, such as `rebar review`, resolves the **top-level** model instead
+declares none resolves the **top-level** model instead
 (`[tool.rebar.llm].model`, else the deprecated `REBAR_LLM_MODEL`, else `DEFAULT_MODEL`), so a
 per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o`
 set and this repo's own `[tool.rebar.llm].model` pinned to Bedrock,
-`rebar review` still ran — and stamped its provenance — as
+a classless op still ran — and stamped its provenance — as
 `bedrock:us.anthropic.claude-opus-4-8`, while `resolve_model(cfg, step="frontier")` returned
 `openai:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
 class the operation declares) to move a classless operation.
@@ -405,7 +404,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_MCP_SERVERS` | `{}` | JSON of MCP servers (pydantic-ai MCP server / toolset shape) |
 | `ANTHROPIC_API_KEY` | — | model credentials for the **direct-Anthropic** path only; not required for Bedrock or a local server |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` | — | OTLP trace sink only (auto-enabled when both keys present + the `[tracing]` extra); never used for prompt text |
-| `REBAR_MCP_ALLOW_LLM` | off | gate the MCP `review_ticket` tool (it makes a live, billable call) |
+| `REBAR_MCP_ALLOW_LLM` | off | gate the billable MCP LLM tools (they make live, billable calls) |
 
 > **`REBAR_LLM_TIMEOUT` wiring & default semantics.** The resolved `timeout_s` is passed
 > into the model's request settings (the base `ModelSettings.timeout`, which maps to the
@@ -439,8 +438,6 @@ pip install 'nava-rebar[agents]'        # pydantic-ai-slim[anthropic,retries] + 
 export ANTHROPIC_API_KEY=...            # direct-Anthropic credentials (Bedrock uses the AWS chain)
 rebar review-plan --check               # show backend/credential availability
 rebar review-plan <ticket-id>           # the plan-review gate; JSON plan_review_verdict on stdout
-# `rebar review` is DEPRECATED (story 316a): it forwards to `review-plan` with --no-sign,
-# and rejects `--graph` / a positional reviewer_id (exit 2) — neither exists on the target verb.
 rebar review-code --base main --head HEAD    # multi-reviewer code review of a git range
 rebar review-code --diff-file change.diff -o text   # review a diff file, human output
 rebar scan-spec --spec-file spec.md --batch-size 5   # scan open epics against a spec
@@ -448,12 +445,12 @@ rebar scan-spec --spec-file spec.md --batch-size 5   # scan open epics against a
 
 ```python
 import rebar.llm
-result = rebar.llm.review_ticket("abc123", "ticket-quality", graph=False)
+result = rebar.llm.review_code(base="main", head="HEAD")
 for f in result["findings"]:
     print(f["severity"], f["dimension"], f["detail"])
 ```
 
-MCP: the `review_ticket` tool is exposed but **disabled unless
+MCP: the `review_code` tool is exposed but **disabled unless
 `REBAR_MCP_ALLOW_LLM=1`** (it has cost/network side-effects). It returns a plain
 dict (the `review_result` shape) and advertises no `outputSchema` by design.
 
@@ -605,7 +602,7 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
 
 ## How the motivating examples map
 
-1. **LLM review of a ticket / ticket-graph** — the shipped `review_ticket` op.
+1. **LLM review of a ticket's plan** — the shipped `review_plan` gate op.
 2. **Code review over a change — the four-pass code-review GATE** — the `review_code` op
    (library `rebar.llm.review_code`, CLI `rebar review-code`, gated MCP `review_code`). As of
    epic b744 (WS4, ADR 0011) the throwaway single-pass route — deterministic reviewer selection

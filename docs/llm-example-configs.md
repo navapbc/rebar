@@ -91,7 +91,7 @@ Every slot field has a matching variable — `REBAR_LLM_<CLASS>_MODEL`,
 one field never clears its siblings:
 
 ```bash
-REBAR_LLM_STANDARD_MODEL=openai:gpt-4o rebar review <id>
+REBAR_LLM_STANDARD_MODEL=openai:gpt-4o rebar review-plan <id>
 ```
 
 Resolution order, per field: `rebar -c llm.<class>.<field>=…` > `REBAR_LLM_<CLASS>_<FIELD>` >

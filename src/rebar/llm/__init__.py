@@ -4,10 +4,10 @@ findings, exposed (like the rest of rebar) over library, CLI, and MCP.
 The primary review surface is the **plan-review gate** (:func:`review_plan` /
 ``rebar review-plan``): a deterministic floor plus a multi-pass (find → verify →
 decide → coach) review of a ticket's whole plan, which signs a claim-gating
-attestation. :func:`review_ticket` — a single-pass review of a ticket or
-ticket-graph — is now **deprecated** (story 316a; its CLI verb ``rebar review`` is
-a forwarding shim over ``review-plan``); it still works but signals a registered
-deprecation on every call.
+attestation. The older single-pass review op was deprecated by story 316a and its public
+surfaces (the ``rebar review`` verb, ``rebar.llm.review_ticket``, and the
+``review_ticket`` MCP tool) were removed in the pre-1.0 breaking pass; use
+``review_plan``.
 
 Design in one paragraph: an **operation** (e.g. :func:`review_plan`) assembles
 deterministic context from rebar's own reads, resolves a **prompt** git-canonically
@@ -51,7 +51,7 @@ from rebar.llm.errors import (
     StructuredOutputError,
 )
 from rebar.llm.findings import build_result, normalize_finding, validate_result
-from rebar.llm.operations import review_ticket, select_reviewers
+from rebar.llm.operations import select_reviewers
 from rebar.llm.plan_review import (
     claim_gate_check,
     plan_review_status,
@@ -116,7 +116,6 @@ __all__ = [
     "review_code",
     "review_plan",
     # operations
-    "review_ticket",
     "scan_epics_for_spec",
     "select_reviewers",
     "update_prompt",

@@ -40,7 +40,6 @@ _LADDER = {
     "llm",
     "prompt",
     "reconcile",
-    "review",
     "review-code",
     "review-plan",
     "scan-spec",
@@ -90,12 +89,13 @@ def test_intercept_dict_matches_ladder():
 
 
 def test_substring_commands_are_distinct(tmp_path: Path):
-    """`review` and `review-plan` are BOTH present as distinct backtick tokens — the
-    reference must not let one mask the other (backtick-wrapping makes them exact)."""
+    """`review-plan` and `review-code` are BOTH present as distinct backtick tokens —
+    the reference must not let one mask the other (backtick-wrapping makes them exact).
+    The bare `review` verb was removed in the pre-1.0 breaking pass."""
     doc = gen.render()
-    assert "`review`" in doc
     assert "`review-plan`" in doc
     assert "`review-code`" in doc
+    assert "`review`" not in doc
 
 
 def test_help_backed_usage_text_included():

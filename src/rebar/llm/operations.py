@@ -1,11 +1,11 @@
 """LLM operations — the high-level capabilities the framework exposes.
 
-The original reference operation here was :func:`review_ticket` (a single-pass LLM
-review of a ticket or ticket-graph). Story 316a retired its CLI verb (``rebar
-review``) in favour of the plan-review gate (``rebar review-plan`` /
-:func:`rebar.llm.review_plan`), which is now the primary review surface;
-``review_ticket`` survives as a deprecated library/MCP op (see
-:func:`_review_ticket_impl` for the implementation internal callers should use).
+The original reference operation here was the single-pass review of a ticket or
+ticket-graph. Story 316a deprecated it in favour of the plan-review gate (``rebar
+review-plan`` / :func:`rebar.llm.review_plan`), which is now the primary review
+surface, and the pre-1.0 breaking pass removed its three public entry points. The
+engine survives as :func:`_review_ticket_impl` for the two internal callers (the
+workflow-parity harness and the eval solver).
 This module also exposes :func:`select_reviewers`, the deterministic
 reviewer-selection rules the code-review operation uses.
 
@@ -30,7 +30,7 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 if TYPE_CHECKING:
     from rebar.llm.workflow.completion_prefetch import PrefetchSpec
 
-__all__ = ["assemble_context", "default_reviewer_id", "review_ticket", "select_reviewers"]
+__all__ = ["assemble_context", "default_reviewer_id", "select_reviewers"]
 
 # A tool-using review is inherently multi-step (explore → search → read several files →
 # report). The framework review default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too
@@ -91,7 +91,7 @@ def assemble_context(
     Returns ``(context_text, reviewed_ids)`` — the rendered, deterministic context block
     fed to a review/verify agent, and the list of ticket ids it covers (just ``ticket_id``,
     or the whole subtree when ``graph`` is true). This is the shared context-builder BOTH
-    the review op (:func:`review_ticket`) and the mandatory completion gate
+    the single-pass review engine and the mandatory completion gate
     (``llm.workflow.gate_ops``) consume. It is public (SC1) so the gate reaches it through a
     documented contract instead of importing a leading-underscore sibling across modules.
 
@@ -132,56 +132,6 @@ def assemble_context(
     return context, ids
 
 
-def review_ticket(
-    ticket_id: str,
-    reviewer_id: str | None = None,
-    *,
-    graph: bool = False,
-    ref: str | None = None,
-    source: str | None = None,
-    repo_root=None,
-    config: LLMConfig | None = None,
-    runner: Runner | None = None,
-) -> dict:
-    """Run an LLM review of a ticket (or its graph) and return a ``review_result``.
-
-    .. deprecated:: story 316a
-        The CLI verb ``rebar review`` is retired in favour of the plan-review gate
-        (``rebar review-plan``). This library function still works but is
-        superseded by :func:`rebar.llm.review_plan` — see the registered
-        deprecation ``lib:rebar.llm.review_ticket``. It is a thin public wrapper
-        that warns and delegates to :func:`_review_ticket_impl`; internal callers
-        should use ``_review_ticket_impl`` directly so a single surface does not
-        fire this warning twice.
-
-    Args:
-        ticket_id: the ticket to review (id, short id, or alias).
-        reviewer_id: a reviewer from the catalog (default: the catalog's default).
-        graph: also include the ticket's descendants, reviewed as one unit.
-        repo_root: rebar repo root (defaults to the resolved root).
-        config: an :class:`LLMConfig` (defaults to :meth:`LLMConfig.from_env`).
-        runner: an explicit runner (the test-injection seam; defaults to the
-            config-selected runner — ``pydantic_ai`` unless overridden).
-
-    Returns a validated ``review_result`` dict ({findings[], target, reviewers,
-    runner, model, trace_id, summary}). Raises :class:`LLMError` subclasses on
-    missing deps/credentials or a failed/empty structured review.
-    """
-    from rebar._deprecations import warn_deprecated
-
-    warn_deprecated("lib:rebar.llm.review_ticket", via="warning")
-    return _review_ticket_impl(
-        ticket_id,
-        reviewer_id,
-        graph=graph,
-        ref=ref,
-        source=source,
-        repo_root=repo_root,
-        config=config,
-        runner=runner,
-    )
-
-
 def _review_ticket_impl(
     ticket_id: str,
     reviewer_id: str | None = None,
@@ -193,11 +143,12 @@ def _review_ticket_impl(
     config: LLMConfig | None = None,
     runner: Runner | None = None,
 ) -> dict:
-    """The actual review-ticket implementation (see :func:`review_ticket`).
+    """The single-pass review-ticket engine.
 
-    Internal callers (the workflow-parity harness, the eval solver, the MCP tool
-    body) call THIS directly so they don't ALSO trigger the public wrapper's
-    deprecation signal — one surface, one signal."""
+    Its public entry points (the ``rebar review`` verb, ``rebar.llm.review_ticket``,
+    and the ``review_ticket`` MCP tool) were removed in the pre-1.0 breaking pass;
+    the remaining callers are the workflow-parity harness and the eval solver, which
+    call this directly. Use ``rebar.llm.review_plan`` for the public review op."""
     from rebar.llm import gate_source
 
     handle = gate_source.resolve_gate_handle(ref, source, repo_root)

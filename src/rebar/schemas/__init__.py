@@ -117,10 +117,10 @@ FSCK = "fsck"
 # graph — output of `rebar doctor`: blocking edges that disagree with the
 # structural link rule, plus their repair disposition after a `--repair` pass.
 DOCTOR = "doctor"
-# rebar.llm — output of the (deprecated, story 316a) review_ticket op. The MCP tool
-# is exempt (live LLM call → plain dict, no outputSchema); the surviving library
-# JSON path is pinned to this schema via the synthetic "review_ticket" key below —
-# the CLI verb `rebar review` no longer emits it (it forwards to review-plan).
+# rebar.llm — the structured review-findings document. Produced by the code-review op
+# (`rebar review-code` / rebar.llm.review_code) and by the single-pass review engine.
+# The MCP tool is exempt (live LLM call → plain dict, no outputSchema); the CLI/library
+# JSON path is pinned to this schema via the synthetic "review_code" key below.
 REVIEW_RESULT = "review_result"
 # rebar.llm — output of the completion-verification op (`rebar verify-completion`).
 # Like review_result, the MCP tool is exempt (live LLM call → plain dict, no
@@ -338,16 +338,12 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "metrics": METRICS,
     "fsck": FSCK,
     "doctor": DOCTOR,
-    # `rebar review` is now a deprecation shim over the plan-review gate (story 316a),
-    # so its --output json path is pinned to the plan-review verdict schema, not
-    # review_result. The surviving library/MCP review_ticket surface is wired below
-    # under the synthetic "review_ticket" key.
-    "review": PLAN_REVIEW_VERDICT,
-    # rebar.llm.review_ticket / the MCP review_ticket tool (deprecated, story 316a):
-    # synthetic key, no CLI help arm (the CLI verb no longer emits this schema) —
-    # registered so the every-schema-file-is-wired guard sees review_result is still
-    # produced by the surviving library/MCP surface.
-    "review_ticket": REVIEW_RESULT,
+    # code review (`rebar review-code` / rebar.llm.review_code): synthetic key, no CLI
+    # help arm (review-code is an intercept, so the --output coverage guard never drives
+    # it live) — registered so the every-schema-file-is-wired guard sees review_result is
+    # still produced. The removed `rebar review` verb and `review_ticket` library/MCP
+    # surfaces used to carry this wiring (pre-1.0 breaking pass #3).
+    "review_code": REVIEW_RESULT,
     # completion-verification op: like `review`, no CLI help arm (so the --output
     # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
     # registered here so the every-schema-file-is-wired guard sees completion_verdict.

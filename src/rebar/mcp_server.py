@@ -125,8 +125,8 @@ MCP_ENV_VARS: tuple[dict, ...] = (
     {
         "name": "REBAR_MCP_ALLOW_LLM",
         "description": (
-            "Set to 1 to enable the billable LLM tools (review_ticket / review_code / "
-            "scan_spec / verify_completion / review_plan); off by default."
+            "Set to 1 to enable the billable LLM tools (review_code / scan_spec / "
+            "verify_completion / review_plan); off by default."
         ),
         "deprecated": False,
     },

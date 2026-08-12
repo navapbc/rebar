@@ -82,6 +82,22 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   unresolved-children close guard remains unbypassable, and no force bypass is exposed over
   MCP.
 
+## [Unreleased]
+
+### Removed
+
+- **BREAKING (pre-1.0)** — the single-pass review operation's three public entry
+  points are removed: the CLI verb `rebar review`, the library function
+  `rebar.llm.review_ticket()`, and the MCP `review_ticket` tool. v0.11.0 turned the
+  CLI verb into a forwarding shim and deprecated the library/MCP surfaces; this
+  deletes them. Use `rebar review-plan` / `rebar.llm.review_plan()` / the
+  `review_plan` MCP tool. Operator-approved early removal (pre-1.0 pass #3),
+  2026-08-12.
+- **BREAKING (pre-1.0)** — `rebar init` no longer strips the retired
+  `.reconciler-* merge=ours` line from an already-committed `.gitattributes`; the
+  ensure-unit is create-only. A clone last swept before 2026-07-05 must strip the
+  line by hand.
+
 ## [0.11.0] - 2026-08-06
 
 A feature release centered on first-class Amazon Bedrock support, a substantially

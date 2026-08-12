@@ -209,7 +209,7 @@ def test_unresolvable_ref_attested_fails_closed(rebar_repo: Path):
     from rebar._snapshot import SnapshotRefError
 
     with pytest.raises(SnapshotRefError):
-        rebar.llm.review_ticket(
+        rebar.llm.operations._review_ticket_impl(
             tid,
             "ticket-quality",
             ref="no-such-ref-xyz",

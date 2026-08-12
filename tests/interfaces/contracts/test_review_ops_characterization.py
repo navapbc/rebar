@@ -29,7 +29,9 @@ def test_review_ticket_contract(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     tid = rebar.create_ticket("task", "Review me", description="body", repo_root=r)
     fake = FakeRunner([{"severity": "high", "dimension": "bugs", "detail": "x"}], summary="s")
-    result = rebar.llm.review_ticket(tid, "ticket-quality", runner=fake, repo_root=r)
+    result = rebar.llm.operations._review_ticket_impl(
+        tid, "ticket-quality", runner=fake, repo_root=r
+    )
 
     assert _REQUIRED_KEYS <= set(result)
     assert result["runner"] == "fake"
@@ -44,7 +46,7 @@ def test_review_ticket_graph_target_kind(rebar_repo: Path) -> None:
     r = str(rebar_repo)
     epic = rebar.create_ticket("epic", "E", repo_root=r)
     rebar.create_ticket("task", "child", parent=epic, repo_root=r)
-    result = rebar.llm.review_ticket(
+    result = rebar.llm.operations._review_ticket_impl(
         epic, "ticket-quality", graph=True, runner=FakeRunner([]), repo_root=r
     )
     assert result["target"]["kind"] == "ticket_graph"
@@ -74,7 +76,7 @@ def test_review_result_validates_against_schema(rebar_repo: Path) -> None:
 
     r = str(rebar_repo)
     tid = rebar.create_ticket("task", "T", repo_root=r)
-    result = rebar.llm.review_ticket(
+    result = rebar.llm.operations._review_ticket_impl(
         tid,
         "ticket-quality",
         runner=FakeRunner([{"severity": "low", "dimension": "x", "detail": "d"}]),
