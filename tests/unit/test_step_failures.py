@@ -144,6 +144,124 @@ def test_clean_run_coverage_omits_the_key_entirely():
     assert "llm_step_failures" not in out_unscoped["coverage"]
 
 
+# ── review-code: the same tally on the gate that already has a `coverage` object ──
+def _code_review_coach_op():
+    from rebar.llm.code_review import workflow_ops  # noqa: F401 — import registers the steps
+    from rebar.llm.workflow.executor import STEP_REGISTRY
+
+    return STEP_REGISTRY["code_review_coach"]
+
+
+def _code_review_coach_ctx():
+    from rebar.llm.workflow.executor import StepContext
+
+    return StepContext(
+        run_id="r",
+        step_id="coach",
+        kind="scripted",
+        step={},
+        inputs={"blocking": [], "surfaced": [], "notes": [], "coverage": {"llm_ran": True}},
+        workflow={},
+        target_ticket="0000-0000-0000-0001",
+        repo_root=None,
+    )
+
+
+def test_code_review_coverage_carries_the_tally_when_a_step_failed():
+    op = _code_review_coach_op()
+    with step_failures.collect_step_failures():
+        step_failures.record("code-review-novelty")
+        out = op(_code_review_coach_ctx())
+    assert out["coverage"]["llm_step_failures"] == {
+        "total": 1,
+        "by_step": {"code-review-novelty": 1},
+    }
+    assert out["verdict"] == "PASS"  # observability only
+
+
+def test_code_review_clean_run_omits_the_key():
+    op = _code_review_coach_op()
+    with step_failures.collect_step_failures():
+        out = op(_code_review_coach_ctx())
+    assert "llm_step_failures" not in out["coverage"]
+
+
+# ── verify-completion: the placement decision — coverage.llm_step_failures ────────
+def _completion_reconcile_op():
+    from rebar.llm.workflow import gate_ops  # noqa: F401 — import registers the steps
+    from rebar.llm.workflow.executor import STEP_REGISTRY
+
+    return STEP_REGISTRY["completion_reconcile"]
+
+
+def _completion_reconcile_ctx():
+    from rebar.llm.workflow.executor import StepContext
+
+    return StepContext(
+        run_id="r",
+        step_id="reconcile",
+        kind="scripted",
+        step={},
+        inputs={
+            "ticket_id": "0000-0000-0000-0001",
+            "raw_verdict": "PASS",
+            "raw_findings": [],
+            # The schema types these as string/nullable-string; a real run always supplies
+            # them from the verify step, so the fixture does too.
+            "runner": "fake",
+            "model": None,
+            "trace_id": None,
+        },
+        workflow={},
+        target_ticket="0000-0000-0000-0001",
+        repo_root=None,
+    )
+
+
+def test_completion_verdict_carries_the_tally_under_coverage():
+    """The placement decision: the completion verdict has no `coverage` object of its own, and
+    the tally goes at `coverage.llm_step_failures` so ONE JSON path reaches it on all three
+    gates rather than a bespoke top-level key on this one."""
+    op = _completion_reconcile_op()
+    with step_failures.collect_step_failures():
+        step_failures.record("completion-verifier")
+        step_failures.record("completion-verifier")
+        step_failures.record("xcheck")
+        out = op(_completion_reconcile_ctx())
+    assert out["coverage"]["llm_step_failures"] == {
+        "total": 3,
+        "by_step": {"completion-verifier": 2, "xcheck": 1},
+    }
+    assert out["verdict"] == "PASS"  # observability only
+
+
+def test_completion_clean_run_creates_no_coverage_container_at_all():
+    """Attestation safety, and the reason `coverage` is built lazily: this verdict is SIGNED, so
+    a clean run must stay byte-identical rather than gain an empty container."""
+    op = _completion_reconcile_op()
+    with step_failures.collect_step_failures():
+        out = op(_completion_reconcile_ctx())
+    assert "coverage" not in out
+    # ...and with no sink active at all (a caller outside the gate's run scope).
+    assert "coverage" not in _completion_reconcile_op()(_completion_reconcile_ctx())
+
+
+def test_both_new_gate_run_scopes_activate_the_sink():
+    """A drain that can never receive anything is a silent no-op, so pin that each gate's run
+    scope actually opens a sink. Asserted on the dispatch source rather than by driving a live
+    gate, which would need a model."""
+    from pathlib import Path
+
+    from rebar.llm.workflow import gate_dispatch
+
+    src = Path(gate_dispatch.__file__).read_text(encoding="utf-8")
+    cr_start = src.index("def _run_code_review_gate")
+    code_review = src[cr_start : src.index("def _consumed_diagnostic")]
+    completion = src[src.index("def produce_completion_verdict") :]
+    assert "collect_step_failures()" in code_review
+    assert "collect_step_failures()" in completion
+
+
 # ── the runner → sink wiring ─────────────────────────────────────────────────────
 def test_a_failed_runner_call_reaches_the_sink_under_its_call_label():
     """The end-to-end claim: the REAL runner's except spine records the failure under the same

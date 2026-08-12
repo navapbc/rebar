@@ -38,7 +38,21 @@
           "description": "Systemic-degrade disposition (story blackbear): the closed resolution-class the LLM-failure classifier assigned. Present only on a degraded/INDETERMINATE verdict; absent on a normal verdict."
         },
         "retryable": { "type": "boolean", "description": "Whether resolution_class is transient/retryable (drives CLI exit 11); mirrors LLMOutcome.retryable." },
-        "diagnostic": { "type": "object", "additionalProperties": true, "description": "Sanitized, redacted failure diagnostic (no secrets/PII); present with resolution_class." }
+        "diagnostic": { "type": "object", "additionalProperties": true, "description": "Sanitized, redacted failure diagnostic (no secrets/PII); present with resolution_class." },
+        "llm_step_failures": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "LLM step calls that FAILED but did not fail this run - the non-fatal degradation that used to be visible only in the logs (e.g. every overlap-judge batch dying, so an empty overlap[] was indistinguishable from 'nothing overlapped'). Present ONLY when at least one call failed, so a clean run's coverage is byte-identical; purely additive - it never changes the verdict, exit code, signature, or provenance stamp. Reaching the verdict at all means the run survived these, which is what makes them non-fatal.",
+          "required": ["total", "by_step"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 1, "description": "Number of failed LLM step calls in this run." },
+            "by_step": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 1 },
+              "description": "Failure count per step, keyed by the runner's call label VERBATIM so a key matches the 'llm call [<label>] ... FAILED' log line. The label is the joined reviewer list when a call has one (e.g. 'overlap-judge') and otherwise falls back to the target ticket id, or the literal '?' when even that is absent - so calls carrying no reviewer list group under that fallback key rather than under a step name."
+            }
+          }
+        }
       }
     },
     "runner": { "type": "string", "description": "The runner backend that produced the verdict." },
