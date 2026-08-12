@@ -36,6 +36,7 @@ on:
 permissions:
   contents: read
   actions: read   # workflow-conclusion queries this run's jobs
+  checks: read    # read job annotations to tell a TIMEOUT from a plain cancellation
 
 concurrency:
   # A newer patchset for the same change cancels the in-flight run (stale-run guard).
@@ -341,7 +342,9 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-          sparse-checkout: scripts/normalize_ci_conclusion.py
+          sparse-checkout: |
+            scripts/normalize_ci_conclusion.py
+            scripts/summarize_ci_failures.py
           sparse-checkout-cone-mode: false
 
       # im-open/workflow-conclusion can set WORKFLOW_CONCLUSION to `skipped` (its fallback
@@ -377,5 +380,101 @@ jobs:
           # The action's vote message embeds THIS run's URL — its cast is
           # `review --message "<STATUS>: <server>/<repo>/actions/runs/<run_id>"` — so the
           # Gerrit vote always links back to the CI run's log surface (the "run URL in the
-          # vote message" requirement; no custom `comment` input exists nor is needed).
+          # vote message" requirement). The action exposes NO input for custom message text
+          # (verified at this pin and on the action's current main; v1.1.2 is its latest tag),
+          # which is why the triage detail below is posted as a SEPARATE comment-only review.
           vote-type: ${{ steps.normalize.outputs.vote-type }}
+
+      # ---- Observability only (ticket be9d-2f2d-47ca-45d2) ----------------------------
+      # A `Verified -1` reads exactly `CANCELLED: <run URL>` whatever went wrong, so a job
+      # that blew its `timeout-minutes` and a job that failed on stale-base version skew look
+      # identical — though only the second needs a rebase. These two steps add a comment
+      # naming the jobs and saying which of those it was.
+      #
+      # They run AFTER the cast so the vote is already on the change before any of this
+      # executes, and both are `continue-on-error` so a hiccup here can never change the gate
+      # outcome. Nothing below casts a label.
+      - name: Summarize the jobs that did not succeed
+        id: summary
+        if: ${{ steps.normalize.outputs.vote-type != 'success' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # This run's jobs. `actions: read` already grants this (workflow-conclusion uses it).
+          jobs_json="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs" \
+            -q '.jobs[]' | jq -s -c '{jobs: .}')"
+
+          # GitHub reports a TIMED-OUT job as `conclusion: cancelled` and explains itself only
+          # in the check-run annotation ("exceeded the maximum execution time"), so fetch those
+          # for the non-successful jobs only. A job id IS its check-run id. Best-effort: a
+          # failed annotation read degrades the wording, it must not fail the step.
+          annotations='{}'
+          for job_id in $(jq -r '.jobs[]
+                | select(.conclusion == "failure" or .conclusion == "cancelled"
+                         or .conclusion == "timed_out")
+                | .id' <<<"$jobs_json"); do
+            job_annotations="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/check-runs/${job_id}/annotations" 2>/dev/null \
+              || echo '[]')"
+            annotations="$(jq -c --arg id "$job_id" --argjson a "$job_annotations" \
+              '. + {($id): $a}' <<<"$annotations")"
+          done
+
+          text="$(JOBS_JSON="$jobs_json" ANNOTATIONS_JSON="$annotations" \
+            python3 scripts/summarize_ci_failures.py)"
+          printf '%s\n' "$text"
+          {
+            echo "text<<SUMMARY_EOF"
+            printf '%s\n' "$text"
+            echo "SUMMARY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post the triage detail to Gerrit (comment only, no vote)
+        if: ${{ steps.normalize.outputs.vote-type != 'success' && steps.summary.outputs.text != '' }}
+        continue-on-error: true
+        shell: bash
+        env:
+          GERRIT_SSH_PRIVKEY: ${{ secrets.GERRIT_SSH_PRIVKEY }}
+          GERRIT_KNOWN_HOSTS: ${{ vars.GERRIT_KNOWN_HOSTS }}
+          GERRIT_SERVER: ${{ vars.GERRIT_SERVER }}
+          GERRIT_SSH_USER: ${{ vars.GERRIT_SSH_USER }}
+          CHANGE_NUMBER: ${{ inputs.GERRIT_CHANGE_NUMBER }}
+          PATCHSET_NUMBER: ${{ inputs.GERRIT_PATCHSET_NUMBER }}
+          SUMMARY: ${{ steps.summary.outputs.text }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          # Reject any change/patchset that is not a positive integer before it reaches the
+          # remote command, mirroring gerrit-review-action's own guard.
+          if [[ ! "${CHANGE_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::warning::refusing to comment: bad change number '${CHANGE_NUMBER}'"
+            exit 0
+          fi
+          if [[ ! "${PATCHSET_NUMBER}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::warning::refusing to comment: bad patchset number '${PATCHSET_NUMBER}'"
+            exit 0
+          fi
+
+          mkdir -p ~/.ssh
+          printf '%s\n' "${GERRIT_SSH_PRIVKEY}" > ~/.ssh/gerrit_comment_key
+          chmod 600 ~/.ssh/gerrit_comment_key
+          printf '%s\n' "${GERRIT_KNOWN_HOSTS}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+          # summarize_ci_failures.py strips ' and \ and any control character other than
+          # newline, so the summary cannot terminate the single-quoted argument below.
+          message="${SUMMARY}"$'\n\n'"Full log: ${RUN_URL}"
+          ssh -i ~/.ssh/gerrit_comment_key -p 29418 -o StrictHostKeyChecking=yes \
+            -- "${GERRIT_SSH_USER}@${GERRIT_SERVER}" \
+            gerrit review "${CHANGE_NUMBER},${PATCHSET_NUMBER}" \
+            --message "'${message}'" --tag autogenerated:github
+
+      - name: Remove the Gerrit comment key
+        if: ${{ always() }}
+        continue-on-error: true
+        shell: bash
+        run: rm -f ~/.ssh/gerrit_comment_key
