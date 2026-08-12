@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import threading
 import time
 from pathlib import Path
 
@@ -34,7 +33,7 @@ import pytest
 
 import rebar
 from rebar import config
-from rebar._store import event_append
+from rebar._store import event_append, gitutil
 
 # A short stale threshold so the retry path self-heals fast in tests. The implementation
 # must expose the reclamation threshold as this module-level seconds value.
@@ -91,16 +90,42 @@ def test_stale_index_lock_is_reclaimed_and_write_succeeds(tmp_path: Path) -> Non
     assert not lock.exists(), "the stale lock should have been reclaimed"
 
 
-def test_contended_index_lock_cleared_during_backoff_succeeds(tmp_path: Path) -> None:
+def test_contended_index_lock_cleared_during_backoff_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A CONTENDED lock the peer releases mid-retry is ridden out and the write succeeds.
+
+    The peer's release is driven by an OBSERVED retry attempt, not by a wall clock. A
+    wall-clock ``threading.Timer`` here unlinks whatever ``index.lock`` exists when it fires,
+    and it cannot tell the planted lock from git's OWN: once the planted lock is reclaimed on
+    the first retry (``stage_and_commit`` holds the write lock, so the reclaim is
+    ``force=True``), ``git commit`` creates a REAL ``index.lock``, and a timer landing there
+    deletes it mid-commit — git then dies ``fatal: unable to write new index file``. That is a
+    property of the runner's speed, not of the contract under test, and it is what made this
+    test flake on the slow macOS leg (bug lowcost-unsainted-wallaby). ``gitutil._retry_probe``
+    fires after every attempt inside ``_with_index_lock_retry``, so releasing on the first
+    observed failure models the same peer without a clock.
+    """
     tracker = _fresh_tracker(tmp_path, "contended")
     lock = _index_lock_path(tracker)
     lock.write_text("")  # a *fresh* lock: a live peer mid-write
-    # Peer releases the lock shortly after — the write must ride it out on retry.
-    threading.Timer(0.4, lambda: lock.exists() and lock.unlink()).start()
+    released: list[int] = []
+
+    def release_on_first_failure(attempt: int, result: subprocess.CompletedProcess) -> None:
+        # The peer releases ONLY the lock it planted, and only once the write has been
+        # observed to fail on it — never a lock git created for itself.
+        if released or result.returncode == 0:
+            return
+        if gitutil._is_index_lock_error(result.stderr or result.stdout or ""):
+            lock.unlink()
+            released.append(attempt)
+
+    monkeypatch.setattr(gitutil, "_retry_probe", release_on_first_failure)
 
     rc = event_append.stage_and_commit(tracker, "tk-cont", _event("u-cont"))
     assert rc == 0
     assert _committed(tracker, "tk-cont")
+    assert released, "the write must have contended on the planted lock before succeeding"
 
 
 def test_unlocked_reclaim_preserves_young_lock_but_force_reclaims_orphan(tmp_path: Path) -> None:
