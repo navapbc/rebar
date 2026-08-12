@@ -96,7 +96,14 @@ def test_empty_manifest_does_not_attach_metadata() -> None:
     assert not hasattr(record_criterion_verdict, COMPLETION_EVIDENCE_POLICY_ATTR)
 
 
-def test_parallel_evidence_batch_executes_only_one_governed_action() -> None:
+def test_parallel_evidence_batch_executes_every_evidence_call() -> None:
+    """A lost batch must cost a round trip at most, never the criterion's evidence.
+
+    Suppressing the losers returned a synthetic notice in place of repository content while
+    still consuming one of the three evidence responses, so a persistently batching model
+    banked met=false against files that exist.
+    """
+
     async def scenario() -> tuple[list[str], list[_FakeToolset]]:
         fakes = [_FakeToolset(), _FakeToolset(), _FakeToolset()]
         wrappers = wrap_completion_evidence_policy(fakes, _policy())
@@ -108,8 +115,34 @@ def test_parallel_evidence_batch_executes_only_one_governed_action() -> None:
         return results, fakes
 
     results, fakes = asyncio.run(scenario())
-    assert sum(len(fake.calls) for fake in fakes) == 1
-    assert results.count(COMMIT_STEERING_NOTICE) == 2
+    assert sum(len(fake.calls) for fake in fakes) == 3
+    assert COMMIT_STEERING_NOTICE not in results
+    assert sorted(results) == [
+        "result:list_directory:1",
+        "result:read_file:1",
+        "result:search_files:1",
+    ]
+
+
+def test_batched_evidence_consumes_exactly_one_evidence_response() -> None:
+    """N evidence calls in one response still spend one of the three finite responses."""
+    banked: set[str] = set()
+    fallbacks: list[tuple[str, str]] = []
+    fake = _FakeToolset()
+    wrapper = _wrapped(fake, _policy(("c00-a",), banked=banked, fallbacks=fallbacks))
+
+    async def scenario() -> None:
+        for step in (1, 2):
+            await asyncio.gather(
+                wrapper.call_tool("read_file", {}, _Ctx(step), None),
+                wrapper.call_tool("search_files", {}, _Ctx(step), None),
+                wrapper.call_tool("list_directory", {}, _Ctx(step), None),
+            )
+
+    asyncio.run(scenario())
+    assert len(fake.calls) == 6
+    assert fallbacks == []
+    assert banked == set()
 
 
 def test_action_marker_is_set_atomically_before_the_first_await() -> None:
@@ -119,7 +152,7 @@ def test_action_marker_is_set_atomically_before_the_first_await() -> None:
         wrapper = _wrapped(fake, _policy())
         first = asyncio.create_task(wrapper.call_tool("read_file", {}, _Ctx(4), None))
         await asyncio.sleep(0)
-        second = await wrapper.call_tool("search_files", {}, _Ctx(4), None)
+        second = await wrapper.call_tool("record_criterion_verdict", {}, _Ctx(4), None)
         release.set()
         await first
         return second, fake

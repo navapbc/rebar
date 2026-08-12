@@ -12,11 +12,22 @@ when the repository result is served from memo, and inside runaway detection so 
 call remains observable to the general loop guard.
 
 Pydantic-ai may execute all tool calls in one model response concurrently and may copy toolsets
-while preparing later steps.  Consequently the lock, used-response markers, current criterion,
+while preparing later steps.  Consequently the lock, response-kind markers, current criterion,
 and evidence-response state below are closure-owned and shared by every wrapper/toolset copy.
-The response marker is checked and claimed atomically before the selected tool is awaited.  At
-most one governed action -- either repository evidence or verdict recording -- can therefore
-execute at a ``run_step``; non-governed tools pass through and definitions remain advertised.
+The response marker is checked and claimed atomically before the selected tool is awaited.
+
+The exclusion is per *kind*, not per call.  A ``run_step`` is claimed by the kind of its first
+governed call, and the COMMIT discipline that the claim protects is the separation of evidence
+gathering from verdict recording: a record must never share a response with evidence, and only
+one verdict is recorded per response.  Read-only repository evidence calls do not need that
+protection from each other, so further evidence calls in an evidence-claimed step execute
+normally rather than being answered with a synthetic notice and dropped.  Suppressing them
+would cost the criterion its evidence rather than a round trip, because the finite boundary
+below counts responses: a response whose only useful call was suppressed still consumes one of
+the three, so a persistently batching model can bank ``met=false`` against a file that exists.
+Executing them is free of that risk and adds no round trip -- ``current_evidence_steps`` is a
+set of steps, so N evidence calls in one response still consume exactly one evidence response.
+Non-governed tools pass through and definitions remain advertised.
 """
 
 from __future__ import annotations
@@ -121,7 +132,8 @@ def wrap_completion_evidence_policy(toolsets: list, policy: CompletionEvidencePo
     from pydantic_ai.toolsets import WrapperToolset
 
     lock = asyncio.Lock()
-    acted_steps: set[int] = set()
+    # run_step -> the kind of governed action that claimed it: "evidence" or "record".
+    step_kind: dict[int, str] = {}
     current_id: str | None = None
     current_evidence_steps: set[int] = set()
 
@@ -147,12 +159,16 @@ def wrap_completion_evidence_policy(toolsets: list, policy: CompletionEvidencePo
             step = int(ctx.run_step)
             target_id: str | None = None
             evidence_count = 0
-            # Claim the response's governed action before awaiting the selected tool.  The
+            kind = "evidence" if is_evidence else "record"
+            # Claim the response's governed kind before awaiting the selected tool.  The
             # closure-owned lock makes this check-and-set shared across every wrapped toolset.
+            # Evidence may join an evidence-claimed step; every other repeat is still steered,
+            # which keeps a verdict record from ever sharing a response with evidence.
             async with lock:
-                if step in acted_steps:
+                claimed = step_kind.get(step)
+                if claimed is not None and not (claimed == "evidence" and is_evidence):
                     return COMMIT_STEERING_NOTICE
-                acted_steps.add(step)
+                step_kind[step] = kind
                 live = set(policy.banked_ids())
                 first = _sync_current(live)
                 if is_evidence:
