@@ -50,6 +50,14 @@ NON_CAS = {
     "pre-receive hook declined": (
         "! [remote rejected] refs/reconciler/lock (pre-receive hook declined)"
     ),
+    # Bug ebee (freeborn-dizzy-raven): the witness push failed server-side against a HEALTHY
+    # lease and was logged as "classified as CAS mismatch (lease moved)" — a false claim
+    # that a competing pass stole the lease.
+    "github ref-transaction failure": (
+        "remote: fatal error in commit_refs\n"
+        "! [remote rejected]       1e5caeb7c8c9af4ab7cb33501eae7102ba3efa47 -> "
+        "refs/reconciler/last-pass (failure)"
+    ),
     "secondary rate limit": (
         "! [remote rejected] refs/reconciler/lock (You have exceeded a secondary rate limit)"
     ),
@@ -132,3 +140,26 @@ def test_cas_mismatch_logs_the_stderr_that_justified_it(
         "the ref actually holds, which is the whole point of making the claim checkable. "
         f"logged: {logged!r}"
     )
+
+
+def test_a_github_server_side_ref_failure_is_not_reported_as_a_stolen_lease(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for bug ebee (freeborn-dizzy-raven), a Reconcile Bridge witness publish.
+
+    The witness push hit `remote: fatal error in commit_refs` while its lease was intact.
+    The broad `rejected` marker won, so the pass claimed the lease had MOVED — sending an
+    operator hunting a concurrent holder that never existed. A server fault must fail
+    closed on its own terms instead.
+    """
+    assert _classify(monkeypatch, NON_CAS["github ref-transaction failure"]) == "fail-closed"
+
+
+def test_stale_info_still_wins_over_the_new_server_side_markers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`stale info` stays CONCLUSIVE — a real lease move is still detected (bug 4afc)."""
+    combined = (
+        "remote: fatal error in commit_refs\n! [rejected] refs/reconciler/last-pass (stale info)"
+    )
+    assert _classify(monkeypatch, combined) == "cas-mismatch"
