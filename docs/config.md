@@ -274,12 +274,11 @@ url            = ""      # env JIRA_URL  (must be https unless allow_insecure=tr
 user           = ""      # env JIRA_USER
 project        = ""      # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
 allow_insecure = false   # env REBAR_JIRA_ALLOW_INSECURE — allow a cleartext http:// url
-# Workflow status names the Cloud absence-probe treats as "resolved / out of the working
-# set" (parity with [reconciler].resolved_statuses on DC). Defaults to Cloud/DIG's own
-# names, so a stock tenant needs no config; set it when your workflow names its resolved
-# states differently (e.g. "Closed"/"Complete") so those issues classify PRESENT_RESOLVED
-# rather than PRESENT_FILTERED. An empty list falls back to the default. env (auto-derived)
-# REBAR_JIRA_RESOLVED_STATUSES.
+# INERT — accepted and validated, but nothing reads it today. It configured the inbound
+# absence probe, which had already lost every consumer and was deleted outright (task
+# f020). The key is retained so an existing pyproject.toml keeps loading unchanged;
+# whether to deprecate or remove it is task 549c-032f-6cb0-4258. Setting it has no
+# effect on reconcile behavior. env (auto-derived) REBAR_JIRA_RESOLVED_STATUSES.
 resolved_statuses = ["Resolved", "Done", "Cancelled"]
 ```
 

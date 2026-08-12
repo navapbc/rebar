@@ -126,28 +126,15 @@ def test_resolved_statuses_defaults_to_the_documented_set() -> None:
     assert DEFAULT_RESOLVED_STATUSES == frozenset({"Resolved", "Done", "Cancelled"})
 
 
-def test_a_custom_workflow_status_set_reaches_the_probe_classifier() -> None:
-    """A self-hosted DC workflow can name its resolved states anything.
-
-    Pinning this against the CLASSIFIER rather than the settings tuple is the point: a value
-    that is stored but never consulted would satisfy a weaker assertion while leaving the
-    probe classifying against the wrong vocabulary.
-    """
+def test_a_custom_workflow_status_set_reaches_the_transport() -> None:
+    """A self-hosted DC workflow can name its resolved states anything, and the
+    configured set must reach the transport rather than being dropped in settings."""
     from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
-    from rebar_reconciler.inbound_probe import ProbeBranch
 
     custom = frozenset({"Shipped", "Abandoned"})
     transport = JiraDataCenterTransport(client=object(), project="X", resolved_statuses=custom)
 
-    from rebar_reconciler.adapters.jira_family import classify_probe_response
-
-    shipped = classify_probe_response(
-        "X-1", 200, {"fields": {"status": {"name": "Shipped"}}}, resolved_statuses=custom
-    )
-    assert shipped.branch is not ProbeBranch.UNREACHABLE
-    assert transport._resolved_statuses == custom, (
-        "the configured set must reach the transport that classifies with it"
-    )
+    assert transport._resolved_statuses == custom, "the configured set must reach the transport"
 
 
 # --- AC(13) sub-requirements the earlier tests did NOT cover -------------------------------
