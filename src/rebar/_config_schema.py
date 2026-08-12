@@ -481,13 +481,15 @@ class JiraConfig:
     url: str = ""
     user: str = ""
     project: str = ""
-    # Workflow status names the Cloud absence-probe treats as "resolved / out of the
-    # working set" (story e34a). Mirrors DC's reconciler.resolved_statuses so a Cloud
-    # tenant whose workflow names its resolved states non-standardly (e.g. "Closed",
-    # "Complete") classifies a still-present resolved issue as PRESENT_RESOLVED — not
-    # PRESENT_FILTERED — without a code change. Defaults to Cloud/DIG's own configured
-    # names, so a stock tenant is unaffected. Consumed by adapters/jira/probe.py; env
-    # override REBAR_JIRA_RESOLVED_STATUSES is auto-derived from this field.
+    # Workflow status names the Cloud absence-probe treated as "resolved / out of the
+    # working set" (story e34a). Its ONLY consumer was adapters/jira/probe.py, which task
+    # f020-0960-2c42-4d61 DELETED along with the dormant inbound absence-probe port, so
+    # this field currently has NO reader. It is retained rather than removed because it is
+    # a DOCUMENTED, validated operator-facing key: dropping it is a user-visible surface
+    # change needing its own deprecate-vs-remove decision, tracked on 549c-032f-6cb0-4258.
+    # Env override REBAR_JIRA_RESOLVED_STATUSES is still auto-derived from this field, so
+    # an existing pyproject.toml that sets it keeps validating exactly as before.
+    # read-via: inert pending task 549c-032f-6cb0-4258 (deprecate-vs-remove decision)
     resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
     # Overrides ONLY the url scheme check below (parity with reconciler.allow_insecure);
     # never relaxes certificate verification. Env override auto-derives to

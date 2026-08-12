@@ -3,13 +3,13 @@
 
 These are the leaf helpers that a reconcile pass leans on but which carry no
 back-edge to the ``reconcile_once`` spine: the status-preflight scan and its
-``StatusMappingError`` marker, the binding-store commit-back, the inbound-probe
-router (+ its audit-log helper), the ticket-CLI reader, the filter-scope set
+``StatusMappingError`` marker, the binding-store commit-back, the ticket-CLI
+reader, the filter-scope set
 builders, the no-write plan renderer, and the ``_NoOpSyncLogger`` cap-0 stand-in.
 
 Loader convention: like every sibling in this package (and mirrored by
 reconcile.py / run_differs.py), this module loads its own siblings (``config.py``,
-``alert_store.py``, ``inbound_probe.py``, ``mutation.py``) by file path via the
+``alert_store.py``) by file path via the
 local ``_load`` helper (``importlib.util.spec_from_file_location``), so it resolves
 both under the real package and when a single module is loaded standalone in tests.
 It imports NOTHING from reconcile.py; reconcile.py loads this module once and

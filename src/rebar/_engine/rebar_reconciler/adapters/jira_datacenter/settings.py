@@ -30,10 +30,9 @@ from __future__ import annotations
 import os
 from typing import NamedTuple
 
-#: DC's absence-probe default resolved-status set, identical to Cloud/DIG's
-#: (`adapters/jira/probe.py::RESOLVED_STATUS_NAMES`) — the sensible default for
-#: an unconfigured `[tool.rebar.reconciler].resolved_statuses`, overridable per
-#: self-hosted workflow.
+#: DC's default resolved-status set — the sensible default for an unconfigured
+#: `[tool.rebar.reconciler].resolved_statuses`, overridable per self-hosted
+#: workflow.
 DEFAULT_RESOLVED_STATUSES: frozenset[str] = frozenset({"Resolved", "Done", "Cancelled"})
 
 

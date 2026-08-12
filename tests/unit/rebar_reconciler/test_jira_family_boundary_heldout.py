@@ -218,7 +218,7 @@ def test_checker_flags_a_synthetic_violation() -> None:
     # negative controls — the permitted direction must NOT be flagged
     assert not _violations(f"from {_FAMILY} import sanitize_label", _JIRA)
     assert not _violations(f"from {_FAMILY} import sanitize_label", _DC)
-    assert not _violations("from rebar_reconciler.inbound_probe import ProbeBranch", _FAMILY)
+    assert not _violations("from rebar_reconciler.mutation import Mutation", _FAMILY)
     assert not _violations("from rebar_reconciler.adapters.jira.adf import x", _JIRA)
 
 

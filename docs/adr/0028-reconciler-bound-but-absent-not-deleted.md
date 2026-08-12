@@ -91,6 +91,7 @@ Three lessons encode this:
   GET, 404 → `_DELETED`) and `binding_walk`'s binding-driven loop, which maps the GET onto
   the four-way `ObservedJira` state and advances grace only on `CONFIRMED_404`. The
   inbound absence-probe port (`SupportsAbsenceProbe.probe_remote`, `inbound_probe.py`)
-  survives as a **dormant** capability with no consumer: removing it would drop the DC
-  adapter's only import of the shared `classify_probe_response`, leaving that classifier
-  Cloud-only and weakening epic `e369`'s AC5.
+  was left dormant with no consumer by that removal, and task `f020` subsequently
+  **deleted** it outright — along with the shared `classify_probe_response` classifier
+  its implementations were the only callers of. Absence-vs-deletion discrimination is
+  outbound-owned; there is no inbound probe port.

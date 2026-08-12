@@ -42,7 +42,7 @@ restructuring and are the reason this is design-first + phased:
    `alert_store.py`, `outbound_fields.py`, `differ.py`, `inbound_differ.py`,
    `outbound_differ.py`, `applier.py`, `invariants.py`, `invariant_sink.py`,
    `fetcher.py`, `run_differs.py`, `classify.py`, `binding_store.py`, `binding_walk.py`,
-   `conflict_resolver.py`, `health.py`, `baseline_shadow.py`, `inbound_probe.py`,
+   `conflict_resolver.py`, `health.py`, `baseline_shadow.py`,
    `local_label_intent.py`, `sync_logger.py`. Of these, `adf.py`, `outbound_fields.py`,
    and `comment_limits.py` are **Jira-coupled *and* location-pinned** — they cannot
    move until Phase 2 updates the loader.

@@ -495,7 +495,7 @@ Three further DC-only keys, all under `[tool.rebar.reconciler]`:
 |---|---|
 | `allow_insecure` | **Cleartext only if you must.** `base_url` must be `https`; a non-TLS URL is rejected at config load unless you set `allow_insecure = true`, which logs a warning naming the cleartext risk. It governs the URL **scheme only** — it never relaxes certificate verification. Intended for a loopback test instance, not a production bridge. |
 | `ca_bundle` | Path to a CA bundle for an **internal-CA or self-signed** certificate — the supported answer to a verification failure. Certificate verification is never disabled (the standard `REQUESTS_CA_BUNDLE` env var works too); disabling it would make the `https` requirement theatre. |
-| `resolved_statuses` | The workflow state names that count as resolved, for the absence probe. Defaults to `["Resolved", "Done", "Cancelled"]`. Set it if your self-hosted workflow names its resolved states differently — otherwise a resolved issue is misclassified. |
+| `resolved_statuses` | **Inert — accepted and validated, but nothing reads it today.** It configured the inbound absence probe, which lost every consumer and was then deleted outright (task `f020`). Defaults to `["Resolved", "Done", "Cancelled"]`. The key is retained so existing config keeps loading; setting it currently has no effect. Deprecate-vs-remove is tracked on task `549c-032f-6cb0-4258`. |
 
 Design rationale, the shared Jira-family layer, and the Data Center support horizon (DC goes
 read-only on 28 March 2029, so this adapter is a deliberately time-boxed investment) are in

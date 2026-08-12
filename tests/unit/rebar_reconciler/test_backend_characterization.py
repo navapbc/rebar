@@ -279,53 +279,6 @@ def test_identity_is_identity_label_tracks_parse():
     assert ident.is_identity_label("other") is False
 
 
-# --- probe classifier: every branch it dispatches on ------------------------------
-
-
-def test_classify_probe_response_pins_every_branch():
-    from rebar_reconciler.adapters.jira.probe import classify_probe_response
-    from rebar_reconciler.inbound_probe import ProbeBranch
-
-    def _branch(status_code: int, payload: dict | None = None):
-        return classify_probe_response("REB-1", status_code, payload or {})
-
-    # archived/moved: 404, 410, 403
-    for code in (404, 410, 403):
-        result = _branch(code)
-        assert result.branch is ProbeBranch.ARCHIVED_OR_MOVED
-        assert result.detail == {"status_code": code}
-
-    # unreachable: 401 and any 5xx
-    for code in (401, 500, 503):
-        assert _branch(code).branch is ProbeBranch.UNREACHABLE
-
-    # 200 + a resolved status name
-    for status_name in ("Resolved", "Done", "Cancelled"):
-        result = _branch(200, {"fields": {"status": {"name": status_name}}})
-        assert result.branch is ProbeBranch.PRESENT_RESOLVED
-        assert result.detail == {"status": status_name}
-
-    # 200 + a non-resolved status name == present but filtered out of the query
-    result = _branch(200, {"fields": {"status": {"name": "In Progress"}}})
-    assert result.branch is ProbeBranch.PRESENT_FILTERED
-    assert result.detail == {"status": "In Progress"}
-
-    # 200 with no status at all still classifies (empty name), not raises
-    assert _branch(200, {}).branch is ProbeBranch.PRESENT_FILTERED
-    assert _branch(200, {}).detail == {"status": ""}
-
-    # unknown code falls through to unreachable AND flags itself
-    result = _branch(302)
-    assert result.branch is ProbeBranch.UNREACHABLE
-    assert result.detail == {"status_code": 302, "unknown": True}
-
-
-def test_probe_resolved_status_names_pinned():
-    from rebar_reconciler.adapters.jira.probe import RESOLVED_STATUS_NAMES
-
-    assert RESOLVED_STATUS_NAMES == frozenset({"Resolved", "Done", "Cancelled"})
-
-
 # --- link relation vocabulary + inbound direction, for every relation -------------
 
 
