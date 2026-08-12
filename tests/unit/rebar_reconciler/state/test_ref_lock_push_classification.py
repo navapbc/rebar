@@ -163,3 +163,86 @@ def test_stale_info_still_wins_over_the_new_server_side_markers(
         "remote: fatal error in commit_refs\n! [rejected] refs/reconciler/last-pass (stale info)"
     )
     assert _classify(monkeypatch, combined) == "cas-mismatch"
+
+
+# ---------------------------------------------------------------------------
+# The split of the push/CAS cluster into the `_ref_lock_push` sibling must not move
+# the seams the tests above (and any future caller) bind to: the `_git` patch point,
+# the logger the CAS evidence is emitted on, and the names' original module path.
+# Ticket splurgy-witless-flamingo (6d4f-165e-188c-42a3).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(
+            lambda: _ref_lock._push_lease_cas(None, REF, OLD, "origin", f"x:{REF}"),
+            id="_push_lease_cas",
+        ),
+        pytest.param(
+            lambda: _ref_lock._push_cas(None, REF, "y" * 40, OLD, "origin"), id="_push_cas"
+        ),
+        pytest.param(
+            lambda: _ref_lock._push_delete_cas(None, REF, OLD, "origin"), id="_push_delete_cas"
+        ),
+    ],
+)
+def test_the_git_patch_point_survives_the_module_split(
+    call: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`monkeypatch.setattr(_ref_lock, "_git", ...)` must still intercept every lease push.
+
+    The push functions live in the `_ref_lock_push` sibling, loaded under its own
+    `sys.modules` key, so a module object distinct from `_ref_lock`. If they resolved
+    `_git` at import time — or from their own module — this patch would miss and the call
+    would shell out to real git. Each entry point must resolve `_git` at CALL time from
+    the `_ref_lock` module object, which is the one tests patch.
+    """
+    calls: list[Any] = []
+
+    def _git(*a: Any, **k: Any) -> Any:
+        calls.append((a, k))
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="", args=["git", "push"])
+
+    monkeypatch.setattr(_ref_lock, "_git", _git)
+    call()
+    assert calls, (
+        "the patched _ref_lock._git was never called — the split moved the lease push out "
+        "of reach of the patch point the existing tests rely on"
+    )
+    assert calls[0][0][1][0] == "push", calls
+
+
+def test_the_cas_verdict_still_logs_on_the_ref_lock_logger(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The CAS evidence must stay on `rebar_reconciler._ref_lock`.
+
+    Moving a function moves its module-level `logger = logging.getLogger(__name__)` with
+    it, silently re-homing operator-facing evidence onto a logger nobody filters for. The
+    push module must log through the caller's logger instead.
+    """
+    with caplog.at_level(logging.WARNING):
+        assert _classify(monkeypatch, CAS_MISMATCH) == "cas-mismatch"
+    cas_records = [r for r in caplog.records if "CAS mismatch" in r.getMessage()]
+    assert cas_records, (
+        f"no CAS-mismatch warning logged: {[r.getMessage() for r in caplog.records]}"
+    )
+    assert [r.name for r in cas_records] == ["rebar_reconciler._ref_lock"] * len(cas_records), (
+        "the CAS verdict must be emitted on the rebar_reconciler._ref_lock logger, not on "
+        f"the sibling module's. got: {[r.name for r in cas_records]}"
+    )
+
+
+@pytest.mark.parametrize(
+    "name", ["_push_lease_cas", "_push_cas", "_push_delete_cas", "_is_cas_mismatch_stderr"]
+)
+def test_moved_names_stay_resolvable_at_the_original_module_path(name: str) -> None:
+    """Every moved symbol keeps its `rebar_reconciler._ref_lock` attribute path.
+
+    `_push_cas` and `_push_delete_cas` have in-module production callers (acquire's
+    `_plant`, release's `_delete`, `_cas_advance`'s `_do`); dropping the names would break
+    the remote acquire/release/advance paths with a NameError.
+    """
+    assert callable(getattr(_ref_lock, name)), f"{name} is no longer resolvable on _ref_lock"
