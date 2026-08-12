@@ -1,93 +1,138 @@
 # Mutation testing
 
 Mutation testing checks whether tests constrain behavior rather than merely execute code.
-mutmut makes small source changes; a useful test suite kills those mutants by failing.
+`mutmut` makes small source changes; tests provide useful evidence when they detect those
+changes. The policy is phased so coverage can become blocking without hiding existing debt or
+turning historical measurements into permanent thresholds.
 
-## Source of truth
+## Manifest authority
 
-`.github/mutation-shards.toml` is authoritative for protected source modules, selected tests,
-support inputs, score/count ceilings, and accepted equivalent-mutant fingerprints. Do not copy
-those mappings or numbers into this document or `pyproject.toml`. `scripts/mutation_gate.py`
-generates the effective mutmut configuration for each run.
+`.github/mutation-shards.toml` is authoritative for every shard's source, selected tests,
+support inputs, enforcement mode, reviewed equivalent fingerprints, and timeout policy. The
+driver validates these inputs and generates the effective tool configuration; do not duplicate
+them in `pyproject.toml` or operator documentation. Changes to global support inputs select all
+shards because they can affect every mapping or execution environment.
 
-The runtime contract is Python 3.12 and `mutmut==3.7.0`, locked in `uv.lock`. Mutation runs use
-one child, a 30-minute job limit, and mutmut's `(clean-test duration + 1 second) x 15` per-mutant
-timeout. The selected clean tests must pass before mutation starts.
+## Enforcement modes
 
-## CI cadence
+The manifest assigns one of the following modes to each shard. A configuration failure or
+execution failure fails the job in every mode; modes change the comparison policy, not whether
+the driver itself must complete successfully.
 
-The Gerrit `Verified` workflow compares `HEAD^` with the exact patchset and runs only shards
-selected by changed source, tests, or support inputs. Changes to global mutation infrastructure
-select every shard. Renames inspect both old and new paths. An unresolved ref or diff fails; an
-empty selection is an explicit successful skip. Changed Python tests that map to no protected
-shard produce an advisory so mapping gaps stay visible without making all tests mutation-gated.
+### Advisory
 
-The push/PR mirror invokes the same reusable workflow. Its recurring main-health run skips the
-targeted check because `.github/workflows/mutation.yml` performs the broad all-shard sweep weekly
-and on manual request. Newer runs cancel older runs.
+Advisory is a head-only run. `survived`, `no tests`, and `timeout` results remain visible in
+head counts, raw evidence, and survivor fingerprints, but they are non-blocking and are not
+serialized as comparison findings. In particular, a parsed survivor without a reviewed
+fingerprint remains non-blocking in this mode.
 
-This split keeps the merge gate proportional to the change while the broad sweep detects stale
-mappings, tool drift, and cross-shard assumptions.
+Advisory still blocks on zero mutants, missing evidence, a non-decisive result, an unrecognized
+status, a configuration failure, or an execution failure. These conditions mean the run did not
+produce trustworthy mutation evidence; they are not quality debt that an advisory rollout may
+silently accept.
 
-## Comparison and accepted outcomes
+### Ratchet
 
-Base and head run from separate git archives. Mutation verdict state is never restored; only
-dependency downloads may be cached. This avoids treating a stale mutmut result as evidence.
+Ratchet collects fresh base and head evidence. Only a legacy survivor or legacy `no tests`
+result on an AST-identical mutation unit is grandfathered. A new `no tests` result is advisory,
+and the per-shard summary serializes it in `advisories`. Every head timeout blocks. A new
+survivor, incomplete evidence, a killed regression, or a missing killed mutant blocks.
 
-Comparison is per mutation unit (module plus qualified function):
+The only new-survivor exception is a reviewed equivalent fingerprint. That exception remains
+subject to the killed-regression invariant: on an AST-identical unit, a mutant killed on base
+must still be present and killed on head. A reviewed fingerprint cannot excuse that regression.
 
-- When the unit's AST is identical, every mutant killed on base must still exist and be killed
-  on head. This catches weakened tests even in a mixed source/test patch.
-- Added, removed, renamed, or edited units are reported as source changes. Mutant IDs can move
-  after a legitimate edit, so these units use the head shard budgets instead of an exact-ID
-  comparison.
-- A surviving mutant is accepted only when its normalized `mutmut show` diff matches a
-  checked-in fingerprint and the shard remains within its survivor ceiling.
-- `no tests` has a separate ceiling. Rebar has interface tests that exercise behavior through a
-  subprocess, which mutmut's in-process coverage map cannot attribute. The mapped score is
-  therefore `killed / (killed + survived + timeout)` while unattributed mutants remain visible
-  and bounded.
-- Timeouts have a zero ceiling. Zero parsed mutants, unknown fingerprints, unknown or incomplete
-  statuses, and any exceeded ceiling fail closed.
+### Strict
 
-## Flakiness and false positives
+Strict requires every result to be killed, with only one survivor exception: `survived` is
+accepted only when it has a reviewed equivalent fingerprint. `no tests`, `timeout`, incomplete
+or otherwise non-decisive evidence, and zero mutants all block.
 
-Only an independently identified setup operation may retry. Mutation failures are not retried
-into a pass. When head has a non-killed result, the driver reruns it once for diagnosis; a changed
-outcome is labeled nondeterministic, but the gate remains red. This preserves evidence without
-letting a lucky rerun merge a regression.
+The base/head invariant still applies to AST-identical units. A mutant killed on base must
+remain killed on head even if its head survivor has a reviewed equivalent fingerprint; the
+fingerprint does not override regression evidence.
 
-Equivalent mutants are handled narrowly with normalized diff fingerprints rather than by
-ignoring a file or lowering its whole score. Location headers are excluded so line movement does
-not invalidate the fingerprint; the actual mutation remains part of it.
+## Promotion evidence
 
-Every driver outcome writes `mutation-results/summary.json`. Clean-test logs, raw mutmut output,
-parsed results, and diagnostic output are uploaded when available.
+Promotion is decided per candidate shard. Before moving a shard out of advisory, require three
+retained successful fresh base/head pilots, each with its summary and artifact. For each
+candidate shard, repeatedly run CI against an unmerged patch that temporarily changes its mode
+to ratchet, or otherwise explicitly invokes fresh base/head execution under the candidate
+policy. Ordinary advisory head-only runs do not qualify. The pilots must demonstrate stable
+mapping from the shard's source, tests, and support inputs to its results, with a maximum runtime
+of 24 minutes inside the 30-minute job.
 
-## Updating a shard
+Narrow the candidate shard otherwise, then repeat the pilots. Promote to ratchet only with that
+evidence. Promote to strict after mutation debt is resolved or each remaining equivalent is
+individually reviewed and recorded.
 
-A relaxed budget must accompany the affected source or mapping, measured base/head results, and
-a rationale explaining why the additional outcome is not a behavioral gap. A budget-only
-relaxation is invalid. Add an equivalent fingerprint only after inspecting the exact normalized
-diff and proving that no observable contract can distinguish it. Never lower a threshold merely
-to make CI pass.
+## Selection and CI cadence
 
-When adding a behavioral test for protected code, add it to that shard. A new production core
-needs its own focused shard and measured baseline. Keep source selection narrow enough that the
-blocking run remains bounded.
+`scripts/mutation_gate.py select` emits selector JSON for targeted selection; `--all-shards`
+selects every manifest shard. The diff parser includes both sides of renames and includes
+deletions. An empty selection is an explicit successful skip, while unresolved refs or a failed
+diff fail selection. Unmatched Python tests produce an advisory warning so mapping gaps are
+visible.
+
+The Gerrit lane checks out the exact Gerrit patchset. Push/PR parity comes from the same reusable
+workflow used by the branch and pull-request lane. The independent weekly and manual sweep uses
+`--all-shards`, and its concurrency setting cancels stale all-shard runs.
+
+The matrix creates one 30-minute job per shard. Each job runs with no secrets declared,
+inherited, or forwarded from callers or the repository on a GitHub-hosted `ubuntu-latest`
+runner. GitHub's automatic token exists only as platform-provided read-only checkout context.
+Current mutation evidence is therefore Ubuntu-only; Windows and macOS portability is not
+established.
+
+## Fresh execution and evidence
+
+Advisory extracts and runs head only. Ratchet and strict extract base and head into separate
+fresh archives, and there is no verdict cache. Dependency downloads may be cached, but mutation
+state is not restored. Each executed side must pass its selected clean-test preflight before
+mutation begins. The driver uses manifest-generated configuration, Python 3.12, the locked
+`mutmut==3.7.0`, and the `--max-children 1` concurrency contract. Timeout values remain solely
+in the authoritative manifest.
+
+The driver writes `mutation-results/summary.json` with counts, fingerprints, failures, and
+advisories. Available raw artifacts contain clean-test and `mutmut` raw result output, survivor
+diffs, and diagnostic output. Artifact upload uses `if: always()` and is attempted when a shard
+matrix job runs, even when its driver step fails. This does not guarantee an artifact: evidence
+can be absent after a hard timeout, cancellation, selector failure, empty selection, or any
+termination before matrix creation. Current mutation evidence runs on the GitHub-hosted
+`ubuntu-latest` environment; Windows and macOS support is not established by these artifacts.
+
+## False positives and nondeterminism
+
+A failing comparison can trigger a diagnostic rerun of head's non-killed mutants. The diagnostic
+rerun cannot turn red into green; it only labels changed outcomes as nondeterminism and adds
+evidence for investigation.
+
+Equivalent fingerprints are individually reviewed. Fingerprint normalization is
+location-insensitive so harmless line movement does not invalidate a decision, but it remains
+mutation-sensitive so a different normalized mutation diff produces a different fingerprint.
+Diagnostics and fingerprints narrow investigation; neither may erase a killed regression or
+incomplete run.
 
 ## Local use
 
-From the repository virtualenv:
+Run the same driver from the repository environment:
 
 ```sh
-python scripts/mutation_gate.py run --base HEAD^ --head HEAD
-python scripts/mutation_gate.py run --base HEAD^ --head HEAD --all-shards
-python scripts/mutation_gate.py smoke --shard compact-policy --base HEAD^ --head HEAD
+uv run --locked python scripts/mutation_gate.py select --base HEAD^ --head HEAD
+uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD
+uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD --all-shards
+uv run --locked python scripts/mutation_gate.py smoke --shard compact-policy \
+  --base HEAD^ --head HEAD
 ```
 
-Use the first command to reproduce the merge gate and the second to reproduce the scheduled
-sweep. Inspect `mutation-results/summary.json` before the raw logs.
+The default `run` reproduces targeted selection; the all-shard command reproduces the scheduled
+sweep. Inspect `mutation-results/summary.json` first, then the shard's raw evidence and survivor
+diffs.
 
-If the gate itself blocks all changes, follow `infra/runbooks/two-vote-gate-rollback.md`. The
-rollback is an operator recovery path, not a contributor bypass.
+## Emergency recovery
+
+If mutation infrastructure freezes the submit path, an operator must follow
+`infra/runbooks/two-vote-gate-rollback.md`. The two-vote runbook temporarily backs out the
+`Verified` submit requirement through the reviewed Gerrit configuration path while retaining the
+independent `LLM-Review` vote. It is an operator recovery procedure, not a contributor bypass;
+restore the two-vote gate after the CI path is repaired and proven end to end.

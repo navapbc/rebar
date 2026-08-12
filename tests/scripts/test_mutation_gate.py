@@ -6,8 +6,11 @@ import argparse
 import ast
 import importlib.util
 import json
+import re
 import subprocess
 import sys
+from dataclasses import asdict
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -384,6 +387,67 @@ def test_advisory_mode_runs_only_head_mutation_evidence(
         None,
         [],
         [],
+    )
+
+
+def test_ratchet_serializes_new_no_tests_advisory_without_failing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    gate = _load()
+    shard = _shard(gate, mode=gate.EnforcementMode.RATCHET)
+    manifest = gate.Manifest(shards={shard.name: shard}, global_support=())
+    mutant = "pkg.demo_f__mutmut_1"
+    evidence_requests: list[tuple[str, str]] = []
+    monkeypatch.setattr(gate, "load_manifest", lambda path: manifest)
+    monkeypatch.setattr(gate, "changed_paths", lambda repo, base, head: {shard.source})
+    monkeypatch.setattr(
+        gate,
+        "_extract_ref",
+        lambda repo, ref, destination: evidence_requests.append(("archive", ref)),
+    )
+
+    def execute_shard(root, selected_shard, artifact_dir, label):
+        evidence_requests.append(("execute", label))
+        statuses = {} if label == "base" else {mutant: "no tests"}
+        return _run(gate, statuses, hashes={"pkg.demo_f": label})
+
+    monkeypatch.setattr(gate, "execute_shard", execute_shard)
+    args = argparse.Namespace(
+        repo=tmp_path,
+        output_dir=tmp_path / "artifacts",
+        manifest=tmp_path / "mutation-shards.toml",
+        base="base-ref",
+        head="head-ref",
+        shard=(),
+        all_shards=False,
+    )
+
+    gate.run_gate(args)
+    summary = json.loads((args.output_dir / "summary.json").read_text(encoding="utf-8"))
+    shard_summary = summary["shards"][shard.name]
+
+    assert (
+        evidence_requests,
+        summary["outcome"],
+        shard_summary["failures"],
+        shard_summary["advisories"],
+    ) == (
+        [
+            ("archive", "base-ref"),
+            ("archive", "head-ref"),
+            ("execute", "base"),
+            ("execute", "head"),
+        ],
+        "success",
+        [],
+        [
+            asdict(
+                gate.Failure(
+                    gate.FailureCode.NO_TESTS_BUDGET,
+                    f"{mutant}: no tests",
+                )
+            )
+        ],
     )
 
 
@@ -809,3 +873,411 @@ def test_fingerprint_ignores_diff_locations_but_not_the_mutation() -> None:
 
     assert gate.fingerprint_diff(first) == gate.fingerprint_diff(moved)
     assert gate.fingerprint_diff(first) != gate.fingerprint_diff(different)
+
+
+def test_mutation_testing_docs_define_phased_policy_without_legacy_budgets() -> None:
+    markdown = (ROOT / "docs" / "mutation-testing.md").read_text(encoding="utf-8")
+
+    def normalize(value: str) -> str:
+        return re.sub(
+            r"\s+",
+            " ",
+            value.lower().replace("‑", "-").replace("–", "-").replace("`", ""),
+        ).strip()
+
+    heading_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+    heading_stack: list[tuple[int, str]] = []
+    heading_titles: list[str] = []
+    section_lines: dict[tuple[str, ...], list[str]] = {}
+    current_path: tuple[str, ...] = ()
+    for line in markdown.splitlines():
+        heading = heading_pattern.match(line)
+        if heading:
+            level = len(heading.group(1))
+            title = normalize(heading.group(2).strip("`*_"))
+            heading_titles.append(title)
+            if level == 1:
+                heading_stack = []
+                current_path = ()
+                continue
+            while heading_stack and heading_stack[-1][0] >= level:
+                heading_stack.pop()
+            heading_stack.append((level, title))
+            current_path = tuple(item[1] for item in heading_stack)
+            section_lines.setdefault(current_path, [])
+        elif current_path:
+            section_lines[current_path].append(line)
+
+    def section(*path: str) -> str:
+        return normalize("\n".join(section_lines.get(path, [])))
+
+    def section_tree(*path: str) -> str:
+        prefix = tuple(path)
+        return normalize(
+            "\n".join(
+                "\n".join(lines)
+                for candidate, lines in section_lines.items()
+                if candidate[: len(prefix)] == prefix
+            )
+        )
+
+    def contains_all(text: str, *phrases: str) -> bool:
+        return all(phrase in text for phrase in phrases)
+
+    advisory = section("enforcement modes", "advisory")
+    ratchet = section("enforcement modes", "ratchet")
+    strict = section("enforcement modes", "strict")
+    enforcement = section_tree("enforcement modes")
+    manifest = section("manifest authority")
+    promotion = section("promotion evidence")
+    selection = section("selection and ci cadence")
+    fresh = section("fresh execution and evidence")
+    diagnostics = section("false positives and nondeterminism")
+    local_use = section("local use")
+    recovery = section("emergency recovery")
+    normative_policy = normalize("\n".join((manifest, enforcement, promotion, selection, fresh)))
+    timeout_authority_policy = normalize("\n".join((manifest, fresh)))
+
+    stale_score_budget_heading_patterns = (
+        re.compile(
+            r"^(?:historical\s+)?(?:mapped\s+|mutation\s+)?scores?"
+            r"(?:\s+budgets?)?(?:\s*\([^)]*\))?$"
+        ),
+        re.compile(r"^(?:historical\s+)?(?:score\s+)?budgets?(?:\s*\([^)]*\))?$"),
+        re.compile(r"^(?:score|budget)\s+history(?:\s*\([^)]*\))?$"),
+    )
+    stale_score_budget_headings = {
+        title
+        for title in heading_titles
+        if any(pattern.fullmatch(title) for pattern in stale_score_budget_heading_patterns)
+    }
+
+    def markdown_table_cells(line: str) -> list[str]:
+        return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+    def is_markdown_table_separator(line: str) -> bool:
+        cells = markdown_table_cells(line)
+        return len(cells) >= 2 and all(
+            re.fullmatch(r":?-{3,}:?", cell) is not None for cell in cells
+        )
+
+    policy_measurement_column_patterns = (
+        re.compile(r"\b(?:mapped|mutation)\s+score\b"),
+        re.compile(r"\bsurvivors?\s+(?:ceiling|max(?:imum)?)\b"),
+        re.compile(r"\bno[\s-]*tests?\s+(?:ceiling|max(?:imum)?)\b"),
+        re.compile(r"\btimeouts?\s+(?:ceiling|max(?:imum)?)\b"),
+        re.compile(r"\bbudgets?\b"),
+    )
+    markdown_lines = markdown.splitlines()
+    stale_policy_table_headers: set[str] = set()
+    for header_line, separator_line in pairwise(markdown_lines):
+        header_cells = markdown_table_cells(header_line)
+        separator_cells = markdown_table_cells(separator_line)
+        if (
+            "|" not in header_line
+            or not is_markdown_table_separator(separator_line)
+            or len(header_cells) != len(separator_cells)
+        ):
+            continue
+        normalized_cells = [normalize(cell.strip("`*_")) for cell in header_cells]
+        if any(
+            pattern.search(cell)
+            for cell in normalized_cells
+            for pattern in policy_measurement_column_patterns
+        ):
+            stale_policy_table_headers.add(" | ".join(normalized_cells))
+
+    required_paths = {
+        ("manifest authority",),
+        ("enforcement modes",),
+        ("enforcement modes", "advisory"),
+        ("enforcement modes", "ratchet"),
+        ("enforcement modes", "strict"),
+        ("promotion evidence",),
+        ("selection and ci cadence",),
+        ("fresh execution and evidence",),
+        ("false positives and nondeterminism",),
+        ("local use",),
+        ("emergency recovery",),
+    }
+    legacy_field_identifiers = {
+        "score_floor",
+        "survivors_max",
+        "no_tests_max",
+        "timeouts_max",
+    }
+    legacy_ceiling_phrases = {
+        "score/count ceilings",
+        "head shard budgets",
+        "survivor ceiling",
+        "no tests has a separate ceiling",
+        "timeouts have a zero ceiling",
+    }
+    copied_timeout_patterns = {
+        "copied per-mutant timeout formula": re.compile(
+            r"(?:\+|plus)\s*(?:1|one)\s*seconds?[\s),;:]*"
+            r"(?:times|x|×|\*)\s*(?:15|fifteen)\b"
+        ),
+        "direct numeric timeout field assignment": re.compile(
+            r"\btimeout[_ -]?(?:constant|multiplier)\b\s*(?:=|:|\bis\b)\s*"
+            r"(?:\d+(?:\.\d+)?|zero|one|two|three|four|five|six|seven|eight|nine|"
+            r"ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|"
+            r"eighteen|nineteen|twenty|thirty)\b"
+        ),
+    }
+    requirements = {
+        **{
+            f"heading path {' > '.join(path)!r} exists": path in section_lines
+            for path in required_paths
+        },
+        "manifest names the authoritative shard manifest and its policy inputs": contains_all(
+            manifest,
+            ".github/mutation-shards.toml",
+            "authoritative",
+            "source",
+            "tests",
+            "support",
+            "mode",
+            "equivalent fingerprints",
+            "timeout",
+        ),
+        "advisory is head-only and preserves non-blocking observable quality evidence": (
+            contains_all(
+                advisory,
+                "head-only",
+                "survived",
+                "no tests",
+                "timeout",
+                "non-blocking",
+                "counts",
+                "raw evidence",
+                "survivor fingerprints",
+            )
+            and re.search(r"not serialized (?:(?:as|into) (?:comparison )?)?findings", advisory)
+            is not None
+        ),
+        "advisory keeps an unreviewed parsed survivor non-blocking": (
+            contains_all(advisory, "parsed", "without", "reviewed", "fingerprint", "non-blocking")
+            and ("survived" in advisory or "survivor" in advisory)
+        ),
+        "advisory blocks missing/zero evidence and non-decisive statuses": contains_all(
+            advisory,
+            "zero mutants",
+            "missing evidence",
+            "non-decisive",
+            "unrecognized status",
+            "configuration failure",
+            "execution failure",
+            "block",
+        ),
+        "ratchet collects fresh base/head and only grandfathers AST-identical legacy debt": (
+            contains_all(
+                ratchet,
+                "fresh",
+                "base and head",
+                "ast-identical",
+                "legacy survivor",
+                "legacy no tests",
+                "grandfathered",
+                "only",
+            )
+        ),
+        "ratchet blocks every head timeout": (
+            contains_all(ratchet, "head timeout", "block")
+            and ("every head timeout" in ratchet or "all head timeouts" in ratchet)
+        ),
+        "ratchet blocks new survivors, incomplete evidence, and killed/missing regressions": (
+            contains_all(
+                ratchet,
+                "new survivor",
+                "incomplete",
+                "killed regression",
+                "missing killed",
+                "block",
+            )
+        ),
+        "ratchet keeps new no-tests advisory": contains_all(ratchet, "new no tests", "advisory"),
+        "ratchet permits only the reviewed equivalent-fingerprint exception": contains_all(
+            ratchet, "reviewed equivalent fingerprint", "exception"
+        ),
+        "strict requires every result to be killed or a reviewed survivor": (
+            contains_all(
+                strict,
+                "every result",
+                "killed",
+                "survived",
+                "reviewed equivalent fingerprint",
+                "only",
+                "no tests",
+                "timeout",
+                "incomplete",
+                "zero mutants",
+                "block",
+            )
+        ),
+        "strict preserves AST-identical base-killed mutants despite reviewed fingerprints": (
+            contains_all(
+                strict,
+                "ast-identical",
+                "killed on base",
+                "remain killed",
+                "reviewed equivalent fingerprint",
+            )
+            and (
+                "even if" in strict or "cannot override" in strict or "does not override" in strict
+            )
+        ),
+        "promotion requires three retained fresh base/head pilots with stable shard mappings": (
+            re.search(r"\b(?:three|3)\b", promotion) is not None
+            and "successful" in promotion
+            and contains_all(
+                promotion,
+                "retained",
+                "fresh",
+                "pilot",
+                "summary",
+                "artifact",
+            )
+            and ("per candidate shard" in promotion or "for each candidate shard" in promotion)
+            and ("base/head" in promotion or "base and head" in promotion)
+            and ("stable mapping" in promotion or "mapping stability" in promotion)
+        ),
+        "promotion keeps each candidate at or below 24 minutes inside a 30-minute job": (
+            "30-minute job" in promotion
+            and re.search(
+                r"(?:maximum|max runtime|at most|<=|≤).{0,30}24 minutes|"
+                r"24-minute (?:maximum|max)",
+                promotion,
+            )
+            is not None
+        ),
+        "promotion narrows scope when over budget and delays strict until debt resolution": (
+            contains_all(
+                promotion,
+                "narrow",
+                "otherwise",
+                "strict",
+                "debt",
+                "resolved",
+                "reviewed",
+            )
+        ),
+        "selector JSON covers targeted/all-shard selection, renames, and deletions": (
+            contains_all(selection, "selector json", "targeted", "--all-shards", "renames")
+            and "both sides" in selection
+            and "deletions" in selection
+        ),
+        "selector explicitly skips empty diffs and fails unresolved refs": contains_all(
+            selection, "explicit", "empty", "skip", "unresolved refs", "fail"
+        ),
+        "unmatched Python tests are advisory": contains_all(
+            selection, "unmatched python tests", "advisory"
+        ),
+        "CI uses the exact Gerrit patchset with push/PR parity": (
+            "exact gerrit patchset" in selection
+            and ("push/pr" in selection or "push and pr" in selection)
+            and ("parity" in selection or "same reusable workflow" in selection)
+        ),
+        "CI weekly/manual sweeps cancel stale runs": contains_all(
+            selection, "weekly", "manual", "all-shard", "cancel"
+        ),
+        "CI runs one secretless 30-minute job per shard": contains_all(
+            selection, "one", "30-minute job", "per shard", "no secrets"
+        ),
+        "current mutation evidence is Ubuntu-only and portability is unestablished": (
+            contains_all(
+                normalize("\n".join((selection, fresh))),
+                "current mutation evidence",
+                "github-hosted",
+                "ubuntu-latest",
+                "windows",
+                "macos",
+                "not established",
+            )
+        ),
+        "fresh execution forbids verdict caches and requires clean-test preflight": (
+            contains_all(fresh, "fresh archives", "no verdict cache", "clean-test preflight")
+        ),
+        "fresh execution generates config and pins the runtime/concurrency contract": (
+            contains_all(
+                fresh,
+                "manifest-generated configuration",
+                "python 3.12",
+                "mutmut==3.7.0",
+                "--max-children 1",
+            )
+        ),
+        "timeout values remain solely in the authoritative manifest": contains_all(
+            fresh, "timeout values", "authoritative manifest"
+        ),
+        "artifact upload is attempted with exact always semantics for a running shard job": (
+            contains_all(fresh, "if: always()", "attempt", "artifact")
+            and re.search(
+                r"(?:when|once|for)\s+(?:a|each|every)?\s*shard matrix job"
+                r"(?: that)? runs",
+                fresh,
+            )
+            is not None
+            and "always published" not in fresh
+            and "unconditionally published" not in fresh
+        ),
+        "artifact absence is explained for all pre-upload termination paths": contains_all(
+            fresh,
+            "evidence can be absent",
+            "hard timeout",
+            "cancellation",
+            "selector failure",
+            "empty selection",
+            "before matrix creation",
+        ),
+        "diagnostic reruns cannot turn red into green": contains_all(
+            diagnostics, "diagnostic rerun", "cannot", "red", "green"
+        ),
+        "equivalent fingerprints are individually reviewed and semantically stable": (
+            contains_all(
+                diagnostics,
+                "equivalent fingerprints",
+                "individually reviewed",
+                "location-insensitive",
+                "mutation-sensitive",
+            )
+        ),
+        "local use documents targeted, all-shard, and evidence inspection commands": (
+            contains_all(local_use, "scripts/mutation_gate.py", "--all-shards", "summary.json")
+        ),
+        "emergency recovery retains the two-vote rollback runbook": (
+            contains_all(
+                recovery,
+                "infra/runbooks/two-vote-gate-rollback.md",
+                "two-vote",
+                "operator",
+            )
+        ),
+        "stale score/budget historical-table headings are absent globally": (
+            not stale_score_budget_headings
+        ),
+        "stale policy-measurement Markdown table headers are absent globally": (
+            not stale_policy_table_headers
+        ),
+        **{
+            f"legacy normative field identifier {identifier!r} is absent": (
+                identifier not in normative_policy
+            )
+            for identifier in legacy_field_identifiers
+        },
+        **{
+            f"legacy normative ceiling phrase {phrase!r} is absent": (
+                phrase not in normative_policy
+            )
+            for phrase in legacy_ceiling_phrases
+        },
+        **{
+            f"{description} is absent from manifest/fresh policy sections": (
+                pattern.search(timeout_authority_policy) is None
+            )
+            for description, pattern in copied_timeout_patterns.items()
+        },
+    }
+    failures = [description for description, satisfied in requirements.items() if not satisfied]
+
+    assert failures == [], "documentation contract violations:\n- " + "\n- ".join(failures)

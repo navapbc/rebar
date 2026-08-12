@@ -709,6 +709,7 @@ def run_gate(args: argparse.Namespace) -> int:
                 "removed_units": list(comparison.removed_units),
                 "added_units": list(comparison.added_units),
                 "failures": [asdict(item) for item in comparison.failures],
+                "advisories": [asdict(item) for item in comparison.advisories],
                 "diagnostic": diagnostic,
             }
     summary["outcome"] = "failure" if failed else "success"
