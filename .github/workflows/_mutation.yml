@@ -61,6 +61,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! -f scripts/mutation_gate.py ]]; then
+            echo "scripts/mutation_gate.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            echo 'matrix={"shard":[]}' >> "$GITHUB_OUTPUT"
+            echo "has-shards=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           selector_args=(select --base HEAD^ --head HEAD)
           if [[ "${{ inputs.all-shards }}" == "true" ]]; then
             selector_args+=(--all-shards)
