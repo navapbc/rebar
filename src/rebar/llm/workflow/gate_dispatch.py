@@ -459,6 +459,7 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     from rebar.llm import gate_source, review_kernel
     from rebar.llm.code_review.batch_runner import CodeReviewBatchRunner
     from rebar.llm.runner import get_runner
+    from rebar.llm.step_failures import collect_step_failures
 
     from . import executor as _ex
     from .runs import RunnerAgentStep
@@ -477,7 +478,13 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
     # pre-snapshot cfg; reusing it hits the bare clone (missing .tickets-tracker); injected kept.
     runner_sel = request.runner or get_runner(cfg)
     try:
-        with gate_source.gate_read_root(handle), review_kernel.collect_contract_violations():
+        with (
+            gate_source.gate_read_root(handle),
+            review_kernel.collect_contract_violations(),
+            # Same survived-LLM-step-failure tally the plan-review scope activates above: a
+            # non-fatal sub-call dying is otherwise visible only in the logs.
+            collect_step_failures(),
+        ):
             res = _ex.run_workflow(
                 prep.doc,
                 prep.inputs,
@@ -656,6 +663,7 @@ def produce_completion_verdict(
 
     from rebar.llm.config import gate_config
     from rebar.llm.runner import get_runner
+    from rebar.llm.step_failures import collect_step_failures
 
     from . import executor as _ex
     from .completion_recovery import CompletionAgentStep, raise_completion_workflow_failure
@@ -693,7 +701,9 @@ def produce_completion_verdict(
     )
     recorder = MemoryRecorder()
     _t_total = time.monotonic()
-    with gate_config(cfg):
+    # collect_step_failures wraps the WHOLE run so the reconcile op's drain can see failures
+    # from the verify agent step; see completion_reconcile for where the tally lands.
+    with gate_config(cfg), collect_step_failures():
         res = _ex.run_workflow(
             doc,
             {"ticket_id": ticket_id, "graph": bool(graph)},

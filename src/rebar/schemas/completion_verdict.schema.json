@@ -60,6 +60,27 @@
     "certifiable": { "type": "boolean", "description": "Whether the close may be CERTIFIED (signed). False iff a direct child is closed-but-uncertified (force-closed) — the parent may close but not certify, because certification propagates: an unattested descendant leaves the subtree unattested. Absent/true on the common path. Does not affect the PASS/FAIL verdict (the parent's own criteria stand); the close gate reads it to close without signing." },
     "runner": { "type": "string", "description": "Execution backend: 'pydantic_ai', 'fake'." },
     "model": { "type": ["string", "null"], "description": "Model id used (null for non-LLM/fake runners)." },
-    "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id when tracing is enabled; null otherwise." }
+    "trace_id": { "type": ["string", "null"], "description": "Langfuse trace id when tracing is enabled; null otherwise." },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Additive observability about how this run was produced. Present ONLY when there is something to report, so a clean run omits it entirely and its verdict stays byte-identical - which matters here because this verdict is SIGNED. Never changes the verdict, exit code, signature, or provenance stamp. The key mirrors review-plan and review-code so one JSON path reaches the tally on every gate.",
+      "properties": {
+        "llm_step_failures": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "LLM step calls that FAILED but did not fail this run - the non-fatal degradation that used to be visible only in the logs (e.g. every overlap-judge batch dying, so an empty overlap[] was indistinguishable from 'nothing overlapped'). Present ONLY when at least one call failed, so a clean run's coverage is byte-identical; purely additive - it never changes the verdict, exit code, signature, or provenance stamp. Reaching the verdict at all means the run survived these, which is what makes them non-fatal.",
+          "required": ["total", "by_step"],
+          "properties": {
+            "total": { "type": "integer", "minimum": 1, "description": "Number of failed LLM step calls in this run." },
+            "by_step": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 1 },
+              "description": "Failure count per step, keyed by the runner's call label VERBATIM so a key matches the 'llm call [<label>] ... FAILED' log line. The label is the joined reviewer list when a call has one (e.g. 'overlap-judge') and otherwise falls back to the target ticket id, or the literal '?' when even that is absent - so calls carrying no reviewer list group under that fallback key rather than under a step name."
+            }
+          }
+        }
+      }
+    }
   }
 }

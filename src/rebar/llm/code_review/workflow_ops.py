@@ -499,6 +499,7 @@ def code_review_coach_inputs(ctx: StepContext) -> dict[str, Any]:
 )
 def code_review_coach(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm import review_kernel
+    from rebar.llm import step_failures as step_failure_sink
     from rebar.llm.code_review import moves
 
     blocking = list(ctx.inputs.get("blocking") or [])
@@ -521,6 +522,13 @@ def code_review_coach(ctx: StepContext) -> dict[str, Any]:
     violations = review_kernel.drain_contract_violations()
     if violations:
         coverage["verification_contract_violations"] = violations
+    # Same posture for LLM step calls that FAILED but did not fail this run (a novelty or
+    # overlap sub-call degrading rather than raising): present ONLY when non-empty, so a clean
+    # run's coverage stays byte-identical and the verdict string is untouched. Reaching this
+    # line at all means the run survived them.
+    step_failures = step_failure_sink.drain()
+    if step_failures:
+        coverage["llm_step_failures"] = step_failures
     verdict = {
         "verdict": "BLOCK" if blocking else "PASS",
         "blocking": blocking,

@@ -251,6 +251,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
 def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
     """Reconcile the agent verdict → a validated completion_verdict (parity with completion.py)."""
     from rebar.llm import findings
+    from rebar.llm import step_failures as step_failure_sink
     from rebar.llm.completion import reconcile_verdict
     from rebar.llm.config import resolve_gate_config
 
@@ -316,6 +317,14 @@ def completion_reconcile(ctx: StepContext) -> dict[str, Any]:
             "Closed without certification: a force-closed (uncertified) descendant leaves the "
             "subtree unattested; re-close it through the gate to certify."
         )
+    # LLM step calls that FAILED but did not fail this run (a completion sub-call degrading to
+    # "score nothing", ...). Placement mirrors review-plan and review-code so ONE JSON path,
+    # `coverage.llm_step_failures`, works across all three gates. `coverage` itself is created
+    # ONLY when the tally is non-empty: this verdict is SIGNED, so a clean run must stay
+    # byte-identical rather than gain an empty container. Never changes the verdict string.
+    step_failures = step_failure_sink.drain()
+    if step_failures:
+        result["coverage"] = {"llm_step_failures": step_failures}
     return findings.validate_structured(result, _OUTPUT_SCHEMA)
 
 
