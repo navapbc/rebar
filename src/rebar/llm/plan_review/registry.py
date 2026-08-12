@@ -10,7 +10,7 @@ project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold``
 ``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
 index — the analog of the reviewers' ``index.json``, which likewise separates prompt
 TEXT (library) from selection/routing metadata. :func:`load_criteria` MERGES the two
-into a descriptor (32: the Layer-2 judgment F/E/G/A, the T1–T12 overlays, COH, ISF).
+into a descriptor (44: the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF).
 
 This registry provides the generic routing the orchestrator needs:
 
