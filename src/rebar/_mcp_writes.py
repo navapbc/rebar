@@ -21,6 +21,7 @@ from typing import Any, cast
 
 import rebar
 from rebar._mcp_models import (
+    AttachCommitsResultOut,
     ClaimResultOut,
     CreateResultOut,
     FileImpactItemOut,
@@ -28,6 +29,25 @@ from rebar._mcp_models import (
     VerifyCommandItemOut,
     tool_annotation_presets,
 )
+
+
+def _register_attach_commits(mcp, ann) -> None:
+    """Register the ``attach_commits`` repair tool.
+
+    Its own registrar rather than another nested ``def`` inside ``register_write_tools``:
+    every nested function raises that already-large function's cyclomatic complexity, which
+    the shrink-only complexity baseline gate caps.
+    """
+
+    @mcp.tool(annotations=ann["MUTATE_IDEMPOTENT"])
+    def attach_commits(ticket_id: str, commits: list[str]) -> AttachCommitsResultOut:
+        """Retroactively link commits to a ticket by SHA (union-add, idempotent).
+
+        The repair path when a commit landed without a usable `rebar-ticket:` trailer:
+        attaching the SHAs records a COMMITS event so the close gate can still tie the
+        ticket to its change. Every SHA must resolve to a commit in this repository —
+        validation is ALL-OR-NOTHING, so if any SHA is bad, nothing is recorded."""
+        return AttachCommitsResultOut.model_validate(rebar.attach_commits(ticket_id, commits))
 
 
 def register_write_tools(mcp, ctx) -> None:
@@ -277,6 +297,8 @@ def register_write_tools(mcp, ctx) -> None:
         """Record DD-level verify commands (list of {dd_id, dd_text, command})."""
         rebar.set_verify_commands(ticket_id, [_dump(e) for e in commands])
         return "ok"
+
+    _register_attach_commits(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
