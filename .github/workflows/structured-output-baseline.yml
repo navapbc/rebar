@@ -101,8 +101,20 @@ jobs:
           # The external tier is inert unless this opt-in is set (a guard against accidental
           # billable calls).
           REBAR_RUN_EXTERNAL: "1"
+        # Per-test hang guard (ticket d835-1846-95d1-4d84): this job declares no
+        # timeout-minutes, so without --timeout a deadlocked sweep hides behind the last -q dot
+        # until GitHub's 360-minute default with no traceback. --timeout-method=thread is the
+        # load-bearing half — the default `signal` method cannot fire while blocked in a
+        # C-level socket call, which is every one of this harness's live model calls.
+        # 3600s, the most generous budget of any lane, because this module is a SINGLE test
+        # function that drives the WHOLE sweep: the per-test budget must cover the entire
+        # matrix, not one call. Recent green runs took 65-173s, so 3600s is ~20x the worst
+        # observation — deliberate headroom, because the sweep's size is the workflow_dispatch
+        # input `max_calls` (default 300) and a human may legitimately raise it. Sizing this to
+        # the observation would silently truncate exactly the larger sweep someone paid for.
         run: >-
           pytest tests/external/test_structured_output_matrix.py -q
+          --timeout=3600 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Upload the structured-output artifact bundle

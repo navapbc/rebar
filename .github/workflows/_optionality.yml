@@ -102,13 +102,21 @@ jobs:
       # Story alive-ogre-tiger (epic clumsy-jab-yacht).
       - name: degradation-path tests run with NO agents extra
         run: |
-          /tmp/clean/bin/pip install pytest jsonschema 'mcp>=1.28.1,<2'
+          # pytest-timeout joins the minimal set so the --timeout flags below are HONORED
+          # rather than failing as an unknown option (ticket d835-1846-95d1-4d84). It is a
+          # test-harness tool in the same category as the `pytest` already installed here, and
+          # is NOT part of the agents stack whose ABSENCE this lane exists to prove — the
+          # assertion immediately below still requires agents_extra_installed() to be False.
+          /tmp/clean/bin/pip install pytest pytest-timeout jsonschema 'mcp>=1.28.1,<2'
           /tmp/clean/bin/python -c "from rebar.llm import agents_extra_installed; assert not agents_extra_installed(), 'agents extra must be ABSENT in the clean lane (else the degradation tests skip)'"
           # F2: drive the completion close-gate fail-closed path with the [agents] extra
           # genuinely ABSENT (not just a monkeypatched error) — the lean lane is the one
           # place it runs for real. The test monkeypatches the verifier, so it needs no
           # extra; running it HERE proves the fail-closed close survives a real lean install.
-          /tmp/clean/bin/python -m pytest \
+          # Per-test hang guard (ticket d835-1846-95d1-4d84). 300s: offline unit tests, the
+          # same budget the shared suite uses in _build-and-test.yml. --timeout-method=thread
+          # for the usual reason (the default `signal` method cannot interrupt a C-level call).
+          /tmp/clean/bin/python -m pytest --timeout=300 --timeout-method=thread \
             tests/interfaces/store/test_llm_optionality.py \
             tests/interfaces/lifecycle/test_completion_gate.py::test_gate_missing_llm_fails_closed \
             -m "not external" -rs
