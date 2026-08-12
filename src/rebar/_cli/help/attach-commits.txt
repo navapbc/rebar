@@ -1,0 +1,1 @@
+Usage: rebar attach-commits <ticket_id> <sha> [<sha>...]

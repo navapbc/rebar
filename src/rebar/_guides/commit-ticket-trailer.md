@@ -54,6 +54,32 @@ once its ticket is bound in the reconciler's binding store. The store is located
 config precedence (`REBAR_TRACKER_DIR` / `tracker.dir`), so it works per environment without
 extra flags.
 
+## Repairing a commit that already landed without a trailer
+
+An amend is not always available — the commit may already be pushed, merged, or part of someone
+else's stack. Link it retroactively instead:
+
+```sh
+rebar attach-commits <ticket> <sha> [<sha>...]
+```
+
+This records a `COMMITS` event on the ticket, so the close gate can still tie the ticket to its
+change even though the message carries no usable trailer. Every SHA must resolve to a commit in
+the repository, and validation is **all-or-nothing** — if any SHA is bad, nothing is recorded, so
+a typo can never leave a half-linked ticket behind. Re-attaching a SHA is a no-op (union-add). The
+same operation is available on all three surfaces: this CLI verb, `rebar.attach_commits(...)` in
+the library, and the `attach_commits` MCP tool.
+
+Once commits are linked, the close gate deterministically checks that their changed paths are
+covered by the ticket's recorded `file_impact`. If a close is blocked naming paths you did in fact
+intend to change, the fix is to declare them:
+
+```sh
+rebar set-file-impact <ticket> '[{"path":"src/…","reason":"…"}]'
+```
+
+Paths under `tests/`, `docs/`, any `*.md`, and `CHANGELOG.md` are exempt and never need declaring.
+
 ## See also
 
 - `rebar explain review` — how to pass the code-review gate (the trailer is on its commit

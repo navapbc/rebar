@@ -240,12 +240,15 @@ def applies_to_globs(criterion_id: str) -> list[str]:
 
 
 def _glob_match(path: str, pattern: str) -> bool:
-    """Match a changed-file path against an ``applies_to`` glob — same rule as
-    ``prompts._glob_match``: fnmatch over the full path, plus a ``**/`` prefix that also
-    matches the bare suffix (so ``**/auth*`` matches a top-level ``auth.py``)."""
-    from fnmatch import fnmatch
+    """Match a changed-file path against an ``applies_to`` glob.
 
-    return fnmatch(path, pattern) or (pattern.startswith("**/") and fnmatch(path, pattern[3:]))
+    Same rule as ``prompts._glob_match``: fnmatch over the full path, plus a ``**/`` prefix
+    that also matches the bare suffix (so ``**/auth*`` matches a top-level ``auth.py``).
+    Both delegate to the one implementation in ``_engine_support.commit_impact``.
+    """
+    from rebar._engine_support.commit_impact import glob_match
+
+    return glob_match(path, pattern)
 
 
 def glob_triggered_overlays(changed_files: Sequence[str]) -> list[str]:
