@@ -199,8 +199,18 @@ jobs:
           # provider_provenance, which a bare AWS_* var does not. With neither resolving,
           # provider construction raises a typed LLMConfigError naming the knob — never a
           # silent skip and never green.
-          AWS_DEFAULT_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
-          REBAR_LLM_BEDROCK_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}
+          # Set on EVERY arm, not just the bedrock one (bug 79d6). A region is a repository
+          # VARIABLE, not a credential, so guarding it on `matrix.provider` bought no
+          # credential isolation — while live-LLM modules may pin a `bedrock:` model
+          # irrespective of the arm that runs them (e.g.
+          # tests/external/test_completion_banking_behavior_0707.py pins
+          # `bedrock:us.anthropic.claude-sonnet-4-6`). Guarded, those cells reached
+          # build_bedrock_provider with an empty region on the anthropic and openai arms and
+          # failed identically on region resolution (run 31587452003). us-east-1 is the
+          # fallback only when the repository variable is unset; it is the region rebar
+          # documents for Bedrock (docs/llm-framework.md).
+          AWS_DEFAULT_REGION: ${{ vars.AWS_BEDROCK_CI_REGION || 'us-east-1' }}
+          REBAR_LLM_BEDROCK_REGION: ${{ vars.AWS_BEDROCK_CI_REGION || 'us-east-1' }}
           # The external tier is inert unless this opt-in is set (a safety guard against
           # accidental billable calls); the preflight above already required a credential.
           REBAR_RUN_EXTERNAL: "1"
