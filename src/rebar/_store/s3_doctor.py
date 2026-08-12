@@ -133,6 +133,8 @@ def _heal_locked(base_path: str, ref: str, s3: Any) -> dict:
             "deleted_keys": [],
         }
 
+    _require_tracker_on_ref(base_path, ref)
+
     original_keys = [b["Key"] for b in bundles]
     scratch_refs: list[str] = []
     try:
@@ -160,6 +162,37 @@ def _heal_locked(base_path: str, ref: str, s3: Any) -> dict:
         "merged_sha": merged_sha,
         "deleted_keys": deleted_keys,
     }
+
+
+def _require_tracker_on_ref(base_path: str, ref: str) -> None:
+    """Refuse the heal unless the tracker actually has *ref* checked out.
+
+    The fold merges every fetched head into the WORKTREE's HEAD and then force-moves
+    ``refs/heads/<ref>`` onto the result, so the published tip is a function of whichever
+    branch the tracker happens to be on. When that is not *ref*, the checked-out branch's
+    commits are merged into the ticket history and published under *ref* — proven
+    experimentally on the doctor's own harness (bug gnarled-acardiac-bettong). Nothing
+    downstream can detect that after the fact, so the doctor refuses rather than silently
+    publishing unrelated history; a detached HEAD is refused too, since there is no branch to
+    check. Raised as :class:`S3DoctorConflict` because that is the module's established loud
+    channel: the sole caller already logs it with its hint and escalates under ``strict``.
+
+    This is the SAFE half of the fix. Teaching the fold to target ``refs/heads/<ref>`` — which
+    needs ``merge-tree``/``commit-tree`` or a scratch worktree, since ``git merge`` only merges
+    into the checked-out branch — is ticket envious-metal-budgie; this guard retires with it.
+    Runs AFTER the single-bundle no-op check, so a store with nothing to heal is unaffected.
+    """
+    current_branch = _git(base_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
+    if current_branch == ref:
+        return
+    on = f"branch {current_branch!r}" if current_branch else "a detached HEAD"
+    raise S3DoctorConflict(
+        f"refusing to heal ref {ref}: the tracker at {base_path} has {on} checked out, not {ref}",
+        hint=(
+            f"the heal merges into the checked-out branch, so healing from here would publish "
+            f"unrelated commits into {ref}; check out {ref} in the tracker and retry"
+        ),
+    )
 
 
 def _fetch_heads(
@@ -235,19 +268,16 @@ def _publish_and_prune(
     merged_sha: str,
     original_keys: list[str],
 ) -> list[str]:
-    """Write the merged tip as a NEW bundle FIRST, then delete the original bundles."""
-    merged_key = f"{s3.prefix}/{ref}/{merged_sha}.bundle"
+    """Write the merged tip as a NEW bundle FIRST, then delete the original bundles.
 
-    # Point a local branch <ref> at merged_sha so the bundle carries refs/heads/<ref>. When
-    # <ref> is the checked-out branch it already points at merged_sha (we merged into HEAD),
-    # and git refuses to force-update a checked-out branch — so only update when it differs.
-    current_branch = _git(base_path, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip()
-    if current_branch != ref:
-        update = _git(base_path, "branch", "-f", ref, merged_sha)
-        if update.returncode != 0:
-            raise S3DoctorConflict(
-                f"could not point branch {ref} at merged tip {merged_sha}: {update.stderr}"
-            )
+    :func:`_require_tracker_on_ref` has already established that ``ref`` IS the tracker's
+    checked-out branch, so ``refs/heads/<ref>`` and ``HEAD`` both already point at
+    ``merged_sha`` (the fold merged into HEAD) and the bundle carries the two names for the
+    one commit. The former ``git branch -f`` fallback for a differently-checked-out tracker
+    is gone with that guard: it was what published the wrong history in the first place, by
+    force-moving the ref onto an unrelated branch's merge (bug gnarled-acardiac-bettong).
+    """
+    merged_key = f"{s3.prefix}/{ref}/{merged_sha}.bundle"
 
     with tempfile.NamedTemporaryFile(suffix=".bundle", dir=base_path, delete=False) as tmp:
         bundle_path = tmp.name
