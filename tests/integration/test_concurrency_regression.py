@@ -1677,6 +1677,24 @@ def _merge_tree(tracker_a: Path, tracker_b: Path, label: str) -> subprocess.Comp
     )
 
 
+def _sync_from_origin(tracker: Path) -> None:
+    """Deterministically fast-forward *tracker*'s tickets branch onto ``origin/tickets``.
+
+    Deliberately NOT ``_engine_run(repo, "list")``. Production read-freshness
+    (``rebar._engine_support.reads.ensure_fresh``) is best-effort BY DESIGN: it is
+    throttled by a ``/tmp`` marker, reconverges under a deliberately short lock timeout,
+    and swallows every failure, because "a read must never fail because a fetch could not
+    run". The read therefore succeeds whether or not the pull landed, so driving a clone's
+    sync through it makes the sync an unasserted side effect — and any fixture precondition
+    built on it is flaky under load, not deterministic (bug 1647-19b3-cbec-4a17).
+
+    Both git calls are ``check=True``, so a sync that does not land raises HERE, at the
+    setup step that owns it, instead of surfacing later as a misleading invariant failure.
+    """
+    _git("fetch", "-q", "origin", "tickets", cwd=tracker)
+    _git("merge", "-q", "--ff-only", "FETCH_HEAD", cwd=tracker)
+
+
 def _assert_emit_is_append_only(two_clones, *, emit, event_type: str, retain: int) -> None:
     """Two clones share a sidecar history padded to the retention bound, go offline, and each
     performs ONE automatic emit. Emit must APPEND ONLY: no committed event may disappear, and
@@ -1694,12 +1712,21 @@ def _assert_emit_is_append_only(two_clones, *, emit, event_type: str, retain: in
     for _ in range(retain):
         assert emit(repo_a, ticket_id) is True
     _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
-    _expire_sync_marker(tracker_b)
-    _engine_run(repo_b, "list")
 
+    # Setup preconditions. These are NOT the invariant under test, so they say so: a red
+    # here means the harness failed to build its own shared base, and is not evidence of an
+    # append-only defect. Clone B is synced explicitly (see _sync_from_origin) so the base
+    # is established by an asserted step rather than by a best-effort read's side effect.
     base_a = _sidecar_paths(tracker_a, ticket_id, event_type)
-    assert len(base_a) == retain, f"base padding did not reach the bound: {sorted(base_a)}"
-    assert base_a == _sidecar_paths(tracker_b, ticket_id, event_type), "clones do not share a base"
+    assert len(base_a) == retain, (
+        f"SETUP (not the I1 invariant): base padding did not reach the bound: {sorted(base_a)}"
+    )
+    _sync_from_origin(tracker_b)
+    base_b = _sidecar_paths(tracker_b, ticket_id, event_type)
+    assert base_b == base_a, (
+        "SETUP (not the I1 invariant): clone B did not converge on the base clone A pushed; "
+        f"missing in B: {sorted(base_a - base_b)}; unexpected in B: {sorted(base_b - base_a)}"
+    )
 
     # Both clones go offline, then each emits once against the shared base.
     _remote_remove(tracker_a)
