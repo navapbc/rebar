@@ -337,6 +337,28 @@ def test_the_bedrock_arm_sets_both_region_variables() -> None:
     )
 
 
+def test_every_arm_resolves_a_region_not_only_the_bedrock_arm() -> None:
+    """Bug 79d6. A live-LLM module may pin a `bedrock:` model whichever arm runs it —
+    tests/external/test_completion_banking_behavior_0707.py pins
+    `bedrock:us.anthropic.claude-sonnet-4-6`. While both region vars were guarded on
+    `matrix.provider == 'bedrock'` they evaluated to the empty string on the anthropic and
+    openai arms, and every such cell failed identically on region resolution (run
+    31587452003). A region is a repository VARIABLE, not a credential, so the guard bought
+    no credential isolation — and a fallback keeps the arms working when the variable is
+    unset."""
+    env = _suite_step()["env"]
+    for name in ("AWS_DEFAULT_REGION", "REBAR_LLM_BEDROCK_REGION"):
+        expr = str(env[name])
+        assert "matrix.provider" not in expr, (
+            f"{name} is guarded on the arm ({expr!r}) — bedrock-pinned live-LLM modules then "
+            "reach build_bedrock_provider with no region on every non-bedrock arm"
+        )
+        assert "us-east-1" in expr, (
+            f"{name} has no literal fallback ({expr!r}) — with AWS_BEDROCK_CI_REGION unset the "
+            "arms resolve no region at all"
+        )
+
+
 # ── an absent credential fails LOUDLY; it never skips to green ─────────────────────────
 def test_the_credential_preflight_fails_loudly_for_every_arm() -> None:
     step = _step_named(_LLM_JOB, "Require this arm's credential")

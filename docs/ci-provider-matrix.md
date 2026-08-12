@@ -92,6 +92,14 @@ rebar's own knob **alone was insufficient**, `AWS_DEFAULT_REGION` was required t
 still set because it is what puts the region into the verdict's `provider_provenance`, which a bare
 `AWS_*` var does not.
 
+Both vars are set on **every** arm, not only the Bedrock one. A region is a repository
+*variable*, not a credential, so guarding it on `matrix.provider` isolated nothing — and a
+live-LLM module may pin a `bedrock:` model whichever arm runs it
+(`tests/external/test_completion_banking_behavior_0707.py` pins
+`bedrock:us.anthropic.claude-sonnet-4-6`). Guarded, those cells failed on region resolution on
+the anthropic and openai arms (bug `79d6`). `us-east-1` is the fallback when
+`AWS_BEDROCK_CI_REGION` is unset.
+
 rebar invents no default region: with none resolving, `build_bedrock_provider` raises a typed
 `LLMConfigError` naming `REBAR_LLM_BEDROCK_REGION`
 (`tests/unit/test_bedrock_provider.py::test_missing_region_raises_a_typed_error_naming_the_setting`),
