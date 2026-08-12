@@ -130,7 +130,7 @@ resource "aws_cloudwatch_metric_alarm" "review_interrupts_bound_exceeded" {
   metric_name = "review_interrupts_bound_exceeded"
   statistic   = "Sum"
 
-  # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=1800s): a bound-exceeded
+  # Cadence matches the deferral bound (autodeploy.sh DEPLOY_DEFER_MAX=2400s): a bound-exceeded
   # interrupt cannot recur faster than one per episode, so a single 900s period > 0 latches.
   period              = 900
   evaluation_periods  = 1
