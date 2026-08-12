@@ -220,28 +220,74 @@ def test_a_two_criteria_block_is_REFUSED(tmp_path, accepted_attestation):
 # ── the attestation must actually be acceptable ──────────────────────────────────
 
 
-@pytest.mark.parametrize("verdict", ["unsigned", "stale-material", "mismatch", "invalid"])
-def test_a_flagged_attestation_is_REFUSED(tmp_path, monkeypatch, verdict):
-    """A present-but-not-valid attestation must not unlock.
+@pytest.mark.parametrize(
+    "verdict",
+    ["unsigned", "stale-material", "stale-reopened", "unverifiable-material", "incompatible-phase"],
+)
+def test_a_flagged_attestation_is_REFUSED_and_the_reply_NAMES_the_verdict(
+    tmp_path, monkeypatch, verdict
+):
+    """A present-but-invalid attestation must not unlock, and the reply must say WHICH state did it.
 
     `stale-material` is the important one: attest, then edit the plan, and the attestation no longer
     covers what it claims to. If that unlocked a re-review the gate would be bypassable by editing.
+
+    Naming the observed verdict is the other half of the acceptance criterion and is load-bearing
+    for the contributor: the generic refusal text sends them to `git commit --amend`, which is
+    precisely the wrong instruction here — their remedy is a TICKET action. Asserting only
+    `result is None` would pass against a build that dropped the `detail` plumbing in
+    `_refusal_message`, leaving the contributor with advice that cannot fix their block.
+
+    Every parameter is a REAL member of the gate's `FLAG_VERDICTS`; an invented literal would take
+    the unknown-literal fail-open path into the `infra` bucket and so would not exercise the flagged
+    case it claims to (that path is covered separately below).
     """
     _patch_gate(monkeypatch, verdict=verdict)
     cfg = _cfg(tmp_path)
     gerrit = RetriggerGerrit([_finding_message()])
 
     assert _run(_comment_event(), cfg, gerrit) is None
+    assert gerrit.comments, "a refused attestation re-check must still reply"
+    reply = gerrit.comments[-1][2]
+    assert "attestation re-check:" in reply, (
+        "the refusal must disclose that an attestation re-check ran, else the contributor reads "
+        f"only the generic amend-and-re-push advice; got: {reply!r}"
+    )
+    assert verdict in reply, (
+        f"the OBSERVED verdict {verdict!r} must be named in the refusal reply so the contributor "
+        f"knows their attestation is present-but-rejected rather than missing; got: {reply!r}"
+    )
+    assert "attestation-flag:" in reply, (
+        f"a {verdict!r} attestation must be reported in the `flag` bucket, not `infra` — an infra "
+        f"label would wrongly suggest a transient failure to retry; got: {reply!r}"
+    )
 
 
 @pytest.mark.parametrize("verdict", ["unavailable", "error"])
-def test_an_infra_verdict_does_not_accept_through_this_arm(tmp_path, monkeypatch, verdict):
-    """An infra verdict is not evidence the attestation exists, so it must not unlock here."""
+def test_an_infra_verdict_does_not_accept_and_the_reply_NAMES_the_verdict(
+    tmp_path, monkeypatch, verdict
+):
+    """An infra verdict is not evidence the attestation exists, so it must not unlock here.
+
+    The reply must name it too, and name it as `infra` rather than `flag`: this contributor's
+    attestation may be perfectly good and merely unreadable, so the remedy differs from the flagged
+    case and the message must not conflate them.
+
+    `error` is the declared infra literal; `unavailable` is NOT a known literal at all and so
+    exercises `bucket_for_verdict`'s unknown-future-literal fail-open. Both must refuse here — an
+    unreadable attestation is not an attestation.
+    """
     _patch_gate(monkeypatch, verdict=verdict)
     cfg = _cfg(tmp_path)
     gerrit = RetriggerGerrit([_finding_message()])
 
     assert _run(_comment_event(), cfg, gerrit) is None
+    assert gerrit.comments, "a refused attestation re-check must still reply"
+    reply = gerrit.comments[-1][2]
+    assert f"attestation-infra:{verdict}" in reply, (
+        f"the observed infra verdict {verdict!r} must be named in the refusal reply, bucketed as "
+        f"`infra`; got: {reply!r}"
+    )
 
 
 def test_the_classifier_raising_REFUSES(tmp_path, monkeypatch):
@@ -251,6 +297,97 @@ def test_the_classifier_raising_REFUSES(tmp_path, monkeypatch):
     gerrit = RetriggerGerrit([_finding_message()])
 
     assert _run(_comment_event(), cfg, gerrit) is None
+
+
+# ── every PARSE failure refuses — asserted case by case, not assumed ─────────────
+#
+# `sole_blocking_criterion` is the whole soundness argument of this arm: it is what turns "the bot
+# blocked" into "the bot blocked for exactly one reason, and that reason was the attestation". Each
+# way the parse can fail must be shown to refuse, because a parse that cannot ESTABLISH the
+# precondition is not evidence the precondition holds. The remaining two failure modes have their
+# own tests above: an unresolvable ticket id, and the classifier raising.
+
+
+def _raw_finding_message(body: str) -> dict:
+    """A bot verdict message with a `finding` tag and an ARBITRARY summary body.
+
+    `_finding_message` can only build well-formed summaries; these cases need malformed ones, so the
+    tag line (which is what makes `latest_bot_tag_state` classify this as `finding`) is kept intact
+    and only the summary below it is corrupted.
+    """
+    return {
+        "_revision_number": 2,
+        "tag": "autogenerated:rebar",
+        "message": f"Patch Set 2: LLM-Review-1\n\n[LLM-Review: BLOCK — finding]\n{body}",
+    }
+
+
+_ATTESTATION_LINE = f"- ({_CRIT}) over the 150-line floor and bug {_TICKET} is not attested."
+
+
+def _assert_refused_as_a_plain_finding(gerrit, result) -> None:
+    """Refused, and refused WITHOUT claiming an attestation verdict was observed."""
+    assert result is None
+    assert gerrit.comments, "a refusal must still reply"
+    reply = gerrit.comments[-1][2]
+    assert "REAL FINDING" in reply
+    assert "attestation re-check:" not in reply, (
+        "a PARSE failure never established a verdict, so the reply must not report one — doing so "
+        f"would attribute the refusal to attestation state that was never read; got: {reply!r}"
+    )
+
+
+def test_a_MISSING_HEADER_refuses(tmp_path, accepted_attestation):
+    """No total means soleness is unproven, even though the one rendered line is the criterion.
+
+    The header is the ONLY trustworthy count (`adapter.py` renders at most ten findings), so without
+    it a twelve-finding block and a one-finding block are indistinguishable from the list alone.
+    """
+    assert retrigger.sole_blocking_criterion(_ATTESTATION_LINE) is None
+
+    cfg = _cfg(tmp_path)
+    gerrit = RetriggerGerrit([_raw_finding_message(_ATTESTATION_LINE)])
+
+    _assert_refused_as_a_plain_finding(gerrit, _run(_comment_event(), cfg, gerrit))
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "rebar code review found many blocking issue(s):",
+        "rebar code review found  blocking issue(s):",
+        "rebar code review found 1.0 blocking issue(s):",
+        "rebar code review found one blocking issue(s):",
+    ],
+)
+def test_an_UNPARSEABLE_COUNT_refuses(tmp_path, accepted_attestation, header):
+    """A header whose count is not a plain integer proves nothing, so it must not unlock.
+
+    Parametrised over the shapes a reworded or partially-rendered summary could produce; each must
+    fail closed rather than fall through to "assume 1".
+    """
+    body = f"{header}\n{_ATTESTATION_LINE}"
+    assert retrigger.sole_blocking_criterion(body) is None
+
+    cfg = _cfg(tmp_path)
+    gerrit = RetriggerGerrit([_raw_finding_message(body)])
+
+    _assert_refused_as_a_plain_finding(gerrit, _run(_comment_event(), cfg, gerrit))
+
+
+def test_a_MISSING_CRITERION_LINE_refuses(tmp_path, accepted_attestation):
+    """A credible header with nothing rendered under it names no criterion, so nothing is unlocked.
+
+    Without this the arm could unlock on the header alone — accepting a block whose single finding
+    was some entirely different criterion that simply failed to render.
+    """
+    body = "rebar code review found 1 blocking issue(s):\n(no findings rendered)"
+    assert retrigger.sole_blocking_criterion(body) is None
+
+    cfg = _cfg(tmp_path)
+    gerrit = RetriggerGerrit([_raw_finding_message(body)])
+
+    _assert_refused_as_a_plain_finding(gerrit, _run(_comment_event(), cfg, gerrit))
 
 
 # ── privileged-side only: the requesting comment is never trusted ────────────────
