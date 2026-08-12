@@ -131,11 +131,13 @@ Read the `LLM-Review` tag — it tells you whose problem it is:
   re-push, and mark each inline comment **Done** (submit requires no unresolved comments).
 - **`BLOCK — coverage-gap (…)`** (gate-disabled / llm-unavailable / scanner / review-error /
   indeterminate / merge-review): an **infrastructure veto, not your diff** — once the
-  infrastructure issue clears, comment **`recheck-review`** on the change to re-trigger
+  infrastructure issue clears, comment **`rerun-llm-review`** on the change to re-trigger
   the review yourself (self-service; the bot refuses the trigger only when the standing
-  `-1` is a real finding). No code change and no re-push needed. The two triggers mirror
-  each other: `recheck` re-runs CI (`Verified`), `recheck-review` re-runs the LLM review
-  (`LLM-Review`).
+  `-1` is a real finding). No code change and no re-push needed. The two triggers are
+  parallel but deliberately share **no substring**: `recheck` re-runs CI (`Verified`),
+  `rerun-llm-review` re-runs the LLM review (`LLM-Review`). The older LLM word embedded
+  `recheck`, so CI's substring matcher fired on it too and cancelled in-flight runs; it was
+  retired outright and now draws a refusal reply naming `rerun-llm-review`.
 - **`PASS`**: nothing to do.
 
 The gate is **required-with-human-override**: the lead maintainer owns the rubric and can waive

@@ -1004,7 +1004,7 @@ call to `classify_plan_review_attestation`; the bucket partition and the fail-op
 unchanged, so nothing else would have to move.
 
 Store trouble and any unrecognized future verdict degrade to an **advisory**, never a block. The
-same classifier backs the self-service `recheck-review` trigger, which stays fail-closed: anything
+same classifier backs the self-service `rerun-llm-review` trigger, which stays fail-closed: anything
 other than an accepted attestation refuses the re-review.
 
 ### The epic-close bug screen (three stages, epic closes only)
