@@ -30,7 +30,9 @@ def test_partial_failure_aborts_but_successful_empty_does_not(monkeypatch) -> No
             {"path": "other.py", "reason": "changed"},
         ],
     )
-    monkeypatch.setattr(blame, "resolve_ticket_id", lambda ticket_id, tracker: ticket_id)
+    monkeypatch.setattr(
+        blame, "resolve_ticket_id", lambda ticket_id, tracker, quiet=False: ticket_id
+    )
     monkeypatch.setattr(blame, "_commit_ticket", lambda *args: "culprit-ticket")
 
     results: dict[str, list[str] | None] = {
