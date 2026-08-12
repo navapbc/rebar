@@ -565,3 +565,53 @@ gates: an escape hatch for a human operator's judgment call, not a routine agent
 `fsck` reports the condition independently — a `FOREIGN_STORE_PATH` finding means
 something wrote source paths into the tracker, and is a counted integrity issue rather
 than a warning, because a healthy store never has them.
+
+## Re-cloning the tracker: carry the git-ignored local state over
+
+A fresh clone of the `tickets` branch is **not** a working store. Four files are
+git-ignored, live only on disk, and are never in any clone:
+
+| File | What it is | What breaks without it |
+|---|---|---|
+| `.env-id` | this environment's identity, **stamped into every event** and the `principal` of every op-cert attestation | a new identity is minted; every existing attestation becomes unverifiable here (`foreign_key` at the claim/close gates) and must be re-earned |
+| `.opcert-key` | the op-cert signing key (mode `0600`) | nothing verifies, even with the matching `.env-id` — the signature was made by the missing key |
+| `.opcert-key.pub` | the op-cert public key the verifier reads (or re-derives from the private key) | verification cannot find a key to check against |
+| `.ensure-applied` | the ensure-registry marker | harmless: every unit simply re-runs and re-converges |
+
+Copy all four out of the old tracker **before** you replace it.
+
+The first row is the one that bites, because losing it fails **silently and late**. rebar
+therefore never mints an identity into a populated store *quietly*: when `.env-id` is
+absent and the store already holds events from another environment, the new id is written
+and a warning naming that environment, the attestation consequence, and this carry-over
+list is printed to stderr.
+
+It **warns rather than refuses** because the store cannot tell the two cases apart, and
+only one of them is a fault:
+
+- **A second clone collaborating on a shared tickets branch** legitimately needs its own
+  identity. It simply starts with no attestations of its own. Refusing the mint here would
+  break a first-class workflow.
+- **A re-clone of a tracker you were already working in** has just orphaned that
+  environment's attestations. Recover by copying the four files above out of the old
+  tracker and re-running the command — but only if the old tracker still exists. Restoring
+  `.env-id` alone does **not** help: the signature was made by `.opcert-key`, so without
+  the key nothing it signed can ever be verified again.
+
+Set `REBAR_ALLOW_ENV_REIDENTIFY=1` to acknowledge the situation and quieten the warning.
+
+`fsck` reports the condition independently and store-wide: an `ENV_ID_MISMATCH` finding
+means **this environment's own author(s) have also written events under a different env
+id** — a re-clone, or the same person moving machines. It is deliberately scoped by
+author rather than simply "the store holds more than one env id", because a healthy store
+shared by several clones always holds several; a check that fired there would fire on
+every well-formed team store until nobody read it. It is a counted integrity issue,
+because the alternative is discovering the loss one ticket at a time at a gate, hours
+later. Prior events are **not** rewritten — they are correctly stamped with whichever
+environment actually wrote them.
+
+Making an attestation from a previously-trusted environment survive a re-clone would mean
+publishing each environment's op-cert **public** key into the store, the way author
+identities already are. That is a real trust-model change (local same-environment
+certification becomes a small federated trust root) and needs its own ADR; it is
+deliberately not what the warning above does.

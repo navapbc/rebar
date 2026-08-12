@@ -43,13 +43,14 @@ _UNKNOWN_AUTHORS = frozenset({"", "unknown"})
 class _EnvRow:
     """Mutable per-env accumulator (events, signed, unattributed, latest timestamp)."""
 
-    __slots__ = ("events", "last_ts", "signed", "unattributed")
+    __slots__ = ("authors", "events", "last_ts", "signed", "unattributed")
 
     def __init__(self) -> None:
         self.events = 0
         self.signed = 0
         self.unattributed = 0
         self.last_ts = 0
+        self.authors: set[str] = set()
 
 
 class EnvAuthorshipTally:
@@ -93,6 +94,18 @@ class EnvAuthorshipTally:
         author = payload.get("author")
         if not isinstance(author, str) or author.strip().lower() in _UNKNOWN_AUTHORS:
             row.unattributed += 1
+        elif author.strip():
+            row.authors.add(author.strip())
+
+    def identity_pairs(self) -> set[tuple[str, str]]:
+        """The store's ``(env_id, author)`` pairs, for the environment-identity divergence
+        check (bug gold-distinct-lacewing).
+
+        Served from this tally rather than collected separately in ``fsck._scan`` because
+        this class ALREADY extracts both fields from every event on the way past — a second
+        observer would re-do that work and, more to the point, spend lines in ``fsck.py``,
+        which sits at the module-size cap."""
+        return {(env_id, author) for env_id, row in self._envs.items() for author in row.authors}
 
     def findings(self) -> list[str]:
         """``UNSIGNED_ENV:`` lines for every env that is silently writing unsigned.

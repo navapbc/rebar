@@ -24,6 +24,7 @@ import uuid
 
 from rebar._commands import _init_probe
 from rebar._store.ensures import APPLIED_MARKER, HINTED_MARKER, EnsureOutcome, run_ensures
+from rebar._store.env_identity import mint_env_id_guarded
 from rebar._store.gitutil import run_git, run_git_write
 from rebar._store.lock import MKDIR_LOCK_NAME, WRITE_LOCK_NAME
 from rebar.graph._cache import _GRAPH_CACHE_FILE
@@ -153,21 +154,6 @@ def _gc_config_unit(tracker: str) -> EnsureOutcome:
         "changed" if changed else "ok",
         "gc.auto unset + gc.autoDetach=false + maintenance.autoDetach=false",
     )
-
-
-def _ensure_env_id_unit(tracker: str) -> EnsureOutcome:
-    """Ensure the store carries a stable ``.env-id`` (ensure-registry unit).
-
-    Check-then-act: writes a fresh uuid only when absent, so it no-ops on a store
-    that already has one (e.g. after fresh-init's ``_gen_local_files``)."""
-    real = _realpath(tracker)
-    if not os.path.isdir(real):
-        return EnsureOutcome("env-id", "ok", "tracker dir absent")
-    if os.path.isfile(os.path.join(real, ".env-id")):
-        return EnsureOutcome("env-id", "ok", ".env-id present")
-    with open(os.path.join(real, ".env-id"), "w", encoding="utf-8") as f:
-        f.write(str(uuid.uuid4()) + "\n")
-    return EnsureOutcome("env-id", "changed", "generated .env-id")
 
 
 def _detect_stale(git_dir: str) -> str:
@@ -652,10 +638,9 @@ def _gen_local_files(tracker: str) -> None:
     # key (chmod 600). The legacy .closure-key (verdict-hash gate) is NO LONGER
     # minted — the signature system supersedes it — but stays gitignored for
     # back-compat with stores that still carry one.
-    env_path = os.path.join(tracker, ".env-id")
-    if not os.path.isfile(env_path):
-        with open(env_path, "w", encoding="utf-8") as f:
-            f.write(str(uuid.uuid4()) + "\n")
+    # Guarded: mints only when the store is genuinely new. At genesis it always is;
+    # routed through the shared guard so a mount of an existing store cannot slip past.
+    mint_env_id_guarded(tracker)
     key_path = os.path.join(tracker, ".signing-key")
     if not os.path.isfile(key_path):
         with open(key_path, "w", encoding="utf-8") as f:

@@ -12,6 +12,7 @@ Runs five checks over the tracker:
   4.7 FOREIGN_STORE_PATH: source paths polluting the tracker (bug 2fa6)
   4.8 UNSIGNED_ENV: an ``env_id`` still writing after the store adopted signing yet
       signing nothing (bug ed5c; tallied in the ``fsck_authorship`` leaf module)
+  4.9 ENV_ID_MISMATCH: this environment's author(s) also wrote under another env id
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the
@@ -56,7 +57,7 @@ from rebar._commands.fsck_repair import (
     repair_or_plan as _repair_or_plan,
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
-from rebar._store import compat
+from rebar._store import compat, env_identity
 from rebar._store.gitutil import (
     _reclaim_if_stale_index_lock,
     path_is_foreign_to_branch,
@@ -222,8 +223,8 @@ def _scan(
     # (bug 01e8). _store/sync.py already refuses to absorb such a store and logs a
     # best-effort warning; fsck must surface it as a COUNTED issue so the operator
     # sees it from the dedicated health check.
-    # ── Checks 4.5–4.7 (tracker-level, not per-ticket) ───────────────────────
-    tracker_lines, tracker_issues = _tracker_health(tracker, repo_root)
+    # ── Checks 4.5–4.7 + 4.9 (tracker-level, not per-ticket) ─────────────────
+    tracker_lines, tracker_issues = _tracker_health(tracker, repo_root, env_authorship)
     lines.extend(tracker_lines)
     issue_count += tracker_issues
 
@@ -387,8 +388,8 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
     )
 
 
-def _tracker_health(tracker: str, repo_root=None) -> tuple[list[str], int]:
-    """The three TRACKER-level checks (4.5–4.7), as ``(lines, issue_count)``.
+def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list[str], int]:
+    """The four TRACKER-level checks (4.5–4.7, 4.9), as ``(lines, issue_count)``.
 
     Grouped out of ``_scan`` because they share a shape the per-ticket checks do not:
     each inspects the tracker as a whole, each yields at most one line, and each decides
@@ -400,15 +401,19 @@ def _tracker_health(tracker: str, repo_root=None) -> tuple[list[str], int]:
     * 4.6 configured-vs-mounted ``tracker.branch``: informational;
     * 4.7 source paths polluting the store (bug 2fa6): a counted issue, because
       ``origin/tickets`` holds no source tree, so any such path means something wrote to
-      the store outside the event-append path.
+      the store outside the event-append path;
+    * 4.9 environment-identity divergence (bug gold-distinct-lacewing): a counted issue —
+      a re-clone that dropped ``.env-id`` silently orphaned its own attestations.
     """
     lines: list[str] = []
     issues = 0
+    pairs = authorship.identity_pairs() if authorship is not None else set()
     sync_line, sync_is_issue = _tracker_sync_status(tracker)
     for line, is_issue in (
         (sync_line, sync_is_issue),
         (_branch_mismatch(tracker, repo_root), False),
         (_foreign_store_paths(tracker), True),
+        (env_identity.divergence_report(env_identity.read_env_id(tracker), pairs), True),
     ):
         if not line:
             continue

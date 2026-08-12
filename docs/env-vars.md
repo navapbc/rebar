@@ -32,6 +32,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `OPENAI_API_KEY` | `src/rebar/llm/config.py` |  |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_cli/_llm_eval_commands.py` |  |
 | `REBAR_ACLI_TIMEOUT` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_JIRA_CLI_TIMEOUT` |
+| `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_store/env_identity.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
@@ -170,7 +171,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_160 variables._
+_161 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 
