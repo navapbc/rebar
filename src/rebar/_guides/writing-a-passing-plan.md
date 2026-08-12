@@ -242,6 +242,9 @@ round, then re-review in dependency order.
 - **sample, not the population** — enumerate the whole population the flagged instance samples,
   plus a machine-checkable criterion that fails while any instance remains.
 
+- **out-of-loop proof** — unlike the planning-time spike, add an execution step that proves the
+  implementation against the real target before it enters the slow delivery loop.
+
 ## Citing a prerequisite's symbol (`[rebar:<id>]`)
 
 If your plan relies on a file, module, class, function, or config key that a **prerequisite

@@ -128,6 +128,15 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
         ),
         "applies_when": ["G1G2", "E4", "G6", "A1"],
     },
+    "16": {
+        "name": "out-of-loop proof",
+        "template": (
+            "Build an out-of-loop proof of {subject} into the plan — an execution step that "
+            "confirms the implementation works via the fastest local run or manual probe "
+            "against the real target, before it is committed to the slow delivery loop."
+        ),
+        "applies_when": ["T15"],
+    },
 }
 
 

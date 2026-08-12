@@ -138,6 +138,22 @@ def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
     assert "only the resources it created" in completed.stdout
 
 
+def test_rebar_explain_plan_cli_explains_out_of_loop_proof_move() -> None:
+    completed = subprocess.run(
+        ["rebar", "explain", "plan"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    rendered = re.sub(r"\s+", " ", completed.stdout)
+    assert "out-of-loop proof" in rendered
+    assert "planning-time spike" in rendered
+    assert "execution step" in rendered
+    assert "against the real target" in rendered
+    assert "before it enters the slow delivery loop" in rendered
+
+
 def test_hand_authored_docs_name_current_overlay_range_and_count() -> None:
     repo_root = Path(__file__).parents[2]
     gate_doc = re.sub(
