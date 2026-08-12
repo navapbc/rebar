@@ -723,3 +723,155 @@ def test_make_sources_cover_src_and_tests():
             break
     else:
         raise AssertionError("no `sources` variable found in Makefile")
+
+
+# ── the lock's base of comparison (bug humble-cinnamoned-mussel) ───────────────────────────
+# The lock rejects a ceiling HIGHER on the branch than on its base. Judged against main's TIP,
+# a branch that never touched the baseline is measured against a main that moved on — so the
+# moment any change LOWERS a ceiling on main, every un-rebased branch still carrying the old
+# file reads as RAISING it, and the shrink-only ratchet punishes the shrinking it exists to
+# reward. It is judged against the MERGE BASE, so only entries the branch itself changed count.
+
+_KEY = "src/rebar/_commands/transition_close.py::close_ticket"
+
+
+def _baseline_bytes(ceilings: dict) -> str:
+    return json.dumps({"schema_version": 1, "ceilings": ceilings}, indent=2, sort_keys=True) + "\n"
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+@pytest.fixture
+def forked_repo(tmp_path: Path) -> Path:
+    """A repo where main LOWERED a ceiling after a branch forked from it.
+
+    This is the exact shape of the incident: change 1673 took close_ticket 19 -> 17 on main,
+    and every branch that forked before it still carries 19 in its own tree.
+    """
+    repo = tmp_path / "repo"
+    (repo / ".github").mkdir(parents=True)
+    _git(repo.parent, "init", "-q", str(repo))
+    for k, v in (("user.email", "t@example.com"), ("user.name", "T")):
+        _git(repo, "config", k, v)
+    baseline = repo / ".github" / "complexity-baseline.json"
+
+    baseline.write_text(_baseline_bytes({_KEY: 19}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fork point: ceiling 19")
+    _git(repo, "branch", "-M", "main")
+    fork_point = _git(repo, "rev-parse", "HEAD")
+
+    _git(repo, "checkout", "-qb", "feature")  # branches here, never touches the baseline
+    (repo / "unrelated.txt").write_text("work\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated work")
+
+    _git(repo, "checkout", "-q", "main")
+    baseline.write_text(_baseline_bytes({_KEY: 17}))  # main LOWERS the ceiling
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "lower the ceiling to 17")
+
+    _git(repo, "checkout", "-q", "feature")
+    assert _git(repo, "merge-base", "main", "HEAD") == fork_point
+    return repo
+
+
+def _base_rev(repo: Path, monkeypatch) -> str:
+    monkeypatch.setattr(ccb, "REPO_ROOT", repo)
+    return ccb._base_commit_for_comparison("main")
+
+
+def test_the_base_is_the_merge_base_not_mains_tip(forked_repo: Path, monkeypatch):
+    """The fix itself: an un-rebased branch is judged against where it forked."""
+    rev = _base_rev(forked_repo, monkeypatch)
+
+    assert rev == _git(forked_repo, "merge-base", "main", "HEAD")
+    assert rev != _git(forked_repo, "rev-parse", "main")
+
+
+def test_an_unrebased_branch_passes_after_main_lowers_a_ceiling(forked_repo: Path, monkeypatch):
+    """THE REGRESSION. Before the fix this produced, verbatim:
+
+        ceiling RAISED for '...close_ticket': 17 -> 19 — an administrator must override
+
+    on every open change that had not rebased — while the branch had changed nothing.
+    """
+    rev = _base_rev(forked_repo, monkeypatch)
+    base = ccb.parse_baseline(
+        subprocess.run(
+            ["git", "show", f"{rev}:.github/complexity-baseline.json"],
+            cwd=forked_repo,
+            capture_output=True,
+            check=True,
+        ).stdout
+    )
+    branch = {_KEY: 19}  # what the un-rebased branch still carries
+
+    assert ccb.lock_against_base(base, branch) == []
+
+    tip = ccb.parse_baseline(
+        subprocess.run(
+            ["git", "show", "main:.github/complexity-baseline.json"],
+            cwd=forked_repo,
+            capture_output=True,
+            check=True,
+        ).stdout
+    )
+    assert ccb.lock_against_base(tip, branch), (
+        "sanity: against main's TIP this is exactly the false positive the bug was filed for"
+    )
+
+
+def test_a_genuine_raise_still_fails(forked_repo: Path, monkeypatch):
+    """The gate must not be softened: raising a ceiling relative to the fork point is still
+    an administrator-only change."""
+    rev = _base_rev(forked_repo, monkeypatch)
+    base = {_KEY: 19}
+    assert rev  # the branch is judged against the fork point, where the ceiling was 19
+
+    violations = ccb.lock_against_base(base, {_KEY: 25})
+
+    assert len(violations) == 1
+    assert "RAISED" in violations[0] and _KEY in violations[0]
+
+
+def test_a_new_entry_still_fails():
+    """The other administrator-only change, unaffected by the base being the merge base."""
+    violations = ccb.lock_against_base({_KEY: 19}, {_KEY: 19, "src/rebar/x.py::f": 16})
+
+    assert len(violations) == 1
+    assert "NEW entry" in violations[0]
+
+
+def test_a_branch_that_lowers_or_removes_still_passes():
+    """Reductions are the behaviour the ratchet exists to reward and must never be flagged."""
+    assert ccb.lock_against_base({_KEY: 19}, {_KEY: 16}) == []
+    assert ccb.lock_against_base({_KEY: 19}, {}) == []
+
+
+def test_no_merge_base_falls_back_to_the_tip_and_says_so(tmp_path: Path, monkeypatch, capsys):
+    """Unrelated histories cannot produce a merge base. The fallback is main's tip — the
+    STRICTER comparison — so an unavailable merge base can never let a genuine raise through."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo.parent, "init", "-q", str(repo))
+    for k, v in (("user.email", "t@example.com"), ("user.name", "T")):
+        _git(repo, "config", k, v)
+    (repo / "a.txt").write_text("a\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "main")
+    _git(repo, "branch", "-M", "main")
+    _git(repo, "checkout", "-q", "--orphan", "detached")  # no shared history with main
+    (repo / "b.txt").write_text("b\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "orphan")
+    monkeypatch.setattr(ccb, "REPO_ROOT", repo)
+
+    rev = ccb._base_commit_for_comparison("main")
+
+    assert rev == "main"
+    assert "no merge base" in capsys.readouterr().out

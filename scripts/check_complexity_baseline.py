@@ -491,13 +491,62 @@ class LockFetchError(BaselineError):
     """The base (main) copy of the baseline could not be established (fail closed)."""
 
 
+def _base_commit_for_comparison(main_ref: str) -> str:
+    """The commit whose baseline the branch is judged against: ``merge-base(main, HEAD)``.
+
+    Comparing against main's TIP is what bug humble-cinnamoned-mussel was filed for. The lock
+    rejects a ceiling that is HIGHER on the branch than on the base. Against the tip, a branch
+    that never touched the baseline is judged against a main that has moved on — so the moment
+    any change LOWERS a ceiling on main, every un-rebased branch still carrying the old file
+    reads as RAISING it, and the shrink-only ratchet starts punishing the shrinking it exists
+    to reward. Against the merge base, only entries the BRANCH ITSELF changed can violate.
+
+    Falls back to *main_ref* (the previous behaviour) when no merge base can be computed —
+    a shallow checkout with no shared history, say. That direction is deliberate: the tip
+    comparison is STRICTER, so it can only ever over-report. An unavailable merge base can
+    never let a genuine ceiling raise through, preserving the fail-closed posture.
+    """
+    if (
+        subprocess.run(
+            ["git", "rev-parse", "--is-shallow-repository"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        == "true"
+    ):
+        # A shallow HEAD may not reach the fork point; deepen before giving up. Best-effort:
+        # a failure here just falls through to the merge-base attempt below.
+        subprocess.run(
+            ["git", "fetch", "--unshallow"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+    merge_base = subprocess.run(
+        ["git", "merge-base", main_ref, "HEAD"],
+        cwd=str(REPO_ROOT),
+        capture_output=True,
+        text=True,
+    )
+    rev = merge_base.stdout.strip()
+    if merge_base.returncode != 0 or not rev:
+        print(
+            "complexity-baseline lock: no merge base with main could be computed; "
+            "comparing against main's tip instead (stricter, so a genuine raise still fails)."
+        )
+        return main_ref
+    return rev
+
+
 def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
     """Fetch main's copy of the baseline and return its parsed ceilings.
 
     Used by the CI lock when no explicit ``--base`` path is given. Fetches ``main`` by
     EXPLICIT URL from the canonical GitHub repo (``GITHUB_REPOSITORY``) — the same posture
     the module-size gate uses — so the lock does NOT depend on an ``origin`` remote being
-    configured by the checkout action.
+    configured by the checkout action. The ceilings returned are those at
+    :func:`_base_commit_for_comparison`, i.e. the merge base with main rather than its tip.
 
     Returns ``None`` when main does not yet carry the baseline file (bootstrap: allow).
     Raises :class:`LockFetchError` when the base cannot be established for any other reason
@@ -512,8 +561,11 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
         )
     url = f"https://github.com/{repo}"
     ref = "refs/remotes/gh-main-complexity-lock"
+    # Deep enough to compute a merge base (bug humble-cinnamoned-mussel). A --depth=1 fetch
+    # gives only main's tip, which cannot be used to tell "this branch RAISED a ceiling" from
+    # "main LOWERED it underneath an un-rebased branch" — see _base_commit_for_comparison.
     fetch = subprocess.run(  # fixed, non-shell argv
-        ["git", "fetch", "--depth=1", url, f"+refs/heads/main:{ref}"],
+        ["git", "fetch", url, f"+refs/heads/main:{ref}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -523,8 +575,9 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
             f"could not fetch main from {url} to verify the complexity-baseline lock "
             f"(failing closed): {fetch.stderr.strip()}"
         )
+    rev = _base_commit_for_comparison(ref)
     exists = subprocess.run(
-        ["git", "cat-file", "-e", f"{ref}:{_BASELINE_REPO_RELPATH}"],
+        ["git", "cat-file", "-e", f"{rev}:{_BASELINE_REPO_RELPATH}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
@@ -532,7 +585,7 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
     if exists.returncode != 0:
         return None  # main has no baseline yet — bootstrap, allow
     show = subprocess.run(
-        ["git", "show", f"{ref}:{_BASELINE_REPO_RELPATH}"],
+        ["git", "show", f"{rev}:{_BASELINE_REPO_RELPATH}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
     )
