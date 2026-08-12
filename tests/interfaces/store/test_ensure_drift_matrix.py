@@ -22,7 +22,7 @@ from _git_counts import commit_count
 
 import rebar
 from rebar._commands import fsck as fsck_mod
-from rebar._commands.init import _GITATTRIBUTES, _GITIGNORE, _RETIRED_GITATTRIBUTES_LINES
+from rebar._commands.init import _GITIGNORE
 from rebar._store import ensures
 
 # The units this drift matrix can fabricate legacy drift on (the original five).
@@ -81,13 +81,10 @@ def _make_behind(tracker: Path, units: set[str]) -> None:
     if "merge-ours" in units:
         _git(tracker, "config", "--unset", "merge.ours.driver")
     if "gitattributes" in units:
-        # A committed .gitattributes predating the ref-lock still carries the retired line.
-        _commit_tracker_file(
-            tracker,
-            ".gitattributes",
-            _GITATTRIBUTES + _RETIRED_GITATTRIBUTES_LINES[0] + "\n",
-            "legacy .gitattributes with retired reconciler line",
-        )
+        # A tracker predating the merge=ours carve-out has no committed .gitattributes
+        # at all; the unit's create arm is what reconverges it.
+        _git(tracker, "rm", "-q", ".gitattributes")
+        _git(tracker, "commit", "-q", "--no-verify", "-m", "legacy tracker without .gitattributes")
     if "gitignore" in units:
         # A stale committed .gitignore missing the newer lock/cache/marker entries.
         _commit_tracker_file(tracker, ".gitignore", ".env-id\n", "stale legacy .gitignore")
@@ -103,7 +100,7 @@ def _assert_converged(tracker: Path) -> None:
     assert _git(tracker, "config", "--get", "maintenance.autoDetach").stdout.strip() == "false"
     assert _git(tracker, "config", "--get", "merge.ours.driver").stdout.strip() == "true"
     ga = _git(tracker, "show", "tickets:.gitattributes").stdout
-    assert all(r.strip() not in ga.splitlines() for r in _RETIRED_GITATTRIBUTES_LINES)
+    assert ".bridge_state/* merge=ours" in ga, "gitattributes carve-out missing"
     gi = set(_git(tracker, "show", "tickets:.gitignore").stdout.splitlines())
     assert {ln for ln in _GITIGNORE.splitlines() if ln} <= gi, "gitignore still missing entries"
     assert (tracker / ".env-id").is_file(), ".env-id absent"

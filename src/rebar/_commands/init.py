@@ -62,12 +62,6 @@ _GITATTRIBUTES = """# Shared mutable root files are per-pass derived CACHES the 
 .bridge_state/* merge=ours
 """
 
-# The retired ``.reconciler-*`` merge=ours line (epic dust-troth-naval / C4): the
-# reconciler pass-lock/phase-gate moved off the tickets tree onto refs/reconciler/*,
-# so it no longer needs a union-merge carve-out. Kept as a constant so the
-# already-initialized-tracker migration can strip it from committed .gitattributes.
-_RETIRED_GITATTRIBUTES_LINES = (".reconciler-* merge=ours",)
-
 _PRECOMMIT = """# No-op pre-commit config for the tickets orphan branch.
 # The tickets branch carries event-sourced ticket data only — no source
 # code to lint — so no hooks are needed. This empty config exists solely
@@ -576,10 +570,6 @@ def _gitattributes_unit(tracker: str) -> EnsureOutcome:
     so a union merge keeps OUR copy of the per-pass mutable root files instead of
     wedging. Pairs with :func:`_merge_ours_unit` (the driver it names).
 
-    Also runs a one-time migration (epic dust-troth-naval / C4): an already-committed
-    ``.gitattributes`` predating the ref-lock still carries ``.reconciler-* merge=ours``;
-    strip that retired line (the lock moved off the tickets tree onto refs/reconciler/*).
-
     Tree-checks the committed blob first, so a converged store makes zero commits and
     reports ``ok`` (ensure-registry unit; run_ensures catches any raise → ``failed``)."""
     show = _git(tracker, "show", "tickets:.gitattributes")
@@ -597,24 +587,7 @@ def _gitattributes_unit(tracker: str) -> EnsureOutcome:
         )
         return EnsureOutcome("gitattributes", "changed", "created .gitattributes")
 
-    # Migration arm: strip any retired line from an existing committed .gitattributes.
-    lines = show.stdout.splitlines()
-    kept = [ln for ln in lines if ln.strip() not in _RETIRED_GITATTRIBUTES_LINES]
-    if len(kept) == len(lines):
-        return EnsureOutcome("gitattributes", "ok", ".gitattributes converged")
-    path = os.path.join(tracker, ".gitattributes")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + ("\n" if kept else ""))
-    _git(tracker, "add", ".gitattributes")
-    _git(
-        tracker,
-        "commit",
-        "-q",
-        "--no-verify",
-        "-m",
-        "chore(reconciler): drop retired .reconciler-* merge=ours (moved to refs/reconciler/*)",
-    )
-    return EnsureOutcome("gitattributes", "changed", "stripped retired merge=ours line")
+    return EnsureOutcome("gitattributes", "ok", ".gitattributes converged")
 
 
 # raw-git-ok: store-maintenance command, seam-internal

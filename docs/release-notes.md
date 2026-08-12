@@ -8,6 +8,23 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — dead `.reconciler-*` gitattributes strip arm removed
+
+Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12. `rebar init`'s
+`gitattributes` ensure-unit no longer strips the retired `.reconciler-* merge=ours`
+line from an already-committed `.gitattributes`. That one-time migration arm (epic
+dust-troth-naval / C4) existed because the reconciler pass-lock/phase-gate moved off
+the tickets tree onto `refs/reconciler/*`; this store already swept it (commit
+`826d5ae379`), so the arm was permanently unreachable here.
+
+**Contract impact:** the unit is now create-only — it still writes `.gitattributes`
+(carrying `.bridge_state/* merge=ours`) on a tracker that has none, and reports
+`ok`/".gitattributes converged" for any tracker that has one. A clone last swept
+**before 2026-07-05** that still carries the retired line will no longer be converged
+by `init`; strip the line by hand if you have such a clone. No deprecation-registry
+row and no tombstone are involved — this was internal store convergence, never a
+user-facing input. (ticket `e654-58e2-0d38-48c6`)
+
 ## Scheduled bridge execution is runner-neutral
 
 GitHub Actions, Jenkins, and GitLab now invoke the same
