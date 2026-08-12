@@ -200,58 +200,99 @@ def test_persistent_bad_object_reports_an_object_read_failure_not_a_heads_confli
     assert "object" in hint.lower()
 
 
-# ── the tracker must be ON the published ref (bug gnarled-acardiac-bettong) ──────────────
+# ── the fold targets the PUBLISHED ref, not the worktree HEAD (envious-metal-budgie) ─────
+#
+# Bug gnarled-acardiac-bettong proved the old fold merged into whatever branch the tracker had
+# checked out, so a side branch's commits reached the ticket history; it shipped a blanket
+# refusal for every tracker not sitting on the published ref. The fold now merges into
+# refs/heads/<ref> itself, so those trackers HEAL. These tests replace that refusal, and pin the
+# property the refusal was protecting: nothing from the checked-out branch reaches the ref.
 
 
-def test_heal_refuses_when_the_tracker_is_not_on_the_published_ref(tmp_path: Path) -> None:
-    """A tracker sitting on a different branch is REFUSED, not healed into that branch.
+def _bundle_contains(remote, ref: str, sha: str, scratch: Path) -> bool:
+    """True if *sha* is an object in the ONE published bundle for *ref*."""
+    dest = scratch / f"probe-{sha[:8]}"
+    h.clone_from_single_bundle(remote, ref, dest)
+    return h.git(dest, "cat-file", "-e", f"{sha}^{{commit}}", check=False).returncode == 0
 
-    The heal folds every fetched head into the worktree's HEAD and then force-moves
-    ``refs/heads/<ref>`` onto the result, so when the checked-out branch is not the published
-    ref, that branch's commits are merged into the ticket history and published — a silent
-    data-integrity failure no caller can detect afterwards. Until the fold targets the ref
-    itself (ticket envious-metal-budgie), the doctor refuses loudly instead.
-    """
-    remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+
+def test_heal_folds_into_the_ref_from_a_side_branch_tracker(tmp_path: Path) -> None:
+    """A tracker on a different branch now HEALS — and its side commit stays out of the ref."""
+    remote, base_path, _sha_base, sha_a, sha_b = _seed_two_divergent_bundles(tmp_path)
     h.git(base_path, "checkout", "-q", "-b", "sidebranch")
     side = h.commit_file(base_path, "side.txt", "SIDE", "unrelated side commit")
-    keys_before = sorted(h.bundle_keys(remote, "tickets"))
 
-    from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
+    from rebar._store.s3_doctor import heal_multi_bundle
 
-    with pytest.raises(S3DoctorConflict) as excinfo:
-        heal_multi_bundle(
-            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
-        )
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+    )
 
-    # The remote is untouched: nothing merged, nothing published, nothing pruned.
-    assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
-    # And the side branch's commit never reached the published ref.
+    assert result["healed"] is True
+    assert len(h.bundle_keys(remote, "tickets")) == 1
+    merged = result["merged_sha"]
+    # Both divergent heads folded in; the side branch's commit did NOT.
+    assert h.reachable(base_path, "refs/heads/tickets", sha_a)
+    assert h.reachable(base_path, "refs/heads/tickets", sha_b)
     assert not h.reachable(base_path, "refs/heads/tickets", side)
-    assert "tickets" in str(excinfo.value)
-    assert excinfo.value.hint
+    assert not _bundle_contains(remote, "tickets", side, tmp_path), "side commit was published"
+    # The worktree is left exactly where it was: still on sidebranch, still at its own tip.
+    assert h.git(base_path, "symbolic-ref", "--short", "HEAD").stdout.strip() == "sidebranch"
+    assert h.git(base_path, "rev-parse", "HEAD").stdout.strip() == side
+    assert h.git(base_path, "rev-parse", "refs/heads/tickets").stdout.strip() == merged
 
 
-def test_heal_refuses_on_a_detached_head_tracker(tmp_path: Path) -> None:
-    """Detached HEAD is refused by the same guard — there is no branch to trust."""
-    remote, base_path, sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
+def test_heal_folds_into_the_ref_from_a_detached_head_tracker(tmp_path: Path) -> None:
+    """Detached HEAD heals too: there is no branch to trust, and the fold no longer needs one."""
+    remote, base_path, sha_base, sha_a, sha_b = _seed_two_divergent_bundles(tmp_path)
     h.git(base_path, "checkout", "-q", "--detach", sha_base)
-    keys_before = sorted(h.bundle_keys(remote, "tickets"))
 
-    from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
+    from rebar._store.s3_doctor import heal_multi_bundle
 
-    with pytest.raises(S3DoctorConflict):
-        heal_multi_bundle(
-            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
-        )
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+    )
 
-    assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
+    assert result["healed"] is True
+    assert len(h.bundle_keys(remote, "tickets")) == 1
+    assert h.reachable(base_path, "refs/heads/tickets", sha_a)
+    assert h.reachable(base_path, "refs/heads/tickets", sha_b)
+    # HEAD stays detached at the base commit — the heal never moved the worktree.
+    assert h.git(base_path, "rev-parse", "HEAD").stdout.strip() == sha_base
+    assert h.git(base_path, "symbolic-ref", "--quiet", "HEAD", check=False).returncode != 0
 
 
-def test_heal_refuses_before_downloading_any_bundle(tmp_path: Path) -> None:
-    """The refusal is a precondition check, not a rollback: no bundle is ever fetched."""
+def test_on_ref_heal_advances_the_worktree_and_leaves_it_clean(tmp_path: Path) -> None:
+    """The ordinary tracker still ends with branch, index and worktree in agreement — the old
+    ``git merge`` fold's end state. A ref moved without the worktree would show every merged
+    file as deleted in ``git status``."""
+    remote, base_path, _sha_base, sha_a, sha_b = _seed_two_divergent_bundles(tmp_path)
+    assert h.git(base_path, "symbolic-ref", "--short", "HEAD").stdout.strip() == "tickets"
+
+    from rebar._store.s3_doctor import heal_multi_bundle
+
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+    )
+
+    merged = result["merged_sha"]
+    assert h.git(base_path, "rev-parse", "HEAD").stdout.strip() == merged
+    assert h.git(base_path, "rev-parse", "refs/heads/tickets").stdout.strip() == merged
+    # Tracked state only: the tracker also carries untracked runtime debris (the write lock).
+    assert h.git(base_path, "status", "--porcelain", "-uno").stdout.strip() == ""
+    for sha in (sha_a, sha_b):
+        assert h.reachable(base_path, "HEAD", sha)
+
+
+def test_heal_refuses_a_dirty_worktree_on_the_published_ref(tmp_path: Path) -> None:
+    """The one refusal that survives: uncommitted TRACKED work on the ref's own worktree would
+    be overwritten when the heal advances it, so refuse BEFORE downloading anything. Untracked
+    files (the write lock, and any operator scratch) are not at risk and must not trip it —
+    proven by every other test here, which run with the untracked lock file present."""
     remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
-    h.git(base_path, "checkout", "-q", "-b", "sidebranch")
+    (base_path / "uncommitted.txt").write_text("operator WIP")
+    h.git(base_path, "add", "uncommitted.txt")
+    keys_before = sorted(h.bundle_keys(remote, "tickets"))
 
     downloads: list[str] = []
     real_download = remote.s3.download_file
@@ -264,16 +305,19 @@ def test_heal_refuses_before_downloading_any_bundle(tmp_path: Path) -> None:
 
     from rebar._store.s3_doctor import S3DoctorConflict, heal_multi_bundle
 
-    with pytest.raises(S3DoctorConflict):
+    with pytest.raises(S3DoctorConflict) as excinfo:
         heal_multi_bundle(
             str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
         )
 
     assert downloads == [], "the guard must run before any bundle is fetched"
+    assert sorted(h.bundle_keys(remote, "tickets")) == keys_before
+    assert (base_path / "uncommitted.txt").read_text() == "operator WIP"
+    assert excinfo.value.hint
 
 
 def test_single_bundle_store_still_reports_noop_off_the_published_ref(tmp_path: Path) -> None:
-    """Nothing to heal stays a no-op: the guard must not turn a benign call into an error."""
+    """Nothing to heal stays a no-op: the guards must not turn a benign call into an error."""
     remote, base_path, _sha_base, _sha_a, _sha_b = _seed_two_divergent_bundles(tmp_path)
     for key in h.bundle_keys(remote, "tickets")[1:]:
         remote.s3.delete_object(Bucket=remote.bucket, Key=key)

@@ -342,3 +342,80 @@ def test_git_remote_s3_api_surface_contract() -> None:
     for attr in ("acquire_lock", "release_lock", "get_bundles_for_ref", "init_remote_head"):
         assert hasattr(S3Remote, attr), f"git_remote_s3.S3Remote lost .{attr}"
     assert hasattr(git_remote_s3, "Doctor")
+
+
+# ---------------------------------------------------------------------------------------------
+# The tickets-branch merge policy (.bridge_state/* merge=ours) governs the fold
+# ---------------------------------------------------------------------------------------------
+def _policy_tracker(tmp_path: Path, *, driver: bool):
+    """A tracker carrying the tickets-branch merge policy: the committed ``.gitattributes``
+    ``.bridge_state/* merge=ours`` line (``_commands/init.py``) plus, when *driver*, the
+    ``merge.ours.driver=true`` config that makes it more than decoration. Without the driver
+    git silently ignores the attribute, which is exactly what the negative half asserts."""
+    remote = h.FakeS3Remote(tmp_path / "objstore")
+    content = h.init_repo(tmp_path / "content")
+    (content / ".bridge_state").mkdir()
+    (content / ".bridge_state" / "state.json").write_text("base")
+    (content / ".gitattributes").write_text(".bridge_state/* merge=ours\n")
+    h.git(content, "add", "-A")
+    h.git(content, "commit", "-q", "-m", "base with merge policy")
+    sha_base = h.git(content, "rev-parse", "HEAD").stdout.strip()
+
+    h.git(tmp_path, "clone", "-q", "-b", "tickets", str(content), "tracker")
+    base_path = tmp_path / "tracker"
+    h.git(base_path, "remote", "remove", "origin")
+    h.git(base_path, "remote", "add", "origin", "s3://test-bucket/tickets")
+    if driver:
+        h.git(base_path, "config", "merge.ours.driver", "true")
+
+    # Two heads that write the SAME derived file differently -> collides without the policy.
+    for value in ("LEFT", "RIGHT"):
+        h.git(content, "reset", "-q", "--hard", sha_base)
+        (content / ".bridge_state" / "state.json").write_text(value)
+        h.git(content, "add", "-A")
+        h.git(content, "commit", "-q", "-m", f"derived {value}")
+        h.seed_bundle(remote, content, "tickets", "tickets")
+    assert len(h.bundle_keys(remote, "tickets")) == 2
+    return remote, base_path
+
+
+def test_fold_resolves_a_derived_file_collision_via_merge_ours(tmp_path: Path) -> None:
+    """Two heads rewriting the same ``.bridge_state/*`` file must NOT conflict: the tickets
+    branch maps those paths to ``merge=ours``, so the fold keeps the side it merges into.
+    This pins the policy the fold relies on, independent of the merge mechanism it uses."""
+    remote, base_path = _policy_tracker(tmp_path, driver=True)
+
+    from rebar._store.s3_doctor import heal_multi_bundle
+
+    result = heal_multi_bundle(
+        str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+    )
+
+    assert result["healed"] is True
+    assert len(h.bundle_keys(remote, "tickets")) == 1
+    merged = result["merged_sha"]
+    blob = h.git(base_path, "show", f"{merged}:.bridge_state/state.json").stdout
+    assert "<<<<<<<" not in blob, "conflict markers were committed"
+    assert blob.strip() in {"LEFT", "RIGHT"}, blob
+    # Nothing is discarded: both heads stay reachable from the published tip.
+    for value in ("LEFT", "RIGHT"):
+        sha = h.git(
+            base_path, "rev-list", "--all", "--grep", f"derived {value}", "-1"
+        ).stdout.strip()
+        assert sha, f"no commit for {value}"
+        assert h.reachable(base_path, merged, sha), f"{value} head discarded by the fold"
+
+
+def test_derived_file_collision_conflicts_without_the_ours_driver(tmp_path: Path) -> None:
+    """The negative half: strip the ``ours`` driver and the very same fold raises. Proves the
+    positive test above is exercising the merge policy, not an accident of the inputs."""
+    remote, base_path = _policy_tracker(tmp_path, driver=False)
+    before = set(h.bundle_keys(remote, "tickets"))
+
+    from rebar._store import s3_doctor
+
+    with pytest.raises(s3_doctor.S3DoctorConflict):
+        s3_doctor.heal_multi_bundle(
+            str(base_path), "origin", "tickets", s3remote_factory=h.make_factory(remote)
+        )
+    assert set(h.bundle_keys(remote, "tickets")) == before
