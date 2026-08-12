@@ -174,3 +174,24 @@ def test_network_git_is_bounded_and_timeout_is_best_effort(monkeypatch, mod, arg
     assert isinstance(seen["timeout"], (int, float)) and seen["timeout"] > 0, (
         "the git wrapper must pass a bounded timeout to subprocess.run"
     )
+
+
+def test_event_filename_timestamp_prefix_equals_body_timestamp(tracker: str):
+    """The on-disk name's leading timestamp IS the event body's ``timestamp`` field.
+
+    Readers that walk a ticket dir newest-first (``llm/overlap/queue``,
+    ``llm/overlap/digest_sidecar``) rely on this coupling: it is what makes lexicographic
+    filename order equal event-timestamp order, so a bounded suffix scan can stop early
+    instead of opening every file. A future writer that names files differently would make
+    those reducers silently mis-order, so pin it here at the writer.
+    """
+    ev = _event(timestamp=1786312582640037001, uuid="u-ts", event_type="COMMENT")
+    event_append.stage_and_commit(tracker, "tk", dict(ev))
+    names = [f for f in os.listdir(os.path.join(tracker, "tk")) if f.endswith(".json")]
+    assert len(names) == 1, names
+    fname = names[0]
+    on_disk = json.loads(Path(tracker, "tk", fname).read_text(encoding="utf-8"))
+    assert fname.split("-", 1)[0] == str(on_disk["timestamp"])
+    assert on_disk["timestamp"] == ev["timestamp"]
+    # And the name is still the full {timestamp}-{uuid}-{TYPE}.json shape.
+    assert fname == f"{on_disk['timestamp']}-{on_disk['uuid']}-{on_disk['event_type']}.json"
