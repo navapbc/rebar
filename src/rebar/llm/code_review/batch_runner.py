@@ -59,6 +59,8 @@ class CodeReviewBatchRunner(BatchRunner):
         self._project_criteria_root = project_criteria_root
 
     def run(self, req: BatchRunRequest, agent_runner: Any = None) -> BatchRunResult:
+        from rebar.llm.plan_review import sizing
+        from rebar.llm.plan_review.pass1 import aggregate_usage
         from rebar.llm.workflow.executor import StepContext
 
         # The entry rung is a MODEL CLASS name (`trivial`/`standard`/`frontier`) resolved at run
@@ -74,6 +76,10 @@ class CodeReviewBatchRunner(BatchRunner):
             "criteria_count": 0,
         }
         findings: list[Any] = []
+        # One per-CALL usage record per overlay dispatch (task 514d). Each dispatch is a single
+        # AGENT call covering exactly one criterion, so attribution is whole — no equal-split
+        # approximation applies here, unlike plan-review's multi-criterion chunks.
+        call_records: list[dict[str, Any]] = []
         active_criteria: list[Mapping[str, Any]] = list(req.criteria)
         # Project criteria run in the stable, deterministic Round-A fan-in only. They must not
         # enter Round B, whose membership is intentionally controlled solely by escalation.
@@ -109,13 +115,21 @@ class CodeReviewBatchRunner(BatchRunner):
                 repo_root=req.repo_root,
             )
             out = agent_runner.run(ctx).outputs or {}
+            logical_id = crit.get("criterion_id")
+            # The runner attaches this call's token usage as `_usage` (runner._extract_usage); a
+            # runner that attaches none degrades to an all-zero record, never an error.
+            call_records.append(
+                sizing.usage_record(
+                    [str(logical_id or prompt_id)],
+                    out.get("_usage") if isinstance(out.get("_usage"), dict) else None,
+                )
+            )
             emitted = out.get("findings", []) or []
             # Provenance: tag each finding with the overlay that emitted it (so Pass-2 can
             # re-ground it and merge_findings can record agreement across reviewers).
             for f in emitted:
                 if isinstance(f, dict):
                     f.setdefault("reviewer_id", prompt_id)
-                    logical_id = crit.get("criterion_id")
                     if isinstance(logical_id, str) and logical_id:
                         tags = f.get("criteria")
                         if isinstance(tags, list):
@@ -126,8 +140,27 @@ class CodeReviewBatchRunner(BatchRunner):
             findings.extend(emitted)
             plan["ran"].append(prompt_id)
         plan["criteria_count"] = len(plan["ran"])
+        # Pass-1 finder token usage (task 514d). The full aggregate — raw per-call records, the
+        # derived per-criterion map, and the totals — rides on `batch_plan`, the same place
+        # plan-review keeps it (`coverage["usage"]`, story d52a), so the two paths share one
+        # helper and one payload shape.
+        usage = aggregate_usage(call_records)
+        plan["usage"] = usage
         return BatchRunResult(
-            outputs={"findings": findings, "criteria_count": len(plan["ran"]), "batch_plan": plan}
+            outputs={
+                "findings": findings,
+                "criteria_count": len(plan["ran"]),
+                "batch_plan": plan,
+                # The step-output `_usage` is the FLAT totals, not the nested aggregate:
+                # `finalize._attach_code_review_metrics` folds `_usage` by reading the token
+                # fields at the TOP level (the shape `runner._extract_usage` attaches to an
+                # agent step), so handing it the nested aggregate would contribute zero and
+                # leave the CloudWatch totals under-reporting exactly as before. Plan-review's
+                # consumer (`_attach_plan_review_metrics`) folds the nested form instead — the
+                # divergence is in the two CONSUMERS, so each producer emits what its own
+                # consumer reads while both derive it from `aggregate_usage`.
+                "_usage": dict(usage["totals"]),
+            }
         )
 
     def _validated_project_criteria(self, repo_root: str | None) -> tuple[Mapping[str, str], ...]:
