@@ -35333,7 +35333,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\nGitHub code scanning (CodeQL) reports 5 open findings, all rule `py/clear-text-logging-sensitive-data`, operator-directed into the bug bash 2026-08-12. Locations re-confirmed on CURRENT `origin/main` (line numbers below are exact as of the tip; they match the scan's most recent instance):\n\n- alert 83 \u2014 `src/rebar/_commands/__init__.py:199` \u2014 `print(f\"Error: unknown leaf-write command '{command}'\", ...)`\n- alert 84 \u2014 `src/rebar/_commands/__init__.py:204` \u2014 `print(_usage_error(command, entry, \"...unrecognised option '{offending}'...\"))`\n- alert 85 \u2014 `src/rebar/_commands/__init__.py:221` \u2014 `print(_usage_error(command, entry, \"...refusing to drop {positionals[limit:]}...\"))`\n- alert 86 \u2014 `src/rebar/_commands/_seam.py:452` \u2014 `\", \".join(data[\"secret_override\"][\"families\"])` in `screen_event`\n- alert 87 \u2014 `src/rebar/_commands/_seam.py:512` \u2014 same expression in `append_event`\n\n## Analysis (pre-claim, evidence-backed)\n\nAll five are CodeQL taint over-approximations. No credential material reaches any log or stdout at these sites.\n\n**86/87 \u2014 the forced-write audit log.** The logged expression reads the `families` key of `data[\"secret_override\"]`, which is assigned two/three lines above from `secret_screen.override_record(findings, reason)`. That helper returns `{\"reason\", \"families\": sorted({f.family for f in findings}), \"locations\"}`. `f.family` is a literal drawn from the module-level `SECRET_PATTERNS` table in `src/rebar/secret_screen.py` \u2014 a fixed set of detector category names (e.g. \"Anthropic API key\", \"GitHub token\"). The `SecretFinding` dataclass carries only `family`/`field`/`line` and **structurally has no value field** \u2014 a documented, deliberate design property of that module (\"Report the family and the location, never the value\"). CodeQL taints the whole `data` payload \u2014 correctly, it may contain a credential shape, that is what the screen just detected \u2014 and cannot see that this one key holds constant category names.\n\n**83/84/85 \u2014 CLI usage errors.** CodeQL's sensitive-data heuristic flags `_extract_allow_secret` on its NAME and taints its entire return tuple `(rest, reason)`, so plain argv (`rest`) inherits the \"secret\" label. Two independent reasons this is false: (1) the flag's value is the operator's free-text JUSTIFICATION for `--allow-secret-pattern=<reason>`, not credential material; (2) the flag token is *stripped* from `rest` before it is returned, so the flagged variable's value provably cannot reach any of the three prints. What is actually printed is `argv[0]` (an unknown command name), an unrecognised option token, and surplus positional arguments \u2014 the caller's own command line echoed back on their own stderr in a usage error.\n\n## Plan\n\n1. Dismiss all 5 alerts via the code-scanning API with `dismissed_reason=\"false positive\"`\n   and a per-alert evidence comment, and record the same justification on this ticket.\n2. Make no log-content change: redacting these would remove the diagnostic value\n   (which detector was bypassed / which argument was rejected) for zero security gain.\n3. Add regression tests that PIN the invariant so a future edit cannot start logging the\n   value. Existing `tests/unit/test_secret_screen_e7a9.py::test_force_override_lands_the_write_and_records_it_as_forced`\n   already pins the library forced-write route (asserts the value and its 12-char tail are\n   absent from caplog). Extend coverage to the CLI route through\n   `_commands.__init__.main` + `forced_secret_write` (`_seam.screen_event`, line 452), and\n   assert the usage-error prints at 199/204/221 never carry the `--allow-secret-pattern`\n   reason.\n\n## Acceptance Criteria\n\n- [ ] AC1 \u2014 Each of the 5 alerts is dismissed via the code-scanning API with an\n      evidence-backed false-positive justification, and the same per-alert justification is\n      recorded as a comment on this ticket. No alert is dismissed without recorded evidence.\n- [ ] AC2 \u2014 Regression tests pin the invariant at both flagged routes: (a) driving the CLI\n      forced-write path with a synthetic secret asserts the value and its 12-char head/tail\n      fragments are absent from captured log records; (b) a test asserts the\n      `--allow-secret-pattern` reason never appears in the usage-error output of\n      `_commands.__init__.main`. Both are deterministic and use synthetic fixtures only.\n- [ ] AC3 \u2014 After the change lands, `gh api repos/navapbc/rebar/code-scanning/alerts` shows\n      0 OPEN alerts for rule `py/clear-text-logging-sensitive-data` (all 5 dismissed).\n- [ ] AC4 \u2014 `make lint`, `make typecheck`, and the touched test module pass; no production\n      source behavior changes (tests-only change to `src/`-adjacent behavior: none).\n\n## Testing\n\nRun from inside the worktree with its venv first on `PATH` (`env PATH=\"$PWD/.venv/bin:$PATH\"`):\n\n- `python -m pytest tests/unit/test_secret_screen_e7a9.py -q` \u2014 the new and existing\n  regression tests pinning the no-secret-in-logs invariant at both flagged routes.\n- `make lint` and `make typecheck` \u2014 the commit gate.\n- `gh api repos/navapbc/rebar/code-scanning/alerts --jq '[.[] | select(.rule.id==\"py/clear-text-logging-sensitive-data\" and .state==\"open\")] | length'`\n  \u2014 must print `0` after the dismissals, proving AC3.\n\nThis change is tests-only; there is no production behavior to roll back, and the alert dismissals are reversible through the same code-scanning API (`-f state=open`).",
+        "description": "## Context\n\nGitHub code scanning (CodeQL) reports 5 open findings, all rule `py/clear-text-logging-sensitive-data`, operator-directed into the bug bash 2026-08-12. Locations re-confirmed on CURRENT `origin/main` (line numbers below are exact as of the tip; they match the scan's most recent instance):\n\n- alert 83 \u2014 `src/rebar/_commands/__init__.py:199` \u2014 `print(f\"Error: unknown leaf-write command '{command}'\", ...)`\n- alert 84 \u2014 `src/rebar/_commands/__init__.py:204` \u2014 `print(_usage_error(command, entry, \"...unrecognised option '{offending}'...\"))`\n- alert 85 \u2014 `src/rebar/_commands/__init__.py:221` \u2014 `print(_usage_error(command, entry, \"...refusing to drop {positionals[limit:]}...\"))`\n- alert 86 \u2014 `src/rebar/_commands/_seam.py:452` \u2014 `\", \".join(data[\"secret_override\"][\"families\"])` in `screen_event`\n- alert 87 \u2014 `src/rebar/_commands/_seam.py:512` \u2014 same expression in `append_event`\n\n## Analysis (pre-claim, evidence-backed)\n\nAll five are CodeQL taint over-approximations. No credential material reaches any log or stdout at these sites.\n\n**86/87 \u2014 the forced-write audit log.** The logged expression reads the `families` key of `data[\"secret_override\"]`, which is assigned two/three lines above from `secret_screen.override_record(findings, reason)`. That helper returns `{\"reason\", \"families\": sorted({f.family for f in findings}), \"locations\"}`. `f.family` is a literal drawn from the module-level `SECRET_PATTERNS` table in `src/rebar/secret_screen.py` \u2014 a fixed set of detector category names (e.g. \"Anthropic API key\", \"GitHub token\"). The `SecretFinding` dataclass carries only `family`/`field`/`line` and **structurally has no value field** \u2014 a documented, deliberate design property of that module (\"Report the family and the location, never the value\"). CodeQL taints the whole `data` payload \u2014 correctly, it may contain a credential shape, that is what the screen just detected \u2014 and cannot see that this one key holds constant category names.\n\n**83/84/85 \u2014 CLI usage errors.** CodeQL's sensitive-data heuristic flags `_extract_allow_secret` on its NAME and taints its entire return tuple `(rest, reason)`, so plain argv (`rest`) inherits the \"secret\" label. Two independent reasons this is false: (1) the flag's value is the operator's free-text JUSTIFICATION for `--allow-secret-pattern=<reason>`, not credential material; (2) the flag token is *stripped* from `rest` before it is returned, so the flagged variable's value provably cannot reach any of the three prints. What is actually printed is `argv[0]` (an unknown command name), an unrecognised option token, and surplus positional arguments \u2014 the caller's own command line echoed back on their own stderr in a usage error.\n\n## Plan\n\n1. Dismiss all 5 alerts via the code-scanning API with `dismissed_reason=\"false positive\"`\n   and a per-alert evidence comment, and record the same justification on this ticket.\n2. Make no log-content change: redacting these would remove the diagnostic value\n   (which detector was bypassed / which argument was rejected) for zero security gain.\n3. Add regression tests that PIN the invariant so a future edit cannot start logging the\n   value. Existing `tests/unit/test_secret_screen_e7a9.py::test_force_override_lands_the_write_and_records_it_as_forced`\n   already pins the library forced-write route (asserts the value and its 12-char tail are\n   absent from caplog). Extend coverage to the CLI route through\n   `_commands.__init__.main` + `forced_secret_write` (`_seam.screen_event`, line 452), and\n   assert the usage-error prints at 199/204/221 never carry the `--allow-secret-pattern`\n   reason.\n\n## Acceptance Criteria\n\n- [x] AC1 \u2014 Each of the 5 alerts is dismissed via the code-scanning API with an\n      evidence-backed false-positive justification, and the same per-alert justification is\n      recorded as a comment on this ticket. No alert is dismissed without recorded evidence.\n- [x] AC2 \u2014 Regression tests pin the invariant at both flagged routes: (a) driving the CLI\n      forced-write path with a synthetic secret asserts the value and its 12-char head/tail\n      fragments are absent from captured log records; (b) a test asserts the\n      `--allow-secret-pattern` reason never appears in the usage-error output of\n      `_commands.__init__.main`. Both are deterministic and use synthetic fixtures only.\n- [x] AC3 \u2014 After the change lands, `gh api repos/navapbc/rebar/code-scanning/alerts` shows\n      0 OPEN alerts for rule `py/clear-text-logging-sensitive-data` (all 5 dismissed).\n- [x] AC4 \u2014 `make lint`, `make typecheck`, and the touched test module pass; no production\n      source behavior changes (tests-only change to `src/`-adjacent behavior: none).\n\n## Testing\n\nRun from inside the worktree with its venv first on `PATH` (`env PATH=\"$PWD/.venv/bin:$PATH\"`):\n\n- `python -m pytest tests/unit/test_secret_screen_e7a9.py -q` \u2014 the new and existing\n  regression tests pinning the no-secret-in-logs invariant at both flagged routes.\n- `make lint` and `make typecheck` \u2014 the commit gate.\n- `gh api repos/navapbc/rebar/code-scanning/alerts --jq '[.[] | select(.rule.id==\"py/clear-text-logging-sensitive-data\" and .state==\"open\")] | length'`\n  \u2014 must print `0` after the dismissals, proving AC3.\n\nThis change is tests-only; there is no production behavior to roll back, and the alert dismissals are reversible through the same code-scanning API (`-f state=open`).",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "CodeQL: 5 clear-text logging of sensitive information findings"
@@ -52136,10 +52136,24 @@
     },
     "657a-47a3-436f-4a16": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Refuted premise (as originally filed)\n\nFiled as: current `origin/main` fails the locked complexity gate because `close_ticket` in `transition_close.py` reports 19 against a recorded ceiling of 17, to be fixed by extracting along a seam.\n\n**That is false, and the suggested remedy would have changed working code without unblocking anyone.** Verified:\n\n* main tip `07e76a1ce3`: ruff reports `close_ticket` at **17**, and\n  `.github/complexity-baseline.json` records **17**. `--check` on a clean checkout returns\n  `active=60 new=0 increased=0 stale=0`.\n* the sha in the report, `104dc4e10a`: code **19**, recorded ceiling **19**.\n\nNeither tree contains a 19-vs-17 mismatch. There is nothing in `close_ticket` to extract.\n\n## The real defect\n\nCI runs `--lock`, not `--check`. `lock_against_base` (`scripts/check_complexity_baseline.py:455`) compares the CHANGE's baseline against **main TIP**: a REMOVED entry or a LOWERED ceiling is allowed; a RAISED ceiling or a NEW entry is a violation needing an administrator.\n\nChange 1673 (merged `8f6b6c9356`) extracted the signing tail from `close_ticket`, taking it 19 -> 17, and drained the stale baseline entry 19 -> 17. Lowering is allowed, so it passed. But every OPEN change whose tree still carries the pre-1673 baseline now presents ceiling 19 against main's 17 \u2014 which the lock reads as RAISING it.\n\n**Verbatim reproduction.** Feeding main-tip ceilings as `base` and `104dc4e10a`'s as `branch` into `lock_against_base` returns exactly one violation:\n\n```\nceiling RAISED for 'src/rebar/_commands/transition_close.py::close_ticket': 17 -> 19 \u2014\nan administrator must override the gate to raise a ceiling\n```\n\nThat is the reported symptom, verbatim. The same call with a rebased branch returns ZERO.\n\nSo the gate cannot distinguish \"this branch RAISED a ceiling\" from \"main LOWERED it underneath an un-rebased branch\". It blames the branch for a change main made. This is not specific to 1673: **every future ceiling reduction on main will break the fleet identically**, so the shrink-only ratchet currently punishes the shrinking it exists to reward. A change that never touches the baseline is still hit, because it still carries the old FILE.\n\nImmediate operational unblock (no code, no admin): affected changes REBASE onto current main.\n\n## Direction\n\nCompare the branch against **`merge-base(main, HEAD)`** rather than main tip, so only entries the BRANCH itself changed can violate.\n\n* `_fetch_base_ceilings_from_main` (`:494`) currently fetches `--depth=1`, which is too\n  shallow to compute a merge base. Fetch main with enough history, and if the local checkout\n  is shallow (`git rev-parse --is-shallow-repository`) deepen it before retrying.\n* Read the baseline at the merge-base commit and use it as `base`. `lock_against_base`'s rules\n  are unchanged \u2014 only the base it is given changes.\n* **Fallback direction matters.** If a merge base still cannot be computed, fall back to\n  today's main-tip comparison with an explicit note. That fallback is STRICTER, never looser:\n  it can only over-report, so an unavailable merge base can never let a genuine ceiling raise\n  through. Fail-closed posture is preserved.\n\n## Acceptance criteria\n\n- [ ] An un-rebased branch carrying the pre-reduction baseline PASSES the lock after main\n      lowers a ceiling \u2014 verified by a test reproducing exactly that scenario\n- [ ] A branch that genuinely RAISES a ceiling relative to its merge base still FAILS \u2014\n      verified by a test\n- [ ] A branch that adds a NEW entry still FAILS \u2014 verified by a test\n- [ ] A ceiling LOWERED or an entry REMOVED by the branch still passes \u2014 verified by a test\n- [ ] When no merge base can be computed the gate falls back to the main-tip comparison and\n      says so, never silently passing a genuine raise \u2014 verified by a test",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "complexity lock compares against main tip instead of merge base, so ceiling reductions on main break every un-rebased branch"
       },
       "created_at": "2026-08-12T21:24:06Z",
@@ -55907,6 +55921,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-01T00:32:34Z"
+    },
+    "6cc4-56f1-6cc6-4c7f": {
+      "created_at": "2026-08-12T21:56:04Z",
+      "jira_id": "4588530",
+      "jira_key": "REB-2803",
+      "state": "confirmed",
+      "updated_at": "2026-08-12T21:56:07Z"
     },
     "6cca-758d-38aa-4c23": {
       "baseline": {
@@ -60024,9 +60045,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "# Context\n\nLive External Integration run 31587452003 (operator-sanctioned dispatch) failed both live-LLM arms (anthropic + openai) on two pure-configuration causes.\n\n## Cause 1 \u2014 region is exported only on the bedrock arm (confirmed mechanism)\n\n`.github/workflows/external-integration.yml` L202-203 (origin/main) guard BOTH region vars on the arm:\n\n    AWS_DEFAULT_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}\n    REBAR_LLM_BEDROCK_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}\n\nOn the anthropic and openai arms both evaluate to the empty string. But `tests/external/test_completion_banking_behavior_0707.py:32` pins `_MODEL = \"bedrock:us.anthropic.claude-sonnet-4-6\"` \u2014 a bedrock-routed model *regardless of which arm runs it*. So every 0707 cell on a non-bedrock arm hits `build_bedrock_provider` with no resolvable region and raises the typed `LLMConfigError` naming `REBAR_LLM_BEDROCK_REGION`. A region is not a credential (it is a repository *variable*, per the file's own preflight comment), so the per-arm guard buys no credential isolation here \u2014 it only starves arms that run bedrock-pinned modules.\n\n## Cause 2 \u2014 ANTHROPIC_API_KEY repository secret missing\n\nThe anthropic arm emits `::error title=anthropic arm has no credential::`. Adding the secret is an OPERATOR action (repo settings). The arm's fail-not-skip design is CORRECT and must not be changed.\n\n# Plan\n\n1. `.github/workflows/external-integration.yml` L202-203: drop the\n   `matrix.provider == 'bedrock' &&` guard from both region vars and give them a\n   literal `us-east-1` fallback, so every arm resolves a region:\n   `${{ vars.AWS_BEDROCK_CI_REGION || 'us-east-1' }}`. `us-east-1` is rebar's\n   documented Bedrock region (`docs/llm-framework.md:182`,\n   `docs/calibration/overlap_batch_confidence.md:10`).\n   Update the adjacent comment block (L194-201) to say why the region is now\n   unguarded: live-LLM modules may pin a `bedrock:` model on any arm.\n2. `docs/ci-provider-matrix.md` \u00a7\"Bedrock: region is a separate, mandatory setting\":\n   the text says \"The arm sets both \u2026\", which becomes stale. One sentence: the region\n   is set on EVERY arm because bedrock-pinned modules run on all of them.\n3. Comment on this ticket recording the ANTHROPIC_API_KEY secret as an operator action.\n\nOut of scope: the fail-not-skip credential design; AWS credential (OIDC) availability on non-bedrock arms \u2014 the OIDC step stays guarded on `matrix.provider == 'bedrock'`, so a bedrock-pinned cell on the anthropic arm may still fail on *credentials*. That is a distinct defect and gets its own `discovered_from` ticket rather than being folded in here; this ticket's AC2 is scoped to the region-resolution signature only.\n\n# Acceptance criteria\n\n- [ ] AC1 \u2014 `REBAR_LLM_BEDROCK_REGION` (and `AWS_DEFAULT_REGION`) are exported for the\n  live-LLM suite step on every matrix arm, resolving to `us-east-1` when\n  `vars.AWS_BEDROCK_CI_REGION` is unset.\n- [ ] AC2 \u2014 The 0707 banking cells no longer fail on region resolution (evidence: run\n  link, or `[operator-attested]` citing run 31587452003's failure signature + the env diff).\n- [ ] AC3 \u2014 A comment records that adding the `ANTHROPIC_API_KEY` repository secret is an\n  operator action, and that the arm's fail-not-skip design is correct and unchanged.",
+        "description": "# Context\n\nLive External Integration run 31587452003 (operator-sanctioned dispatch) failed both live-LLM arms (anthropic + openai) on two pure-configuration causes.\n\n## Cause 1 \u2014 region is exported only on the bedrock arm (confirmed mechanism)\n\n`.github/workflows/external-integration.yml` L202-203 (origin/main) guard BOTH region vars on the arm:\n\n    AWS_DEFAULT_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}\n    REBAR_LLM_BEDROCK_REGION: ${{ matrix.provider == 'bedrock' && vars.AWS_BEDROCK_CI_REGION || '' }}\n\nOn the anthropic and openai arms both evaluate to the empty string. But `tests/external/test_completion_banking_behavior_0707.py:32` pins `_MODEL = \"bedrock:us.anthropic.claude-sonnet-4-6\"` \u2014 a bedrock-routed model *regardless of which arm runs it*. So every 0707 cell on a non-bedrock arm hits `build_bedrock_provider` with no resolvable region and raises the typed `LLMConfigError` naming `REBAR_LLM_BEDROCK_REGION`. A region is not a credential (it is a repository *variable*, per the file's own preflight comment), so the per-arm guard buys no credential isolation here \u2014 it only starves arms that run bedrock-pinned modules.\n\n## Cause 2 \u2014 ANTHROPIC_API_KEY repository secret missing\n\nThe anthropic arm emits `::error title=anthropic arm has no credential::`. Adding the secret is an OPERATOR action (repo settings). The arm's fail-not-skip design is CORRECT and must not be changed.\n\n# Plan\n\n1. `.github/workflows/external-integration.yml` L202-203: drop the\n   `matrix.provider == 'bedrock' &&` guard from both region vars and give them a\n   literal `us-east-1` fallback, so every arm resolves a region:\n   `${{ vars.AWS_BEDROCK_CI_REGION || 'us-east-1' }}`. `us-east-1` is rebar's\n   documented Bedrock region (`docs/llm-framework.md:182`,\n   `docs/calibration/overlap_batch_confidence.md:10`).\n   Update the adjacent comment block (L194-201) to say why the region is now\n   unguarded: live-LLM modules may pin a `bedrock:` model on any arm.\n2. `docs/ci-provider-matrix.md` \u00a7\"Bedrock: region is a separate, mandatory setting\":\n   the text says \"The arm sets both \u2026\", which becomes stale. One sentence: the region\n   is set on EVERY arm because bedrock-pinned modules run on all of them.\n3. Comment on this ticket recording the ANTHROPIC_API_KEY secret as an operator action.\n\nOut of scope: the fail-not-skip credential design; AWS credential (OIDC) availability on non-bedrock arms \u2014 the OIDC step stays guarded on `matrix.provider == 'bedrock'`, so a bedrock-pinned cell on the anthropic arm may still fail on *credentials*. That is a distinct defect and gets its own `discovered_from` ticket rather than being folded in here; this ticket's AC2 is scoped to the region-resolution signature only.\n\n# Acceptance criteria\n\n- [x] AC1 \u2014 `REBAR_LLM_BEDROCK_REGION` (and `AWS_DEFAULT_REGION`) are exported for the\n  live-LLM suite step on every matrix arm, resolving to `us-east-1` when\n  `vars.AWS_BEDROCK_CI_REGION` is unset.\n- [x] AC2 \u2014 The 0707 banking cells no longer fail on region resolution (evidence: run\n  link, or `[operator-attested]` citing run 31587452003's failure signature + the env diff).\n- [x] AC3 \u2014 A comment records that adding the `ANTHROPIC_API_KEY` repository secret is an\n  operator action, and that the arm's fail-not-skip design is correct and unchanged.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Live-LLM external lane fails on unset bedrock region; anthropic arm lacks secret"
       },
       "created_at": "2026-08-12T11:26:47Z",
@@ -99581,7 +99602,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "# Generalize divergent-head healing: share reconcile_one across sync and the S3 doctor\n\n## Disposition: OBSOLETE \u2014 the targeted duplication was removed by Gerrit 1665\n\nThis ticket asked for a shared, behaviour-preserving `reconcile_one(tracker, target_ref)` used by both `sync.reconverge` and `s3_doctor._fold_heads`. Premise validation disproved it. The duplication it targeted was the doctor's own copy of the worktree `git merge` policy; Gerrit change 1665 (ticket `envious-metal-budgie`) replaced that fold with a worktree-free `merge-tree`/`commit-tree` merge into the published ref, so the duplicated merge no longer exists to extract.\n\nBeyond that, the two healers were found to share only about four lines of graph arithmetic while holding OPPOSED policies, so the original AC (\"no duplicated merge/unrelated-history logic\") cannot be satisfied behaviour-preservingly:\n\n- Unrelated histories: sync REFUSES on a non-empty local store (anti-graft rule); the doctor\n  UNIONS unconditionally, pinned by a held-out test. Same input, opposite required outcomes.\n- Merge mechanism: sync's consumers read ticket events off the tracker's WORKTREE files, so a\n  ref-only merge would leave readers on pre-merge state. Sync cannot adopt the doctor's engine.\n- Failure policy: sync must never raise (its read path swallows everything); the doctor must\n  raise so the push path abandons.\n- Plus an epoch-guard asymmetry, and different lock scope and head cardinality.\n\nFull evidence, with file:line citations, is in this ticket's comment \"Premise validation: a BEHAVIOUR-PRESERVING `reconcile_one` is not available\".\n\nTwo alternatives were considered and rejected by operator decision: a thin ~4-line `merge_class` extraction (buys nothing \u2014 it couples two opposed policy domains for four lines), and a deep unification (genuinely possible but behaviour-changing, a rewrite of the store's hottest path). Deep unification is NOT filed as follow-up work; it can be raised later if the duplication ever becomes costly.\n\n## Acceptance Criteria\n\n- [x] The premise is validated against current `main` and the outcome recorded on this ticket\n      with file:line evidence rather than in scratch notes.\n- [x] The disposition is explicit: obsolete, because the duplication this ticket targeted was\n      removed by Gerrit 1665.\n- [x] The rejected alternatives (thin extraction, deep unification) are recorded with the reason\n      each was rejected, so the question is not re-opened from scratch.\n- [x] No code change is made under this ticket.",
+        "description": "# Generalize divergent-head healing: share reconcile_one across sync and the S3 doctor\n\n## Disposition: OBSOLETE \u2014 the targeted duplication was removed by Gerrit 1665\n\nThis ticket asked for a shared, behaviour-preserving `reconcile_one(tracker, target_ref)` used by both `sync.reconverge` and `s3_doctor._fold_heads`. Premise validation disproved it. The duplication it targeted was the doctor's own copy of the worktree `git merge` policy; Gerrit change 1665 (ticket `envious-metal-budgie`) replaced that fold with a worktree-free `merge-tree`/`commit-tree` merge into the published ref, so the duplicated merge no longer exists to extract.\n\nBeyond that, the two healers were found to share only about four lines of graph arithmetic while holding OPPOSED policies, so the original AC (\"no duplicated merge/unrelated-history logic\") cannot be satisfied behaviour-preservingly:\n\n- Unrelated histories: sync REFUSES on a non-empty local store (anti-graft rule); the doctor\n  UNIONS unconditionally, pinned by a held-out test. Same input, opposite required outcomes.\n- Merge mechanism: sync's consumers read ticket events off the tracker's WORKTREE files, so a\n  ref-only merge would leave readers on pre-merge state. Sync cannot adopt the doctor's engine.\n- Failure policy: sync must never raise (its read path swallows everything); the doctor must\n  raise so the push path abandons.\n- Plus an epoch-guard asymmetry, and different lock scope and head cardinality.\n\nFull evidence, with file:line citations, is in this ticket's comment \"Premise validation: a BEHAVIOUR-PRESERVING `reconcile_one` is not available\".\n\nTwo alternatives were considered and rejected by operator decision: a thin ~4-line `merge_class` extraction (buys nothing \u2014 it couples two opposed policy domains for four lines), and a deep unification (genuinely possible but behaviour-changing, a rewrite of the store's hottest path). Deep unification is NOT filed as follow-up work; it can be raised later if the duplication ever becomes costly.\n\n## Acceptance Criteria\n\n- [x] [operator-attested] The premise is validated against current `main` and the outcome\n      recorded on this ticket with file:line evidence rather than in scratch notes. Evidence:\n      this ticket's comment \"Premise validation: a BEHAVIOUR-PRESERVING `reconcile_one` is not\n      available\" (COMMENT event 1786560015411342001-6852d00f in the store).\n- [x] [operator-attested] The disposition is explicit: obsolete, because the duplication this\n      ticket targeted was removed by Gerrit 1665 (merged as cd95a58d7d). Evidence: the\n      \"Disposition: OBSOLETE\" section heading this description, plus the comment \"Closing as\n      OBSOLETE per operator decision (option A)\" (COMMENT event 1786568467676332001-506371a5).\n- [x] [operator-attested] The rejected alternatives (thin extraction, deep unification) are\n      recorded with the reason each was rejected, so the question is not re-opened from scratch.\n      Evidence: the \"Rejected alternatives\" list in the same OBSOLETE closing comment, and the\n      options section of the premise-validation comment.\n- [x] No code change is made under this ticket.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Generalize divergent-head healing: share reconcile_one across sync and the S3 doctor"
@@ -112290,151 +112311,15 @@
     "e0d4-4f19-699d-4d61": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "Framework seam: make the agent's structured-output **contract pluggable per operation**, and add the `completion_verdict` contract + schema. The runner currently hardcodes `findings_response_model()`; this is the enabling change (epic req #4).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope (files)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/contracts.py` (NEW): name\u2192response-model registry; `response_model_for(output_schema)` (default findings); import-clean (pydantic only inside builders); `completion_verdict_response_model` defined here.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/findings.py`: extract `citation_model()`/`finding_model()` lazy builders (shared Citation); promote `_validate_structured`\u2192public `validate_structured`; **BI-1**: `finalize_outcome(mode=\"structured\")` uses `model_dump(exclude_none=True)`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/llm/runner.py`: both runners select response model via `contracts.response_model_for(req.output_schema)` (lazy import inside run()); add `RunRequest.extra_tools` appended to the tool list (name-collision check).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/schemas/completion_verdict.schema.json` (NEW, full-URL `$id`) + register `COMPLETION_VERDICT`/`OUTPUT_SCHEMAS[\"verify_completion\"]`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `response_model_for(None)`\u2192findings; `(\"completion_verdict\")`\u2192CompletionVerdict; unknown\u2192findings default",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] schema-pin test: CompletionVerdict mirrors `completion_verdict` schema; existing findings pin still passes",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] BI-1: a model with omitted optionals serializes without nulls and validates (real-model test, not FakeRunner)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `import rebar.llm` pulls no pydantic (import-cleanliness); existing review/code/scan ops unchanged",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `extra_tools` appended in both runners with a duplicate-name guard",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "Framework seam: make the agent's structured-output **contract pluggable per operation**, and add the `completion_verdict` contract + schema. The runner currently hardcodes `findings_response_model()`; this is the enabling change (epic req #4).\n\n## Scope (files)\n- `src/rebar/llm/contracts.py` (NEW): name\u2192response-model registry; `response_model_for(output_schema)` (default findings); import-clean (pydantic only inside builders); `completion_verdict_response_model` defined here.\n- `src/rebar/llm/findings.py`: extract `citation_model()`/`finding_model()` lazy builders (shared Citation); promote `_validate_structured`\u2192public `validate_structured`; **BI-1**: `finalize_outcome(mode=\"structured\")` uses `model_dump(exclude_none=True)`.\n- `src/rebar/llm/runner.py`: both runners select response model via `contracts.response_model_for(req.output_schema)` (lazy import inside run()); add `RunRequest.extra_tools` appended to the tool list (name-collision check).\n- `src/rebar/schemas/completion_verdict.schema.json` (NEW, full-URL `$id`) + register `COMPLETION_VERDICT`/`OUTPUT_SCHEMAS[\"verify_completion\"]`.\n\n## Acceptance Criteria\n- [ ] `response_model_for(None)`\u2192findings; `(\"completion_verdict\")`\u2192CompletionVerdict; unknown\u2192findings default\n- [ ] schema-pin test: CompletionVerdict mirrors `completion_verdict` schema; existing findings pin still passes\n- [ ] BI-1: a model with omitted optionals serializes without nulls and validates (real-model test, not FakeRunner)\n- [ ] `import rebar.llm` pulls no pydantic (import-cleanliness); existing review/code/scan ops unchanged\n- [ ] `extra_tools` appended in both runners with a duplicate-name guard",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "WS-1: Pluggable output contract + completion_verdict schema (+ BI-1)"
       },
       "baseline_advanced_at": "2026-07-20T21:12:34Z",
       "created_at": "2026-06-25T23:19:36Z",
       "jira_key": "REB-351",
+      "peer_parent": "REB-309",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:19:36Z"
     },
@@ -115881,7 +115766,7 @@
         },
         "description": "Operator-approved early removal (pre-1.0 breaking pass #3), 2026-08-12. Source: the DEPRECATION REMOVAL-READINESS SURVEY, comment #11 on childsafe-bizarre-lorikeet (b902-18af-14ed-4da1), Tier 1 item 1 \u2014 the only genuinely expired, genuinely dead surface found. Operator ruling (verbatim): \"The two best candidates and the one ready now are all approved for removal.\"\n\n## What\n\nDelete the dead `.gitattributes` migration arm that strips the retired `.reconciler-* merge=ours` line from an already-initialized tracker.\n\n## Why it is dead\n\nThe reconciler pass-lock/phase-gate moved onto `refs/reconciler/*` (epic dust-troth-naval / C4), so the union-merge carve-out was retired. This store ALREADY ran the strip: `git log origin/tickets -- .gitattributes` shows exactly two commits, the second being 826d5ae379 \"drop retired .reconciler-* merge=ours\", and the live blob contains only `.bridge_state/* merge=ours`. The arm is permanently unreachable here. Residual risk, accepted by the operator ruling: a clone that has not swept since 2026-07-05 would no longer be converged by `init`.\n\n## Scope (current main)\n\n- `src/rebar/_commands/init.py:69` \u2014 the `_RETIRED_GITATTRIBUTES_LINES` constant and its explanatory comment.\n- `src/rebar/_commands/init.py:600-616` \u2014 the strip arm at the tail of the gitattributes ensure-unit; the unit then returns `EnsureOutcome(\"gitattributes\", \"ok\", \".gitattributes converged\")` for any existing committed `.gitattributes`.\n- `tests/interfaces/store/test_gitattributes_merge.py:104-116` \u2014 `test_gitattributes_migration_strips_retired_reconciler_line`, which exercises only the deleted arm.\n- `tests/interfaces/store/test_ensure_drift_matrix.py:25,88,106` \u2014 imports `_RETIRED_GITATTRIBUTES_LINES` and injects \"committed .gitattributes carries the retired line\" as the gitattributes drift; that drift is no longer convergent, so it is retargeted to the drift the surviving create arm still fixes (no committed `.gitattributes` at all).\n\nOut of scope: the gitattributes ensure-unit's create arm (School-B convergent, see `docs/migrations.md`), and the `.bridge_state/* merge=ours` line. No deprecation-registry or tombstone row is involved \u2014 this is internal store convergence, not a user-facing input, so it never had one.\n\n## Acceptance Criteria\n\n- [x] `_RETIRED_GITATTRIBUTES_LINES` and the strip arm are gone from `src/rebar/_commands/init.py`; checked: `grep -rn _RETIRED_GITATTRIBUTES_LINES src tests` returns no matches.\n- [x] The ensure-unit reports converged for an existing `.gitattributes` and its create arm still writes the carve-out; proven by `pytest tests/interfaces/store/test_gitattributes_merge.py`.\n- [x] The drift matrix still converges every ensure unit with the gitattributes drift retargeted; proven by `pytest tests/interfaces/store/test_ensure_drift_matrix.py`.\n- [x] `docs/release-notes.md` carries a \"BREAKING (pre-1.0)\" entry for this removal recording \"operator-approved early removal (pre-1.0 pass #3), 2026-08-12\", following the format of the two prior passes (DE7 and the ticket-5899 sibling pass).\n- [x] Gates are green; checked: `make lint` and `make typecheck` pass.\n\n## Testing\n\n- `pytest tests/interfaces/store/test_gitattributes_merge.py tests/interfaces/store/test_ensure_drift_matrix.py` \u2014 the two suites that cover the ensure-unit's create arm and full-drift convergence.\n- `make lint` and `make typecheck` \u2014 the commit gate.\n- `grep -rn _RETIRED_GITATTRIBUTES_LINES src tests` \u2014 proves the constant is fully gone (the LSP misses string-named references, so this is a raw grep per `docs/code-navigation.md`).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Remove dead .reconciler-* gitattributes strip arm"
       },
       "created_at": "2026-08-12T20:32:07Z",
@@ -134256,6 +134141,7 @@
     "REB-28": "1268-fe1d-d4da-4531",
     "REB-280": "b2ca-ab20-9aa9-430a",
     "REB-2801": "657a-47a3-436f-4a16",
+    "REB-2803": "6cc4-56f1-6cc6-4c7f",
     "REB-281": "b2e5-2eda-d6a4-47aa",
     "REB-282": "b355-7140-50cd-4195",
     "REB-283": "b44a-6700-c356-490e",
