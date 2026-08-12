@@ -41,6 +41,8 @@ import re
 import subprocess
 from typing import Any
 
+from rebar.review_bot.finding_publish import render_findings_block
+
 logger = logging.getLogger("rebar.review_bot.adapter")
 
 __all__ = [
@@ -113,7 +115,12 @@ def _coverage_gap_reason(coverage: dict[str, Any]) -> str | None:
 
 def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize the verdict's blocking + advisory findings to the receiver's logged shape
-    (``{severity, dimension, detail}``)."""
+    (``{severity, dimension, detail, location}``).
+
+    ``location`` is carried through (bug lacquer-grotesque-urson) so the voter can anchor a
+    finding to a real file/line as an inline Gerrit comment; it was previously dropped here,
+    which is why no anchor ever reached the Gerrit layer. The key is additive — consumers
+    reading ``{severity, dimension, detail}`` are unaffected."""
     out: list[dict[str, Any]] = []
     for f in (verdict.get("blocking") or []) + (verdict.get("advisory") or []):
         criteria = f.get("criteria") or []
@@ -124,6 +131,7 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
                 ),
                 "dimension": criteria[0] if criteria else "general",
                 "detail": str(f.get("finding", "")).strip(),
+                "location": f.get("location") or "",
             }
         )
     return out
@@ -131,25 +139,22 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _summarize(reason: str, verdict: dict[str, Any]) -> str:
     coverage = verdict.get("coverage") or {}
+    advisory = verdict.get("advisory") or []
     if reason == "PASS":
-        n = len(verdict.get("advisory") or [])
-        return "rebar code review passed." + (
-            f" {n} advisory finding(s) (non-blocking)." if n else ""
-        )
+        if not advisory:
+            return "rebar code review passed."
+        # The finding TEXT, not just its count (bug lacquer-grotesque-urson): a count alone left
+        # advisories unreadable on the change, so nobody could judge which criteria to promote
+        # to blocking.
+        return "rebar code review passed. " + render_findings_block(advisory, kind="advisory")
     if reason == "finding":
         blocking = verdict.get("blocking") or []
-        lines = [f"rebar code review found {len(blocking)} blocking issue(s):"]
-        for f in blocking[:10]:
-            crit = (f.get("criteria") or ["general"])[0]
-            full_detail = str(f.get("finding", "")).strip().replace("\n", " ")
-            detail = f"{full_detail[:239]}…" if len(full_detail) > 240 else full_detail
-            loc = f" [{f.get('location')}]" if f.get("location") else ""
-            lines.append(f"- ({crit}) {detail}{loc}")
-        omitted = len(blocking) - 10
-        if omitted > 0:
-            noun = "finding" if omitted == 1 else "findings"
-            lines.append(f"{omitted} additional blocking {noun} omitted from this summary.")
-        return "\n".join(lines)
+        block = render_findings_block(blocking, kind="blocking") or (
+            "rebar code review found 0 blocking issue(s):"
+        )
+        # Advisories ride along on the BLOCK path too — they were dropped here as well.
+        tail = render_findings_block(advisory, kind="advisory")
+        return f"{block}\n\n{tail}" if tail else block
     # coverage-gap sub-reasons — name the gap; it is infra, not "bad code".
     if reason == "scanner":
         gaps = "; ".join(

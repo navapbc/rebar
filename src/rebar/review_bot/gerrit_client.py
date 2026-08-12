@@ -187,6 +187,16 @@ class GerritClient:
         auto-merge base (the conflict resolutions); a CLEAN merge yields only the magic
         ``/COMMIT_MSG`` + ``/MERGE_LIST`` pseudo-paths (:attr:`MAGIC_PATHS`), i.e. an empty
         real delta. NEVER call the bare ``/patch`` on a merge (it 409s)."""
+        return self.get_revision_files(change_id, revision)
+
+    def get_revision_files(self, change_id: str, revision: str = "current") -> dict[str, dict]:
+        """The revision's file map — the plain ``GET .../files``, valid for ANY revision.
+
+        :meth:`get_merge_files` is the merge-specific reading of the same endpoint (for a merge
+        revision, omitting ``base``/``parent`` yields the auto-merge delta) and delegates here so
+        the call exists once. Used to validate that a finding's location names a path Gerrit
+        actually knows before it is posted as an inline comment — a comment on an unknown path is
+        a 400 that would take the whole vote down with it."""
         d = self._get_json(f"/a/changes/{self._q(change_id)}/revisions/{revision}/files")
         return d if isinstance(d, dict) else {}
 
@@ -281,6 +291,7 @@ class GerritClient:
         value: int,
         message: str,
         robot_comments: dict | None = None,
+        comments: dict | None = None,
     ) -> int:
         """Cast the ``LLM-Review`` label on ``revision`` and return the HTTP status.
 
@@ -288,7 +299,14 @@ class GerritClient:
         and (default) a single patchset-level robot comment under the magic path
         ``/PATCHSET_LEVEL`` — a robot comment with NO path is a 400, so we always anchor
         it there. Raises ``GerritError`` on a non-2xx response (the voter treats that as
-        a fail-closed BLOCK; no dedup row is written)."""
+        a fail-closed BLOCK; no dedup row is written).
+
+        ``comments`` is an optional ordinary ``CommentInput`` map (``{path: [...]}``) carrying
+        the review's findings inline on the diff; it is included only when non-empty, so a
+        review with nothing to anchor posts exactly the body it always did. Ordinary comments
+        are used rather than robot comments because a Gerrit with robot comments disabled
+        answers ``/robotcomments`` with "robot comments unsupported", which is what left
+        advisory findings unreadable (bug lacquer-grotesque-urson)."""
         if robot_comments is None:
             robot_comments = {
                 "/PATCHSET_LEVEL": [
@@ -308,6 +326,8 @@ class GerritClient:
             "message": message or "rebar code review.",
             "robot_comments": robot_comments,
         }
+        if comments:
+            body["comments"] = comments
         status, _ = self._request(
             "POST",
             f"/a/changes/{self._q(change_id)}/revisions/{revision}/review",

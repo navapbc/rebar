@@ -139,7 +139,7 @@ class FakeGerrit:
             raise GerritError("mergelist fetch failed", status=500)
         return list(self._mergelist)
 
-    def post_vote(self, change_id, revision, value, message, robot_comments=None):
+    def post_vote(self, change_id, revision, value, message, robot_comments=None, comments=None):
         if self._raise_on_post:
             raise GerritError("post failed", status=self._post_status)
         self.votes.append((change_id, revision, value, message))
@@ -604,9 +604,11 @@ def test_voter_single_flight_serializes_same_change_rev(monkeypatch, tmp_path):
         async def _gap(self):
             await asyncio.sleep(0)
 
-        def post_vote(self, change_id, revision, value, message, robot_comments=None):
+        def post_vote(
+            self, change_id, revision, value, message, robot_comments=None, comments=None
+        ):
             order.append("post")
-            return super().post_vote(change_id, revision, value, message, robot_comments)
+            return super().post_vote(change_id, revision, value, message, robot_comments, comments)
 
     g = SlowGerrit()
     store = DedupStore(str(tmp_path / "v.db"))
@@ -718,8 +720,8 @@ class ReconcileGerrit(FakeGerrit):
         self.has_vote_calls += 1
         return revision in self._voted
 
-    def post_vote(self, change_id, revision, value, message, robot_comments=None):
-        status = super().post_vote(change_id, revision, value, message, robot_comments)
+    def post_vote(self, change_id, revision, value, message, robot_comments=None, comments=None):
+        status = super().post_vote(change_id, revision, value, message, robot_comments, comments)
         self._voted.add(revision)
         return status
 
