@@ -180,6 +180,71 @@ class PeerConfirmationStore:
         self._dirty = False
 
 
+def confirm_from_snapshot(
+    store: PeerConfirmationStore,
+    curr_snapshot: Any,
+    binding_store: Any,
+    pass_id: str | None = None,
+) -> int:
+    """Confirm links OBSERVED in an authoritative fetched snapshot. Returns the count.
+
+    The second, independent evidence source: a link present on the peer is proven
+    synchronized even if this clone never pushed it (peer-created links, links
+    pushed before this store existed, links pushed by another clone).
+
+    COMPLETENESS IS THE WHOLE CONTRACT. A partial, paginated, failed or stale read
+    is NON-EVIDENCE — it can neither confirm nor deny. We do not invent a signal for
+    that: ``fetcher.merge_issuelinks_map`` already writes the per-issue
+    ``issuelinks`` key ONLY on an authoritative read, so an ABSENT key means
+    unobserved (truncated page walk, HTTP 410, failed enrichment, a backend with no
+    ``get_issuelinks_map``) and ``[]`` means authoritatively-empty. Hence the
+    ``"issuelinks" in entry`` membership test below — ``entry.get("issuelinks") or
+    []`` would collapse observed-empty into unobserved, the exact trap
+    ``inbound_differ``'s G1 docstring warns against. A stalled pager never reaches
+    here at all: ``BackendPaginationStallError`` re-raises rather than degrading.
+
+    MONOTONIC AND ADDITIVE. Observing a link confirms it; NOT observing one never
+    un-confirms. There is deliberately no un-confirmation path — reintroducing
+    "absence is evidence" is precisely the failure this epic exists to remove.
+
+    ``resolve_inbound_link`` is used per raw entry rather than ``observed_peer_deps``
+    because the latter returns only ``(relation, target)`` and DISCARDS the vendor
+    link id this record must persist.
+    """
+    from rebar_reconciler.link_direction import resolve_inbound_link
+
+    written = 0
+    for jira_key, entry in (curr_snapshot or {}).items():
+        if not isinstance(entry, dict) or "issuelinks" not in entry:
+            continue  # UNOBSERVED — never evidence, in either direction
+        links = entry.get("issuelinks")
+        if not isinstance(links, list):
+            continue
+        source_local_id = binding_store.get_local_id(jira_key)
+        if not source_local_id:
+            continue  # unbound source: nothing local to key the evidence on
+        for link in links:
+            if not isinstance(link, dict):
+                continue
+            other_key, relation = resolve_inbound_link(link)
+            if not other_key or not relation:
+                continue  # unmapped vendor link type or malformed entry
+            target_local_id = binding_store.get_local_id(other_key)
+            if not target_local_id:
+                continue
+            store.record(
+                str(source_local_id),
+                str(target_local_id),
+                str(relation),
+                link_id=link.get("id"),
+                direction=DIRECTION_SNAPSHOT,
+                pass_id=pass_id,
+                source_kind=SOURCE_SNAPSHOT,
+            )
+            written += 1
+    return written
+
+
 def open_store(repo_root: Any) -> PeerConfirmationStore:
     """Open the store for ``repo_root``'s tracker dir."""
     from rebar._commands._seam import tracker_dir
