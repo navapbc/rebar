@@ -382,6 +382,20 @@ def _reconcile_exception_result(
     details: dict[str, object] = {"error": str(exc)}
     if type(exc).__name__ == "SelectionStaleError":
         return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=f"ERROR: {exc}")
+    # Bug sole-curbable-stinkpot: a rejected Jira credential is a CONFIG fault, not a
+    # data/operational one, so it classifies as INVALID_INVOCATION — the operator gets a
+    # distinct exit code (2, not 1) AND a message naming the token, instead of the generic
+    # "reconcile_once raised: ... exit status 1" that six failed bridge runs reported.
+    # Matched by NAME (not isinstance) to match this function's existing adapter-neutral
+    # posture: it must not import the Jira/ACLI adapter to classify a pass.
+    if type(exc).__name__ == "AcliAuthError":
+        details["error_class"] = "auth_failed"
+        message = (
+            "ERROR: Jira credential REJECTED — the reconciler is not authenticated. "
+            "This is a credential problem, not a data problem: rotate the JIRA_API_TOKEN "
+            f"secret (re-running `acli auth login` with the same token cannot help). {exc}"
+        )
+        return PassResult(_Disposition.INVALID_INVOCATION, details, legacy_message=message)
     if reschedule_error_cls is not None and isinstance(exc, reschedule_error_cls):
         message = f"RESCHEDULE: reconcile_once signalled reschedule: {exc}"
         return PassResult(_Disposition.RESCHEDULE, details, legacy_message=message)

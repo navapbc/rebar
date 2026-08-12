@@ -32,6 +32,30 @@ _DEFAULT_ACLI_CMD: list[str] = ["acli"]
 _MAX_ATTEMPTS: int = 3  # initial + 2 retries
 _AUTH_FAILURE_CODE: int = 401
 
+# --- Auth-failure detection (bug sole-curbable-stinkpot) -------------------
+# ACLI is a SUBPROCESS: a rejected credential exits **1** with the marker on
+# stderr, never with an HTTP status as the exit code. The historical
+# ``returncode == _AUTH_FAILURE_CODE`` fast-abort below therefore never fired —
+# an expired token burned the full 3-attempt retry budget (pointless: a rejected
+# credential is deterministic, not transient) and then surfaced as a generic
+# ``returned non-zero exit status 1``, indistinguishable from a data failure.
+# Six scheduled Reconcile Bridge runs over 2026-08-07 -> 2026-08-11 died exactly
+# this way, each on the FIRST ACLI call of the pass:
+#
+#     ✗ Error: unauthorized: use `acli [product] auth login` to authenticate
+#
+# So detect it from stderr. Markers are matched case-insensitively against the
+# whole stderr. Kept deliberately TIGHT — only credential-rejection wording, not
+# authorization/permission wording ("forbidden", "cannot be assigned"), which
+# signals a data/config problem the caller handles separately and must not be
+# reported to an operator as an expired credential.
+_AUTH_FAILURE_MARKERS: tuple[str, ...] = (
+    "unauthorized",
+    "auth login",
+    "authentication failed",
+    "invalid credentials",
+)
+
 # --- Subprocess timeout / process-group reaping (bug d843) -----------------
 # A hung ``acli`` child (interactive prompt, stuck socket, JVM/network-helper
 # grandchild holding the capture pipe) must never freeze a reconcile pass.
@@ -170,6 +194,48 @@ class AssigneeNotFoundError(BackendAssigneeNotFoundError, ValueError):
 # `RetryExhaustedError` is the UNIFIED type from `_errors` (epic romp-swath-wince); imported at
 # the top (not defined here) so the `acli` surface re-exports the SAME object `applier` does. Its
 # MRO still subclasses RuntimeError, so this module's `except RuntimeError` sites are unaffected.
+
+
+def _is_auth_failure(stderr: str | None) -> bool:
+    """True when *stderr* carries an ACLI credential-rejection marker.
+
+    See :data:`_AUTH_FAILURE_MARKERS` for why this is a stderr match rather than
+    an exit-code check.
+    """
+    if not stderr:
+        return False
+    text = stderr.lower()
+    return any(marker in text for marker in _AUTH_FAILURE_MARKERS)
+
+
+class AcliAuthError(RuntimeError):
+    """ACLI rejected the credential — the session is not authenticated.
+
+    Terminal and raised on the FIRST attempt: a rejected credential is
+    deterministic, so retrying only delays the failure by the backoff schedule.
+
+    Distinct from a bare :class:`subprocess.CalledProcessError` so callers can
+    ``except`` this specifically and report a CREDENTIAL problem rather than a
+    data problem — the reconciler's pass classifier does exactly that, turning
+    what used to be a generic ``reconcile_once raised: ... exit status 1`` into
+    an operator-actionable message naming the token.
+
+    Subclasses ``RuntimeError`` so existing ``except RuntimeError`` sites in the
+    acli path (which already catch ``RetryExhaustedError``) keep working.
+
+    Note this reports that the credential was REJECTED; it does not and cannot
+    renew one. Recovery is rotating the ``JIRA_API_TOKEN`` secret — an operator
+    action, deliberately not automated here.
+    """
+
+    def __init__(self, cmd: list[str], stderr: str | None = None) -> None:
+        self.cmd = cmd
+        self.stderr = stderr
+        detail = (stderr or "").strip()
+        super().__init__(
+            "ACLI rejected the credential (not authenticated) running "
+            f"{cmd!r}" + (f": {detail}" if detail else "")
+        )
 
 
 class AcliTimeoutError(Exception):
@@ -419,9 +485,18 @@ def _run_acli(
             # Preserve the previous check=True semantics.
             cpe = subprocess.CalledProcessError(p.returncode, full_cmd, out, err)
             last_error = cpe
-            # Fast-abort on auth failure
-            if cpe.returncode == _AUTH_FAILURE_CODE:
-                raise cpe
+            # Fast-abort on auth failure. Detected from stderr (the marker ACLI
+            # actually emits) OR from the historical 401 exit code, which a
+            # subprocess never returns but which is kept so a future ACLI that
+            # DOES propagate the status still fast-aborts. Raised as the typed
+            # AcliAuthError, on the FIRST attempt — retrying a rejected
+            # credential is deterministic and cannot succeed.
+            if cpe.returncode == _AUTH_FAILURE_CODE or _is_auth_failure(cpe.stderr):
+                logger.error(
+                    "acli: credential rejected (not authenticated) — aborting the pass "
+                    "without retrying; rotate the Jira API token"
+                )
+                raise AcliAuthError(full_cmd, cpe.stderr) from cpe
             # Fast-abort on deterministic assignee errors — retrying is pointless.
             # Callers print a contextual warning; no stderr print here to avoid duplication.
             if cpe.stderr and (
