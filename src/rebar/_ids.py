@@ -1,8 +1,18 @@
 """Shared ticket-ID resolution primitives (stdlib-only leaf).
 
 The single resolution seam Python CLIs and the library use, so every surface
-accepts the same ID forms: full 16-hex, 8-hex short, alias, Jira issue key
-(e.g. ``REB-310``), and unique prefix >= 4 chars.
+accepts the same ID forms. The forms to WRITE are the alias (preferred), the
+8-hex two-quad short id, the full 16-hex canonical id, and the Jira issue key
+(e.g. ``REB-310``).
+
+Shorter unique prefixes (down to 4 characters) still resolve, but a bare
+single-quad 4-hex prefix is DEPRECATED as a reference form and should not be
+used in new prose, docs, or tooling: with a large store those fragments collide
+constantly, so they resolve ambiguously to nothing and, worse, turn any text
+that merely CONTAINS one into an accidental ticket citation. Resolution of
+existing short forms is unchanged — this is compatibility behavior, not a
+recommendation. Scanners that resolve candidates the user never supplied should
+pass ``quiet=True`` (see :func:`resolve_ticket_id`).
 
 This is a **top-of-tree leaf**: it imports only stdlib + ``rebar._alias`` (itself
 a stdlib-only leaf) and NOTHING from ``rebar.reducer`` / ``rebar._engine_support``

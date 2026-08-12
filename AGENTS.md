@@ -72,6 +72,14 @@ full canonical four-quad ticket ID for identity-sensitive artifacts, especially
 resolver's acceptance of aliases and short forms in some identity-sensitive paths is
 compatibility behavior, not the authoring policy.
 
+The forms to WRITE, in order of preference: the **alias** (`postwar-bardic-walleye`), the
+**8-digit two-quad** short id (`c50e-7326`), the **full canonical id**
+(`c50e-7326-9cac-45e4`), and **Jira/bridge ids** (`REB-310`). A bare **4-digit single-quad**
+fragment (`c50e`) is **deprecated** as a reference form — in a store of any size those quads
+collide, so they resolve to nothing and make ordinary prose that happens to contain a hex
+fragment look like a ticket citation. Existing 4-digit references keep resolving; that is
+compatibility only, so do not introduce new ones.
+
 Before starting, `search`/`list` for an existing ticket; if none fits, `create` one and
 capture the plan (and its acceptance criteria) in the description. As you work, write
 progress, decisions, and emergent findings back as `comment`s on the ticket (and `create` +
