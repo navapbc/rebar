@@ -134,6 +134,63 @@ def test_mutation_workflows_are_bounded_and_publish_results() -> None:
     assert "workflow_dispatch:" in broad
 
 
+def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
+    tmp_path: Path,
+) -> None:
+    """Definition/tree skew skips only when the patchset lacks the selector script."""
+    import os
+    import shlex
+    import subprocess
+    import sys
+
+    import yaml
+
+    workflow = yaml.safe_load(_read(_ROOT / ".github" / "workflows" / "_mutation.yml"))
+    selector_steps = workflow["jobs"]["selector"]["steps"]
+    selector = next(step for step in selector_steps if step.get("id") == "select")
+    run = str(selector["run"])
+
+    absent_tree = tmp_path / "predates-mutation-gate"
+    absent_tree.mkdir()
+    absent_output = absent_tree / "github-output"
+    absent = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
+        cwd=absent_tree,
+        env={**os.environ, "GITHUB_OUTPUT": str(absent_output)},
+        capture_output=True,
+        text=True,
+    )
+
+    assert absent.returncode == 0, absent.stdout + absent.stderr
+    assert "change predates the gate" in absent.stdout
+    assert absent_output.read_text(encoding="utf-8").splitlines() == [
+        'matrix={"shard":[]}',
+        "has-shards=false",
+    ]
+
+    current_tree = tmp_path / "current-tree"
+    (current_tree / "scripts").mkdir(parents=True)
+    marker = current_tree / "selector-ran"
+    (current_tree / "scripts" / "mutation_gate.py").write_text(
+        f"import pathlib, sys\npathlib.Path({str(marker)!r}).write_text('ran')\nsys.exit(17)\n",
+        encoding="utf-8",
+    )
+    current_output = current_tree / "github-output"
+    executable_run = run.replace("${{ inputs.all-shards }}", "false").replace(
+        "uv run --locked python", shlex.quote(sys.executable)
+    )
+    current = subprocess.run(
+        ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", executable_run],
+        cwd=current_tree,
+        env={**os.environ, "GITHUB_OUTPUT": str(current_output)},
+        capture_output=True,
+        text=True,
+    )
+
+    assert marker.read_text(encoding="utf-8") == "ran"
+    assert current.returncode == 17, current.stdout + current.stderr
+
+
 def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard() -> None:
     """One selector topology serves push, PR, Gerrit, and weekly mutation lanes."""
     import re
@@ -174,7 +231,12 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
             'echo "matrix=$matrix" >> "$GITHUB_OUTPUT"',
             'echo "has-shards=$has_shards" >> "$GITHUB_OUTPUT"',
         ]
-        positions = [lines.index(line) if lines.count(line) == 1 else None for line in canonical]
+        start = lines.index(canonical[0]) if lines.count(canonical[0]) == 1 else len(lines)
+        dataflow_lines = lines[start:]
+        positions = [
+            dataflow_lines.index(line) if dataflow_lines.count(line) == 1 else None
+            for line in canonical
+        ]
         present_positions = [position for position in positions if position is not None]
         assignment_write = re.compile(
             r"(?<![A-Za-z0-9_$\"'])"
@@ -185,7 +247,7 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
         return {
             "canonical_sequence_is_unique_and_ordered": len(present_positions) == len(canonical)
             and present_positions == sorted(present_positions),
-            "assignment_lines": [line for line in lines if assignment_write.search(line)],
+            "assignment_lines": [line for line in dataflow_lines if assignment_write.search(line)],
         }
 
     def checkout_contract(steps: list[dict[str, Any]]) -> dict[str, bool]:
