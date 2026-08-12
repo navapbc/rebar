@@ -22,8 +22,21 @@ import sys
 import textwrap
 import time
 from collections.abc import Callable, Mapping
+from pathlib import Path
 
-import alert_dedup
+# `alert_dedup` is a SIBLING module in this directory, not an installed package. Under
+# `python scripts/canary_bridge.py` it resolves because the script's directory leads
+# sys.path, but a test that loads this file via `importlib.util.spec_from_file_location`
+# gets no such entry — so the bare import raised ModuleNotFoundError whenever the loading
+# test ran without something else having inserted `scripts/` first, which is exactly what a
+# subset run does (bug 291e-7b48-3f24-41c6). Derive the directory from `__file__` so
+# resolution is invocation-independent; the membership check keeps it idempotent and never
+# reorders an entry that is already present.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import alert_dedup  # noqa: E402  (needs _SCRIPTS_DIR on sys.path, set just above)
 
 # Every external command (gh, rebar) goes through a Runner so unit tests can
 # inject a fake: argv -> (returncode, stdout, stderr).

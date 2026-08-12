@@ -46,8 +46,17 @@ import sys
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
-import alert_dedup
+# Same sibling-import repair as `canary_bridge.py` (bug 291e-7b48-3f24-41c6): `alert_dedup`
+# lives next to this file, so the bare import resolves only when `scripts/` already leads
+# sys.path. Derive the directory from `__file__` so it holds under every invocation style;
+# the membership check keeps it idempotent.
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+import alert_dedup  # noqa: E402  (needs _SCRIPTS_DIR on sys.path, set just above)
 
 # (argv) -> (returncode, stdout, stderr) — the seam unit tests replace.
 Runner = Callable[[list[str]], tuple[int, str, str]]
