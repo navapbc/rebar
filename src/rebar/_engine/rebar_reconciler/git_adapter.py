@@ -38,6 +38,7 @@ __all__ = [
     "BINDINGS_RETIRED_FILE",
     "BRIDGE_STATE_DIR",
     "GET_ROTATION_FILE",
+    "IMPOSSIBLE_LINKS_FILE",
     "TICKETS_BRANCH",
     "TICKETS_REF",
     "TRACKER_DIR",
@@ -80,6 +81,11 @@ BINDINGS_FILE = f"{BRIDGE_STATE_DIR}/bindings.json"
 BINDINGS_RETIRED_FILE = f"{BRIDGE_STATE_DIR}/bindings-retired.json"
 # The bounded direct-GET rotation sidecar, staged with bindings during rollout.
 GET_ROTATION_FILE = f"{BRIDGE_STATE_DIR}/get_rotation.json"
+# The impossible-inbound-link record (bug b8b1), staged with the other bridge state.
+# It MUST be committed: each reconcile pass runs in a fresh CI checkout, so a record
+# that lives only in the working tree is thrown away and every pass re-attempts the
+# same doomed links — exactly the defect the record exists to end.
+IMPOSSIBLE_LINKS_FILE = f"{BRIDGE_STATE_DIR}/impossible_links.json"
 
 RepoRoot = str | os.PathLike[str]
 
