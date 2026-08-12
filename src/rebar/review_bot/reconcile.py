@@ -22,7 +22,7 @@ window UNCONDITIONALLY, including when a candidate had been abandoned mid-flight
 events-log check error, a review timeout, or a voter ``error``/``deferred`` result). The
 abandoned change fell out of every subsequent window and was never retried — the docstring's
 promise that "this poller closes that loop" silently regressed, and only a new event
-(a ``recheck-review`` comment, a re-push) could re-admit the change. The cursor is now a
+(a ``rerun-llm-review`` comment, a re-push) could re-admit the change. The cursor is now a
 LOW-WATER MARK: a pass persists ``min(newest_event, oldest_retryably_abandoned_candidate)``,
 so the next pass re-fetches every candidate it still owes a vote. Terminal outcomes (voted,
 already-voted, malformed, other-project, or a change closed mid-review) do NOT hold it back.

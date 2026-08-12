@@ -2675,7 +2675,7 @@ def test_deferred_change_stays_eligible_for_reconciler(monkeypatch, tmp_path):
 # window — permanently. Since Gerrit's ``webhooks`` plugin is at-MOST-once and the
 # receiver 202-ACKs into an in-memory queue a container recreation discards, the
 # reconciler is the ONLY recovery path, so the change simply never got a vote until a
-# human minted a fresh event (a ``recheck-review`` comment or a no-op re-push).
+# human minted a fresh event (a ``rerun-llm-review`` comment or a no-op re-push).
 #
 # This contradicted three written contracts: ``reconcile.py``'s module docstring ("This
 # poller closes that loop"), its in-loop comment ("is retried next pass"), and

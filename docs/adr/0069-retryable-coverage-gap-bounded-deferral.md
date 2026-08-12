@@ -33,7 +33,7 @@ marker so the `voter_errors` alarm surface sees the escalation. A poison-pill ca
 cannot defer forever — it converges to a definite fail-closed vote.
 
 The attempt budget is **shared** with the bb9b contributor re-trigger, whose explicit
-`reset_attempts` re-arms it, so a human re-push / `recheck-review` gives a genuinely transient gap
+`reset_attempts` re-arms it, so a human re-push / `rerun-llm-review` gives a genuinely transient gap
 a fresh budget. The counter itself **fails open** (`record_attempt` errors are swallowed with a
 `VOTER_ERROR` and treated as attempt 0) — an uncounted attempt only delays escalation by one
 reconcile cycle; the fail-open is on the **counter**, never on the vote.

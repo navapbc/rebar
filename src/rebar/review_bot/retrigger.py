@@ -1,10 +1,10 @@
-"""Contributor-triggerable re-review — the ``recheck-review`` comment trigger (ticket bb9b).
+"""Contributor-triggerable re-review — the ``rerun-llm-review`` comment trigger (ticket bb9b).
 
 WHAT THIS IS. The review-bot's fail-closed design leaves two states a CONTRIBUTOR could
 previously only escape by finding an operator: a coverage-gap ``-1`` whose underlying
 infra failure has since been corrected, and a retries-exhausted escalation (ticket 0347)
 whose bounded automatic recovery has been spent. This module lets the contributor comment
-``recheck-review`` on the Gerrit change to request a FRESH review through the same
+``rerun-llm-review`` on the Gerrit change to request a FRESH review through the same
 fail-closed pipeline — the human analogue of the reconciler's re-drive, and the
 contributor analogue of the operator's ``/rerun``.
 
@@ -48,13 +48,21 @@ from rebar.review_bot.gerrit_client import GerritClient, GerritError
 
 logger = logging.getLogger("rebar.review_bot.retrigger")
 
-#: The magic comment token. Distinct from CI's ``recheck`` (which re-runs the Verified
-#: gate) — ``recheck-review`` re-runs the LLM-Review gate.
-TRIGGER_TOKEN = "recheck-review"
+#: The magic comment token. Deliberately shares NO substring with CI's ``recheck`` ChatOps
+#: word (``infra/gerrit/gerrit_to_platform.ini.template``, ``[mapping "comment-added"]``).
+#: That external matcher is substring-based and we do not own it, so a trigger word that
+#: EMBEDS ``recheck`` also re-dispatches the Verified workflow — which is how the retired
+#: word cancelled in-flight CI runs (ticket 0d78-6c15-db26-4cea, changes 1551/1577).
+TRIGGER_TOKEN = "rerun-llm-review"
 
-#: Word-boundary match where ``-`` and ``_`` also bind: ``recheck-review`` triggers,
-#: ``recheck-reviews`` / ``pre-recheck-review`` / ``recheck-review-x`` do not.
-_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])recheck-review(?![A-Za-z0-9_-])")
+#: Word-boundary match where ``-`` and ``_`` also bind: ``rerun-llm-review`` triggers,
+#: ``rerun-llm-reviews`` / ``pre-rerun-llm-review`` / ``rerun-llm-review-x`` do not.
+_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])rerun-llm-review(?![A-Za-z0-9_-])")
+
+#: The RETIRED trigger word, kept ONLY so a contributor who types it gets told the new one.
+#: Hard cutover — matching it never queues a review and never writes a label. This regex and
+#: the docstring above are the sole surviving occurrences of the retired word in the package.
+_RETIRED_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_-])recheck-review(?![A-Za-z0-9_-])")
 
 #: A bot vote-message tag line: ``[LLM-Review: <body>]`` alone on its line. Gerrit
 #: prepends a ``Patch Set N:``/``Patch Set N: LLM-Review-1`` header block to every
@@ -239,10 +247,10 @@ def latest_bot_tag_state(
 
 def _refusal_message(state: str, *, detail: str | None = None) -> str:
     base = (
-        "recheck-review refused: this revision's LLM-Review -1 is a REAL FINDING "
+        "rerun-llm-review refused: this revision's LLM-Review -1 is a REAL FINDING "
         f"(current tag state: {state}), not an infrastructure coverage gap. "
         "Address the finding and push a new patchset (git commit --amend + re-push); "
-        "the new revision is reviewed automatically. recheck-review only re-runs "
+        "the new revision is reviewed automatically. rerun-llm-review only re-runs "
         "reviews that failed for infrastructure reasons."
     )
     # Name the attestation verdict when that was the reason (ticket 6a81), so a contributor whose
@@ -254,10 +262,68 @@ def _refusal_message(state: str, *, detail: str | None = None) -> str:
 
 
 _ACCEPTED_MESSAGE = (
-    "recheck-review accepted: a fresh fail-closed LLM review of the current revision "
+    "rerun-llm-review accepted: a fresh fail-closed LLM review of the current revision "
     "has been queued and its automatic-retry budget re-armed. The verdict will be "
     "posted as a new vote when the review completes."
 )
+
+
+#: Reply to the RETIRED trigger word. It must NOT spell that word: this text is posted as a
+#: Gerrit comment, and the retired word embeds CI's substring-matched ChatOps keyword — a
+#: reply quoting it would re-dispatch the Verified workflow from the bot's own comment.
+_RETIRED_TOKEN_MESSAGE = (
+    "The LLM re-review trigger word has changed: comment `rerun-llm-review` instead. "
+    "The former word was retired because it embedded CI's re-run keyword, so posting it "
+    "also re-dispatched the Verified workflow and cancelled in-flight CI runs. No review "
+    "was queued for this comment — post `rerun-llm-review` to request one."
+)
+
+
+def _actionable_change_key(cfg: ReceiverConfig, event: dict) -> str | None:
+    """The change's key, or ``None`` when the event is not ours to act on.
+
+    Folds the project guard and the key lookup together: an event for another project, or one
+    with no usable change key, yields ``None`` and every caller path silently no-ops."""
+    change = event.get("change") or {}
+    project = change.get("project")
+    if cfg.project and project and project != cfg.project:
+        return None
+    key = change.get("id") or change.get("number")
+    return str(key) if key else None
+
+
+def _trigger_mode(comment: str) -> str | None:
+    """``"current"`` for the live trigger word, ``"retired"`` for the retired one, else ``None``.
+
+    A comment carrying BOTH resolves to ``"current"``: quoting the retired word while also
+    asking properly must not downgrade the request into a refusal."""
+    if _TOKEN_RE.search(comment) is not None:
+        return "current"
+    if _RETIRED_TOKEN_RE.search(comment) is not None:
+        return "retired"
+    return None
+
+
+def _refuse_retired_word(gc: GerritClient, change_id: str, revision: str, author: str) -> None:
+    """Reply to the RETIRED trigger word (hard cutover, ticket 0d78-6c15-db26-4cea).
+
+    No eligibility read, no label write, exactly one best-effort reply naming the live
+    trigger. Callers invoke this only AFTER the project guard and the change re-anchoring,
+    because ``post_comment`` needs the re-anchored ``change_id``/``revision`` and the bot
+    must never reply on an out-of-project change."""
+    _emit(
+        logging.INFO,
+        "RETRIGGER_REFUSED",
+        change_id=change_id,
+        revision_id=revision,
+        reason="retired-trigger-word",
+        detail=f"use {TRIGGER_TOKEN}",
+        requested_by=author,
+    )
+    try:
+        gc.post_comment(change_id, revision, _RETIRED_TOKEN_MESSAGE)
+    except GerritError:
+        logger.warning("retrigger: retired-word reply failed for %s (non-fatal)", change_id)
 
 
 def _durable_reset_failure(
@@ -288,9 +354,10 @@ def handle_comment_added(
     enqueue on acceptance, else ``None``.
 
     Order of checks (each earlier check sees strictly less attacker-controlled input):
-    loop guard (bot's own comments) → token word-match → project guard → eligibility
-    from the bot's own durable vote-message tag → fixed-neutral reset → all-accounts
-    verification → local budget reset. Replies are best-effort — a failed reply must
+    loop guard (bot's own comments) → token word-match (current OR retired) → project
+    guard → change re-anchoring → retired-word refusal → eligibility from the bot's own
+    durable vote-message tag → fixed-neutral reset → all-accounts verification → local
+    budget reset. Replies are best-effort — a failed reply must
     not lose the accepted re-review or crash the worker."""
     if not isinstance(event, dict):
         return None
@@ -300,15 +367,12 @@ def handle_comment_added(
     if author == cfg.bot_user:
         return None  # loop guard: our own replies re-arrive as comment-added events
 
-    if _TOKEN_RE.search(str(event.get("comment") or "")) is None:
+    mode = _trigger_mode(str(event.get("comment") or ""))
+    if mode is None:
         return None  # not addressed to us — silent skip (every human comment lands here)
 
-    change = event.get("change") or {}
-    project = change.get("project")
-    if cfg.project and project and project != cfg.project:
-        return None
-    change_key = change.get("id") or change.get("number")
-    if not change_key:
+    change_key = _actionable_change_key(cfg, event)
+    if change_key is None:
         return None
 
     gc = gerrit or GerritClient(cfg)
@@ -316,12 +380,12 @@ def handle_comment_added(
     # Re-anchor on the CURRENT revision (the comment may sit on an older patchset view;
     # the /rerun path re-anchors identically via the same helper).
     try:
-        fresh = gc.get_change_event(str(change_key))
+        fresh = gc.get_change_event(change_key)
     except GerritError as exc:
         _emit(
             logging.WARNING,
             "RETRIGGER_REFUSED",
-            change_id=str(change_key),
+            change_id=change_key,
             reason="eligibility-read-error",
             error=str(exc),
             requested_by=author,
@@ -331,7 +395,7 @@ def handle_comment_added(
         _emit(
             logging.WARNING,
             "RETRIGGER_REFUSED",
-            change_id=str(change_key),
+            change_id=change_key,
             reason="change-not-found",
             requested_by=author,
         )
@@ -340,6 +404,10 @@ def handle_comment_added(
     change_id = str(fresh["change"]["id"])
     revision = str(fresh["patchSet"]["revision"])
     patchset_number = fresh["patchSet"].get("number")
+
+    if mode == "retired":
+        _refuse_retired_word(gc, change_id, revision, author)
+        return None
 
     try:
         state = latest_bot_tag_state(gc, change_id, patchset_number)

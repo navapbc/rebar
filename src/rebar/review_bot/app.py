@@ -224,7 +224,7 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
     while True:
         event = await queue.get()
         try:
-            # A contributor `recheck-review` comment (ticket bb9b): decide eligibility
+            # A contributor `rerun-llm-review` comment (ticket bb9b): decide eligibility
             # privileged-side and, on acceptance, requeue the change's CURRENT revision
             # as a forced review event (it then flows through the normal branch below on
             # its next dequeue). Runs off the event loop — it makes blocking REST calls.

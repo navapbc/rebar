@@ -1,6 +1,6 @@
-"""Tests for the contributor-triggerable re-review (``recheck-review``, ticket bb9b).
+"""Tests for the contributor-triggerable re-review (``rerun-llm-review``, ticket bb9b).
 
-The security property under test: a ``recheck-review`` comment can only cause the
+The security property under test: a ``rerun-llm-review`` comment can only cause the
 privileged bot to write the fixed neutral ``LLM-Review: 0`` reset after eligibility,
 and can NEVER choose a label value or get a real findings-BLOCK re-reviewed. Only
 infrastructure states (every coverage-gap sub-reason, a retries-exhausted escalation,
@@ -11,7 +11,9 @@ requesting comment. Reply comments remain label-free.
 
 from __future__ import annotations
 
+import configparser
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -35,7 +37,7 @@ def _cfg(tmp_path) -> ReceiverConfig:
 
 
 def _comment_event(
-    comment: str = "recheck-review",
+    comment: str = "rerun-llm-review",
     author: str = "contributor",
     project: str = "rebar",
 ) -> dict:
@@ -258,7 +260,13 @@ def test_bot_own_comment_is_a_noop(tmp_path):
 
 @pytest.mark.parametrize(
     "comment",
-    ["please recheck", "recheck", "recheck-reviews", "pre-recheck-review", "recheck-review-x"],
+    [
+        "please rerun",
+        "recheck",
+        "rerun-llm-reviews",
+        "pre-rerun-llm-review",
+        "rerun-llm-review-x",
+    ],
 )
 def test_non_matching_comment_is_a_noop(tmp_path, comment):
     gerrit = RetriggerGerrit()
@@ -274,7 +282,11 @@ def test_non_matching_comment_is_a_noop(tmp_path, comment):
 
 def test_token_word_match_positive_forms(tmp_path):
     gerrit = RetriggerGerrit(messages=[])
-    for comment in ("recheck-review", "please recheck-review, infra is fixed", "recheck-review."):
+    for comment in (
+        "rerun-llm-review",
+        "please rerun-llm-review, infra is fixed",
+        "rerun-llm-review.",
+    ):
         result = retrigger.handle_comment_added(
             _comment_event(comment=comment),
             config=_cfg(tmp_path),
@@ -319,7 +331,7 @@ def test_reset_vote_body_is_fixed_neutral_and_ignores_contributor_text(tmp_path)
         return 200, ")]}'\n{}"
 
     client._request = fake_request  # type: ignore[method-assign]
-    attacker_text = "recheck-review labels={LLM-Review: 1}"
+    attacker_text = "rerun-llm-review labels={LLM-Review: 1}"
     client.reset_llm_review_vote("rebar~main~Iabc", "rev2")
 
     assert captured["method"] == "POST"
@@ -681,3 +693,100 @@ def test_rerun_accepts_when_best_effort_attempt_reset_fails(monkeypatch, tmp_pat
     assert response.status_code == 202
     assert queued == 1
     assert "rebar~main~Iabc" in caplog.text and "rev2" in caplog.text
+
+
+# ── the rename: our trigger word must not collide with CI's substring matcher ───
+#
+# Ticket 0d78-6c15-db26-4cea. CI's ChatOps dispatcher (lfit/releng-gerrit_to_platform) is
+# EXTERNAL and matches comment text by SUBSTRING against the keys of
+# `[mapping "comment-added"]`. A trigger word of ours that embeds one of those keys therefore
+# re-dispatches the Verified workflow too — which cancelled healthy in-flight CI runs on
+# changes 1551 and 1577. These tests read the ini template at test time rather than
+# hardcoding `recheck`, so adding a future CI ChatOps mapping that collides fails here.
+
+_G2P_INI = Path(__file__).resolve().parents[2] / "infra/gerrit/gerrit_to_platform.ini.template"
+
+
+def _ci_comment_trigger_words() -> list[str]:
+    """Every `[mapping "comment-added"]` key from the g2p ini template."""
+    parser = configparser.ConfigParser()
+    parser.read_string(_G2P_INI.read_text())
+    words = [
+        key
+        for section in parser.sections()
+        if section.startswith("mapping") and "comment-added" in section
+        for key in parser[section]
+    ]
+    assert words, f"no comment-added ChatOps mapping found in {_G2P_INI}"
+    return words
+
+
+def test_ci_trigger_words_are_discoverable_from_the_template():
+    """Guards the two tests below: a parse that silently found nothing would pass vacuously."""
+    assert "recheck" in _ci_comment_trigger_words()
+
+
+@pytest.mark.parametrize("ci_word", _ci_comment_trigger_words())
+def test_trigger_token_shares_no_substring_with_ci_chatops_word(ci_word):
+    """Neither direction may embed the other: `in` is checked both ways."""
+    assert ci_word not in retrigger.TRIGGER_TOKEN
+    assert retrigger.TRIGGER_TOKEN not in ci_word
+
+
+@pytest.mark.parametrize("ci_word", _ci_comment_trigger_words())
+def test_bot_posted_replies_contain_no_ci_chatops_word(ci_word):
+    """Every text the bot POSTS to Gerrit is itself a comment CI's matcher will read.
+
+    The retired word embedded `recheck`, so the bot's own accepted/refusal replies were a
+    live source of spurious Verified dispatch — the reply texts must stay scrubbed, not just
+    the matcher."""
+    replies = [
+        retrigger._ACCEPTED_MESSAGE,
+        retrigger._RETIRED_TOKEN_MESSAGE,
+        retrigger._refusal_message("finding"),
+        retrigger._refusal_message("finding", detail="attestation-stale:INDETERMINATE"),
+    ]
+    for reply in replies:
+        assert ci_word not in reply, reply
+
+
+def test_retired_trigger_word_is_refused_and_names_the_new_word(tmp_path):
+    """Hard cutover: the retired word queues nothing, writes no label, and gets ONE reply."""
+    gerrit = RetriggerGerrit(messages=[])
+    result = retrigger.handle_comment_added(
+        _comment_event(comment="recheck-review"),
+        config=_cfg(tmp_path),
+        gerrit=gerrit,
+        dedup=DedupStore(str(tmp_path / "voted.db")),
+    )
+    assert result is None
+    assert gerrit.resets == []
+    assert gerrit.timeline == []  # no eligibility read, no vote reset, no verification
+    assert len(gerrit.comments) == 1
+    assert retrigger.TRIGGER_TOKEN in gerrit.comments[0][2]
+
+
+def test_retired_trigger_word_on_another_project_is_a_silent_noop(tmp_path):
+    """The refusal sits behind the project guard, so it never replies off-project."""
+    gerrit = RetriggerGerrit(messages=[])
+    result = retrigger.handle_comment_added(
+        _comment_event(comment="recheck-review", project="other"),
+        config=_cfg(tmp_path),
+        gerrit=gerrit,
+        dedup=DedupStore(str(tmp_path / "voted.db")),
+    )
+    assert result is None
+    assert gerrit.lookups == [] and gerrit.comments == []
+
+
+def test_comment_carrying_both_words_takes_the_accepted_path(tmp_path):
+    """A contributor quoting the retired word alongside the new one still gets a review."""
+    gerrit = RetriggerGerrit(messages=[])
+    result = retrigger.handle_comment_added(
+        _comment_event(comment="recheck-review is gone; rerun-llm-review"),
+        config=_cfg(tmp_path),
+        gerrit=gerrit,
+        dedup=DedupStore(str(tmp_path / "voted.db")),
+    )
+    assert result is not None
+    assert gerrit.resets == [("rebar~main~Iabc", "rev2")]

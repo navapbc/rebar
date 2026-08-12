@@ -44,16 +44,16 @@ The `LLM-Review` bot tags every vote so you can tell a *finding* (your code) fro
 |---|---|---|
 | `[LLM-Review: PASS]` | The review passed. | Nothing — this is a `+1`. |
 | `[LLM-Review: BLOCK — finding]` (+ inline comments) | **Real finding(s)** in your code. | Fix the code, amend, and re-push. |
-| `[LLM-Review: BLOCK — coverage-gap (gate-disabled)]` | Infra veto: the review gate was disabled. | Not your code — comment `recheck-review` once infra is back (or a maintainer re-triggers). |
-| `[LLM-Review: BLOCK — coverage-gap (llm-unavailable)]` | Infra veto: the LLM backend was unavailable. | Not your code — comment `recheck-review`, or re-push the same commit. |
-| `[LLM-Review: BLOCK — coverage-gap (scanner)]` | Infra veto: a scanner step failed. | Not your code — comment `recheck-review` (or a maintainer re-triggers). |
-| `[LLM-Review: BLOCK — coverage-gap (review-error)]` | Infra veto: the review errored out. | Not your code — comment `recheck-review` (or a maintainer re-triggers). |
-| `[LLM-Review: BLOCK — coverage-gap (indeterminate)]` | Infra veto: the outcome could not be determined. | Not your code — comment `recheck-review` (or a maintainer re-triggers). |
-| `[LLM-Review: BLOCK — coverage-gap (merge-review)]` | Infra veto **on a merge change** (epic feature-branch merge-back): the merge-change review could not run. | Not your code — comment `recheck-review` to re-trigger the merge review. |
+| `[LLM-Review: BLOCK — coverage-gap (gate-disabled)]` | Infra veto: the review gate was disabled. | Not your code — comment `rerun-llm-review` once infra is back (or a maintainer re-triggers). |
+| `[LLM-Review: BLOCK — coverage-gap (llm-unavailable)]` | Infra veto: the LLM backend was unavailable. | Not your code — comment `rerun-llm-review`, or re-push the same commit. |
+| `[LLM-Review: BLOCK — coverage-gap (scanner)]` | Infra veto: a scanner step failed. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
+| `[LLM-Review: BLOCK — coverage-gap (review-error)]` | Infra veto: the review errored out. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
+| `[LLM-Review: BLOCK — coverage-gap (indeterminate)]` | Infra veto: the outcome could not be determined. | Not your code — comment `rerun-llm-review` (or a maintainer re-triggers). |
+| `[LLM-Review: BLOCK — coverage-gap (merge-review)]` | Infra veto **on a merge change** (epic feature-branch merge-back): the merge-change review could not run. | Not your code — comment `rerun-llm-review` to re-trigger the merge review. |
 | `… (merge-change, N integrated commit(s))` suffix | A merge change carrying N already-reviewed commits; the suffix annotates the merge path. | Informational; respond to the base tag as above. |
 
 **In one line:** a `finding` means *fix and re-push*; **any** `coverage-gap (…)`
-means *infra veto, not your code — comment **`recheck-review`** to re-trigger it*; a `Verified −1`
+means *infra veto, not your code — comment **`rerun-llm-review`** to re-trigger it*; a `Verified −1`
 means *CI failed — open the linked run*, and for a flake comment **`recheck`** to
 re-run CI on the same patchset.
 
@@ -75,15 +75,20 @@ to completion and concluded coverage could not be established, which is a result
 interruption — and `merge-review` (a merge-change REST failure). And a `finding` is of
 course a real code veto, never retried automatically. A stuck coverage-gap `-1` (an
 exhausted budget or a terminal sub-reason after infra recovery) is cleared by a
-contributor `recheck-review` comment (below), a maintainer re-trigger (`/rerun`; see
+contributor `rerun-llm-review` comment (below), a maintainer re-trigger (`/rerun`; see
 `infra/runbooks/review-bot-ops.md`) or a new patchset — a new patchset is a new revision,
 which starts with a fresh retry budget.
 
-### Contributor-triggered re-review: comment `recheck-review`
+### Contributor-triggered re-review: comment `rerun-llm-review`
 
 Once the underlying infrastructure failure is corrected, **any contributor** can request
-a fresh review by commenting **`recheck-review`** on the change (a whole-word match; it
-is deliberately distinct from `recheck`, which re-runs CI's `Verified` gate). The bot
+a fresh review by commenting **`rerun-llm-review`** on the change (a whole-word match; it
+shares **no substring** with `recheck`, which re-runs CI's `Verified` gate). That
+substring-disjointness is the point: CI's ChatOps matcher is substring-based and lives in a
+tool this project does not own, so the earlier LLM trigger word — which embedded `recheck` —
+also re-dispatched the Verified workflow and cancelled healthy in-flight CI runs. It was
+retired in a hard cutover with no alias window; commenting it now queues nothing and draws a
+refusal reply naming `rerun-llm-review`. The bot
 decides eligibility from its own durable vote state on the **current revision** — never
 from the requesting comment:
 

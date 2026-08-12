@@ -96,19 +96,19 @@ vote. Contrast the two paths before that reset:
   a re-delivered event a **no-op skip** once any non-zero vote exists.
 - **The 5-minute backfill reconciler** (`reconcile.py`) — re-reviews **vote-LESS** changes.
   It will not retry a change that still carries a `-1`; after an accepted `/rerun` or
-  `recheck-review` resets that vote, the reset's Gerrit event durably admits the revision
+  `rerun-llm-review` resets that vote, the reset's Gerrit event durably admits the revision
   to reconciliation even if the process-local queue is lost.
 
 So a transient outage that produced a `-1` will sit there until you `/rerun` it (or
 push a new patchset). Contributors also have a self-service path: commenting
-**`recheck-review`** on the change re-triggers the review for any latest bot state
+**`rerun-llm-review`** on the change re-triggers the review for any latest bot state
 that is not a real finding (see `docs/review-policy.md`); `/rerun` remains the
 operator-side equivalent and additionally works when the bot cannot read comments.
 (**Activation note:** the trigger depends on the `comment-added` webhook event in
 `infra/gerrit/webhooks.config`; after that file changes, an operator must re-run
 `infra/gerrit/service-user.sh` to push the rendered config to `refs/meta/config`.)
 
-**SEMANTICS (budget).** Both `/rerun` and an accepted `recheck-review` trigger also
+**SEMANTICS (budget).** Both `/rerun` and an accepted `rerun-llm-review` trigger also
 best-effort **reset the change's retry-budget row** in the dedup store, so a change that
 previously exhausted its automatic retries gets a fresh budget for the forced run. A local
 budget-reset failure is logged but cannot undo the already-durable Gerrit reset.
