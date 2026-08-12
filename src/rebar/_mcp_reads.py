@@ -30,6 +30,7 @@ from rebar._mcp_models import (
     GateResultOut,
     GroundingInfoOut,
     NextBatchOut,
+    PlanReviewStatusOut,
     SearchResultOut,
     TicketStateOut,
     ValidateReportOut,
@@ -140,6 +141,38 @@ def register_bridge_tools(mcp, ctx) -> None:
 
     if not _gate_value(ctx.readonly):
         _register_bridge_mutation_tools(mcp, ctx, annotations)
+
+
+def _register_plan_review_tools(mcp, annotations) -> None:
+    """Register the read-only plan-review query tools.
+
+    A module-level registrar rather than another nested ``def`` inside
+    ``register_read_tools``: that function is already at its frozen
+    complexity ceiling (every nested tool costs it a McCabe point), and this
+    mirrors how ``register_bridge_tools`` is factored out of the same body.
+    """
+
+    @mcp.tool(annotations=annotations["READ_ONLY"])
+    def plan_review_status(ticket_id: str) -> PlanReviewStatusOut:
+        """Is this ticket's plan-review attestation current RIGHT NOW? Read-only.
+
+        The MCP mirror of `rebar review-plan <id> --status`: it delegates to
+        `rebar.llm.plan_review_status`, which runs the EXACT local check the claim
+        gate runs — NO LLM and NO network, never a billable review — so the answer
+        is precisely what a `claim` would decide.
+
+        Returns {ok, verdict, reason, verified_at_sha, signed_at}. `verdict` is
+        'certified' when current, else one of stale-code / stale-head /
+        stale-material / stale-reopened / stale-pin-drift / stale-pin-missing /
+        unsigned / wrong-kind / not-closed / malformed-pin / malformed-phase /
+        incompatible-phase / unverifiable-material / error, and `reason` NAMES what
+        changed. `verified_at_sha` is the code anchor the plan was reviewed against
+        and `signed_at` the sign timestamp; both are null when no readable certified
+        attestation exists. Use it to answer "should I re-gate before I implement?"
+        without provoking a claim refusal."""
+        import rebar.llm
+
+        return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
 
 
 def register_read_tools(mcp, ctx) -> None:
@@ -381,6 +414,8 @@ def register_read_tools(mcp, ctx) -> None:
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     register_bridge_tools(mcp, ctx)
+
+    _register_plan_review_tools(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def verify_signature(ticket_id: str, kind: str | None = None) -> VerifySignatureResultOut:
