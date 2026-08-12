@@ -612,6 +612,16 @@ def main(argv: list[str] | None = None) -> int:
             "or <repo-root>/.tickets-tracker."
         ),
     )
+    parser.add_argument(
+        "--repair",
+        action="store_true",
+        help=(
+            "Prune reverse bindings that have no forward entry "
+            "(store_integrity / reverse_missing_forward). Refuses if any other "
+            "integrity kind is present. This is the only writing mode; the audit "
+            "itself never writes."
+        ),
+    )
     args = parser.parse_args(raw)
 
     # Resolve tracker path: explicit arg > env override > repo root default
@@ -638,6 +648,14 @@ def main(argv: list[str] | None = None) -> int:
             repo_root = Path.cwd()
         # fsck walks the tracker directly by design.
         tracker_path = repo_root / ".tickets-tracker"  # tickets-boundary-ok
+
+    # --repair is the ONE writing mode, and it lives in its own module so the
+    # audit functions above keep their read-only (L9) boundary. It consumes
+    # audit_store_integrity() rather than re-deriving the orphan set.
+    if args.repair:
+        from rebar._commands.bridge_repair import prune_orphan_reverse_bindings
+
+        return prune_orphan_reverse_bindings(tracker_path, argv=raw)
 
     try:
         findings = audit_bridge_mappings(tracker_path)

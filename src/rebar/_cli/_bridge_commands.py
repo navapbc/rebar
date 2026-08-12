@@ -215,9 +215,14 @@ def _passthrough_help(command: str) -> int:
     """Render canonical child help without invoking an operational implementation."""
     if command == "fsck":
         text = (
-            "Usage: rebar bridge fsck [--tickets-tracker=<path>] [--output json]\n\n"
+            "Usage: rebar bridge fsck [--tickets-tracker=<path>] [--output json] "
+            "[--repair]\n\n"
             "Audit committed event compatibility, binding drift, and forward/reverse "
-            "binding-store integrity without Jira access.\n"
+            "binding-store integrity without Jira access.\n\n"
+            "--repair prunes reverse bindings that have no forward entry "
+            "(store_integrity / reverse_missing_forward). It is the only writing mode, "
+            "refuses when any other integrity kind is present, and records a durable "
+            "audit line. The audit itself never writes.\n"
         )
     elif command == "check-access":
         text = (
