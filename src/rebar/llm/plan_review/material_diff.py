@@ -46,6 +46,14 @@ _UNITS = {
 }
 
 _CHECKBOX_STATE_RE = re.compile(r"^(\s*[-*]\s*\[)[xX ](\])", re.MULTILINE)
+_CHECKBOX_ITEM_RE = re.compile(r"^\s*[-*]\s*\[([xX ])\]", re.MULTILINE)
+
+#: Diagnostic component name recorded ALONGSIDE the basis components. It is absent from
+#: ``COMPONENT_ORDER`` on purpose: nothing hashed into the composite, nothing
+#: :func:`describe_delta` reports — it exists only so the explainer can separate "the text
+#: moved" from "boxes were also ticked".
+BOXES_COMPONENT = "description_boxes"
+DIAGNOSTIC_COMPONENTS = (BOXES_COMPONENT,)
 
 #: The advice every material-staleness reason carries, because it is the single most
 #: frequently mis-believed fact about the gate (bug 94a3, observations 1 and 3).
@@ -172,6 +180,36 @@ def material_components(
     }
 
 
+def checkbox_state_component(description: str) -> tuple[str, int]:
+    """``(hash16, ticked_count)`` for the checkbox STATE the description carries.
+
+    Diagnostic ONLY — deliberately *not* a basis key (see :data:`DIAGNOSTIC_COMPONENTS`).
+    Box state is normalized out of the material basis, so the signed component hashes carry
+    no record of it and a stale-material message could not previously say whether an author
+    who ticked boxes *and* edited prose in one ``rebar edit`` was stale because of the prose
+    (they always are) or the ticks (they never are). Recording the state sequence separately
+    lets the explainer answer that. Carries no ticket content: a state string and a count.
+    """
+    states = [m.group(1).lower() for m in _CHECKBOX_ITEM_RE.finditer(description)]
+    blob = "".join(states)
+    digest = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    return digest, sum(1 for s in states if s == "x")
+
+
+def components_with_diagnostics(
+    ctx: PlanContext, *, normalize_checkboxes: bool = True
+) -> dict[str, tuple[str, int]]:
+    """The material components PLUS the non-basis diagnostics the explainer reads.
+
+    This is what rides on the manifest and what the live-state reader returns; the composite
+    fingerprint and :func:`describe_delta` both ignore the diagnostic keys, so nothing here
+    can change a gate outcome.
+    """
+    parts = material_components(ctx, normalize_checkboxes=normalize_checkboxes)
+    parts[BOXES_COMPONENT] = checkbox_state_component(ctx.description)
+    return parts
+
+
 def context_from_snapshot(snapshot: Any) -> PlanContext | None:
     """Rebuild the subject :class:`PlanContext` a review actually saw, from its relation
     snapshot. Lets the signer record components for exactly the reviewed state, and lets a
@@ -239,7 +277,7 @@ def verified_material_components(
     try:
         if material_fingerprint(ctx) != expected_composite:
             return None
-        return material_components(ctx)
+        return components_with_diagnostics(ctx)
     except Exception:
         logger.warning("could not derive material components", exc_info=True)
         return None
@@ -254,6 +292,28 @@ def _render(name: str, signed: tuple[str, int] | None, current: tuple[str, int] 
     if signed[1] == current[1]:
         return f"{name} ({signed[1]} {unit}, contents edited)"
     return f"{name} ({signed[1]} -> {current[1]} {unit})"
+
+
+def _description_detail(
+    signed: dict[str, tuple[str, int]], current: dict[str, tuple[str, int]]
+) -> str:
+    """Say what moved INSIDE ``description``: its text, and whether boxes moved as well.
+
+    Empty string unless ``description`` is one of the changed components and BOTH sides
+    recorded the (diagnostic) checkbox state — an attestation signed before that line
+    existed simply gets no clause rather than a guess.
+    """
+    if signed.get("description") == current.get("description"):
+        return ""
+    signed_boxes, current_boxes = signed.get(BOXES_COMPONENT), current.get(BOXES_COMPONENT)
+    if signed_boxes is None or current_boxes is None:
+        return ""
+    if signed_boxes == current_boxes:
+        return "; its TEXT changed, checkbox state is unchanged"
+    return (
+        "; its TEXT changed, and checkbox state changed too "
+        f"({signed_boxes[1]} -> {current_boxes[1]} ticked), which is NOT the cause"
+    )
 
 
 def _children_from_pins(manifest: list[str] | None) -> set[str] | None:
@@ -281,7 +341,7 @@ def _current_components(ticket_id: str, repo_root) -> dict[str, tuple[str, int]]
     except Exception:
         logger.warning("could not read current material for %s", ticket_id, exc_info=True)
         return None
-    return None if ctx is None else material_components(ctx)
+    return None if ctx is None else components_with_diagnostics(ctx)
 
 
 def explain_material_change(attestation: Any, ticket_id: str, *, repo_root=None) -> str:
@@ -304,7 +364,9 @@ def explain_material_change(attestation: Any, ticket_id: str, *, repo_root=None)
     if signed and current is not None:
         delta = describe_delta(signed, current)
         if delta is not None:
-            return delta
+            # The note rides on THIS branch too — it is the branch a current attestation
+            # takes, so it is the one nearly every author reads (bug b886).
+            return f"{delta}{_description_detail(signed, current)}; note that {CHECKBOX_NOTE}"
         return (
             "no material component differs — the attestation predates AC-checkbox "
             f"normalization (bug 330c), so re-signing is required; {CHECKBOX_NOTE}"

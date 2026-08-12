@@ -25,6 +25,8 @@ from rebar.llm.plan_review.attest import compute_validity
 from rebar.llm.plan_review.det_floor import PlanContext
 from rebar.llm.plan_review.manifest import build_manifest, manifest_material_parts
 from rebar.llm.plan_review.material_diff import (
+    CHECKBOX_NOTE,
+    components_with_diagnostics,
     explain_material_change,
     material_components,
 )
@@ -69,7 +71,7 @@ def _wire(monkeypatch, ctx: PlanContext) -> None:
 
 def _attestation(signed_ctx: PlanContext, *, kind: str = "completion-verifier") -> dict:
     """A signed attestation over ``signed_ctx``: the composite plus the component parts."""
-    parts = material_components(signed_ctx)
+    parts = components_with_diagnostics(signed_ctx)
     lines = [f"{kind}: PASS", f"material: {material_fingerprint(signed_ctx)}"]
     lines += [f"material-part: {name} {digest} {size}" for name, (digest, size) in parts.items()]
     return {"manifest": lines, "signed_at": 100}
@@ -222,6 +224,101 @@ def test_ticking_plus_added_prose_names_only_description(monkeypatch) -> None:
     assert res["verdict"] == "stale-material"
     assert "description" in res["reason"]
     assert "children" not in res["reason"]
+
+
+# ── every reason carries the checkbox note, INCLUDING the named-delta path (b886) ──
+@pytest.mark.parametrize(
+    "current",
+    [
+        _ctx(description=_UNTICKED + "\nnew evidence prose\n"),
+        _ctx(file_impact=[{"path": "a.py"}]),
+        _ctx(children=("c1-1111-2222-3333",)),
+    ],
+    ids=["description", "file_impact", "children"],
+)
+def test_named_delta_reason_still_carries_the_checkbox_note(monkeypatch, current) -> None:
+    """The PRIMARY branch — a current attestation with a nameable delta — is the one nearly
+    every author reads, and it was the one branch omitting the note (bug b886)."""
+    _wire(monkeypatch, current)
+    res = compute_validity(_attestation(_ctx()), _state(current), "completion-verifier")
+    assert res["verdict"] == "stale-material"
+    assert res["reason"].startswith("the ticket was materially edited")
+    assert CHECKBOX_NOTE in res["reason"]
+
+
+def test_ac_text_edit_is_stale_and_says_the_text_moved(monkeypatch) -> None:
+    """Held-out: editing AC ITEM TEXT stales the attestation, and the reason says so."""
+    current = _ctx(description=_UNTICKED.replace("- [ ] beta", "- [ ] beta (revised)"))
+    _wire(monkeypatch, current)
+    res = compute_validity(_attestation(_ctx()), _state(current), "completion-verifier")
+    assert res["verdict"] == "stale-material"
+    assert "TEXT changed" in res["reason"]
+    assert "checkbox state is unchanged" in res["reason"]
+    assert CHECKBOX_NOTE in res["reason"]
+
+
+def test_tick_only_edit_yields_no_staleness_at_all(monkeypatch) -> None:
+    """Held-out counterpart: flipping ONLY box state never produces stale-material."""
+    ticked = _ctx(description=_TICKED)
+    _wire(monkeypatch, ticked)
+    res = compute_validity(
+        _attestation(_ctx(description=_UNTICKED)), _state(ticked), "completion-verifier"
+    )
+    assert res["valid"] is True and res["verdict"] == "certified"
+
+
+def test_text_edit_plus_ticks_separates_the_two_edits(monkeypatch) -> None:
+    """The message the bug report asked for: an author who ticked boxes AND edited text in
+    one ``rebar edit`` must be able to tell which one staled the review."""
+    current = _ctx(description=_TICKED.replace("- [x] alpha", "- [x] alpha (revised)"))
+    _wire(monkeypatch, current)
+    res = compute_validity(_attestation(_ctx()), _state(current), "completion-verifier")
+    assert res["verdict"] == "stale-material"
+    assert "TEXT changed" in res["reason"]
+    assert "0 -> 2 ticked" in res["reason"]
+    assert "NOT the cause" in res["reason"]
+
+
+def test_checkbox_clause_is_omitted_when_the_attestation_predates_it(monkeypatch) -> None:
+    """An attestation signed before the diagnostic line existed gets no clause — never a
+    guess — but still gets the note and the named delta."""
+    signed = _ctx()
+    parts = material_components(signed)  # basis only: no ``description_boxes`` line
+    att = {
+        "manifest": [
+            "completion-verifier: PASS",
+            f"material: {material_fingerprint(signed)}",
+            *(f"material-part: {n} {d} {s}" for n, (d, s) in parts.items()),
+        ],
+        "signed_at": 100,
+    }
+    current = _ctx(description=_TICKED + "\nprose\n")
+    _wire(monkeypatch, current)
+    res = compute_validity(att, _state(current), "completion-verifier")
+    assert res["verdict"] == "stale-material"
+    assert "changed: description" in res["reason"]
+    assert "ticked" not in res["reason"]
+    assert CHECKBOX_NOTE in res["reason"]
+
+
+def test_diagnostic_component_is_not_part_of_the_material_basis() -> None:
+    """``description_boxes`` must never reach the composite or the delta — it is diagnostic
+    only, so it cannot change a gate outcome."""
+    from rebar.llm.plan_review.material_diff import BOXES_COMPONENT, COMPONENT_ORDER
+
+    assert BOXES_COMPONENT not in COMPONENT_ORDER
+    assert BOXES_COMPONENT not in material_components(_ctx())
+    assert BOXES_COMPONENT in components_with_diagnostics(_ctx())
+
+
+def test_a_tick_only_edit_produces_no_delta_despite_the_diagnostic() -> None:
+    """The diagnostic differs across a tick, but ``describe_delta`` must ignore it."""
+    from rebar.llm.plan_review.material_diff import BOXES_COMPONENT, describe_delta
+
+    unticked = components_with_diagnostics(_ctx(description=_UNTICKED))
+    ticked = components_with_diagnostics(_ctx(description=_TICKED))
+    assert unticked[BOXES_COMPONENT] != ticked[BOXES_COMPONENT]
+    assert describe_delta(unticked, ticked) is None
 
 
 # ── pre-330c grandfather: no spurious component diff (bug 96d1) ─────────────────
