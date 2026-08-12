@@ -452,3 +452,91 @@ def test_override_requires_a_reason(ticket: str, rebar_repo: Path) -> None:
     with pytest.raises(CommandError):
         leaf.comment(ticket, f"KEY={value}", repo_root=str(rebar_repo), allow_secret_pattern="")
     assert _comments(ticket, rebar_repo) == []
+
+
+# ------------------------------------------------------- clear-text-logging (alerts 83-87)
+
+
+def test_the_cli_forced_write_log_names_the_family_and_not_the_secret(
+    ticket: str, rebar_repo: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The CLI forced-write audit log must name WHICH detector was bypassed, never WHAT.
+
+    CodeQL flags this log site (``py/clear-text-logging-sensitive-data``) because the
+    logged expression reads out of the event ``data`` payload, which by construction may
+    carry a credential shape — that is what the screen just detected. What it actually
+    reads is ``secret_override["families"]``, assembled by
+    :func:`rebar.secret_screen.override_record` from ``SecretFinding.family``, a literal
+    from the module-level pattern table; :class:`~rebar.secret_screen.SecretFinding` has
+    no value field at all. That makes the alert a taint over-approximation rather than a
+    leak — and this test is what keeps it one, so a future edit cannot start logging the
+    value (or a prefix of it) without failing here.
+
+    The library route (``allow_secret_pattern=`` passed to ``append_event``) is pinned by
+    ``test_force_override_lands_the_write_and_records_it_as_forced``; this covers the
+    OTHER site, the CLI route through ``forced_secret_write`` -> ``screen_event``.
+    """
+    from rebar._commands import main as commands_main
+
+    value = _fake_secret("sk-ant-api03-", 95)
+    head, tail = value[len("sk-ant-api03-") :][:12], value[-12:]
+
+    with caplog.at_level(0):
+        assert (
+            commands_main(
+                [
+                    "comment",
+                    ticket,
+                    f"KEY={value}",
+                    "--allow-secret-pattern=synthetic fixture",
+                ]
+            )
+            == 0
+        )
+
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "FORCED" in logged, "the forced write must still be announced"
+    assert "Anthropic API key" in logged, (
+        "the log must keep naming which detector was bypassed — redacting the family "
+        "would remove the diagnostic value without removing any secret"
+    )
+    fragments = (
+        (value, "the secret"),
+        (head, "a head fragment"),
+        (tail, "a tail fragment"),
+    )
+    for fragment, label in fragments:
+        assert fragment not in logged, f"{label} leaked into the CLI forced-write log"
+    assert len(_comments(ticket, rebar_repo)) == 1, "the forced write must still land"
+
+
+def test_usage_errors_never_echo_the_override_reason(
+    ticket: str, rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The three CLI usage-error prints must not carry the ``--allow-secret-pattern`` value.
+
+    CodeQL's sensitive-data heuristic flags :func:`rebar._commands._extract_allow_secret`
+    on its NAME and taints its whole return tuple, so plain argv inherits a "secret"
+    label and every downstream print is reported. Two things make that false, and this
+    test pins both: the flag token is STRIPPED from the returned argv, so its value
+    provably cannot reach these prints; and each print still names the argument it
+    rejected, which is the whole diagnostic point of the message.
+    """
+    from rebar._commands import main as commands_main
+
+    sentinel = "override-reason-sentinel-must-not-be-echoed"
+    flag = f"--allow-secret-pattern={sentinel}"
+
+    cases = (
+        ("unknown command", ["nosuchcommand", flag], "nosuchcommand"),
+        ("unrecognised option", ["comment", ticket, "body", "--bogus", flag], "--bogus"),
+        ("surplus positional", ["comment", ticket, "body", "surplus", flag], "surplus"),
+    )
+    for label, argv, expected_echo in cases:
+        commands_main(list(argv))
+        captured = capsys.readouterr()
+        for channel, text in (("stdout", captured.out), ("stderr", captured.err)):
+            assert sentinel not in text, f"the override reason leaked into {channel} ({label})"
+        assert expected_echo in captured.err, (
+            f"the {label} usage error must still name the argument it rejected"
+        )
