@@ -313,21 +313,23 @@ def test_ticket_pointer_reporting_never_changes_the_exit_code(gate, tmp_path, ca
     assert "dce2-b93d-4112-451c" in combined, "main must PRINT the report, not just compute it"
 
 
-def test_the_real_schema_parks_exactly_one_marker_against_a_ticket(gate):
+def test_the_real_schema_parks_exactly_two_markers_against_a_ticket(gate):
     """Today's expected state, pinned so a newly-parked marker surfaces in review.
 
     Task f020 deleted the inbound absence-probe port and with it the ONLY reader of
-    ``JiraConfig.resolved_statuses``. The key itself is documented and operator-facing,
-    so removing it is a user-visible change deferred to task 549c-032f-6cb0-4258; until
-    that decision lands the field is inert and carries a ticket-pointing marker. This
-    pin is deliberately EXACT (one report, naming that ticket) rather than a bare
-    non-empty check: a loosened assertion would let a second, unrelated field be parked
-    against a ticket without anyone noticing.
+    ``JiraConfig.resolved_statuses``. Task 549c then decided DEPRECATE-not-remove (the key
+    was behaviour-affecting as recently as v0.10.1, so an existing config must keep
+    loading) and removed the write-only DC plumbing that had been the last read of
+    ``ReconcilerConfig.resolved_statuses`` — so BOTH fields are now inert and both carry a
+    marker pointing at the hard-removal follow-up, f408-64ad-ee41-46b6, which is blocked on
+    operator sign-off. This pin is deliberately EXACT (two reports, naming that ticket)
+    rather than a bare non-empty check: a loosened assertion would let a third, unrelated
+    field be parked against a ticket without anyone noticing.
     """
     reports = gate.ticket_pointer_reports(_REAL_SCHEMA)
-    assert len(reports) == 1, f"exactly one marker parked against a ticket; got {reports!r}"
-    assert "resolved_statuses" in reports[0]
-    assert "549c-032f-6cb0-4258" in reports[0]
+    assert len(reports) == 2, f"exactly two markers parked against a ticket; got {reports!r}"
+    assert all("resolved_statuses" in r for r in reports)
+    assert all("f408-64ad-ee41-46b6" in r for r in reports)
 
 
 def test_ci_wires_the_gate(gate):

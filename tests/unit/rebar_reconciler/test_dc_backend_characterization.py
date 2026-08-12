@@ -111,6 +111,7 @@ from .backend_support import FakeTransport
 # MUTATED: DEFAULT_RESOLVED_STATUSES {"Resolved","Done","Cancelled"} ->
 #   {"Resolved","Done","Canceled"}; FAILED:
 #   test_dc_default_resolved_statuses_pinned
+#   (constant and test both RETIRED by task 549c; entry kept as the record)
 #
 # TWO MUTATIONS INITIALLY SURVIVED, and fixing them changed the suite. Recorded
 # because a mutation ledger that only lists successes is not evidence:
@@ -529,11 +530,7 @@ def test_dc_identity_is_identity_label_tracks_parse():
 
 
 # ---------------------------------------------------------------------------
-# The DC resolved-status default (still an operator-facing config default).
+# The DC resolved-status default was RETIRED by task 549c along with the
+# write-only transport plumbing it fed (see test_jira_dc_config_settings.py).
+# The mutation-ledger entry below is kept as the historical record.
 # ---------------------------------------------------------------------------
-
-
-def test_dc_default_resolved_statuses_pinned():
-    from rebar_reconciler.adapters.jira_datacenter.settings import DEFAULT_RESOLVED_STATUSES
-
-    assert DEFAULT_RESOLVED_STATUSES == frozenset({"Resolved", "Done", "Cancelled"})

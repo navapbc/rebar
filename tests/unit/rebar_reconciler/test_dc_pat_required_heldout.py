@@ -45,7 +45,6 @@ def _settings(pat: str) -> dc_settings.JiraDataCenterSettings:
         project="REB",
         allow_insecure=False,
         ca_bundle="",
-        resolved_statuses=dc_settings.DEFAULT_RESOLVED_STATUSES,
         pat=pat,
     )
 

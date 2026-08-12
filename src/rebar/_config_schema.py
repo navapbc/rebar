@@ -35,7 +35,7 @@ from rebar._config_coercion import (
     _src,
     unknown_key_hint,
 )
-from rebar._deprecations import raise_or_warn_cfg_key, warn_deprecated
+from rebar._deprecations import raise_or_warn_cfg_key, warn_deprecated, warn_deprecated_cfg_keys
 
 logger = logging.getLogger("rebar.config")
 
@@ -457,11 +457,11 @@ class ReconcilerConfig:
     # options["verify"] value (never a bare False — see transport.py's
     # build_client_from_settings). Empty means "use the library's TLS default".
     ca_bundle: str = ""
-    # Workflow status names the DC absence-probe treats as "resolved / out of the
-    # working set". Defaults to Cloud/DIG's own configured names, since a
-    # self-hosted DC workflow can name its resolved states anything and sharing
-    # Cloud's hardcoded classifier names verbatim would misclassify a resolved
-    # DC issue as PRESENT_FILTERED.
+    # DEPRECATED (task 549c) — accepted and validated exactly as before, but nothing reads
+    # it and setting it warns. It fed the DC absence probe, deleted with task f020; 549c
+    # removed the write-only plumbing that carried it to a transport which never consulted
+    # it. Why a deprecation and not a tombstone: see `_deprecations.py`.
+    # read-via: deprecated, inert pending task f408-64ad-ee41-46b6 (hard removal)
     resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
     # Ceiling (characters) the DC comment sanitizer truncates a comment body to —
     # this instance's `jira.text.field.character.limit`, which is ADMIN-SETTABLE on
@@ -481,12 +481,11 @@ class JiraConfig:
     url: str = ""
     user: str = ""
     project: str = ""
-    # INERT: its only consumer, adapters/jira/probe.py, was deleted with the dormant
-    # inbound absence-probe port (task f020), so nothing reads this today. Retained, not
-    # removed, because it is a DOCUMENTED operator-facing key — dropping it is a
-    # user-visible change needing its own deprecate-vs-remove call. REBAR_JIRA_RESOLVED_
-    # STATUSES still auto-derives from it, so existing config keeps validating unchanged.
-    # read-via: inert pending task 549c-032f-6cb0-4258 (deprecate-vs-remove decision)
+    # DEPRECATED (task 549c) — accepted and validated exactly as before, but nothing reads
+    # it and setting it warns. Its only consumer, adapters/jira/probe.py, went with the
+    # dormant inbound absence-probe port (task f020). REBAR_JIRA_RESOLVED_STATUSES still
+    # auto-derives from it. Why a deprecation and not a tombstone: see `_deprecations.py`.
+    # read-via: deprecated, inert pending task f408-64ad-ee41-46b6 (hard removal)
     resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
     # Overrides ONLY the url scheme check below (parity with reconciler.allow_insecure);
     # never relaxes certificate verification. Env override auto-derives to
@@ -771,6 +770,7 @@ def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -
         for tkey in list(d):
             if raise_or_warn_cfg_key(sect, tkey) is not None:
                 d.pop(tkey)  # warn-class: consumed here so _warn_unknown does not re-flag it
+        warn_deprecated_cfg_keys(sect, d, renames=_ALIASES.get(sect, {}), logger=logger)
         for old, new in _ALIASES.get(sect, {}).items():
             if old in d:
                 if new not in d:

@@ -46,7 +46,6 @@ def _settings(**overrides):
         "project": "DCPROJ",
         "allow_insecure": False,
         "ca_bundle": "",
-        "resolved_statuses": frozenset({"Done"}),
         "pat": "a-personal-access-token",
     }
     base.update(overrides)

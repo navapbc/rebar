@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import sys
 import warnings
-from collections.abc import Mapping
+from collections.abc import Container, Iterable, Mapping
 from dataclasses import dataclass
 
 # Default logger for log-channel signals. Config/LLM callers pass their own module
@@ -109,6 +109,22 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # `_scheduled` (removable) rather than `_permanent` (kept forever). The old
     # surfaces are NOT deleted (announce-then-remove): `review_ticket` and its MCP
     # tool keep working, they just signal on every call.
+    # ── config keys: SCHEDULED RETIREMENTS (no replacement) — task 549c ────────
+    # `resolved_statuses` configured the inbound absence probe, whose last consumer went
+    # with task f020. Unlike the rows above these are not superseded by anything — there is
+    # no replacement key, the behaviour simply no longer exists, so `replacement` is "" and
+    # `_message` words it as a retirement.
+    #
+    # They are DEPRECATED rather than tombstoned deliberately. The precedent for retiring a
+    # zero-read-site operator-facing key (`code_health.enabled` below) deletes the field and
+    # tombstones the key, but that was done "per the operator ruling" on bug a573 — sign-off
+    # first. There is no such ruling here, and the key was live and behaviour-affecting as
+    # recently as shipped v0.10.1 (docs of the day told self-hosted operators to set it), so
+    # an existing pyproject.toml plausibly carries it. Keys therefore keep loading and
+    # validating unchanged and merely warn; the hard removal is task f408-64ad-ee41-46b6,
+    # which is blocked on operator sign-off.
+    _scheduled("cfg", "jira.resolved_statuses", ""),
+    _scheduled("cfg", "reconciler.resolved_statuses", ""),
     _scheduled("cli", "rebar review", "rebar review-plan"),
     _scheduled("lib", "rebar.llm.review_ticket", "rebar.llm.review_plan"),
     _scheduled("mcp", "review_ticket", "the review_plan tool"),
@@ -292,6 +308,32 @@ def raise_or_warn_cfg_key(sect: str, key: str) -> RemovedInput | None:
     return ri
 
 
+def warn_deprecated_cfg_keys(
+    sect: str,
+    keys: Iterable[str],
+    *,
+    renames: Container[str] = (),
+    logger: logging.Logger | None = None,
+) -> None:
+    """WARN for each deprecated-but-still-HONORED config key in ``keys``.
+
+    The third of the three retirement stages a config key can be in, and the only one that
+    changes nothing about how the key is parsed:
+
+    * RENAME  — handled by the caller's alias table; the value moves to the canonical key.
+    * REMOVAL — :func:`raise_or_warn_cfg_key`; the key is dropped (or raises).
+    * DEPRECATION (here) — the key still coerces and validates exactly as before and merely
+      announces its removal horizon, so the caller MUST fall through to normal coercion.
+
+    This registry is the single source of truth, which is why the caller passes its section's
+    ``renames`` in rather than keeping a parallel list of deprecated-but-honored keys that
+    would have to be kept in sync with :data:`REGISTRY`.
+    """
+    for key in keys:
+        if f"cfg:{sect}.{key}" in REGISTRY and key not in renames:
+            warn_deprecated(f"cfg:{sect}.{key}", logger=logger)
+
+
 def raise_or_warn_file(present: list) -> None:
     """For each file-kind tombstone whose registry name appears in ``present`` (the
     list of legacy files that EXIST, by their registry name), raise or WARN."""
@@ -330,6 +372,14 @@ def _message(dep: Deprecation) -> str:
     """The user-facing signalling message for ``dep`` (wording keys off ``permanent``)."""
     if dep.permanent:
         return f"{dep.name} is a permanent alias of {dep.replacement} (no removal planned)."
+    if not dep.replacement:
+        # A RETIREMENT, not a supersession: the surface is still honored but has nothing to
+        # migrate to. Mirrors the same branch in `_tombstone_message`, so the two registries
+        # word "no replacement" identically instead of emitting "use <blank>".
+        return (
+            f"{dep.name} is deprecated and no longer has any effect "
+            f"(scheduled for removal in {dep.remove_in})."
+        )
     return (
         f"{dep.name} is deprecated; use {dep.replacement} "
         f"(scheduled for removal in {dep.remove_in})."

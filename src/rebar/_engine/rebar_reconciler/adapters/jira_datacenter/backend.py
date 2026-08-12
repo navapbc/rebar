@@ -299,9 +299,7 @@ def _build_jira_datacenter_backend(config: Any) -> JiraDataCenterBackend:
 
     settings = resolve_jira_datacenter_settings()
     client = build_client_from_settings(settings)
-    transport = JiraDataCenterTransport(
-        client=client, project=settings.project, resolved_statuses=settings.resolved_statuses
-    )
+    transport = JiraDataCenterTransport(client=client, project=settings.project)
     # Conformance is asserted HERE, before the backend can be handed to a pass:
     # a missing member must be a loud construction failure, not a crash partway
     # through a writing pass that has already mutated the remote (story J9).

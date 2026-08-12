@@ -56,7 +56,6 @@ def _built_client_kwargs(monkeypatch: Any, **overrides: Any) -> dict[str, Any]:
         project=overrides.get("project", "DC"),
         allow_insecure=overrides.get("allow_insecure", False),
         ca_bundle=overrides.get("ca_bundle", ""),
-        resolved_statuses=frozenset({"Done"}),
         pat=overrides.get("token", "pat-xyz"),
     )
     monkeypatch.setattr(_t, "_jira_client_class", lambda: _Spy, raising=False)

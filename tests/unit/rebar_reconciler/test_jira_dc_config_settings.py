@@ -116,25 +116,32 @@ def test_a_malformed_config_propagates_rather_than_degrading_to_env_only(monkeyp
         _settings.resolve_jira_datacenter_settings()
 
 
-# --- AC: resolved_statuses default and custom ---------------------------------------------
+# --- AC: the retired resolved_statuses plumbing (task 549c) --------------------------------
 
 
-def test_resolved_statuses_defaults_to_the_documented_set() -> None:
-    """The default the absence-probe classifies against when the config is unset."""
-    from rebar_reconciler.adapters.jira_datacenter.settings import DEFAULT_RESOLVED_STATUSES
+def test_the_transport_no_longer_carries_a_resolved_statuses_attribute() -> None:
+    """Task f020 deleted the inbound absence probe -- the only consumer of the value --
+    leaving ``_resolved_statuses`` stored on every transport and read by nothing. Task 549c
+    removed that write-only plumbing, so neither the ctor keyword nor the attribute exists.
 
-    assert DEFAULT_RESOLVED_STATUSES == frozenset({"Resolved", "Done", "Cancelled"})
-
-
-def test_a_custom_workflow_status_set_reaches_the_transport() -> None:
-    """A self-hosted DC workflow can name its resolved states anything, and the
-    configured set must reach the transport rather than being dropped in settings."""
+    Pinned rather than simply deleted: a silent reintroduction would recreate a field that
+    looks configurable, is documented as such, and changes nothing."""
     from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
-    custom = frozenset({"Shipped", "Abandoned"})
-    transport = JiraDataCenterTransport(client=object(), project="X", resolved_statuses=custom)
+    transport = JiraDataCenterTransport(client=object(), project="X")
+    assert not hasattr(transport, "_resolved_statuses")
 
-    assert transport._resolved_statuses == custom, "the configured set must reach the transport"
+    with pytest.raises(TypeError):
+        JiraDataCenterTransport(  # type: ignore[call-arg]
+            client=object(), project="X", resolved_statuses=frozenset({"Shipped"})
+        )
+
+
+def test_settings_no_longer_expose_resolved_statuses() -> None:
+    """The NamedTuple member went with the transport plumbing it existed to feed."""
+    from rebar_reconciler.adapters.jira_datacenter.settings import JiraDataCenterSettings
+
+    assert "resolved_statuses" not in JiraDataCenterSettings._fields
 
 
 # --- AC(13) sub-requirements the earlier tests did NOT cover -------------------------------
@@ -202,7 +209,6 @@ def test_allow_insecure_does_not_relax_certificate_verification(monkeypatch) -> 
         project="DC",
         allow_insecure=True,  # the override under test
         ca_bundle="",
-        resolved_statuses=frozenset({"Done"}),
         pat="pat-xyz",
     )
     monkeypatch.setattr(_t, "_jira_client_class", lambda: _Spy, raising=False)

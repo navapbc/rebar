@@ -207,8 +207,7 @@ class JiraDataCenterTransport(
     capability (ticket 465d) on an injected ``jira.JIRA``-shaped client.
 
     ``__init__`` and the attributes every mixin depends on
-    (``self._client`` / ``self.project`` / ``self._epic_link_field_id`` /
-    ``self._resolved_statuses``) live on ``_base._TransportBase``, which every
-    mixin above inherits — so construction happens exactly once regardless of
-    how many capability mixins are composed.
+    (``self._client`` / ``self.project`` / ``self._epic_link_field_id``) live on
+    ``_base._TransportBase``, which every mixin above inherits — so construction
+    happens exactly once regardless of how many capability mixins are composed.
     """
