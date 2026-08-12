@@ -34,6 +34,7 @@ import subprocess
 import pytest
 
 from rebar._store import lock as _lock
+from rebar._store import lock_owner as _owner
 
 _OLD_CONTAINER = "1e0fab75d5bd"  # the container that was SIGKILLed mid-store-write
 _NEW_CONTAINER = "9a7c22ef4411"  # its replacement after `compose up -d`
@@ -53,16 +54,16 @@ def _seed(tmp_path, stamp: str) -> str:
     """Create a held mkdir lock dir carrying *stamp* as its owner file."""
     lock_dir = os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME)
     os.mkdir(lock_dir)
-    with open(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
+    with open(os.path.join(lock_dir, _owner._MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
         fh.write(stamp)
     return lock_dir
 
 
 def _pose_as(monkeypatch, *, boot_id: str | None, hostname: str, ns: str | None) -> None:
     """Make this process look like a container: fixed boot id, container-id hostname, ns."""
-    monkeypatch.setattr(_lock, "_read_boot_id", lambda: boot_id)
-    monkeypatch.setattr(_lock, "_read_pid_namespace_id", lambda: ns)
-    monkeypatch.setattr(_lock.socket, "gethostname", lambda: hostname)
+    monkeypatch.setattr(_owner, "_read_boot_id", lambda: boot_id)
+    monkeypatch.setattr(_owner, "_read_pid_namespace_id", lambda: ns)
+    monkeypatch.setattr(_owner.socket, "gethostname", lambda: hostname)
 
 
 def test_container_recreate_orphan_is_reclaimed(tmp_path, monkeypatch):
@@ -71,7 +72,7 @@ def test_container_recreate_orphan_is_reclaimed(tmp_path, monkeypatch):
     promptly instead of refusing forever."""
     # The doomed container stamps the lock, then is SIGKILLed (pid never released it).
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
-    orphan_stamp = _lock._owner_stamp()
+    orphan_stamp = _owner._owner_stamp()
     _seed(tmp_path, orphan_stamp)
 
     # Its replacement boots: new container id, new pid namespace, same host.
@@ -89,20 +90,20 @@ def test_cross_namespace_reclaim_requires_the_fcntl_proof(tmp_path, monkeypatch)
     """The cross-namespace reclaim rests entirely on holding the fcntl leg. Without that
     proof asserted, the same stamp is NOT judged stale — the guard is not merely loosened."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
-    lock_dir = _seed(tmp_path, _lock._owner_stamp())
+    lock_dir = _seed(tmp_path, _owner._owner_stamp())
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_NEW_CONTAINER, ns=_NEW_NS)
 
-    assert _lock._mkdir_lock_is_stale(lock_dir) is False, "no reclaim without the fcntl proof"
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
+    assert _owner._mkdir_lock_is_stale(lock_dir) is False, "no reclaim without the fcntl proof"
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
 
 
 def test_live_owner_in_same_namespace_is_still_never_reclaimed(tmp_path, monkeypatch):
     """SAFETY (no regression of yaw-gravel-linen): a lock owned by a LIVE process in this
     same pid namespace is never reclaimed, even under the fcntl proof — acquire times out."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
-    lock_dir = _seed(tmp_path, _lock._owner_stamp())  # stamped with OUR live pid
+    lock_dir = _seed(tmp_path, _owner._owner_stamp())  # stamped with OUR live pid
 
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
     with pytest.raises(_lock.LockTimeout):
         _lock.acquire(str(tmp_path), timeout=1, attempts=1)
     assert os.path.isdir(lock_dir)
@@ -118,11 +119,11 @@ def test_foreign_host_is_still_never_reclaimed(tmp_path, monkeypatch):
         hostname="host-a",
         ns=_OLD_NS,
     )
-    foreign = _lock._owner_stamp().replace(f"pid={os.getpid()}", f"pid={_dead_pid()}")
+    foreign = _owner._owner_stamp().replace(f"pid={os.getpid()}", f"pid={_dead_pid()}")
     lock_dir = _seed(tmp_path, foreign)
 
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname="host-b", ns=_NEW_NS)
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
     with pytest.raises(_lock.LockTimeout):
         _lock.acquire(str(tmp_path), timeout=1, attempts=1)
     assert os.path.isdir(lock_dir)
@@ -133,10 +134,10 @@ def test_dead_owner_in_same_namespace_is_reclaimed(tmp_path, monkeypatch):
     namespace, dead pid."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
     dead = _dead_pid()
-    monkeypatch.setattr(_lock, "_process_start_time", lambda pid: None)
-    lock_dir = _seed(tmp_path, _lock._owner_stamp().replace(f"pid={os.getpid()}", f"pid={dead}"))
+    monkeypatch.setattr(_owner, "_process_start_time", lambda pid: None)
+    lock_dir = _seed(tmp_path, _owner._owner_stamp().replace(f"pid={os.getpid()}", f"pid={dead}"))
 
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
 
 
 def test_recycled_pid_does_not_masquerade_as_the_owner(tmp_path, monkeypatch):
@@ -144,16 +145,16 @@ def test_recycled_pid_does_not_masquerade_as_the_owner(tmp_path, monkeypatch):
     inherited the number — the true owner is gone, so the lock is stale. Without this the
     lock would be permanently unreclaimable on pid reuse (the same defect class)."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
-    monkeypatch.setattr(_lock, "_process_start_time", lambda pid: "111")
-    lock_dir = _seed(tmp_path, _lock._owner_stamp())  # stamped start=111, our own live pid
+    monkeypatch.setattr(_owner, "_process_start_time", lambda pid: "111")
+    lock_dir = _seed(tmp_path, _owner._owner_stamp())  # stamped start=111, our own live pid
 
     # The pid is still alive, but it is now a different process (start time moved on).
-    monkeypatch.setattr(_lock, "_process_start_time", lambda pid: "222")
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
+    monkeypatch.setattr(_owner, "_process_start_time", lambda pid: "222")
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is True
 
     # Same pid, same start time → genuinely the live owner → never reclaimed.
-    monkeypatch.setattr(_lock, "_process_start_time", lambda pid: "111")
-    assert _lock._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
+    monkeypatch.setattr(_owner, "_process_start_time", lambda pid: "111")
+    assert _owner._mkdir_lock_is_stale(lock_dir, fcntl_held=True) is False
 
 
 def test_new_stamp_is_inert_to_a_legacy_reader(tmp_path, monkeypatch):
@@ -161,7 +162,7 @@ def test_new_stamp_is_inert_to_a_legacy_reader(tmp_path, monkeypatch):
     never parse into "this host + a dead pid" for such a reader, or the old code could reclaim
     a live lock. Reproduces the legacy parse verbatim and asserts it declines."""
     _pose_as(monkeypatch, boot_id=_HOST_BOOT_ID, hostname=_OLD_CONTAINER, ns=_OLD_NS)
-    stamp = _lock._owner_stamp()
+    stamp = _owner._owner_stamp()
 
     host, sep, pid_s = stamp.partition(":")
     legacy_would_probe = bool(sep) and host == socket.gethostname() and pid_s.isdigit()

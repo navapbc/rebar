@@ -20,12 +20,13 @@ import sys
 import pytest
 
 from rebar._store import lock as _lock
+from rebar._store import lock_owner as _owner
 
 
 def _seed_stamp(tmp_path, stamp: str) -> str:
     lock_dir = tmp_path / _lock.MKDIR_LOCK_NAME
     lock_dir.mkdir(exist_ok=True)
-    (lock_dir / _lock._MKDIR_OWNER_FILE).write_text(stamp)
+    (lock_dir / _owner._MKDIR_OWNER_FILE).write_text(stamp)
     return str(lock_dir)
 
 
@@ -42,7 +43,7 @@ def test_describes_a_held_lock_from_the_existing_stamp(tmp_path):
         handle.release()
 
     assert f"pid={os.getpid()}" in holder
-    assert f"host={_lock._host_identity()}" in holder
+    assert f"host={_owner._host_identity()}" in holder
     assert "held=" in holder
     # Our own pid is, definitionally, live — so the message distinguishes a real holder
     # from a stale stamp.
@@ -52,8 +53,8 @@ def test_describes_a_held_lock_from_the_existing_stamp(tmp_path):
 def test_a_dead_stamped_pid_reports_not_running(tmp_path, monkeypatch):
     """The other half of the distinction: an orphaned stamp says so instead of implying a
     live holder."""
-    monkeypatch.setattr(_lock, "_pid_alive", lambda _pid: False)
-    _seed_stamp(tmp_path, _lock._owner_stamp())
+    monkeypatch.setattr(_owner, "_pid_alive", lambda _pid: False)
+    _seed_stamp(tmp_path, _owner._owner_stamp())
 
     assert "pid_state=not-running" in _lock.describe_lock_holder(str(tmp_path))
 
@@ -103,8 +104,8 @@ def test_describe_never_raises_on_an_unreadable_stamp(tmp_path, monkeypatch):
     def boom(*_a, **_kw):
         raise RuntimeError("unreadable")
 
-    monkeypatch.setattr(_lock, "_parse_v2_stamp", boom)
-    _seed_stamp(tmp_path, _lock._owner_stamp())
+    monkeypatch.setattr(_owner, "_parse_v2_stamp", boom)
+    _seed_stamp(tmp_path, _owner._owner_stamp())
 
     assert _lock.describe_lock_holder(str(tmp_path)).startswith("unknown (")
 
