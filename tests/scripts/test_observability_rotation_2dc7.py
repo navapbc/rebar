@@ -68,8 +68,9 @@ def _environment(tmp_path: Path, seeded_offset: int) -> tuple[dict[str, str], di
         "journalctl",
         f"""
         for _ in {{1..{_MARKERS_IN_JOURNAL}}}; do
-          printf '%s\\n' VOTER_ERROR MERGE_CHANGE_ERROR AUTODEPLOY_ERROR
-          printf '%s\\n' AUTODEPLOY_DEFERRED AUTODEPLOY_REVIEW_INTERRUPT
+          printf '%s\\n' 'VOTER_ERROR {{"ts": 1}}' 'MERGE_CHANGE_ERROR {{"ts": 1}}'
+          printf '%s\\n' 'AUTODEPLOY_ERROR {{"ts": 1}}' 'AUTODEPLOY_DEFERRED {{"ts": 1}}'
+          printf '%s\\n' 'AUTODEPLOY_REVIEW_INTERRUPT {{"ts": 1}}'
           printf '%s\\n' 'gerrit_to_platform error'
         done
         """,
