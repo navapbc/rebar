@@ -98859,9 +98859,17 @@
       "updated_at": "2026-08-07T10:12:05Z"
     },
     "ccba-3b6a-4241-4f59": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nHistorical audit (analysis ticket b902-18af-14ed-4da1): of 894 BLOCK\u2192re-review transitions, 13-14% re-blocked ONLY on the same persisting criteria \u2014 the author re-submitted without addressing the outstanding findings, paying a full review (~$3-7) to learn nothing new. A staged-LLM re-review was modeled and rejected (net negative: 45% of re-reviews PASS and would pay an extra serial call). The approved compromise is a zero-LLM deterministic pre-check, WARN-ONLY (operator decision 2026-08-11): it must never hard-block, because ~8% of BLOCK\u2192PASS flips occur with no material change at all (verdict flap) and a hard decline would freeze those recoveries. This mirrors the escape-hatch posture of the shipped BLOCK-verdict-reuse (`plan_review/reuse.py`).\n\n## Plan\n\n1. When `review-plan` runs on a ticket whose LATEST attested verdict is BLOCK with recorded blocking findings, extract each blocking finding's cited evidence anchors (the finding's `evidence` strings and quoted plan fragments recorded in the sidecar).\n2. DET check (no LLM): compare the current plan material against the material fingerprinted at the blocking review. If the plan text containing every cited anchor is UNCHANGED (all anchors still present verbatim and description component fingerprint unchanged per `material_parts`), print a WARNING before the review runs: the outstanding blocking findings cite text the revision did not touch, naming the findings and their criteria, and noting the review will likely re-block. Then RUN THE REVIEW ANYWAY (warn-only; no new flag, no decline, no exit-code change).\n3. Anchors that cannot be matched verbatim (paraphrased evidence, structural findings with no quote) are treated as unmatchable and NEVER trigger the warning on their own \u2014 the warning fires only when at least one anchor matched the old text AND all matched anchors are untouched.\n4. Record `precheck.cited_anchor_warning: true|false` in the review's sidecar metrics so the warning's hit rate and predictive value are measurable offline (per ADR 0054).\n\n## Acceptance Criteria\n\n- [ ] Re-reviewing a ticket whose plan is unchanged since a BLOCK (same description component fingerprint) prints the warning naming the persisting findings' criteria, and the review still runs to a verdict. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit -k \"cited_anchor\" -x` passes with a test pinning warning text + review execution.\n- [ ] Re-reviewing after an edit that changed cited text does NOT warn. Verify: covered in the same test module.\n- [ ] Findings with no verbatim-matchable anchors never trigger the warning alone. Verify: covered in the same test module.\n- [ ] The sidecar metrics block records the warning flag on every plan review. Verify: unit test pins the field.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Warn-only DET cited-anchor pre-check before re-reviewing an unaddressed BLOCK"
+      },
       "created_at": "2026-08-12T00:56:50Z",
       "jira_id": "4588396",
       "jira_key": "REB-2741",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-12T00:56:52Z"
     },
@@ -103181,10 +103189,24 @@
     },
     "d147-c219-baf9-4e9e": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context (measured 2026-08-11, analysis ticket b902-18af-14ed-4da1)\n\nZero of 2,093 recorded plan reviews carry a non-empty `overlap` block \u2014 the overlap feature (ADR 0086; ~13% of local usage-log LLM spend, ~$165/5 days plus its historical failure storms) has never surfaced a finding to a reviewer. An instrumented probe of `wire.overlap_findings` on 3 live tickets plus a controlled near-duplicate probe isolated a stacked root cause:\n\n1. **Batch-path verdicts systematically carry `confidence=0.0`.** Live `judge_batch` calls SUCCEED (no exception) and return entries with a real `relation` but `confidence=0.0` \u2014 including an unmistakable near-duplicate pair (same artifact, same feature, paraphrased titles), and every non-abstained real-pipeline verdict observed. `aggregate` requires BOTH orderings \u2265 `overlap_conf_threshold` (0.7), so every pair dies. This has plausibly been fatal since batching landed (c403): the single-pair prompt/contract was calibrated for a confidence field the batched prompt path does not elicit.\n2. **Since 7fa8102477 (08-08), `output_token_limit=1024` truncates any real multi-candidate batch** (K up to 20 candidates \u2192 10-pair batches; ~100+ tokens per verdict entry): the truncated response abstains the WHOLE batch. Probe: ordering-1 batches abstained for 31/31 candidates across 3 tickets. The fix for the 48k retry storms silently zeroed the surviving output path.\n\nUnit tests pass because they use canned runners; no live calibration case pins \"a near-duplicate pair actually surfaces\".\n\n## Plan\n\n1. Fix the batch contract so the model emits a meaningful `confidence` per entry (prompt-side: the overlap-judge prompt's confidence instructions must survive the batched rendering; verify with a live near-duplicate probe emitting confidence >= 0.7).\n2. Right-size the batch output budget: replace the flat `output_token_limit=1024` with a per-batch bound derived from the code's own batch cardinality constant (`_CANDIDATES_PER_CALL`) and a measured per-entry token allowance (measure a real verdict entry's token size in the calibration probe and add headroom), keeping `structured_retry_limit=0` and `transport_attempt_limit=1` so the 48k-storm class stays dead.\n3. Add a live calibration case (T5c discipline) asserting the near-duplicate pair surfaces and an unrelated pair does not, so this failure class cannot regress silently.\n4. Re-measure after landing: surfaced-findings rate over the next N reviews; if still ~0 with the mechanism healthy, THEN have the scrap-vs-keep conversation with working-feature data.\n\nOperator note: until this lands, the drain burns spend with provably zero output \u2014 pausing via the documented `overlap_drain = \"off\"` kill switch is reversible and recommended, but is the operator's call.\n\n## Acceptance Criteria\n\n- [ ] A live near-duplicate probe (two digests naming the same artifact and paraphrased scope) run through `judge_batch` in both orderings yields a non-abstain verdict with `confidence >= 0.7` in each ordering, and `aggregate` surfaces it. Verify: the new calibration script/test output committed with the change.\n- [ ] `judge_batch`'s output budget scales with the batch's pair count (no flat 1024), with `structured_retry_limit=0` and `transport_attempt_limit=1` retained. Verify: `env PATH=\"$PWD/.venv/bin:$PATH\" python -m pytest tests/unit/test_overlap_judge.py -x` passes including a new bound-scaling assertion.\n- [ ] An unrelated-pair probe still yields no surfaced finding (false-flag guard intact). Verify: same calibration evidence.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Overlap detection has never surfaced a finding: batch-path verdicts carry confidence=0.0 and post-08-08 output cap truncates whole batches"
       },
       "created_at": "2026-08-11T22:14:21Z",
