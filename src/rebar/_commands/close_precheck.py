@@ -5,9 +5,10 @@ locked 800-LOC module-size cap).
 :func:`_completion_precheck` is the gate's pre-lock half — the deterministic prechecks
 (bug-class, replacement-link disposition, AC-checkbox completeness, file-impact →
 referencing-commit) followed by the billable ``llm.verify_completion`` run and its
-fail-closed error shaping. Its three private helpers (:func:`_is_live_ticket`,
-:func:`_has_live_replacement_link`, :func:`_referencing_commit_exists`) are called only from
-here. ``transition_close`` re-imports the public seam names so existing monkeypatch targets
+fail-closed error shaping. Its private helpers (:func:`_is_live_ticket`,
+:func:`_has_live_replacement_link`, :func:`_recorded_replacement_target`,
+:func:`_ensure_duplicate_close_is_linked`, :func:`_referencing_commit_exists`) are called only
+from here. ``transition_close`` re-imports the public seam names so existing monkeypatch targets
 (``transition_close._completion_precheck``) and test imports keep working unchanged.
 """
 
@@ -88,6 +89,97 @@ def _has_live_replacement_link(
         link.get("relation") == "supersedes"
         and _is_live_ticket(str(link.get("from_id") or ""), tracker)
         for link in inbound.get("inbound_links") or []
+    )
+
+
+def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
+    """The replacement ticket this bug NAMES, ignoring whether that target is usable.
+
+    :func:`_has_live_replacement_link` answers "is there a usable replacement?"; this answers
+    the strictly weaker "was one ever recorded?". The two differ in exactly one case — a link
+    exists but its target is archived, deleted, or no longer resolvable — and that case earns a
+    different remedy ("re-link to a live canonical") from having recorded nothing at all ("run
+    ``rebar link``"). Kept SEPARATE from the predicate above rather than folded into it because
+    that predicate's bool signature is a monkeypatch target in the disposition-attestation suite
+    (bug 738a), and because the two questions genuinely differ.
+
+    Reads only reduced state and the inbound graph — no LLM, no network. Any unreadable source
+    yields ``None``, which routes to the more conservative "you named none" message.
+    """
+    from rebar.reducer import reduce_ticket
+
+    try:
+        state = reduce_ticket(os.path.join(tracker, ticket_id))
+    except Exception:  # noqa: BLE001 -- an unreadable source degrades to the generic remedy
+        state = None
+    if isinstance(state, dict):
+        for dep in state.get("deps") or []:
+            if dep.get("relation") != "duplicates":
+                continue
+            target = str(dep.get("target_id", dep.get("target", "")) or "")
+            if target:
+                return target
+
+    from rebar.reducer._inbound import find_inbound_relationships
+
+    try:
+        inbound = find_inbound_relationships(ticket_id, tracker)
+    except Exception:  # noqa: BLE001 -- a failed graph read degrades to the generic remedy
+        return None
+    for link in inbound.get("inbound_links") or []:
+        if link.get("relation") != "supersedes":
+            continue
+        source = str(link.get("from_id") or "")
+        if source:
+            return source
+    return None
+
+
+def _ensure_duplicate_close_is_linked(
+    ticket_id: str, ticket_type: str, close_class: str, tracker: str
+) -> None:
+    """Block a ``--class duplicate`` close that names no usable canonical, naming the remedy.
+
+    Before this existed the close fell through to the completion verifier, which correctly
+    FAILED (a duplicate's defect is not resolved by the duplicate) but offered only two
+    impossible remedies: finish work that belongs to the canonical ticket, or mark the criterion
+    ``[operator-attested]`` — a false attestation. The one action that works, recording the
+    link, was never named. Observed on bug 9b70, where the fix was a single
+    ``rebar link 9b70 6a81 duplicates``.
+
+    Deliberately NOT a claim about the canonical's status: a duplicate of an ALREADY-CLOSED
+    canonical is the common case, so the gate asks only that the link exist.
+
+    Scoped to ``duplicate`` alone rather than the whole ``_NON_COMPLETION_BUG_CLASSES`` set:
+    ``not_a_bug`` asserts there is no defect and ``escalated`` may point outside the tracker, so
+    neither owes a ``duplicates`` link; both keep the prior fallthrough to completion verification.
+
+    A GUARD FUNCTION, not an inline branch, on purpose — ``_completion_precheck`` sits at its
+    recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
+    decision points live here and the call site stays unconditional.
+    """
+    if ticket_type != "bug" or close_class != "duplicate":
+        return
+    named = _recorded_replacement_target(ticket_id, tracker)
+    if named:
+        detail = (
+            f"its 'duplicates' link names {named}, which is archived, deleted, or no longer "
+            "resolvable, so there is no canonical ticket left to point at. Re-link it to a live "
+            f"one:\n  rebar link {ticket_id} <canonical> duplicates"
+        )
+    else:
+        detail = (
+            "it records no 'duplicates' link, so it names no canonical ticket. Record the "
+            f"relation first:\n  rebar link {ticket_id} <canonical> duplicates"
+        )
+    raise CommandError(
+        f"Error: cannot close {ticket_id} as --class duplicate: {detail}\n"
+        "The canonical ticket may already be closed — the gate requires only that the link "
+        "exist, never that its target still be open. Without it there is nothing to verify: "
+        "the defect's fix lives on the canonical ticket, not here, so completion verification "
+        "would ask this ticket to prove work it never owned. "
+        'Override with --force="<reason>" if this genuinely duplicates nothing.',
+        returncode=1,
     )
 
 
@@ -236,6 +328,15 @@ def _completion_precheck(
         from rebar._commands import close_disposition
 
         return close_disposition.verdict(ticket_id, close_class, tracker)
+
+    # NO usable replacement. A `duplicate` close cannot be rescued by the completion verifier —
+    # the work it would ask about lives on the canonical ticket — so falling through printed
+    # advice that could not be followed. Fail HERE, naming the one command that works. Scoped to
+    # `duplicate` alone (not the whole non-completion set): `not_a_bug` asserts there is no defect
+    # and `escalated` may point outside the tracker, so neither owes a `duplicates` link; both keep
+    # the prior fallthrough. Deterministic and pre-LLM, so a duplicate close never buys the wrong
+    # advice with a billable request.
+    _ensure_duplicate_close_is_linked(ticket_id, ticket_type, close_class, tracker)
 
     # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
     txn.ensure_ac_boxes_checked(ticket_id, tracker)
