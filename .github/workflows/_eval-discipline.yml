@@ -65,8 +65,13 @@ jobs:
         # The strict per-spec validation also lives in the default suite (via
         # _build-and-test.yml), so it already blocks Verified; this job runs the eval
         # test subset directly so the discipline is a named gate on BOTH lanes.
+        # Per-test hang guard (ticket d835-1846-95d1-4d84). 300s: these are OFFLINE unit
+        # tests, the same ones the shared suite runs under the identical 300s budget in
+        # _build-and-test.yml, so this lane inherits that calibration rather than inventing a
+        # second number for the same tests. --timeout-method=thread for the usual reason: the
+        # default `signal` method cannot fire while blocked in a C-level flock/subprocess call.
         run: |
-          python -m pytest -q \
+          python -m pytest -q --timeout=300 --timeout-method=thread \
             tests/unit/test_eval.py \
             tests/unit/test_eval_scorers.py \
             tests/unit/test_new_eval_specs.py \
