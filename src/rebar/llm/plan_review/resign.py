@@ -423,6 +423,9 @@ ATTESTATION_RELATION_UNREADABLE = "relation_unreadable"
 #: A transient/recoverable signing failure (a lock, a retry event, any non-material error).
 #: Nothing materially changed, so the cheap no-LLM re-sign applies.
 ATTESTATION_SIGN_FAILED = "sign_failed"
+#: The signature failed AND the recovery sidecar never persisted, so there is no recorded PASS
+#: for the cheap no-LLM re-sign to read back. Only a fresh full review recovers it.
+ATTESTATION_SIDECAR_LOST = "sidecar_lost"
 
 
 class PlanReviewAttestation:
@@ -491,7 +494,11 @@ def classify_plan_review_attestation(result: dict[str, Any]) -> PlanReviewAttest
     sole durable product — the signature the claim gate consumes — was lost to a recoverable
     condition, so a later ``claim`` still fails the gate. Such a result is ``retryable``, and
     ``cause`` says which recovery applies. A deliberately-unsigned PASS and a
-    successfully-signed PASS are both non-retryable."""
+    successfully-signed PASS are both non-retryable.
+
+    The cheap no-LLM ``sign-review`` recovery is named only when something durable actually
+    survived: it re-signs from the recovery sidecar, so a result reporting
+    ``sidecar_emitted`` explicitly False gets ``review_plan`` instead."""
     sig = result.get("signature") or {}
     if not (sig.get("signed") is False and sig.get("error")):
         persisted = sig.get("signed") is True
@@ -539,9 +546,34 @@ def classify_plan_review_attestation(result: dict[str, Any]) -> PlanReviewAttest
                 f"`rebar review-plan {tid}` again.\n"
             ),
         )
-    # A TRANSIENT/retryable failure (retry event, a lock, or any non-material error): nothing
-    # materially changed, so the cheap no-LLM recovery applies — re-persist the
-    # already-computed verdict with `sign-review`.
+    if result.get("sidecar_emitted") is False:
+        # The signature AND the recovery sidecar were both lost — one contention episode can
+        # take the pair, and the sidecar is written only AFTER the sign attempt. Keyed on an
+        # explicit False, never on absence: a result that does not carry the field says
+        # nothing about the sidecar, and guessing there would misroute a recoverable failure.
+        # `sign-review`
+        # reads the sidecar back, so with none written it cannot re-sign this PASS: it finds
+        # the PREVIOUS round's record and refuses (bug inborn-asbestine-moray). Advertising it
+        # here sent the reader into that dead end at the cost of a whole review. Worse, that
+        # stale record is a CONTRADICTING verdict, so it must not be read as current either.
+        return PlanReviewAttestation(
+            signed=False,
+            retryable=True,
+            cause=ATTESTATION_SIDECAR_LOST,
+            error=error,
+            recovery_tool="review_plan",
+            message=(
+                "plan review PASSED but NEITHER the attestation NOR the recovery record "
+                f"persisted: {error}\n"
+                "nothing durable survives from this review, so there is nothing left to "
+                f"re-sign — run `rebar review-plan {tid}` again.\n"
+                "any plan-review verdict still recorded for this ticket predates this review "
+                "and is NOT current.\n"
+            ),
+        )
+    # A TRANSIENT/retryable failure (retry event, a lock, or any non-material error) that left
+    # the recovery sidecar behind: nothing materially changed, so the cheap no-LLM recovery
+    # applies — re-persist the already-computed verdict with `sign-review`.
     return PlanReviewAttestation(
         signed=False,
         retryable=True,

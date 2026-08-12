@@ -152,3 +152,99 @@ def test_mcp_passed_but_unsigned_is_flagged_retryable_and_names_sign_review(
     assert att["cause"] == "sign_failed"
     assert att["recovery_tool"] == "sign_review"
     assert att["error"] == "index.lock exists"
+
+
+# ── sidecar lost (bug inborn-asbestine-moray) ───────────────────────────────────
+# One contention episode can take BOTH the signature and the recovery sidecar. `sign-review`
+# re-signs FROM that sidecar, so with none written it reads the PREVIOUS round's record and
+# refuses — the advertised cheap recovery could not work, at the cost of a whole review.
+
+
+def _classify(signature: dict, sidecar_emitted: object) -> dict:
+    """The classifier's verdict for a PASS carrying ``signature`` and ``sidecar_emitted``."""
+    from rebar.llm.plan_review.resign import classify_plan_review_attestation
+
+    result = _verdict("t1", signature)
+    if sidecar_emitted is not None:
+        result["sidecar_emitted"] = sidecar_emitted
+    return classify_plan_review_attestation(result).as_dict()
+
+
+def test_sidecar_lost_names_review_plan_and_never_sign_review():
+    """AC1: with no sidecar there is nothing to re-sign, so the guidance must not send the
+    reader to `sign-review` — the dead end that cost two full reviews in the field."""
+    att = _classify(_UNSIGNED_TRANSIENT, False)
+
+    assert att["cause"] == "sidecar_lost"
+    assert att["recovery_tool"] == "review_plan"
+    assert att["retryable"] is True
+    assert att["signed"] is False
+    assert "sign-review" not in att["message"]
+    assert "sign_review" not in att["message"]
+
+
+def test_sidecar_present_keeps_the_cheap_no_llm_resign_guidance():
+    """AC2: when only the signature was lost the recorded PASS still exists, so the cheap
+    no-LLM `sign-review` recovery is still the right — and still the named — one."""
+    att = _classify(_UNSIGNED_TRANSIENT, True)
+
+    assert att["cause"] == "sign_failed"
+    assert att["recovery_tool"] == "sign_review"
+    assert "sign-review" in att["message"]
+
+
+def test_sidecar_lost_message_marks_any_recorded_verdict_as_not_current():
+    """AC3: the recorded verdict silently remains the PREVIOUS round's — a stale
+    CONTRADICTING verdict. The message must say so rather than let it read as current."""
+    message = _classify(_UNSIGNED_TRANSIENT, False)["message"]
+
+    assert "NOT current" in message
+    assert "predates this review" in message
+
+
+@pytest.mark.parametrize(
+    ("event", "error", "expected"),
+    [
+        ("plan_review_generation_changed", "the plan changed", "plan_changed"),
+        ("plan_review_generation_retry", "index.lock exists", "sidecar_lost"),
+    ],
+)
+def test_material_change_still_outranks_a_lost_sidecar(event, error, expected):
+    """AC4: the new branch sits BELOW the material-change branch, so a stale plan is still
+    reported as a stale plan — the lost sidecar must not shadow a sharper diagnosis."""
+    att = _classify({"signed": False, "error": error, "event": event}, False)
+
+    assert att["cause"] == expected
+    assert att["recovery_tool"] == "review_plan"
+
+
+def test_absent_sidecar_field_is_not_read_as_a_lost_sidecar():
+    """Absence says nothing about the sidecar. Only an explicit False is evidence, so a
+    result without the field keeps its prior classification rather than being downgraded."""
+    att = _classify(_UNSIGNED_TRANSIENT, None)
+
+    assert att["cause"] == "sign_failed"
+    assert att["recovery_tool"] == "sign_review"
+
+
+def test_cli_reports_the_lost_sidecar_instead_of_the_sign_review_dead_end(
+    rebar_repo: Path, monkeypatch, capsys
+):
+    """The CLI half, end to end: still exit 11 (retryable), but the stderr an agent reads
+    now names the recovery that can actually work."""
+    from rebar._cli import main
+
+    tid = _seed(rebar_repo)
+
+    def _run(ticket_id, **kw):
+        result = _verdict(ticket_id, _UNSIGNED_TRANSIENT)
+        result["sidecar_emitted"] = False
+        return result
+
+    monkeypatch.setattr(rebar.llm, "review_plan", _run)
+    rc = main(["review-plan", tid, "-o", "json"])
+    err = capsys.readouterr().err
+
+    assert rc == 11
+    assert "sign-review" not in err
+    assert f"rebar review-plan {tid}" in err

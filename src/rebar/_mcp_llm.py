@@ -235,7 +235,9 @@ def register_llm_tools(mcp, ctx) -> None:
         ``attestation.retryable`` (do NOT proceed to ``claim``) and call the tool named by
         ``attestation.recovery_tool`` — ``sign_review`` for a transient sign failure (cheap, no
         LLM), or ``review_plan`` again when ``cause`` is ``plan_changed`` /
-        ``relation_unreadable``. ``cause`` is ``signed``/``skipped`` when nothing is wrong.
+        ``relation_unreadable`` / ``sidecar_lost`` (the last meaning nothing durable survived,
+        so there is nothing to re-sign). ``cause`` is ``signed``/``skipped`` when nothing is
+        wrong.
 
         DISABLED unless REBAR_MCP_ALLOW_LLM=1: this makes live, billable LLM calls and reaches
         the network + filesystem. Needs the 'agents' extra + a model API key. Returns a plain
