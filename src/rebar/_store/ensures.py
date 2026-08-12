@@ -83,9 +83,13 @@ def _registry() -> dict[str, object]:
     """Map id → check-then-act callable. Lazy-imports the unit implementations from
     :mod:`rebar._commands.init` (cold path — only :func:`run_ensures` calls this)."""
     from rebar._commands import init
+    from rebar._store import env_identity
 
     return {
-        "env-id": init._ensure_env_id_unit,
+        # env-id lives in `env_identity` (not `init`) because minting is guarded: it
+        # refuses to invent an identity for a store that already holds another
+        # environment's events (bug gold-distinct-lacewing).
+        "env-id": env_identity.ensure_env_id_unit,
         "gc-config": init._gc_config_unit,
         "merge-ours": init._merge_ours_unit,
         "gitattributes": init._gitattributes_unit,
