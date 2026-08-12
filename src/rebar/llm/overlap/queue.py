@@ -88,34 +88,71 @@ def mark_done(ticket_id: str, *, repo_root=None) -> bool:
     return _append(ticket_id, DONE, {"ticket_id": ticket_id}, repo_root)
 
 
-def _events_of(ticket_dir: str, event_type: str) -> list[tuple[int, str, dict]]:
-    """All ``event_type`` events in ``ticket_dir`` as ``(timestamp, uuid, data)``, oldest
-    first (by the filename timestamp prefix). Tolerates unreadable files."""
-    out: list[tuple[int, str, dict]] = []
+def _event_names(ticket_dir: str, event_type: str) -> list[str]:
+    """Matching event filenames, oldest first. Names are ``{timestamp}-{uuid}-{TYPE}.json``
+    (``_store/event_append.event_filename``, built from the event's OWN validated
+    ``timestamp``), and the timestamps are fixed-width ns integers — so lexicographic name
+    order IS timestamp order. Tolerates a missing/unreadable directory."""
     try:
-        names = sorted(
+        return sorted(
             f
             for f in os.listdir(ticket_dir)
             if f.endswith(f"-{event_type}.json") and not f.startswith(".")
         )
     except OSError:
-        return out
-    for fname in names:
-        try:
-            with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
-                event = json.load(fh)
-        except (OSError, ValueError):
-            continue
-        ts = event.get("timestamp")
-        data = event.get("data")
-        if isinstance(ts, int) and isinstance(data, dict):
-            out.append((ts, str(event.get("uuid", "")), data))
-    return out
+        return []
+
+
+def _read_event(ticket_dir: str, fname: str) -> tuple[int, str, dict] | None:
+    """One event as ``(timestamp, uuid, data)``, or ``None`` if unreadable/malformed."""
+    try:
+        with open(os.path.join(ticket_dir, fname), encoding="utf-8") as fh:
+            event = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(event, dict):
+        return None
+    ts, data = event.get("timestamp"), event.get("data")
+    if isinstance(ts, int) and isinstance(data, dict):
+        return (ts, str(event.get("uuid", "")), data)
+    return None
+
+
+def _name_ts(fname: str) -> int | None:
+    """The filename's leading timestamp, or ``None`` if it does not carry one."""
+    prefix = fname.split("-", 1)[0]
+    return int(prefix) if prefix.isdigit() else None
 
 
 def _latest(ticket_dir: str, event_type: str) -> tuple[int, str, dict] | None:
-    evs = _events_of(ticket_dir, event_type)
-    return evs[-1] if evs else None
+    """The newest usable ``event_type`` event, walking newest→oldest and returning the FIRST
+    parseable one — so an intact newest file costs exactly ONE open regardless of how much
+    history the ticket carries (the shape ``digest_sidecar.latest_ticket_digest`` already
+    uses). If the walk exhausts every matching name (all corrupt, or none present) the type
+    is absent and ``None`` is returned, exactly as before."""
+    for fname in reversed(_event_names(ticket_dir, event_type)):
+        event = _read_event(ticket_dir, fname)
+        if event is not None:
+            return event
+        logger.warning("%s event %s unreadable; trying older", event_type, fname)
+    return None
+
+
+def _claims_after(ticket_dir: str, enq_ts: int) -> list[tuple[int, str, dict]]:
+    """CLAIM events strictly newer than ``enq_ts``. Those are a contiguous SUFFIX of the
+    name-sorted list, so walk newest→oldest and stop at the first name whose timestamp
+    prefix is ``<= enq_ts`` — the read is bounded by the contention window, not by history.
+    A name with no parseable timestamp prefix is skipped rather than treated as a stop, and
+    the body's own ``timestamp`` still decides membership."""
+    out: list[tuple[int, str, dict]] = []
+    for fname in reversed(_event_names(ticket_dir, CLAIM)):
+        name_ts = _name_ts(fname)
+        if name_ts is not None and name_ts <= enq_ts:
+            break
+        event = _read_event(ticket_dir, fname)
+        if event is not None and event[0] > enq_ts:
+            out.append(event)
+    return out
 
 
 def reduce_ticket(ticket_id: str, tracker: str, *, now_ns: int | None = None) -> dict[str, Any]:
@@ -201,8 +238,8 @@ def claim(
         return False
     contenders = [
         (ts, uuid, data)
-        for (ts, uuid, data) in _events_of(ticket_dir, CLAIM)
-        if ts > enq[0] and now < data.get("lease_expires_ns", 0)
+        for (ts, uuid, data) in _claims_after(ticket_dir, enq[0])
+        if now < data.get("lease_expires_ns", 0)
     ]
     if not contenders:
         return False

@@ -4,6 +4,9 @@ cert-triggered enqueue, soak, latest-wins, optimistic claim + lease, reducer.
 
 from __future__ import annotations
 
+import builtins
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -166,3 +169,143 @@ def test_lease_reclaim(repo: str) -> None:
     after = now + 20 * _MIN  # lease (15 min) has expired
     assert Q.reduce_ticket(tid, _tracker(repo), now_ns=after)["pending"] is True
     assert Q.claim(tid, "B", lease_ttl_min=15, now_ns=after, repo_root=repo) is True
+
+
+# ── bounded reduce read (ticket emersed-utopic-whiterhino) ───────────────────────
+# reduce_ticket used to json.load EVERY queue event file in a ticket dir, three times over
+# (once per event type), so the enrich-drain gate's cost grew without bound as enrichment
+# re-ran. The reduce now walks newest→oldest and stops early. These tests pin that bound.
+
+_BASE_NS = 1_700_000_000_000_000_000  # a realistic fixed-width ns stamp (Nov 2023)
+
+
+def _seed_event(ticket_dir: Path, ts: int, etype: str, data: dict, uuid: str) -> str:
+    """Write one raw event file straight into ``ticket_dir`` (no git), using the store's
+    ``{timestamp}-{uuid}-{TYPE}.json`` name. Returns the filename."""
+    fname = f"{ts}-{uuid}-{etype}.json"
+    (ticket_dir / fname).write_text(
+        json.dumps(
+            {
+                "timestamp": ts,
+                "uuid": uuid,
+                "event_type": etype,
+                "env_id": "e",
+                "author": "a",
+                "data": data,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return fname
+
+
+def _count_queue_opens(monkeypatch) -> list[str]:
+    """Record the basename of every queue-event file opened while the patch is active."""
+    opened: list[str] = []
+    real_open = builtins.open
+
+    def counting_open(file, *a, **kw):
+        name = os.path.basename(str(file))
+        if name.endswith(tuple(f"-{et}.json" for et in Q.QUEUE_EVENT_TYPES)):
+            opened.append(name)
+        return real_open(file, *a, **kw)
+
+    monkeypatch.setattr(builtins, "open", counting_open)
+    return opened
+
+
+def test_reduce_opens_at_most_one_file_per_event_type(repo: str, monkeypatch) -> None:
+    """A ticket dir carrying a long queue history costs ONE open per event type, not one
+    per file — the asymptote the enrich-drain gate was paying."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    ticket_dir = Path(tracker) / tid
+    for i in range(30):
+        _seed_event(ticket_dir, _BASE_NS + i, Q.ENQUEUE, {"not_before_ns": _BASE_NS}, f"e{i:03d}")
+        _seed_event(
+            ticket_dir,
+            _BASE_NS + 100 + i,
+            Q.CLAIM,
+            {"drainer_id": f"d{i}", "lease_expires_ns": 0},
+            f"c{i:03d}",
+        )
+        _seed_event(ticket_dir, _BASE_NS + 200 + i, Q.DONE, {}, f"d{i:03d}")
+
+    opened = _count_queue_opens(monkeypatch)
+    state = Q.reduce_ticket(tid, tracker, now_ns=_BASE_NS + 10_000)
+
+    assert len(opened) <= 3, f"reduce opened {len(opened)} queue files: {opened}"
+    for et in Q.QUEUE_EVENT_TYPES:
+        per_type = [n for n in opened if n.endswith(f"-{et}.json")]
+        assert len(per_type) <= 1, f"{et}: {per_type}"
+    # …and it still reduced correctly: the newest DONE (ts +229) postdates the newest
+    # ENQUEUE (ts +29), so nothing is pending.
+    assert state["enqueued"] is True
+    assert state["done"] is True
+    assert state["pending"] is False
+
+
+def test_claim_arbitration_skips_pre_enqueue_claims(repo: str, monkeypatch) -> None:
+    """claim() arbitration reads only the CLAIM suffix newer than the latest ENQUEUE.
+
+    Claims older than the enqueue can never be contenders, so the scan must stop at the
+    enqueue boundary instead of reading back through the whole history. The single newest
+    pre-enqueue claim may still be opened — that is reduce_ticket's own one-open-per-type
+    probe, which runs before arbitration — but every OLDER one must be untouched.
+    """
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    ticket_dir = Path(tracker) / tid
+    stale = [
+        _seed_event(
+            ticket_dir,
+            _BASE_NS + i,
+            Q.CLAIM,
+            {"drainer_id": f"old{i}", "lease_expires_ns": _BASE_NS + 10**12},
+            f"c{i:03d}",
+        )
+        for i in range(20)
+    ]
+    enq_ts = _BASE_NS + 1_000_000
+    _seed_event(ticket_dir, enq_ts, Q.ENQUEUE, {"not_before_ns": _BASE_NS}, "enq0")
+
+    opened = _count_queue_opens(monkeypatch)
+    won = Q.claim(tid, "drainer-new", lease_ttl_min=15, now_ns=enq_ts + 1, repo_root=repo)
+
+    assert won is True, "the only post-enqueue claimant must win"
+    touched_stale = [n for n in opened if n in stale]
+    assert touched_stale in ([], [stale[-1]]), (
+        f"arbitration read back past the enqueue boundary: {touched_stale}"
+    )
+    for older in stale[:-1]:
+        assert older not in opened, f"{older} predates the enqueue and must never be opened"
+
+
+def test_corrupt_newest_event_falls_back_to_older(repo: str) -> None:
+    """An unparseable newest file does not blind the reduce — it walks to the next-older."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    ticket_dir = Path(tracker) / tid
+    good_not_before = _BASE_NS + 500
+    _seed_event(ticket_dir, _BASE_NS + 10, Q.ENQUEUE, {"not_before_ns": good_not_before}, "eok")
+    (ticket_dir / f"{_BASE_NS + 20}-ebad-{Q.ENQUEUE}.json").write_text("{not json", "utf-8")
+
+    state = Q.reduce_ticket(tid, tracker, now_ns=good_not_before + 1)
+    assert state["enqueued"] is True
+    assert state["not_before_ns"] == good_not_before
+    assert state["pending"] is True
+
+
+def test_all_events_corrupt_reads_as_absent(repo: str) -> None:
+    """Terminal case of the newest-first walk: every matching file unparseable → the type
+    reduces as absent, exactly as if no file existed."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    ticket_dir = Path(tracker) / tid
+    for i in range(3):
+        (ticket_dir / f"{_BASE_NS + i}-bad{i}-{Q.ENQUEUE}.json").write_text("{", "utf-8")
+
+    assert Q._latest(str(ticket_dir), Q.ENQUEUE) is None
+    state = Q.reduce_ticket(tid, tracker, now_ns=_BASE_NS + 10)
+    assert state["enqueued"] is False
+    assert state["pending"] is False
