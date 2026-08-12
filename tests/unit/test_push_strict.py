@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from rebar import config
-from rebar._store import compat, lock, push
+from rebar._store import compat, lock, push, push_classify
 
 pytestmark = pytest.mark.unit
 
@@ -98,10 +98,14 @@ def test_strict_invalid_destination_and_missing_remote_fail_without_changing_def
 
 
 @pytest.mark.parametrize(
-    ("stderr", "reason"),
+    ("stderr", "reason", "attempts"),
     [
-        ("remote: GH013 rule violation\npre-receive hook declined", "push-policy-declined"),
-        ("fatal: unable to access remote: operation timed out", "push-transport-failed"),
+        ("remote: GH013 rule violation\npre-receive hook declined", "push-policy-declined", 1),
+        (
+            "fatal: unable to access remote: operation timed out",
+            "push-transport-failed",
+            push_classify._MAX_TRANSPORT_ATTEMPTS,
+        ),
     ],
 )
 def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
@@ -110,7 +114,10 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
     capsys: pytest.CaptureFixture[str],
     stderr: str,
     reason: str,
+    attempts: int,
 ) -> None:
+    """Both classes stay terminal with their own reason — but bug f61c gives a TRANSPORT
+    fault a bounded retry first, while a policy decline is still spent in ONE attempt."""
     tracker = tmp_path / ".tickets-tracker"
     _common(monkeypatch, tracker)
     witness = tracker / "local-commit.witness"
@@ -132,15 +139,18 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
     monkeypatch.setattr(push, "_git", terminal_git)
     monkeypatch.setattr(push.sys, "exit", lambda *_a, **_k: pytest.fail("core called sys.exit"))
 
-    error = _delivery_error(lambda: push.push_tickets_branch(str(tracker), strict=True), reason)
+    error = _delivery_error(
+        lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
+        reason,
+    )
     assert stderr.splitlines()[0] in str(error)
     assert "7 unpushed commits" in str(error)
     assert capsys.readouterr() == ("", "")
     assert witness.read_bytes() == before
-    assert push_calls == 1
+    assert push_calls == attempts
 
-    assert push.push_tickets_branch(str(tracker)) is None
-    assert push_calls == 2
+    assert push.push_tickets_branch(str(tracker), sleep_fn=lambda _d: None) is None
+    assert push_calls == attempts * 2
 
 
 def _non_ff_git(
@@ -243,7 +253,8 @@ def test_five_rejections_spend_one_terminal_push_and_earlier_success_does_not(
     exhausted_git, exhausted_calls = _non_ff_git(push_results=[1, 1, 1, 1, 1, 1])
     monkeypatch.setattr(push, "_git", exhausted_git)
     _delivery_error(
-        lambda: push.push_tickets_branch(str(tracker), strict=True), "final-push-rejected"
+        lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
+        "final-push-rejected",
     )
     assert [call for call in exhausted_calls if call and call[0] == "push"] == [
         ("push", "origin", "HEAD:tickets")
@@ -251,5 +262,186 @@ def test_five_rejections_spend_one_terminal_push_and_earlier_success_does_not(
 
     early_git, early_calls = _non_ff_git(push_results=[1, 0])
     monkeypatch.setattr(push, "_git", early_git)
-    assert push.push_tickets_branch(str(tracker), strict=True) is None
+    assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None) is None
     assert len([call for call in early_calls if call and call[0] == "push"]) == 2
+
+
+_CI_TLS_STDERR = (
+    "fatal: unable to access 'https://github.com/navapbc/rebar/': "
+    "server certificate verification failed. CAfile: none CRLfile: none"
+)
+
+
+def test_transient_tls_failure_is_retried_and_then_delivers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug f61c: run 31535962079 abandoned a CONVERGED pass on this exact stderr.
+
+    The commits were left on the runner and died with it. One blip must not cost the pass.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    push_calls = 0
+    slept: list[float] = []
+
+    def flaky_git(_base: str, *args: str, **_kwargs: object):
+        nonlocal push_calls
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="local-origin\n")
+        if args and args[0] == "push":
+            push_calls += 1
+            if push_calls == 1:
+                return _completed(args, 1, err=_CI_TLS_STDERR)
+            return _completed(args)
+        if args[:2] == ("rev-list", "--count"):
+            return _completed(args, out="3\n")
+        return _completed(args)
+
+    monkeypatch.setattr(push, "_git", flaky_git)
+
+    assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append) is None
+    assert push_calls == 2
+    assert slept == [push_classify._TRANSPORT_BACKOFF_SECONDS[0]]
+
+
+def test_persistent_transport_failure_stops_on_a_bounded_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retry rides out a blip; it must not sit on a real outage forever."""
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    push_calls = 0
+    slept: list[float] = []
+
+    def dead_git(_base: str, *args: str, **_kwargs: object):
+        nonlocal push_calls
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="local-origin\n")
+        if args and args[0] == "push":
+            push_calls += 1
+            return _completed(args, 1, err=_CI_TLS_STDERR)
+        if args[:2] == ("rev-list", "--count"):
+            return _completed(args, out="3\n")
+        return _completed(args)
+
+    monkeypatch.setattr(push, "_git", dead_git)
+
+    error = _delivery_error(
+        lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append),
+        "push-transport-failed",
+    )
+    assert "server certificate verification failed" in str(error)
+    assert "3 unpushed commits" in str(error)
+    assert push_calls == push_classify._MAX_TRANSPORT_ATTEMPTS
+    # Backoff is spent BETWEEN attempts, and it escalates rather than firing back-to-back.
+    expected = push_classify._TRANSPORT_BACKOFF_SECONDS[: push_classify._MAX_TRANSPORT_ATTEMPTS - 1]
+    assert slept == list(expected)
+    assert slept == sorted(slept)
+    assert all(delay > 0 for delay in slept)
+
+
+@pytest.mark.parametrize(
+    ("stderr", "retriable"),
+    [
+        (_CI_TLS_STDERR, True),
+        ("fatal: could not fetch 983800f2 from promisor remote", True),
+        ("git timed out after 30s", True),
+        ("ssl certificate problem: unable to get local issuer certificate", True),
+        ("fatal: could not resolve host: github.com", True),
+        # A policy decline is PERMANENT — it must never become transport-retriable, even
+        # when it also carries a transport-shaped phrase (bug 2a76's subtractive contract).
+        ("remote: GH013 rule violation\npre-receive hook declined", False),
+        ("remote: Internal Server Error", False),
+        ("fatal: unable to access remote: rate limit exceeded", False),
+        ("! [remote rejected] HEAD -> tickets (non-fast-forward)", False),
+    ],
+)
+def test_transport_classifier_is_subtractive(stderr: str, retriable: bool) -> None:
+    assert push_classify._is_transport_retriable(stderr) is retriable
+
+
+_PROMISOR_TLS_STDERR = (
+    "fatal: unable to access 'https://github.com/navapbc/rebar/': "
+    "server certificate verification failed. CAfile: none CRLfile: none\n"
+    "fatal: could not fetch 983800f21c7d9e261b84dc340555e315eb51437a from promisor remote"
+)
+
+
+def _recovery_git(
+    *, merge_results: list[tuple[int, str]], push_results: list[int]
+) -> tuple[Callable[..., subprocess.CompletedProcess[str]], list[tuple[str, ...]]]:
+    """A git whose recovery MERGE can fail with caller-chosen stderr."""
+    calls: list[tuple[str, ...]] = []
+    merges = list(merge_results)
+    pushes = list(push_results)
+
+    def fake(_base: str, *args: str, **_kwargs: object):
+        calls.append(args)
+        if args[:2] == ("remote", "get-url"):
+            return _completed(args, out="local-origin\n")
+        if args and args[0] == "push":
+            rc = pushes.pop(0) if pushes else 1
+            return _completed(args, rc, err="rejected non-fast-forward" if rc else "")
+        if args[:2] == ("rev-list", "--count"):
+            return _completed(args, out="2\n")
+        if args and args[0] == "merge":
+            if len(args) > 1 and args[1] == "--abort":
+                return _completed(args)
+            rc, err = merges.pop(0) if merges else (0, "")
+            return _completed(args, rc, err=err)
+        return _completed(args)
+
+    return fake, calls
+
+
+def _recovery_common(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(lock, "write_lock", _open_lock)
+    monkeypatch.setattr(lock, "check_no_rebase_in_progress", lambda _base: None)
+    monkeypatch.setattr(
+        compat, "store_epoch_merge_target", lambda _base, _ref: ("origin/tickets", None)
+    )
+
+
+def test_merge_recovery_retries_a_promisor_transport_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug f61c, run 31420498173: the TLS fault fired INSIDE `git merge`.
+
+    The checkout is a blob:none partial clone, so the merge does on-demand promisor
+    fetches — the failure surfaced as `merge-recovery-blocked` plus `could not fetch ...
+    from promisor remote`, and the converged pass was abandoned with 2 unpushed commits.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    _recovery_common(monkeypatch)
+    slept: list[float] = []
+    git, calls = _recovery_git(
+        merge_results=[(1, _PROMISOR_TLS_STDERR), (0, "")], push_results=[1, 0]
+    )
+    monkeypatch.setattr(push, "_git", git)
+
+    assert push.push_tickets_branch(str(tracker), strict=True, sleep_fn=slept.append) is None
+    merges = [c for c in calls if c and c[0] == "merge" and c[1:2] != ("--abort",)]
+    assert len(merges) == 2, "the transport-faulted merge must be retried"
+    assert slept[0] == push_classify._TRANSPORT_BACKOFF_SECONDS[0]
+
+
+def test_merge_recovery_keeps_a_genuine_conflict_terminal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real merge conflict is NOT transport-retriable — it must still stop at once."""
+    tracker = tmp_path / ".tickets-tracker"
+    _common(monkeypatch, tracker)
+    _recovery_common(monkeypatch)
+    git, calls = _recovery_git(
+        merge_results=[(1, "CONFLICT (content): Merge conflict in events.jsonl")],
+        push_results=[1, 1, 1, 1, 1, 1],
+    )
+    monkeypatch.setattr(push, "_git", git)
+
+    _delivery_error(
+        lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
+        "merge-recovery-blocked",
+    )
+    merges = [c for c in calls if c and c[0] == "merge" and c[1:2] != ("--abort",)]
+    assert len(merges) == 1, "a genuine conflict must not be retried as a transport fault"
