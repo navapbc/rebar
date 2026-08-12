@@ -233,6 +233,41 @@ def test_sidecar_payload_anchors_on_the_explicit_target_ticket():
     assert sidecar.emit({"verdict": "PASS"}, target_ticket="") is False
 
 
+def test_sidecar_round_trips_a_findings_pass2_verification_block():
+    """Regression pin (bug abdominal-grieving-nandu): the Pass-2 ``verification`` block must
+    survive into the persisted payload, in every findings bucket.
+
+    ``build_payload`` persists findings by FIELD-SPREAD (``_with_norm_ids`` returns
+    ``{**f, "norm_id": ...}``), where plan-review's ``_slim`` is a field-SELECTION that names
+    ``verification`` explicitly. The spread is what makes the block survive today — nothing names
+    it — so a refactor to selection-style would silently drop it and destroy the offline
+    calibration corpus. This pins the outcome, whichever mechanism provides it.
+    """
+    from rebar.llm.code_review import sidecar
+
+    verification = {
+        "binary": {"is_real": "yes", "is_in_diff": "yes"},
+        "severity_attributes": {"blast_radius": "narrow", "churn90": 3},
+    }
+    finding = {"id": "f1", "finding": "x", "tier": "LLM", "verification": verification}
+    payload = sidecar.build_payload(
+        {
+            "verdict": "BLOCK",
+            "blocking": [finding],
+            "advisory": [finding],
+            "dropped": [finding],
+            "indeterminate": [finding],
+        },
+        target_ticket="abc-123",
+    )
+    for bucket in ("blocking", "advisory", "dropped", "indeterminate"):
+        got = payload[bucket][0]["verification"]
+        assert got["binary"] == {"is_real": "yes", "is_in_diff": "yes"}
+        assert got["severity_attributes"] == {"blast_radius": "narrow", "churn90": 3}
+        # the stamped norm_id is additive — it never displaces the carried fields
+        assert payload[bucket][0]["finding"] == "x"
+
+
 # ── flag + source-separation pins ───────────────────────────────────────────────────────────
 def test_flag_defaults_off_and_is_env_overridable(monkeypatch, tmp_path):
     import rebar.config as _config

@@ -17,7 +17,10 @@ canonical definitions in ``gate_dispatch`` (``STEP_VERIFY`` / ``STEP_DECIDE`` /
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Local mirrors of gate_dispatch's shared step ids/kinds, re-declared here to keep this a strict
 # leaf (no back-import into gate_dispatch). These MUST track gate_dispatch.STEP_VERIFY /
@@ -43,9 +46,6 @@ def _resolve_or_create_session_artifact(
     ``voter.emit_code_review_artifact``): a title match REUSES the existing artifact so two reviews
     under one session append to the SAME memory. Never raises — the artifact is best-effort, so a
     store failure must not fail the review (only local convergence memory is lost)."""
-    import logging
-
-    logger = logging.getLogger(__name__)
     try:
         import rebar
 
@@ -82,10 +82,8 @@ def _link_session_artifact(artifact_id: str, *, head: str = "HEAD", repo_root: A
     """Best-effort ``relates_to`` link from the session artifact to the work ticket named in
     ``head``'s ``rebar-ticket:`` trailer (searchability). A trailerless/unresolved review still
     persists — the link is optional and never fails the review. Mirrors the voter's trailer path."""
-    import logging
     import subprocess
 
-    logger = logging.getLogger(__name__)
     try:
         import rebar
         from rebar import config as _config
@@ -116,6 +114,51 @@ def _count_diff_lines(text: str) -> int:
         if ln.startswith(("+", "-")) and not ln.startswith(("+++", "---")):
             n += 1
     return n
+
+
+def _expects_verification(f: Any) -> bool:
+    """Is this finding one that SHOULD carry a Pass-2 ``verification`` block?
+
+    Only LLM-tier DECIDED findings are. Two populations are legitimately blockless and must be
+    excluded, or the missing-recording signal below becomes a standing false alarm rather than an
+    alert (they are ~2.5% of the recorded corpus, present on routine runs):
+
+    * ``tier != "LLM"`` — deterministic findings (the WS5 fail-closed security detectors, the
+      bugfix-size gate) are injected AFTER Pass-3 and never enter Pass-2, so no verification for
+      them was ever produced to record. An untiered finding is treated the same way.
+    * ``decision == "indeterminate"`` / ``reason == "no-verification"`` — the verifier emitted
+      nothing for this index and ``pass3_decide`` degraded the finding on purpose. That path
+      already has its own signal (the decision itself); it is not a recording failure.
+    """
+    if not isinstance(f, dict):
+        return False
+    if f.get("tier") != "LLM":
+        return False
+    return f.get("decision") != "indeterminate" and f.get("reason") != "no-verification"
+
+
+def _verification_recording(verdict: dict[str, Any], *, verify_requests: int) -> tuple[bool, int]:
+    """``(recorded, missing_count)`` for the Pass-2 verification blocks on ``verdict``'s findings.
+
+    The metrics gap this closes (bug abdominal-grieving-nandu / operator escalation R3): the
+    sidecar persists each finding's ``verification`` by FIELD-SPREAD, so a regression that stopped
+    producing or carrying the block would silently write ~1,400 reviews' worth of unverified
+    findings with nothing erroring or warning. ``recorded`` is False ONLY when Pass-2 demonstrably
+    ran (``verify_requests > 0``) and an expected block is nonetheless absent — so a review that
+    never reached the verifier reports True here and is flagged by ``grounding_health`` instead,
+    keeping the two signals from double-counting one outage."""
+    # `advisory` / `surfaced` are the SAME bucket under two key spellings (the terminal verdict vs
+    # the decide step's output); take one, never both, so a verdict carrying both cannot
+    # double-count its advisories into the warning's missing/expected tally.
+    buckets = [
+        verdict.get("blocking") or [],
+        verdict.get("advisory") or verdict.get("surfaced") or [],
+        verdict.get("dropped") or [],
+        verdict.get("indeterminate") or [],
+    ]
+    expected = [f for bucket in buckets for f in bucket if _expects_verification(f)]
+    missing = sum(1 for f in expected if not f.get("verification"))
+    return (not (verify_requests > 0 and missing)), missing
 
 
 def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -> None:
@@ -198,6 +241,9 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     if not isinstance(coverage, dict):
         coverage = {}
         verdict["coverage"] = coverage
+    verification_recorded, missing_verifications = _verification_recording(
+        verdict, verify_requests=verify_requests
+    )
     coverage["llm_ran"] = True
     coverage["metrics"] = {
         "llm_ms": round(llm_ms, 1),
@@ -206,9 +252,23 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
         "findings_per_run": len(blocking) + len(advisory),
         "verify_requests": verify_requests,
         "grounding_health": grounding_health,
+        # The missing-recording signal (bug abdominal-grieving-nandu): False means Pass-2 ran but
+        # an LLM-tier decided finding reached the sidecar with no verification block. Always
+        # present, so "no absence detected" and "the check never ran" are distinguishable offline
+        # — the whole point is that an ABSENCE is now measurable instead of silent.
+        "verification_recorded": verification_recorded,
         **token_totals,
         "total_tokens": token_totals["input_tokens"] + token_totals["output_tokens"],
     }
+    if not verification_recorded:
+        logger.warning(
+            "code-review Pass-2 verification recording gap: %d LLM-tier finding(s) reached the "
+            "verdict with no verification block despite %d verifier request(s) "
+            "(coverage.metrics.verification_recorded=false; the verdict is unchanged). The "
+            "offline calibration corpus is incomplete for this run.",
+            missing_verifications,
+            verify_requests,
+        )
     # Advisory notes live on `coverage` (NOT in `metrics`), and NEVER on `verdict['verdict']`.
     if grounding_health == "low":
         coverage["grounding_note"] = (
