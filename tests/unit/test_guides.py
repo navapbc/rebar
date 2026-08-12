@@ -9,12 +9,15 @@ resource, so an installed rebar serves it from any working directory).
 
 from __future__ import annotations
 
+import re
+import subprocess
 from importlib import resources
+from pathlib import Path
 
 import pytest
 
 from rebar.llm.plan_review.coach_moves import MOVE_REGISTRY
-from rebar.llm.plan_review.registry import explain_criterion, explain_guide
+from rebar.llm.plan_review.registry import CANONICAL_LLM, explain_criterion, explain_guide
 
 pytestmark = pytest.mark.unit
 
@@ -94,6 +97,68 @@ def test_advisory_section_cross_links_to_moves() -> None:
     assert "#responding-to-coaching-moves" in advisory, (
         "advisory section does not cross-link the coaching-moves section"
     )
+
+
+def test_t15_derisk_guidance_is_rendered_by_explain_plan() -> None:
+    """The supported author-facing surface carries the complete fast-proof contract."""
+    guide = explain_guide("plan")
+    assert "T15" in guide
+    assert "slow codified delivery loop" in guide
+    assert "local run or a manual probe against the real target" in guide
+    assert "only the resources it created" in guide
+
+
+def _criterion_bullet(guide: str, criterion: str) -> str:
+    match = re.search(
+        rf"(?ms)^- \*\*[^\n]*\(`{re.escape(criterion)}`\)\.\*\*.*?(?=^- \*\*|\Z)",
+        guide,
+    )
+    assert match is not None, f"guide is missing its {criterion} bullet"
+    return re.sub(r"\s+", " ", match.group())
+
+
+def test_t15_guidance_is_stack_agnostic_and_scopes_throwaway_cleanup() -> None:
+    guidance = _criterion_bullet(explain_guide("plan"), "T15")
+    assert "before codifying" in guidance
+    assert "only the resources it created" in guidance
+    assert "Terraform" not in guidance
+    assert "Docker" not in guidance
+
+
+def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
+    completed = subprocess.run(
+        ["rebar", "explain", "plan"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "T15" in completed.stdout
+    assert "local run or a manual probe against the real target" in completed.stdout
+    assert "only the resources it created" in completed.stdout
+
+
+def test_hand_authored_gate_doc_names_current_overlay_range_and_count() -> None:
+    repo_root = Path(__file__).parents[2]
+    gate_doc = re.sub(
+        r"\s+",
+        " ",
+        (repo_root / "docs" / "plan-review-gate.md").read_text(encoding="utf-8"),
+    )
+    expected_count = len(CANONICAL_LLM)
+    overlay_numbers = [
+        int(match.group(1))
+        for criterion in CANONICAL_LLM
+        if (match := re.fullmatch(r"T(\d+)[a-z]?", criterion))
+    ]
+    expected_range = f"T{min(overlay_numbers)}–T{max(overlay_numbers)}"
+
+    documented_count = re.search(r"\b(\d+) criteria\b", gate_doc)
+    documented_range = re.search(r"\b(T\d+–T\d+) triggered overlays\b", gate_doc)
+    assert documented_count is not None
+    assert int(documented_count.group(1)) == expected_count
+    assert documented_range is not None
+    assert documented_range.group(1) == expected_range
 
 
 # --- Ticket 828a: the author guide must not contradict G6's anti-priming rule ---------------
