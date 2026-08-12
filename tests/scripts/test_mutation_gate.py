@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 import subprocess
@@ -10,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import tomllib
 
 pytestmark = pytest.mark.scripts
 
@@ -70,6 +72,8 @@ mode = "advisory"
 source = "src/alpha.py"
 tests = ["tests/test_alpha.py"]
 support = []
+timeout_constant = 1.0
+timeout_multiplier = 15.0
 survivors_max = 0
 no_tests_max = 0
 timeouts_max = 0
@@ -82,6 +86,8 @@ mode = "advisory"
 source = "src/beta.py"
 tests = ["tests/test_beta.py"]
 support = []
+timeout_constant = 1.0
+timeout_multiplier = 15.0
 survivors_max = 0
 no_tests_max = 0
 timeouts_max = 0
@@ -218,6 +224,8 @@ mode = "advisory"
 source = "src/alpha.py"
 tests = ["tests/test_alpha.py"]
 support = ["tests/conftest.py"]
+timeout_constant = 1.0
+timeout_multiplier = 15.0
 survivors_max = 0
 no_tests_max = 0
 timeouts_max = 0
@@ -230,6 +238,8 @@ mode = "advisory"
 source = "src/beta.py"
 tests = ["tests/beta/"]
 support = []
+timeout_constant = 1.0
+timeout_multiplier = 15.0
 survivors_max = 0
 no_tests_max = 0
 timeouts_max = 0
@@ -260,6 +270,8 @@ mode = "advisory"
 source = "src/alpha.py"
 tests = ["tests/test_alpha.py"]
 support = []
+timeout_constant = 1.0
+timeout_multiplier = 15.0
 survivors_max = 0
 no_tests_max = 0
 timeouts_max = 0
@@ -655,6 +667,138 @@ def test_mutmut_config_is_generated_from_one_shard() -> None:
     assert 'pytest_add_cli_args_test_selection = ["tests/test_demo.py"]' in config
     assert "timeout_constant = 1.0" in config
     assert "timeout_multiplier = 15.0" in config
+
+
+def test_manifest_timeout_policy_drives_generated_mutmut_config(tmp_path: Path) -> None:
+    gate = _load()
+    canonical_text = MANIFEST.read_text(encoding="utf-8")
+    manifest_chunks = canonical_text.split("[[shards]]")
+    signing_index = next(
+        index
+        for index, chunk in enumerate(manifest_chunks[1:], start=1)
+        if tomllib.loads("[[shards]]" + chunk)["shards"][0]["name"] == "signing"
+    )
+    signing_block = manifest_chunks[signing_index]
+    replacement_counts = (
+        signing_block.count("timeout_constant = 1.0"),
+        signing_block.count("timeout_multiplier = 15.0"),
+    )
+    manifest_chunks[signing_index] = signing_block.replace(
+        "timeout_constant = 1.0", "timeout_constant = 2.5"
+    ).replace("timeout_multiplier = 15.0", "timeout_multiplier = 9.0")
+    probe_text = "[[shards]]".join(manifest_chunks)
+    probe_path = tmp_path / "mutation-shards.toml"
+    probe_path.write_text(probe_text, encoding="utf-8")
+
+    canonical_manifest = tomllib.loads(canonical_text)
+    probe_manifest = tomllib.loads(probe_text)
+    canonical_signing = next(
+        row for row in canonical_manifest["shards"] if row["name"] == "signing"
+    )
+    probe_signing = next(row for row in probe_manifest["shards"] if row["name"] == "signing")
+    canonical_shard = gate.load_manifest(MANIFEST).shards["signing"]
+    probe_shard = gate.load_manifest(probe_path).shards["signing"]
+    canonical_config = tomllib.loads(
+        gate.render_mutmut_config(canonical_shard, basetemp="/tmp/canonical")
+    )
+    probe_config = tomllib.loads(gate.render_mutmut_config(probe_shard, basetemp="/tmp/probe"))
+    repository_config = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    driver_tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    driver_functions = {
+        node.name: node for node in driver_tree.body if isinstance(node, ast.FunctionDef)
+    }
+
+    def mutmut_run_concurrency(
+        function_name: str,
+    ) -> tuple[tuple[tuple[str, str | None], ...], ...]:
+        calls = []
+        for node in ast.walk(driver_functions[function_name]):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "_run"
+                and node.args
+                and isinstance(node.args[0], ast.Tuple)
+            ):
+                continue
+            literal_args = tuple(
+                element.value
+                for element in node.args[0].elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            )
+            if literal_args[:3] != ("-m", "mutmut", "run"):
+                continue
+            calls.append(
+                tuple(
+                    (
+                        argument,
+                        literal_args[index + 1] if index + 1 < len(literal_args) else None,
+                    )
+                    for index, argument in enumerate(literal_args)
+                    if argument == "--max-children"
+                )
+            )
+        return tuple(calls)
+
+    assert (
+        replacement_counts,
+        (canonical_signing.get("timeout_constant"), canonical_signing.get("timeout_multiplier")),
+        (probe_signing.get("timeout_constant"), probe_signing.get("timeout_multiplier")),
+        (
+            canonical_config["tool"]["mutmut"]["timeout_constant"],
+            canonical_config["tool"]["mutmut"]["timeout_multiplier"],
+        ),
+        (
+            probe_config["tool"]["mutmut"]["timeout_constant"],
+            probe_config["tool"]["mutmut"]["timeout_multiplier"],
+        ),
+        "mutmut" in repository_config.get("tool", {}),
+        {
+            "main": mutmut_run_concurrency("execute_shard"),
+            "diagnostic": mutmut_run_concurrency("_diagnose_non_killed"),
+        },
+    ) == (
+        (1, 1),
+        (1.0, 15.0),
+        (2.5, 9.0),
+        (1.0, 15.0),
+        (2.5, 9.0),
+        False,
+        {
+            "main": ((("--max-children", "1"),),),
+            "diagnostic": ((("--max-children", "1"),),),
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("semantic_type_name", "candidate"),
+    [
+        pytest.param("TimeoutConstant", 0, id="constant-zero"),
+        pytest.param("TimeoutConstant", -1.0, id="constant-negative"),
+        pytest.param("TimeoutConstant", True, id="constant-bool"),
+        pytest.param("TimeoutConstant", "1.0", id="constant-string"),
+        pytest.param("TimeoutConstant", float("nan"), id="constant-nan"),
+        pytest.param("TimeoutConstant", float("inf"), id="constant-positive-infinity"),
+        pytest.param("TimeoutConstant", float("-inf"), id="constant-negative-infinity"),
+        pytest.param("TimeoutMultiplier", 0, id="multiplier-zero"),
+        pytest.param("TimeoutMultiplier", -1.0, id="multiplier-negative"),
+        pytest.param("TimeoutMultiplier", True, id="multiplier-bool"),
+        pytest.param("TimeoutMultiplier", "1.0", id="multiplier-string"),
+        pytest.param("TimeoutMultiplier", float("nan"), id="multiplier-nan"),
+        pytest.param("TimeoutMultiplier", float("inf"), id="multiplier-positive-infinity"),
+        pytest.param("TimeoutMultiplier", float("-inf"), id="multiplier-negative-infinity"),
+    ],
+)
+def test_timeout_policy_value_objects_reject_invalid_values(
+    semantic_type_name: str, candidate: object
+) -> None:
+    gate = _load()
+    semantic_type = getattr(gate, semantic_type_name)
+
+    with pytest.raises(gate.GateError):
+        semantic_type(candidate)
 
 
 def test_fingerprint_ignores_diff_locations_but_not_the_mutation() -> None:

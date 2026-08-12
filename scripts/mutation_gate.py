@@ -8,6 +8,7 @@ import ast
 import fnmatch
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -65,6 +66,35 @@ class FailureCode(StrEnum):
         return self in {FailureCode.ZERO_MUTANTS, FailureCode.UNEXPECTED_STATUS}
 
 
+@dataclass(frozen=True, init=False)
+class TimeoutConstant:
+    value: float
+
+    def __init__(self, candidate: object) -> None:
+        object.__setattr__(self, "value", _positive_finite_timeout(candidate, "timeout_constant"))
+
+
+@dataclass(frozen=True, init=False)
+class TimeoutMultiplier:
+    value: float
+
+    def __init__(self, candidate: object) -> None:
+        object.__setattr__(self, "value", _positive_finite_timeout(candidate, "timeout_multiplier"))
+
+
+def _positive_finite_timeout(candidate: object, field_name: str) -> float:
+    detail = f"{field_name} must be a finite number greater than zero"
+    if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+        raise GateError("manifest", detail)
+    try:
+        value = float(candidate)
+    except OverflowError:
+        raise GateError("manifest", detail) from None
+    if not math.isfinite(value) or value <= 0:
+        raise GateError("manifest", detail)
+    return value
+
+
 @dataclass(frozen=True)
 class Shard:
     name: str
@@ -77,6 +107,8 @@ class Shard:
     timeouts_max: int
     score_floor: float
     equivalent_fingerprints: frozenset[str]
+    timeout_constant: TimeoutConstant = TimeoutConstant(1.0)
+    timeout_multiplier: TimeoutMultiplier = TimeoutMultiplier(15.0)
 
 
 @dataclass(frozen=True)
@@ -161,6 +193,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
         equivalents = frozenset(
             _string_tuple(row.get("equivalent_fingerprints", []), f"{name}.equivalent_fingerprints")
         )
+        timeout_constant = TimeoutConstant(row.get("timeout_constant"))
+        timeout_multiplier = TimeoutMultiplier(row.get("timeout_multiplier"))
         budgets = [row.get("survivors_max"), row.get("no_tests_max"), row.get("timeouts_max")]
         if not all(isinstance(value, int) and value >= 0 for value in budgets):
             raise GateError("manifest", f"{name} count budgets must be non-negative integers")
@@ -181,6 +215,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> Manifest:
             timeouts_max=timeouts_max,
             score_floor=float(score_floor),
             equivalent_fingerprints=equivalents,
+            timeout_constant=timeout_constant,
+            timeout_multiplier=timeout_multiplier,
         )
         sources.add(source)
     return Manifest(shards=shards, global_support=global_support)
@@ -410,8 +446,8 @@ def render_mutmut_config(shard: Shard, *, basetemp: str) -> str:
         'also_copy = [".github/"]\n'
         f"pytest_add_cli_args = [{args}]\n"
         f"pytest_add_cli_args_test_selection = [{tests}]\n"
-        "timeout_constant = 1.0\n"
-        "timeout_multiplier = 15.0\n"
+        f"timeout_constant = {shard.timeout_constant.value!r}\n"
+        f"timeout_multiplier = {shard.timeout_multiplier.value!r}\n"
     )
 
 
