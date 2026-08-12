@@ -254,8 +254,8 @@ These are **not** living references — do not treat them as current guidance.
   listed here.
 - **[design/](design/)** — focused design notes for individual seams (e.g. the
   batch-runner seam).
-- **[calibration/](calibration/)** — calibration notes for the LLM gates (completion
-  floor, trust-boundary tuning).
+- **[calibration/](calibration/)** — calibration notes for the LLM gates and judges
+  (completion floor, trust-boundary tuning, batched overlap-judge confidence).
 - **[experiments/](experiments/)** — reproducible prototypes and analysis backing the
   remediation and plan-review work (scripts + markdown; see its own `README.md`).
 - **[archive/](archive/)** — completed, historical planning/handoff documents kept for

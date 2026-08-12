@@ -206,15 +206,44 @@ def overlap_verdict_batch_response_model() -> type:
     The entry SUBCLASSES the single-pair model so the relation enum, its normalizing validator
     and the three other fields stay single-sourced — a batched relation and a single-pair one
     must never be able to drift apart. No JSON Schema file: like ``plan_review_novelty``, this
-    is an internal contract with no ``--output`` surface."""
+    is an internal contract with no ``--output`` surface.
+
+    The entry's judgement fields are REQUIRED here, unlike on the single-pair parent (ticket
+    d147). The parent's all-defaulted shape is a deliberate safe-default for ONE object — a
+    sparse payload still reads as a non-surfacing verdict. Repeated across a LIST it is not
+    safe, and measurably was not: with every field optional the model omitted ``confidence``,
+    which defaulted to 0.0 and so could never clear ``overlap_conf_threshold``, and its
+    multi-entry tool arguments degenerated outright (whole entries collapsing into the first
+    string field). Live 6-candidate batches went from malformed-and-abstaining to 6/6 clean
+    verdicts once these four fields were made required, because a required field is what tells
+    the model the value is not optional to think about. ``shared_artifact`` stays optional: a
+    null there is a MEANINGFUL answer ("no artifact I can name"), not an omission.
+
+    A model that now omits a required field fails validation and — with the judge's
+    ``structured_retry_limit=0`` — abstains the batch, which is the fail-safe direction: the
+    overlap step is advisory, and a dropped finding is cheaper than a false one."""
     from pydantic import BaseModel, Field
 
     OverlapVerdict = overlap_verdict_response_model()
 
     class OverlapVerdictEntry(OverlapVerdict):  # type: ignore[misc,valid-type]
+        # Declared FIRST so it is the first argument the model writes for each entry, anchoring
+        # the entry to the id it is answering for before it starts judging.
         candidate_id: str = Field(
-            default="",
             description="The candidate_id given in the request, echoed back verbatim.",
+        )
+        relation: str = Field(
+            description="REQUIRED. First <relation> Second (closed relation enum).",
+        )
+        confidence: float = Field(
+            description=(
+                "REQUIRED. Your honest confidence (0.0-1.0) in the relation stated for THIS "
+                "candidate. Judge it per entry — never omit it, and never leave it at 0.0 "
+                "unless you genuinely have no confidence in your own verdict."
+            ),
+        )
+        abstain: bool = Field(
+            description="REQUIRED. True when the judge is unsure about this candidate.",
         )
 
     class OverlapVerdictBatch(BaseModel):
