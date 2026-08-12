@@ -111,21 +111,60 @@ def agents_extra_installed() -> bool:
     return bool(llm.agents_extra_installed())
 
 
-def live_llm_ready() -> bool:
-    """True when a real LLM call can be made on the CONFIGURED provider."""
-    return agents_extra_installed() and credential_present(configured_provider())
+def live_llm_ready(required_provider: str | None = None) -> bool:
+    """True when a real LLM call can be made on the CONFIGURED provider.
+
+    ``required_provider`` is for a module that PINS a provider in its own ``LLMConfig``
+    instead of resolving the ``standard`` model class — e.g.
+    ``test_completion_banking_behavior_0707.py``, which pins
+    ``bedrock:us.anthropic.claude-sonnet-4-6`` to hold the model fixed while reproducing that
+    bug. Such a module calls Bedrock on EVERY arm, including the arms that carry no AWS
+    credential (the OIDC step is gated to the bedrock arm), so the plain probe answers the
+    wrong question: it reports the *arm's* credential while the module calls something else.
+    Passing the pinned provider makes readiness mean what the module actually needs — this arm
+    resolves that provider AND its credential is present (bug 4f74).
+    """
+    if not agents_extra_installed():
+        return False
+    provider = configured_provider()
+    if required_provider is not None and provider != required_provider:
+        return False
+    return credential_present(required_provider or provider)
 
 
-def _skip_reason() -> str:
+def _skip_reason(required_provider: str | None = None) -> str:
     provider = configured_provider()
     if not agents_extra_installed():
         return "no live LLM: the [agents] extra is not installed"
+    if required_provider is not None and provider != required_provider:
+        return (
+            f"no live LLM: this module pins a {required_provider!r} model, but the configured "
+            f"arm resolves {provider!r} — that arm cannot cover it, so it runs on the "
+            f"{required_provider!r} arm instead"
+        )
+    target = required_provider or provider
     return (
-        f"no live LLM: configured provider is {provider!r} but its credential is absent "
-        f"— needs {credential_hint(provider)}"
+        f"no live LLM: configured provider is {target!r} but its credential is absent "
+        f"— needs {credential_hint(target)}"
     )
 
 
 #: The shared gate for every live-LLM module in this tier. Import it and apply it; do not
 #: hand-roll an ``ANTHROPIC_API_KEY`` skipif, which silently green-lights a non-Anthropic arm.
 skip_without_live_llm = pytest.mark.skipif(not live_llm_ready(), reason=_skip_reason())
+
+
+def skip_unless_provider(required_provider: str) -> pytest.MarkDecorator:
+    """The gate for a module that PINS *required_provider* rather than following the arm.
+
+    Skips — VISIBLY, with a reason naming both the pinned provider and the arm's resolved one
+    — on any arm that does not run that provider. A skip here is honest: the anthropic arm
+    never claimed to cover Bedrock. It does not weaken the matrix's "a missing credential
+    FAILS, never skips" rule, which is enforced by the workflow's per-arm credential preflight
+    and by the all-skip canary (both untouched): the canary fires only when NO ``llm_live``
+    test executed, and the modules that follow the arm still execute here.
+    """
+    return pytest.mark.skipif(
+        not live_llm_ready(required_provider),
+        reason=_skip_reason(required_provider),
+    )

@@ -27,9 +27,15 @@ from rebar.llm.workflow.completion_recovery import CompletionRecoveryError
 pytest.importorskip("pydantic_ai")
 
 pytestmark = pytest.mark.external
-_live_llm_ready = _live_llm.live_llm_ready()
 
 _MODEL = "bedrock:us.anthropic.claude-sonnet-4-6"
+#: The provider _MODEL pins. This module does NOT follow the arm's `standard` model class, so
+#: its readiness must be asked about bedrock specifically — on an arm that resolves anything
+#: else there is no AWS credential (the OIDC step is gated to the bedrock arm) and every cell
+#: here would fail on a provider this arm never claimed to cover (bug 4f74).
+_PINNED_PROVIDER = _MODEL.partition(":")[0]
+_live_llm_ready = _live_llm.live_llm_ready(_PINNED_PROVIDER)
+_skip = _live_llm.skip_unless_provider(_PINNED_PROVIDER)
 _TRIALS = 3
 
 
@@ -169,7 +175,7 @@ def _dense_ticket(repo: Path) -> str:
     return ticket_id
 
 
-@_live_llm.skip_without_live_llm
+@_skip
 def test_dense_completion_banks_and_terminates_in_two_of_three_trials(
     monkeypatch: pytest.MonkeyPatch, rebar_repo: Path
 ) -> None:
@@ -185,7 +191,7 @@ def test_dense_completion_banks_and_terminates_in_two_of_three_trials(
     assert len(successes) >= 2, f"dense completion banking successes={len(successes)}/3: {trials}"
 
 
-@_live_llm.skip_without_live_llm
+@_skip
 def test_simple_completion_control_still_banks_every_criterion(
     monkeypatch: pytest.MonkeyPatch, rebar_repo: Path
 ) -> None:
