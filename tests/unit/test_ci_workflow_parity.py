@@ -17,6 +17,7 @@ optionality wiring — are preserved, now checked against the reusable that owns
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -138,54 +139,130 @@ def test_shared_pytest_job_has_incident_timeout() -> None:
     )
 
 
-def _pytest_suite_run_blocks() -> list[str]:
-    """The ``run:`` scripts of every parallel pytest step in the shared reusable's test job.
+# Matches a pytest invocation in COMMAND position on one shell line: start-of-line or a
+# `|`/`&&`/`;` separator, an optional path prefix, then either `python -m pytest` or `pytest`.
+# Deliberately independent of `-m` and of `--dist` — the predicate this replaced required both,
+# which made it blind to every non-xdist lane AND to the `python -m pytest` form. The
+# command-boundary requirement is what keeps `pip install pytest pytest-timeout` (where pytest
+# is an ARGUMENT) from being mistaken for a pytest lane.
+# re.MULTILINE is load-bearing, not decoration: a run block is multi-line and the invocation is
+# rarely its first line (_optionality.yml runs pip install, then a python -c probe, and only
+# then pytest). Without it `^` would anchor to the start of the whole block and miss that lane
+# entirely — which the liveness test below caught while this guard was being written.
+_PYTEST_INVOCATION = re.compile(
+    r"(?:^|\|\s*|&&\s*|;\s*)\s*(?:[\w./-]*/)?(?:python[\d.]*\s+-m\s+pytest|pytest)\b",
+    re.MULTILINE,
+)
 
-    Both the default-suite and integration-tier steps launch the xdist-parallel suite
-    (``pytest -m ... -n <N> --dist ...``). Returns their ``run`` bodies so a guard can assert a
-    property holds on ALL of them, not just the one it happened to eyeball.
+# Every invocation FORM that exists in this repo's workflows, each keyed to a lane that uses it.
+# Asserted as a subset of what the sweep discovers, so a future refactor that breaks the matcher
+# fails loudly instead of passing vacuously over an empty lane set. This is a liveness floor,
+# NOT an allowlist: a new lane needs no entry here, it just has to carry the guard.
+_EXPECTED_PYTEST_FORMS = {
+    "_build-and-test.yml": 'pytest -m "not integration and not external"',  # bare, with -m
+    "structured-output-baseline.yml": "pytest tests/external/",  # bare, NO -m
+    "_eval-discipline.yml": "python -m pytest",  # module form
+    "_optionality.yml": "/tmp/clean/bin/python -m pytest",  # path-prefixed module form
+}
+
+
+def _all_workflow_pytest_steps() -> list[tuple[str, str, str]]:
+    """Every ``run`` block in .github/workflows that invokes pytest, as (file, step name, body).
+
+    Shell comment lines are dropped before matching: ``_build-and-test.yml`` carries a
+    ``# --timeout (pytest-timeout) ...`` comment that names pytest without invoking it, and a
+    substring matcher would demand a hang guard on the comment's step regardless of its command.
     """
     import yaml
 
-    workflow = yaml.safe_load(_read(_BAT_YML))
-    steps = ((workflow.get("jobs") or {}).get("test") or {}).get("steps") or []
-    blocks = [
-        str(step.get("run", ""))
-        for step in steps
-        if "pytest -m" in str(step.get("run", "")) and "--dist" in str(step.get("run", ""))
-    ]
-    assert blocks, "_build-and-test.yml jobs.test no longer runs the parallel pytest suite"
-    return blocks
+    found: list[tuple[str, str, str]] = []
+    for path in sorted((_ROOT / ".github" / "workflows").iterdir()):
+        if path.suffix not in {".yml", ".yaml"}:
+            continue
+        workflow = yaml.safe_load(_read(path)) or {}
+        for job in (workflow.get("jobs") or {}).values():
+            for step in (job or {}).get("steps") or []:
+                body = str((step or {}).get("run", ""))
+                if not body:
+                    continue
+                live = "\n".join(
+                    line for line in body.splitlines() if not line.lstrip().startswith("#")
+                )
+                if _PYTEST_INVOCATION.search(live):
+                    found.append((path.name, str((step or {}).get("name", "<unnamed>")), body))
+    assert found, "the pytest-invocation sweep found NO lanes at all — the matcher is broken"
+    return found
 
 
-def test_shared_pytest_suite_has_a_per_test_hang_guard() -> None:
-    """A single deadlocked test must name itself in seconds, not eat the whole 60-minute job.
+def test_pytest_invocation_sweep_sees_every_form() -> None:
+    """The sweep's liveness floor: it must still find a lane of each invocation form present.
 
-    ``timeout-minutes: 60`` (asserted above) only bounds the WHOLE job: a test that blocks
-    forever under ``-q`` stays invisible behind the last dot and is killed 52 minutes later
-    with no traceback and no culprit named — exactly the ubuntu/py3.11 incident (ticket
-    ``89d5-61da-b621-47f8``), whose acceptance criteria require "whatever makes the hang
-    diagnosable (a per-test timeout, -v, or a faulthandler dump)" be committed.
-
-    ``pytest-timeout``'s ``--timeout`` is that instrument, and ``--timeout-method=thread`` is
-    the load-bearing half: the default ``signal`` method arms ``SIGALRM`` in the main thread
-    and cannot fire while a worker is blocked in a C-level syscall (a stuck ``fcntl.flock``,
-    socket ``recv``, or ``subprocess`` pipe) — precisely the hang shapes this suite is full of.
-    The ``thread`` method's watchdog + faulthandler dumps every thread's stack and aborts the
-    worker, so the recurrence points straight at the offending test instead of going silent.
+    Without this, a regression in ``_PYTEST_INVOCATION`` that stopped matching (say) the
+    ``python -m pytest`` form would leave the guard below asserting over a silently smaller set
+    and passing — the precise failure mode of the predicate this replaced, which required
+    ``--dist`` and so never saw a single one of the eight non-xdist lanes.
     """
-    for block in _pytest_suite_run_blocks():
-        assert "--timeout=" in block, (
-            "a parallel pytest step in _build-and-test.yml carries no `--timeout=<seconds>` "
-            "per-test hang guard: a deadlocked test is invisible under -q until the 60-minute "
-            "job cap, with no traceback (ticket 89d5-61da-b621-47f8). Add pytest-timeout's "
-            f"--timeout to the step:\n{block}"
+    discovered = _all_workflow_pytest_steps()
+    for filename, snippet in _EXPECTED_PYTEST_FORMS.items():
+        assert any(name == filename and snippet in body for name, _step, body in discovered), (
+            f"the pytest-invocation sweep no longer detects {snippet!r} in {filename} — the "
+            "matcher regressed and lanes are going unchecked. Fix _PYTEST_INVOCATION; do not "
+            "relax this expectation."
         )
-        assert "--timeout-method=thread" in block, (
-            "a parallel pytest step in _build-and-test.yml sets --timeout without "
-            "--timeout-method=thread; the default `signal` method cannot interrupt a worker "
-            "blocked in a C-level flock/socket/subprocess call (the hang shapes this suite "
-            f"exercises), so it would still go silent. Use the thread method:\n{block}"
+
+
+def test_pip_install_of_pytest_is_not_mistaken_for_a_lane() -> None:
+    """`pip install pytest ...` names pytest but does not RUN it — it must not demand a guard.
+
+    ``_optionality.yml`` installs pytest (and pytest-timeout) by name into its minimal clean
+    venv. A matcher keyed on the bare substring would flag that install step as an unguarded
+    pytest lane and force a nonsensical ``--timeout`` onto pip.
+    """
+    for line in (
+        "          /tmp/clean/bin/pip install pytest pytest-timeout jsonschema 'mcp>=1.28.1,<2'",
+        "          python -m pip install pytest",
+    ):
+        assert not _PYTEST_INVOCATION.search(line), (
+            f"_PYTEST_INVOCATION matched an INSTALL line, not an invocation: {line!r}. The "
+            "command-boundary requirement is what separates the two; do not drop it."
+        )
+
+
+def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
+    """A single deadlocked test must name itself in seconds, not eat the whole job.
+
+    ``timeout-minutes`` — where a job even declares it — bounds only the WHOLE job: a test that
+    blocks forever under ``-q`` stays invisible behind the last dot and is killed much later
+    with no traceback and no culprit named, which is exactly the ubuntu/py3.11 incident (ticket
+    ``89d5-61da-b621-47f8``). ``pytest-timeout``'s ``--timeout`` is that instrument.
+
+    ``--timeout-method=thread`` is the load-bearing half: the default ``signal`` method arms
+    ``SIGALRM`` in the main thread and cannot fire while a worker is blocked in a C-level
+    syscall (a stuck ``fcntl.flock``, socket ``recv``, or ``subprocess`` pipe) — precisely the
+    hang shapes these suites are full of, and the ONLY shape the live-service lanes have. The
+    ``thread`` watchdog dumps every thread's stack and aborts the worker, so a recurrence points
+    straight at the offending test.
+
+    This sweeps EVERY workflow rather than just the shared reusable (ticket
+    ``d835-1846-95d1-4d84``): the guard originally shipped only in ``_build-and-test.yml``, and
+    the eight other lanes — the live-LLM matrix, live Jira Cloud, the Langfuse round trip, the
+    Jira DC harness, the structured-output sweep, ``test.yml``'s external tier, and the two
+    offline lanes — each went unguarded because nothing asserted over them. Budgets are
+    per-lane and calibrated from observed runtime (see each step's own comment); this asserts
+    only that a budget EXISTS, so a new lane cannot ship without one.
+    """
+    for filename, step, body in _all_workflow_pytest_steps():
+        where = f"{filename} step {step!r}"
+        assert "--timeout=" in body, (
+            f"{where} invokes pytest with no `--timeout=<seconds>` per-test hang guard: a "
+            "deadlocked test is invisible under -q until the job cap, with no traceback "
+            "(ticket 89d5-61da-b621-47f8). Add pytest-timeout's --timeout, sized from this "
+            f"lane's observed runtime rather than copied:\n{body}"
+        )
+        assert "--timeout-method=thread" in body, (
+            f"{where} sets --timeout without --timeout-method=thread; the default `signal` "
+            "method cannot interrupt a worker blocked in a C-level flock/socket/subprocess "
+            f"call, so the hang would still go silent. Use the thread method:\n{body}"
         )
 
 

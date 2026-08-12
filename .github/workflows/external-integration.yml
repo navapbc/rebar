@@ -215,9 +215,18 @@ jobs:
         # split; and a NEW live-LLM module is picked up automatically instead of needing a
         # path added here (tests/unit/test_ci_provider_matrix.py fails if a module uses the
         # shared live-LLM gate without the sentinel).
+        # --timeout is the per-test HANG GUARD (ticket d835-1846-95d1-4d84). This job declares
+        # no timeout-minutes, so without it one deadlocked test hides behind the last -q dot
+        # until GitHub's 360-minute default, with no traceback naming the culprit.
+        # 900s is calibrated to THIS lane, not copied: the step ran 138-870s over 15-16 tests
+        # across recent green runs (the bedrock arm alone swung 347->870s), so 900s exceeds the
+        # worst observed whole-step time and is ~16x the worst arm's mean per test — a live-LLM
+        # call with retries can be legitimately slow, and this must not clip one.
+        # --timeout-method=thread is load-bearing: the default `signal` method arms SIGALRM in
+        # the main thread and cannot fire while blocked in a C-level socket/subprocess call.
         run: >-
           pytest -m "external and llm_live" tests/external -q
-          --ignore=tests/external/live_jira_dc
+          --ignore=tests/external/live_jira_dc --timeout=900 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Summarize LLM token usage → job summary
@@ -365,9 +374,14 @@ jobs:
         # MASK an all-skip of the Jira tests. The two lanes must stay independent for each
         # job's canary to mean what it says, exactly as the --ignore below reasons about the
         # Data Center tier.
+        # Per-test hang guard (ticket d835-1846-95d1-4d84); see the live-LLM lane above for why
+        # timeout-minutes is not a substitute and why the method must be `thread`.
+        # 600s is this lane's own budget: the step ran 85-120s over ~19 live-Jira-Cloud tests
+        # across recent green runs, so 600s is 5x the worst observed WHOLE step and ~100x the
+        # observed mean per test — ample room for a slow Jira Cloud round trip.
         run: >-
           pytest -m "external and not llm_live" tests/external -q
-          --ignore=tests/external/live_jira_dc
+          --ignore=tests/external/live_jira_dc --timeout=600 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Summarize LLM token usage → job summary
@@ -468,8 +482,15 @@ jobs:
           LANGFUSE_PUBLIC_KEY: pk-lf-1234567890
           LANGFUSE_SECRET_KEY: sk-lf-1234567890
           REBAR_RUN_EXTERNAL: "1"
+        # Per-test hang guard (ticket d835-1846-95d1-4d84); see the live-LLM lane above for the
+        # rationale and why --timeout-method=thread is the load-bearing half.
+        # 300s for this lane: it is a SINGLE test that ran 24-29s across recent green runs, so
+        # 300s is ~10x the worst observation. It is also the floor this project uses for any
+        # pytest lane, and a round trip against the local ephemeral Langfuse stack has no
+        # reason to approach it.
         run: >-
           pytest -m external tests/external/test_llm_trace.py -q
+          --timeout=300 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Langfuse logs on failure
@@ -562,8 +583,19 @@ jobs:
         # means the image genuinely dropped them (re-run the capability map). The wait's
         # allowance is JIRA_DC_FIELD_READY_TIMEOUT (seconds, default 120) — see
         # tests/external/live_jira_dc/README.md § Readiness.
+        # Per-test hang guard (ticket d835-1846-95d1-4d84); see the live-LLM lane above for the
+        # rationale and why --timeout-method=thread is the load-bearing half.
+        # 900s for this lane. The step ran 2384-2635s over 63 tests across recent green runs —
+        # a ~41s mean per test — so 900s is ~22x that mean. It ALSO has to clear the
+        # field-readiness wait documented above, which runs INSIDE a test and is therefore
+        # charged to the per-test budget: JIRA_DC_FIELD_READY_TIMEOUT defaults to 120s and
+        # README.md documents raising it to 300s, so 900s keeps a 3x margin over the
+        # documented maximum. --durations=25 is added with it: no lane here has ever printed
+        # per-test durations, so the tail behind that mean is unmeasured and a future
+        # re-calibration would otherwise be guesswork.
         run: >-
-          pytest -m external tests/external/live_jira_dc -q -rA
+          pytest -m external tests/external/live_jira_dc -q -rA --durations=25
+          --timeout=900 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Jira DC container logs on failure

@@ -121,8 +121,18 @@ jobs:
           # JIRA_USER: ${{ secrets.JIRA_USER }}
           # JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
           # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        # Per-test hang guard (ticket d835-1846-95d1-4d84); --timeout-method=thread because
+        # the default `signal` method cannot interrupt a worker blocked in a C-level
+        # socket/subprocess call.
+        # 600s is calibrated BY ANALOGY, not from history, and the analogy is stated so the
+        # number is auditable: this job has NEVER executed (it is gated on a workflow_dispatch
+        # input that has never been fired, and its credential env keys are all commented out
+        # below), so it has no runtime record of its own. It runs the same `-m external`
+        # selection as external-integration.yml's `external` job, which was measured at
+        # 85-120s per step, and takes that job's 600s budget.
         run: >-
           pytest -m external -q -p no:cacheprovider
+          --timeout=600 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-ext"
 
   # Golden-path on a CLEAN (non-editable) install (ticket 0435): the README quickstart
