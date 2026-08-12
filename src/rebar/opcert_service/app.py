@@ -22,7 +22,9 @@ RUN. ``uvicorn rebar.opcert_service.app:app --host 0.0.0.0 --port 8080``.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import contextlib
+import functools
 import hmac
 import logging
 import uuid
@@ -33,7 +35,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from rebar.opcert_service import jobs
-from rebar.opcert_service.config import OpcertServiceConfig
+from rebar.opcert_service.config import (
+    DEFAULT_SHUTDOWN_CANCEL_SECONDS,
+    OpcertServiceConfig,
+)
 from rebar.opcert_service.ssm import boto3_ssm_fetcher
 
 logger = logging.getLogger("rebar.opcert_service")
@@ -47,6 +52,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Start the in-process job queue + the single background worker; stop them on shutdown."""
     app.state.queue = asyncio.Queue()
     app.state.jobs = {}
+    # An app-OWNED executor, not the event loop's default one (bug c89f). ``asyncio.to_thread``
+    # would offload onto the loop's DEFAULT executor, and the loop's teardown joins that executor
+    # via ``loop.shutdown_default_executor()`` with NO timeout — so an in-flight job wedged
+    # shutdown for its FULL remaining duration (measured: a 12s job -> a 12.01s shutdown; a 30s
+    # job -> 30.02s; up to ``DEFAULT_JOB_TIMEOUT_SECONDS`` = 900s in production). Owning the
+    # executor lets shutdown ABANDON the orphaned thread instead of joining it. Cancelling the
+    # task is NOT sufficient on its own: the await unwinds immediately, but the OS thread stays
+    # registered with whichever executor ran it.
+    app.state.executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=WORKER_COUNT, thread_name_prefix="opcert-job"
+    )
     tasks = [asyncio.create_task(_worker(app)) for _ in range(WORKER_COUNT)]
     app.state.tasks = tasks
     try:
@@ -54,9 +70,45 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         for task in tasks:
             task.cancel()
-        for task in tasks:
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+        # Bound the cancel + await, mirroring ``review_bot.app``: a task slow to honor
+        # cancellation must not hang shutdown without an upper bound. ``gather`` with
+        # ``return_exceptions=True`` collects each task's CancelledError as a result rather than
+        # re-raising, so this never propagates out of the lifespan.
+        if tasks:
+            with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=_shutdown_cancel_seconds(app),
+                )
+        # ABANDON whatever is still running. ``wait=False`` is the whole point: a thread cannot be
+        # force-cancelled, so waiting here would reintroduce the unbounded join this fix removes.
+        # ``cancel_futures=True`` drops work that never started.
+        app.state.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _shutdown_cancel_seconds(app: FastAPI) -> float:
+    """The lifespan's bounded cancel window, defaulting if the app carries no config."""
+    cfg = getattr(app.state, "config", None)
+    return float(getattr(cfg, "shutdown_cancel_seconds", DEFAULT_SHUTDOWN_CANCEL_SECONDS))
+
+
+async def _offload(app: FastAPI, rec: dict) -> dict:
+    """Run one job body on the app-owned executor (the seam tests replace).
+
+    Deliberately NOT ``asyncio.to_thread``: see the executor comment in :func:`lifespan`.
+    """
+    loop = asyncio.get_running_loop()
+    cfg: OpcertServiceConfig = app.state.config
+    return await loop.run_in_executor(
+        app.state.executor,
+        functools.partial(
+            jobs.run_job,
+            ticket_id=rec["ticket_id"],
+            kind=rec["kind"],
+            cfg=cfg,
+            ssm_fetcher=app.state.ssm_fetcher,
+        ),
+    )
 
 
 async def _worker(app: FastAPI) -> None:
@@ -74,13 +126,7 @@ async def _worker(app: FastAPI) -> None:
                 continue
             rec["status"] = "running"
             async with asyncio.timeout(cfg.job_timeout_seconds):
-                fields = await asyncio.to_thread(
-                    jobs.run_job,
-                    ticket_id=rec["ticket_id"],
-                    kind=rec["kind"],
-                    cfg=cfg,
-                    ssm_fetcher=app.state.ssm_fetcher,
-                )
+                fields = await _offload(app, rec)
             rec.update(fields)
         except asyncio.CancelledError:
             raise

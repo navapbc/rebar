@@ -14,6 +14,15 @@ from dataclasses import dataclass
 #: 30s-minutes, so the default is 900s (15 min). Override via ``REBAR_OPCERT_JOB_TIMEOUT_SECONDS``.
 DEFAULT_JOB_TIMEOUT_SECONDS = 900
 
+#: Bounded window (seconds) for the lifespan's shutdown cancel + await of the background worker
+#: tasks (``REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS``). A well-behaved task cancels promptly, but one
+#: slow to honor cancellation — a shielded region, a synchronous ``finally`` — would otherwise make
+#: the join unbounded. Anything still pending when the window closes is ABANDONED (the process is
+#: exiting anyway). This bounds the TASK join only; the in-flight job's OS thread is bounded
+#: separately by the app-owned executor (see ``app._offload``), because a thread cannot be
+#: force-cancelled. Small by design: the drain already happened, this is only the cancel tail.
+DEFAULT_SHUTDOWN_CANCEL_SECONDS = 5
+
 #: The SSM SecureString holding the environment's passphrase-free Ed25519 op-cert PRIVATE key.
 DEFAULT_SSM_KEY_PARAM = "/rebar/prod/opcert-ed25519-key"
 
@@ -34,6 +43,7 @@ class OpcertServiceConfig:
     env_id: str | None = None
     ssm_key_param: str = DEFAULT_SSM_KEY_PARAM
     job_timeout_seconds: float = float(DEFAULT_JOB_TIMEOUT_SECONDS)
+    shutdown_cancel_seconds: float = float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
     port: int = DEFAULT_PORT
 
     @classmethod
@@ -47,6 +57,7 @@ class OpcertServiceConfig:
             env_id=_str_env("REBAR_OPCERT_ENV_ID"),
             ssm_key_param=_str_env("REBAR_OPCERT_SSM_KEY_PARAM") or DEFAULT_SSM_KEY_PARAM,
             job_timeout_seconds=_timeout_env(),
+            shutdown_cancel_seconds=_shutdown_cancel_env(),
             port=_port_env(),
         )
 
@@ -69,6 +80,21 @@ def _timeout_env() -> float:
     except ValueError:
         return float(DEFAULT_JOB_TIMEOUT_SECONDS)
     return val if val > 0 else float(DEFAULT_JOB_TIMEOUT_SECONDS)
+
+
+def _shutdown_cancel_env() -> float:
+    """``REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS`` (default
+    :data:`DEFAULT_SHUTDOWN_CANCEL_SECONDS`); a missing / unparseable / non-positive value falls
+    back to the default (a 0 or negative bound would abandon every task instantly, losing
+    well-behaved tasks' prompt cancellation)."""
+    raw = os.environ.get("REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS")
+    if not raw:
+        return float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
+    try:
+        val = float(raw.strip())
+    except ValueError:
+        return float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
+    return val if val > 0 else float(DEFAULT_SHUTDOWN_CANCEL_SECONDS)
 
 
 def _port_env() -> int:
