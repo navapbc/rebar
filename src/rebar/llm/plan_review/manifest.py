@@ -340,6 +340,26 @@ def _inherited_child_impact(children: Sequence[dict[str, Any]] | None) -> _Child
     return _ChildImpact(frozenset(out), live_count > 0 and all_none)
 
 
+def _declares_no_impact(ticket_id: str, impact: _ChildImpact, *, repo_root=None) -> bool:
+    """True when this ticket's signed scope would classify as ``none`` (ticket 81ca).
+
+    Mirrors :func:`classify_file_scope`'s ``none`` arm on an EMPTY dependency set: an own scope
+    of ``none``, or an ``undeclared`` container whose live children all declare none. Such an
+    attestation is exempt from the code-drift check today, and read-set scoping must not take
+    that exemption away. Unreadable scope answers False — the conservative direction here, since
+    False only means the read-set MIGHT scope a ticket that turns out to be ``undeclared``."""
+    try:
+        import rebar
+
+        own_scope = rebar.get_file_impact_scope(ticket_id, repo_root=repo_root).get(
+            "kind", "undeclared"
+        )
+    except Exception:  # noqa: BLE001 — an unreadable scope must not raise inside the gate
+        logger.warning("file_impact scope read failed for %s; treating as undeclared", ticket_id)
+        return False
+    return own_scope == "none" or (own_scope == "undeclared" and impact.all_none)
+
+
 def dependency_hashes(
     verdict: dict[str, Any],
     *,
@@ -380,12 +400,26 @@ def dependency_hashes(
     coverage: dict[str, Any] = raw_coverage if isinstance(raw_coverage, dict) else {}
     basis = CURRENCY_BASIS_FILE_IMPACT
     # Scope ONLY the case ADR 0002 leaves unscoped: a set that would otherwise be EMPTY, on a
-    # container that did not poison. Both guards are load-bearing. Adding the blast radius to an
-    # already-scoped set would re-introduce the very false positive this ticket removes (an
-    # unrelated commit touching e.g. rebar.toml would invalidate a container scoped to its
-    # child's files); and a poisoned container is deliberately fail-CLOSED at whole-HEAD,
-    # because any partial scope is fail-OPEN for the child's undeclared impact.
-    if not paths and not impact.poisoned and coverage.get("read_set_recorded"):
+    # container that did not poison, for a ticket whose scope is UNDECLARED. All three guards
+    # are load-bearing:
+    #
+    #   * adding the blast radius to an already-scoped set would re-introduce the very false
+    #     positive this ticket removes (an unrelated commit touching e.g. rebar.toml would
+    #     invalidate a container correctly scoped to its child's files);
+    #   * a poisoned container is deliberately fail-CLOSED at whole-HEAD, because any partial
+    #     scope is fail-OPEN for the child's undeclared impact;
+    #   * an AUTHENTICATED no-impact scope (``file-scope: none``) is today fully EXEMPT from
+    #     code drift — ``compute_validity`` skips the head check for it entirely. Scoping it
+    #     would hand it a non-empty dep set, which :func:`classify_file_scope` reclassifies
+    #     ``none`` → ``paths``, so a previously exempt attestation would START invalidating on
+    #     read-set/blast-radius drift. That is strictly MORE invalidation — the opposite of
+    #     this change's purpose — so a declared ``none`` keeps its exemption untouched.
+    if (
+        not paths
+        and not impact.poisoned
+        and not _declares_no_impact(ticket_id, impact, repo_root=repo_root)
+        and coverage.get("read_set_recorded")
+    ):
         try:
             paths.update(
                 _read_set.read_set_dependency_paths(coverage.get("read_set") or [], base=base)

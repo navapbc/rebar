@@ -166,8 +166,9 @@ all unchanged.
   opened no files, and the stronger reading would scope in the fail-OPEN direction.
 
 - **Composition rule — and its two preconditions.** The scoping applies ONLY where this ADR
-  leaves a hole. All three must hold: the pre-existing dependency set (declared `file_impact` ∪
-  cited paths ∪ inherited child impact) is EMPTY; the container poison rule is NOT in effect; and
+  leaves a hole. All four must hold: the pre-existing dependency set (declared `file_impact` ∪
+  cited paths ∪ inherited child impact) is EMPTY; the container poison rule is NOT in effect; the
+  ticket's own scope is UNDECLARED rather than an authenticated `none`; and
   a read-set was recorded. The set then becomes read-set ∪ the blast-radius entries
   (`read_set.BLAST_RADIUS_ENTRIES`: the criteria machinery, the routing overlays, the reviewer
   rubrics, the gate workflows, and `rebar.toml`).
@@ -178,6 +179,14 @@ all unchanged.
   files. And a poisoned container (decision 5's amendment: a live child with undeclared impact)
   is deliberately fail-CLOSED at whole-HEAD, precisely because any partial scope is fail-OPEN
   for that undeclared impact; read-set scoping is such a partial scope, so it must not apply.
+
+  The third guard protects the OPPOSITE direction. An authenticated `file-scope: none` is today
+  fully EXEMPT from code drift — with an empty dependency map `compute_validity` skips even the
+  whole-HEAD check. Scoping such a ticket would hand it a non-empty map, which
+  `classify_file_scope` reclassifies `none` → `paths`, so an attestation that previously never
+  went stale on code motion would START invalidating on read-set or blast-radius drift. That is
+  strictly MORE invalidation than before — the opposite of this addendum's purpose — so a
+  declared `none` keeps its exemption untouched.
 
 - **Globs: expansion + membership digest.** The currency check iterates the concrete entries
   recorded at signing time, so a glob is handled twice. It is EXPANDED to its matching regular

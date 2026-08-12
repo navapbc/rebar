@@ -484,3 +484,26 @@ def test_currency_basis_is_carried_in_status_json(
 
     assert _llm_commands._review_plan(["t", "--status", "-o", "json"]) == 12
     assert json.loads(capsys.readouterr().out)["currency_basis"] == CURRENCY_BASIS_FAIL_SAFE
+
+
+def test_an_authenticated_none_scope_keeps_its_drift_exemption(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ticket that AUTHENTICALLY declares no file impact (``file-scope: none``) is exempt
+    from the code-drift check entirely — ``compute_validity`` skips even the head check for it.
+    Scoping it would hand it a non-empty dep set, which ``classify_file_scope`` reclassifies
+    ``none`` → ``paths``, so a previously exempt attestation would START invalidating on
+    read-set/blast-radius drift. That is strictly MORE invalidation than before, so the
+    exemption must survive untouched."""
+    _tree(store)
+    monkeypatch.setattr("rebar.llm.plan_review.manifest._hash_basis", lambda *a, **k: str(store))
+    ticket_id = rebar.create_ticket("task", "declared none", repo_root=str(store))
+    rebar.declare_no_file_impact(ticket_id, "no code changes", repo_root=str(store))
+    verdict = _verdict(ticket_id, recorded=True, paths=["read_me.py"])
+
+    deps = attest.dependency_hashes(verdict, repo_root=str(store))
+
+    assert deps == {}, "a declared-none ticket must not gain a read-set/blast-radius scope"
+    assert attest.classify_file_scope(deps.keys(), "none") == "none", (
+        "and it must still classify as none, preserving the drift exemption"
+    )
