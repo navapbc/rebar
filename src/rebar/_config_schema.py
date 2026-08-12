@@ -33,6 +33,7 @@ from rebar._config_coercion import (
     _as_str_tuple,
     _as_tracker_dir,
     _src,
+    unknown_key_hint,
 )
 from rebar._deprecations import raise_or_warn_cfg_key, warn_deprecated
 
@@ -65,12 +66,10 @@ def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = F
             f"rebar config{_src(source)}: unknown key(s) {keys} "
             "(REBAR_CONFIG_UNKNOWN_KEYS=error — remove them or fix the typo)"
         )
+    hint = unknown_key_hint()
     for k in leftover:
         logger.warning(
-            "rebar config%s: unknown key '%s.%s' ignored (typo? see docs/config.md)",
-            _src(source),
-            section,
-            k,
+            "rebar config%s: unknown key '%s.%s' ignored (%s)", _src(source), section, k, hint
         )
 
 
