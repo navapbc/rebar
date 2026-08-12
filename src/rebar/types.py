@@ -209,6 +209,7 @@ TransitionResult = TypedDict(
         "from": TicketStatus,
         "to": TicketStatus,
         "newly_unblocked": list[str],
+        "completion_signature": NotRequired[dict[str, Any]],
     },
 )
 
