@@ -320,6 +320,57 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     assert "src/rebar/live.py:1" in result.stderr
 
 
+# Decode policy (ticket 8b6c): an authored text format that cannot be decoded is a HOLE in the
+# guard — every occurrence inside it would be silently skipped — so those suffixes fail closed,
+# while genuine binaries stay tolerated so the gate does not redden on legitimate assets.
+@pytest.mark.parametrize("relative", ["src/rebar/live.py", "README.md", "data.json", "conf.toml"])
+def test_undecodable_source_file_fails_closed(tmp_path: Path, relative: str) -> None:
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"# " + _legacy_heading().encode() + b"\n\xff\xfe invalid\n")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert relative in result.stderr
+    assert "not valid UTF-8" in result.stderr
+
+
+@pytest.mark.parametrize("relative", ["assets/logo.png", "vendor/blob.bin", "archive.tar.gz"])
+def test_undecodable_binary_file_is_tolerated(tmp_path: Path, relative: str) -> None:
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00\x01binary payload")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+
+
+# Diagnostic excerpts are attacker-influenced text bound for a CI log: escaped, and capped.
+def test_control_characters_in_a_matching_line_are_escaped(tmp_path: Path) -> None:
+    _write(tmp_path, "src/rebar/live.py", f"x = 1\x00\x1b[31m {_legacy_heading()}\n")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert "\x00" not in result.stderr
+    assert "\x1b" not in result.stderr
+    assert "\\x00" in result.stderr
+    assert "\\x1b" in result.stderr
+
+
+def test_long_matching_line_is_truncated(tmp_path: Path) -> None:
+    _write(tmp_path, "src/rebar/live.py", f"{_legacy_heading()} {'A' * 5000}\n")
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 1
+    assert "[truncated]" in result.stderr
+    assert "A" * 400 not in result.stderr
+    assert max(len(line) for line in result.stderr.splitlines()) < 400
+
+
 # The committed inventory and all live migrations are validated through the real CLI.
 def test_current_repository_vocabulary_is_clean() -> None:
     result = subprocess.run(

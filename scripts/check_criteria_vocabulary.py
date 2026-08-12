@@ -50,6 +50,24 @@ ABBREVIATION_FILES = (
     Path("docs/plan-review-criteria-guide.md"),
 )
 
+# Decode policy. A guard that silently skips whatever it cannot decode is a guard with an
+# opt-out: one stray byte in a source file would hide every occurrence in it. So the suffixes
+# below — the repository's own authored text formats, where an undecodable byte is a defect
+# rather than a legitimate payload — FAIL CLOSED: the file is reported as an error instead of
+# skipped. Every other suffix stays tolerated, because genuine binaries (images, archives,
+# compiled artifacts) are checked in legitimately and must not turn the gate red. The split is
+# deliberately by extension, not by content sniffing: it is reviewable, stable, and cannot be
+# defeated by crafting bytes that a heuristic would call binary.
+SOURCE_TEXT_SUFFIXES = frozenset({".py", ".md", ".json", ".toml", ".yaml", ".yml"})
+
+# Diagnostic excerpts are attacker-influenced text going straight into a CI log, so they are
+# escaped (no raw control characters, no terminal escape sequences) and capped. The cap applies
+# to the ESCAPED form so the emitted width is bounded no matter how the input expands. A
+# truncated excerpt still identifies the site exactly: path, line, and the matched token are
+# reported separately from the excerpt.
+MAX_EXCERPT_CHARS = 200
+TRUNCATION_MARKER = "… [truncated]"
+
 
 @dataclass(frozen=True)
 class Allowance:
@@ -67,7 +85,8 @@ class VocabularyMatch:
     path: Path
     line: int
     text: str
-    source_line: str
+    excerpt: str
+    """The matching line, already escaped and truncated by `_excerpt`."""
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -229,20 +248,60 @@ def _line_matches(abbreviation_is_scoped: bool, line: str) -> Iterable[tuple[int
     yield from sorted(matches)
 
 
-def scan_repository(root: Path) -> dict[Path, list[VocabularyMatch]]:
-    """Return every in-scope occurrence grouped by repository-relative path."""
+def _escape(text: str) -> str:
+    """Render *text* with every non-printable character as a visible escape."""
+
+    return "".join(
+        character
+        if character.isprintable()
+        else (
+            f"\\x{ord(character):02x}"
+            if ord(character) < 0x100
+            else f"\\u{ord(character):04x}"
+            if ord(character) <= 0xFFFF
+            else f"\\U{ord(character):08x}"
+        )
+        for character in text
+    )
+
+
+def _excerpt(line: str) -> str:
+    """Escape and length-cap one source line for safe inclusion in a diagnostic."""
+
+    escaped = _escape(line)
+    if len(escaped) <= MAX_EXCERPT_CHARS:
+        return escaped
+    return escaped[:MAX_EXCERPT_CHARS] + TRUNCATION_MARKER
+
+
+def _fails_closed_on_decode_error(relative: Path) -> bool:
+    return relative.suffix.lower() in SOURCE_TEXT_SUFFIXES
+
+
+def scan_repository(root: Path) -> tuple[dict[Path, list[VocabularyMatch]], list[str]]:
+    """Return every in-scope occurrence by path, plus errors for undecodable source files."""
 
     found: dict[Path, list[VocabularyMatch]] = defaultdict(list)
+    decode_errors: list[str] = []
     for candidate, relative in iter_repository_files(root):
         try:
             text = candidate.read_text(encoding="utf-8")
         except UnicodeDecodeError:
+            # Fail closed for authored text formats; tolerate everything else as binary.
+            if _fails_closed_on_decode_error(relative):
+                decode_errors.append(
+                    f"{relative}: is not valid UTF-8, so it cannot be checked for deprecated "
+                    "vocabulary; fix the encoding or rename it out of "
+                    f"{sorted(SOURCE_TEXT_SUFFIXES)}"
+                )
             continue
         abbreviation_is_scoped = _abbreviation_is_scoped(relative)
         for line_number, line in enumerate(text.splitlines(), 1):
             for _, token in _line_matches(abbreviation_is_scoped, line):
-                found[relative].append(VocabularyMatch(relative, line_number, token, line))
-    return found
+                found[relative].append(
+                    VocabularyMatch(relative, line_number, token, _excerpt(line))
+                )
+    return found, sorted(decode_errors)
 
 
 def validate_matches(
@@ -254,15 +313,16 @@ def validate_matches(
     for path, matches in sorted(found.items()):
         if path not in allowances:
             errors.extend(
-                f'{match.path}:{match.line}: deprecated vocabulary "{match.text}" '
-                f"in {match.source_line}"
+                f'{_escape(str(match.path))}:{match.line}: deprecated vocabulary "{match.text}" '
+                f"in {match.excerpt}"
                 for match in matches
             )
     for path, allowance in sorted(allowances.items()):
         actual = len(found.get(path, []))
         if actual != allowance.count:
             errors.append(
-                f"{path}: allowlist count mismatch: expected {allowance.count}, found {actual}"
+                f"{_escape(str(path))}: allowlist count mismatch: "
+                f"expected {allowance.count}, found {actual}"
             )
     return errors
 
@@ -276,7 +336,9 @@ def run(root: Path, allowlist_path: Path, stderr: TextIO = sys.stderr) -> int:
         return 1
     allowances, errors = load_allowlist(allowlist_path, root)
     if not errors:
-        errors.extend(validate_matches(scan_repository(root), allowances))
+        found, decode_errors = scan_repository(root)
+        errors.extend(decode_errors)
+        errors.extend(validate_matches(found, allowances))
     if errors:
         print("criteria vocabulary check failed:", file=stderr)
         print(*errors, sep="\n", file=stderr)
