@@ -62,8 +62,19 @@ def _engine_run(repo: Path, *args: str, check: bool = True) -> subprocess.Comple
 
 
 def _make_repo(remote: Path, path: Path) -> Path:
-    """Clone *remote* into *path*, configure identity, return the repo path."""
-    _git("clone", "-q", str(remote), str(path), cwd=path.parent)
+    """Clone *remote* into *path*, configure identity, return the repo path.
+
+    ``--no-hardlinks`` is deliberate. *remote* is a local path, so git's default
+    ``--local`` optimization would HARDLINK ``remote.git/objects`` into this clone's object
+    database — and this clone's database is in turn shared with the ``.tickets-tracker``
+    linked worktree that the tests write through. git-clone(1) warns that the hardlink mode
+    "can race with concurrent modification to the source repository", which is precisely the
+    shape of this harness: the remote is pushed to throughout, from two clones. Copying the
+    objects keeps the three object stores independent, so the only thing that crosses
+    between them is what a push or fetch actually transfers — which is what these tests
+    characterize (bug 5b74-5d8f-a6b4-4674).
+    """
+    _git("clone", "-q", "--no-hardlinks", str(remote), str(path), cwd=path.parent)
     _git("config", "user.email", "test@example.com", cwd=path)
     _git("config", "user.name", "Test", cwd=path)
     return path
@@ -204,6 +215,42 @@ def _create(repo: Path, ttype: str, title: str) -> str:
     return _engine_run(repo, "create", ttype, title).stdout.strip().splitlines()[-1]
 
 
+# The upkeep posture the fixture's bare remote is pinned to. Keys are git config keys.
+#
+# rebar pins the FIRST TWO on every tracker it owns (``_commands/init.py`` gc-config ensure
+# unit): auto-gc stays enabled, but is forced FOREGROUND, because a DETACHED background
+# ``git gc`` / ``git maintenance run --auto`` repacks an object database outside the write
+# lock and corrupts the store (bug 88eb, ADR 0051; ``rebar._store.sync`` module docstring).
+#
+# That pinning reaches the tracker and its enclosing clone. It does NOT reach a bare remote,
+# which no rebar code owns — so the harness's own ``remote.git`` was the one repository here
+# whose ``receive-pack`` ran ``git gc --auto`` at git's defaults, i.e. DETACHED, after every
+# push. Background upkeep then repacked and pruned it concurrently with the next incoming
+# push, which is how a push came back ``unresolved deltas left after unpacking`` /
+# ``refs/heads/tickets does not point to a valid object!`` (bug 5b74-5d8f-a6b4-4674).
+#
+# ``receive.autogc=false`` is the direct fix: a throwaway fixture remote has no reason to run
+# upkeep at all, and a push must never trigger a concurrent rewrite of the object store the
+# NEXT push depends on. The two ``autoDetach`` pins are defence in depth for any other
+# trigger, and keep this remote's posture identical to the one rebar guarantees elsewhere.
+#
+# None of this weakens an oracle: it removes a concurrent mutator, and adds no retry, no
+# swallowed error, and no timing bound. A push that genuinely cannot succeed still fails.
+_REMOTE_UPKEEP_PINS = {
+    "gc.autoDetach": "false",
+    "maintenance.autoDetach": "false",
+    "receive.autogc": "false",
+}
+
+
+def _init_bare_remote(remote: Path, cwd: Path) -> Path:
+    """Create the harness's bare remote with no detached background upkeep."""
+    _git("init", "-q", "--bare", str(remote), cwd=cwd)
+    for key, value in _REMOTE_UPKEEP_PINS.items():
+        _git("config", key, value, cwd=remote)
+    return remote
+
+
 # ─────────────────────────── fixtures ───────────────────────────────────────
 @pytest.fixture
 def two_clones(tmp_path: Path):
@@ -212,8 +259,7 @@ def two_clones(tmp_path: Path):
     A creates a seed ticket and pushes it; B mounts the same tickets branch.
     Returns (remote, repo_a, repo_b, seed_ticket_id).
     """
-    remote = tmp_path / "remote.git"
-    _git("init", "-q", "--bare", str(remote), cwd=tmp_path)
+    remote = _init_bare_remote(tmp_path / "remote.git", tmp_path)
 
     repo_a = _make_repo(remote, tmp_path / "a")
     _git("commit", "-q", "--allow-empty", "-m", "init", cwd=repo_a)
@@ -235,6 +281,68 @@ def two_clones(tmp_path: Path):
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_b)
 
     return remote, repo_a, repo_b, seed
+
+
+# ── harness integrity: the fixture's own remote must not rewrite itself ───────────────────
+def _object_inodes(objects_dir: Path) -> set[tuple[int, int]]:
+    """The ``(device, inode)`` identity of every object file under *objects_dir*."""
+    return {
+        (path.stat().st_dev, path.stat().st_ino)
+        for path in objects_dir.rglob("*")
+        if path.is_file()
+    }
+
+
+def test_fixture_remote_runs_no_detached_upkeep_and_shares_no_objects(two_clones):
+    """The harness's remote must be inert storage: nothing rewrites it but a push.
+
+    This is the deterministic oracle for bug 5b74-5d8f-a6b4-4674, whose real-world form was
+    a rare CI-only corruption. If a future edit recreates the remote without the pins, or
+    restores git's hardlinking local-clone default, it fails HERE and immediately -- not once
+    in dozens of parallel CI runs, as an unrelated change's spurious red.
+    """
+    remote, repo_a, repo_b, _seed = two_clones
+
+    for key, expected in _REMOTE_UPKEEP_PINS.items():
+        got = _git("config", "--get", key, cwd=remote, check=False).stdout.strip()
+        assert got == expected, (
+            f"the fixture's bare remote must pin {key}={expected} so no DETACHED background "
+            f"gc/maintenance can repack it while a push is in flight (bug 88eb, ADR 0051); "
+            f"got {got!r}"
+        )
+
+    remote_objects = _object_inodes(remote / "objects")
+    assert remote_objects, "SETUP: the remote has no object files to compare"
+    for label, repo in (("A", repo_a), ("B", repo_b)):
+        shared = remote_objects & _object_inodes(repo / ".git" / "objects")
+        assert not shared, (
+            f"clone {label} shares {len(shared)} object file(s) with the remote by hardlink; "
+            "clone with --no-hardlinks so upkeep in one store cannot perturb the other"
+        )
+
+
+def test_setup_push_still_fails_when_the_push_genuinely_cannot_succeed(two_clones):
+    """The de-flake must not buy determinism by tolerating a failed push.
+
+    The harness's setup pushes are checked (``check=True``) on purpose: they publish the
+    shared base the invariants are measured against. Removing the concurrent mutator around
+    them must leave that fail-fast intact, so a genuine rejection -- here a true
+    non-fast-forward, the ordinary way a push fails -- still raises.
+    """
+    remote, repo_a, repo_b, seed = two_clones
+    tracker_a, tracker_b = _tracker(repo_a), _tracker(repo_b)
+
+    # B publishes a commit, moving origin/tickets ahead of A.
+    _engine_run(repo_b, "comment", seed, "published commit from B")
+    _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_b)
+
+    # A commits offline, so its history diverges from the published one.
+    _remote_remove(tracker_a)
+    _engine_run(repo_a, "comment", seed, "local-only commit from A")
+    _remote_add(tracker_a, remote)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _git("push", "-q", "origin", "HEAD:tickets", cwd=tracker_a)
 
 
 # ─────────────────────────── tests ──────────────────────────────────────────
