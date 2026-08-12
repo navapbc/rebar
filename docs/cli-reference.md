@@ -7,12 +7,18 @@ Bridge operations use the canonical nested forms `rebar bridge fsck`, `rebar bri
 
 ## Help-backed subcommands
 
-The 53 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
+The 54 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
 
 ### `archive`
 
 ```
 Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
+```
+
+### `attach-commits`
+
+```
+Usage: rebar attach-commits <ticket_id> <sha> [<sha>...]
 ```
 
 ### `audit`

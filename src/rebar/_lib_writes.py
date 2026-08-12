@@ -701,6 +701,7 @@ def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
     ``{ticket_id, attached}``."""
     from rebar._commands import _seam
     from rebar._commands._seam import CommandError
+    from rebar._engine_support import commit_impact
 
     tracker = _seam.tracker_dir(repo_root)
     tid = _seam.require_id(ticket_id, tracker)
@@ -713,6 +714,15 @@ def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
             records.append(c)
         else:
             raise RebarError(f"invalid commit entry {c!r}: need a sha string or {{sha, …}} dict")
+    # ALL-OR-NOTHING: the WHOLE batch is validated before anything is appended, so one bad
+    # SHA never leaves a half-recorded attachment. The CLI and the MCP tool inherit this by
+    # construction — they all route through THIS seam.
+    unresolvable = commit_impact.unresolvable_shas([r["sha"] for r in records], tracker)
+    if unresolvable:
+        raise RebarError(
+            f"cannot attach commits: {', '.join(unresolvable)} did not resolve to a commit "
+            "in this repository; nothing was recorded"
+        )
     try:
         _seam.append_event(tid, "COMMITS", {"commits": records}, tracker, repo_root=repo_root)
     except CommandError as exc:
