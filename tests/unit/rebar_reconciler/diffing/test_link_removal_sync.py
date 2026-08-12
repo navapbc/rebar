@@ -260,8 +260,15 @@ def test_update_one_applies_link_remove(batch_dispatch: ModuleType) -> None:
 
 def test_update_one_tolerates_acli_delete_failure(batch_dispatch: ModuleType) -> None:
     """delete_issue_link shells out via ACLI (subprocess.CalledProcessError, NOT HTTPError).
-    A failure after the link was found in the probe (concurrent removal / transient) must be
-    idempotent — update_one does not raise and the pass is not unwound."""
+    A failure after the link was found in the probe must NOT unwind the pass — update_one
+    does not raise.
+
+    Ticket 5528: this case carries NO stderr, so the link's end-state is unproven and it is
+    counted FAILED, not applied. This assertion previously read ``links_applied == 1``, which
+    encoded the defect: every ACLI delete failure was scored a success, so a pass could report
+    links_applied=N having removed nothing. Idempotent-race coverage now lives in the sibling
+    test below, which supplies the 404 stderr that actually proves the link is gone.
+    """
     import subprocess
 
     exc = subprocess.CalledProcessError(1, ["jira", "workitem", "link", "delete"])
@@ -275,9 +282,34 @@ def test_update_one_tolerates_acli_delete_failure(batch_dispatch: ModuleType) ->
         "links": [{"action": "remove", "type": "Blocks", "to_key": "PROJ-2"}],
     }
     subop: dict[str, int] = {}
-    # Must NOT raise (the CalledProcessError is caught and treated as idempotent).
+    # Must NOT raise (the CalledProcessError is caught; the batch is not unwound).
     batch_dispatch.update_one(mutation, client, subop_applied=subop)
-    assert subop.get("links_applied") == 1, "an ACLI delete race is idempotent success"
+    assert subop.get("links_applied") == 0, "an unproven delete failure is not a success"
+    assert subop.get("links_failed") == 1, "it must be counted, not silently absorbed"
+
+
+def test_update_one_counts_404_delete_as_idempotent(batch_dispatch: ModuleType) -> None:
+    """A delete failing with a 404 signature DID reach the desired end-state (link gone),
+    so it still counts as applied — the genuine concurrent-removal race the original
+    tolerance was written for (ticket 5528 keeps this, narrowed to a proven signature)."""
+    import subprocess
+
+    exc = subprocess.CalledProcessError(
+        1, ["jira", "workitem", "link", "delete"], stderr="Error: 404 link not found"
+    )
+    client = _FakeClient(
+        [{"id": "88", "type": {"name": "Blocks"}, "inwardIssue": {"key": "PROJ-2"}}],
+        delete_exc=exc,
+    )
+    mutation = {
+        "key": "PROJ-1",
+        "fields": {},
+        "links": [{"action": "remove", "type": "Blocks", "to_key": "PROJ-2"}],
+    }
+    subop: dict[str, int] = {}
+    batch_dispatch.update_one(mutation, client, subop_applied=subop)
+    assert subop.get("links_applied") == 1, "a proven-gone link is idempotent success"
+    assert subop.get("links_failed") == 0
 
 
 class _MutableJira:

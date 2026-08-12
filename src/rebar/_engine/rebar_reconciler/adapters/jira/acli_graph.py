@@ -593,6 +593,15 @@ class AcliGraphMixin:
         # with it for forward-version tolerance (older builds that DO accept it
         # behave identically either way — we never read the structured output
         # here, the return is synthesized).
+        #
+        # Ticket 5528: ``--yes`` skips ACLI's interactive confirmation. Without it this
+        # subcommand prompts, and _run_acli spawns with stdin=subprocess.DEVNULL, so the
+        # prompt reads EOF and ACLI aborts with "✗ Error: command cancelled" — deterministic,
+        # so it recurred on every pass. Same failure mode bug 3256 fixed for
+        # ``workitem delete`` (see acli.py). Verified on the flag ITSELF rather than assumed
+        # from that sibling (story 25ae's lesson: ``--json`` IS rejected here):
+        #     $ acli jira workitem link create --help   # acli 1.3.19-stable, the fleet's
+        #           --yes    Confirm link creation without prompting
         cmd = [
             "jira",
             "workitem",
@@ -604,6 +613,7 @@ class AcliGraphMixin:
             from_key,
             "--type",
             link_type,
+            "--yes",
         ]
         self._run(cmd)  # raises on failure — no silent swallowing
         return {"status": "created", "from": from_key, "to": to_key}
@@ -644,6 +654,15 @@ class AcliGraphMixin:
             # Story 25ae: the installed ACLI rejects ``--json`` on link delete
             # ("unknown flag"); ``_run`` raises on a nonzero exit, so the
             # synthesized return below stands in for structured-failure detection.
+            #
+            # Ticket 5528: ``--yes`` skips the interactive confirmation. Without it every
+            # delete prompted, read EOF from stdin=subprocess.DEVNULL, and aborted with
+            # "✗ Error: command cancelled" — which dispatch_one then counted as an APPLIED
+            # link, so passes reported removing links they had not removed. Note ``--json``
+            # and ``--yes`` had to be checked separately; this one IS accepted:
+            #     $ acli jira workitem link delete --help   # acli 1.3.19-stable
+            #           --yes    Confirm link deletion without prompting
+            "--yes",
         ]
         self._run(cmd)
         return {"status": "deleted", "link_id": link_id}

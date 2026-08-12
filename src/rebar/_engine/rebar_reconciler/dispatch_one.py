@@ -451,7 +451,9 @@ def update_one(
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
         mutation, client, issue_key, comment_errors
     )
-    _links_computed, _links_applied = _update_one_dispatch_links(mutation, client, issue_key)
+    _links_computed, _links_applied, _links_failed = _update_one_dispatch_links(
+        mutation, client, issue_key
+    )
 
     if subop_applied is not None:
         subop_applied.update(
@@ -462,6 +464,7 @@ def update_one(
                 "comments_applied": _comments_applied,
                 "links_computed": _links_computed,
                 "links_applied": _links_applied,
+                "links_failed": _links_failed,
             }
         )
 
@@ -651,11 +654,129 @@ def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) ->
     return _labels_computed, _labels_applied
 
 
-def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
+# A link DELETE that fails because the link is already gone (or was concurrently changed)
+# still reaches the desired end-state — link absent — so it counts as applied. These are the
+# only signatures that justify that, matched case-insensitively against ACLI stderr.
+#
+# Deliberately NARROW, and absent/empty stderr does NOT qualify. The previous code treated
+# EVERY CalledProcessError as an idempotent race, which is how a deterministic, permanent
+# failure (an unanswered confirmation prompt reading EOF from stdin=DEVNULL, reported by ACLI
+# as "command cancelled") was scored as a successful removal on every pass, forever. The
+# "self-healing next pass" rationale only holds for a TRANSIENT race; it is false for a
+# deterministic one, so the benefit of the doubt has to be earned by an explicit signature.
+_IDEMPOTENT_LINK_REMOVAL_MARKERS: tuple[str, ...] = (
+    "404",
+    "409",
+    "does not exist",
+    "not found",
+)
+
+
+def _is_idempotent_link_removal(stderr: str | None) -> bool:
+    """True when *stderr* shows a link delete failed because the link was already gone.
+
+    See :data:`_IDEMPOTENT_LINK_REMOVAL_MARKERS` for why this is a narrow allow-list and why
+    absent stderr returns False (unproven end-state, so it is counted failed, not applied).
+    """
+    if not stderr:
+        return False
+    text = stderr.lower()
+    return any(marker in text for marker in _IDEMPOTENT_LINK_REMOVAL_MARKERS)
+
+
+def _dispatch_link_removes(links, client: TicketTransport, issue_key) -> tuple[int, int, int]:
+    """Sub-phase: the symmetric link REMOVE dispatch. Returns (computed, applied, failed).
+
+    Split out of :func:`_update_one_dispatch_links` along the ADD/REMOVE seam that phase
+    already had. The two halves share only the counters, so this is an extraction of an
+    existing cluster rather than a mechanical carve — and it keeps the parent function under
+    its locked complexity ceiling now that the delete arm distinguishes a proven-gone link
+    from a failure.
+
+    Bug wake-inn-parse: a managed link the differ marked for removal (a deliberate local
+    unlink) is deleted on Jira so the inbound differ stops re-adding it. The differ emits only
+    (type, to_key); resolve the link id here by probing the issue's current links (mirrors the
+    ADD dedup probe). Best-effort + logged — a link op must not unwind the batch.
+    """
+    _computed = _applied = _failed = 0
+    if not (
+        isinstance(links, list)
+        and any(isinstance(e, dict) and e.get("action") == "remove" for e in links)
+    ):
+        return _computed, _applied, _failed
+
+    try:
+        link_objs = client.get_issue_links(issue_key)
+    except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
+        print(
+            f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
+            file=sys.stderr,
+        )
+        return _computed, _applied, _failed
+
+    for entry in links:
+        if not isinstance(entry, dict) or entry.get("action") != "remove":
+            continue
+        link_type = entry.get("type")
+        to_key = entry.get("to_key")
+        if not link_type or not to_key:
+            continue
+        link_id = _find_link_id(link_objs, link_type, to_key)
+        if link_id is None:
+            continue  # already absent in Jira — idempotent success, nothing to do
+        _computed += 1
+        try:
+            _call_with_retry(client.delete_issue_link, link_id)
+            _applied += 1
+        except subprocess.CalledProcessError as exc:
+            # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT an
+            # HTTPError). We only reach here after _find_link_id confirmed the link exists in
+            # a fresh probe, so a failure carrying a 404/409/"does not exist" signature is a
+            # concurrent removal or change — idempotent, the desired end-state (link gone) is
+            # reached, so it counts as applied.
+            #
+            # Any OTHER failure has NOT reached that end-state and is counted failed. Counting
+            # it applied is what made ticket 5528 invisible: the missing confirmation flag made
+            # every delete fail identically and permanently, while the pass reported
+            # links_applied=N. Non-fatal either way — the batch is not unwound — but no longer
+            # scored as success.
+            if _is_idempotent_link_removal(exc.stderr):
+                _applied += 1
+            else:
+                _failed += 1
+                _log_link_delete_failure(issue_key, to_key, link_type, exc)
+        except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, counted
+            # Also the Jira Data Center path, whose _links.py raises HTTPError rather than
+            # CalledProcessError — counted failed, not ignored.
+            _failed += 1
+            _log_link_delete_failure(issue_key, to_key, link_type, exc)
+    return _computed, _applied, _failed
+
+
+def _log_link_delete_failure(issue_key, to_key, link_type, exc: BaseException) -> None:
+    """Emit the operator-facing line for a link delete that did not reach its end-state."""
+    print(
+        f"update_one: delete_issue_link failed for {issue_key} -> {to_key} ({link_type}): {exc!r}",
+        file=sys.stderr,
+    )
+
+
+def _update_one_dispatch_links(
+    mutation, client: TicketTransport, issue_key
+) -> tuple[int, int, int]:
     """Phase: dispatch link ADD (deduped) + link REMOVE sub-ops. ``links_computed`` is
     counted POST-DEDUP so an idempotent re-sync reports 0 (no false canary). Returns
-    (computed, applied) counts."""
-    _links_computed = _links_applied = 0
+    (computed, applied, failed) counts.
+
+    ``failed`` counts link ops that did NOT reach their desired end-state. It exists because
+    a failure that is neither counted nor surfaced is indistinguishable from success: the
+    delete arm used to increment ``applied`` on ANY ``CalledProcessError``, so a Jira pass
+    could report ``links_applied=N`` having removed nothing (ticket 5528 — 15 cancelled ACLI
+    deletes, 15 reported applied, 0 links actually removed). Failures stay NON-FATAL — the
+    scalar update already succeeded and one bad link must not unwind the batch — but they
+    are now counted and surfaced instead of silently absorbed.
+    """
+    _links_computed = _links_applied = _links_failed = 0
 
     # Bug 3f04: dispatch link adds (blocks/relates) via client.set_relationship.
     # The outbound differ emits these alongside changed scalar fields, but the
@@ -709,56 +830,16 @@ def _update_one_dispatch_links(mutation, client: TicketTransport, issue_key) -> 
             try:
                 _call_with_retry(cast("SupportsLinks", client).set_relationship, frm, to, link_type)
                 _links_applied += 1
-            except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
+            except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, counted
+                _links_failed += 1
                 print(
                     f"update_one: set_relationship failed for {frm} -> {to} ({link_type}): {exc!r}",
                     file=sys.stderr,
                 )
 
-    # Symmetric link REMOVE dispatch (wake-inn-parse): a managed link the differ
-    # marked for removal (a deliberate local unlink) is deleted on Jira so the inbound
-    # differ stops re-adding it. The differ emits only (type, to_key); resolve the link
-    # id here by probing the issue's current links (mirrors the ADD dedup probe). A link
-    # already gone (no match / 404 / 409) is idempotent success. Best-effort + logged.
-    if isinstance(links, list) and any(
-        isinstance(e, dict) and e.get("action") == "remove" for e in links
-    ):
-        try:
-            link_objs = client.get_issue_links(issue_key)
-        except Exception as exc:  # noqa: BLE001 — probe is best-effort; skip removals this pass
-            link_objs = None
-            print(
-                f"update_one: get_issue_links probe (remove) failed for {issue_key}: {exc!r}",
-                file=sys.stderr,
-            )
-        if link_objs is not None:
-            for entry in links:
-                if not isinstance(entry, dict) or entry.get("action") != "remove":
-                    continue
-                link_type = entry.get("type")
-                to_key = entry.get("to_key")
-                if not link_type or not to_key:
-                    continue
-                link_id = _find_link_id(link_objs, link_type, to_key)
-                if link_id is None:
-                    continue  # already absent in Jira — idempotent success, nothing to do
-                _links_computed += 1
-                try:
-                    _call_with_retry(client.delete_issue_link, link_id)
-                    _links_applied += 1
-                except subprocess.CalledProcessError:
-                    # delete_issue_link shells out via ACLI (raises CalledProcessError, NOT
-                    # an HTTPError). We only reach here after _find_link_id confirmed the link
-                    # exists in a fresh probe, so a failure now is dominated by a concurrent
-                    # removal (404) / concurrent change (409) — idempotent: the desired
-                    # end-state (link gone) is reached. A genuine persistent failure is
-                    # self-healing — the differ recomputes the REMOVE from managed_refs next
-                    # pass — so treat as non-fatal and don't unwind the pass.
-                    _links_applied += 1
-                except Exception as exc:  # noqa: BLE001 — best-effort link op; non-fatal, logged
-                    print(
-                        f"update_one: delete_issue_link failed for {issue_key} -> "
-                        f"{to_key} ({link_type}): {exc!r}",
-                        file=sys.stderr,
-                    )
-    return _links_computed, _links_applied
+    _rm_computed, _rm_applied, _rm_failed = _dispatch_link_removes(links, client, issue_key)
+    return (
+        _links_computed + _rm_computed,
+        _links_applied + _rm_applied,
+        _links_failed + _rm_failed,
+    )
