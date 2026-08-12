@@ -549,7 +549,7 @@ def _run_plan_review(
     # drift-refresh check below (a fully-valid attestation beats a needs-refresh one), and
     # only on the signing path (a --no-sign / readonly review has no attestation to reuse).
     # ``force`` bypasses BOTH this skip and the drift-refresh, forcing a full re-review.
-    from . import reuse
+    from . import cited_anchor, reuse
 
     if sign and not force:
         reused = reuse.idempotent_reuse(ticket_id, ctx, repo_root=repo_root)
@@ -565,6 +565,10 @@ def _run_plan_review(
         block_reused = reuse.verdict_reuse(ticket_id, ctx, repo_root=repo_root)
         if block_reused is not None:
             return block_reused
+    # Warn-only cited-anchor pre-check (task ccba) — deterministic, zero-LLM, and placed
+    # before drift_refresh so the operator sees it before any billable call. It never
+    # returns a verdict: the review proceeds either way. See :mod:`.cited_anchor`.
+    anchor_precheck = cited_anchor.precheck(ticket_id, ctx, repo_root=repo_root)
     # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
     # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
     # plan still matches the code, refresh the attestation instead of a full re-review.
@@ -733,6 +737,9 @@ def _run_plan_review(
             verdict["signature"] = signature_error
     else:
         verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})
+
+    # Record the outcome (True AND False) so the warning's precision is measurable offline.
+    cited_anchor.record_metrics(verdict, anchor_precheck)
 
     # Persist the recovery sidecar only after the atomic sign attempt. Writing it earlier
     # advances the ticket-store revision and invalidates this review's immutable generation.
