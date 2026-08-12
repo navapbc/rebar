@@ -32,6 +32,7 @@ from rebar._snapshot import (
     acquire,
 )
 from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
+from rebar.llm import build_drift
 from rebar.llm.config import LLMConfig, gate_session, use_code_root, use_tickets_root
 
 __all__ = [
@@ -101,6 +102,11 @@ def resolve_gate_handle(
     resolved_ref = ref or default_ref(repo_root)
     resolved_source = source or default_source(repo_root)
     handle = acquire(resolved_ref, source_mode=resolved_source, repo_root=repo_root, fetch=fetch)
+    # A gate reads material at `handle.sha` with the code of whatever build is running. When
+    # that build PREDATES the pinned sha it can silently mis-handle newer material (the
+    # motivating incident: a renamed config key read as an unknown one). Advisory only — the
+    # call cannot raise and cannot alter the handle, the verdict, or the provenance stamp.
+    build_drift.warn_if_behind(handle.sha, repo_root)
     if handle.source == SOURCE_ATTESTED:
         # The ticket store lives on the orphan `tickets` branch, so it is ABSENT from the
         # code snapshot — materialize a separate pinned copy and attach it so the agent's
