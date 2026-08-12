@@ -25,6 +25,7 @@ MODEL_SCHEMAS: dict[str, str] = {
     "SignResultOut": "sign_result",
     "VerifySignatureResultOut": "verify_signature_result",
     "GroundingInfoOut": "grounding_info",
+    "PlanReviewStatusOut": "plan_review_status",
     "WorkflowRunOut": "workflow_run",
 }
 
