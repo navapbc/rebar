@@ -204,6 +204,38 @@ not structural introspection.
 > reintroduced from vendor support (Jira JQL `updated >`, GitHub `since=`, Linear `updatedAt`)
 > if a measured bandwidth need later arises.
 
+> **AMENDED by [rebar:5c21-f24a-f7f8-4a55].** The `isinstance`-guarded rule above is
+> NECESSARY BUT NOT SUFFICIENT on Python 3.12+, and taking it literally reintroduces a silent
+> soft failure. This is temporal decay, not an authoring error: the guidance was correct when
+> written and a later interpreter changed underneath it. Since CPython 3.12 (gh-102433) a
+> `@runtime_checkable` Protocol `isinstance` resolves members with `inspect.getattr_static`,
+> which deliberately does NOT see attributes served by `__getattr__`. Measured on one proxy
+> object and one Protocol: 3.11 → `isinstance` True (the check was plain `hasattr`); 3.12 →
+> False. rebar's requires-python is `>=3.11` and CI runs 3.11/3.12/3.13, so an isinstance-only
+> guard is correct on one supported interpreter and wrong on another.
+>
+> The consequence lands exactly where capability Protocols are meant to help. A transport that
+> forwards dynamically to an inner client — a retry wrapper, an instrumentation shim, a
+> recording proxy, and every `MagicMock` test double — HAS the capability yet fails
+> `isinstance`. A caller following the unamended rule would skip the write and record the skip
+> as DESIGNED, which is a real failure wearing an "intended" label.
+>
+> **The sanctioned shape is `isinstance` PRIMARY with a member-level `hasattr` fallback:**
+> `if isinstance(client, protocol) or hasattr(client, member)`. `isinstance` stays primary so
+> a backend's advertised capability remains the declared contract; the fallback closes the
+> proxy hole. Check the specific `member` you are about to call rather than the whole
+> Protocol — at a write dispatch site the question is "can this transport perform THIS call",
+> not "does it also implement the read side". The reference implementation is
+> `dispatch_apply_phases._capability_present` (task `a3fa-e8d4-f4aa-4b51`), which is also
+> consistent with the `hasattr`-based capability checks already used in `fetcher.py`.
+>
+> A tree-wide sweep under Python 3.12 found no other affected site: the single executable
+> isinstance-against-Protocol dispatch in `src/rebar` is `_capability_present` itself (already
+> hardened), and the only other Protocol `isinstance` is `_TransportPortMeta.__instancecheck__`,
+> whose `hasattr`-based body is proxy-safe by construction. The fallback is deliberately NOT
+> centralised into a shared helper: with one dispatch expression in the tree there is no second
+> caller to share it, so extraction would be premature.
+
 **4. One new identity type `RemoteRef{vendor, instance, remote_id}`.**
 
 > **AMENDED by [rebar:6a91-7429-e521-4a2e].** This section originally introduced `instance` as
