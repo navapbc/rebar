@@ -1,0 +1,221 @@
+# Standing semantic eval for the T10 durable-infrastructure overlay. The balanced corpus pins the
+# transient-experiment exclusion while retaining the overlay's four MAJOR safety classes. Run the
+# offline discipline check with `rebar prompt eval plan-review-T10`; live execution requires the
+# [agents] extra and configured model credentials.
+prompt: plan-review-T10
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  - type: deterministic
+    name: no_fire_on_good_cases
+    description: Each pass case emits no T10 finding.
+  - type: deterministic
+    name: recall_on_seeded_defects
+    description: Each finding case emits at least one T10 finding.
+
+dataset:
+  # Transient, isolated, throwaway de-risk work is outside the routine durable-infra checks.
+  - id: T10-P-loopback-throwaway-probe
+    corpus: rebar
+    criterion: T10
+    expect: pass
+    note: >-
+      A loopback-only throwaway probe with isolation and teardown scoped to its own PID and unique
+      temporary directory; it creates no durable IaC or shared/stateful resource.
+    input: >
+      ## Plan
+
+      Before choosing a durable deployment mechanism, run a one-shot HTTP probe bound only to
+      127.0.0.1 on an OS-assigned port. Create it under a unique `mktemp` directory, record the
+      child PID, and use a trap that kills only that PID and removes only that exact temporary
+      directory. The probe is a throwaway de-risk experiment: it writes no IaC or persistent
+      configuration, creates no cloud or shared resource, and cannot be reached from the network.
+
+  - id: T10-P-complete-durable-infrastructure
+    corpus: rebar
+    criterion: T10
+    expect: pass
+    note: >-
+      Durable Terraform specifies every T10 contract, including state, access, drift, isolation,
+      destroy safety, secrets, cost bounds, observability, ownership, and teardown.
+    input: >
+      ## Plan
+
+      Commit Terraform for a production API. Use encrypted versioned remote state with locking;
+      require a reviewed saved plan before apply. The runtime role allows only GetObject on the
+      named artifact ARN and GetSecretValue on one named secret ARN, with no wildcard or long-lived
+      credential. Users and admins authenticate through the named company OIDC gateway with
+      separate admin-group authorization. Modules are idempotent, nightly drift detection alerts
+      the owning team, and dev/stage/prod use separate accounts and state. The database has deletion
+      protection and `prevent_destroy`; secrets are runtime references to Secrets Manager. Instance
+      count and autoscaling are capped, with a monthly budget alarm. Logs, metrics, health alarms,
+      an owner, a runbook, reproducible apply steps, and a production-aware teardown procedure are
+      part of the committed configuration.
+
+  - id: T10-P-private-transient-scoped-iam
+    corpus: rebar
+    criterion: T10
+    expect: pass
+    note: >-
+      A private-network throwaway probe uses narrowly scoped IAM, explicit single-tenant access,
+      unique isolation, and tag-scoped teardown; no durable infrastructure persists.
+    input: >
+      ## Plan
+
+      De-risk an AWS API call with a one-hour throwaway probe in a unique test account and private
+      subnet that has no public route or ingress. Only the named engineer can enter through the
+      existing SSO-authenticated bastion; this is the explicit single-tenant private-network human
+      and admin access rationale. The temporary role permits only `s3:GetObject` for one named test
+      object ARN. Tag every created resource with a unique run ID, and in a `finally` step delete
+      only resources carrying that exact run ID. No IaC or configuration from the experiment will
+      persist, and it cannot access shared or stateful resources.
+
+  - id: T10-P-transient-secret-manager
+    corpus: rebar
+    criterion: T10
+    expect: pass
+    note: >-
+      A transient isolated probe retrieves its secret at runtime from a secret manager and neither
+      commits nor logs plaintext; teardown is confined to the probe namespace.
+    input: >
+      ## Plan
+
+      Run a disposable one-shot container in a unique scratch namespace to verify SDK connectivity.
+      Its short-lived workload identity may read exactly one named Secrets Manager ARN at runtime;
+      the value is mounted in memory, redacted from logs, and never written to source, IaC, variables,
+      images, or disk. A namespace-scoped cleanup removes only this container and namespace. This is
+      a throwaway de-risk experiment and leaves no durable infrastructure or configuration.
+
+  - id: T10-P-disposable-sandbox-safe-teardown
+    corpus: rebar
+    criterion: T10
+    expect: pass
+    note: >-
+      A disposable sandbox is isolated from shared/stateful data, and explicit deny rules plus an
+      exact run-ID selector make teardown incapable of touching it.
+    input: >
+      ## Plan
+
+      Exercise the provisioning command in a disposable sandbox account containing no shared or
+      stateful data. A sandbox boundary explicitly denies database, bucket, snapshot, and volume
+      delete actions. The experiment creates only stateless resources bearing one unique run ID;
+      teardown requires both the sandbox account ID and exact run-ID tag, refuses an empty selector,
+      and deletes only those stateless resources. Discard the account afterward. No experiment IaC
+      or configuration is retained as durable infrastructure.
+
+  # Durable lifecycle gaps and all four retained MAJOR safety classes remain findings.
+  - id: T10-F-durable-lifecycle-unspecified
+    corpus: rebar
+    criterion: T10
+    expect: finding
+    note: >-
+      This is durable Terraform, but its state, locking, apply, drift, environment, ownership, and
+      teardown contracts are explicitly left undecided.
+    input: >
+      ## Plan
+
+      Commit Terraform that permanently provisions the team's new cloud worker. Decide later where
+      Terraform state lives, whether it is locked, how plans are reviewed before apply, how drift is
+      detected, how environments are separated, who owns alerts, and how the durable worker is
+      safely torn down. Those lifecycle details are outside this ticket.
+
+  - id: T10-F-transient-destructive-shared-data
+    corpus: rebar
+    criterion: T10
+    expect: finding
+    note: >-
+      Although transient, the apply can destroy a shared production database and volumes, with no
+      safeguard; this is the destructive-apply MAJOR class.
+    input: >
+      ## Plan
+
+      As a throwaway migration experiment, apply a temporary Terraform stack directly in the shared
+      production account. Permit replacement of the existing production database and attached data
+      volumes if the provider requests it. Use `force_destroy`, with no backup, deletion protection,
+      `prevent_destroy`, saved-plan review, or resource selector; destroy the stack after the probe.
+
+  - id: T10-F-transient-wildcard-admin
+    corpus: rebar
+    criterion: T10
+    expect: finding
+    note: >-
+      The transient probe grants wildcard administrator access for convenience; this is the
+      wildcard/overbroad-grant MAJOR class despite its short lifetime.
+    input: >
+      ## Plan
+
+      Create a transient probe role for a one-hour throwaway cloud experiment. To avoid permission
+      debugging, attach a policy with `Action: "*"`, `Resource: "*"` and the provider's full
+      AdministratorAccess role. Delete the role when the experiment ends.
+
+  - id: T10-F-transient-plaintext-secret
+    corpus: rebar
+    criterion: T10
+    expect: finding
+    note: >-
+      The throwaway probe commits a plaintext production API key in an IaC variables file; this is
+      the plaintext-secret MAJOR class even if the stack is later destroyed.
+    input: >
+      ## Plan
+
+      For a disposable connectivity probe, commit `probe.auto.tfvars` containing the plaintext
+      production API key and pass it into the transient Terraform resource. Destroy the probe after
+      ten minutes, but leave the variables file in git so another engineer can reproduce the run.
+
+  - id: T10-F-transient-untrusted-service-auth-unspecified
+    corpus: rebar
+    criterion: T10
+    expect: finding
+    note: >-
+      A transient admin UI is reachable from an untrusted network while human and admin
+      authentication is unspecified; this is the endpoint-auth MAJOR class.
+    input: >
+      ## Plan
+
+      Stand up a throwaway web administration UI for two hours with a public IP and ingress from
+      `0.0.0.0/0` so external testers on untrusted networks can reach it. The plan specifies only a
+      service-to-service API token and leaves how human users and administrators authenticate to the
+      UI unspecified. Tear the service down after the experiment.
+
+gold_set:
+  - input: >-
+      Throwaway HTTP probe is loopback-only, isolated by PID and unique temp directory, has scoped
+      teardown, creates no shared/stateful resource, and leaves no durable IaC/configuration.
+    label: pass
+  - input: >-
+      Durable Terraform fully specifies remote locked state, reviewed apply, least privilege,
+      human/admin OIDC, drift, isolation, destroy safety, secrets, cost, observability, and ownership.
+    label: pass
+  - input: >-
+      Private-network transient probe has a single-tenant SSO access rationale, scoped IAM, unique
+      isolation, tag-scoped teardown, and no durable infrastructure.
+    label: pass
+  - input: >-
+      Transient isolated container retrieves one secret from Secrets Manager at runtime, never
+      commits or logs plaintext, and leaves no durable infrastructure.
+    label: pass
+  - input: >-
+      Disposable sandbox has no shared/stateful data and teardown is constrained by account, exact
+      run ID, and deny rules that prevent stateful deletes.
+    label: pass
+  - input: >-
+      Durable Terraform explicitly leaves state, locking, apply review, drift, isolation, ownership,
+      and teardown undecided.
+    label: finding
+  - input: >-
+      Transient Terraform may force-destroy a shared production database and volumes with no backup,
+      selector, saved-plan review, deletion protection, or prevent_destroy safeguard.
+    label: finding
+  - input: >-
+      Transient probe role grants wildcard Action and Resource plus full AdministratorAccess.
+    label: finding
+  - input: >-
+      Disposable probe commits a plaintext production API key in probe.auto.tfvars and retains it
+      in git after teardown.
+    label: finding
+  - input: >-
+      Public transient admin UI accepts untrusted-network ingress while human and administrator
+      authentication remains unspecified; a machine API token is the only credential named.
+    label: finding

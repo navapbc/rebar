@@ -10,7 +10,12 @@ import pytest
 from rebar.llm.evals import eval as ev
 from rebar.llm.evals import eval_scorers as sc
 
-NEW_SPECS = ("completion-verifier", "ticket-quality", "spec-alignment")
+NEW_SPECS = (
+    "completion-verifier",
+    "ticket-quality",
+    "spec-alignment",
+    "plan-review-T10",
+)
 
 
 @pytest.mark.parametrize("prompt_id", NEW_SPECS)
