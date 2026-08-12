@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from pathlib import Path
@@ -11,7 +12,10 @@ import pytest
 from rebar.llm.config import LLMConfig
 from rebar.llm.overlap.judge import (
     _CANDIDATES_PER_CALL,
+    _OUTPUT_TOKENS_BASE,
+    _OUTPUT_TOKENS_PER_VERDICT,
     _SHARED_DIGEST_REF,
+    _batch_output_token_limit,
     _digest_block,
     aggregate,
     judge,
@@ -586,7 +590,9 @@ def test_runaway_batch_is_bounded_and_abstains() -> None:
         "abstain": True,
     }
     assert out == {candidate_id: abstain for candidate_id in corpus}
-    assert [item["max_tokens"] for item in settings] == [1024]
+    assert [item["max_tokens"] for item in settings] == [
+        _batch_output_token_limit(_CANDIDATES_PER_CALL)
+    ]
     assert [item["timeout"] for item in settings] == [60.0]
 
 
@@ -619,7 +625,9 @@ def test_bounded_abstention_on_truncation_or_timeout(
         "abstain": True,
     }
     assert out == {candidate_id: abstain for candidate_id in corpus}
-    assert [item["max_tokens"] for item in settings] == [1024]
+    assert [item["max_tokens"] for item in settings] == [
+        _batch_output_token_limit(_CANDIDATES_PER_CALL)
+    ]
     assert [item["timeout"] for item in settings] == [60.0]
 
 
@@ -680,4 +688,90 @@ def test_valid_six_candidate_batch_survives_the_request_budget() -> None:
         out[candidate_id]["shared_artifact"] == f"artifact-{candidate_id}"
         for candidate_id in corpus
     )
-    assert [item["max_tokens"] for item in settings] == [1024]
+    assert [item["max_tokens"] for item in settings] == [
+        _batch_output_token_limit(_CANDIDATES_PER_CALL)
+    ]
+
+
+def test_output_budget_scales_with_the_batchs_candidate_count() -> None:
+    """The batch output budget is a FUNCTION of the batch size, not a constant (ticket d147).
+
+    The flat 1024-token cap it replaces was sized for a single verdict, so a full batch's reply
+    was truncated — and a truncated reply is rejected wholesale, abstaining every candidate in
+    it. Pinning the shape (strictly increasing, one verdict's allowance per added candidate)
+    rather than the literal numbers keeps this test about the defect and not about the constant.
+    """
+    budgets = [_batch_output_token_limit(n) for n in range(1, _CANDIDATES_PER_CALL + 1)]
+    assert budgets == sorted(budgets) and len(set(budgets)) == len(budgets)
+    assert all(
+        later - earlier == _OUTPUT_TOKENS_PER_VERDICT
+        for earlier, later in itertools.pairwise(budgets)
+    )
+    assert budgets[0] == _OUTPUT_TOKENS_BASE + _OUTPUT_TOKENS_PER_VERDICT
+    # A FULL batch must be able to afford one verdict per candidate it carries — the property
+    # the flat cap violated.
+    assert budgets[-1] >= _OUTPUT_TOKENS_PER_VERDICT * _CANDIDATES_PER_CALL
+
+
+def test_output_budget_is_bounded_by_the_batch_cardinality_cap() -> None:
+    """Scaling the budget must not un-bound it: `_CANDIDATES_PER_CALL` caps a batch, so it caps
+    the budget too. This is what keeps the 48k retry-storm class (7fa8102477) dead while the
+    truncation fix lands — together with the retry/transport bounds asserted below."""
+    ceiling = _batch_output_token_limit(_CANDIDATES_PER_CALL)
+    assert all(_batch_output_token_limit(n) <= ceiling for n in range(1, _CANDIDATES_PER_CALL + 1))
+    # A degenerate empty batch still asks for a usable, non-zero budget.
+    assert _batch_output_token_limit(0) == _batch_output_token_limit(1)
+
+
+def test_scaled_budget_keeps_the_retry_and_transport_bounds_at_one_attempt() -> None:
+    """The budget grew; the attempt counts did not. `structured_retry_limit=0` and
+    `transport_attempt_limit=1` are the storm guards, and this change must not spend them."""
+
+    class _CapturingRunner(Runner):
+        name = "capturing"
+
+        def __init__(self) -> None:
+            self.requests: list[RunRequest] = []
+
+        def preflight(self) -> None:
+            pass
+
+        def run(self, req: RunRequest) -> dict:
+            self.requests.append(req)
+            return {"verdicts": []}
+
+    query, corpus = _six()
+    runner = _CapturingRunner()
+    judge_batch(query, list(corpus.items()), _cfg(), runner, shared_side="first")
+
+    (req,) = runner.requests
+    assert req.structured_retry_limit == 0
+    assert req.transport_attempt_limit == 1
+    assert req.output_token_limit == _batch_output_token_limit(_CANDIDATES_PER_CALL)
+
+
+def test_a_short_final_batch_is_not_charged_a_full_batchs_budget() -> None:
+    """A corpus that does not divide evenly leaves a short tail batch; its budget tracks the
+    candidates it actually carries, so the tail call is not billed a full batch's ceiling."""
+
+    class _CapturingRunner(Runner):
+        name = "capturing"
+
+        def __init__(self) -> None:
+            self.requests: list[RunRequest] = []
+
+        def preflight(self) -> None:
+            pass
+
+        def run(self, req: RunRequest) -> dict:
+            self.requests.append(req)
+            return {"verdicts": []}
+
+    runner = _CapturingRunner()
+    corpus = {f"t{i}": _digest(area=f"area-{i}") for i in range(_CANDIDATES_PER_CALL + 2)}
+    judge("query", _digest(), list(corpus), corpus, config=_cfg(), runner=runner)
+
+    limits = [req.output_token_limit for req in runner.requests]
+    assert _batch_output_token_limit(_CANDIDATES_PER_CALL) in limits
+    assert _batch_output_token_limit(2) in limits
+    assert max(limits) == _batch_output_token_limit(_CANDIDATES_PER_CALL)

@@ -60,6 +60,11 @@ its own against the shared digest, exactly as if it had arrived alone in a singl
   correct for most or all of a batch to be `unrelated`.
 - `related_distinct` remains the default and false flags remain costly. Batching must not make
   you more generous: a candidate you would have judged `unrelated` alone is `unrelated` here.
+- Rule 3 applies PER ENTRY: every entry carries its own `confidence`, judged for that candidate
+  alone. Batching does not make `confidence` a formality to be copied across entries, left out,
+  or filled in with 0.0 — a verdict you are sure of takes a high confidence here exactly as it
+  would in a single-pair call, and a batch's entries will normally carry DIFFERENT confidences.
+  Emit `relation`, `confidence` and `abstain` for every entry; none of the three is optional.
 
 Emit exactly ONE verdict per candidate, in a `verdicts` list, and echo that candidate's
 `candidate_id` verbatim in its entry so each verdict can be matched back. Emit no entry for an id

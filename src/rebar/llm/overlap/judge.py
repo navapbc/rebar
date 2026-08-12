@@ -65,6 +65,36 @@ def _pair_instructions(first: dict, second: dict, shared_side: str | None) -> st
 # cross-contamination risk the prompt's per-candidate independence rules exist to contain.
 _CANDIDATES_PER_CALL = 6
 
+# Output budget for ONE batched judge call. This replaces a FLAT ``output_token_limit=1024``
+# (7fa8102477) that was sized for a single verdict and silently truncated every real
+# multi-candidate batch. Truncation is not a partial answer: the stop-reason guard rejects the
+# turn, so the WHOLE batch abstained — which is how overlap detection surfaced zero findings
+# across 2,093 plan reviews (ticket d147). A per-batch budget must therefore scale with the
+# batch's own cardinality rather than being a constant.
+#
+# ``_OUTPUT_TOKENS_PER_VERDICT`` is MEASURED, not guessed: a real verdict entry serializes to
+# ~230 bytes of JSON (~65 tokens) at the widest ``shared_artifact`` observed in the calibration
+# probe (``scripts/overlap_judge_calibrate.py``), so 192 carries roughly 3x headroom per entry.
+# ``_OUTPUT_TOKENS_BASE`` covers the ``verdicts`` wrapper and matches the 256-token floor
+# ``structured_run`` clamps to in any case.
+#
+# The budget stays BOUNDED, which is the whole point of the cap it replaces: it is a function of
+# a bounded batch (at most ``_CANDIDATES_PER_CALL``), and ``structured_retry_limit=0`` /
+# ``transport_attempt_limit=1`` are untouched — so the 48k retry-storm class the flat cap was
+# introduced to kill stays dead. What changes is only that ONE correctly-sized attempt can now
+# finish its answer instead of being cut off mid-list.
+_OUTPUT_TOKENS_PER_VERDICT = 192
+_OUTPUT_TOKENS_BASE = 256
+
+
+def _batch_output_token_limit(candidates: int) -> int:
+    """The output-token budget for a batch carrying ``candidates`` verdicts.
+
+    Derived from the ACTUAL batch size, so a short final batch is not charged a full one's
+    ceiling; bounded above by ``_CANDIDATES_PER_CALL`` because that is what caps a batch.
+    """
+    return _OUTPUT_TOKENS_BASE + _OUTPUT_TOKENS_PER_VERDICT * max(1, candidates)
+
 
 def _candidate_listing(pairs: list[tuple[str, dict]]) -> str:
     """The labelled candidate digests. The label is the key the response is matched back on, so
@@ -178,7 +208,7 @@ def judge_batch(
             mode="structured",
             output_schema="overlap_verdict_batch",
             execution_mode="single_turn",
-            output_token_limit=1024,
+            output_token_limit=_batch_output_token_limit(len(pairs)),
             structured_retry_limit=0,
             transport_attempt_limit=1,
             request_timeout_limit_s=60,

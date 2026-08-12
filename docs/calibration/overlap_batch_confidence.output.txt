@@ -1,0 +1,27 @@
+overlap_conf_threshold = 0.7
+
+[near_duplicate] expect surfaced=True
+  ordering 1 (query FIRST):  {"abstain": false, "confidence": 0.95, "relation": "duplicates", "shared_artifact": "judge_batch output_token_limit"}
+  ordering 2 (query SECOND): {"abstain": false, "confidence": 0.95, "relation": "duplicates", "shared_artifact": "judge_batch output_token_limit"}
+  measured verdict-entry size: 151 bytes of JSON
+  aggregate -> {"confidence": 0.95, "counterpart_id": "near_duplicate", "link_command": "rebar link QUERY near_duplicate duplicates", "relation": "duplicates", "shared_artifact": "judge_batch output_token_limit", "source_id": "QUERY", "target_id": "near_duplicate"}
+  => PASS (surfaced=True)
+
+[unrelated] expect surfaced=False
+  ordering 1 (query FIRST):  {"abstain": false, "confidence": 0.95, "relation": "unrelated", "shared_artifact": null}
+  ordering 2 (query SECOND): {"abstain": false, "confidence": 0.95, "relation": "unrelated", "shared_artifact": null}
+  measured verdict-entry size: 117 bytes of JSON
+  aggregate -> None
+  => PASS (surfaced=False)
+
+[full_batch] expect ONLY near_duplicate surfaced, 6 candidates
+  batch of 6; derived output_token_limit = 1408
+  near_duplicate: o1=duplicates/0.95 o2=duplicates/0.95 surfaced=True (want True)
+  unrelated_0: o1=unrelated/0.98 o2=unrelated/0.97 surfaced=False (want False)
+  unrelated_1: o1=unrelated/0.98 o2=unrelated/0.97 surfaced=False (want False)
+  unrelated_2: o1=unrelated/0.98 o2=unrelated/0.97 surfaced=False (want False)
+  unrelated_3: o1=unrelated/0.98 o2=unrelated/0.97 surfaced=False (want False)
+  unrelated_4: o1=unrelated/0.98 o2=unrelated/0.97 surfaced=False (want False)
+  => PASS
+
+RESULT: PASS
