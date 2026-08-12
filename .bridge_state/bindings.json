@@ -74341,7 +74341,7 @@
         "assignee": null,
         "description": "# Live-validate the Jira Data Center adapter against the real client instance\n\n## Context / Problem\n\nEpic `e369` verifies the Data Center adapter against a Dockerized Jira from the Atlassian SDK, because\nAtlassian stopped issuing DC trial licenses on 30 March 2026 and publishes no official DC OpenAPI spec. That\nharness proves REST v2 semantics, but it cannot prove behavior specific to the client's actual deployment:\ntheir Jira version, workflow/transition names, custom fields, permission scheme, link types, and user-directory\nconfiguration.\n\n## Approach\n\nWhen sandbox access to the real self-hosted instance exists (a scratch project on the client's Jira, or a\ndeveloper license generated from their existing commercial license via my.atlassian.com), run rebar's\nlive-validation harness pattern from ADR 0037 \u2014 guaranteed bilateral teardown, deterministic matrix \u2014 against\nit, and record the deltas from the Dockerized baseline.\n\nThis is filed as an idea rather than a child story of `e369` because its precondition is access rebar does not\ncontrol, and a ticket that cannot be finished in-session would fail the plan-review gate's measurability\ncriterion. Promote it to a story once access is confirmed.\n\n## Acceptance Criteria\n\n- [ ] a scratch project on the real instance is reachable and its Jira version recorded\n- [ ] the reconcile convergence + idempotence pass from `e369` runs green against it\n- [ ] every delta from the Dockerized baseline (transition names, custom fields, permission errors, link types)\n      is recorded as a comment and, where it changes behavior, filed as a follow-up ticket",
         "priority": "Low",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "Live-validate the Jira Data Center adapter against the real client instance"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -95782,7 +95782,7 @@
         "assignee": null,
         "description": "## Problem\nFindings carry a `severity` string (`severity_label(impact)` -> critical/major/minor/none,\n`review_kernel/decide.py`) that is derived from IMPACT ALONE, so it does not order the same way as\nthe authoritative `priority = validity x impact`. A high-impact/low-validity finding shows as\n`critical` while ranking below a `major`. This is a foot-gun: it invites reading the label as the\ngate signal when it is not. It also caused a field misread \u2014 via `_KERNEL_TO_COMMON_SEVERITY`\n(major->high, minor->medium, none->info) the review-bot surfaced the same finding as INFO then\nMEDIUM across identical runs, reading like a severity change when only impact drifted.\n\n## Idea\nMake findings blocking / not-blocking + numeric priority, mirroring the intent that priority is\nthe single source of truth. Remove or rename the impact-only severity label so nothing mistakes it\nfor the decision.\n\n## Why this is NOT a one-liner (traced)\n- The label lives in the SHARED kernel (`pass3_decide`), so plan review carries it too \u2014 this is\n  not a code-review-only change.\n- The block/advisory decision is ALREADY binary and priority-keyed; severity is an extra surfaced\n  signal, not the gate.\n- Real consumers exist and there are TWO vocabularies (kernel critical/major/minor/none; and the\n  original 5-level critical/high/medium/low/info in `findings.py`, from commit b501c38d1):\n    - Gerrit review-bot comment surface (`review_bot/adapter.py`, ADR 0009)\n    - cross-finding aggregation/dedup picks the highest-severity representative (`aggregate.py`)\n    - workflow `fail_on_severity` policy (`workflow/steps.py`)\n\n## Suggested sequence (each independently reviewable)\n1. Rank aggregation by `priority` instead of severity.\n2. Surface `priority` + blocking/advisory in the review-bot instead of the mapped label.\n3. Migrate `fail_on_severity` to a priority threshold.\n4. Drop the `severity` field from the finding shape.\nChanges the Gerrit comment format and touches both gates -> warrants an ADR.\n\n## Provenance\nDiscovered from the upstream review-code false-positive report (client project). Sibling of the\nmerge-base diff fix (ticket 8559-44c3-e08a-4bb9).",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "To Do",
         "summary": "Retire the kernel severity label in favor of numeric priority (blocking/not-blocking)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -132018,7 +132018,7 @@
         "assignee": null,
         "description": "",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "Navigate large volume of rivers"
       },
       "created_at": "2026-08-10T05:07:09Z",
