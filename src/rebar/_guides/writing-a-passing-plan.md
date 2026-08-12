@@ -143,6 +143,10 @@ never block on their own (they're scored and coached, capped at the top ~20 per 
 - **Test the real path (`E5` + `T*` overlays).** Happy-path-only on a new user-facing flow, or
   offline/mock-only coverage of a path that defaults to a **live** boundary, both draw
   findings. Add the failure path; add a live end-to-end criterion for a cutover.
+- **De-risk a slow delivery loop (`T15`).** When correctness only resolves after a
+  slow codified delivery loop, name the risky mechanisms and build a fast proof before
+  codifying them. Use a local run or a manual probe against the real target; keep the
+  experiment throwaway, and make cleanup remove only the resources it created.
 - **State value & intent fidelity (`F4`, `E3`, `ISF`).** Tie the work to the user problem and
   to the linked design/epic intent; don't drift from what the parent asked for.
 - **Justify removals (`removal-rationale`).** Deleting something? Say why it's safe to remove.

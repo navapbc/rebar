@@ -9,7 +9,10 @@ resource, so an installed rebar serves it from any working directory).
 
 from __future__ import annotations
 
+import re
+import subprocess
 from importlib import resources
+from pathlib import Path
 
 import pytest
 
@@ -94,6 +97,52 @@ def test_advisory_section_cross_links_to_moves() -> None:
     assert "#responding-to-coaching-moves" in advisory, (
         "advisory section does not cross-link the coaching-moves section"
     )
+
+
+def test_t15_derisk_guidance_is_rendered_by_explain_plan() -> None:
+    """The supported author-facing surface carries the complete fast-proof contract."""
+    guide = explain_guide("plan")
+    assert "T15" in guide
+    assert "slow codified delivery loop" in guide
+    assert "local run or a manual probe against the real target" in guide
+    assert "only the resources it created" in guide
+
+
+def _t15_guidance(guide: str) -> str:
+    start = guide.index("T15")
+    return re.sub(r"\s+", " ", guide[start : start + 1000])
+
+
+def test_t15_guidance_is_stack_agnostic_and_scopes_throwaway_cleanup() -> None:
+    guidance = _t15_guidance(explain_guide("plan"))
+    assert "before codifying" in guidance
+    assert "only the resources it created" in guidance
+    assert "Terraform" not in guidance
+    assert "Docker" not in guidance
+
+
+def test_rebar_explain_plan_cli_renders_t15_guidance() -> None:
+    completed = subprocess.run(
+        ["rebar", "explain", "plan"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert "T15" in completed.stdout
+    assert "local run or a manual probe against the real target" in completed.stdout
+    assert "only the resources it created" in completed.stdout
+
+
+def test_hand_authored_gate_doc_names_current_overlay_range_and_count() -> None:
+    repo_root = Path(__file__).parents[2]
+    gate_doc = re.sub(
+        r"\s+",
+        " ",
+        (repo_root / "docs" / "plan-review-gate.md").read_text(encoding="utf-8"),
+    )
+    assert "Each of the 44 criteria" in gate_doc
+    assert "T1–T15 triggered overlays" in gate_doc
 
 
 # --- Ticket 828a: the author guide must not contradict G6's anti-priming rule ---------------
