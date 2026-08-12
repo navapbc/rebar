@@ -136,11 +136,12 @@ def _attach_code_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     agent_calls = 0
     # Pass-2 verifier model-request count (mirror plan-review's verify-step sum).
     verify_requests = 0
-    # Token usage summed across every step that exposes per-call `_usage` (the runner attaches
-    # it; see runner._extract_usage). Today that is the Pass-2 `verify` + Pass-3 `decide` agent
-    # steps — the Pass-1 finder batch does not surface `_usage` on its step output (follow-up),
-    # so these totals are the review's agent-step token usage. Enables the review bot to emit
-    # token counts to CloudWatch and enriches the persisted code_review artifact.
+    # Token usage summed across every step that exposes per-call `_usage`: the Pass-2 `verify` +
+    # Pass-3 `decide` agent steps (the runner attaches it; see runner._extract_usage) and the
+    # Pass-1 finder batch, which aggregates its per-overlay calls into the same flat token shape
+    # (CodeReviewBatchRunner, task 514d). So these totals are the review's WHOLE token usage.
+    # Enables the review bot to emit token counts to CloudWatch and enriches the persisted
+    # code_review artifact.
     token_totals = {
         "input_tokens": 0,
         "output_tokens": 0,
