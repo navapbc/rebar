@@ -298,4 +298,26 @@ jobs:
         run: |
           set -euo pipefail
           echo "RECONCILE_CONTINUOUS=true — re-dispatching to sustain the loop (mode=${MODE})."
-          gh workflow run reconcile-bridge.yml --ref "${{ github.ref_name }}" --field mode="${MODE}"
+          # Bug 8aed: a bare `gh workflow run` here let a transient re-dispatch failure fail
+          # an ALREADY-CONVERGED pass. When the workflow is disabled, gh exits non-zero with
+          # `HTTP 422: Cannot trigger a 'workflow_dispatch' on a disabled workflow`, and
+          # `set -e` turned that into a red run whose reconcile had fully succeeded (runs
+          # 31129551929 / 31129431096) — tripping the heartbeat/alerting path for a non-problem.
+          # Re-seeding is already self-healing: the */20 schedule above is the documented
+          # backstop that restarts the chain. So the disabled-workflow 422 is a benign no-op.
+          # The downgrade is deliberately NARROW — it requires BOTH the 422 status and the
+          # disabled-workflow phrase, so an unrelated 422 (and every auth/404/network/rate-limit
+          # failure) still fails the step loudly.
+          dispatch_rc=0
+          dispatch_out="$(gh workflow run reconcile-bridge.yml --ref "${{ github.ref_name }}" --field mode="${MODE}" 2>&1)" || dispatch_rc=$?
+          printf '%s\n' "${dispatch_out}"
+          if [ "${dispatch_rc}" -eq 0 ]; then
+            exit 0
+          fi
+          if printf '%s' "${dispatch_out}" | grep -q 'HTTP 422' \
+            && printf '%s' "${dispatch_out}" | grep -qi 'disabled workflow'; then
+            echo "::warning::Re-dispatch skipped: this workflow is disabled (HTTP 422). The reconcile pass itself converged; the */20 schedule backstop re-seeds the continuous loop once the workflow is re-enabled."
+            exit 0
+          fi
+          echo "::error::Re-dispatch failed (exit ${dispatch_rc}) — see the captured gh output above"
+          exit "${dispatch_rc}"
