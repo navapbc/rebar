@@ -79,7 +79,7 @@ Changelog = "https://github.com/navapbc/rebar/blob/main/CHANGELOG.md"
 Security = "https://github.com/navapbc/rebar/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.28.1,<2", "pyjwt[crypto]>=2.10,<3"]
+mcp = ["mcp>=1.28.1,<3", "pyjwt[crypto]>=2.10,<3"]
 # Review-bot webhook receiver (epic d251 / story S2). OPTIONAL — never required by
 # core rebar. A thin FastAPI ASGI app (src/rebar/review_bot/) that receives Gerrit
 # webhooks and imports the review kernel as a library (see docs/adr/0007). The
@@ -203,7 +203,7 @@ grounding-t2 = [
 s3 = ["git-remote-s3>=0.3.2"]
 dev = [
     "pytest>=8",
-    "mcp>=1.28.1,<2",
+    "mcp>=1.28.1,<3",
     # jsonschema/referencing moved to core [project.dependencies] — the schema
     # registry + workflow contract validation are lean-runtime paths, not dev-only.
     "hatchling>=1.18",
@@ -215,7 +215,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.16.1",
+    "ruff==0.16.2",
     # Provider wrapper shell is checked identically on every developer and CI host.
     # shellcheck-py 0.11.0.1 packages the upstream ShellCheck 0.11.0 binary.
     "shellcheck-py==0.11.0.1",
