@@ -31,10 +31,73 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Bounded retry budget for the ONE network call this module makes (the `tickets` fetch).
+# Retry-then-FAIL, never retry-then-skip: a genuine misconfiguration must still red the lane
+# rather than silently dropping the store-copy cells' coverage.
+FETCH_ATTEMPTS = 3
+FETCH_BACKOFF_SECONDS = 2.0
+
+
+def run_git(
+    argv: Sequence[str],
+    cwd: Path | str,
+    *,
+    runner: Callable[..., Any] = subprocess.run,
+) -> Any:
+    """Run a git command, raising with git's OWN stderr when it fails.
+
+    ``subprocess.run(..., capture_output=True, check=True)`` is a diagnostic dead end: the
+    capture routes git's stderr into a buffer and ``CalledProcessError``'s string form then
+    reports only the exit status, so a run log records "exit 128" and nothing about whether
+    that was auth, a missing ref, a refspec miss under CI's partial clone, or the network
+    (bug ``ancient-domestic-orca``, live run 31587452003). This keeps the capture — the
+    fixture consumes ``git archive``'s stdout — and does the check itself, so the raised
+    message carries the full command (hence the remote and branch), the status, and git's
+    verbatim stderr.
+    """
+    result = runner(argv, cwd=cwd, capture_output=True)
+    if result.returncode != 0:
+        stderr = result.stderr
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode("utf-8", "replace")
+        raise RuntimeError(
+            f"{' '.join(argv)} failed in {cwd} (exit {result.returncode}): "
+            f"{(stderr or '').strip() or '<git wrote no stderr>'}"
+        )
+    return result
+
+
+def fetch_tickets(
+    source: Path | str,
+    remote: str = "origin",
+    branch: str = "tickets",
+    *,
+    attempts: int = FETCH_ATTEMPTS,
+    runner: Callable[..., Any] = subprocess.run,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Any:
+    """Fetch ``branch`` from ``remote``, tolerating a transient failure.
+
+    A single un-retried network call on the critical path of a 41-minute live job turns any
+    blip into an ERROR at fixture setup. Retries are bounded and the final failure re-raises
+    the diagnostic error from `run_git` — so a real misconfiguration still fails, and now
+    says why.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return run_git(["git", "fetch", remote, branch], cwd=source, runner=runner)
+        except RuntimeError:
+            if attempt == attempts:
+                raise
+            sleep(FETCH_BACKOFF_SECONDS * attempt)
+    raise AssertionError("unreachable: attempts must be >= 1")  # pragma: no cover
 
 
 @pytest.fixture
@@ -136,25 +199,19 @@ def dc_store_copy_repo(
     _init(work, "main")
     (work / ".gitignore").write_text(".tickets-tracker/\n")
 
-    subprocess.run(
-        ["git", "fetch", "origin", "tickets"], cwd=source, capture_output=True, check=True
-    )
-    archive = subprocess.run(
-        ["git", "archive", "FETCH_HEAD"], cwd=source, capture_output=True, check=True
-    ).stdout
+    fetch_tickets(source)
+    archive = run_git(["git", "archive", "FETCH_HEAD"], cwd=source).stdout
     subprocess.run(["tar", "-x", "-C", str(tracker)], input=archive, check=True)
 
     # Record the expected entry set from THE SAME FETCH_HEAD the archive came from. The
     # tickets branch is LIVE (rebar auto-pushes on every write, and a concurrent agent
     # session writes to it constantly), so re-fetching at assertion time samples a DIFFERENT
     # commit and the counts differ for reasons unrelated to the extraction.
-    listing = subprocess.run(
-        ["git", "ls-tree", "--name-only", "FETCH_HEAD"],
-        cwd=source,
-        text=True,
-        capture_output=True,
-        check=True,
-    ).stdout.split()
+    listing = (
+        run_git(["git", "ls-tree", "--name-only", "FETCH_HEAD"], cwd=source)
+        .stdout.decode("utf-8")
+        .split()
+    )
     (work / ".j11-expected-entries.json").write_text(
         json.dumps(sorted(e for e in listing if is_ticket_entry(e)))
     )
