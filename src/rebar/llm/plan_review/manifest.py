@@ -50,6 +50,20 @@ _PIN_FINGERPRINT_RE = re.compile(r"^[0-9a-f]{16}$")
 _REVIEW_PHASE_PREFIX = "review-phase:"
 _PRIORITY_FLOOR_PREFIX = "priority-floor:"
 _FILE_SCOPE_NONE = "file-scope: none"
+# The agentic passes' READ-SET (ticket 81ca), inside the SIGNED material so a tampered or
+# truncated read-set fails signature verification and resolves to the fail-safe. ``read-set: <n>``
+# is the presence marker — emitted only when telemetry was actually collected, so a manifest with
+# an EMPTY-but-recorded read-set (``read-set: 0``) is distinguishable from one that recorded none
+# at all (no line), which is what keeps the pre-change fallback intact for legacy attestations.
+_READ_SET_PREFIX = "read-set:"
+_READ_PATH_PREFIX = "read-path:"
+# Which basis the signed dependency set was composed on: ``file_impact`` (declared/inherited
+# paths), ``read-set`` (the no-file-impact scoping) or ``fail-safe`` (empty set → whole-HEAD).
+# Diagnostic and additive; ``rebar review-plan --status`` reports it.
+_CURRENCY_BASIS_PREFIX = "currency-basis:"
+CURRENCY_BASIS_FILE_IMPACT = "file_impact"
+CURRENCY_BASIS_READ_SET = "read-set"
+CURRENCY_BASIS_FAIL_SAFE = "fail-safe"
 
 
 class ManifestFormatError(ValueError):
@@ -332,24 +346,51 @@ def dependency_hashes(
     declared ``file_impact``, the files the review CITED (``kind=file``), and the paths from
     a container's declared direct children (:func:`_inherited_child_impact`; ticket 3e4b).
     Sorted for reproducible signing.
-    Empty when nothing is declared/cited/inherited — the claim gate then falls back to
-    whole-HEAD freshness (any commit invalidates), the fail-closed direction."""
+
+    Ticket 81ca: when the ticket declares NO ``file_impact`` and the review recorded a
+    read-set (``coverage['read_set_recorded']``), the set is additionally scoped to the
+    normalized read-set ∪ the blast-radius entries (:mod:`read_set`) instead of collapsing to
+    empty. Every other case is byte-identical to before. Empty when nothing is
+    declared/cited/inherited/read — the claim gate then falls back to whole-HEAD freshness
+    (any commit invalidates), the fail-closed direction."""
     import rebar
+
+    from . import read_set as _read_set
 
     ticket_id = verdict.get("ticket_id", "")
     paths: set[str] = set(_cited_paths(verdict))
     paths.update((child_impact or _inherited_child_impact(children)).paths)
+    declared = False
     try:
         for entry in rebar.get_file_impact(ticket_id, repo_root=repo_root) or []:
             p = entry.get("path") if isinstance(entry, dict) else None
             if p:
+                declared = True
                 paths.add(str(p))
     except Exception:  # noqa: BLE001 — file_impact read is best-effort; broad-but-logged below
         logger.warning("file_impact read failed for %s; scoping to citations only", ticket_id)
     # Hash through the shared boundary: during an attested review this is the pinned-SHA
     # snapshot (the claim gate re-hashes the SAME basis); in local mode it is the checkout.
     base = _hash_basis(repo_root)
-    return {p: _hash_file(p, base=base) for p in sorted(paths)}
+    raw_coverage = verdict.get("coverage")
+    coverage: dict[str, Any] = raw_coverage if isinstance(raw_coverage, dict) else {}
+    basis = CURRENCY_BASIS_FILE_IMPACT
+    if not declared and coverage.get("read_set_recorded"):
+        try:
+            paths.update(
+                _read_set.read_set_dependency_paths(coverage.get("read_set") or [], base=base)
+            )
+            basis = CURRENCY_BASIS_READ_SET
+        except Exception:  # noqa: BLE001 — a failed expansion must never scope; fail-safe
+            logger.warning(
+                "read-set scoping failed for %s; falling back to whole-HEAD freshness", ticket_id
+            )
+    deps = {p: _read_set.hash_dep_entry(p, base=base) for p in sorted(paths)}
+    if isinstance(raw_coverage, dict):
+        # Stash the basis the set was ACTUALLY composed on so the signer records the truth
+        # rather than re-deriving it from a second (possibly divergent) file_impact read.
+        coverage["currency_basis"] = basis if deps else CURRENCY_BASIS_FAIL_SAFE
+    return deps
 
 
 def classify_file_scope(
@@ -377,6 +418,8 @@ def build_manifest(
     review_phase: object = "planning",
     priority_floor: object = None,
     file_scope: object = "unscoped",
+    read_set: Sequence[str] | None = None,
+    currency_basis: str | None = None,
 ) -> list[str]:
     """The deterministic manifest signed for a passing plan-review verdict. The
     signature binds ``(ticket_id, manifest)``; the manifest records the verdict, the
@@ -438,6 +481,15 @@ def build_manifest(
         lines.append(f"{_DEP_PREFIX} {digest} {path}")
     if file_scope == "none":
         lines.append(_FILE_SCOPE_NONE)
+    # The signed read-set (ticket 81ca), additive and emitted only when the review actually
+    # recorded one: the ``read-set: <n>`` marker distinguishes a verified-EMPTY read-set from
+    # a manifest that recorded none at all (which keeps the pre-change fail-safe).
+    if read_set is not None:
+        paths = sorted({str(p) for p in read_set if str(p)})
+        lines.append(f"{_READ_SET_PREFIX} {len(paths)}")
+        lines.extend(f"{_READ_PATH_PREFIX} {p}" for p in paths)
+    if currency_basis:
+        lines.append(f"{_CURRENCY_BASIS_PREFIX} {currency_basis}")
     return lines
 
 
@@ -484,6 +536,34 @@ def manifest_deps(manifest: list[str] | None) -> dict[str, str]:
             if path:
                 out[path] = digest
     return out
+
+
+def manifest_read_set(manifest: list[str] | None) -> list[str] | None:
+    """The signed read-set, or ``None`` when the manifest recorded none at all.
+
+    ``None`` and ``[]`` are DIFFERENT and the difference is load-bearing: ``None`` means no
+    agentic pass ran, telemetry collection failed, or the attestation predates ticket 81ca —
+    in every such case the no-file-impact scoping was not applied and the whole-HEAD fail-safe
+    still governs. ``[]`` means the review verifiably read nothing."""
+    if not any(str(line).startswith(_READ_SET_PREFIX) for line in manifest or []):
+        return None
+    return sorted(
+        str(line).split(":", 1)[1].strip()
+        for line in manifest or []
+        if str(line).startswith(_READ_PATH_PREFIX) and str(line).split(":", 1)[1].strip()
+    )
+
+
+def manifest_currency_basis(manifest: list[str] | None) -> str:
+    """Which basis the signed dependency set was composed on. A manifest predating ticket
+    81ca carries no record, so it is DERIVED conservatively: dependency lines mean the set
+    came from declared/cited paths (``file_impact``), none means the whole-HEAD fail-safe."""
+    for line in manifest or []:
+        if str(line).startswith(_CURRENCY_BASIS_PREFIX):
+            recorded = str(line).split(":", 1)[1].strip()
+            if recorded:
+                return recorded
+    return CURRENCY_BASIS_FILE_IMPACT if manifest_deps(manifest) else CURRENCY_BASIS_FAIL_SAFE
 
 
 def manifest_file_scope(manifest: list[str] | None) -> Literal["none", "unscoped"]:

@@ -507,7 +507,10 @@ def _review_plan(argv: list[str]) -> int:
         else:
             sha = status.get("verified_at_sha") or "unknown"
             sys.stdout.write(f"PLAN REVIEW STATUS: {status['verdict']} for {args.ticket_id}\n")
-            sys.stdout.write(f"  current={status['ok']} verified-at-sha={sha}\n")
+            basis = status.get("currency_basis") or "unknown"
+            sys.stdout.write(
+                f"  current={status['ok']} verified-at-sha={sha} currency-basis={basis}\n"
+            )
             sys.stdout.write(f"  {status['reason']}\n")
         # Distinct from a review's PASS/BLOCK/INDETERMINATE codes: 0 current, 12 not current.
         return 0 if status["ok"] else 12

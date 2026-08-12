@@ -23,7 +23,10 @@ defeat the patch.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Named step ids for gates/plan-review.yaml. The dispatcher's mid-tail RECOVERY and the metrics
 # reconstruction below key off these ids (a run's succeeded-step partition is looked up by id); a
@@ -179,7 +182,42 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
             "per_call": usage_agg["per_call"],
             "per_criterion": usage_agg["per_criterion"],
         }
+    _attach_read_set(coverage, rec)
     coverage["metrics"] = metrics
+
+
+def _attach_read_set(coverage: dict[str, Any], rec) -> None:
+    """Record the repository files the agentic passes actually opened (ticket 81ca).
+
+    Unions every succeeded LLM step's ``_usage['distinct_fetches']`` and normalizes it at the
+    review's hash root — the SAME basis the dependency hashes are computed against moments
+    later, so a path that normalizes here is a path that hashes there.
+
+    ``read_set_recorded`` is the fail-safe discriminator and is set ONLY when at least one LLM
+    step produced a ``_usage``: an unrecorded read-set keeps the pre-change whole-HEAD fallback
+    in force, whereas a recorded-but-empty one asserts that the review verifiably read nothing.
+    Any failure records neither, which is the conservative direction."""
+    fetches: list[dict[str, Any]] = []
+    recorded = False
+    for s in rec.steps:
+        if not isinstance(s, dict) or s.get("status") != "succeeded":
+            continue
+        if s.get("kind") not in _LLM_STEP_KINDS:
+            continue
+        step_usage = (s.get("outputs") or {}).get("_usage")
+        if isinstance(step_usage, dict):
+            recorded = True
+            fetches += [f for f in step_usage.get("distinct_fetches") or [] if isinstance(f, dict)]
+    if not recorded:
+        return
+    try:
+        from rebar.llm.plan_review.manifest import _hash_basis
+        from rebar.llm.plan_review.read_set import normalize_read_set
+
+        coverage["read_set"] = normalize_read_set(fetches, base=_hash_basis(None))
+        coverage["read_set_recorded"] = True
+    except Exception:  # noqa: BLE001 — telemetry is never allowed to fail the gate
+        logger.warning("read-set normalization failed; leaving currency unscoped")
 
 
 def _recover_plan_review_coach_failure(rec, cfg, *, error) -> dict[str, Any] | None:

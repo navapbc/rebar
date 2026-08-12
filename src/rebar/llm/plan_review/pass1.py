@@ -733,7 +733,26 @@ def aggregate_usage(per_call: list[dict[str, Any]]) -> dict[str, Any]:
         "per_call": [dict(r) for r in per_call],
         "per_criterion": per_criterion,
         "totals": totals,
+        # Ticket 81ca: the union of every call's observed repository fetches, deduped on
+        # ``(tool, target)`` with first-seen order preserved so the aggregate is stable.
+        # It is what ``_attach_plan_review_metrics`` normalizes into the signed read-set.
+        "distinct_fetches": _union_fetches(per_call),
     }
+
+
+def _union_fetches(per_call: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Dedupe the per-call ``distinct_fetches`` lists on ``(tool, target)``."""
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for rec in per_call:
+        for fetch in rec.get("distinct_fetches") or []:
+            if not isinstance(fetch, dict):
+                continue
+            key = (str(fetch.get("tool", "")), str(fetch.get("target", "")))
+            if key not in seen:
+                seen.add(key)
+                out.append(dict(fetch))
+    return out
 
 
 def material_fingerprint(
