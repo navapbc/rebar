@@ -253,3 +253,88 @@ def test_a_force_close_reports_its_own_cause(repo, monkeypatch, capsys):
         "cause": "force_bypassed",
         "error": "",
     }
+
+
+# ── force-close reason durability (bug defiant-orthoclase-buck) ────────────────────────────
+# `transition_core` accepted `force_close_reason` and never read it, so the operator's
+# `--force=<reason>` was discarded before reaching the STATUS event. The only durable trace was
+# a best-effort FORCE_CLOSE audit comment written AFTER the close via a SECOND lock acquisition
+# and swallowed on failure — least reliable under exactly the contention that makes
+# force-closing attractive. It now rides the close's own locked write.
+
+
+def _status_events(repo: Path, ticket_id: str) -> list[dict]:
+    """Every raw STATUS event for a ticket, oldest first, straight off disk.
+
+    Resolved through rebar's own tracker resolver rather than a guessed path, so the
+    assertion is about the EVENT's contents and cannot silently pass if the layout moves."""
+    from rebar import config
+
+    tdir = Path(config.tracker_dir(str(repo))) / ticket_id
+    paths = sorted(tdir.glob("*-STATUS.json"))
+    assert paths, f"no STATUS events found on disk for {ticket_id} under {tdir}"
+    return [json.loads(p.read_text()) for p in paths]
+
+
+def test_force_close_reason_is_written_onto_the_close_status_event(repo, monkeypatch):
+    """AC1: the reason lands on the STATUS event itself — which IS the close's own locked
+    write, so its durability costs no additional lock acquisition.
+
+    Compaction is disabled here only so the individual event survives to be read; it absorbs
+    events into a SNAPSHOT on close and is orthogonal to what this asserts."""
+    monkeypatch.setattr(transition_close, "_compact_on_close", lambda *a, **k: None)
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+    from rebar._cli import main
+
+    main(["transition", tid, "in_progress", "closed", "--force=gate is wedged, shipping"])
+
+    closes = [e for e in _status_events(repo, tid) if e["data"].get("status") == "closed"]
+    assert len(closes) == 1
+    assert closes[0]["data"]["force_close_reason"] == "gate is wedged, shipping"
+
+
+def test_the_reason_is_readable_from_reduced_state(repo, monkeypatch):
+    """AC2: a later reader, holding no lock, sees WHY the gates were bypassed."""
+    tid = _open_ticket(repo)
+    monkeypatch.chdir(repo)
+    from rebar._cli import main
+
+    main(["transition", tid, "in_progress", "closed", "--force=operator judgement call"])
+
+    shown = rebar.show_ticket(tid, repo_root=str(repo))
+    assert shown["status"] == "closed"
+    assert shown["force_close_reason"] == "operator judgement call"
+
+
+def test_an_unforced_close_omits_the_key_entirely(repo, monkeypatch):
+    """AC3: present-only. An ordinary close must stay byte-identical to the pre-change event
+    shape, so absence of the key is itself the signal that the close was NOT forced."""
+    monkeypatch.setattr(transition_close, "_compact_on_close", lambda *a, **k: None)
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    closes = [e for e in _status_events(repo, tid) if e["data"].get("status") == "closed"]
+    assert "force_close_reason" not in closes[0]["data"]
+    assert "force_close_reason" not in rebar.show_ticket(tid, repo_root=str(repo))
+
+
+def test_transition_core_does_not_accept_a_parameter_it_discards():
+    """AC4: the defect itself was a parameter accepted and silently dropped. Pin that every
+    close-metadata parameter `transition_core` declares is actually READ in its body, so a
+    future one cannot rot into a no-op the way this one did."""
+    import inspect
+
+    from rebar._commands import txn
+
+    source = inspect.getsource(txn.transition_core)
+    signature = inspect.signature(txn.transition_core)
+    body = source.split(":", 1)[1]  # drop the def line so params are not counted as reads
+
+    for name in ("close_class", "force_close_reason"):
+        assert name in signature.parameters, f"{name} should still be a parameter"
+        assert body.count(name) > 1, (
+            f"{name} is declared but never read in transition_core's body — the "
+            "defiant-orthoclase-buck defect"
+        )

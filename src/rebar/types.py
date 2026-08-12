@@ -134,6 +134,7 @@ class TicketState(TypedDict):
     creation_channel_inferred: NotRequired[Literal[True]]
     detected_by: NotRequired[str]
     close_class: NotRequired[CloseClass]
+    force_close_reason: NotRequired[str]
 
 
 class TicketStateLLM(TypedDict):
