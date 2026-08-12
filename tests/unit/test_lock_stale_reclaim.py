@@ -21,6 +21,7 @@ import time as _time
 import pytest
 
 from rebar._store import lock as _lock
+from rebar._store import lock_owner as _owner
 
 
 def _dead_pid() -> int:
@@ -221,7 +222,7 @@ def _seed_owner_stamp(tmp_path, content: str | None) -> str:
     lock_dir = os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME)
     os.mkdir(lock_dir)
     if content is not None:
-        with open(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
+        with open(os.path.join(lock_dir, _owner._MKDIR_OWNER_FILE), "w", encoding="utf-8") as fh:
             fh.write(content)
     return lock_dir
 
@@ -245,13 +246,13 @@ def _seed_owner_stamp(tmp_path, content: str | None) -> str:
 def test_malformed_owner_stamp_is_never_stale(tmp_path, label, stamp):
     """No malformed/foreign/partial stamp is ever judged stale (conservative — no reclaim)."""
     lock_dir = _seed_owner_stamp(tmp_path, stamp)
-    assert _lock._mkdir_lock_is_stale(lock_dir) is False, f"{label!r} must not be reclaimable"
+    assert _owner._mkdir_lock_is_stale(lock_dir) is False, f"{label!r} must not be reclaimable"
 
 
 def test_absent_owner_file_is_never_stale(tmp_path):
     """A mkdir lock with NO owner file (e.g. a bash-style lock) is never reclaimable."""
     lock_dir = _seed_owner_stamp(tmp_path, None)
-    assert _lock._mkdir_lock_is_stale(lock_dir) is False
+    assert _owner._mkdir_lock_is_stale(lock_dir) is False
 
 
 def test_unreadable_owner_file_is_never_stale(tmp_path):
@@ -259,8 +260,8 @@ def test_unreadable_owner_file_is_never_stale(tmp_path):
     OSError on open) is never reclaimable — the read-error branch is conservative."""
     lock_dir = os.path.join(str(tmp_path), _lock.MKDIR_LOCK_NAME)
     os.mkdir(lock_dir)
-    os.mkdir(os.path.join(lock_dir, _lock._MKDIR_OWNER_FILE))  # a dir where a file is expected
-    assert _lock._mkdir_lock_is_stale(lock_dir) is False
+    os.mkdir(os.path.join(lock_dir, _owner._MKDIR_OWNER_FILE))  # a dir where a file is expected
+    assert _owner._mkdir_lock_is_stale(lock_dir) is False
 
 
 # ── The dual-window lock is a permanent contract (story sublime-phlegmy-oropendola) ──
