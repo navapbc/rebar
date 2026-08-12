@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import logging
 import os
@@ -185,7 +186,7 @@ def test_recovery_guard_blocks_before_staging_and_clean_retry_delivers(
 
 @pytest.mark.parametrize(
     ("phase", "reason"),
-    [("add", "stage-failed"), ("commit", "commit-failed")],
+    [("status", "stage-failed"), ("add", "stage-failed"), ("commit", "commit-failed")],
 )
 def test_stage_and_commit_failures_split_strict_from_default_and_retry(
     tracker_and_origin: tuple[Path, Path],
@@ -254,6 +255,143 @@ def test_lock_failure_splits_strict_from_default_and_retry(
     monkeypatch.setattr(lock, "write_lock", original_lock)
     push.commit_and_push_tickets_branch(tracker, message="retry lock", strict=True)
     assert _git(origin, "show", "tickets:lock-retry.json").stdout == "retain me\n"
+
+
+def test_exclusion_failure_splits_strict_from_default_and_retry(
+    tracker_and_origin: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Exclusion is the FIRST gate: if lock artifacts cannot be excluded, nothing may stage.
+
+    Committing without the exclusion installed is what would let a live lock file into the
+    tickets branch, so this path must fail closed — typed for strict callers, warn-and-return
+    for best-effort ones — while retaining the pending content for a later clean retry.
+    """
+    tracker, origin = tracker_and_origin
+    event = tracker / "exclusion-retry.json"
+    event.write_text("retain me\n", encoding="utf-8")
+    head_before = _git(tracker, "rev-parse", "HEAD").stdout.strip()
+    original_git = push._git
+    push_calls = 0
+
+    def failing_git(base: str, *args: str, **kwargs: object):
+        nonlocal push_calls
+        if args and args[0] == "push":
+            push_calls += 1
+        if args[:3] == ("rev-parse", "--git-path", "info/exclude"):
+            return subprocess.CompletedProcess(args, 1, "", "injected exclude resolve failure")
+        return original_git(base, *args, **kwargs)
+
+    monkeypatch.setattr(push, "_git", failing_git)
+    error = _delivery_error(
+        lambda: push.commit_and_push_tickets_branch(
+            tracker, message="retry exclusion", strict=True
+        ),
+        "stage-failed",
+    )
+    assert "exclude" in str(error).lower()
+
+    with caplog.at_level(logging.WARNING, logger="rebar._store.push"):
+        assert push.commit_and_push_tickets_branch(tracker, message="retry exclusion") is None
+    assert "exclude" in caplog.text.lower()
+
+    # Failed closed: nothing staged, nothing committed, nothing pushed, content retained.
+    assert push_calls == 0
+    assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == head_before
+    assert event.read_text(encoding="utf-8") == "retain me\n"
+    assert _git(origin, "show", f"tickets:{event.name}", check=False).returncode != 0
+
+    monkeypatch.setattr(push, "_git", original_git)
+    push.commit_and_push_tickets_branch(tracker, message="retry exclusion", strict=True)
+    assert _git(origin, "show", f"tickets:{event.name}").stdout == "retain me\n"
+
+
+def test_legacy_tracker_commit_excludes_lock_artifacts_and_retry_is_clean(
+    tracker_and_origin: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real commit on a legacy tracker must not capture the lock artifacts it is holding.
+
+    The artifacts are NOT planted by the test: ``.ticket-write.lock`` and
+    ``.ticket-write.lock.d`` ARE the write lock (lock.py WRITE_LOCK_NAME / MKDIR_LOCK_NAME),
+    so planting them would just block the lock. They exist for real, on disk, precisely while
+    the locked phase runs ``git add -A`` — which is the whole hazard. The fixture tracker has
+    no .gitignore, so the exclusion installed by ``_ignore_lock_artifacts`` is the only thing
+    between that ``add -A`` and a committed lock file.
+
+    ``staged_with_lock_present`` keeps the oracle honest: without it the assertion would pass
+    vacuously on a tracker where the artifacts never existed at staging time. Assert against
+    the committed TREE, not the working tree — a lock artifact in the tree is what would be
+    delivered to every other clone.
+    """
+    tracker, origin = tracker_and_origin
+    event = tracker / "legacy-event.json"
+    event.write_text("{}\n", encoding="utf-8")
+    original_git = push._git
+    staged_with_lock_present = False
+
+    def probing_git(base: str, *args: str, **kwargs: object):
+        nonlocal staged_with_lock_present
+        if args[:2] == ("add", "-A"):
+            staged_with_lock_present = (tracker / ".ticket-write.lock").exists() and (
+                tracker / ".ticket-write.lock.d"
+            ).exists()
+        return original_git(base, *args, **kwargs)
+
+    monkeypatch.setattr(push, "_git", probing_git)
+    push.commit_and_push_tickets_branch(tracker, message="legacy commit", strict=True)
+    monkeypatch.setattr(push, "_git", original_git)
+
+    assert staged_with_lock_present, (
+        "vacuous oracle: the lock artifacts were not on disk when `git add -A` ran"
+    )
+    tree = _git(tracker, "ls-tree", "-r", "--name-only", "HEAD").stdout.split()
+    assert "legacy-event.json" in tree, f"the real event must be committed; tree={tree}"
+    assert not [name for name in tree if name.startswith(".ticket-write.lock")], (
+        f"reserved lock artifacts entered the committed tree: {tree}"
+    )
+    assert _git(origin, "show", "tickets:legacy-event.json").stdout == "{}\n"
+
+    # Clean retry: excluded paths must not leave the tracker permanently dirty.
+    assert _git(tracker, "status", "--porcelain").stdout == ""
+    push.commit_and_push_tickets_branch(tracker, message="legacy retry", strict=True)
+    assert _git(tracker, "status", "--porcelain").stdout == ""
+
+
+def test_concurrent_first_use_cannot_tear_exclude_metadata(
+    tracker_and_origin: tuple[Path, Path],
+) -> None:
+    """Racing first-time callers may duplicate a whole line, but may never tear one.
+
+    ``_ignore_lock_artifacts`` runs BEFORE the write lock, so concurrent first use is
+    reachable by construction. A torn pattern (``.ticket-write.lo``) would still look like a
+    populated exclude file while silently no longer excluding the artifact, so the oracle is
+    per-line integrity, not file equality.
+    """
+    tracker, _origin = tracker_and_origin
+    exclude_path = Path(
+        _git(
+            tracker, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"
+        ).stdout.strip()
+    )
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    exclude_path.write_text("# pre-existing\n", encoding="utf-8")
+    patterns = {".ticket-write.lock", ".ticket-write.lock.d/"}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(lambda _: push._ignore_lock_artifacts(str(tracker)), range(32)))
+    assert all(results)
+
+    lines = [line for line in exclude_path.read_text(encoding="utf-8").splitlines() if line]
+    assert patterns <= set(lines), f"both patterns must be present: {lines}"
+    assert set(lines) <= patterns | {"# pre-existing"}, (
+        f"exclude metadata was torn or corrupted by concurrent first use: {lines}"
+    )
+
+    # Idempotent thereafter: once both patterns are present, no further call appends.
+    settled = exclude_path.read_text(encoding="utf-8")
+    assert push._ignore_lock_artifacts(str(tracker)) is True
+    assert exclude_path.read_text(encoding="utf-8") == settled
 
 
 def test_direct_push_remains_push_only_and_preserves_dirty_tree(

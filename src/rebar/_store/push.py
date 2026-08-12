@@ -604,7 +604,17 @@ def push_tickets_branch(
 
 
 def _ignore_lock_artifacts(base_path: str) -> bool:
-    """Keep the lock's own files out of Git even in an implicit-legacy store."""
+    """Keep the lock's own files out of Git even in an implicit-legacy store.
+
+    Runs BEFORE the write lock (the exclusion must exist before anything stages), so two
+    first-time callers race by construction. The append is therefore ONE ``os.write`` to an
+    ``O_APPEND`` fd, applied atomically at end-of-file on POSIX (this project's declared
+    support surface), so a race cannot tear a pattern into a half-line that would silently
+    stop excluding it. The prior buffered two-write append merely happened to coalesce under
+    CPython buffering; this makes that guarantee explicit rather than incidental. A racing
+    pair can still append the same WHOLE line twice: tolerated by design, since git applies
+    a repeated pattern identically and de-duplicating would need a lock forbidden here.
+    """
     resolved = _git(base_path, "rev-parse", "--git-path", "info/exclude")
     if resolved.returncode != 0 or not resolved.stdout.strip():
         return False
@@ -614,16 +624,16 @@ def _ignore_lock_artifacts(base_path: str) -> bool:
     try:
         with open(exclude_path, encoding="utf-8") as fh:
             existing = fh.read()
-        missing = [
-            pattern
-            for pattern in (".ticket-write.lock", ".ticket-write.lock.d/")
-            if pattern not in existing.splitlines()
-        ]
+        patterns = (".ticket-write.lock", ".ticket-write.lock.d/")
+        missing = [p for p in patterns if p not in existing.splitlines()]
         if missing:
-            with open(exclude_path, "a", encoding="utf-8") as fh:
-                if existing and not existing.endswith("\n"):
-                    fh.write("\n")
-                fh.write("\n".join(missing) + "\n")
+            lead = "" if not existing or existing.endswith("\n") else "\n"
+            payload = (lead + "\n".join(missing) + "\n").encode("utf-8")
+            fd = os.open(exclude_path, os.O_WRONLY | os.O_APPEND)
+            try:
+                os.write(fd, payload)
+            finally:
+                os.close(fd)
     except OSError:
         return False
     return True
