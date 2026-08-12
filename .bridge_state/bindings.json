@@ -7871,7 +7871,7 @@
         "assignee": null,
         "description": "Wire the remaining checks into the registry once the framework is proven: llm-provider (Anthropic reachable/quota), github (API/Actions/mirror), config-valid, deploy-host/replication, environment. Each an independent tri-state probe with blocking/advisory severity.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S7: Additional infra-health signals"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -14343,7 +14343,7 @@
         "assignee": null,
         "description": "Land detect-only/WARN mode first (emit signals, do not block) until detection proven reliable in the field, then flip to fail-closed. Document the full lifecycle (detect->block->apply->confirm->re-run->clear->waive->break-glass) in the deploy runbook + review-gate docs.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S8: WARN->enforce rollout + docs/runbook"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -30844,7 +30844,7 @@
         "assignee": null,
         "description": "## Context\nThe plan-review gate (`5fd2`) deliberately EXEMPTS bugs in v1 \u2014 a bug has a different shape (reproduction,\nexpected-vs-actual, fix-plan) than a feature plan, and round-4 data showed the plan criteria draw mostly\nplanning-noise on bugs. This epic designs the dedicated bug-review gate. (Spun out of `5fd2`; was follow-on F6.)\n\n## Acceptance Criteria\n- [ ] A bug-specific criteria set (reproduction, expected-vs-actual, root-cause, regression test) on the three-pass structure.\n- [ ] Validated on real bug tickets across the corpuses; low false-positive vs the plan criteria on bugs.\n- [ ] Reuses the shared review infrastructure (engine, Pass-2/Pass-3, eval seam).\n- [ ] A review gate tuned to bug tickets (reproduction adequacy, root-cause vs symptom, fix-plan soundness,\n- [ ] Bugs are no longer simply skipped: they get an appropriate, low-false-positive review.",
         "priority": "Medium",
-        "status": "IDEA",
+        "status": "Done",
         "summary": "Bug-ticket review gate (dedicated; the plan-review gate exempts bugs in v1)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -38547,7 +38547,7 @@
         "assignee": null,
         "description": "Umbrella for confirmed defects from a downstream client bug report (multi-agent workflow on a consumer repo, rebar v0.10.0). Children are independently reproducible + landable defects verified against v0.10.0 / the installed tool. Excluded: 8c (already fixed by e3c74881f in v0.10.0), 8a/8b (reviewer calibration, separate track), 3 (verdict-precedence design decision, needs maintainer call), 6 (backgrounded review-plan repo-root, repro pending).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Fix rebar defects surfaced by sec-semantic-layer client report"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -43406,7 +43406,7 @@
         "assignee": null,
         "description": "On a signal returning healthy, auto-re-run the blocked reviews + re-eval the gate \u2014 no human recheck (infra-class, per Zuul RETRY_LIMIT). Same-patchset re-vote that cleanly REPLACES the stale -1. Bounded retries (RETRY_LIMIT) with a terminal loud alert on exhaustion; windowed/rate-limited to avoid a thundering herd.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S5: Infra-class auto-recovery loop (re-run blocked reviews on recovery)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -75053,7 +75053,7 @@
         "assignee": null,
         "description": "Supersedes bug e983 (config_manual fire-and-forget) by generalizing it into an infra-health readiness gate for the review/landing pipeline.\n\nPRINCIPLE: an unhealthy infra precondition (unapplied/invalid config, LLM-provider outage, GitHub outage, env error) makes LLM Review UNSOUND. Treat these as INFRA-CLASS conditions (per Zuul RETRY_LIMIT/NODE_FAILURE): block fail-closed, do NOT cast a content vote, and AUTO-RECOVER (re-run blocked reviews) when the signal returns healthy \u2014 no human recheck (author changed nothing; only the environment did).\n\nDESIGN (OSS-grounded):\n- Health registry: named checks, each tri-state healthy/unhealthy/unknown (never conflate 'check errored' with 'healthy'). Signals: config-applied (live-vs-desired refs-meta/replication probe), config-valid, llm-provider (Anthropic reachable/quota), github (API/Actions/mirror), deploy-host/replication, environment.\n- Aggregator: per-signal blocking vs advisory severity; fail-closed on any blocking-unhealthy. (cf. Argo health assessment; K8s readiness gate.)\n- Consumption points, one health source: (a) REVIEW boundary \u2014 review-bot ABSTAINS (casts no LLM-Review content vote) when infra unhealthy, instead of erroring/false-voting; (b) LANDING boundary \u2014 dedicated bot-cast Infra-Ready submit-requirement blocks submit with an explicit per-signal message. Keeps env-readiness OFF the code-content labels (avoids the 'environment masquerading as a review vote' anti-pattern).\n- Recovery = infra-class retry loop: on signal recovery, auto-re-run blocked reviews + re-eval gate; bounded (RETRY_LIMIT), windowed (thundering-herd), same-patchset re-vote that cleanly REPLACES the stale -1, terminal alert on exhaustion. (cf. Zuul infra-class auto-retry.)\n- Reliability: independent tri-state observation (Ansible/Puppet lesson: apply exit-0 != converged; only a zero-diff re-read proves it); Terraform-style tri-state so a probe ERROR never false-clears; marker bound to the config revision it was computed against (Terraform stale-plan rejection).\n- Waiver + break-glass: audited per-signal/global override; guard-the-guard on who may waive (Gatekeeper); a guaranteed break-glass reachable when the gate itself is wedged.\n- Rollout: WARN/detect-only first (emit signals, do not block) until detection proven reliable, THEN flip to fail-closed. Staged config-first.\n\nCONTEXT: closes the e983 root cause properly (durable reconciled status, not a fire-and-forget event) and also turns today's ad-hoc LLM/GitHub-outage failures into one loud, self-healing, auditable signal. Related: 0e15 (--class propagation), and the plan-review calibration miss on epic 86ac/ed13 that let consumer-migration advisories ship sub-threshold.\n\n## Acceptance Criteria\n\n- [ ] A health registry exposes each named infra check in tri-state (healthy / unhealthy / unknown) and never reports a probe error as healthy; verified by a unit test that feeds an errored probe and asserts the aggregate is unknown, not healthy.\n- [ ] When any blocking signal is unhealthy the review-bot casts no LLM-Review content vote (abstains) and the Infra-Ready submit-requirement blocks submit with a per-signal message; verified by an offline test asserting no content vote is emitted and submit is blocked.\n- [ ] On signal recovery a blocked review is automatically re-run under a bounded retry (RETRY_LIMIT) with windowed replay, replacing the stale vote without human recheck; verified by a test that drives unhealthy then healthy and asserts exactly one bounded re-run.\n- [ ] Each health observation is bound to the config revision it was computed against and a stale observation is rejected rather than allowed to false-clear; verified by a test that presents a stale-revision observation and asserts rejection.\n- [ ] Rollout ships in WARN/detect-only mode (signals emitted, submit not blocked) until a config flip enables fail-closed; verified by a test asserting detect-only emits signals without blocking and the flip enables blocking.\n- [ ] An audited break-glass override can waive per-signal or global blocking and remains reachable when the gate itself is wedged; verified by a test exercising the waiver path and asserting the audit record is written.",
         "priority": "High",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "Infra-Ready health gate: fail-closed review/landing gate over infra-health signals with infra-class auto-recovery"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -77943,7 +77943,7 @@
         "assignee": null,
         "description": "Replace autodeploy's fire-and-forget config_manual signal with a durable reconciled STATUS: a live-vs-desired probe over refs-meta/replication config, tri-state, bound to the config revision it was computed against (Terraform stale-plan rejection). Independent observation \u2014 apply exit-0 != converged; require zero-diff re-read. This is the original e983 defect done properly.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S2: config-applied signal as a durable reconciled status (fixes e983 root cause)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -85745,7 +85745,7 @@
         "assignee": null,
         "description": "A dedicated bot-cast Infra-Ready Gerrit label expressed as a declarative submit-requirement (not Prolog); blocks submit fail-closed with an explicit PER-SIGNAL message when infra unhealthy. Keeps env-readiness off the code-content labels (avoids 'environment masquerading as a review vote'). cf. Gerrit submit-requirements; Go TryBot label design.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S3: Landing-boundary Infra-Ready submit-requirement (bot-cast, blocking)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -103858,7 +103858,7 @@
         "assignee": null,
         "description": "Named infra-health checks each returning tri-state (healthy/unhealthy/unknown; 'check errored' must be distinct from 'healthy'). Aggregator computes overall readiness from per-signal blocking/advisory severities; fail-closed on any blocking-unhealthy. Framework only (no signal enforces yet \u2014 WARN mode). cf. Argo health assessment, K8s readiness gate.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S1: Health registry + fail-closed aggregator framework"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -115842,7 +115842,7 @@
         "assignee": null,
         "description": "The review-bot consults infra-health BEFORE running; when unhealthy (e.g. LLM provider down) it ABSTAINS \u2014 casts no LLM-Review content vote \u2014 instead of erroring or risking a spurious vote. 'We could not review' != 'review failed'. The block lives on Infra-Ready (S3), not LLM-Review.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S4: Review-boundary abstain (no false content vote on infra failure)"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -129482,7 +129482,7 @@
         "assignee": null,
         "description": "Per-signal/global operator override (waiver), audited; guard-the-guard \u2014 treat 'may waive' as privileged and review waivers periodically (Gatekeeper). A guaranteed break-glass reachable even when the gate itself is wedged (analogue of deleting a ValidatingWebhookConfiguration). Bounds the 'all work stops' blast radius.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "S6: Audited waiver + guaranteed break-glass"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
