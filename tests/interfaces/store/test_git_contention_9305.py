@@ -235,7 +235,26 @@ def test_advisory_lock_serializes_against_competing_holder(tmp_path: Path) -> No
 
 def test_concurrent_processes_through_seam_both_succeed(tmp_path: Path) -> None:
     """Two processes committing through the seam against the SAME repo both succeed —
-    contention among rebar's own writers is absorbed, never surfaced."""
+    contention among rebar's own writers is absorbed, never surfaced.
+
+    Each writer commits its OWN PATHSPEC rather than the whole index. The advisory git-op
+    lock serializes each ``run_git_write`` CALL but not the add+commit PAIR, so with a bare
+    (whole-index) ``git commit`` this interleaving is legal:
+
+        alpha: add alpha.txt   -> index holds alpha.txt
+        beta:  add beta.txt    -> index holds alpha.txt AND beta.txt
+        alpha: commit          -> commits the WHOLE index, sweeping up beta.txt
+        beta:  commit          -> nothing staged -> "nothing to commit" -> rc=1
+
+    That rc=1 is git correctly reporting an empty commit, not a contention failure — and
+    ``git commit -q`` puts the reason on STDOUT with an EMPTY stderr, which is why the CI
+    failures arrived as a message-less ``AssertionError`` (bug mutinous-conceptual-moorhen).
+    A pathspec commit keeps each writer's commit non-empty under every interleaving, so the
+    test measures the contention policy instead of the commit ordering.
+
+    The worker also reports WHICH inner git command failed, with stdout as well as stderr,
+    so an empty-stderr failure is diagnosable from the CI log alone.
+    """
     repo = _fresh_repo(tmp_path, "both")
     src = str(Path(__file__).resolve().parents[3] / "src")
 
@@ -248,11 +267,15 @@ def test_concurrent_processes_through_seam_both_succeed(tmp_path: Path) -> None:
                 "sys.path.insert(0, sys.argv[3])\n"
                 "from rebar._store import gitutil\n"
                 "repo, name = sys.argv[1], sys.argv[2]\n"
+                "def check(label, r):\n"
+                "    assert r.returncode == 0, (\n"
+                "        f'{label} failed rc={r.returncode}\\n'\n"
+                "        f'stderr: {r.stderr!r}\\nstdout: {r.stdout!r}'\n"
+                "    )\n"
                 "open(f'{repo}/{name}.txt', 'w').write(name)\n"
-                "r = gitutil.run_git_write(repo, 'add', '--', f'{name}.txt')\n"
-                "assert r.returncode == 0, r.stderr\n"
-                "r = gitutil.run_git_write(repo, 'commit', '-q', '--no-verify', '-m', name)\n"
-                "assert r.returncode == 0, r.stderr\n",
+                "check('git add', gitutil.run_git_write(repo, 'add', '--', f'{name}.txt'))\n"
+                "check('git commit', gitutil.run_git_write(\n"
+                "    repo, 'commit', '-q', '--no-verify', '-m', name, '--', f'{name}.txt'))\n",
                 repo,
                 name,
                 src,
