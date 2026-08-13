@@ -19,6 +19,12 @@ what each one should be, so the audit can never drift from the rule it audits:
   * ``unreadable``        — the resolver could not read an endpoint. Reported,
     never repaired.
 
+Alongside the link audit it reports LOCK HEALTH — held/free, the ownership stamp,
+holder liveness, hold age and staleness for each of the store's lock legs. That half
+lives in :mod:`rebar._commands.doctor_locks` and is strictly read-only: a stale lock is
+reported and advised on, never reclaimed. Only link findings are repairable, so lock
+results never enter the repair loop below.
+
 Repair writes the replacement BEFORE removing the stale edge: unlink-first would,
 on any failure in between, destroy a dependency with nothing left to reconstruct
 it from, whereas link-first fails toward a transient superset that the next scan
@@ -32,6 +38,7 @@ import json
 import sys
 from typing import Any
 
+from rebar._commands import doctor_locks
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -240,7 +247,14 @@ def run_repair(
     return findings, pre_oid
 
 
-def _print_text(findings: list[dict[str, Any]], pre_oid: str, *, repaired: bool) -> None:
+def _print_text(
+    findings: list[dict[str, Any]],
+    pre_oid: str,
+    *,
+    repaired: bool,
+    lock_reports: list[dict[str, Any]],
+    lock_faults: list[dict[str, Any]],
+) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
     for f in findings:
@@ -250,6 +264,11 @@ def _print_text(findings: list[dict[str, Any]], pre_oid: str, *, repaired: bool)
     outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
     verb = "outstanding" if repaired else "finding(s)"
     print(f"doctor: {len(findings)} finding(s), {outstanding} {verb}")
+    # The lock section keeps its own count: lock findings are never repairable, so folding
+    # them into the line above would report a repair total that cannot be acted on.
+    for line in doctor_locks.render_text(lock_reports, lock_faults):
+        print(line)
+    print(f"doctor: {len(lock_faults)} stale lock(s)")
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -273,6 +292,13 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
 
     tracker = str(tracker_dir(repo_root))
     findings = scan(tracker)
+    # Read-only, and deliberately outside the repair path below: `run_repair` iterates
+    # `findings`, so keeping lock results in their own list is what guarantees --repair
+    # can never act on a lock (ticket metaphoric-fleeting-nutcracker). Sampled BEFORE any
+    # repair for the same reason — a repair pass takes the write lock for each of its own
+    # event writes, and a report gathered after that would describe doctor itself.
+    lock_reports = doctor_locks.scan_locks(tracker)
+    lock_faults = doctor_locks.lock_findings(lock_reports)
 
     pre_oid = ""
     if do_repair and not dry_run and findings:
@@ -289,11 +315,22 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
                     "findings": findings,
                     "finding_count": len(findings),
                     "pre_repair_tag_oid": pre_oid,
+                    "locks": lock_reports,
+                    "lock_findings": lock_faults,
                 }
             )
         )
     else:
-        _print_text(findings, pre_oid, repaired=do_repair and not dry_run)
+        _print_text(
+            findings,
+            pre_oid,
+            repaired=do_repair and not dry_run,
+            lock_reports=lock_reports,
+            lock_faults=lock_faults,
+        )
 
     outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
-    return 1 if outstanding else 0
+    # A stale lock is outstanding by the same rule as an unrepaired link finding: no live
+    # process claims it. A HELD lock with a live holder is information, not a finding, so
+    # it never fails a CI gate keyed on this exit code.
+    return 1 if outstanding or lock_faults else 0
