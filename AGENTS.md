@@ -257,7 +257,15 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   (keep the `Change-Id`) + re-push.
 - **The gate:** a change is submittable only at **`LLM-Review +1` AND `Verified +1` AND no
   unresolved comments** — only the bots/admins cast either label, so you cannot self-approve.
-  A `Verified -1` is a CI failure (open the run; comment `recheck` if it is a flake).
+  A `Verified -1` is a CI failure: open the run and read it. `recheck` only for a **provably
+  environmental** fault (see the next bullet).
+- **A flaky test is a BUG to root-cause, never a retry.** A test that fails intermittently gets
+  debugged — reproduce it deterministically (the `/rebar-debug` workflow: hypothesis-driven, in
+  its own worktree, a confirmed root cause before any fix) and fix the **class**, not the one
+  run. Retrying until green slows development, wastes tokens, and erodes CI as a regression
+  oracle. `recheck` is reserved for provably environmental faults — a TLS/promisor cert flake, a
+  missing CI dispatch, a runner outage — and the recheck comment must state that reasoning →
+  [CONTRIBUTING.md](CONTRIBUTING.md) §6.
 - **Land it yourself with a plain Gerrit Submit** once both votes are green. `main` is
   Rebase-If-Necessary: Gerrit rebases + submits server-side, so you do **not** pre-rebase
   except on a textual conflict it cannot resolve. Do **not** close a ticket until its change

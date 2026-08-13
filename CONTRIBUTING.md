@@ -671,8 +671,20 @@ a `rebar-ticket:` trailer, and push to `refs/for/main`.
   gerrit-to-platform → GitHub Actions) may be down. Comment **`recheck`** to re-trigger; if
   still nothing, it's an infra issue for maintainers (see
   `infra/runbooks/two-vote-gate-rollback.md`) — not a problem with your diff.
-- **`Verified -1` but the failure looks transient/flaky.** Comment **`recheck`** to re-run
-  CI on the same patchset (§2c). A new patchset also re-runs it and cancels the stale run.
+- **`Verified -1` and you think the failure is not your diff.** Split the two cases before
+  you do anything — they have opposite remedies.
+  - **A provably environmental fault** (a TLS/promisor cert error, a dispatch that never
+    arrived, a runner outage): comment **`recheck`** to re-run CI on the same patchset (§2c),
+    and **say in the comment why you believe it is environmental**. A new patchset also
+    re-runs CI and cancels the stale run.
+  - **A nondeterministic test** (it passes on a re-run with no change, or only fails in
+    certain orderings): that is a **bug**, and `recheck` is not the remedy. Root-cause it —
+    reproduce deterministically via the `/rebar-debug` workflow and fix the class — then
+    re-run CI. Retrying a flake until it goes green slows development, wastes tokens, and
+    erodes CI as a regression oracle. This rule is stated in
+    [AGENTS.md](AGENTS.md) §"Git workflow"; the standing example is the order-dependent
+    leaked-logger flake, which cost four `Verified -1`s and several recheck cycles before one
+    root-cause pass fixed it class-wide.
 - **`! [remote rejected] … you are not allowed to upload merges` (or `not permitted:
   push merge commit`) pushing the merge-back.** Pushing a merge commit to
   `refs/for/refs/heads/feature/*` or `refs/for/main` is restricted to the
