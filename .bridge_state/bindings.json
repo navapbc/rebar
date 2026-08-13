@@ -34602,9 +34602,17 @@
       "updated_at": "2026-07-06T15:35:04Z"
     },
     "4557-1f33-7a3f-47c7": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Operator directive (2026-08-13, verbatim)\n'you're authorized to configure our bridge to run hourly instead of continuously for this project in order to free the runner.'\n\n## Already done (config, immediate)\nRECONCILE_CONTINUOUS repo Variable flipped true -> false at 2026-08-13T14:59Z. The self-re-dispatch chain stops after its in-flight pass; the runner slot frees. The bridge now runs solely on reconcile-bridge.yml's cron.\n\n## Remaining (code change, post-pause)\nThe cron is the 40-minute three-entry schedule change 1726 just landed. Operator intent is HOURLY for this project: replace the three-entry 40-min block with a single hourly entry (off-:00 minute per scheduling hygiene, e.g. '23 * * * *'), update the gap-asserting cadence test 1726 added (and any pinned literals/docs/Jenkinsfile mirror), and update the canary staleness-window arithmetic if it keys off the bridge cadence (canary itself stays 2-hourly per pittabird). Update the workflow comments naming 40-min.\n\n## Acceptance criteria\n- [ ] reconcile-bridge.yml fires hourly (single cron entry, off-:00 minute); no other trigger fires the bridge for this repo (chain variable false is config, not asserted by CI).\n- [ ] The cadence test derives and asserts the hourly schedule; all pinned literals/docs/comments/Jenkinsfile updated truthfully.\n- [ ] Worst-case sync latency (1h) recorded in the bridge docs.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Bridge schedule to hourly now that continuous is off"
+      },
       "created_at": "2026-08-13T15:09:42Z",
       "jira_id": "4588602",
       "jira_key": "REB-2862",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T15:09:45Z"
     },
