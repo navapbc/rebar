@@ -41,7 +41,15 @@ EXCLUDED_DIRECTORY_NAMES = frozenset(
         "node_modules",
     }
 )
-EXCLUDED_PREFIXES = (Path("docs/archive"), Path("docs/experiments"))
+# ``tests/fixtures/dc_wiki_corpus`` is a FROZEN, scrubbed snapshot of historical ticket
+# prose (scripts/build_dc_wiki_corpus.py) used to prove the Data Center renderer never
+# corrupts real bodies. It is captured data, not authored text, so rewording it to
+# satisfy the criteria vocabulary would falsify the fixture.
+EXCLUDED_PREFIXES = (
+    Path("docs/archive"),
+    Path("docs/experiments"),
+    Path("tests/fixtures/dc_wiki_corpus"),
+)
 # ``scripts/build_cloud_adf_corpus.py`` NAMES the retired vocabulary because its
 # scrub MAPS it to the canonical spellings when freezing captured ticket prose into
 # a fixture — the same reason ``scripts/gen_cli_reference.py`` is a compatibility

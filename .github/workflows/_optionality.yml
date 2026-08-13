@@ -176,14 +176,14 @@ jobs:
           # that no single-extra install reaches.
           specs=(
             "agents:agents"
-            "eval:eval"
             "tracing:tracing"
             "grounding:grounding"
             "metrics:metrics"
             "s3:s3"
             "adf:adf"
+            "wiki:wiki"
             "mcp:mcp"
-            "union:agents,eval,tracing"
+            "union:agents,tracing,wiki"
           )
           for spec in "${specs[@]}"; do
             label="${spec%%:*}"
