@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from rebar.llm.evals import eval as ev
+
 REPO = Path(__file__).resolve().parents[2]
 RUBRIC = REPO / "src/rebar/llm/reviewers/plan_review_T15.md"
 ROUTING = REPO / "src/rebar/llm/plan_review/criteria_routing.json"
@@ -65,3 +67,95 @@ def test_routing_entry_has_the_required_values() -> None:
     assert entry["facet"] == "overlay-derisk"
     assert entry["overlay_routing"] == "llm", "content-routed by the orchestrator, like T13/T14"
     assert entry["applies_at"]["suppress_types"] == ["bug"]
+
+
+def _t15_spec() -> dict:
+    return ev.load_eval_spec("plan-review-T15")
+
+
+def _t15_cases() -> dict[str, dict]:
+    return {case["id"]: case for case in _t15_spec()["dataset"]}
+
+
+T15_EXPECTED_CASES = {
+    "T15-P-deployed-service-fast-proof": ("pass", "applicable"),
+    "T15-F-full-slow-loop-only": ("finding", "applicable"),
+    "T15-F-cleanup-drops-preexisting-table": ("finding", "applicable"),
+    "T15-F-cleanup-wipes-shared-bucket": ("finding", "applicable"),
+    "T15-P-not-applicable-app-only": ("pass", "not-applicable"),
+    "T15-P-not-applicable-library-only": ("pass", "not-applicable"),
+    "T15-P-not-applicable-cli-only": ("pass", "not-applicable"),
+    "T15-P-not-applicable-docs-only": ("pass", "not-applicable"),
+    "T15-P-not-applicable-health-route": ("pass", "not-applicable"),
+    "T15-P-not-applicable-incidental-deploy-wording": ("pass", "not-applicable"),
+    "T15-P-not-applicable-fast-cheap-loop": ("pass", "not-applicable"),
+    "T15-P-not-applicable-unit-test-settled": ("pass", "not-applicable"),
+}
+
+
+def test_t15_eval_case_matrix_is_complete_and_labeled() -> None:
+    cases = _t15_cases()
+    assert set(T15_EXPECTED_CASES) <= set(cases)
+    for case_id, (expect, mode) in T15_EXPECTED_CASES.items():
+        assert cases[case_id]["expect"] == expect
+        assert cases[case_id]["mode"] == mode
+
+
+def test_t15_deployed_service_fast_proof_fixture_carries_the_full_contract() -> None:
+    case = _t15_cases()["T15-P-deployed-service-fast-proof"]
+    text = case["input"].lower()
+    for risk in ("boot", "authentication", "authorization", "connectivity", "readiness"):
+        assert risk in text
+    for proof_contract in (
+        "out-of-loop",
+        "before codifying",
+        "minutes",
+        "only resources created by this experiment",
+    ):
+        assert proof_contract in text
+
+
+def test_t15_applicable_findings_pin_slow_loop_and_destructive_cleanup() -> None:
+    cases = _t15_cases()
+    slow_loop = cases["T15-F-full-slow-loop-only"]["input"].lower()
+    assert "repeat the full pipeline until it works" in slow_loop
+    assert "do not run the image locally or perform a direct probe" in slow_loop
+
+    table = cases["T15-F-cleanup-drops-preexisting-table"]["input"].lower()
+    assert "pre-existing" in table and "drop" in table
+
+    bucket = cases["T15-F-cleanup-wipes-shared-bucket"]["input"].lower()
+    assert "wiping the entire shared bucket" in bucket
+
+
+def test_t15_not_applicable_cases_pin_s1_s2_s3_false_positive_boundaries() -> None:
+    cases = _t15_cases()
+    for case_id in (
+        "T15-P-not-applicable-app-only",
+        "T15-P-not-applicable-library-only",
+        "T15-P-not-applicable-cli-only",
+        "T15-P-not-applicable-docs-only",
+        "T15-P-not-applicable-health-route",
+        "T15-P-not-applicable-incidental-deploy-wording",
+        "T15-P-not-applicable-fast-cheap-loop",
+        "T15-P-not-applicable-unit-test-settled",
+    ):
+        assert cases[case_id]["expect"] == "pass"
+        assert cases[case_id]["mode"] == "not-applicable"
+
+
+def test_t15_eval_uses_the_standard_deterministic_scorers() -> None:
+    scorer_names = {
+        scorer["name"] for scorer in _t15_spec()["scorers"] if scorer.get("type") == "deterministic"
+    }
+    assert scorer_names == {"no_fire_on_good_cases", "recall_on_seeded_defects"}
+
+
+def test_t15_application_scope_negatives_are_recorded_as_regression_guards() -> None:
+    ledger = (
+        REPO / "docs/experiments/plan-review-gate/eval/observed-false-positives.md"
+    ).read_text()
+    normalized = ledger.lower().replace("-", " ")
+    assert "t15 application scope regression guards" in normalized
+    for guard in ("app only", "library only", "cli only", "docs only", "health route"):
+        assert guard in normalized

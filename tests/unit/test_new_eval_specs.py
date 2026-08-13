@@ -15,6 +15,7 @@ NEW_SPECS = (
     "ticket-quality",
     "spec-alignment",
     "plan-review-T10",
+    "plan-review-T15",
 )
 
 

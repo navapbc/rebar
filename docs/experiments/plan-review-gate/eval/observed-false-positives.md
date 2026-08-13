@@ -84,3 +84,24 @@ designated probe/reference.
 **Calibration guardrail:** add FP6/FP7 as good-cases to the per-criterion false-fire set and re-measure recall
 on the sycophancy axis after the change — neither lever may trade these FPs for a real-defect miss (e.g. the
 T3/T1 feature-maturity flag must still fire).
+
+## T15 application-scope regression guards
+
+T15 applies only when a plan uses a slow or costly codified delivery/apply loop to settle
+runtime-only correctness. Ordinary application wording must not make the overlay fire. The standing
+`plan-review-T15` eval records these labeled good cases:
+
+| eval case | scope guard | why T15 must pass |
+|-----------|-------------|-------------------|
+| `T15-P-not-applicable-app-only` | application parser | directly exercised application code; no delivery/apply loop |
+| `T15-P-not-applicable-library-only` | library API | pure behavior is settled by direct unit tests |
+| `T15-P-not-applicable-cli-only` | local CLI | directly executable against a temporary repository |
+| `T15-P-not-applicable-docs-only` | documentation | no executable runtime mechanism exists |
+| `T15-P-not-applicable-health-route` | health-route wording | an in-process route does not imply deployed-service validation |
+| `T15-P-not-applicable-incidental-deploy-wording` | incidental “deploy” wording | a later ordinary release is not the proof mechanism |
+| `T15-P-not-applicable-fast-cheap-loop` | S2 exclusion | the complete runtime loop returns a cheap verdict in seconds |
+| `T15-P-not-applicable-unit-test-settled` | S3 exclusion | direct unit tests fully settle correctness |
+
+These guards are paired with applicable pass/finding cases so suppressing app-scope false fires does
+not erase T15 recall. In particular, the corpus retains failures for relying only on a full slow
+delivery loop and for “cleanup” that drops a pre-existing table or wipes a shared bucket.

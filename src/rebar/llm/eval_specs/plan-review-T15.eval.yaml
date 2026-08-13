@@ -1,0 +1,307 @@
+# Standing semantic eval for the T15 out-of-loop proof overlay. The corpus separates plans that
+# genuinely require a slow runtime delivery loop from ordinary application, library, CLI, and docs
+# work, and pins destructive-cleanup findings. Run the offline discipline check with
+# `rebar prompt eval plan-review-T15`; live execution requires the [agents] extra and configured
+# model credentials.
+prompt: plan-review-T15
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  - type: deterministic
+    name: no_fire_on_good_cases
+    description: Each pass case emits no T15 finding.
+  - type: deterministic
+    name: recall_on_seeded_defects
+    description: Each finding case emits at least one T15 finding.
+
+dataset:
+  # Applicable plans pass when each runtime-only risk gets cheap proof before the slow loop.
+  - id: T15-P-deployed-service-fast-proof
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: pass
+    note: >-
+      A new deployed service names every runtime-only risk, proves each through a concrete
+      minutes-fast out-of-loop experiment before codifying, and scopes cleanup to experiment
+      artifacts.
+    input: >
+      ## Plan
+
+      Deliver a new worker service through the 25-minute deployment pipeline. Its runtime-only
+      risks are boot, authentication, authorization, connectivity, and readiness. Before codifying
+      the deployment, run an out-of-loop proof: start the production image locally with the real
+      entrypoint to prove boot in under two minutes; then use a one-off CLI probe against the real
+      staging identity provider, policy endpoint, database, and readiness endpoint to prove
+      authentication, authorization, connectivity, and readiness in under five minutes. Record the
+      command, expected verdict, and observed result for each mechanism. The probe creates a unique
+      scratch identity and uniquely tagged record, and teardown deletes only resources created by
+      this experiment. Only after those proofs pass, encode the already-proven settings in the slow
+      pipeline and use deployment as final integration confirmation.
+
+  - id: T15-P-real-target-manual-proof
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: pass
+    note: >-
+      Local reproduction is impossible, so a concrete manual real-target probe validly proves the
+      named connection and permission risks before the costly environment apply.
+    input: >
+      ## Plan
+
+      Provision a new managed queue consumer through an environment apply that takes 35 minutes.
+      The runtime-only risks are whether workload identity authenticates, the queue policy
+      authorizes ReceiveMessage, and the private endpoint connects. Local reproduction cannot
+      exercise the provider identity plane. Before committing the mechanism to the apply, perform
+      an out-of-loop manual experiment against the real sandbox target: create a uniquely named
+      five-minute scratch consumer with the provider CLI, request one experiment-created message,
+      and require authenticated receipt as the verdict. Delete only the scratch consumer and the
+      message this experiment created. Preserve the shared queue and every pre-existing message.
+
+  - id: T15-P-experiment-owned-cleanup
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: pass
+    note: >-
+      The cheap pre-codification probe has an exact run identifier and removes only its own row and
+      scratch resource, never shared or pre-existing state.
+    input: >
+      ## Plan
+
+      A 20-minute release job will install a new database-backed readiness worker whose runtime-only
+      risks are service boot, database connectivity, and readiness. Before codifying the release
+      job, run the image locally and execute a direct sandbox probe with a unique run ID; it must
+      boot, insert and read its own tagged row, and answer ready within three minutes. In a finally
+      block delete exactly that tagged row and the uniquely named scratch worker created by the
+      experiment. Do not alter the pre-existing schema, shared table, or any other rows. Then encode
+      the proven configuration in the release job.
+
+  # Applicable plans are findings when the slow loop is the first proof or cleanup is destructive.
+  - id: T15-F-full-slow-loop-only
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: finding
+    note: >-
+      A new service has runtime-only boot and connectivity risk, but repeated full deployments are
+      its only proposed feedback path.
+    input: >
+      ## Plan
+
+      Add a new service to the 40-minute delivery pipeline. Whether the container boots with its
+      generated configuration and connects to the managed database can only be learned at runtime.
+      Push the configuration, wait for the full deployment, and inspect the environment. If it
+      fails, adjust the configuration and repeat the full pipeline until it works. Do not run the
+      image locally or perform a direct probe before codifying the deployment.
+
+  - id: T15-F-cleanup-drops-preexisting-table
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: finding
+    note: >-
+      The pre-codification probe is otherwise concrete, but cleanup destroys a table that existed
+      before the experiment.
+    input: >
+      ## Plan
+
+      Before adding a database migration to the 30-minute environment apply, use a five-minute
+      out-of-loop probe against staging to prove runtime connectivity and migration authorization.
+      Insert one tagged scratch row into the existing shared audit table. After the probe, clean up
+      by dropping that pre-existing table so the next run starts fresh, then codify the migration in
+      the slow apply.
+
+  - id: T15-F-cleanup-wipes-shared-bucket
+    corpus: rebar
+    criterion: T15
+    mode: applicable
+    expect: finding
+    note: >-
+      The experiment proves object-store authorization cheaply, but its cleanup wipes a shared
+      bucket rather than deleting only the object it created.
+    input: >
+      ## Plan
+
+      A new upload worker will ship through a 25-minute pipeline, and object-store connectivity and
+      authorization resolve only at runtime. Before codifying it, run a three-minute direct probe
+      that writes a uniquely named object to the existing shared staging bucket and reads it back.
+      Clean up by wiping the entire shared bucket, including pre-existing objects, then commit the
+      proven worker configuration to the pipeline.
+
+  # Scope guards: application, library, CLI, and docs work without the S1 loop are not applicable.
+  - id: T15-P-not-applicable-app-only
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      An application-only parser change runs directly and has no automated delivery or environment
+      apply loop.
+    input: >
+      ## Plan
+
+      Add an in-process application parser for the new configuration key. Exercise it directly with
+      focused unit and integration tests, including malformed and missing values. This ticket does
+      not change a pipeline, deployment, environment apply, or runtime infrastructure mechanism.
+
+  - id: T15-P-not-applicable-library-only
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      Pure library behavior is callable directly and is fully resolved by unit tests.
+    input: >
+      ## Plan
+
+      Extend the Python library's value-object constructor and public serialization helper. Cover
+      round trips, invalid inputs, and backwards compatibility in unit tests that invoke the library
+      directly. No delivery pipeline or environment apply participates in the behavior.
+
+  - id: T15-P-not-applicable-cli-only
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      A local CLI presentation change is directly executable and has no slow codified loop.
+    input: >
+      ## Plan
+
+      Add `--output json` to the local inspection command. Test exit codes and exact stdout by
+      invoking the CLI against a temporary repository. This is a CLI-only change with no deployment,
+      infrastructure apply, authentication plane, or remote runtime dependency.
+
+  - id: T15-P-not-applicable-docs-only
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      Documentation prose introduces no executable mechanism and cannot satisfy S1 or S3.
+    input: >
+      ## Plan
+
+      Correct the contributor guide's examples and add a glossary link. Verify Markdown formatting
+      and internal anchors. No executable code, pipeline, deployed service, or infrastructure changes.
+
+  - id: T15-P-not-applicable-health-route
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      Merely adding a health route to application code does not imply a slow delivery loop.
+    input: >
+      ## Plan
+
+      Add an in-process `/health` route that returns the already-computed application status. Call
+      the ASGI app directly in focused tests to prove the response body and status transitions. The
+      change is application code only; it does not alter or rely on a deployment pipeline or an
+      environment apply.
+
+  - id: T15-P-not-applicable-incidental-deploy-wording
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      Incidental prose saying a normal code change will deploy does not establish a slow/costly
+      codified validation loop.
+    input: >
+      ## Plan
+
+      Rename an internal application metric and update its unit tests. The ordinary release will
+      deploy this code later, but deployment is not the proof mechanism and this ticket changes no
+      release, infrastructure, or environment behavior. Direct tests fully settle correctness.
+
+  # Applicability guards: S2 and S3 must independently hold before T15 may fire.
+  - id: T15-P-not-applicable-fast-cheap-loop
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      The codified loop is the fastest available feedback and completes in seconds, so S2 is false.
+    input: >
+      ## Plan
+
+      Update a tiny generated configuration in a hermetic local pipeline. The complete pipeline
+      starts an isolated process and returns a runtime verdict in eight seconds at negligible cost;
+      it is the fastest available feedback path and can be repeated immediately. No slow or costly
+      pass exists, so a separate manual experiment would only duplicate the same proof.
+
+  - id: T15-P-not-applicable-unit-test-settled
+    corpus: rebar
+    criterion: T15
+    mode: not-applicable
+    expect: pass
+    note: >-
+      Although the repository has a slow delivery pipeline, the changed pure behavior is completely
+      settled by direct unit tests, so S3 is false.
+    input: >
+      ## Plan
+
+      Change the pure function that maps readiness enum values to display labels. Exhaustive unit
+      tests invoke the function directly and settle every input and output without a realistic
+      environment. The repository's delivery pipeline takes 30 minutes, but it adds no information
+      about this behavior and is not needed to establish correctness.
+
+gold_set:
+  - input: >-
+      A new deployed service names boot, authentication, authorization, connectivity, and readiness;
+      minutes-fast local and real-target proofs run out-of-loop before codifying, and cleanup removes
+      only experiment-created resources.
+    label: pass
+  - input: >-
+      A managed queue consumer's identity, permission, and connectivity are manually proven against
+      the real sandbox target before the slow apply; cleanup preserves all shared state.
+    label: pass
+  - input: >-
+      A run-ID-scoped probe proves boot, database connectivity, and readiness before release, then
+      removes only its tagged row and scratch worker.
+    label: pass
+  - input: >-
+      Runtime boot and connectivity are tested only by repeatedly running the 40-minute delivery
+      pipeline, with no direct proof before codification.
+    label: finding
+  - input: >-
+      A cheap staging probe inserts a scratch row, then drops the pre-existing shared table during
+      cleanup.
+    label: finding
+  - input: >-
+      A direct object-store probe creates one object, then cleanup wipes the shared bucket and all
+      pre-existing objects.
+    label: finding
+  - input: >-
+      Application parser behavior is exercised directly and changes no pipeline, deployment, or
+      infrastructure mechanism.
+    label: pass
+  - input: >-
+      Pure library behavior is settled by direct unit tests without a delivery or apply loop.
+    label: pass
+  - input: >-
+      A CLI-only presentation change runs against a temporary repository with no remote runtime.
+    label: pass
+  - input: >-
+      A docs-only link and glossary correction changes no executable mechanism.
+    label: pass
+  - input: >-
+      An application health route is directly tested and does not alter or rely on deployment.
+    label: pass
+  - input: >-
+      Incidental deploy wording accompanies a unit-tested metric rename; deployment is not the
+      proof mechanism.
+    label: pass
+  - input: >-
+      A hermetic runtime pipeline returns its verdict in eight seconds at negligible cost, making
+      S2 false.
+    label: pass
+  - input: >-
+      A slow pipeline exists, but exhaustive direct unit tests fully settle the changed pure
+      mapping, making S3 false.
+    label: pass
