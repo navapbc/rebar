@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -366,3 +369,156 @@ def test_drain_preserves_committed_queue_history(repo: str) -> None:
         "CLAIM_ENRICH.json",
         "DONE_ENRICH.json",
     }
+
+
+# --- drain-lock ownership + staleness (bug knavish-stimulated-bluebottle) -------------
+#
+# The drain lock used to be a bare O_EXCL file with no owner stamp and no staleness path:
+# a drainer that died between acquire and release leaked it PERMANENTLY and every later
+# drain skipped silently. These tests pin the stamp, the reclaim, and the refusals — all
+# adjudicated by the SHARED lock_owner decision table, never a second heuristic.
+
+
+def _drain_lock(repo: str) -> Path:
+    return Path(D._drain_lock_path(_tracker(repo)))
+
+
+def _plant_lock(repo: str, stamp: str, *, age_s: float = 0.0) -> Path:
+    """Write a drain lock file carrying *stamp*, optionally back-dated by *age_s*."""
+    path = _drain_lock(repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(stamp, encoding="utf-8")
+    if age_s:
+        when = time.time() - age_s
+        os.utime(path, (when, when))
+    return path
+
+
+def _dead_pid() -> int:
+    """A pid that is provably not running: a child we started, waited for, and reaped."""
+    proc = subprocess.Popen([sys.executable, "-c", ""])
+    proc.wait()
+    return proc.pid
+
+
+def _stamp_with(**overrides: str) -> str:
+    """Our own v2 stamp with individual fields substituted."""
+    from rebar._store import lock_owner as owner
+
+    fields = dict(token.split("=", 1) for token in owner._owner_stamp().split()[2:] if "=" in token)
+    fields.update(overrides)
+    return "rebar-lock v2 " + " ".join(f"{k}={v}" for k, v in fields.items())
+
+
+def test_acquired_lock_carries_v2_stamp(repo: str) -> None:
+    from rebar._store import lock_owner as owner
+
+    fd = D._acquire_advisory_lock(_tracker(repo))
+    assert fd is not None
+    try:
+        fields = owner._parse_v2_stamp(_drain_lock(repo).read_text(encoding="utf-8").strip())
+        assert fields, "the acquired lock must carry a parseable v2 stamp"
+        assert fields["host"] == owner._host_identity()
+        assert fields["pid"] == str(os.getpid())
+    finally:
+        D._release_advisory_lock(_tracker(repo), fd)
+    assert not _drain_lock(repo).exists()  # release still removes the file
+
+
+def test_dead_holder_is_reclaimed(repo: str, caplog: pytest.LogCaptureFixture) -> None:
+    """THE bug: a drainer that died without releasing must not wedge enrichment."""
+    tid = rebar.create_ticket("task", "Wedged", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    _plant_lock(repo, _stamp_with(pid=str(_dead_pid())))
+
+    with caplog.at_level("WARNING", logger="rebar.llm.enrich_drain"):
+        result = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+
+    assert "skipped" not in result
+    assert result["processed"] == 1
+    assert any("reclaiming stale drain lock" in r.message for r in caplog.records)
+    assert any("held " in r.getMessage() for r in caplog.records)  # the reclaim names the age
+
+
+def test_unstamped_orphan_is_reclaimed_past_the_ceiling(
+    repo: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The already-leaked shape: a 0-byte lock from a pre-stamp rebar."""
+    from rebar._store import lock_owner as owner
+
+    _plant_lock(repo, "", age_s=owner._MKDIR_LOCK_STALE_CEILING_S + 60)
+    with caplog.at_level("WARNING", logger="rebar.llm.enrich_drain"):
+        fd = D._acquire_advisory_lock(_tracker(repo))
+    assert fd is not None, "an aged-out unstamped orphan must be reclaimable"
+    D._release_advisory_lock(_tracker(repo), fd)
+    # With no holder to name, the age is the only signal an operator has — say it anyway.
+    assert any("unstamped drain lock" in r.getMessage() for r in caplog.records)
+    assert any(", held " in r.getMessage() for r in caplog.records)
+
+
+def test_fresh_unstamped_lock_is_respected(repo: str) -> None:
+    """The create/stamp window: a drainer between os.open and the stamp write."""
+    _plant_lock(repo, "")
+    assert D._acquire_advisory_lock(_tracker(repo)) is None
+
+
+def test_live_holder_is_honoured(repo: str, caplog: pytest.LogCaptureFixture) -> None:
+    path = _plant_lock(repo, _stamp_with())  # our own live pid
+    before = path.read_bytes()
+
+    with caplog.at_level("WARNING", logger="rebar.llm.enrich_drain"):
+        result = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+
+    assert result == {"skipped": "lock-held", "processed": 0}
+    assert path.read_bytes() == before  # never broken, never rewritten
+    assert any("advisory lock held by" in r.message for r in caplog.records)
+    assert any(f"pid={os.getpid()}" in r.getMessage() for r in caplog.records)
+
+
+def test_foreign_host_lock_is_respected_then_aged_out(repo: str) -> None:
+    from rebar._store import lock_owner as owner
+
+    _plant_lock(repo, _stamp_with(host="boot-somewhere-else"))
+    assert D._acquire_advisory_lock(_tracker(repo)) is None  # no proof, no reclaim
+
+    _plant_lock(
+        repo,
+        _stamp_with(host="boot-somewhere-else"),
+        age_s=owner._MKDIR_LOCK_STALE_CEILING_S + 60,
+    )
+    fd = D._acquire_advisory_lock(_tracker(repo))
+    assert fd is not None  # the inherited ceiling still bounds the wedge
+    D._release_advisory_lock(_tracker(repo), fd)
+
+
+def test_reclaim_retries_exactly_once(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bounded: a lock that keeps reappearing must not spin."""
+    from rebar._store import lock_owner as owner
+
+    _plant_lock(repo, "", age_s=owner._MKDIR_LOCK_STALE_CEILING_S + 60)
+    real_open = os.open
+    attempts = []
+
+    def _always_taken(path, *args, **kwargs):
+        if str(path).endswith(D._DRAIN_LOCK_NAME):
+            attempts.append(path)
+            raise FileExistsError(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", _always_taken)
+    assert D._acquire_advisory_lock(_tracker(repo)) is None
+    assert len(attempts) == 2  # the original + exactly one post-reclaim retry
+
+
+def test_acquire_swallows_other_os_errors(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A drain concern must never fail its caller: an open failure that is not a
+    collision (a read-only .rebar, a full disk) still degrades to "no lock"."""
+    real_open = os.open
+
+    def _boom(path, *args, **kwargs):
+        if str(path).endswith(D._DRAIN_LOCK_NAME):
+            raise PermissionError(path)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", _boom)
+    assert D._acquire_advisory_lock(_tracker(repo)) is None

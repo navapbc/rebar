@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -252,23 +253,73 @@ def test_a_missing_rebar_dir_reports_absent_rather_than_raising(tmp_path: Path) 
     assert _by_name(reports, doctor_locks.LEG_ENRICH_DRAIN)["state"] == "free"
 
 
+def _plant_drain_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
+    rebar_dir = tracker.parent / ".rebar"
+    rebar_dir.mkdir(exist_ok=True)
+    path = rebar_dir / "enrich-drain.lock"
+    path.write_text(stamp, encoding="utf-8")
+    if age_s:
+        when = time.time() - age_s
+        os.utime(path, (when, when))
+    return path
+
+
+def _drain_stamp(**overrides: str) -> str:
+    fields = dict(
+        token.split("=", 1) for token in _owner._owner_stamp().split()[2:] if "=" in token
+    )
+    fields.update(overrides)
+    return "rebar-lock v2 " + " ".join(f"{k}={v}" for k, v in fields.items())
+
+
 @pytest.mark.unit
 @pytest.mark.scripts
-def test_the_drain_lock_declines_to_adjudicate_staleness(tmp_path: Path) -> None:
-    """The drain lock is an ``O_EXCL`` file with no ownership stamp. It reports held and
-    aged, and explicitly does NOT claim a staleness verdict — inventing a threshold for
-    it would be the forked heuristic this module refuses to write."""
+def test_the_drain_lock_names_a_live_holder_and_is_not_a_finding(tmp_path: Path) -> None:
+    """The drain lock now carries the v2 stamp (bug knavish-stimulated-bluebottle), so its
+    row names a holder and carries a REAL staleness verdict instead of ``not-assessable``.
+    A live holder is information, never a finding."""
     tracker = _tracker(tmp_path)
-    rebar_dir = tracker.parent / ".rebar"
-    rebar_dir.mkdir()
-    (rebar_dir / "enrich-drain.lock").write_text("", encoding="utf-8")
+    _plant_drain_lock(tracker, _drain_stamp())  # this live process
 
     drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
 
     assert drain["state"] == "held"
     assert drain["held_seconds"] is not None
-    assert drain["staleness"] == doctor_locks.STALENESS_NOT_ASSESSABLE
-    assert doctor_locks.lock_findings([drain]) == [], "an unstamped lock is not a finding"
+    assert drain["holder"]["pid"] == str(os.getpid())
+    assert drain["pid_state"] == "live"
+    assert drain["staleness"] == doctor_locks.STALENESS_NOT_STALE
+    assert doctor_locks.lock_findings([drain]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_a_dead_holder_drain_lock_is_a_stale_finding(tmp_path: Path) -> None:
+    """The wedge the bug describes: a drainer that died without releasing."""
+    tracker = _tracker(tmp_path)
+    _plant_drain_lock(tracker, _drain_stamp(pid=str(_dead_pid())))
+
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+
+    assert drain["staleness"] == doctor_locks.STALENESS_STALE
+    findings = doctor_locks.lock_findings([drain])
+    assert [f["kind"] for f in findings] == [doctor_locks.KIND_STALE_LOCK]
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_an_unstamped_drain_lock_is_adjudicated_by_the_shared_ceiling(tmp_path: Path) -> None:
+    """A lock written by a rebar predating the stamp: unattributable, so the shared
+    wall-clock ceiling decides — young is honoured, aged-out is stale."""
+    tracker = _tracker(tmp_path)
+
+    _plant_drain_lock(tracker, "")
+    fresh = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    assert fresh["holder_description"] == "unknown (no ownership stamp)"
+    assert fresh["staleness"] == doctor_locks.STALENESS_NOT_STALE
+
+    _plant_drain_lock(tracker, "", age_s=_owner._MKDIR_LOCK_STALE_CEILING_S + 60)
+    aged = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+    assert aged["staleness"] == doctor_locks.STALENESS_STALE
 
 
 # ---------------------------------------------------------------------------

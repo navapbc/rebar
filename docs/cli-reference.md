@@ -166,8 +166,8 @@ Usage: rebar doctor [--repair] [--dry-run] [--output json]
                       endpoints differ from what the resolver returns)
     lock health       held/free for each of the store's lock legs (the tickets
                       write lock's fcntl and mkdir legs, .rebar/hlc.lock and
-                      .rebar/enrich-drain.lock), plus — for the mkdir leg, the
-                      one carrying an ownership stamp — the holder's
+                      .rebar/enrich-drain.lock), plus — for the stamped legs,
+                      the mkdir leg and the drain lock — the holder's
                       host/ns/pid/start, whether that pid is alive (same host
                       only; "unprobeable" across hosts or pid namespaces), and
                       how long it has been held. A held lock with a live holder
