@@ -65,6 +65,10 @@ STORE_RELATIVE = os.path.join(".bridge_state", "peer_confirmations.json")
 DIRECTION_OUTBOUND = "outbound"
 #: We observed the link in an authoritative fetched snapshot.
 DIRECTION_SNAPSHOT = "snapshot"
+#: Grandfathered at upgrade — assumed, never observed. Kept in the SAME closed
+#: vocabulary as the two evidence-backed directions so an operator reading the file
+#: can always tell an assumption from a proof.
+DIRECTION_BACKFILL = "backfill"
 
 #: Provenance of a record, most-to-least direct.
 SOURCE_PUSH = "push"
@@ -91,6 +95,10 @@ class PeerConfirmationStore:
         self.path = os.path.join(self.tracker_dir, STORE_RELATIVE)
         self._records: dict[str, dict[str, Any]] = {}
         self._dirty = False
+        # Did the store FILE not exist when we opened it? The one-shot upgrade
+        # backfill keys off this rather than off emptiness: an operator who
+        # deliberately emptied the store must not have it silently repopulated.
+        self.was_absent = False
         self._load()
 
     def _load(self) -> None:
@@ -98,6 +106,7 @@ class PeerConfirmationStore:
             with open(self.path, encoding="utf-8") as handle:
                 data = json.load(handle)
         except FileNotFoundError:
+            self.was_absent = True
             return
         except (OSError, ValueError) as exc:
             # Corrupt / unreadable / conflict-markered: degrade to empty. The
@@ -240,6 +249,66 @@ def confirm_from_snapshot(
                 direction=DIRECTION_SNAPSHOT,
                 pass_id=pass_id,
                 source_kind=SOURCE_SNAPSHOT,
+            )
+            written += 1
+    return written
+
+
+def backfill_from_managed_refs(
+    store: PeerConfirmationStore,
+    local_tickets: Any,
+    binding_store: Any,
+    pass_id: str | None = None,
+) -> int:
+    """Grandfather pre-upgrade managed links as confirmed. Returns the count written.
+
+    WHY THIS IS REQUIRED, not a nicety. The removal path declines any link with no
+    confirmation record. On the FIRST run after this feature ships the store is
+    empty, so without a backfill every legitimate peer deletion would be declined —
+    a worse regression than the blind spot the epic set out to close. Grandfathering
+    trades a one-time assumption for that.
+
+    THE ASSUMPTION IS MARKED, not hidden. Records carry ``source="backfill"`` and
+    ``direction="backfill"`` so an operator can always separate assumed evidence from
+    proven evidence. It is deliberately NOT distinguished at the decision point —
+    treating backfill as weaker there would re-open the blind spot for every
+    pre-upgrade link, which is precisely what grandfathering exists to prevent.
+
+    ONE-SHOT ON FILE ABSENCE, not on emptiness (``store.was_absent``): an operator who
+    deliberately emptied the store must not have it silently repopulated next pass.
+
+    NEVER DOWNGRADES. ``record()`` overwrites its key unconditionally, so this must
+    read before writing and skip any key that already holds a record. An existing
+    ``push`` or ``snapshot`` entry is strictly stronger evidence than a grandfather
+    assumption, and clobbering it would lose the vendor link id and the confirming
+    pass. The reverse direction needs no code: a later real confirmation overwrites a
+    backfilled entry by that same unconditional behaviour, so provenance upgrades.
+    """
+    from rebar.reducer._managed_refs import managed_ref_set
+
+    if not store.was_absent:
+        return 0
+
+    written = 0
+    for ticket in local_tickets or []:
+        if not isinstance(ticket, dict):
+            continue
+        local_id = ticket.get("ticket_id") or ticket.get("id")
+        if not local_id:
+            continue
+        for kind, target in sorted(managed_ref_set(ticket)):
+            if not binding_store.get_jira_key(target):
+                continue  # unbound target: no peer link could exist to grandfather
+            if store.get(str(local_id), str(target), str(kind)) is not None:
+                continue  # already proven — never downgrade to an assumption
+            store.record(
+                str(local_id),
+                str(target),
+                str(kind),
+                link_id=None,
+                direction=DIRECTION_BACKFILL,
+                pass_id=pass_id,
+                source_kind=SOURCE_BACKFILL,
             )
             written += 1
     return written
