@@ -195,13 +195,32 @@ def test_an_unreadable_project_fails_loudly_rather_than_passing_vacuously(
 def test_a_missing_epic_field_aborts_provisioning(harness, monkeypatch) -> None:
     """``Epic Name`` is required by DC to CREATE an epic and ``Epic Link`` is the
     field the outbound parent write targets. Both are instance-global, so they are
-    verified once here rather than as a mid-run SETUP failure in one cell."""
-    _stub_request(harness, monkeypatch, fields=_field_body("Summary", "Epic Name"))
+    verified once here rather than as a mid-run SETUP failure in one cell.
+
+    The stubbed field is PERMANENTLY absent, so the readiness poll can only expire —
+    and it used to expire against the real 120s production budget, costing this unit
+    test two minutes of wall clock to learn something the stub decided up front
+    (ticket e394-9433-c839-4c9f). ``_assert_project_capabilities`` passes
+    ``budget=_field_ready_timeout()`` explicitly, and that reads
+    ``JIRA_DC_FIELD_READY_TIMEOUT`` before falling back to the module constant, so
+    the environment variable is the seam that works from here — rebinding
+    ``FIELD_READY_BUDGET_S`` would be silently defeated whenever the variable is
+    already set in the ambient environment.
+    """
+    monkeypatch.setenv("JIRA_DC_FIELD_READY_TIMEOUT", "0")
+    calls = _stub_request(harness, monkeypatch, fields=_field_body("Summary", "Epic Name"))
 
     with pytest.raises(AssertionError) as excinfo:
         harness._assert_project_capabilities("RBTEST")
 
     assert "Epic Link" in str(excinfo.value), "the abort does not name the missing field"
+    # A zero budget makes the loop DETERMINISTIC, not merely fast: one attempt is
+    # always made, `monotonic() >= deadline` is then true, and it breaks BEFORE
+    # `sleep`. So exactly one field read proves the expiry path ran without sleeping
+    # — reaching a real sleep requires another lap, which would read again. This is a
+    # poll-count assertion, deliberately not a wall-clock budget.
+    field_reads = [call for call in calls if call[1] == "/rest/api/2/field"]
+    assert len(field_reads) == 1, f"expected exactly one field poll, got {len(field_reads)}"
 
 
 def test_the_declared_contract_actually_requires_epic(harness) -> None:
