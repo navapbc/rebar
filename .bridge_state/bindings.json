@@ -15230,6 +15230,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:58:35Z"
     },
+    "20cb-cbae-e9df-45e3": {
+      "created_at": "2026-08-13T05:30:14Z",
+      "jira_id": "4588557",
+      "jira_key": "REB-2827",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:30:17Z"
+    },
     "20cc-c59a-ab26-4bc9": {
       "baseline": {
         "assignee": null,
@@ -47620,6 +47627,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-23T00:39:31Z"
+    },
+    "5ea3-76e5-480a-4464": {
+      "created_at": "2026-08-13T05:30:21Z",
+      "jira_id": "4588558",
+      "jira_key": "REB-2828",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:30:24Z"
     },
     "5ea8-5012-3c6c-4f2f": {
       "baseline": {
@@ -114029,6 +114043,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-25T20:17:15Z"
     },
+    "e394-9433-c839-4c9f": {
+      "created_at": "2026-08-13T05:30:26Z",
+      "jira_id": "4588559",
+      "jira_key": "REB-2829",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:30:29Z"
+    },
     "e39f-5055-f5af-424a": {
       "baseline": {
         "assignee": {
@@ -129900,6 +129921,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-22T01:58:18Z"
     },
+    "fa90-3292-38d4-4fd2": {
+      "created_at": "2026-08-13T05:30:32Z",
+      "jira_id": "4588560",
+      "jira_key": "REB-2830",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:30:34Z"
+    },
     "fa98-3b33-d040-4767": {
       "baseline": {
         "assignee": null,
@@ -134470,7 +134498,11 @@
     "REB-2824": "aadc-9af6-0e67-4e2a",
     "REB-2825": "e918-29e4-2e0d-4a3d",
     "REB-2826": "760f-608f-4c69-449a",
+    "REB-2827": "20cb-cbae-e9df-45e3",
+    "REB-2828": "5ea3-76e5-480a-4464",
+    "REB-2829": "e394-9433-c839-4c9f",
     "REB-283": "b44a-6700-c356-490e",
+    "REB-2830": "fa90-3292-38d4-4fd2",
     "REB-284": "b4cd-7db9-92f2-4e1f",
     "REB-285": "b533-485d-d5df-448f",
     "REB-286": "b5db-7433-b731-444f",
