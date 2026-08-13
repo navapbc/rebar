@@ -153,10 +153,24 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
     instead would select a ticket whose excess events are all inside the horizon; the fold
     would write nothing, and the next sweep would select it again — churn.
 
-    Matches the fold's candidate set: ``*.json``, excluding dotfiles, already-retired sources
-    and ``-SYNC.json`` bridge metadata. An unreadable or undecodable file counts as foldable
-    with an unknown timestamp only when the horizon is off, mirroring ``is_foldable``'s
-    treatment of a ``None`` timestamp."""
+    Matches the fold's candidate set exactly — ``*.json`` excluding dotfiles, already-retired
+    sources and ``-SYNC.json`` bridge metadata — and, like
+    :func:`compact_txn._parse_candidate_events`, DROPS forward-compat unknown-type events. A
+    newer clone's event type is preserved untouched by the fold rather than squashed, so
+    counting it here would make selection promise work the fold will not do, and a ticket whose
+    excess was all unknown-type would be selected on every sweep forever.
+
+    The ticket's OWN ``-SNAPSHOT.json`` is excluded too, for a different reason: the fold does
+    absorb a prior snapshot into the new one, but a snapshot is already-folded STATE, not
+    pending work. Counting it left every settled ticket reporting one unit of outstanding work
+    forever, which is exactly the kind of permanent off-by-one that turns a threshold into a
+    churn source at low settings.
+
+    An unreadable or undecodable file counts as foldable with an unknown timestamp only when
+    the horizon is off, mirroring ``is_foldable``'s treatment of a ``None`` timestamp — and
+    mirroring the fold, which keeps such a file as a candidate rather than dropping it."""
+    from rebar.reducer import KNOWN_EVENT_TYPES
+
     count = 0
     try:
         names = os.listdir(ticket_dir)
@@ -165,11 +179,17 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
     for name in names:
         if name.startswith(".") or not name.endswith(".json") or name.endswith("-SYNC.json"):
             continue
+        if name.endswith("-SNAPSHOT.json"):
+            continue  # already-folded state, not pending work
         try:
             with open(os.path.join(ticket_dir, name), encoding="utf-8") as fh:
-                raw_ts = json.load(fh).get("timestamp")
+                event = json.load(fh)
+            etype = event.get("event_type", "")
+            raw_ts = event.get("timestamp")
         except (json.JSONDecodeError, OSError):
-            raw_ts = None
+            etype, raw_ts = "", None
+        if etype and etype not in KNOWN_EVENT_TYPES:
+            continue  # forward-compat: the fold preserves these rather than squashing them
         ts = raw_ts if isinstance(raw_ts, int) else None
         if is_foldable(ts, now, horizon):
             count += 1
@@ -400,5 +420,13 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         _commit_backfill(tracker, compacted)  # commits, then pushes
     else:
         _best_effort_push(tracker, no_commit=no_commit, dry_run=dry_run)
+
+    # Record that a sweep ran, whatever it folded. Both triggers stamp through this one call,
+    # so a store swept by CI does not also detach a worker on its next close, and a store with
+    # no CI ages its own stamp. A dry run stamps nothing — it did not sweep.
+    if not dry_run:
+        from rebar._commands import compact_trigger
+
+        compact_trigger.record_sweep(tracker)
 
     return 2 if error_ids else 0

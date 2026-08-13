@@ -345,6 +345,26 @@ def _compaction_horizon_zero_by_default(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.fixture(autouse=True)
+def _compaction_trigger_off_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No DETACHED compaction workers in the offline suite (story gaudy-gangrenous-basilisk).
+
+    In production ``compact.trigger`` defaults to ``async``: a close spawns a detached worker
+    that folds out of band, which is the compaction floor for stores with no CI and no cron.
+    In a test suite that is actively harmful, and measurably so — with it on, detached children
+    outlive the tests that spawned them and race the NEXT test's writes against the same temp
+    store, producing "git commit failed" / "git operation failed" errors scattered across
+    unrelated interface tests. The child is doing legitimate work; it is simply not this
+    process's work, and a unit suite must not have background writers.
+
+    Same shape as the network and repo-commit guards above: the ambient default is the safe
+    one, and a test that specifically exercises the trigger sets ``REBAR_COMPACT_TRIGGER``
+    itself (``always`` to fold inline and assert on it, or ``async`` with the spawn stubbed) —
+    an explicit value wins over this default."""
+    if "REBAR_COMPACT_TRIGGER" not in os.environ:
+        monkeypatch.setenv("REBAR_COMPACT_TRIGGER", "off")
+
+
+@pytest.fixture(autouse=True)
 def _no_ambient_model_classes(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scrub the nine ``REBAR_LLM_<CLASS>_<FIELD>`` model-class overrides (task 7761).
 

@@ -293,6 +293,32 @@ def _sign_completion_and_report(
     return completion_signature
 
 
+def _trigger_compaction(
+    target_status: str, tracker: str, ticket_id: str, repo_root_str: str
+) -> None:
+    """Fire the operation-linked compaction trigger on a close (story gaudy-gangrenous-basilisk).
+
+    Compaction is no longer PERFORMED on the close path — holding the store write lock across
+    the fold is what starved every concurrent writer for up to 13m53s. But it still has to
+    happen somewhere for an adopter with no CI and no cron, who has no scheduled sweep to fall
+    back on: compaction must work without either, which is why the original design was linked
+    to an operation. So the close TRIGGERS it instead of doing it. By the time this runs the
+    locked write has released the store lock AND the best-effort push has completed, the
+    decision costs two O(1) checks, and any real folding goes to a detached worker — the
+    session holds nothing and waits for nothing.
+
+    A GUARD FUNCTION, not an inline branch, on purpose: :func:`close_ticket` sits at its
+    recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
+    decision point lives here and the call site stays unconditional (the same reason
+    :func:`rebar._commands.close_precheck._ensure_duplicate_close_is_linked` is a function).
+    """
+    if target_status != "closed":
+        return
+    from rebar._commands import compact_trigger
+
+    compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str)
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -499,6 +525,8 @@ def close_ticket(
     from rebar._store import push
 
     push.push_after_commit(tracker)
+
+    _trigger_compaction(target_status, tracker, ticket_id, repo_root_str)
 
     result: dict = {
         "ticket_id": ticket_id,

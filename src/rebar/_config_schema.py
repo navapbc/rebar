@@ -339,6 +339,12 @@ class CompactConfig:
     # re-derived IN MEMORY on every replay (reducer ``process_signature``), so signature
     # verification keeps working on a compacted ticket; only persistence into new snapshots
     # is gone. See docs/migrations.md "Legacy signature-mirror retirement".
+    # The OPERATION-LINKED compaction trigger: the compaction floor for stores with no CI and
+    # no cron. async detaches a worker after a close, always folds inline (tests/CI), off
+    # disables it. trigger_interval_s bounds the last-sweep staleness arm (6 h, matching the
+    # scheduled sweep). Rationale: rebar._commands.compact_trigger; keys: docs/config.md.
+    trigger: str = "async"  # async | always | off
+    trigger_interval_s: int = 21_600
 
 
 @dataclass
@@ -635,6 +641,8 @@ _SECTIONS: dict[str, dict] = {
     "compact": {
         "threshold": lambda v, k: _as_int(v, k, minimum=1),
         "COMPACTION_HORIZON_NS": lambda v, k: _as_int(v, k, minimum=0),
+        "trigger": lambda v, k: _as_choice(v, k, {"async", "always", "off"}),
+        "trigger_interval_s": lambda v, k: _as_int(v, k, minimum=0),
     },
     "sync": {
         "push": lambda v, k: _as_choice(v, k, {"always", "async", "off"}),
