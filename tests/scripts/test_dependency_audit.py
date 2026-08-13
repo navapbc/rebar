@@ -316,12 +316,21 @@ def test_gate_reports_db_unreachable_as_infrastructure(
     mod: ModuleType, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runner = FakeRunner({("pip-audit",): (1, "", "connection timed out reaching osv.dev")})
-    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    # RECORD the backoff instead of sleeping it. `run_pip_audit` resolves its sleeper
+    # at call time, so this patch reaches it; while the default was bound at import
+    # time it did not, and the test really slept 5s + 10s (ticket 5ea3-76e5-480a-4464).
+    delays: list[float] = []
+    monkeypatch.setattr(mod.time, "sleep", delays.append)
     rc = mod.main(["gate", "--lane", "release"], runner=runner, environ={}, now_epoch=0)
     assert rc == 1
     err = capsys.readouterr().err
     assert "INFRASTRUCTURE issue" in err
     assert "recheck" in err
+    assert sum(1 for call in runner.calls if call[0] == "pip-audit") == 3
+    # The LOGICAL schedule (`attempt * 5`, no sleep after the last attempt). Doubles
+    # as the guard: an early-bound seam leaves `delays` empty and fails here rather
+    # than letting the test go quietly slow. A schedule, not a wall-clock budget.
+    assert delays == [5, 10], f"expected 5s then 10s logical delays, got {delays}"
 
 
 def test_a_real_finding_is_not_retried(mod: ModuleType) -> None:
