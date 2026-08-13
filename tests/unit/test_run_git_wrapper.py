@@ -131,10 +131,10 @@ def test_doctor_bad_object_stderr_is_classified_transient(stderr: str) -> None:
     Both the ``HEAD`` and the bare-sha forms were observed for the SAME fault, so the marker
     must match the fault rather than the argument git happened to name.
     """
-    from rebar._store.gitutil import _is_transient_head_error, is_transient_object_read_error
+    from rebar._store.gitutil import _is_transient_git_fault, is_transient_object_read_error
 
     assert is_transient_object_read_error(stderr)
-    assert _is_transient_head_error(stderr)
+    assert _is_transient_git_fault(stderr)
 
 
 @pytest.mark.parametrize(
