@@ -186,6 +186,30 @@ def _git_config(key: str, fallback: str = "", *, cwd=None) -> str:
     return value or fallback
 
 
+_author_cache: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
+    "rebar_author_cache", default=None
+)
+
+
+@contextmanager
+def author_cache() -> Iterator[None]:
+    """Freeze ``author()`` lookups for an explicit bulk-write scope.
+
+    Values are keyed by fallback so a git-config-less import preserves each command's
+    historical ``Unknown``/``unknown`` spelling. The scope is context-local, nestable,
+    and always restores the prior cache; outside it, ``author()`` remains a live lookup.
+
+    This is deliberately separate from ``_ATTRIBUTION_CACHE`` below: that long-lived,
+    repo-keyed cache owns email/current-identity invalidation, while ``user.name`` is
+    frozen only when a bulk importer explicitly opens this short-lived scope.
+    """
+    token = _author_cache.set({})
+    try:
+        yield
+    finally:
+        _author_cache.reset(token)
+
+
 def author(fallback: str = "Unknown") -> str:
     """Commit author name from git config, falling back to ``fallback`` (bash parity).
 
@@ -193,7 +217,17 @@ def author(fallback: str = "Unknown") -> str:
     use ``Unknown``; the tag helpers use lowercase ``unknown``. Callers pass the
     value their bash counterpart uses so a git-config-less environment matches.
     """
-    return _git_config("user.name", fallback)
+    cache = _author_cache.get()
+    if cache is None:
+        return _git_config("user.name", fallback)
+    if fallback not in cache:
+        # Context copies inherit values by reference. Never mutate the inherited mapping:
+        # install a copy in THIS context so a miss in a copied task/context cannot populate
+        # its parent's cache (or vice versa).
+        value = _git_config("user.name", fallback)
+        cache = {**cache, fallback: value}
+        _author_cache.set(cache)
+    return cache[fallback]
 
 
 def author_email(repo_root=None) -> str:

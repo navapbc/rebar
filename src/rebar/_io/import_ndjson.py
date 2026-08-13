@@ -44,6 +44,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable, Iterator
+from contextlib import ExitStack
 from typing import Any, cast
 
 from . import _provenance
@@ -211,7 +212,12 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
     # caller's real sync.push policy.
     _prev_push = os.environ.get("REBAR_SYNC_PUSH")
     os.environ["REBAR_SYNC_PUSH"] = "off"
+    _import_scope = ExitStack()
     try:
+        # Freeze user.name for every event-composition pass in this import. The
+        # context-local cache is fallback-keyed, so command-specific fallback spelling
+        # remains intact while the high-volume path pays for one lookup per fallback.
+        _import_scope.enter_context(_seam.author_cache())
         # ── Pass 1: create new tickets; skip already-imported by source_id ─────
         # Batched: buffer every CREATE and flush in chunks. create_ticket returns the
         # fresh local id synchronously (composed before the deferred commit), so id_map
@@ -368,11 +374,14 @@ def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dic
             except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad close never aborts the import run; collected via warn()
                 warn(f"could not close {local}: {exc}")
     finally:
-        # Restore the caller's push policy before the single final push.
-        if _prev_push is None:
-            os.environ.pop("REBAR_SYNC_PUSH", None)
-        else:
-            os.environ["REBAR_SYNC_PUSH"] = _prev_push
+        try:
+            _import_scope.close()
+        finally:
+            # Restore the caller's push policy before the single final push.
+            if _prev_push is None:
+                os.environ.pop("REBAR_SYNC_PUSH", None)
+            else:
+                os.environ["REBAR_SYNC_PUSH"] = _prev_push
 
     # One final push for the whole import (honors the restored sync.push policy).
     if created:
