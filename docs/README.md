@@ -22,8 +22,9 @@ Jump straight to what you're trying to do:
 
 - **Start using rebar** (drive tickets from the CLI) → [user-guide.md](user-guide.md),
   then [your-first-change.md](your-first-change.md).
-- **Drive rebar over MCP** (an LLM client / agent) → [llm-framework.md](llm-framework.md)
-  for the agent surfaces and gate operations.
+- **Drive rebar over MCP** (an LLM client / agent) → [mcp-reference.md](mcp-reference.md)
+  for the complete tool inventory, then [llm-framework.md](llm-framework.md) for the
+  agent surfaces and gate operations.
 - **Adopt rebar in your own project** (teach your agents to drive it) →
   [../templates/AGENTS.md](../templates/AGENTS.md), a copyable, provider-neutral
   `AGENTS.md` with placeholders for your project's own build/test/landing commands.
@@ -88,8 +89,9 @@ Day-to-day use of rebar through the CLI.
 
 Configuring, deploying, syncing, and releasing rebar.
 
-- **[config.md](config.md)** — rebar's configuration surface: the `.rebar/config.conf`
-  keys, precedence, and the design of record behind them.
+- **[config.md](config.md)** — rebar's configuration surface: the `rebar.toml` (or
+  `[tool.rebar]` in `pyproject.toml`) keys, precedence, and the design of record behind
+  them.
 - **[env-vars.md](env-vars.md)** — the generated registry of every `REBAR_*` (and other)
   environment variable read under `src/rebar`, with its reading module and alias status
   (kept in sync by a CI drift gate).
