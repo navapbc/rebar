@@ -278,12 +278,18 @@ def test_probe_retries_jql_search_three_times() -> None:
         "JIRA_API_TOKEN": "secret-token",
     }
 
+    # RECORD the backoff instead of sleeping it. `access_check.run_access_check`
+    # resolves its sleep seam at call time, so this patch reaches it whether or not
+    # the module was already imported — which is what used to decide between 0.01s
+    # and a real 25s here (ticket 5ea3-76e5-480a-4464).
+    delays: list[float] = []
+
     _run_probe_with_mocked_acli(
         env=env,
         client_instance=client_mock,
         extra_patches=[
             mock.patch("uuid.uuid4", return_value=test_uuid),
-            mock.patch("time.sleep"),  # avoid real delay
+            mock.patch("time.sleep", side_effect=delays.append),
         ],
         module_suffix="t4",
     )
@@ -295,3 +301,8 @@ def test_probe_retries_jql_search_three_times() -> None:
         f"Expected search_issues called 6 times (_JQL_RETRY_COUNT), got "
         f"{client_mock.search_issues.call_count}"
     )
+    # The LOGICAL schedule: one JQL_RETRY_SLEEP between each pair of attempts. This
+    # doubles as the guard — if the seam is ever bound early again, or the retry
+    # stops going through it, `delays` is empty and this fails instead of the test
+    # quietly going slow. It is a schedule assertion, not a wall-clock budget.
+    assert delays == [5, 5, 5, 5, 5], f"expected five 5s logical delays, got {delays}"

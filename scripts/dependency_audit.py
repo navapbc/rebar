@@ -187,11 +187,24 @@ def is_db_unreachable(text: str) -> bool:
     return any(marker in lowered for marker in _DB_UNREACHABLE_MARKERS)
 
 
+def _retry_sleep(seconds: float) -> None:
+    """The default retry sleeper: a patchable indirection over ``time.sleep``.
+
+    Deliberately a named function rather than ``sleeper=time.sleep`` in the
+    signature. A default expression is evaluated ONCE at import, capturing whatever
+    ``time.sleep`` was then, so a test patching ``time.sleep`` afterwards could not
+    reach it and really slept the 5s + 10s backoff (ticket 5ea3-76e5-480a-4464).
+    Resolving ``time.sleep`` at CALL time keeps the seam patchable while leaving
+    production behaviour byte-identical.
+    """
+    time.sleep(seconds)
+
+
 def run_pip_audit(
     runner: Runner,
     *,
     attempts: int = 3,
-    sleeper: Callable[[float], None] = time.sleep,
+    sleeper: Callable[[float], None] = _retry_sleep,
     extra_args: Sequence[str] = (),
 ) -> tuple[str, str]:
     """Run pip-audit with JSON output, retrying ONLY DB-unreachable failures.

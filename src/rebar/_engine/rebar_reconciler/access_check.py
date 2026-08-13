@@ -37,11 +37,26 @@ def _step(
     lines.append(f"PROBE_FAIL step={name}{suffix}")
 
 
+def _retry_sleep(seconds: float) -> None:
+    """The default JQL-retry sleeper: a patchable indirection over ``time.sleep``.
+
+    Deliberately a named function rather than ``sleep_fn=time.sleep`` in the
+    signature. A default expression is evaluated ONCE at import, capturing whatever
+    ``time.sleep`` was then — so whether a test's ``time.sleep`` patch reached this
+    retry depended on whether this module happened to be imported first, and the JQL
+    loop really slept 5x5s whenever it did (ticket 5ea3-76e5-480a-4464). This
+    indirection resolves ``time.sleep`` at CALL time, so the seam is reliably
+    patchable while production behaviour is byte-identical. Mirrors
+    ``acli_subprocess._backoff_sleep``, which exists for the same reason.
+    """
+    time.sleep(seconds)
+
+
 def run_access_check(
     *,
     env: dict[str, str] | None = None,
     client_cls=AcliClient,
-    sleep_fn=time.sleep,
+    sleep_fn=_retry_sleep,
 ) -> tuple[dict[str, object], list[str], int]:
     """Run the six-step probe and return its result, legacy lines, and exit code."""
     if env is None:

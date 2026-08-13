@@ -237,6 +237,7 @@ def test_non_404_http_error_still_propagates(
     applier_mod: ModuleType,
     acli_mod: ModuleType,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Only 404 is softened. A 500 (or any non-404 HTTPError) must keep the
     current behavior and propagate — we do not blanket-catch HTTP errors.
@@ -259,6 +260,23 @@ def test_non_404_http_error_still_propagates(
     )
     fake_acli_mod = _make_fake_acli(acli_mod, fake_client)
 
+    # RECORD `_call_with_retry`'s 5xx backoff instead of sleeping it. This test used
+    # to drive the real ADR-0036 schedule (2s, 4s, 8s + jitter) for ~16s of pure wall
+    # clock while asserting nothing about it (ticket 5ea3-76e5-480a-4464).
+    delays: list[float] = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+
     with patch.object(applier_mod, "_load_acli", return_value=fake_acli_mod):
         with pytest.raises(urllib.error.HTTPError):
             applier_mod.apply([mutation], pass_id, repo_root=tmp_path)
+
+    # Retry exhaustion is what makes the raw 500 propagate, so pin the LOGICAL
+    # schedule that got us there: three retries at 2**(attempt+1) plus < 1s of
+    # ADR-0036 jitter. Bounds, not equalities, because the jitter is random. Doubles
+    # as the guard — a bypassed seam leaves `delays` empty and fails here.
+    assert len(delays) == 3, f"expected three retry backoffs, got {delays}"
+    for attempt, delay in enumerate(delays):
+        base = 2 ** (attempt + 1)
+        assert base <= delay < base + 1, (
+            f"backoff {attempt} was {delay}, wanted [{base}, {base + 1})"
+        )
