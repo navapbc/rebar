@@ -2445,6 +2445,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-30T01:02:20Z"
     },
+    "039b-d179-b669-4439": {
+      "created_at": "2026-08-13T05:34:55Z",
+      "jira_id": "4588561",
+      "jira_key": "REB-2831",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:34:58Z"
+    },
     "03a9-e6d1-4acc-435d": {
       "baseline": {
         "assignee": null,
@@ -13846,6 +13853,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T22:58:29Z"
     },
+    "1c79-1d10-26b0-4a4e": {
+      "created_at": "2026-08-13T05:35:03Z",
+      "jira_id": "4588562",
+      "jira_key": "REB-2832",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:35:06Z"
+    },
     "1c9d-f503-d695-42af": {
       "baseline": {
         "assignee": null,
@@ -15231,9 +15245,17 @@
       "updated_at": "2026-06-25T22:58:35Z"
     },
     "20cb-cbae-e9df-45e3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nCommit cf5155e528 added the real-pandoc corpus safety suite. Its module promises every test shares one cached render, but functools.lru_cache is process-local and CI uses pytest-xdist -n 3. Runtime instrumentation produced three cache fills, one per worker, while serial produced one. Two post-merge macOS jobs spent 321.6s and 495.6s of aggregate test-call time in five wiki corpus tests; the latter default tier took 33m51s. The tests preserve valuable coverage and must remain real-pandoc, full-corpus checks.\n\n## Plan\nRestructure the corpus oracle so each body/pass is rendered once per pytest session, not once per assertion or xdist worker. Partition by stratum or use a session-scoped shared artifact/lock so no single test breaches the 300s timeout. Preserve cardinality, secret scrub, protected excerpts, tables, comments, determinism, fixed-point, coverage-ratio, and non-vacuity assertions.\n\n## Acceptance Criteria\n- [ ] All 178 bodies and every existing safety/fixed-point assertion remain covered with real pandoc.\n- [ ] Runtime evidence under the exact -n 3 --dist worksteal command shows one computation per required body/pass, with no per-worker duplicate cache fill.\n- [ ] No single test approaches the 300s hang guard under a contended macOS run.\n- [ ] Production renderer behavior and corpus thresholds are unchanged.\n- [ ] Coordinate with ashy-waterlog-hamadryas and dimmed-supersweet-xenarthra; neither previously approved removing corpus coverage.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Wiki corpus cost cache is duplicated by every xdist worker"
+      },
       "created_at": "2026-08-13T05:30:14Z",
       "jira_id": "4588557",
       "jira_key": "REB-2827",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:30:17Z"
     },
@@ -25116,6 +25138,13 @@
       "jira_key": "REB-81",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:00Z"
+    },
+    "325e-7e85-d0d6-4318": {
+      "created_at": "2026-08-13T05:35:11Z",
+      "jira_id": "4588563",
+      "jira_key": "REB-2833",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:35:14Z"
     },
     "325f-4546-73e3-4fee": {
       "baseline": {
@@ -47629,9 +47658,17 @@
       "updated_at": "2026-07-23T00:39:31Z"
     },
     "5ea3-76e5-480a-4464": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nCurrent macOS CI records 25.3s in the Jira capability retry test, 15.0s in the dependency-audit infrastructure retry test, and 15.8s in the stale-binding 500 test. The first two patch time.sleep after functions captured it in default arguments; the third exercises the retry policy without replacing its backoff. Runtime A/B: dependency audit 15.007s with real sleeps versus 0.000s with an injected sleeper; stale-binding 15.8s in CI versus 1.30s with no-op backoff. Assertions and attempt counts were unchanged.\n\n## Plan\nLate-bind or explicitly inject sleepers at the two production seams, and make the three unit tests pass no-op/recording sleepers. Preserve production retry counts, schedules, exception behavior, and all assertions. Add a guard that fails if these unit tests call real time.sleep.\n\n## Acceptance Criteria\n- [ ] Jira capability retry still proves six searches and records five 5-second logical delays without sleeping.\n- [ ] Dependency audit still proves three attempts and logical 5s/10s delays without sleeping.\n- [ ] The stale-binding 500 test still proves retry exhaustion/propagation without wall-clock backoff.\n- [ ] Production retry defaults and behavior are unchanged.\n- [ ] Focused tests fail if real time.sleep is reached.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Unit tests execute production retry sleeps through import-bound defaults"
+      },
       "created_at": "2026-08-13T05:30:21Z",
       "jira_id": "4588558",
       "jira_key": "REB-2828",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:30:24Z"
     },
@@ -91960,6 +91997,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-13T18:24:37Z"
     },
+    "baeb-4f4b-3227-457e": {
+      "created_at": "2026-08-13T05:35:19Z",
+      "jira_id": "4588564",
+      "jira_key": "REB-2834",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T05:35:22Z"
+    },
     "baf7-868d-bb7e-4539": {
       "baseline": {
         "assignee": null,
@@ -114044,9 +114088,17 @@
       "updated_at": "2026-07-25T20:17:15Z"
     },
     "e394-9433-c839-4c9f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nmacOS CI records 120.39-121.03s for tests/unit/test_live_jira_dc_provisioning.py::test_a_missing_epic_field_aborts_provisioning. A focused runtime experiment took 121.61s normally and 0.71s with JIRA_DC_FIELD_READY_TIMEOUT=0, producing the same AssertionError and Epic Link assertion. The mocked field is permanently absent, so the unit test consumes the real production readiness budget. The readiness API already accepts injected sleep and monotonic functions.\n\n## Plan\nDrive the logical timeout with a fake clock or a zero-duration test budget while retaining the missing-field path, polling/expiry semantics, error type, and diagnostic assertion.\n\n## Acceptance Criteria\n- [ ] The test still proves a missing Epic Link expires and raises the same AssertionError diagnostic.\n- [ ] Logical poll/timeout behavior is asserted without 120 seconds of wall time.\n- [ ] Production readiness defaults are unchanged.\n- [ ] A guard fails if the unit test reaches real sleep.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Missing-field unit test burns the full 120-second Jira readiness budget"
+      },
       "created_at": "2026-08-13T05:30:26Z",
       "jira_id": "4588559",
       "jira_key": "REB-2829",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:30:29Z"
     },
@@ -129922,9 +129974,17 @@
       "updated_at": "2026-07-22T01:58:18Z"
     },
     "fa90-3292-38d4-4fd2": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nFour tests in tests/unit/test_subcall_class_selection.py each call _run_request_sites and reparse the entire src/rebar tree. Current macOS CI spends 30.10s, 32.27s, 31.02s, and 32.50s in the four guards in one contended run. A profiled local run observed four calls, 32,124 ast.parse calls, 34,004 reads, and 84.13s; a temporary process-local cache produced identical results with one call, 8,033 parses, 8,786 reads, and 23.26s. The original functional behavior is owned by closed ticket sand-dominating-urus; this ticket changes no invariant.\n\n## Plan\nCompute the immutable provenance analysis once per test process/module and share its result across the four independent assertions. Preserve all four assertions, registrations, and full-tree coverage.\n\n## Acceptance Criteria\n- [ ] _run_request_sites executes once per test process for the four guards.\n- [ ] Every existing guard and offender diagnostic remains unchanged in meaning.\n- [ ] A defect-seeded raw-config site is still caught.\n- [ ] The cache cannot survive source changes across pytest sessions.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Four model-provenance guards repeat the same whole-tree AST analysis"
+      },
       "created_at": "2026-08-13T05:30:32Z",
       "jira_id": "4588560",
       "jira_key": "REB-2830",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:30:34Z"
     },
@@ -134503,6 +134563,10 @@
     "REB-2829": "e394-9433-c839-4c9f",
     "REB-283": "b44a-6700-c356-490e",
     "REB-2830": "fa90-3292-38d4-4fd2",
+    "REB-2831": "039b-d179-b669-4439",
+    "REB-2832": "1c79-1d10-26b0-4a4e",
+    "REB-2833": "325e-7e85-d0d6-4318",
+    "REB-2834": "baeb-4f4b-3227-457e",
     "REB-284": "b4cd-7db9-92f2-4e1f",
     "REB-285": "b533-485d-d5df-448f",
     "REB-286": "b5db-7433-b731-444f",
