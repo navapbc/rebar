@@ -422,6 +422,12 @@ class UiConfig:
 @dataclass
 class ReconcilerConfig:
     jira_cli_timeout: int = 0
+    # Rich-text cutover flag (story 3388, epic 708d). Selects which client sends
+    # RICH rich-text instead of today's plain wire: "off" (default), "cloud", "dc",
+    # or "both". Ships defaulting OFF — this is an opt-in per-client cutover, not a
+    # 100%-traffic flip — and setting it back to "off" IS the rollback: the codecs
+    # return to the plain/identity wire with no capability revert or redeploy.
+    rich_text_cutover: str = "off"
     # Which vendor backend the reconciler drives (ADR 0035 §(d) vendor-adapter seam,
     # epic bbf1). Selects the adapter via the in-tree backend registry
     # (rebar_reconciler._backend_registry.select_backend). Only "jira" exists today;
@@ -673,6 +679,7 @@ _SECTIONS: dict[str, dict] = {
         # is UNREACHABLE — the registry resolves it while config rejects it (the
         # state `jira-datacenter` was in between stories J6 and J7, epic e369).
         "backend": lambda v, k: _as_choice(v, k, {"jira", "jira-datacenter"}),
+        "rich_text_cutover": lambda v, k: _as_choice(v, k, {"off", "cloud", "dc", "both"}),
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
         "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
