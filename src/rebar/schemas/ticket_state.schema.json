@@ -19,6 +19,15 @@
       "type": "array",
       "items": { "type": "string" }
     },
+    "bridge_project": {
+      "type": ["string", "null"],
+      "description": "Tri-state Jira bridge target project key: null = absent/legacy (never declared), \"\" = explicit never-sync, \"REB\" (etc.) = sync target. Promote-only via edit once the ticket holds a binding."
+    },
+    "repos": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Repositories this ticket's work spans (freely editable)."
+    },
     "assignee": { "type": ["string", "null"] },
     "claimed_session": { "type": ["string", "null"] },
     "claim_harness": { "type": ["string", "null"] },

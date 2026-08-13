@@ -140,6 +140,8 @@ def register_write_tools(mcp, ctx) -> None:
         assignee: str | None = None,
         description: str | None = None,
         tags: list[str] | None = None,
+        bridge_project: str | None = None,
+        repos: list[str] | None = None,
     ) -> CreateResultOut:
         """Create a ticket; returns {id, alias} (agents get the alias without
         a second show()). A non-null description_warning means the description exceeds
@@ -153,6 +155,8 @@ def register_write_tools(mcp, ctx) -> None:
             assignee=assignee,
             description=description,
             tags=tags,
+            bridge_project=bridge_project,
+            repos=repos,
             return_alias=True,
             _creation_channel="mcp",
         )

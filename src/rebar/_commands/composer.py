@@ -83,6 +83,26 @@ def _compute_alias(ticket_id: str) -> str:
     return compute_genesis_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
+def _apply_bridge_repos(data: dict, bridge_project: str | None, repos) -> None:
+    """Merge the story-cef7 bridge/project fields into a CREATE event's ``data``.
+
+    Split out of :func:`create_core` (which sits at its locked complexity ceiling,
+    ``.github/complexity-baseline.json``). ``bridge_project`` is TRI-STATE and carried
+    PRESENT-ONLY: the ``None`` default means "flag absent — leave state's seeded None";
+    an explicit ``""`` or a real key is stored verbatim so ``""`` (never-sync) and a sync
+    target both survive replay. ``repos`` accepts a CSV string (mirroring ``--tags``) or a
+    list; carried only when provided (the seeded ``[]`` covers the absent case).
+    """
+    if bridge_project is not None:
+        data["bridge_project"] = bridge_project
+    if repos is not None:
+        data["repos"] = (
+            [r.strip() for r in repos.split(",") if r.strip()]
+            if isinstance(repos, str)
+            else [r for r in repos if r]
+        )
+
+
 def create_core(
     ticket_type: str,
     title: str,
@@ -98,6 +118,8 @@ def create_core(
     repo_root=None,
     creation_channel: str,
     detected_by: str | None = None,
+    bridge_project: str | None = None,
+    repos=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
 
@@ -229,6 +251,8 @@ def create_core(
         if _detected_norm:
             data["detected_by"] = _detected_norm
 
+    _apply_bridge_repos(data, bridge_project, repos)
+
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     # Save-time heads-up (ticket 594b): computed AFTER the event lands, so an oversized
     # description is reported the moment it is written instead of at review-plan time.
@@ -250,6 +274,24 @@ def create_core(
     }
 
 
+def _match_long_opt(args: list[str], i: int, name: str):
+    """Match a long option ``--name value`` or ``--name=value`` at ``args[i]``.
+
+    Split out of :func:`create_cli` (at its locked complexity ceiling). Returns
+    ``(value, next_index)`` when it matches, else ``None`` — mirroring the exact
+    ``elif a in (name,) and i + 1 < n`` / ``elif a.startswith(name + "=")`` pair it
+    replaces, so a bare ``--name`` with no following value does NOT match (it falls
+    through to the caller's unknown-option rejection, unchanged).
+    """
+    a = args[i]
+    if a == name and i + 1 < len(args):
+        return args[i + 1], i + 2
+    prefix = f"{name}="
+    if a.startswith(prefix):
+        return a[len(prefix) :], i + 1
+    return None
+
+
 def create_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``create``: parse --output + flags, format output.
 
@@ -268,11 +310,29 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
 
     ticket_type, title = rest[0], rest[1]
     parent = priority = assignee = description = detected_by = None
+    bridge_project = None
+    repos = None
     tags = ""
     i, args = 2, rest
     n = len(args)
     while i < n:
         a = args[i]
+        m = _match_long_opt(args, i, "--bridge-project")
+        if m is not None:
+            bridge_project, i = m
+            continue
+        m = _match_long_opt(args, i, "--repos")
+        if m is not None:
+            repos, i = m
+            continue
+        m = _match_long_opt(args, i, "--detected-by")
+        if m is not None:
+            detected_by, i = m
+            continue
+        m = _match_long_opt(args, i, "--assignee")
+        if m is not None:
+            assignee, i = m
+            continue
         if a in ("--parent",) and i + 1 < n:
             parent = args[i + 1]
             i += 2
@@ -284,18 +344,6 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             i += 2
         elif a.startswith("--priority="):
             priority = a[len("--priority=") :]
-            i += 1
-        elif a in ("--detected-by",) and i + 1 < n:
-            detected_by = args[i + 1]
-            i += 2
-        elif a.startswith("--detected-by="):
-            detected_by = a[len("--detected-by=") :]
-            i += 1
-        elif a in ("--assignee",) and i + 1 < n:
-            assignee = args[i + 1]
-            i += 2
-        elif a.startswith("--assignee="):
-            assignee = a[len("--assignee=") :]
             i += 1
         elif a in ("--description", "-d") and i + 1 < n:
             description = args[i + 1]
@@ -332,6 +380,8 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             repo_root=repo_root,
             creation_channel="cli",
             detected_by=detected_by,
+            bridge_project=bridge_project,
+            repos=repos,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
@@ -377,7 +427,16 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
 # (--add-tag/--remove-tag/--set-tags), so a whole-field EDIT can never clobber a
 # concurrent tag add. The library/MCP ``edit(tags=...)`` arg is a DEPRECATED alias
 # for --set-tags, intercepted in edit_core before this field set is validated.
-_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "parent")
+_EDIT_FIELDS = (
+    "title",
+    "priority",
+    "assignee",
+    "ticket_type",
+    "description",
+    "parent",
+    "bridge_project",
+    "repos",
+)
 _EDIT_USAGE = (
     "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
     "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
@@ -406,6 +465,40 @@ def _parse_tag_list(value, *, validate: bool) -> list[str]:
         if t not in out:
             out.append(t)
     return out
+
+
+def _edit_repos_list(raw_value) -> list[str]:
+    """Normalise an EDIT ``repos`` field value (CSV string or list) to a trimmed list.
+
+    Split out of :func:`edit_core` (at its locked complexity ceiling). Mirrors the CREATE
+    path but str()-coerces list items and tolerates a ``None`` list, matching the prior
+    inline behaviour exactly.
+    """
+    return (
+        [r.strip() for r in raw_value.split(",") if r.strip()]
+        if isinstance(raw_value, str)
+        else [str(r) for r in (raw_value or []) if r]
+    )
+
+
+def _enforce_promote_only(out: dict, resolved: str, tracker) -> None:
+    """Enforce the story-cef7 promote-only rule for ``bridge_project`` on an EDIT.
+
+    Split out of :func:`edit_core` (at its locked complexity ceiling). ``bridge_project``
+    may be set on an UNBOUND ticket but never changed once the ticket already holds a
+    tracker binding — a bound ticket's sync target is fixed. ``binding_jira_key_map``
+    returns ``{local_id: jira_key}``; membership of the resolved id means it is bound.
+    ``repos`` has no such guard (freely editable). Raises :class:`CommandError` when the
+    guard trips; a no-op when ``bridge_project`` is not being edited.
+    """
+    if "bridge_project" not in out:
+        return
+    from rebar._ids import binding_jira_key_map
+
+    if resolved in binding_jira_key_map(str(tracker)):
+        raise CommandError(
+            f"Error: bridge_project is promote-only; ticket {resolved} already holds a binding"
+        )
 
 
 def edit_core(
@@ -438,7 +531,6 @@ def edit_core(
     now just an unknown field, so use ``set_tags``/``add_tags``/``remove_tags``.)
     """
     from rebar.reducer import reduce_ticket
-    from rebar.reducer._version import TAG_DELTA
 
     tracker = tracker_dir(repo_root)
     fields = dict(fields)
@@ -466,8 +558,13 @@ def edit_core(
     require_not_ghost(resolved, tracker)
 
     out: dict = {}
-    for key, value in fields.items():
-        value = "" if value is None else str(value)
+    for key, raw_value in fields.items():
+        # `repos` carries a list (or a CSV string) — normalise BEFORE the blanket str()
+        # coercion below would stringify a list into its repr. Freely editable, no guard.
+        if key == "repos":
+            out["repos"] = _edit_repos_list(raw_value)
+            continue
+        value = "" if raw_value is None else str(raw_value)
         if key == "title":
             if value.strip() == "":
                 raise CommandError(
@@ -498,32 +595,55 @@ def edit_core(
         else:  # assignee
             out[key] = value
 
+    # Promote-only guard (story cef7): `bridge_project` may be set on an UNBOUND ticket
+    # but never changed once the ticket already holds a tracker binding.
+    _enforce_promote_only(out, resolved, tracker)
+
     warning: str | None = None
     if out:
         append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
         warning = _edit_description_warning(out, resolved, tracker, reduce_ticket)
 
     if has_tag_op:
-        observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
-        if has_set:
-            # Compile the wholesale set to a delta vs observed (add-wins):
-            # add what's missing, remove observed tags not in the target set.
-            added = [t for t in set_list if t not in observed]
-            removed = [t for t in observed if t not in set_list]
-        else:
-            # No-op suppression: only add what's absent, only remove what's present.
-            added = [t for t in add_list if t not in observed]
-            removed = [t for t in remove_list if t in observed]
-        if added or removed:
-            append_event(
-                resolved,
-                TAG_DELTA,
-                {"added": added, "removed": removed},
-                tracker,
-                repo_root=repo_root,
-            )
+        _apply_tag_deltas(resolved, tracker, repo_root, has_set, set_list, add_list, remove_list)
 
     return warning
+
+
+def _apply_tag_deltas(
+    resolved: str,
+    tracker,
+    repo_root,
+    has_set: bool,
+    set_list: list[str],
+    add_list: list[str],
+    remove_list: list[str],
+) -> None:
+    """Compile the observed-vs-requested tag delta and append a TAG_DELTA event (P2.3).
+
+    Split out of :func:`edit_core` (at its locked complexity ceiling). ``has_set`` selects
+    the wholesale-set compilation (add-wins: add what's missing, remove observed tags not
+    in the target set) vs the add/remove no-op suppression (only add what's absent, only
+    remove what's present). Appends nothing when the compiled delta is empty.
+    """
+    from rebar.reducer import reduce_ticket
+    from rebar.reducer._version import TAG_DELTA
+
+    observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
+    if has_set:
+        added = [t for t in set_list if t not in observed]
+        removed = [t for t in observed if t not in set_list]
+    else:
+        added = [t for t in add_list if t not in observed]
+        removed = [t for t in remove_list if t in observed]
+    if added or removed:
+        append_event(
+            resolved,
+            TAG_DELTA,
+            {"added": added, "removed": removed},
+            tracker,
+            repo_root=repo_root,
+        )
 
 
 def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) -> str | None:
@@ -591,6 +711,9 @@ def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> s
 
 _TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
 
+# Dashed CLI spellings mapped to their `_EDIT_FIELDS` state-field name (story cef7).
+_EDIT_FLAG_ALIASES = {"bridge-project": "bridge_project"}
+
 
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``edit``: parse ticket_id + --field pairs +
@@ -636,6 +759,10 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             print(f"Error: unexpected argument '{arg}'", file=sys.stderr)
             return 1
+
+        # `--bridge-project` reads more naturally with a dash but the state field (and
+        # `_EDIT_FIELDS`) is `bridge_project`; accept the dashed spelling as an alias.
+        name = _EDIT_FLAG_ALIASES.get(name, name)
 
         if name in _TAG_FLAGS:
             _accept_tag(name, val)
