@@ -228,7 +228,11 @@ def test_client_shape_matrix():
     matrix = {
         "Harness": "Python library, CLI, remote MCP; no Claude Code or Codex dependency.",
         "Target project": "Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.",
-        "Platform and venue": "macOS, Windows, Linux, BSD, CI, servers, developer workstations.",
+        "Platform and venue": (
+            "macOS, Windows, Linux, BSD, CI under any provider (GitHub Actions, "
+            "GitLab CI, Jenkins, and others), projects with NO CI provider at all, "
+            "servers, developer workstations."
+        ),
         "Project location and access": (
             "in-checkout current working directory, explicitly located workspace, "
             "server outside the checkout, no unrestricted-local-filesystem assumption."
@@ -237,6 +241,21 @@ def test_client_shape_matrix():
     for label, value in matrix.items():
         assert label in body, f"missing client-shape label: {label!r}"
         assert value in body, f"missing client-shape value for {label!r}: {value!r}"
+
+
+def test_ci_is_a_venue_not_a_dependency():
+    """The rubric must make the no-CI-provider shape nameable, not just the `CI` cell.
+
+    Without this rule a plan whose only trigger is GitHub Actions cites a supported
+    matrix cell and draws no finding — the gap that let a CI-only compaction schedule
+    through (ticket ce7d-3a15-51e5-4c6a).
+    """
+    body = _rubric_body()
+    assert "### CI is a venue, not a dependency" in body
+    assert ("a capability whose only trigger is a specific CI system\nis not portable") in body, (
+        "the rule's load-bearing sentence is missing from the rubric"
+    )
+    assert "an operation-linked trigger" in body and "in-process fallback" in body
 
 
 def test_omission_guard():

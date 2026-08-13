@@ -60,7 +60,7 @@ cell of this matrix — anything outside it is out of scope and not a finding.
 
 - `Harness`: Python library, CLI, remote MCP; no Claude Code or Codex dependency.
 - `Target project`: Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.
-- `Platform and venue`: macOS, Windows, Linux, BSD, CI, servers, developer workstations.
+- `Platform and venue`: macOS, Windows, Linux, BSD, CI under any provider (GitHub Actions, GitLab CI, Jenkins, and others), projects with NO CI provider at all, servers, developer workstations.
 - `Project location and access`: in-checkout current working directory, explicitly located workspace, server outside the checkout, no unrestricted-local-filesystem assumption.
 
 When you assert that a plan step breaks in an alternate shape, name the specific cell —
@@ -68,6 +68,23 @@ e.g. that a step assuming a POSIX shell breaks the `Windows` platform, or that a
 shelling out to `python` breaks a `Ruby` or `.NET` target project, or that a step
 reading a hardcoded `.rebar/` path under the current working directory breaks a
 `server outside the checkout` deployment.
+
+### CI is a venue, not a dependency
+
+Being portable across venues includes venues that are not GitHub Actions and venues
+that have no CI at all. So: **a capability whose only trigger is a specific CI system
+is not portable.** When a plan makes recurring or automatic work happen — a schedule, a
+periodic sweep, a background reconciliation — it must also state how that work is
+triggered without that CI system: an operation-linked trigger (the work happens as a
+side effect of a normal rebar operation) or an in-process fallback. A plan that names
+only a CI trigger satisfies the four-element threshold above on its own: the alternate
+shape is `a project with no CI provider` (or one on a different provider), the causal
+mechanism is that the trigger never fires because the runner does not exist, and the
+observable breakage is that the capability never runs at all.
+
+This is not a demand that plans support every provider. Configured, opt-in CI behavior
+is still allowed by the Non-findings rule below; what fires is a *hard dependency* — no
+path to the capability except through one CI system.
 
 ## Non-findings
 
