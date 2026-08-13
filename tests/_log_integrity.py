@@ -6,10 +6,17 @@ coverage and stay green, with nothing in the run output distinguishing it from a
 that genuinely verified something (bug 9ac2-e2f1-bb6e-4436).
 
 ``caplog`` captures through a handler on the ROOT logger, so records only reach it if the
-shared ``rebar`` parent logger both *emits* them and *propagates* them. There are
-therefore two process-global mutations that silently sever it, and BOTH are real:
+shared parent logger both *emits* them and *propagates* them. There are **two** such shared
+parents, not one — ``rebar._logging`` names both: library code logs under ``rebar.*``, and the
+reconciler subprocess is imported top-level so its modules log under the sibling
+``rebar_reconciler.*`` root. :data:`SHARED_LOGGER_NAMES` is that set, and every primitive here
+operates over all of it; covering only ``rebar`` leaves every ``rebar_reconciler.*`` log
+assertion unprotected (bug 9151-907b-471d-4a38).
 
-* ``logging.getLogger("rebar").propagate = False`` — nothing under ``rebar`` reaches the
+For each shared root there are two process-global mutations that silently sever capture, and
+BOTH are real:
+
+* ``logging.getLogger(<root>).propagate = False`` — nothing under that root reaches the
   root handler. ``rebar.review_bot.config.configure_logging()`` did exactly this (bug
   b718), at module-import time, and never restored it. On pytest >= 8.4 this is only
   PARTLY mitigated: ``_pytest.logging.catching_logs.__enter__`` attaches the capture
@@ -17,12 +24,13 @@ therefore two process-global mutations that silently sever it, and BOTH are real
   hole — "will miss loggers that *become* non-propagating after the ``__enter__``". Code
   that flips it mid-test therefore voids the rest of that test's assertions silently, and
   the mitigation is an implementation detail we should not be relying on.
-* ``logging.getLogger("rebar").setLevel(...)`` above the record's level — the record is
+* ``logging.getLogger(<root>).setLevel(...)`` above the record's level — the record is
   dropped at the originating logger before any handler is consulted.
-  ``rebar._logging.install_stderr_handler()`` pins it to WARNING, and every in-process
-  ``rebar._cli.main(...)`` call in the suite goes through it. ``caplog.at_level(INFO)``
-  without a ``logger=`` argument does NOT rescue this: it raises the ROOT level, not the
-  ``rebar`` logger's.
+  ``rebar._logging.install_stderr_handler()`` pins it to WARNING; every in-process
+  ``rebar._cli.main(...)`` call in the suite does that to ``rebar``, and every in-process
+  ``rebar_reconciler.__main__.main(...)`` call does it to ``rebar_reconciler``.
+  ``caplog.at_level(INFO)`` without a ``logger=`` argument does NOT rescue this: it raises
+  the ROOT level, not the shared parent's.
 
 Neither is restored, both are invisible, and — because the victim is never the culprit —
 the red (when there is one at all) lands on an unrelated test far from the code that did
@@ -39,13 +47,15 @@ from __future__ import annotations
 
 import logging
 
-#: The shared parent logger every ``rebar.*`` logger inherits from, and therefore the
-#: single point that decides whether ``caplog`` can see rebar's records.
-REBAR_LOGGER_NAME = "rebar"
+#: The shared parent loggers every rebar record inherits from, and therefore the points that
+#: decide whether ``caplog`` can see them. ``rebar`` covers the library/CLI/MCP surfaces;
+#: ``rebar_reconciler`` is the sibling root the reconciler subprocess's modules log under
+#: (they are imported top-level, so they are NOT children of ``rebar``).
+SHARED_LOGGER_NAMES: tuple[str, ...] = ("rebar", "rebar_reconciler")
 
 _REMEDY = (
-    "Do not mutate propagation on the shared 'rebar' logger: it is process-global and not "
-    "restored, so it voids every later caplog assertion on a rebar.* logger. Attach a "
+    "Do not mutate propagation on a shared rebar logger: it is process-global and not "
+    "restored, so it voids every later caplog assertion under that root. Attach a "
     "handler to the specific logger instead (see "
     "rebar.review_bot.config.configure_logging), or scope the change and restore it in a "
     "finally/fixture teardown."
@@ -53,14 +63,16 @@ _REMEDY = (
 
 
 def propagation_failure(nodeid: str, *, phase: str) -> str | None:
-    """Return a failure message if ``caplog`` can no longer see ``rebar.*`` records.
+    """Return a failure message if ``caplog`` can no longer see one of the shared roots.
 
     ``None`` means healthy. *phase* is ``"setup"`` (propagation was already off before this
     test ran — an import/collection-time or non-test code path did it) or ``"teardown"``
     (this test's own body did it, which is the blame we want).
     """
-    if logging.getLogger(REBAR_LOGGER_NAME).propagate:
+    broken = [name for name in SHARED_LOGGER_NAMES if not logging.getLogger(name).propagate]
+    if not broken:
         return None
+    name = broken[0]
     if phase == "teardown":
         cause = f"{nodeid} disabled it during its own body"
     else:
@@ -70,35 +82,39 @@ def propagation_failure(nodeid: str, *, phase: str) -> str | None:
         )
     return (
         "caplog coverage integrity: "
-        f'logging.getLogger("{REBAR_LOGGER_NAME}").propagate is False — {cause}. '
+        f'logging.getLogger("{name}").propagate is False — {cause}. '
         "caplog captures through a handler on the ROOT logger, so while this is off NO "
-        "rebar.* record reaches caplog and every later log assertion passes VACUOUSLY "
+        f"{name}.* record reaches caplog and every later log assertion passes VACUOUSLY "
         "while verifying nothing. " + _REMEDY
     )
 
 
 def restore_propagation() -> None:
-    """Re-enable propagation so one offender does not cascade into unrelated victims."""
-    logging.getLogger(REBAR_LOGGER_NAME).propagate = True
+    """Re-enable propagation on every shared root, so one offender does not cascade."""
+    for name in SHARED_LOGGER_NAMES:
+        logging.getLogger(name).propagate = True
 
 
-def current_level() -> int:
-    """The shared ``rebar`` logger's own level (``logging.NOTSET`` when it inherits)."""
-    return logging.getLogger(REBAR_LOGGER_NAME).level
+def current_level() -> dict[str, int]:
+    """Each shared root's own level (``logging.NOTSET`` when it inherits), keyed by name."""
+    return {name: logging.getLogger(name).level for name in SHARED_LOGGER_NAMES}
 
 
-def restore_level(level: int) -> bool:
-    """Put the shared ``rebar`` logger's level back to *level*; report whether it moved.
+def restore_level(levels: dict[str, int]) -> bool:
+    """Put every shared root's level back to *levels*; report whether any of them moved.
 
-    Unlike propagation, raising this level is a legitimate side effect of exercising a real
-    entrypoint in-process (``rebar._cli.main`` installs the stderr handler, which pins the
-    logger to WARNING). The LEAK is what must not survive the test, so this contains it
-    instead of blaming the test: restoring per-test is strictly stronger for coverage
-    integrity than a failure would be, because every test then starts from the same level
-    and its log assertions are reproducible regardless of run order.
+    Unlike propagation, raising these levels is a legitimate side effect of exercising a real
+    entrypoint in-process (``rebar._cli.main`` and ``rebar_reconciler.__main__.main`` each
+    install the stderr handler, which pins their own root to WARNING). The LEAK is what must
+    not survive the test, so this contains it instead of blaming the test: restoring per-test
+    is strictly stronger for coverage integrity than a failure would be, because every test
+    then starts from the same levels and its log assertions are reproducible regardless of
+    run order.
     """
-    lg = logging.getLogger(REBAR_LOGGER_NAME)
-    if lg.level == level:
-        return False
-    lg.setLevel(level)
-    return True
+    moved = False
+    for name, level in levels.items():
+        lg = logging.getLogger(name)
+        if lg.level != level:
+            lg.setLevel(level)
+            moved = True
+    return moved
