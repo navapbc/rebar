@@ -15,11 +15,13 @@ make that collapse safe:
 from __future__ import annotations
 
 import subprocess
+from contextvars import copy_context
 from pathlib import Path
 
 import pytest
 
-from rebar._store import event_append
+from rebar._commands import _seam
+from rebar._store import event_append, staging
 from rebar._store.canonical import canonical_bytes
 
 pytestmark = pytest.mark.unit
@@ -96,6 +98,90 @@ def test_empty_batch_is_a_noop(tracker):
     base = _commit_count(tracker)
     assert event_append.batch_stage_and_commit(tracker, []) == 0
     assert _commit_count(tracker) == base
+
+
+def test_batch_amortizes_stale_sweep_without_changing_direct_writes(tracker, monkeypatch):
+    event_append.batch_stage_and_commit(
+        tracker, [("existing", _event("u-seed", 1700000000000000011))]
+    )
+    real_sweep = staging.sweep_stale_staging
+    sweeps = 0
+
+    def counted_sweep(path: str) -> None:
+        nonlocal sweeps
+        sweeps += 1
+        real_sweep(path)
+
+    monkeypatch.setattr(staging, "sweep_stale_staging", counted_sweep)
+
+    assert event_append.batch_stage_and_commit(tracker, []) == 0
+    assert sweeps == 0
+
+    event_append.batch_stage_and_commit(
+        tracker, [("existing", _event("u-existing", 1700000000000000012))]
+    )
+    assert sweeps == 0
+
+    event_append.batch_stage_and_commit(
+        tracker,
+        [
+            ("new-a", _event("u-new-a", 1700000000000000013)),
+            ("new-b", _event("u-new-b", 1700000000000000014)),
+        ],
+    )
+    assert sweeps == 1
+
+    event_append.batch_stage_and_commit(
+        tracker,
+        [
+            ("existing", _event("u-mixed-existing", 1700000000000000015)),
+            ("new-mixed", _event("u-mixed-new", 1700000000000000016)),
+        ],
+    )
+    assert sweeps == 2
+
+    direct = staging.stage_event(tracker, "new-c", "manual.json", b"{}")
+    assert sweeps == 3
+    direct.discard()
+
+
+def test_author_cache_is_scoped_nested_and_fallback_sensitive(monkeypatch):
+    reads: list[str] = []
+
+    def fake_git_config(key: str, fallback: str = "", *, cwd=None) -> str:
+        assert key == "user.name"
+        reads.append(fallback)
+        return f"{fallback}-{len(reads)}"
+
+    monkeypatch.setattr(_seam, "_git_config", fake_git_config)
+
+    assert _seam.author("Unknown") == "Unknown-1"
+    with _seam.author_cache():
+        assert _seam.author("Unknown") == "Unknown-2"
+        assert _seam.author("Unknown") == "Unknown-2"
+        assert _seam.author("unknown") == "unknown-3"
+        with _seam.author_cache():
+            assert _seam.author("Unknown") == "Unknown-4"
+        assert _seam.author("Unknown") == "Unknown-2"
+    assert _seam.author("Unknown") == "Unknown-5"
+    assert reads == ["Unknown", "Unknown", "unknown", "Unknown", "Unknown"]
+
+
+def test_author_cache_does_not_share_misses_across_copied_contexts(monkeypatch):
+    reads = 0
+
+    def fake_git_config(key: str, fallback: str = "", *, cwd=None) -> str:
+        nonlocal reads
+        assert key == "user.name"
+        reads += 1
+        return f"{fallback}-{reads}"
+
+    monkeypatch.setattr(_seam, "_git_config", fake_git_config)
+
+    with _seam.author_cache():
+        child = copy_context()
+        assert child.run(_seam.author, "copied") == "copied-1"
+        assert _seam.author("copied") == "copied-2"
 
 
 def test_validation_failure_rolls_back_before_any_commit(tracker, monkeypatch):

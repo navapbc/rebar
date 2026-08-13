@@ -124,7 +124,13 @@ def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
     return event_type, timestamp, uuid_str
 
 
-def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> _staging.StagedEvent:
+def _prepare_event(
+    tracker: str,
+    ticket_id: str,
+    event: dict[str, Any],
+    *,
+    sweep_stale: bool = True,
+) -> _staging.StagedEvent:
     """Validate the event and stage its CANONICAL bytes for an atomic publish.
 
     Ticket 021d: a NEW ticket's directory is built inside a scanner-invisible staging path
@@ -140,6 +146,12 @@ def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> _stag
     event_type, timestamp, uuid_str = _validate_event(event)
     filename = event_filename(timestamp, uuid_str, event_type)
     try:
-        return _staging.stage_event(tracker, ticket_id, filename, canonical_bytes(event))
+        return _staging.stage_event(
+            tracker,
+            ticket_id,
+            filename,
+            canonical_bytes(event),
+            sweep_stale=sweep_stale,
+        )
     except OSError as exc:
         raise StoreError("Error: failed to write staging temp file", 1) from exc

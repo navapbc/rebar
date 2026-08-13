@@ -222,7 +222,14 @@ class StagedEvent:
         shutil.rmtree(self.staging_dir, ignore_errors=True)
 
 
-def stage_event(tracker: str, ticket_id: str, filename: str, payload: bytes) -> StagedEvent:
+def stage_event(
+    tracker: str,
+    ticket_id: str,
+    filename: str,
+    payload: bytes,
+    *,
+    sweep_stale: bool = True,
+) -> StagedEvent:
     """Stage *payload* as *filename* for *ticket_id*, ready for an atomic publish.
 
     No lock is held here and nothing under ``<tracker>/<ticket_id>`` is touched: for a new
@@ -247,7 +254,8 @@ def stage_event(tracker: str, ticket_id: str, filename: str, payload: bytes) -> 
     # Creating a ticket is the only moment a staging path can appear, so it is also the
     # cheapest place to reclaim ones abandoned earlier — bounded, best-effort, and never
     # touching store data (see sweep_stale_staging).
-    sweep_stale_staging(tracker)
+    if sweep_stale:
+        sweep_stale_staging(tracker)
 
     # The TRACKER root may not exist yet on the reconciler paths, which reached here via
     # ``mkdir(parents=True)``. Creating it is not the window this module closes — the debris

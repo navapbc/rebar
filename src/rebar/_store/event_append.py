@@ -261,9 +261,13 @@ def batch_stage_and_commit(
     # Validate + stage every event up front (fail fast, before the lock). On any
     # failure here, unlink the temps staged so far — nothing has been renamed yet.
     prepared: list[_staging.StagedEvent] = []
+    swept_stale = False
     try:
         for ticket_id, event in items:
-            prepared.append(_prepare_event(tracker, ticket_id, event))
+            staged = _prepare_event(tracker, ticket_id, event, sweep_stale=not swept_stale)
+            prepared.append(staged)
+            if staged.staging_dir is not None:
+                swept_stale = True
     except BaseException:
         for staged in prepared:
             staged.discard()
