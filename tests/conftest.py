@@ -498,9 +498,12 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
 # success — indistinguishable, in the run output, from a real verification.
 #
 # caplog captures via a handler on the ROOT logger, so records only reach it if
-# the shared `rebar` parent logger both emits and propagates them. Two
-# process-global, never-restored mutations sever that, and both are real:
-#   * propagate = False — nothing under `rebar` reaches the root handler
+# the shared parent logger both emits and propagates them. There are TWO shared
+# parents — `rebar` for the library/CLI/MCP surfaces and the sibling
+# `rebar_reconciler` for the reconciler subprocess's top-level-imported modules —
+# and both are guarded (_log_integrity.SHARED_LOGGER_NAMES). Two process-global,
+# never-restored mutations sever capture under either, and both are real:
+#   * propagate = False — nothing under that root reaches the root handler
 #     (rebar.review_bot.config.configure_logging did this at import time; b718).
 #     pytest >= 8.4 re-attaches the capture handler to loggers that are ALREADY
 #     non-propagating, so the damage is bounded to the test that flips it
@@ -509,7 +512,10 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
 #   * setLevel(WARNING) — INFO/DEBUG records are dropped at the originating
 #     logger, and caplog.at_level(INFO) without a `logger=` argument cannot undo
 #     it because it raises the ROOT level (rebar._logging.install_stderr_handler
-#     does this, and every in-process rebar._cli.main() call goes through it).
+#     does this; every in-process rebar._cli.main() call leaks it onto `rebar`,
+#     and every in-process rebar_reconciler.__main__.main() call leaks it onto
+#     `rebar_reconciler` — bug 9151, an INFO assertion in the a4bd inbound-removal
+#     suite going order-dependently red under -n 3 --dist worksteal).
 #
 # The two are handled differently on purpose. Disabling propagation is never
 # legitimate, so it FAILS the test that did it — at the SOURCE, not at whichever
@@ -526,17 +532,17 @@ import _log_integrity  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _rebar_log_propagation_guard(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Keep the shared ``rebar`` logger able to reach ``caplog``, and blame whoever breaks it."""
+    """Keep the shared rebar loggers able to reach ``caplog``, and blame whoever breaks it."""
     nodeid = request.node.nodeid
     problem = _log_integrity.propagation_failure(nodeid, phase="setup")
     if problem is not None:
         _log_integrity.restore_propagation()
         pytest.fail(problem, pytrace=False)
-    baseline_level = _log_integrity.current_level()
+    baseline_levels = _log_integrity.current_level()
     try:
         yield
     finally:
-        _log_integrity.restore_level(baseline_level)
+        _log_integrity.restore_level(baseline_levels)
     problem = _log_integrity.propagation_failure(nodeid, phase="teardown")
     if problem is not None:
         _log_integrity.restore_propagation()

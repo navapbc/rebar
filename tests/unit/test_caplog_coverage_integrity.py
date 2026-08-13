@@ -19,10 +19,16 @@ These tests prove the guard actually fires, and prove it in BOTH directions:
 The second pair is the discriminating evidence: the only difference between the runs is
 the guard, and it flips a green no-op into a red failure.
 
-The same pytester pairing covers the LEVEL vector — a shared ``rebar`` logger pinned to
-WARNING drops INFO records at the source, which ``caplog.at_level(INFO)`` cannot undo —
-where the guard's job is containment rather than blame, since raising the level is a
-legitimate side effect of running a real entrypoint in-process.
+The same pytester pairing covers the LEVEL vector — a shared logger pinned to WARNING drops
+INFO records at the source, which ``caplog.at_level(INFO)`` cannot undo — where the guard's
+job is containment rather than blame, since raising the level is a legitimate side effect of
+running a real entrypoint in-process.
+
+Both vectors are exercised on BOTH shared roots. ``rebar_reconciler`` is a sibling of
+``rebar``, not a child (the reconciler's modules are imported top-level), so guarding only
+``rebar`` left every ``rebar_reconciler.*`` log assertion unprotected — which is what made the
+a4bd inbound-removal decline-count assertion order-dependent under ``-n 3 --dist worksteal``
+(bug 9151-907b-471d-4a38).
 """
 
 from __future__ import annotations
@@ -30,6 +36,8 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+
+import pytest
 
 _TESTS_DIR = Path(__file__).resolve().parents[1]
 if str(_TESTS_DIR) not in sys.path:
@@ -43,20 +51,28 @@ pytest_plugins = ["pytester"]
 # ── detection primitive ───────────────────────────────────────────────────────
 
 
+def test_both_shared_roots_are_guarded() -> None:
+    """The reconciler root is a SIBLING of ``rebar``, so it needs its own coverage."""
+    assert set(_log_integrity.SHARED_LOGGER_NAMES) == {"rebar", "rebar_reconciler"}
+
+
 def test_no_failure_while_propagation_is_healthy() -> None:
-    assert logging.getLogger("rebar").propagate is True  # the autouse guard's precondition
+    for name in _log_integrity.SHARED_LOGGER_NAMES:  # the autouse guard's precondition
+        assert logging.getLogger(name).propagate is True
     assert _log_integrity.propagation_failure("t::x", phase="setup") is None
     assert _log_integrity.propagation_failure("t::x", phase="teardown") is None
 
 
-def test_teardown_phase_blames_the_test_that_disabled_propagation() -> None:
-    lg = logging.getLogger("rebar")
+@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+def test_teardown_phase_blames_the_test_that_disabled_propagation(root: str) -> None:
+    lg = logging.getLogger(root)
     lg.propagate = False
     try:
         msg = _log_integrity.propagation_failure("tests/unit/t.py::test_poisoner", phase="teardown")
     finally:
         _log_integrity.restore_propagation()
     assert msg is not None
+    assert f'logging.getLogger("{root}").propagate is False' in msg
     assert "tests/unit/t.py::test_poisoner disabled it during its own body" in msg
     assert "VACUOUSLY" in msg
 
@@ -75,10 +91,12 @@ def test_setup_phase_reports_an_out_of_band_poisoning() -> None:
     assert "disabled it during its own body" not in msg
 
 
-def test_restore_propagation_reenables_it() -> None:
-    logging.getLogger("rebar").propagate = False
+def test_restore_propagation_reenables_every_shared_root() -> None:
+    for name in _log_integrity.SHARED_LOGGER_NAMES:
+        logging.getLogger(name).propagate = False
     _log_integrity.restore_propagation()
-    assert logging.getLogger("rebar").propagate is True
+    for name in _log_integrity.SHARED_LOGGER_NAMES:
+        assert logging.getLogger(name).propagate is True
 
 
 # ── end-to-end wiring (pytester): the same poisoned file, with and without the guard ──
@@ -134,21 +152,23 @@ def _rebar_log_propagation_guard(request) -> Iterator[None]:
 """
 
 # The second vector: the level, not propagation. An INFO record is dropped at the
-# originating logger when the shared `rebar` logger is pinned to WARNING, and
-# caplog.at_level(INFO) with no `logger=` argument cannot rescue it because it raises the
-# ROOT level. This is what `rebar._logging.install_stderr_handler` — reached by every
-# in-process `rebar._cli.main(...)` call — leaks today.
+# originating logger when a shared root is pinned to WARNING, and caplog.at_level(INFO) with
+# no `logger=` argument cannot rescue it because it raises the ROOT level. This is what
+# `rebar._logging.install_stderr_handler` leaks today: every in-process `rebar._cli.main(...)`
+# call pins `rebar`, and every in-process `rebar_reconciler.__main__.main(...)` call pins the
+# sibling `rebar_reconciler` — the latter is what made the a4bd decline-count assertion
+# order-dependent (bug 9151), because the guard used to cover only `rebar`.
 _LEVEL_POISONED_TESTS = """
 import logging
 
 
 def test_level_poisoner():
-    logging.getLogger("rebar").setLevel(logging.WARNING)
+    logging.getLogger({root!r}).setLevel(logging.WARNING)
 
 
 def test_info_assertion(caplog):
     with caplog.at_level(logging.INFO):
-        logging.getLogger("rebar.probe").info("hello")
+        logging.getLogger({root!r} + ".probe").info("hello")
     assert any("hello" in r.getMessage() for r in caplog.records)
 """
 
@@ -195,33 +215,37 @@ def test_innocent_bystander(caplog):
     result.assert_outcomes(passed=2, errors=1)
 
 
-def test_without_the_guard_a_leaked_level_breaks_a_later_info_assertion(pytester) -> None:
+@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+def test_without_the_guard_a_leaked_level_breaks_a_later_info_assertion(pytester, root) -> None:
     """The level vector, reproduced: an unrelated later test goes red, far from the cause."""
     pytester.makeconftest("")
-    pytester.makepyfile(_LEVEL_POISONED_TESTS)
+    pytester.makepyfile(_LEVEL_POISONED_TESTS.format(root=root))
     result = pytester.runpytest_subprocess("-p", "no:randomly")
     result.assert_outcomes(passed=1, failed=1)
     assert result.ret != 0
 
 
-def test_with_the_guard_a_leaked_level_is_contained(pytester) -> None:
+@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+def test_with_the_guard_a_leaked_level_is_contained(pytester, root) -> None:
     """Same file, guard installed: the leak does not survive the test that caused it."""
     pytester.makeconftest(_GUARDED_CONFTEST.format(tests_dir=str(_TESTS_DIR)))
-    pytester.makepyfile(_LEVEL_POISONED_TESTS)
+    pytester.makepyfile(_LEVEL_POISONED_TESTS.format(root=root))
     result = pytester.runpytest_subprocess("-p", "no:randomly")
     result.assert_outcomes(passed=2)
     assert result.ret == 0
 
 
-def test_restore_level_reports_whether_it_moved() -> None:
+@pytest.mark.parametrize("root", ["rebar", "rebar_reconciler"])
+def test_restore_level_reports_whether_it_moved(root: str) -> None:
     baseline = _log_integrity.current_level()
+    assert set(baseline) == set(_log_integrity.SHARED_LOGGER_NAMES)
     try:
         assert _log_integrity.restore_level(baseline) is False  # no drift, no change
-        logging.getLogger("rebar").setLevel(logging.CRITICAL)
+        logging.getLogger(root).setLevel(logging.CRITICAL)
         assert _log_integrity.restore_level(baseline) is True
         assert _log_integrity.current_level() == baseline
     finally:
-        logging.getLogger("rebar").setLevel(baseline)
+        logging.getLogger(root).setLevel(baseline[root])
 
 
 def test_a_clean_run_is_unaffected(pytester) -> None:
