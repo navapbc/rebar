@@ -30,6 +30,97 @@ def _is_closed(status: str) -> bool:
     return is_terminal_status(status)
 
 
+def _read_tombstone_status(ticket_dir: str) -> str | None:
+    """Return the terminal status recorded in ``.tombstone.json``, or None if absent.
+
+    A malformed tombstone still counts as one: the file's presence is the signal,
+    so an unreadable payload degrades to ``deleted`` rather than to "no tombstone".
+    """
+    tombstone_path = Path(ticket_dir) / ".tombstone.json"
+    if not tombstone_path.is_file():
+        return None
+    try:
+        return str(json.loads(tombstone_path.read_text()).get("status", "deleted"))
+    except Exception:  # noqa: BLE001 — tombstone read best-effort: a malformed/missing tombstone defaults to deleted
+        return "deleted"
+
+
+def _load_states_with_tombstones(tracker_path: Path) -> dict[str, dict]:
+    """Load ticket states with the tombstone status overlaid, indexed by ticket id.
+
+    Deliberately NOT ``_loader.load_indexed_states``: the readiness computation needs
+    the terminal status of tickets whose events the reducer cannot see, so a
+    tombstoned dir yields a status-only stub instead of being dropped, and the
+    tombstone status overrides the reduced one. ``error``/``fsck_needed`` states are
+    still skipped.
+    """
+    states: dict[str, dict] = {}
+    for entry in os.scandir(tracker_path):
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        tombstone_status = _read_tombstone_status(entry.path)
+        state = reduce_ticket(entry.path)
+        if state is None:
+            if tombstone_status is not None:
+                states[entry.name] = {"status": tombstone_status}
+            continue
+        if state.get("status") in ("error", "fsck_needed"):
+            continue
+        if tombstone_status is not None:
+            state["status"] = tombstone_status
+        states[entry.name] = state
+    return states
+
+
+def _is_closed_after_batch(ticket_id: str, ticket_states: dict, newly_closed_set: set[str]) -> bool:
+    """True when ``ticket_id`` counts as closed once the batch close is applied."""
+    if ticket_id in newly_closed_set:
+        return True
+    state = ticket_states.get(ticket_id)
+    if state is None:
+        return True  # missing dir → tombstoned, treat as closed
+    return _is_closed(state.get("status", "open"))
+
+
+def _was_already_unblocked(
+    blockers: set[str], ticket_states: dict, newly_closed_set: set[str]
+) -> bool:
+    """True when every blocker was ALREADY closed BEFORE the batch.
+
+    Such a ticket is unblocked but not *newly* so; a blocker in the batch counts as
+    open here precisely because the batch has not happened yet.
+    """
+    return all(
+        False
+        if blocker in newly_closed_set
+        else _is_closed(ticket_states.get(blocker, {}).get("status", "open"))
+        for blocker in blockers
+    )
+
+
+def _select_newly_unblocked(
+    ticket_states: dict, blocked_by: dict[str, set[str]], newly_closed_set: set[str]
+) -> list[str]:
+    """Pick the open, not-being-closed tickets that flip to unblocked from this batch.
+
+    Iterates ``ticket_states`` in insertion order, which ``reduce_all_tickets``
+    derives from ``sorted(os.listdir(...))`` — the ordering contract the caller's
+    byte-parity docstring depends on.
+    """
+    newly_unblocked: list[str] = []
+    for ticket_id, state in ticket_states.items():
+        if _is_closed(state.get("status", "open")) or ticket_id in newly_closed_set:
+            continue
+        blockers = blocked_by.get(ticket_id, set())
+        if not blockers:
+            continue  # no blockers — already unblocked, not "newly"
+        if _was_already_unblocked(blockers, ticket_states, newly_closed_set):
+            continue
+        if all(_is_closed_after_batch(b, ticket_states, newly_closed_set) for b in blockers):
+            newly_unblocked.append(ticket_id)
+    return newly_unblocked
+
+
 def detect_newly_unblocked(
     closed_ticket_ids: list[str],
     tracker_dir: str,
@@ -53,63 +144,11 @@ def detect_newly_unblocked(
     if ticket_states is None:
         if not tracker_path.is_dir():
             return []
-        ticket_states = {}
-        for entry in os.scandir(tracker_path):
-            if not entry.is_dir():
-                continue
-            if entry.name.startswith("."):
-                continue
-            ticket_id = entry.name
-            tombstone_path = Path(entry.path) / ".tombstone.json"
-            tombstone_status: str | None = None
-            if tombstone_path.is_file():
-                try:
-                    _ts = json.loads(tombstone_path.read_text())
-                    tombstone_status = str(_ts.get("status", "deleted"))
-                except Exception:  # noqa: BLE001 — tombstone read best-effort: a malformed/missing tombstone defaults to deleted
-                    tombstone_status = "deleted"
-            state = reduce_ticket(entry.path)
-            if state is None:
-                if tombstone_status is not None:
-                    ticket_states[ticket_id] = {"status": tombstone_status}
-                continue
-            if state.get("status") in ("error", "fsck_needed"):
-                continue
-            if tombstone_status is not None:
-                state["status"] = tombstone_status
-            ticket_states[ticket_id] = state
-
-    def ticket_is_closed(ticket_id: str) -> bool:
-        if ticket_id in newly_closed_set:
-            return True
-        state = ticket_states.get(ticket_id)
-        if state is None:
-            return True  # missing dir → tombstoned, treat as closed
-        return _is_closed(state.get("status", "open"))
+        ticket_states = _load_states_with_tombstones(tracker_path)
 
     # blocked_id → set of blocker_ids (shared blocking-edge inversion).
     blocked_by = build_blocked_by(ticket_states)
-
-    newly_unblocked: list[str] = []
-    for ticket_id, state in ticket_states.items():
-        if _is_closed(state.get("status", "open")):
-            continue
-        if ticket_id in newly_closed_set:
-            continue
-        blockers = blocked_by.get(ticket_id, set())
-        if not blockers:
-            continue  # no blockers — already unblocked, not "newly"
-        all_blockers_were_closed_before = all(
-            _is_closed(ticket_states.get(b, {}).get("status", "open"))
-            if b not in newly_closed_set
-            else False
-            for b in blockers
-        )
-        if all_blockers_were_closed_before:
-            continue
-        if all(ticket_is_closed(b) for b in blockers):
-            newly_unblocked.append(ticket_id)
-    return newly_unblocked
+    return _select_newly_unblocked(ticket_states, blocked_by, newly_closed_set)
 
 
 def batch_close_operations(

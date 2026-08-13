@@ -8,6 +8,60 @@ from . import _loader as _loader_module
 from ._status import _BLOCKING_RELATIONS
 
 
+def _is_archived(state: Any) -> bool:
+    """True when ``state`` is a compiled state dict flagged archived."""
+    return isinstance(state, dict) and state.get("archived") is True
+
+
+def _own_depends_on_blockers(
+    ticket_id: str,
+    ticket_states: dict[str, Any],
+    exclude_archived: bool,
+) -> list[str]:
+    """Source 1: the targets of ticket_id's own ``depends_on`` deps.
+
+    ``ticket_id depends_on target`` means target blocks ticket_id. This covers only
+    the ``depends_on`` half of ``_BLOCKING_RELATIONS``; the ``blocks`` half points
+    outward from this ticket and is Source 2's job (``_blocks_targeting``).
+    """
+    state = ticket_states.get(ticket_id)
+    if not isinstance(state, dict):
+        return []
+
+    blockers: list[str] = []
+    for dep in state.get("deps", []):
+        relation = dep.get("relation")
+        if relation not in _BLOCKING_RELATIONS or relation != "depends_on":
+            continue
+        target = dep.get("target_id", "")
+        if not target or target in blockers:
+            continue
+        if exclude_archived and _is_archived(ticket_states.get(target)):
+            continue
+        blockers.append(target)
+    return blockers
+
+
+def _blocks_targeting(
+    ticket_id: str,
+    ticket_states: dict[str, Any],
+    exclude_archived: bool,
+) -> list[str]:
+    """Source 2: every OTHER ticket carrying a ``blocks`` dep aimed at ticket_id."""
+    blockers: list[str] = []
+    for entry, entry_state in ticket_states.items():
+        if entry == ticket_id or not isinstance(entry_state, dict):
+            continue
+        if exclude_archived and entry_state.get("archived") is True:
+            continue
+        if any(
+            dep.get("relation") == "blocks" and dep.get("target_id") == ticket_id
+            for dep in entry_state.get("deps", [])
+        ):
+            blockers.append(entry)
+    return blockers
+
+
 def _find_direct_blockers(
     ticket_id: str,
     tracker_dir: str,
@@ -30,51 +84,12 @@ def _find_direct_blockers(
             When None, loads all ticket states via reduce_all_tickets.
     """
     if ticket_states is None:
-        all_states = _loader_module.reducer.reduce_all_tickets(
-            tracker_dir, exclude_archived=False, exclude_session_logs=True
-        )
-        ticket_states = {}
-        for t in all_states:
-            tid = t.get("ticket_id", "")
-            if tid and t.get("status") not in ("error", "fsck_needed"):
-                ticket_states[tid] = t
+        ticket_states = _loader_module.load_indexed_states(tracker_dir)
 
-    blockers: list[str] = []
-
-    # Source 1: ticket_id's own compiled deps for 'depends_on'
-    state = ticket_states.get(ticket_id)
-    if state is not None and isinstance(state, dict):
-        for dep in state.get("deps", []):
-            if dep.get("relation") in _BLOCKING_RELATIONS:
-                if dep.get("relation") == "depends_on":
-                    target = dep.get("target_id", "")
-                    if target and target not in blockers:
-                        if exclude_archived:
-                            target_state = ticket_states.get(target)
-                            if (
-                                target_state is not None
-                                and isinstance(target_state, dict)
-                                and target_state.get("archived") is True
-                            ):
-                                continue
-                        blockers.append(target)
-
-    # Source 2: scan all ticket states for deps with relation=='blocks'
-    # targeting ticket_id
-    for entry, entry_state in ticket_states.items():
-        if entry == ticket_id:
-            continue
-
-        if entry_state is None or not isinstance(entry_state, dict):
-            continue
-
-        if exclude_archived and entry_state.get("archived") is True:
-            continue
-
-        for dep in entry_state.get("deps", []):
-            if dep.get("relation") == "blocks" and dep.get("target_id") == ticket_id:
-                if entry not in blockers:
-                    blockers.append(entry)
-                break  # Only need to add entry once
-
+    blockers = _own_depends_on_blockers(ticket_id, ticket_states, exclude_archived)
+    blockers.extend(
+        entry
+        for entry in _blocks_targeting(ticket_id, ticket_states, exclude_archived)
+        if entry not in blockers
+    )
     return blockers

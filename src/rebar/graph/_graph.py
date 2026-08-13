@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from rebar.reducer import is_terminal_status
@@ -14,6 +15,7 @@ from ._cache import (
     _read_graph_cache,
     _write_graph_cache,
 )
+from ._relations import bfs
 from ._status import _get_ticket_status
 
 # Use module-level accessor so tests can patch _loader_module.reducer.reduce_all_tickets
@@ -62,14 +64,7 @@ def _compute_dep_graph(
     ticket_id: str, tracker_dir: str, exclude_archived: bool = True
 ) -> dict[str, Any]:
     """Compute (without cache) the dependency graph for ticket_id."""
-    all_states_list = _loader_module.reducer.reduce_all_tickets(
-        tracker_dir, exclude_archived=False, exclude_session_logs=True
-    )
-    ticket_states: dict[str, Any] = {}
-    for t in all_states_list:
-        tid = t.get("ticket_id", "")
-        if tid and t.get("status") not in ("error", "fsck_needed"):
-            ticket_states[tid] = t
+    ticket_states: dict[str, Any] = _loader_module.load_indexed_states(tracker_dir)
 
     deps: list[dict[str, Any]] = []
     state = ticket_states.get(ticket_id)
@@ -124,62 +119,71 @@ def _compute_dep_graph(
 # ---------------------------------------------------------------------------
 
 
-def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
-    """Return the set of all tickets (transitively) blocked by ticket_id."""
-    blocked: set[str] = set()
-    queue: list[str] = [ticket_id]
-    visited: set[str] = set()
+def _reduce_or_none(ticket_dir: str) -> dict[str, Any] | None:
+    """Reduce a ticket dir, returning None when it is unreducible or not a dict.
 
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
+    The fail-open guard the graph traversals share: an unreducible ticket dir is
+    skipped rather than aborting the walk.
+    """
+    try:
+        state = reduce_ticket(ticket_dir)
+    except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
+        return None
+    return state if isinstance(state, dict) else None
+
+
+def _blocks_targets(state: dict[str, Any]) -> Iterator[str]:
+    """Yield the target of every ``blocks`` dep on ``state``."""
+    for dep in state.get("deps", []):
+        if dep.get("relation") == "blocks":
+            target = dep.get("target_id", "")
+            if target:
+                yield target
+
+
+def _dependents_of(tracker_dir: str, current: str, visited: set[str]) -> Iterator[str]:
+    """Yield every not-yet-visited ticket dir carrying a ``depends_on`` dep on ``current``."""
+    try:
+        entries = os.listdir(tracker_dir)
+    except OSError:
+        return
+
+    for entry in entries:
+        if entry in visited:
             continue
-        visited.add(current)
+        # Skip hidden directories (.suggestions, .review-events, .index, etc.)
+        # — they are not ticket dirs and their JSON files are not ticket events.
+        if entry.startswith("."):
+            continue
+        entry_path = os.path.join(tracker_dir, entry)
+        if not os.path.isdir(entry_path):
+            continue
+        e_state = _reduce_or_none(entry_path)
+        if e_state is None:
+            continue
+        for dep in e_state.get("deps", []):
+            if dep.get("relation") == "depends_on" and dep.get("target_id") == current:
+                yield entry
 
+
+def _get_all_blocked_by(ticket_id: str, tracker_dir: str) -> set[str]:
+    """Return the set of all tickets (transitively) blocked by ticket_id.
+
+    The result is the ACCUMULATOR of discovered edge targets, not the BFS visited
+    set: a ``blocks`` target is included even when no ticket directory backs it,
+    and ``ticket_id`` itself is excluded unless a real edge points back at it.
+    ``check_would_create_cycle`` depends on both halves of that.
+    """
+
+    def neighbors(current: str, visited: set[str]) -> Iterator[str]:
         current_dir = os.path.join(tracker_dir, current)
         if os.path.isdir(current_dir):
-            try:
-                state = reduce_ticket(current_dir)
-            except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
-                state = None
+            state = _reduce_or_none(current_dir)
+            if state is not None:
+                yield from _blocks_targets(state)
+        yield from _dependents_of(tracker_dir, current, visited)
 
-            if state is not None and isinstance(state, dict):
-                for dep in state.get("deps", []):
-                    if dep.get("relation") == "blocks":
-                        target = dep.get("target_id", "")
-                        if target:
-                            blocked.add(target)
-                            if target not in visited:
-                                queue.append(target)
-
-        try:
-            entries = os.listdir(tracker_dir)
-        except OSError:
-            entries = []
-
-        for entry in entries:
-            if entry in visited:
-                continue
-            # Skip hidden directories (.suggestions, .review-events, .index, etc.)
-            # — they are not ticket dirs and their JSON files are not ticket events.
-            if entry.startswith("."):
-                continue
-            entry_path = os.path.join(tracker_dir, entry)
-            if not os.path.isdir(entry_path):
-                continue
-            try:
-                e_state = reduce_ticket(entry_path)
-            except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible ticket dir is skipped during traversal
-                e_state = None
-            if e_state is None or not isinstance(e_state, dict):
-                continue
-            for dep in e_state.get("deps", []):
-                if dep.get("relation") == "depends_on" and dep.get("target_id") == current:
-                    blocked.add(entry)
-                    if entry not in visited:
-                        queue.append(entry)
-
-    return blocked
+    return bfs([ticket_id], neighbors)
 
 
 def check_would_create_cycle(
@@ -220,6 +224,42 @@ def check_would_create_cycle(
         return source_id in blocked_by_target
 
 
+def _is_at_level(tracker_dir: str, ticket_id: str, level: str) -> bool:
+    """True when ``ticket_id`` has a backing dir reducing to the given ``ticket_type``.
+
+    A missing or unreducible dir is not at any level, so it is never traversed.
+    """
+    ticket_dir = os.path.join(tracker_dir, ticket_id)
+    if not os.path.isdir(ticket_dir):
+        return False
+    state = _reduce_or_none(ticket_dir)
+    return state is not None and state.get("ticket_type", "").lower() == level
+
+
+def _same_level_neighbors(tracker_dir: str, level: str) -> Callable[[str, set[str]], Iterator[str]]:
+    """Build the ``neighbors_fn`` for a cycle walk confined to one ticket level.
+
+    Both ends of an edge must sit at ``level``: a node of another type is not
+    expanded, and a target of another type is not traversed into.
+    """
+
+    def neighbors(current: str, visited: set[str]) -> Iterator[str]:
+        current_dir = os.path.join(tracker_dir, current)
+        if not os.path.isdir(current_dir):
+            return
+        state = _reduce_or_none(current_dir)
+        if state is None or state.get("ticket_type", "").lower() != level:
+            return
+        for dep in state.get("deps", []):
+            if dep.get("relation", "") not in ("blocks", "depends_on"):
+                continue
+            target = dep.get("target_id", "")
+            if target and target not in visited and _is_at_level(tracker_dir, target, level):
+                yield target
+
+    return neighbors
+
+
 def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir: str) -> bool:
     """Return True if adding source_id→target_id would create a cycle at the given level.
 
@@ -231,46 +271,10 @@ def check_cycle_at_level(source_id: str, target_id: str, level: str, tracker_dir
     if source_id == target_id:
         return True
 
-    visited: set[str] = set()
-    queue: list[str] = [target_id]
+    neighbors = _same_level_neighbors(tracker_dir, level)
 
-    while queue:
-        current = queue.pop(0)
-        if current in visited:
-            continue
-        visited.add(current)
-
-        if current == source_id:
-            return True
-
-        current_dir = os.path.join(tracker_dir, current)
-        if not os.path.isdir(current_dir):
-            continue
-
-        try:
-            state = reduce_ticket(current_dir)
-        except Exception:  # noqa: BLE001 — safe broad catch (story lean-sloth-ham verified): unreducible node skipped in the cycle BFS (fail-open guard)
-            continue
-
-        if state is None or not isinstance(state, dict):
-            continue
-
-        current_level = state.get("ticket_type", "").lower()
-        if current_level != level:
-            continue
-
-        for dep in state.get("deps", []):
-            relation = dep.get("relation", "")
-            if relation in ("blocks", "depends_on"):
-                target = dep.get("target_id", "")
-                if target and target not in visited:
-                    target_dir = os.path.join(tracker_dir, target)
-                    if os.path.isdir(target_dir):
-                        try:
-                            t_state = reduce_ticket(target_dir)
-                        except Exception:  # noqa: BLE001 — reduce_ticket fallback: an unreducible neighbour is skipped during traversal
-                            t_state = None
-                        if t_state and t_state.get("ticket_type", "").lower() == level:
-                            queue.append(target)
-
-    return False
+    # Walking to completion and testing membership is equivalent to the former
+    # mid-loop ``if current == source_id: return True``: source_id can only be
+    # dequeued if some neighbour yielded it (the seed is target_id, and the
+    # self-loop case already returned), so it is reachable iff it is accumulated.
+    return source_id in bfs([target_id], neighbors)

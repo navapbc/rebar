@@ -323,3 +323,50 @@ def test_cycle_detection_ignores_suggestions_dir(tmp_path: Path) -> None:
     assert "tkt-bbb" not in blocked, (
         f"Expected tkt-bbb not in blocked set (no link exists), got {blocked!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Characterization: _get_all_blocked_by returns an ACCUMULATOR, not `visited`
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_get_all_blocked_by_accumulates_targets_without_a_ticket_dir(tmp_path: Path) -> None:
+    """`_get_all_blocked_by` adds every `blocks` target unconditionally, and never
+    the seed.
+
+    Pins the distinction that the traversal returns an accumulator of discovered
+    edge targets rather than the BFS `visited` set:
+
+    - a `blocks` target with NO backing ticket directory is still in the result
+      (``_graph.py`` adds it before any existence check, so it is accumulated even
+      though it is never reduced);
+    - the seed id is absent unless a real edge points back at it, even though the
+      seed is always in `visited`.
+
+    Without this test a traversal refactor could return `visited` instead — which
+    would silently drop the dangling target AND add the seed, changing
+    ``check_would_create_cycle``'s ``target_id in _get_all_blocked_by(source_id)``
+    membership test.
+    """
+    from rebar.graph._graph import _get_all_blocked_by
+
+    tracker_dir = tmp_path / ".tickets-tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "tkt-seed", status="open")
+    _write_ticket(tracker_dir, "tkt-real", status="open")
+    # tkt-seed blocks a real ticket AND a target that has no ticket directory.
+    _write_link_event("tkt-seed", "tkt-real", "blocks", str(tracker_dir))
+    _write_link_event("tkt-seed", "tkt-ghost-no-dir", "blocks", str(tracker_dir))
+
+    blocked = _get_all_blocked_by("tkt-seed", str(tracker_dir))
+
+    assert "tkt-ghost-no-dir" in blocked, (
+        f"a `blocks` target with no ticket dir must still be accumulated, got {blocked!r}"
+    )
+    assert "tkt-real" in blocked, f"expected the real blocks target in {blocked!r}"
+    assert "tkt-seed" not in blocked, (
+        f"the seed must not appear in the result (it is visited, not accumulated), got {blocked!r}"
+    )

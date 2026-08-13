@@ -1,15 +1,60 @@
-"""Single source of truth for the blocking-relation vocabulary.
+"""Blocking-relation vocabulary and the graph-traversal primitives built on it.
 
-Kept dependency-free on purpose: every module that needs to know which relations
-are "blocking" — including the deliberately light-weight ``_ready`` — imports it
-from here, so the constant is defined ONCE and no module forks its own copy. (It
-cannot live in ``_status``: that module imports the heavy ``_loader``, which
-``_ready`` must not pull in.)
+Holds the pieces every graph query would otherwise re-derive: the set of relations
+that count as "blocking", the inversion of those edges into a blocked→blockers map,
+and the breadth-first walk skeleton the traversals share.
+
+Kept dependency-free on purpose — nothing here imports another rebar module — so
+the deliberately light-weight ``_ready`` can use it without pulling in the heavy
+loader/graph modules. (It cannot live in ``_status``: that module imports
+``_loader``, which ``_ready`` must not pull in.)
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+
 _BLOCKING_RELATIONS = frozenset({"blocks", "depends_on"})
+
+
+def bfs(
+    starts: Iterable[str],
+    neighbors_fn: Callable[[str, set[str]], Iterable[str]],
+) -> set[str]:
+    """Breadth-first walk that returns the ACCUMULATOR of discovered ids.
+
+    The queue/visited bookkeeping shared by the graph traversals, with every
+    filesystem read, reduction, exception-swallowing and filtering policy left to
+    the caller's ``neighbors_fn`` — this skeleton has none.
+
+    The returned set is the accumulator of everything ``neighbors_fn`` yielded, NOT
+    ``visited``. The two differ in both directions and callers depend on it:
+
+    - a start id is absent from the result unless some edge genuinely yields it,
+      even though it is always in ``visited``;
+    - a yielded id is present even when nothing backs it on disk and it is
+      therefore never expanded.
+
+    ``visited`` is passed to ``neighbors_fn`` (read-only by contract) because the
+    callers consult it while deciding what to yield — an already-visited node is
+    not re-yielded, which is precisely what keeps a start id out of the result.
+    """
+    accumulated: set[str] = set()
+    visited: set[str] = set()
+    queue: list[str] = list(starts)
+
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+
+        for neighbor in neighbors_fn(current, visited):
+            accumulated.add(neighbor)
+            if neighbor not in visited:
+                queue.append(neighbor)
+
+    return accumulated
 
 
 def build_blocked_by(ticket_states: dict) -> dict[str, set[str]]:
