@@ -2446,9 +2446,17 @@
       "updated_at": "2026-07-30T01:02:20Z"
     },
     "039b-d179-b669-4439": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nTwo accepted reliability oracles still consume multi-second wall time per matrix cell: test_slow_but_progressing_remote_is_not_aborted deliberately serves for 15 seconds (15.1s in current macOS CI; original behavior ticket suave-constant-cow), and test_read_retried_then_terminal uses one-second timeout/grace/drain windows across retries (9.06s; original behavior ticket fizzy-trunk-salt). Their real process/socket coverage is load-bearing, but the production-scale durations are not.\n\n## Plan\nRetain one real socket/process-group sentinel for each mechanism while injecting smaller test-only stall, timeout, grace, and drain windows with generous scheduling headroom. Keep semantic attempt/reap/throughput assertions and use polling rather than brittle absolute-time pass conditions.\n\n## Acceptance Criteria\n- [ ] Slow-progress crosses a full configured low-speed window and proves throughput, not elapsed wall time, prevents abort.\n- [ ] ACLI read spawns exactly the production retry count and proves every process group is reaped.\n- [ ] Production timeout/stall defaults are unchanged.\n- [ ] Focused tests retain real subprocess/socket execution but complete in low single-digit seconds on macOS CI.\n- [ ] No absolute upper-bound assertion is tightened into a loaded-runner flake.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Shrink test-only real-time windows in subprocess and network sentinels"
+      },
       "created_at": "2026-08-13T05:34:55Z",
       "jira_id": "4588561",
       "jira_key": "REB-2831",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:34:58Z"
     },
@@ -13854,9 +13862,17 @@
       "updated_at": "2026-06-25T22:58:29Z"
     },
     "1c79-1d10-26b0-4a4e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe real-artifact oracle from closed ticket ducal-statuelike-ladybird is valuable, but tests/unit/test_build_provenance.py independently archives the repository and runs python -m build several times. A current macOS job spent 24.34s, 15.53s, and 14.83s in three visible cases, over 54 runner-seconds before the remaining cases. No existing ticket owns test-fixture reuse.\n\n## Plan\nShare immutable clean-source/archive and eligible base-build artifacts at module/session scope, while retaining independent real builds for distinct observable contracts: wheel-from-sdist provenance, empty-env failure, sdist contents, and rebuild-from-sdist preservation.\n\n## Acceptance Criteria\n- [ ] Every existing real wheel/sdist assertion remains and still executes the relevant build boundary.\n- [ ] Clean source extraction and identical prerequisite builds are not repeated per test.\n- [ ] A defect-seeded missing COMMIT still fails the held-out oracle.\n- [ ] Packaging tests remain hermetic and do not reuse artifacts across pytest sessions.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Reuse build-provenance fixtures while preserving real wheel and sdist coverage"
+      },
       "created_at": "2026-08-13T05:35:03Z",
       "jira_id": "4588562",
       "jira_key": "REB-2832",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:35:06Z"
     },
@@ -25140,9 +25156,17 @@
       "updated_at": "2026-06-25T22:59:00Z"
     },
     "325e-7e85-d0d6-4318": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe accepted benchmark contract on closed ticket left-changeful-mamba deliberately requires 3,000 tickets, 6,000 events, exactly 24 batched commits, and at least a 10x commit-count reduction. The test is still the integration tier long pole: 90.18s on 2026-08-01 and 93.34-107.84s on current macOS jobs, consuming 37-45% of the entire integration tier. Reducing N would violate the accepted contract and is out of scope.\n\n## Plan\nProfile import_tickets across N values only to locate scaling costs, then optimize the importer/batch persistence path while preserving N=3000 and the commit/crash-resume contracts. Prefer fewer redundant scans/serializations/git operations, not test removal or sharding.\n\n## Acceptance Criteria\n- [ ] The committed benchmark remains N=3000 with 6,000 events and exactly 24 commits.\n- [ ] Created/comment counts and >=10x reduction assertions remain unchanged.\n- [ ] A before/after profile identifies the dominant scaling artifact and demonstrates lower runner time on the same host.\n- [ ] Crash-resume and rollback suites stay green.\n- [ ] No platform or Python-matrix coverage is removed.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Optimize the N=3000 import benchmark path without shrinking its contract"
+      },
       "created_at": "2026-08-13T05:35:11Z",
       "jira_id": "4588563",
       "jira_key": "REB-2833",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:35:14Z"
     },
@@ -41973,7 +41997,7 @@
         },
         "description": "## Context / Problem\nOn 2026-08-12 a session was blocked on the tickets write lock for 15+ minutes: a `transition ... closed` (pid 61327) held both legs of the store write lock (`.ticket-write.lock` and `.ticket-write.lock.d`) for the whole LLM completion verification. rebar had NO diagnostic surface for this \u2014 the operator had to `ls` the lock dir and `cat` the owner stamp by hand to learn who held it and whether that process was still alive. `rebar doctor` today only audits blocking links, so an operator facing a wedged store has nothing to run.\n\nThe lock-hold defect itself is bug `sunlit-cynical-ray` (84af-8d4f-bc1c-41b9), fixed in parallel. This ticket is the OBSERVABILITY half and does not change locking behaviour: even after 84af lands, a held or orphaned lock still needs to be inspectable.\n\n## Approach\nAdd a read-only lock-health section to `rebar doctor`. All the primitives already exist and are REUSED, not re-derived:\n\n- `rebar._store.lock.write_lock_is_busy` \u2014 the existing zero-deadline both-legs probe.\n  Its immediate-probe technique (fcntl `LOCK_EX|LOCK_NB`, `mkdir`, give straight back)\n  is what the per-leg probes use, so held/free is answered without waiting.\n- `rebar._store.lock_owner._parse_v2_stamp` / `_describe_stamped_pid` /\n  `_mkdir_lock_age_s` \u2014 the v2 owner stamp (host/ns/pid/start), the same-host-only\n  liveness verdict (`live` / `not-running` / `unprobeable (...)`), and the hold age.\n- `rebar._store.lock_owner._mkdir_lock_is_stale(lock_dir, fcntl_held=False)` \u2014 the SOLE\n  staleness authority. No second heuristic is written; the pid-recycle qualification and\n  the wall-clock ceiling from the existing decision table are inherited as-is.\n  `fcntl_held=False` because doctor holds nothing.\n\nLegs reported: the tracker's fcntl leg `.ticket-write.lock`, the tracker's mkdir leg `.ticket-write.lock.d`, `.rebar/hlc.lock` (fcntl, probed the same non-blocking way), and `.rebar/enrich-drain.lock` (an `O_EXCL` existence lock, so held == file exists). The drain lock carries no owner stamp; its staleness is reported as `not-assessable` rather than guessed at, because inventing a heuristic for it is exactly what this plan forbids.\n\nDoctor is READ-ONLY here: nothing is reclaimed or deleted, and `--repair` does not touch locks (its repair loop iterates only the link findings list, which lock results never join). A held lock with a live holder is INFO. A lock the shared staleness function calls stale is a FINDING and joins doctor's existing exit-code rule (exit 1 when anything is outstanding, 0 otherwise).\n\nBecause `_commands/doctor.py` is a link-audit module, the lock checks land in a new sibling module `_commands/doctor_locks.py` along the existing command-module seam (the same split `fsck.py`/`fsck_repair.py` uses); `doctor.py` calls one entry point and renders the result.\n\n## Scope\n- `src/rebar/_commands/doctor_locks.py` (new) \u2014 leg probes, stamp decode, report + finding\n  construction, text rendering.\n- `src/rebar/_commands/doctor.py` \u2014 call the scan, add `locks` / `lock_findings` to the\n  JSON envelope and the text output, fold lock findings into the exit code.\n- `src/rebar/schemas/doctor.schema.json` \u2014 describe the two new keys.\n- `docs/cli-reference.md` \u2014 document the lock section under `rebar doctor`.\n- `tests/scripts/graph/test_doctor.py` (or a new sibling test module) \u2014 the tests below.\n\n## Testing\n- Happy path: a free store reports every leg `free`, no lock findings, exit unchanged (0).\n- Held-and-healthy: holding the real write lock via `lock.write_lock`, doctor reports the\n  mkdir leg held, names host/pid from the stamp, reports a non-negative hold age and a\n  live pid state, and produces NO finding (INFO only) \u2014 so exit stays 0.\n- Stale/dead holder: a mkdir lock dir stamped with a v2 stamp for a dead pid on this host\n  produces a `stale-lock` finding and exit 1.\n- Unreadable/absent stamp: a lock dir with no owner file reports `unknown (no ownership\n  stamp)` and does not crash; a `.rebar` dir that does not exist reports the two `.rebar`\n  legs as absent rather than raising.\n- Read-only guarantee: after a doctor run over a held lock, the lock dir, its owner file\n  and the drain lock file all still exist byte-identical (doctor never reclaims).\n- JSON contract: `--output json` validates against the updated doctor schema.\n\n## Acceptance Criteria\n- [x] `rebar doctor` reports, for each of the four legs, held/free (or absent), and for\n      the mkdir leg the v2 stamp fields host/ns/pid/start, holder liveness, and hold age \u2014\n      verified by the held-and-healthy test asserting those fields in `--output json`.\n- [x] Holder liveness is same-host only: a stamp from another host identity or another pid\n      namespace reports an `unprobeable (...)` verdict, never a pid guess \u2014 verified by a\n      test stamping a foreign host identity.\n- [x] Staleness comes only from `lock_owner._mkdir_lock_is_stale`; a grep of the new module\n      shows no second staleness heuristic (no independent age threshold, no independent pid\n      probe used to decide stale).\n- [x] A dead-holder lock yields a finding and `rebar doctor` exits 1; a live-holder lock\n      yields no finding and exits 0 \u2014 verified by the two tests above.\n- [x] Doctor never mutates lock state: the read-only test shows lock dir, owner file and\n      drain lock file unchanged after a run, and `--repair` performs no lock action.\n- [x] `--output json` matches `src/rebar/schemas/doctor.schema.json` and\n      `docs/cli-reference.md` documents the lock section \u2014 verified by the schema test and\n      the docs diff.\n- [x] All `src/rebar` files stay under the 800-LOC module cap (module-size gate green).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "doctor: lock health checks (held/free, holder liveness, hold age, staleness)"
       },
       "created_at": "2026-08-13T04:17:28Z",
@@ -91998,9 +92022,17 @@
       "updated_at": "2026-07-13T18:24:37Z"
     },
     "baeb-4f4b-3227-457e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nTwo accepted reliability oracles still consume multi-second wall time per matrix cell: test_slow_but_progressing_remote_is_not_aborted deliberately serves for 15 seconds (15.1s in current macOS CI; original behavior ticket suave-constant-cow), and test_read_retried_then_terminal uses one-second timeout/grace/drain windows across retries (9.06s; original behavior ticket fizzy-trunk-salt). Their real process/socket coverage is load-bearing, but the production-scale durations are not.\n\n## Plan\nRetain one real socket/process-group sentinel for each mechanism while injecting smaller test-only stall, timeout, grace, and drain windows with generous scheduling headroom. Keep semantic attempt/reap/throughput assertions and use polling rather than brittle absolute-time pass conditions.\n\n## Acceptance Criteria\n- [ ] Slow-progress still crosses a full configured low-speed window and proves throughput, not elapsed wall time, prevents abort.\n- [ ] ACLI read still spawns exactly the production retry count and proves every process group is reaped.\n- [ ] Production timeout/stall defaults are unchanged.\n- [ ] The focused tests retain real subprocess/socket execution but complete in low single-digit seconds on macOS CI.\n- [ ] No absolute upper-bound assertion is tightened into a loaded-runner flake.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Shrink test-only real-time windows in subprocess and network sentinels"
+      },
       "created_at": "2026-08-13T05:35:19Z",
       "jira_id": "4588564",
       "jira_key": "REB-2834",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-13T05:35:22Z"
     },
