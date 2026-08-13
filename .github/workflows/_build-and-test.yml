@@ -363,6 +363,40 @@ jobs:
             exit 1
           fi
 
+      # pandoc provenance gate (story 5c0e): the DC wiki renderer executes a GPL binary that
+      # ships inside the `pypandoc-binary` wheel, and NOTICE records that binary's version and
+      # licence for anyone redistributing a bundle containing it. The obligation is only
+      # discharged if NOTICE describes what is actually shipped, so this fails when the wheel
+      # pin is loosened (a range would make the shipped pandoc unknowable) or when the pin and
+      # NOTICE disagree about the version.
+      - name: pandoc pin + NOTICE provenance gate
+        shell: bash
+        run: |
+          pins=$(grep -oE 'pypandoc-binary==[0-9][0-9A-Za-z.]*' pyproject.toml | sort -u)
+          if [ -z "$pins" ]; then
+            echo "::error::pyproject.toml must pin pypandoc-binary with '==' — a range leaves the"
+            echo "  bundled GPL pandoc version unknowable, so NOTICE cannot describe what ships."
+            exit 1
+          fi
+          if [ "$(printf '%s\n' "$pins" | wc -l)" -ne 1 ]; then
+            echo "::error::pypandoc-binary is pinned to more than one version: $pins"
+            exit 1
+          fi
+          if [ ! -f NOTICE ]; then
+            echo "::error::NOTICE is missing — it records the bundled pandoc's GPL obligation."
+            exit 1
+          fi
+          if ! grep -q "$pins" NOTICE; then
+            echo "::error::NOTICE does not mention the pinned wheel ($pins). Update NOTICE so the"
+            echo "  recorded pandoc provenance matches what the wheel actually ships."
+            exit 1
+          fi
+          if ! grep -qi 'GPL' NOTICE; then
+            echo "::error::NOTICE no longer records pandoc's GPL licence."
+            exit 1
+          fi
+          echo "pandoc provenance gate: OK ($pins, recorded in NOTICE)."
+
       # Module-size gate: an ABSOLUTE hard cap on every src/rebar/**/*.py file. There is no
       # allowlist escape hatch any more (epic 716f drained it to zero). The limit is
       # single-sourced in .github/module-size-limit.txt and LOCKED: changing it requires an

@@ -428,6 +428,14 @@ class ReconcilerConfig:
     # 100%-traffic flip — and setting it back to "off" IS the rollback: the codecs
     # return to the plain/identity wire with no capability revert or redeploy.
     rich_text_cutover: str = "off"
+    # Wall-clock ceiling, in seconds, on ONE pandoc invocation in the Data Center
+    # wiki renderer (story 5c0e). One corpus body span pandoc's jira reader for
+    # 13.5 minutes at 95.8% CPU, and pypandoc's high-level API sets no timeout at
+    # all, so without this a single field can stall a reconcile indefinitely. The
+    # 10s default is >30x the observed ~0.3s per-field render and ~80x below that
+    # hang, so it cannot fire on healthy input. On expiry the unit degrades to its
+    # original Markdown — echo-safe, and no other unit is affected.
+    dc_pandoc_timeout_s: float = 10.0
     # Which vendor backend the reconciler drives (ADR 0035 §(d) vendor-adapter seam,
     # epic bbf1). Selects the adapter via the in-tree backend registry
     # (rebar_reconciler._backend_registry.select_backend). Only "jira" exists today;
@@ -681,6 +689,7 @@ _SECTIONS: dict[str, dict] = {
         "backend": lambda v, k: _as_choice(v, k, {"jira", "jira-datacenter"}),
         "rich_text_cutover": lambda v, k: _as_choice(v, k, {"off", "cloud", "dc", "both"}),
         "jira_cli_timeout": lambda v, k: _as_int(v, k, minimum=0),
+        "dc_pandoc_timeout_s": lambda v, k: _as_float(v, k, minimum=0.0),
         "lock_lease_secs": lambda v, k: _as_int(v, k, minimum=1),
         "deletion_probe_limit": lambda v, k: _as_int(v, k, minimum=1),
         "id_guard_bypass_unsafe": lambda v, k: _as_bool(v, k),
