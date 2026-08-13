@@ -69,15 +69,56 @@ WIKI_DESCRIPTION_LIMIT: int = 32767
 _WIKI_TRUNCATION_SUFFIX: str = " … [truncated by reconciler]"
 
 
+def cutover_clients() -> frozenset[str]:
+    """Which clients send the RICH rich-text wire (story 3388, epic 708d).
+
+    Resolved from ``reconciler.rich_text_cutover``: ``off`` (default) → nothing,
+    ``cloud``/``dc`` → that one client, ``both`` → both. Read at CALL time, never at
+    import time, so flipping the flag needs no redeploy and a module-level codec cannot
+    freeze the answer.
+
+    Fails CLOSED to the plain wire: an unreadable or absent config yields the empty set,
+    so a config problem can never silently cut a client over. Config is imported lazily
+    (the reconciler engine is stdlib-only and ships as subprocess package data, so it
+    must stay importable without ``rebar`` on the path).
+    """
+    try:
+        from rebar.config import ConfigError, load_config
+    except ImportError:
+        return frozenset()
+    try:
+        value = load_config().reconciler.rich_text_cutover
+    except ConfigError:
+        return frozenset()
+    if value == "both":
+        return frozenset({"cloud", "dc"})
+    if value in ("cloud", "dc"):
+        return frozenset({value})
+    return frozenset()
+
+
 class WikiTextCodec:
     """Data Center's rich-text codec: plain text / wiki markup, REST v2.
 
     Unlike Cloud's ADF, DC has no document-structure inflation to measure, so
-    ``fit_outbound`` is a plain character truncation at ``WIKI_DESCRIPTION_LIMIT``,
-    and ``normalize_outbound`` is the identity (wiki markup has no soft-wrap
-    rejoin transform to undo). ``to_wire``/``decode_inbound`` are the identity
-    on ``str`` since DC's wire shape already IS plain text.
+    ``fit_outbound`` is a plain character truncation at ``WIKI_DESCRIPTION_LIMIT``.
+
+    Two modes, selected by ``rich`` and NOT by editing this class:
+
+    * ``rich=False`` (the DEFAULT, and what every existing caller gets) — fully
+      identity, byte-for-byte today's wire.
+    * ``rich=True`` — ``to_wire`` renders Markdown to wiki markup via story ``271c``'s
+      segmenting renderer, and ``normalize_outbound`` is derived from it.
+
+    The mode is driven by ``reconciler.rich_text_cutover`` (story 3388), which ships
+    ``off``; setting it back to ``off`` restores the identity wire with no capability
+    revert. Defaulting to ``False`` means a caller not routed through the flag cannot
+    accidentally cut over. The DC codec is ONE-WAY and lossy, so loop prevention must
+    never rest on ``decode(encode(x)) == x``; that is the echo-suppression layer's job.
     """
+
+    def __init__(self, *, rich: bool = False) -> None:
+        self._rich = rich
 
     def fit_outbound(self, text: str) -> str:
         """Truncate ``text`` to ``WIKI_DESCRIPTION_LIMIT`` characters.
@@ -94,12 +135,30 @@ class WikiTextCodec:
         return text[:keep] + _WIKI_TRUNCATION_SUFFIX
 
     def normalize_outbound(self, text: str) -> str:
-        """Identity: wiki markup has no soft-wrap rejoin to normalize."""
-        return text
+        """Render ``text`` as it will read after a Jira DC round trip.
+
+        Identity in plain mode (wiki markup has no soft-wrap rejoin to undo). In rich
+        mode this is ``decode_inbound(to_wire(text))`` BY CONSTRUCTION — and since DC's
+        ``decode_inbound`` is the identity, that is exactly the rendered wiki. Deriving
+        it from ``to_wire`` rather than writing a second normalizer is what keeps the
+        codec law (ticket a32a) true for the lossy one-way DC codec.
+        """
+        if not self._rich or not isinstance(text, str):
+            return text
+        return self.decode_inbound(self.to_wire(text))
 
     def to_wire(self, text: str) -> Any:
-        """Identity: DC's wire shape for rich text already is the plain ``str``."""
-        return text
+        """The wire shape DC stores.
+
+        Identity in plain mode. In rich mode the Markdown is rendered to wiki markup by
+        the segmenting renderer from story ``271c``, which converts only what converts
+        losslessly and passes everything else through byte-for-byte.
+        """
+        if not self._rich or not isinstance(text, str):
+            return text
+        from rebar_reconciler.adapters.jira_family.wiki_render import render_markdown_to_wiki
+
+        return render_markdown_to_wiki(text)
 
     def decode_inbound(self, body: Any) -> str:
         """Identity on ``str``; ``""`` for ``None``."""

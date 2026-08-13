@@ -269,6 +269,7 @@ standard names, which deliberately differ from the auto-derived
 ```toml
 [tool.rebar.reconciler]   # advanced; sensible defaults, rarely needed
 jira_cli_timeout       = 0     # acli call timeout (s); 0 ⇒ the 120s default. env REBAR_JIRA_CLI_TIMEOUT (alias REBAR_ACLI_TIMEOUT)
+rich_text_cutover      = "off" # rich-text wire per client: off|cloud|dc|both. Ships OFF; set back to "off" to roll back. env REBAR_RECONCILER_RICH_TEXT_CUTOVER
 # pass-lock/phase-gate backend: the self-healing refs/reconciler/* CAS lock is the ONLY backend.
 # The `lock_backend` key + its legacy accepted-but-ignored "file" value were removed pre-1.0
 # (ticket unclear-verymad-sablefish); a still-present key is ignored as unknown. See ADR 0031.

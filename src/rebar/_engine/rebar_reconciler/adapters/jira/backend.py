@@ -34,6 +34,7 @@ from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sani
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
 from rebar_reconciler.adapters.jira_family.identity_model import AccountIdIdentity
 from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
+from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
 
 
 def _fit_description(value: str) -> str:
@@ -48,7 +49,7 @@ def _fit_description(value: str) -> str:
     pinned ``adf`` module directly, so a Data Center backend can supply its own
     codec without touching this call site.
     """
-    codec = AdfCodec()
+    codec = AdfCodec(rich="cloud" in cutover_clients())
     return codec.normalize_outbound(codec.fit_outbound(value))
 
 
@@ -60,7 +61,7 @@ class _JiraOutbound:
         # implementation of ``map_fields_to_remote`` exists in the tree, in
         # ``adapters/jira_family/outbound_mapper.py`` — the ADF-vs-wiki
         # difference is a constructor parameter, not a duplicated method.
-        self._mapper = OutboundFieldMapper(AdfCodec())
+        self._mapper = OutboundFieldMapper(AdfCodec(rich="cloud" in cutover_clients()))
 
     def map_local_to_remote(
         self,

@@ -38,6 +38,7 @@ from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldM
 from rebar_reconciler.adapters.jira_family.rich_text import (
     _WIKI_TRUNCATION_SUFFIX,
     WikiTextCodec,
+    cutover_clients,
 )
 from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
@@ -65,7 +66,7 @@ def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
     local<->Jira vocabulary stays one definition; only the rich-text fit
     (``WikiTextCodec`` — plain text, not ADF) differs.
     """
-    codec = WikiTextCodec()
+    codec = WikiTextCodec(rich="dc" in cutover_clients())
     return {
         "summary": ticket.get("title") or "",
         "description": codec.fit_outbound(ticket.get("description") or ""),
@@ -86,7 +87,7 @@ class _DCOutbound:
         *,
         assignee_resolver: Callable[[str], tuple[Any, bool, bool]] | None = None,
     ) -> None:
-        self._mapper = OutboundFieldMapper(WikiTextCodec())
+        self._mapper = OutboundFieldMapper(WikiTextCodec(rich="dc" in cutover_clients()))
         #: DC's live account search, bound ONCE to the deployment's client (it takes no
         #: remote key, unlike Cloud's per-issue closure). A declared constructor parameter
         #: rather than an attribute the backend sets from outside (ticket 65d7): the
@@ -194,7 +195,7 @@ class _DCSanitizer:
     ``jira_family/sanitizers.py``)."""
 
     def __init__(self, comment_max_chars: int | None = None) -> None:
-        self._codec = WikiTextCodec()
+        self._codec = WikiTextCodec(rich="dc" in cutover_clients())
         #: ``None`` = resolve from config on first use (see :meth:`comment_max_chars`).
         #: An explicit value is the injection seam tests and callers use to bind a
         #: known ceiling without touching the process config.

@@ -32,6 +32,7 @@ from rebar_reconciler.adapters.jira_family import sanitize_comment as _shared_sa
 from rebar_reconciler.adapters.jira_family import (
     sanitize_description as _shared_sanitize_description,
 )
+from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
 
 
 def _sanitize_description(description: str) -> str:
@@ -50,7 +51,9 @@ def _sanitize_description(description: str) -> str:
     Send-side only — the local store is never mutated; a warning is emitted so an
     operator can investigate.
     """
-    return _shared_sanitize_description(description, fit=AdfCodec().fit_outbound)
+    return _shared_sanitize_description(
+        description, fit=AdfCodec(rich="cloud" in cutover_clients()).fit_outbound
+    )
 
 
 def _sanitize_comment(body: str) -> str:

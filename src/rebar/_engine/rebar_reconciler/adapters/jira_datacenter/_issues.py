@@ -21,7 +21,7 @@ from rebar_reconciler.adapters.jira_datacenter.transitions import (
     transition_to_status,
 )
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _sanitize_summary
-from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec, cutover_clients
 
 #: Bridge-schema keys the create payload carries for Cloud's ``AcliClient`` and that
 #: Jira has no field for — forwarded as field ids they 400 the WHOLE create. Their
@@ -34,10 +34,17 @@ _BRIDGE_ONLY_CREATE_FIELDS: frozenset[str] = frozenset({"title", "ticket_type"})
 #: the outbound status lands later through ``route_status_to_transition``.
 _UNSETTABLE_AT_CREATE_FIELDS: frozenset[str] = frozenset({"status"})
 
+
 #: DC's REST v2 descriptions are plain text/wiki markup with the instance's
 #: ``jira.text.field.character.limit`` cap; the codec is the one place that fit
 #: is spelled, shared with the backend's description sanitizer.
-_DESCRIPTION_CODEC = WikiTextCodec()
+#:
+#: Built per CALL, not once at import: the rich-text cutover flag
+#: (``reconciler.rich_text_cutover``, story 3388) is read at call time, and a
+#: module-level codec would freeze whatever the flag said when this module was first
+#: imported — which for a long-lived reconciler process is "whatever it was at boot".
+def _description_codec() -> WikiTextCodec:
+    return WikiTextCodec(rich="dc" in cutover_clients())
 
 
 def _create_summary(ticket_data: dict[str, Any]) -> str:
@@ -108,7 +115,12 @@ def _translate_create_fields(ticket_data: dict[str, Any]) -> dict[str, Any]:
     fields["issuetype"] = _create_issuetype(ticket_data)
     description = fields.get("description")
     if isinstance(description, str):
-        fields["description"] = _DESCRIPTION_CODEC.fit_outbound(description)
+        # CREATE is a SECOND DC send path, distinct from the update path's mapper. It
+        # must render too: fitting without ``to_wire`` would post raw Markdown on create
+        # and rendered wiki on every later update. In plain mode both ops are the
+        # identity, so this is byte-for-byte today's behaviour.
+        codec = _description_codec()
+        fields["description"] = codec.to_wire(codec.fit_outbound(description))
     # Jira's REST API wants OBJECTS for these two, and a live run is what said so — with the
     # bridge-only names fixed the create got further and failed differently:
     #   "priority":"Could not find valid 'id' or 'name' in priority object."
