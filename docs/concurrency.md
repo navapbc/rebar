@@ -351,6 +351,21 @@ rebase** (bug 637b: an interrupted rebase strands picks as dangling commits, and
 compaction `*.retired` renames conflict under rebase where merge unions cleanly).
 
 ### Outbound — push (on every write)
+
+> **Never let the `tickets` branch trigger your CI.** Because every write auto-pushes,
+> a CI system that watches all branches turns each comment, claim, and close into a
+> pipeline run — and a busy day of ticket activity can saturate a shared runner pool
+> and starve the builds that actually gate your merges. The branch carries an event log,
+> not code, so there is nothing on it for a build to compile or test. Configure your CI
+> so pushes to `tickets` (see `sync.remote` in
+> [config.md](config.md#config-key-inventory)) match no workflow: on GitHub Actions add the
+> branch to each workflow's `on.push.branches-ignore` (or use an explicit `branches:`
+> allow-list that omits it); other systems have an equivalent branch filter. If a job
+> genuinely needs to read the store — a reconciler, an audit, a metrics roll-up — run it
+> on a **schedule** and let it fetch the branch, rather than on a push trigger. rebar's
+> own repository does exactly this, and pins it with a test that enumerates every
+> workflow file so a newly added one cannot reintroduce the trigger.
+
 **Every** rebar write (`create`/`edit`/`transition`/`claim`/`link`/…) auto-commits
 its event and then auto-pushes — so local ticket activity (including test/scratch
 tickets) propagates to the shared `origin/tickets` **immediately**, with no

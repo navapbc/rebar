@@ -26,7 +26,10 @@ name: Verify Authorship Identity
 # and the pre-merge Verified gate is untouched.
 on:
   push:
-    branches-ignore: ["feature/**", "main"]
+    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
+    # multiplies each comment into a CI run and starves the runner pool. It carries no code
+    # — never CI it (ticket refractive-conceptual-sunbear).
+    branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch: {}
   schedule:

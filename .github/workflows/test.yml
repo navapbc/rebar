@@ -30,7 +30,10 @@ on:
     # signal moved to the schedule below: "is main healthy NOW", not "was every commit green".
     # Pre-merge gating is untouched — the Verified vote runs the same reusables against the
     # exact patchset via gerrit-verify.yaml (ticket 03ef-6fb5-158b-4abd).
-    branches-ignore: ["feature/**", "main"]
+    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
+    # multiplies each comment into a CI run and starves the runner pool. It carries no code
+    # — never CI it (ticket refractive-conceptual-sunbear).
+    branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch:
     inputs:

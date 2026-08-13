@@ -22,7 +22,10 @@ on:
     # `main` is excluded with every other branch-health lane (ticket 03ef-6fb5-158b-4abd).
     # This lane does NOT join the 6-hourly tick: its live tier is billable, so the weekly
     # cadence below stays exactly as it was — moving it would be a 28x cost increase.
-    branches-ignore: ["feature/**", "main"]
+    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
+    # multiplies each comment into a CI run and starves the runner pool. It carries no code
+    # — never CI it (ticket refractive-conceptual-sunbear).
+    branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch: {}
   schedule:

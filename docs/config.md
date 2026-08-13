@@ -155,6 +155,9 @@ sync.remote = "origin"  # git remote the tickets branch syncs to — push/fetch/
                         # the OPTIONAL `git-remote-s3` helper (`pip install 'nava-rebar[s3]'`),
                         # keeping ticket history entirely out of any git host — see
                         # `s3-backend.md`. This is opt-in; core rebar never requires boto3/AWS.
+                        # Every write pushes to this remote, so make sure the tickets branch
+                        # triggers NO CI workflow there — see `concurrency.md`, "Outbound —
+                        # push (on every write)".
 
 # MCP server gates
 mcp.readonly         = false
