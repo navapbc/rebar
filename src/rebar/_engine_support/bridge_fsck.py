@@ -30,6 +30,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 from rebar._errors import RebarError
 from rebar._store.gitutil import run_git
@@ -47,7 +48,7 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
-def _load_classify():
+def _load_classify() -> ModuleType:
     """Load the pure reconciler classifier (leaf, stdlib-only) by path.
 
     bridge fsck is the SECOND consumer of the one classifier (epic 3006-e198,

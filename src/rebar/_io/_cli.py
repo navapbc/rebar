@@ -9,6 +9,7 @@ line stays a clean ticket object.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 from .export_ndjson import export_tickets
 from .import_ndjson import import_tickets
@@ -20,7 +21,7 @@ _EXPORT_USAGE = (
 )
 
 
-def export_cli(argv: list[str], *, repo_root=None) -> int:
+def export_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
     """Parse flags, stream NDJSON, print run metadata to stderr. Returns exit code."""
     out_file = None
     status = ticket_type = parent = None
@@ -95,7 +96,7 @@ def export_cli(argv: list[str], *, repo_root=None) -> int:
 _IMPORT_USAGE = "Usage: rebar import [FILE] [--dry-run]   (reads stdin if FILE omitted)"
 
 
-def import_cli(argv: list[str], *, repo_root=None) -> int:
+def import_cli(argv: list[str], *, repo_root: str | Path | None = None) -> int:
     """Parse flags, import NDJSON (FILE or stdin), print a summary. Returns exit code."""
     in_file = None
     dry_run = False

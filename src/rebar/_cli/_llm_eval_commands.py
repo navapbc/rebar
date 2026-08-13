@@ -37,7 +37,7 @@ def _prompt(argv: list[str]) -> int:
     return 1
 
 
-def _prompt_eval(args) -> int:
+def _prompt_eval(args: argparse.Namespace) -> int:
     import json as _json
 
     from rebar import config
@@ -124,7 +124,7 @@ def _criteria(argv: list[str]) -> int:
     return 1
 
 
-def _criteria_eval(args) -> int:
+def _criteria_eval(args: argparse.Namespace) -> int:
     import json as _json
 
     from rebar import config
@@ -176,7 +176,7 @@ def _criteria_eval(args) -> int:
         sys.stdout.write(_json.dumps(report) + "\n")
         return 0
 
-    def _pct(v):
+    def _pct(v: float | None) -> str:
         return "—" if v is None else f"{v * 100:.0f}%"
 
     sys.stdout.write(f"Calibration for criterion {report['criterion']!r} ({report['prompt']}):\n")
@@ -228,7 +228,7 @@ def _llm(argv: list[str]) -> int:
     return 1
 
 
-def _llm_setup(args) -> int:
+def _llm_setup(args: argparse.Namespace) -> int:
     import json as _json
 
     import rebar

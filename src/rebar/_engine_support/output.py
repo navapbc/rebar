@@ -61,7 +61,9 @@ class OutputFormatError(ValueError):
     """An invalid or missing ``--output`` value."""
 
 
-def _resolve_profile(profile: str | None, allowed, default):
+def _resolve_profile(
+    profile: str | None, allowed: Iterable[str] | None, default: str | None
+) -> tuple[str, tuple[str, ...]]:
     """Return (default, allowed-tuple) from a named profile or explicit args."""
     if profile is not None:
         try:
@@ -129,7 +131,9 @@ def parse_output(
     return fmt, rest
 
 
-def error_envelope(error: str, input_str: str, message: str, exit_code=None) -> dict:
+def error_envelope(
+    error: str, input_str: str, message: str, exit_code: int | str | None = None
+) -> dict:
     """Build the canonical machine-readable error envelope (common.schema.json
     error_envelope). ``exit_code`` is optional (see docs/exit-codes.md). Single
     source of truth for the failure shape every ``--output json`` command emits on

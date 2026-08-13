@@ -23,6 +23,7 @@ returned shape is the ``AuditTrail`` TypedDict below (a documented, stable contr
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ def unavailable_plan_review_health() -> dict[str, bool | str]:
     }
 
 
-def plan_review_health(ticket: dict, *, repo_root=None) -> dict[str, Any]:
+def plan_review_health(ticket: dict, *, repo_root: str | Path | None = None) -> dict[str, Any]:
     """Return the current structured health for a ticket's plan-review attestation.
 
     Audit and detailed ticket views are observability surfaces, so an unavailable
@@ -87,7 +88,7 @@ def plan_review_health(ticket: dict, *, repo_root=None) -> dict[str, Any]:
         return unavailable_plan_review_health()
 
 
-def _completion_attestation(ticket_id: str, *, repo_root=None) -> dict | None:
+def _completion_attestation(ticket_id: str, *, repo_root: str | Path | None = None) -> dict | None:
     """The ticket's completion-verifier attestation as a plain dict, or ``None`` when
     unsigned / on any error. Read via :func:`rebar.verify_signature` (kind-scoped to
     ``completion-verifier``); a ``verdict == "unsigned"`` result (no signature record on the
@@ -110,7 +111,9 @@ def _completion_attestation(ticket_id: str, *, repo_root=None) -> dict | None:
         return None
 
 
-def _completion_sidecar_record(ticket_id: str, *, repo_root=None) -> dict | None:
+def _completion_sidecar_record(
+    ticket_id: str, *, repo_root: str | Path | None = None
+) -> dict | None:
     """The newest completion sidecar record for ``ticket_id``, or ``None``. A PASS record
     (``latest_pass_record``) wins over a FAIL record (``latest_fail_verdict``) when both
     exist — the documented tie-break for this surface. Best-effort — never raises."""
@@ -137,7 +140,7 @@ def _resolve(ticket_id: str, tracker: str) -> str:
         return ticket_id
 
 
-def _related_code_reviews(ticket_id: str, *, repo_root=None) -> list[dict]:
+def _related_code_reviews(ticket_id: str, *, repo_root: str | Path | None = None) -> list[dict]:
     """The code reviews associated with ``ticket_id``: ``code_review``-type tickets that link
     ``relates_to`` this ticket. Each match is returned as ``{"ticket_id": <cr id>, "sidecars":
     [...]}`` carrying that artifact's full retained code-review sidecar history (newest→oldest).
@@ -185,7 +188,7 @@ def _related_code_reviews(ticket_id: str, *, repo_root=None) -> list[dict]:
         return []
 
 
-def audit_trail(ticket_id: str, *, repo_root=None) -> dict:
+def audit_trail(ticket_id: str, *, repo_root: str | Path | None = None) -> dict:
     """Aggregate a ticket's FULL retained review history + associated code reviews into one
     ``AuditTrail`` dict (see module docstring for the exact shape).
 
@@ -219,7 +222,7 @@ def audit_trail(ticket_id: str, *, repo_root=None) -> dict:
     return dict(trail)
 
 
-def rebar_show(ticket_id: str, *, repo_root=None) -> dict:
+def rebar_show(ticket_id: str, *, repo_root: str | Path | None = None) -> dict:
     """``rebar.show_ticket(ticket_id)`` with a lazy import (best-effort — an error yields a
     minimal ``{"ticket_id": ...}`` stub rather than raising, keeping the aggregate resilient)."""
     try:

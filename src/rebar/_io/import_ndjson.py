@@ -44,6 +44,7 @@ import json
 import logging
 import os
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 from typing import Any, cast
 
 from . import _provenance
@@ -115,7 +116,9 @@ def _rec_sid(rec: dict) -> str:
     return cast(str, rec.get("ticket_id"))
 
 
-def import_tickets(source: Any, *, dry_run: bool = False, repo_root=None) -> dict:
+def import_tickets(
+    source: Any, *, dry_run: bool = False, repo_root: str | Path | None = None
+) -> dict:
     """Import tickets from NDJSON ``source`` into the target repo.
 
     Idempotent: a streaming scan of the target builds ``{source_id → local_id}`` and

@@ -39,6 +39,7 @@ from __future__ import annotations
 import logging
 import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from rebar.review_bot.finding_publish import render_findings_block
@@ -211,7 +212,7 @@ _REV_PARSE_TIMEOUT = 30
 _SHA_RE = re.compile(r"\A[0-9a-f]{7,64}\Z")
 
 
-def _resolve_reviewed_head(repo_root) -> str | None:
+def _resolve_reviewed_head(repo_root: str | Path) -> str | None:
     """The commit actually checked out at ``repo_root``, or ``None`` when the directory carries
     no resolvable git identity (not a repo, no HEAD, git unavailable).
 
@@ -234,7 +235,7 @@ def _resolve_reviewed_head(repo_root) -> str | None:
     return proc.stdout.strip() if proc.returncode == 0 else None
 
 
-def _assert_reviewed_tree(repo_root, ref: str, revision: str) -> None:
+def _assert_reviewed_tree(repo_root: str | Path, ref: str, revision: str) -> None:
     """Bind the tree that is about to be REVIEWED to the revision the vote will ATTACH to.
 
     ``ref`` (the patch set's ``refs/changes/...``) and ``revision`` arrive as two independently
@@ -277,7 +278,7 @@ def _assert_reviewed_tree(repo_root, ref: str, revision: str) -> None:
 
 def code_review_decision(
     diff_text: str,
-    repo_root,
+    repo_root: str | Path,
     ref: str,
     *,
     revision: str = "",

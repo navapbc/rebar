@@ -51,7 +51,11 @@ def _jinja_env() -> Environment:
 
 
 def _render_ticket(
-    ticket_id: str, *, repo_root: str | None, plan_round=None, code_round=None
+    ticket_id: str,
+    *,
+    repo_root: str | None,
+    plan_round: str | None = None,
+    code_round: str | None = None,
 ) -> str:
     """Render the read-only per-ticket audit page for ``ticket_id``.
 

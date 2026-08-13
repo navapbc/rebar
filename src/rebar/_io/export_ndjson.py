@@ -19,7 +19,8 @@ import json
 import os
 import time
 from collections.abc import Iterator
-from typing import Any
+from pathlib import Path
+from typing import Any, TextIO
 
 from rebar import config
 from rebar.reducer import reduce_ticket
@@ -123,7 +124,7 @@ def iter_export_states(
 
 def export_tickets(
     *,
-    out=None,
+    out: TextIO | str | os.PathLike[str] | None = None,
     status: Any = None,
     ticket_type: Any = None,
     parent: str | None = None,
@@ -131,7 +132,7 @@ def export_tickets(
     include_session_logs: bool = False,
     exclude_archived: bool = False,
     include_deleted: bool = False,
-    repo_root=None,
+    repo_root: str | Path | None = None,
 ) -> dict:
     """Export the store as NDJSON to ``out``; return run metadata.
 

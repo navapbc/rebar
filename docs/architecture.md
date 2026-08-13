@@ -422,16 +422,59 @@ discipline:
 
 - **`check_untyped_defs = true`** (global) — mypy checks the *bodies* of un-annotated
   functions, not just their signatures, so bugs inside un-typed defs can't slip through.
-- **`disallow_untyped_defs`** via `[[tool.mypy.overrides]]` — enabled per-package for
-  packages whose functions are fully annotated. This set is **shrink-only for the exempt
-  list**: a package may only be **added** to the strict override (never removed).
-  `tests/unit/test_mypy_ratchet.py` pins the committed baseline (`rebar.graph`,
-  `rebar.grounding`) as a subset of the enabled set, so a regression turns the build red.
+- **`disallow_untyped_defs`** (ratchet **tier 1**) via `[[tool.mypy.overrides]]` — enabled
+  per-package for packages whose functions are fully annotated. This set is **shrink-only
+  for the exempt list**: a package may only be **added** to the strict override (never
+  removed). `tests/unit/test_mypy_ratchet.py` pins the committed baseline as a subset of
+  the enabled set, so a regression turns the build red.
+- **`disallow_any_explicit`** (ratchet **tier 2**) via a second
+  `[[tool.mypy.overrides]]` block — enabled per-package for packages that carry **no
+  explicit `Any` at all**. Same shrink-only discipline, pinned by the same test, which
+  also asserts tier 2 ⊆ tier 1 (banning `Any` is a *strengthening* of "everything is
+  annotated", never a substitute for it).
 
-**To promote a package** into the strict set: annotate its remaining defs until
+**To promote a package** into tier 1: annotate its remaining defs until
 `mypy src/rebar/<pkg> --disallow-untyped-defs` is clean, then add `rebar.<pkg>.*` to the
 override `module` list. New `type: ignore` must carry a specific code (e.g.
-`type: ignore[arg-type]`); blanket `ignore_errors` is not used.
+`type: ignore[arg-type]`); blanket `ignore_errors` is not used. **To promote into tier
+2**, additionally replace its explicit `Any`s with real types until
+`mypy src/rebar/<pkg> --disallow-untyped-defs --disallow-any-explicit` is clean.
+`cast()` is **not** a promotion tool: it silences the checker at the same place `Any`
+did, so it buys neither driver below.
+
+### Why two tiers — measured
+
+Tier 1 is necessary but **not sufficient**. `rebar.grounding` was promoted with zero
+un-annotated defs and, at the same time, 116 explicit-`Any` sites; `rebar.metrics` and
+`rebar.audit` are in the same shape. A package can therefore satisfy tier 1 while
+remaining opaque to *both* consumers the ratchet exists for:
+
+1. **Navigability.** Pyright/Serena resolve references only through typed receivers. An
+   `Any` receiver makes `find_referencing_symbols` return a **false empty** — not an
+   error — so a symbol with real call sites reads as unused
+   ([rebar:dbf9-3fc8-625d-4730]; see also `docs/code-navigation.md`).
+2. **Contracts, hence testability.** A port typed `Any` cannot be enforced, so a
+   component can silently fail to satisfy the interface it claims
+   ([rebar:cc77-8120-bcc6-47e8], root-caused defect [rebar:a357-b747-ece9-4cf5]).
+
+Measured baseline when tier 2 was introduced (`mypy src/rebar/<pkg>` with each flag):
+
+| package | un-annotated defs | +explicit `Any` | tier |
+|---|---|---|---|
+| `_cli`, `_snapshot` | 0 | 0 | 1 + 2 |
+| `_engine_support`, `_io`, `_store`, `attest`, `audit`, `graph`, `grounding`, `metrics`, `opcert_service`, `review_bot`, `schemas` | 0 | 5–116 | 1 |
+| `reducer` | 1 | 5 | — |
+| `_engine` | 134 | large | — |
+| `_commands` | 146 | large | — |
+| `llm` | 293 | large | — |
+
+Both tiers shrink from there. Not every `Any` is illegitimate — a genuine dynamic
+boundary (JSON payloads, `spec_from_file_location` loaders, third-party stubs) is a
+deliberate `Any`, and the tier-2 set is grown package-by-package rather than by a global
+flag precisely so those stay visible instead of being papered over with casts.
+`reducer` is the smallest remaining example: its single un-annotated parameter,
+`reducer._filters.match_predicate(value)`, is a query-predicate value whose type depends
+on the operator, so it needs a typed predicate value — not a rubber-stamp annotation.
 
 ### The ratchet does not protect a port boundary — two ways to pass it blind
 
