@@ -26,7 +26,8 @@ from _git_counts import commit_count
 
 import rebar
 from rebar import config
-from rebar._store import event_append
+from rebar._commands import _seam
+from rebar._store import event_append, staging
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> Path:
@@ -64,10 +65,29 @@ def _records(n: int, *, with_comment: bool) -> list[dict]:
 
 
 @pytest.mark.integration
-def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path) -> None:
+def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path, monkeypatch) -> None:
     dst = _fresh_repo(tmp_path, "bench")
     n = 3000
     before = _commit_count(dst)
+
+    real_git_config = _seam._git_config
+    real_stale_sweep = staging.sweep_stale_staging
+    user_name_reads = 0
+    stale_sweeps = 0
+
+    def counted_git_config(key: str, fallback: str = "", *, cwd=None) -> str:
+        nonlocal user_name_reads
+        if key == "user.name":
+            user_name_reads += 1
+        return real_git_config(key, fallback, cwd=cwd)
+
+    def counted_stale_sweep(tracker: str) -> None:
+        nonlocal stale_sweeps
+        stale_sweeps += 1
+        real_stale_sweep(tracker)
+
+    monkeypatch.setattr(_seam, "_git_config", counted_git_config)
+    monkeypatch.setattr(staging, "sweep_stale_staging", counted_stale_sweep)
     meta = rebar.import_tickets(_records(n, with_comment=True), repo_root=str(dst))
     delta = _commit_count(dst) - before
 
@@ -78,6 +98,7 @@ def test_benchmark_commit_count_is_ceil_per_pass(tmp_path: Path) -> None:
     assert delta == expected, f"expected {expected} batched commits, got {delta}"
     # A >=10x reduction vs the ~2n per-event baseline.
     assert delta * 10 <= 2 * n
+    assert (user_name_reads, stale_sweeps) == (1, expected // 2)
 
 
 def test_commit_count_tolerates_transient_git_failure_not_opaque_int_crash(
