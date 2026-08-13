@@ -240,12 +240,11 @@ def _write_event_file(
     from rebar._store import event_append as _store_event_append
     from rebar._store import hlc as _hlc
     from rebar._store import lock as _store_lock
+    from rebar._store import staging as _staging
     from rebar._store.canonical import canonical_str
 
     _, uuid_str, env_id, author = _event_meta()
     ts = _hlc.next_tick(str(tracker_dir), ticket_id)
-    ticket_dir = tracker_dir / ticket_id
-    ticket_dir.mkdir(parents=True, exist_ok=True)
     event = {
         "timestamp": ts,
         "uuid": uuid_str,
@@ -274,18 +273,27 @@ def _write_event_file(
     # raises CommandError, failing this event's translate loudly instead of publishing it.
     _repo_root = tracker_dir.parent
     _seam.finalize_event(event, ticket_id, event_type, data, str(tracker_dir), _repo_root)
-    final = ticket_dir / _store_event_append.event_filename(ts, uuid_str, event_type)
-    tmp = ticket_dir / f".tmp-{uuid_str}-{event_type}"
+    # Ticket 021d: stage the directory and this event together in a scanner-invisible path
+    # and publish with ONE rename. Staging happens only AFTER finalize_event above, which
+    # can refuse an event outright (the secret screen raises CommandError) — under the old
+    # ``mkdir`` first shape that refusal, and a lock timeout, both left an empty ticket
+    # directory behind for fsck to report. Byte parity is unchanged: the same
+    # ``canonical_str`` output, just written through the shared staging helper.
+    filename = _store_event_append.event_filename(ts, uuid_str, event_type)
+    staged = _staging.stage_event(
+        str(tracker_dir), ticket_id, filename, canonical_str(event).encode("utf-8")
+    )
     # attempts=1 preserves the bare module's historical single-shot acquire. The
     # bare ``event_append.write_lock`` re-raised a lock timeout as the builtin
     # ``TimeoutError``; preserve that contract here so callers see the same type.
     try:
         with _store_lock.write_lock(str(tracker_dir), attempts=1, dual_window=True):
-            tmp.write_text(canonical_str(event), encoding="utf-8")
-            os.replace(tmp, final)
+            staged.promote()
     except _store_lock.LockTimeout as exc:
         raise TimeoutError(str(exc)) from None
-    return final
+    finally:
+        staged.discard()  # no-op once published
+    return Path(staged.final_path)
 
 
 def _extract_name(val, default=""):

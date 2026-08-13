@@ -32,12 +32,12 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import tempfile
 import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from rebar._store import lock as _lock
+from rebar._store import staging as _staging
 from rebar._store.canonical import canonical_bytes  # the single canonical serializer
 
 # Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
@@ -150,35 +150,25 @@ def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
     return event_type, timestamp, uuid_str
 
 
-def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> tuple[str, str, str]:
-    """Validate the event, ensure its ticket dir, and stage its CANONICAL bytes to a
-    same-filesystem temp (the atomic-rename source). Returns ``(staging, final_path,
-    relative_path)``. Raises :class:`StoreError` (1); no lock is held here."""
+def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> _staging.StagedEvent:
+    """Validate the event and stage its CANONICAL bytes for an atomic publish.
+
+    Ticket 021d: a NEW ticket's directory is built inside a scanner-invisible staging path
+    and published by ONE rename at :meth:`StagedEvent.promote`, so the directory and its
+    first event become visible together and an interruption can no longer strand an empty
+    ticket directory (the ``MISSING_CREATE`` + ``FOREIGN_STORE_PATH`` debris signature).
+    This supersedes bug 043f's "the directory is created before its first event" decision
+    at the WRITER only; 043f's actual ruling — that a reader tolerates an event-less
+    directory and never tidies one — is untouched, and still repairs clones that already
+    carry debris, which no writer-side change can do. See ``_store/staging.py``.
+
+    Returns the staged event; raises :class:`StoreError` (1). No lock is held here."""
     event_type, timestamp, uuid_str = _validate_event(event)
-    ticket_dir = os.path.join(tracker, ticket_id)
-    # Bug 043f — DECIDED: the directory is still created BEFORE its first event, and the
-    # relation snapshot tolerates the resulting event-less directory instead (see
-    # ``relation_snapshot._holds_no_events``). Reasoning, recorded so it is not re-litigated:
-    # the observed orphans came from PROCESS DEATH (crash/kill) between this makedirs and the
-    # under-lock rename below, which no exception handler in this function can cover — a
-    # best-effort rmdir on the staging-failure path would close only the narrow subset that
-    # already raises, while leaving the actual failure mode intact. Cleanup here is also
-    # unsafe under this store's concurrency model, where MANY sessions write one shared
-    # tracker: removing a directory another session has just created races its in-flight
-    # write. Tolerating at the reader additionally repairs clones ALREADY carrying an orphan,
-    # which a writer-side change can never do. Tolerate, never tidy (same rule as the stray
-    # ``.tmp-event-*`` files).
-    os.makedirs(ticket_dir, exist_ok=True)
-    final_path = os.path.join(ticket_dir, event_filename(timestamp, uuid_str, event_type))
-    relative_path = os.path.relpath(final_path, tracker)
-    fd, staging = tempfile.mkstemp(prefix=".tmp-event-", dir=tracker)
+    filename = event_filename(timestamp, uuid_str, event_type)
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(canonical_bytes(event))
+        return _staging.stage_event(tracker, ticket_id, filename, canonical_bytes(event))
     except OSError as exc:
-        _silent_unlink(staging)
         raise StoreError("Error: failed to write staging temp file", 1) from exc
-    return staging, final_path, relative_path
 
 
 # git's object database write intermittently fails on CI runners while hashing a blob
@@ -412,7 +402,7 @@ def stage_and_commit(
     or :class:`LockTimeout` (1) with the exact bash stderr."""
     tracker = _lock.canonical_tracker(tracker)
     _ensure_initialized(tracker)
-    staging, final_path, relative_path = _prepare_event(tracker, ticket_id, event)
+    staged = _prepare_event(tracker, ticket_id, event)
 
     event_type = str(event["event_type"]).upper()
     commit_msg = f"ticket: {event_type} {ticket_id}"
@@ -422,18 +412,19 @@ def stage_and_commit(
             if under_lock_check is not None:
                 under_lock_check()
             try:
-                os.replace(staging, final_path)  # atomic rename
+                staged.promote()  # atomic publish (dir+event together for a new ticket)
             except OSError as exc:
                 raise StoreError("Error: atomic rename failed", 1) from exc
-            add = _git_add(tracker, [relative_path])
+            add = _git_add(tracker, [staged.relative_path])
             if add.returncode != 0:
                 # Check add's return code BEFORE running commit (audit 2.2): the commit
                 # below commits the whole index, so running it after a failed add could
                 # sweep unrelated staged residue in under THIS write's message. Reset the
                 # index as well as unlinking the worktree file so the (possibly partially)
                 # staged event cannot leak into the next successful write's commit.
-                _unstage(tracker, relative_path)
-                _silent_unlink(final_path)
+                _unstage(tracker, staged.relative_path)
+                _silent_unlink(staged.final_path)
+                staged.unpublish()
                 # Surface git's real stderr. The create path historically hid it behind
                 # this generic message, leaving intermittent CI git races (bug edf7 —
                 # "could not parse HEAD" / index.lock contention) undiagnosable; the
@@ -451,19 +442,20 @@ def stage_and_commit(
                 # conflict on a reconciler-regenerable .bridge_state/* file (bug 6818) —
                 # makes git refuse the commit entirely. Self-heal regenerable paths to
                 # HEAD and retry; surface an actionable error for a non-regenerable one.
-                healed, detail = _recover_from_unmerged(tracker, [relative_path], commit_msg)
+                healed, detail = _recover_from_unmerged(tracker, [staged.relative_path], commit_msg)
                 if not healed and detail is None:
                     # A poisoned index (an index entry whose object VANISHED — a gc repack or
                     # a partial write under pressure) makes git refuse this AND every later
                     # commit until the whole index is reset to HEAD (bug 4c1c / Mode D).
                     healed = _recover_from_invalid_object(
-                        tracker, [relative_path], commit_msg, commit.stderr or commit.stdout
+                        tracker, [staged.relative_path], commit_msg, commit.stderr or commit.stdout
                     )
                 if not healed:
                     # Drop the staged blob from the index too (not just disk) so the failed
                     # event cannot be committed by the next successful write.
-                    _unstage(tracker, relative_path)
-                    _silent_unlink(final_path)
+                    _unstage(tracker, staged.relative_path)
+                    _silent_unlink(staged.final_path)
+                    staged.unpublish()
                     git_err = (commit.stderr or commit.stdout).strip()
                     raise StoreError(
                         detail
@@ -474,10 +466,10 @@ def stage_and_commit(
                         1,
                     )
     except (RebaseGuard, LockTimeout):
-        _silent_unlink(staging)
+        staged.discard()
         raise
     finally:
-        _silent_unlink(staging)  # no-op once renamed
+        staged.discard()  # no-op once published
     return 0
 
 
@@ -513,31 +505,31 @@ def batch_stage_and_commit(
 
     # Validate + stage every event up front (fail fast, before the lock). On any
     # failure here, unlink the temps staged so far — nothing has been renamed yet.
-    prepared: list[tuple[str, str, str]] = []  # (staging, final_path, relative_path)
+    prepared: list[_staging.StagedEvent] = []
     try:
         for ticket_id, event in items:
             prepared.append(_prepare_event(tracker, ticket_id, event))
     except BaseException:
-        for staging, _final, _rel in prepared:
-            _silent_unlink(staging)
+        for staged in prepared:
+            staged.discard()
         raise
 
     if not prepared:
         return 0
 
     commit_msg = f"ticket: batch {len(prepared)} events"
-    relpaths = [rel for _s, _f, rel in prepared]
-    renamed: list[tuple[str, str]] = []  # (final_path, relative_path) already in place
+    relpaths = [staged.relative_path for staged in prepared]
+    renamed: list[_staging.StagedEvent] = []  # already published
     try:
         with _lock.write_lock(tracker, dual_window=True, retries=_lock.write_path_retries()):
             _lock.check_no_rebase_in_progress(tracker)  # raises RebaseGuard (75)
-            for staging, final_path, relative_path in prepared:
+            for staged in prepared:
                 try:
-                    os.replace(staging, final_path)  # atomic rename
+                    staged.promote()  # atomic publish
                 except OSError as exc:
                     _rollback_batch(tracker, renamed)
                     raise StoreError("Error: atomic rename failed", 1) from exc
-                renamed.append((final_path, relative_path))
+                renamed.append(staged)
             add = _git_add(tracker, relpaths)
             if add.returncode != 0:
                 _rollback_batch(tracker, renamed)
@@ -568,12 +560,12 @@ def batch_stage_and_commit(
                         1,
                     )
     except (RebaseGuard, LockTimeout):
-        for staging, _final, _rel in prepared:
-            _silent_unlink(staging)
+        for staged in prepared:
+            staged.discard()
         raise
     finally:
-        for staging, _final, _rel in prepared:
-            _silent_unlink(staging)  # no-op once renamed
+        for staged in prepared:
+            staged.discard()  # no-op once published
     return len(prepared)
 
 
@@ -623,14 +615,20 @@ def batch_write_and_push(
     return n
 
 
-def _rollback_batch(tracker: str, renamed: list[tuple[str, str]]) -> None:
-    """Undo a failed batch: unstage every already-renamed event from the index and
+def _rollback_batch(tracker: str, renamed: list[_staging.StagedEvent]) -> None:
+    """Undo a failed batch: unstage every already-published event from the index and
     unlink it from the worktree, so a partial batch leaves NO phantom event (neither
-    staged nor committable by the next write) and no orphaned worktree file."""
-    for _final_path, relative_path in renamed:
-        _unstage(tracker, relative_path)
-    for final_path, _relative_path in renamed:
-        _silent_unlink(final_path)
+    staged nor committable by the next write) and no orphaned worktree file.
+
+    Ticket 021d: a directory this batch itself published is then removed too, once its own
+    event is gone — otherwise rolling back a failed create would re-create exactly the
+    empty-ticket-directory debris the staging path exists to prevent."""
+    for staged in renamed:
+        _unstage(tracker, staged.relative_path)
+    for staged in renamed:
+        _silent_unlink(staged.final_path)
+    for staged in renamed:
+        staged.unpublish()
 
 
 def _maybe_enrich_drain(tracker: str) -> None:
