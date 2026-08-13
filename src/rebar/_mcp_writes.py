@@ -56,9 +56,20 @@ def _push_status() -> dict:
         return {"state": "unknown"}
 
 
-def _ack(result: str = "ok") -> Any:
-    """The shared write ack: the pre-existing ``{"result": …}`` plus delivery status."""
-    return WriteAckOut.model_validate({"result": result, "push_status": _push_status()})
+def _ack(result: str = "ok", *, description_warning: str | None = None) -> Any:
+    """The shared write ack: the pre-existing ``{"result": …}`` plus delivery status.
+
+    ``description_warning`` rides the same reasoning as ``push_status`` (ticket 594b):
+    the library logs the save-time cap notice, but an MCP client reads only the tool
+    result, so it is carried as a result field. ``None`` when there is nothing to say.
+    """
+    return WriteAckOut.model_validate(
+        {
+            "result": result,
+            "push_status": _push_status(),
+            "description_warning": description_warning,
+        }
+    )
 
 
 def _with_push(payload: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +121,9 @@ def register_write_tools(mcp, ctx) -> None:
         tags: list[str] | None = None,
     ) -> CreateResultOut:
         """Create a ticket; returns {id, alias} (agents get the alias without
-        a second show())."""
+        a second show()). A non-null description_warning means the description exceeds
+        the plan-review admission cap while the claim gate is on — the ticket was still
+        created, but claiming it needs a review that refuses the description as-is."""
         created = rebar.create_ticket(
             ticket_type,
             title,
@@ -257,8 +270,12 @@ def register_write_tools(mcp, ctx) -> None:
         or set_tags replaces the whole set (compiled to a delta; add-wins, so a
         concurrent remote add is never silently clobbered). set_tags is mutually
         exclusive with add_tags/remove_tags.
+
+        description_warning is non-null when the new description exceeds the plan-review
+        admission cap while the claim gate is on: the edit still succeeded, but claiming
+        the ticket will need a review that refuses it until the description is shorter.
         """
-        rebar.edit_ticket(
+        description_warning = rebar.edit_ticket(
             ticket_id,
             title=title,
             priority=priority,
@@ -269,7 +286,7 @@ def register_write_tools(mcp, ctx) -> None:
             remove_tags=remove_tags,
             set_tags=set_tags,
         )
-        return _ack()
+        return _ack(description_warning=description_warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def link_tickets(id1: str, id2: str, relation: str) -> WriteAckOut:

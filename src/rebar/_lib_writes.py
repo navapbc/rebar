@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 from rebar import config
+from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
 from rebar._errors import ConcurrencyError, RebarError
 
 if TYPE_CHECKING:
@@ -93,8 +94,8 @@ def create_ticket(
     """Create a ticket.
 
     Returns the canonical 16-hex ticket id (default). With ``return_alias=True``,
-    returns ``{"id": <16-hex>, "alias": <human alias>}`` so agents don't need a
-    second ``show`` to learn the alias (WS5e).
+    returns ``{"id", "alias", "description_warning"}`` (the last being the save-time
+    description-cap notice, also logged) so agents skip a second ``show`` (WS5e).
 
     ``source`` (P1.2 import): optional provenance dict — keys ``source_id``,
     ``source_created_at``, ``source_author``, ``source_env`` are recorded on the
@@ -130,9 +131,10 @@ def create_ticket(
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
+    warning = _warn_description_cap(res.get("description_warning"))
     if not return_alias:
         return res["id"]
-    return {"id": res["id"], "alias": res["alias"] or ""}
+    return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
 
 
 def idea(
@@ -150,8 +152,8 @@ def idea(
     ``ready``/``next-batch``, and ``idea -> closed`` (reject) skips the completion
     gates. Promote a kept idea with ``transition(id, "idea", "open")``.
 
-    Returns the canonical 16-hex ticket id (default), or ``{"id", "alias"}`` with
-    ``return_alias=True`` — same shape as :func:`create_ticket`.
+    Returns the canonical 16-hex ticket id (default), or the ``{"id", "alias",
+    "description_warning"}`` dict with ``return_alias=True`` (as :func:`create_ticket`).
 
     ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
     ``"python"``; the MCP adapter passes ``"mcp"``.
@@ -174,9 +176,10 @@ def idea(
             returncode=exc.returncode,
             stderr=exc.message,
         ) from None
+    warning = _warn_description_cap(res.get("description_warning"))
     if not return_alias:
         return res["id"]
-    return {"id": res["id"], "alias": res["alias"] or ""}
+    return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
 
 
 def create_identity(
@@ -607,12 +610,13 @@ def start_session_log(
         raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
 
 
-def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
+def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
     """Edit ticket fields: title, priority, assignee, ticket_type, description.
 
     Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
     mutate via convergent TAG_DELTA deltas. (The ``tags=`` set-alias was removed
-    pre-1.0 — DE7; it is now rejected as an unknown field.)
+    pre-1.0 — DE7; it is now rejected as an unknown field.) Returns the save-time
+    description-cap warning (``None`` when silent; ALSO logged), for MCP to surface.
     """
     tag_add = fields.pop("add_tags", None)
     tag_remove = fields.pop("remove_tags", None)
@@ -624,7 +628,7 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
         normalized[key] = str(value)
     from rebar._commands import composer
 
-    _python_leaf(
+    warning = _python_leaf(
         composer.edit_core,
         ticket_id,
         normalized,
@@ -634,6 +638,7 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> None:
         tag_remove=tag_remove,
         tag_set=tag_set,
     )
+    return _warn_description_cap(warning)
 
 
 def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:

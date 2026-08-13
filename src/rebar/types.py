@@ -192,6 +192,7 @@ class CreateResult(TypedDict):
     id: str
     alias: NotRequired[str | None]
     title: NotRequired[str]
+    description_warning: NotRequired[str | None]
 
 
 class ClaimResult(TypedDict):

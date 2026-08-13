@@ -26,7 +26,9 @@ from typing import Any, cast
 
 __all__ = [
     "close_plan_review_gate_check",
+    "description_cap_warning",
     "gate_enabled",
+    "log_description_cap_warning",
     "plan_review_precheck",
 ]
 
@@ -159,6 +161,67 @@ def _plan_review_gate_applies(cfg_root: str, ticket_type: str, *, ticket_id: str
     ):
         return False
     return ticket_type not in _PLAN_REVIEW_EXEMPT_TYPES
+
+
+def description_cap_warning(
+    description: str | None, ticket_type: str, *, ticket_id: str, cfg_root: str
+) -> str | None:
+    """The save-time heads-up for a description the plan-review gate will not admit.
+
+    The review guard (``llm.plan_review.det_floor`` P4) and the completion precheck
+    reject a description above ``verify.max_ticket_description_chars``, but they only
+    run at ``review-plan``/close time — so an oversized description was historically
+    discovered long after it was written. When a create/edit writes a description over
+    that same configured cap AND the plan-review START-WORK gate applies to this ticket
+    (:func:`_plan_review_gate_applies` — the very probe the claim path uses, so the
+    warning cannot promise a block the gate would not make), this returns the operator
+    warning; otherwise ``None``.
+
+    Advisory ONLY: callers emit it on their own surface's channel AFTER the event is
+    appended, and it never blocks or alters the write. Any unexpected failure resolving
+    the cap therefore degrades to ``None`` rather than disturbing a completed write.
+
+    ``cfg_root`` is the REPO root (parent of the tracker), where ``.rebar/config.conf``
+    lives — the same root the claim path passes to the gate probe.
+    """
+    if not description:
+        return None
+    try:
+        from rebar.config import load_config
+
+        limit = int(load_config(cfg_root).verify.max_ticket_description_chars)
+        chars = len(description)
+        if chars <= limit:
+            return None
+        if not _plan_review_gate_applies(cfg_root, ticket_type, ticket_id=ticket_id):
+            return None
+    except Exception:  # an advisory notice must never fail a completed write
+        logger.debug("could not evaluate the description cap for %s", ticket_id, exc_info=True)
+        return None
+    return (
+        f"description for {ticket_id} is {chars:,} characters, above the "
+        f"{limit:,}-character plan-review admission cap "
+        f"(verify.max_ticket_description_chars). The plan-review start-work gate is "
+        f"enabled for this project, so claiming {ticket_id} requires a passing review — "
+        f"and review-plan will refuse admission until the description is shortened, "
+        "usually by moving independent work into child tickets."
+    )
+
+
+def log_description_cap_warning(warning: object) -> str | None:
+    """Emit :func:`description_cap_warning`'s notice on the LIBRARY channel and hand it back.
+
+    The CLI prints the notice to stderr and MCP returns it as a result field; an embedding
+    library caller has neither, so it goes through the ``rebar`` logger — the documented
+    library convention (:mod:`rebar._logging`). That root carries a ``NullHandler``, so a
+    caller configuring no logging is undisturbed, while the CLI and MCP entrypoints (which
+    install a stderr handler) surface it. Returns the warning so a caller can pass it on in
+    one expression. Advisory only: the write has already committed by the time this runs.
+    """
+    text = warning if isinstance(warning, str) and warning else None
+    if text:
+        logger.warning("%s", text)
+    return text
 
 
 def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:
