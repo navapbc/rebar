@@ -8,7 +8,7 @@ jobs, 5 macOS, shared across every repo in the org) and queued a Gerrit ``Verifi
 matrix roughly two hours behind tickets-push runs.
 
 The operator directive is absolute: *"The tickets branch should never trigger CI."* Anything
-that must read the store runs on a **schedule** instead — reconcile-bridge every 20 minutes,
+that must read the store runs on a **schedule** instead — reconcile-bridge every 40 minutes,
 verify-identity every 6 hours, and so on — so this change removes triggers, never cadence.
 
 The sibling module :mod:`tests.unit.test_ci_main_push_policy` pins the same class of policy
@@ -20,6 +20,7 @@ workflow directory from disk**, so a new file inherits the invariant automatical
 from __future__ import annotations
 
 import fnmatch
+import itertools
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,13 @@ _PUSH_LANES = ("test.yml", "optionality.yml", "prompt-eval.yml", "verify-identit
 # Schedules that carry the function the removed triggers used to provide. Pinned literally so
 # a future "simplification" cannot quietly widen the store's worst-case sync latency.
 _UNCHANGED_CRONS = {
-    "reconcile-bridge.yml": ["*/20 * * * *"],
+    "reconcile-bridge.yml": [
+        # Uniform 40-minute cadence; cron needs three entries over a 2-hour cycle to
+        # express it (see test_bridge_backstop_fires_on_a_uniform_40_minute_cadence).
+        "0 0-23/2 * * *",
+        "40 0-23/2 * * *",
+        "20 1-23/2 * * *",
+    ],
     "verify-identity.yml": ["53 */6 * * *"],
     "test.yml": ["41 */6 * * *"],
     "optionality.yml": ["47 */6 * * *"],
@@ -136,3 +143,48 @@ def test_scheduled_coverage_is_unchanged(name: str, crons: list[str]) -> None:
         f"{name}'s schedule changed. Dropping the tickets-branch push trigger leaves the "
         "schedule as the only remaining coverage, so it must not be weakened alongside it"
     )
+
+
+# --- Uniform 40-minute bridge backstop (ticket f59a-2d16-68c5-450c) ------------------------
+
+
+def _cron_field_matches(field: str, value: int, lo: int, hi: int) -> bool:
+    """Whether ``value`` matches one cron field (``*``, ``a-b/s``, ``*/s``, or a literal)."""
+    for term in field.split(","):
+        base, _, step_str = term.partition("/")
+        step = int(step_str) if step_str else 1
+        if base == "*":
+            start, end = lo, hi
+        elif "-" in base:
+            start_str, _, end_str = base.partition("-")
+            start, end = int(start_str), int(end_str)
+        else:
+            start = end = int(base)
+        if start <= value <= end and (value - start) % step == 0:
+            return True
+    return False
+
+
+def test_bridge_backstop_fires_on_a_uniform_40_minute_cadence() -> None:
+    """The three schedule entries exist to spell a cadence cron cannot express in one.
+
+    ``*/40`` would fire at :00 and :40 and then restart the hour — alternating 40- and
+    20-minute gaps. Pinning the three literals alone would not catch a future edit that
+    keeps three entries but breaks uniformity, so derive the fire times and check the gaps.
+    """
+    entries = [entry["cron"] for entry in _on(_WORKFLOWS / "reconcile-bridge.yml")["schedule"]]
+    fires = sorted(
+        hour * 60 + minute
+        for hour in range(24)
+        for minute in range(60)
+        if any(
+            _cron_field_matches(cron.split()[0], minute, 0, 59)
+            and _cron_field_matches(cron.split()[1], hour, 0, 23)
+            for cron in entries
+        )
+    )
+
+    assert fires, "the bridge backstop must fire at least once a day"
+    gaps = {b - a for a, b in itertools.pairwise(fires)}
+    gaps.add(fires[0] + 1440 - fires[-1])  # wrap past midnight
+    assert gaps == {40}, f"bridge backstop gaps are not uniformly 40 minutes: {sorted(gaps)}"

@@ -25,15 +25,16 @@
 #     runner is torn down).
 #   * bug-close requires `--reason` prefixed "Fixed:" or "Escalated to user:".
 #
-# Staleness window: default 2h (workflow_dispatch override `alert_window_hours`).
-# The reconcile cadence is */20, so the theoretical floor is ~1h (3x cadence); 2h
-# tolerates a couple of late/contended runs without false alarms.
+# Staleness window: default 4h (workflow_dispatch override `alert_window_hours`).
+# The reconcile cadence is a uniform 40 minutes, so the theoretical floor is 2h
+# (3x cadence); 4h keeps the same 2x margin, tolerating a couple of late/contended
+# runs without false alarms.
 
 name: Reconciler Heartbeat Canary
 
 on:
   schedule:
-    - cron: '0 * * * *'   # hourly
+    - cron: '0 */2 * * *'   # every 2 hours
   workflow_dispatch:
     inputs:
       dry_run:
@@ -45,9 +46,9 @@ on:
           - 'false'
           - 'true'
       alert_window_hours:
-        description: 'Alert window in hours (default: 2)'
+        description: 'Alert window in hours (default: 4)'
         required: false
-        default: '2'
+        default: '4'
         type: string
       status_source:
         description: 'Heartbeat source (status; github-api is one-release rollback)'
@@ -73,7 +74,7 @@ jobs:
     timeout-minutes: 10
 
     env:
-      ALERT_WINDOW_HOURS: ${{ inputs.alert_window_hours || '2' }}
+      ALERT_WINDOW_HOURS: ${{ inputs.alert_window_hours || '4' }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       ALERT_TAG: heartbeat-alert
       REBAR_CANARY_HEARTBEAT_SOURCE: ${{ inputs.status_source || 'status' }}

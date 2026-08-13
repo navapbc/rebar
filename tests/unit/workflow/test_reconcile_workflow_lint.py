@@ -7,6 +7,7 @@ import json
 import re
 import subprocess
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -157,13 +158,26 @@ def _redispatch_script() -> str:
     return str(step["run"]).replace("${{ github.ref_name }}", "main")
 
 
-def _run_redispatch(tmp_path: Path, gh_body: str) -> subprocess.CompletedProcess[str]:
-    """Execute the re-dispatch step with a stubbed ``gh`` on PATH."""
+def _run_redispatch(
+    tmp_path: Path, gh_body: str, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    """Execute the re-dispatch step with a stubbed ``gh`` (and ``sleep``) on PATH.
+
+    ``sleep`` is stubbed so the chain-pacing branch records the duration it asked for
+    instead of actually waiting. The default environment deliberately omits
+    ``PASS_STARTED_EPOCH`` — the step runs under ``set -euo pipefail``, so that absence
+    is the guard every pre-existing test in this module silently depends on.
+    """
     bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(exist_ok=True)
     gh_stub = bin_dir / "gh"
     gh_stub.write_text("#!/usr/bin/env bash\n" + gh_body + "\n", encoding="utf-8")
     gh_stub.chmod(0o755)
+    sleep_stub = bin_dir / "sleep"
+    sleep_stub.write_text(
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$1" >> "{tmp_path / "slept"}"\n', encoding="utf-8"
+    )
+    sleep_stub.chmod(0o755)
 
     script = tmp_path / "redispatch.sh"
     script.write_text("#!/usr/bin/env bash\n" + _redispatch_script() + "\n", encoding="utf-8")
@@ -172,8 +186,15 @@ def _run_redispatch(tmp_path: Path, gh_body: str) -> subprocess.CompletedProcess
         capture_output=True,
         text=True,
         check=False,
-        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "MODE": "live"},
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin", "MODE": "live", **(extra_env or {})},
     )
+
+
+def _slept(tmp_path: Path) -> list[int]:
+    record = tmp_path / "slept"
+    if not record.exists():
+        return []
+    return [int(line) for line in record.read_text(encoding="utf-8").split()]
 
 
 _DISABLED_422 = (
@@ -186,7 +207,7 @@ _DISABLED_422 = (
 def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
     """A converged pass stays GREEN when the loop cannot re-seed onto a disabled workflow.
 
-    The */20 schedule documented in the workflow header is the backstop, so failing the
+    The 40-minute schedule documented in the workflow header is the backstop, so failing the
     job adds no recovery — only a false red that trips heartbeat alerting (runs
     31129551929 / 31129431096).
     """
@@ -230,3 +251,47 @@ def test_redispatch_succeeds_quietly_when_the_dispatch_is_accepted(tmp_path: Pat
     combined = completed.stdout + completed.stderr
     assert "::warning::" not in combined
     assert "::error::" not in combined
+
+
+# --- Chain pacing (ticket f59a-2d16-68c5-450c) ---------------------------------------------
+#
+# Re-dispatching immediately made the chain's inter-invocation period one pass duration.
+# Sleeping for the pass's own elapsed time first makes it two — the doubling the operator
+# asked for. These cover the three branches the pacing block can take.
+
+_DISPATCH_OK = "exit 0"
+
+
+def test_pacing_sleeps_for_the_passs_own_elapsed_duration(tmp_path: Path) -> None:
+    """A 100-second pass pauses ~100 seconds, so the chain's period is two pass durations."""
+    started = int(time.time()) - 100
+    completed = _run_redispatch(tmp_path, _DISPATCH_OK, {"PASS_STARTED_EPOCH": str(started)})
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    slept = _slept(tmp_path)
+    assert len(slept) == 1, f"expected exactly one pacing sleep, got {slept}"
+    assert 100 <= slept[0] <= 130, f"pacing sleep {slept[0]}s does not mirror the ~100s pass"
+
+
+def test_pacing_is_skipped_once_a_pass_is_already_self_pacing(tmp_path: Path) -> None:
+    """Past 1800s the pass paces itself; sleeping would eat the timeout-minutes: 60 budget."""
+    started = int(time.time()) - 2000
+    completed = _run_redispatch(tmp_path, _DISPATCH_OK, {"PASS_STARTED_EPOCH": str(started)})
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert _slept(tmp_path) == [], "a >=1800s pass must not add a pacing sleep"
+    assert "no pacing sleep" in completed.stdout
+
+
+def test_pacing_is_skipped_when_the_pass_start_stamp_is_missing(tmp_path: Path) -> None:
+    """`set -euo pipefail` + arithmetic on an unset variable would abort the whole step.
+
+    The step must degrade to an immediate dispatch instead — that is what keeps every
+    other test in this module (which sets no PASS_STARTED_EPOCH) passing unchanged.
+    """
+    completed = _run_redispatch(tmp_path, _DISPATCH_OK)
+
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+    assert _slept(tmp_path) == []
+    assert "chain pacing skipped" in completed.stdout
+    assert "::error::" not in completed.stdout + completed.stderr
