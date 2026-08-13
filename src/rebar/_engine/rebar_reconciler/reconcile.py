@@ -533,11 +533,27 @@ def _confirm_peer_links(ctx: _PassContext, pass_id: str) -> int:
     steps and so tests can drive it directly. Opening the store here (not once per
     pass elsewhere) keeps the whole feature inside the ``persist`` branch: a no-write
     pass must not write evidence any more than it writes bindings.
+
+    ONE STORE INSTANCE FOR BOTH HALVES (epic a4bd, story f6e9). The upgrade backfill
+    and the snapshot confirmation MUST share a single instance. Two instances would
+    each load a pre-write copy of the file, so (a) records backfilled this pass would
+    be invisible to snapshot confirmation, defeating the same-pass provenance upgrade,
+    and (b) — worse — whichever instance saved last would silently discard the other's
+    records: a lost update. Sharing one instance makes the upgrade fall out of plain
+    in-memory ordering, since snapshot ``record()`` overwrites the backfilled entry
+    before anything is written to disk.
+
+    Backfill runs FIRST for that reason, and saving happens ONCE at the end.
     """
-    from rebar_reconciler.peer_confirmations import confirm_from_snapshot, open_store
+    from rebar_reconciler.peer_confirmations import (
+        backfill_from_managed_refs,
+        confirm_from_snapshot,
+        open_store,
+    )
 
     store = open_store(ctx.repo_root)
-    written = confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store, pass_id)
+    written = backfill_from_managed_refs(store, ctx.local_tickets, ctx.binding_store, pass_id)
+    written += confirm_from_snapshot(store, ctx.curr_snapshot, ctx.binding_store, pass_id)
     if written:
         store.save()
     return written
