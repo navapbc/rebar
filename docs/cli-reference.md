@@ -142,8 +142,9 @@ Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]
 ### `create`
 
 ```
-Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]
+Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--bridge-project <key>] [--repos <r1,r2>] [--output json]
 Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).
+Bridge project: --bridge-project sets the ticket's target bridge project key (tri-state) — omit for the unbound/legacy default, "" (empty) to mark never-sync, or a key (e.g. REB) to bind. --repos sets the associated repositories (CSV, mirroring --tags).
 ```
 
 ### `delete`
@@ -190,8 +191,9 @@ Usage: rebar doctor [--repair] [--dry-run] [--output json]
 ### `edit`
 
 ```
-Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]
+Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--bridge-project=VALUE] [--repos=VALUE] [--review]
 Title: --title must be non-empty after trimming whitespace (a whitespace-only value is rejected); surrounding whitespace around real content is kept verbatim (not trimmed).
+Bridge project: --bridge-project is promote-only — it may be set on an UNBOUND ticket but is rejected (non-zero, no event) once the ticket already holds a binding; "" marks never-sync. --repos replaces the associated repositories (CSV) and is freely editable.
 Tags: --add-tag/--remove-tag add/remove; --set-tags replaces (compiled to a convergent delta, add-wins). --set-tags="" clears only the tags THIS clone has observed (not an authoritative reset).
 Review: --review (valueless) re-runs the signed plan review (`review-plan`) AFTER the edit commits and exits with the review disposition (0 PASS / 1 BLOCK / 2 INDETERMINATE / 11 retryable). The edit stays committed whatever the verdict. Edit-then-review is not atomic against concurrent store reconvergence — check attestation currency cheaply with `rebar review-plan <id> --status`.
 ```
