@@ -371,3 +371,39 @@ def test_the_worker_folds_when_the_store_is_free(
     assert list((Path(tracker) / tid).glob("*-SNAPSHOT.json")), (
         "the worker did not fold an eligible ticket on a free store"
     )
+
+
+def test_a_stand_aside_does_not_reset_the_sweep_clock(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A worker that stood aside swept NOTHING, so it must not touch the last-sweep stamp.
+
+    This is a hole straight through the floor if you get it wrong, and it is easy to get wrong:
+    stamping in a `finally` looks like tidy bookkeeping. But the stamp gates the staleness arm,
+    so a stand-aside that stamps suppresses the trigger for a whole interval — and under
+    sustained contention EVERY trigger stands aside, stamps, and goes quiet. The store would
+    then never compact while looking freshly swept, which is worse than not having the floor at
+    all, because the signal says it is working.
+    """
+    from rebar._store import lock as _lock
+
+    repo = store
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "0")
+    _seed(repo, "contended", comments=4)
+    tracker = _tracker(repo)
+    stamp = compact_trigger._sweep_stamp_path(tracker)
+    assert not os.path.exists(stamp), "precondition: never swept"
+
+    handle = _lock.acquire(tracker, timeout=5, attempts=1, dual_window=True)
+    try:
+        compact_trigger.run_sweep(tracker)
+    finally:
+        handle.release()
+
+    assert not os.path.exists(stamp), (
+        "standing aside stamped the sweep clock — the staleness arm is now suppressed for a "
+        "full interval by a sweep that folded nothing"
+    )
+    # And the clock still being unset means the very next close retries, which is the point.
+    assert compact_trigger._sweep_is_stale(tracker, 3600) is True

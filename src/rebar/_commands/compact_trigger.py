@@ -227,9 +227,15 @@ def run_sweep(tracker: str) -> None:
     """Hold the advisory lock and run the store-wide sweep. The detached child's entry point.
 
     Runs the SAME ``compact-all`` the scheduled workflow runs, so the two triggers cannot fold
-    by different rules. Stamps the sweep on the way out whatever the outcome — the stamp
-    records "a sweep was attempted", so a store where every sweep legitimately folds nothing
-    does not re-detach a worker on every single close."""
+    by different rules.
+
+    Does NOT stamp the sweep itself: :func:`compact.compact_all_cli` stamps when it actually
+    sweeps, and that is the only event the stamp may record. Stamping here — in a ``finally``,
+    whatever happened — put a hole straight through the floor this trigger exists to be. A
+    stand-aside folds nothing, so stamping it would reset the last-sweep clock and suppress the
+    staleness arm for a full interval; under sustained contention every trigger would stand
+    aside, stamp, and go quiet, and the store would never compact while looking freshly swept.
+    A stand-aside must leave the clock alone so the next close tries again."""
     import contextlib
     import io
 
@@ -268,7 +274,6 @@ def run_sweep(tracker: str) -> None:
     except Exception:
         logger.warning("compaction sweep failed; the events stay live", exc_info=True)
     finally:
-        record_sweep(tracker)
         release_trigger_lock(tracker, fd)
 
 

@@ -147,7 +147,11 @@ jobs:
           # Exit 2 means some tickets errored while others folded; the sweep is best-effort
           # housekeeping, so surface it without failing the run. A real invocation error
           # (exit 1) still fails.
-          rebar compact-all "${ARGS[@]}" | tee "${RUNNER_TEMP}/sweep.out" || rc=$?
+          # Redirect rather than pipe: under `set -o pipefail` a `tee` failure (unwritable
+          # RUNNER_TEMP, full disk) becomes the pipeline's exit status and would masquerade as
+          # rebar's, defeating the exit-2-vs-1 branching immediately below.
+          rebar compact-all "${ARGS[@]}" >"${RUNNER_TEMP}/sweep.out" 2>&1 || rc=$?
+          cat "${RUNNER_TEMP}/sweep.out"
           if [ "${rc:-0}" = "2" ]; then
             echo "::warning::some tickets failed to compact; they stay live and the next sweep retries them"
           elif [ "${rc:-0}" != "0" ]; then

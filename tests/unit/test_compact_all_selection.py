@@ -24,6 +24,7 @@ sweep would select it again — churn plus a false tally.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -415,3 +416,26 @@ def test_forward_compat_unknown_event_types_are_not_counted(store: Path) -> None
     assert _foldable_event_count(str(tdir), hlc.physical_now(), 0) == before, (
         "an unknown-type event must not count toward the foldable total — the fold preserves it"
     )
+
+
+# ── the sweep stamp records "a sweep ran", nothing weaker ────────────────────────────────────
+def test_a_real_sweep_stamps_and_a_dry_run_does_not(
+    store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stamp gates the operation-linked trigger's staleness arm, so what it records is
+    load-bearing: stamping something that was not a sweep suppresses the trigger for a full
+    interval. A dry run folds nothing and must leave the clock alone."""
+    from rebar._commands import compact_trigger
+
+    repo = store
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    tid = _seed(repo, "stamp me", comments=3)
+    _age_events(_tdir(repo, tid), _HOUR_NS)
+    tracker = str(rebar.config.tracker_dir(str(repo)))
+    stamp = compact_trigger._sweep_stamp_path(tracker)
+
+    _compact.compact_all_cli(["--dry-run"], repo_root=str(repo))
+    assert not os.path.exists(stamp), "a dry run stamped the sweep clock; it swept nothing"
+
+    _compact.compact_all_cli([], repo_root=str(repo))
+    assert os.path.exists(stamp), "a real sweep must stamp the clock"

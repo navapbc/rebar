@@ -510,11 +510,12 @@ def close_ticket(
     # because the closing process had released the lock seconds earlier so the store always read
     # free to its own probe.
     #
-    # Removing the trigger is safe because compaction is OPTIONAL housekeeping, never a
-    # correctness step: an unfolded event log is completely valid and the reducer replays it.
-    # `rebar compact <id>` still folds on demand, and the standing trigger is now an
-    # out-of-band sweep that runs in a DEDICATED CLONE of the tickets branch, so it contends
-    # with no interactive session's store lock at all.
+    # Moving it is safe because compaction is OPTIONAL housekeeping, never a correctness step:
+    # an unfolded event log is completely valid and the reducer replays it. `rebar compact
+    # <id>` still folds on demand; a scheduled sweep folds the store where CI exists; and this
+    # close still TRIGGERS a fold — see `_trigger_compaction` below — it just hands the work to
+    # a detached worker after the lock is released instead of doing it inline. What changed is
+    # WHO holds the lock and WHEN, not whether a close leads to compaction.
     if target_status == "closed":
         scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 
