@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Callable
 from typing import cast
 
 from rebar.attest import dsse, registry, sshsig
@@ -71,7 +72,7 @@ def allowed_signers_from_keys(keys: list[str], principal: str) -> str:
     )
 
 
-def resolve_trust_root(identity_id: str, *, repo_root=None) -> str | None:
+def resolve_trust_root(identity_id: str, *, repo_root: str | None = None) -> str | None:
     """Compute the SSHSIG trust root for author ``identity_id``, or ``None``.
 
     Looks up the identity ticket and, if it is an ``identity`` with a non-empty
@@ -112,7 +113,7 @@ def keyop_payload(op: str, identity_id: str, public_key: str) -> bytes:
     )
 
 
-def _keyring_for(identity_id: str, *, repo_root=None) -> list:
+def _keyring_for(identity_id: str, *, repo_root: str | None = None) -> list[dict]:
     """The identity's position-based ``keyring`` records, or ``[]`` on ANY lookup problem
     (unknown id, corrupt store, non-identity, I/O). Never raises — mirrors
     :func:`resolve_trust_root`'s fail-closed contract."""
@@ -128,7 +129,9 @@ def _keyring_for(identity_id: str, *, repo_root=None) -> list:
     return ring if isinstance(ring, list) else []
 
 
-def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> str | None:
+def resolve_event_commit(
+    position: str, ticket_dir: str, *, repo_root: str | None = None
+) -> str | None:
     """The tickets-branch commit SHA that INTRODUCED the event file with ``position``
     prefix, or ``None`` (epic gnu-whale-ichor — the git-commit-ancestry anchor).
 
@@ -184,7 +187,9 @@ def resolve_event_commit(position: str, ticket_dir: str, *, repo_root=None) -> s
         return None
 
 
-def resolve_position_commit(position: str, tracker: str, *, repo_root=None) -> str | None:
+def resolve_position_commit(
+    position: str, tracker: str, *, repo_root: str | None = None
+) -> str | None:
     """The tickets-branch commit SHA that INTRODUCED the event file with ``position`` prefix,
     searched GLOBALLY across ``tracker`` (a sibling of :func:`resolve_event_commit` for callers
     that do not know the owning ticket dir — e.g. the op-cert era anchor, whose boundary positions
@@ -233,8 +238,8 @@ def keys_valid_at_anchor(
     anchor_commit: str,
     anchor_position: str | None,
     *,
-    resolve,
-    is_ancestor,
+    resolve: Callable[[str], str | None],
+    is_ancestor: Callable[[str, str], bool],
 ) -> list[str]:
     """The shared ancestry + intra-commit-position era predicate (epic gnu-whale-ichor).
 
@@ -286,7 +291,9 @@ def keys_valid_at_anchor(
     return valid_keys
 
 
-def build_ticket_position_commit_map(ticket_dir: str, *, repo_root=None) -> dict[str, str]:
+def build_ticket_position_commit_map(
+    ticket_dir: str, *, repo_root: str | None = None
+) -> dict[str, str]:
     """Map every event POSITION under ONE ``ticket_dir`` to the OLDEST commit that ADDED
     its file, resolved in a SINGLE ``git log`` pass — the ticket-scoped batched form of
     :func:`resolve_event_commit` (bug 7084 / remediation R1).
@@ -378,7 +385,7 @@ def build_ticket_position_commit_map(ticket_dir: str, *, repo_root=None) -> dict
         return {}
 
 
-def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
+def build_introducing_commit_map(*, repo_root: str | None = None) -> dict[str, str]:
     """Map every tracker event-file path (relative to the tracker root) to the OLDEST commit
     that ADDED it, resolved in a SINGLE ``git log`` pass — the batched form of
     :func:`resolve_event_commit`.
@@ -456,7 +463,7 @@ def build_introducing_commit_map(*, repo_root=None) -> dict[str, str]:
         return {}
 
 
-def build_position_commit_map(*, repo_root=None) -> dict[str, str]:
+def build_position_commit_map(*, repo_root: str | None = None) -> dict[str, str]:
     """Map every event POSITION (``{timestamp}-{uuid}`` prefix) to the OLDEST commit that ADDED
     its ``*.json`` file, resolved in a SINGLE ``git log`` pass — the position-keyed sibling of
     :func:`build_introducing_commit_map`.
@@ -538,8 +545,8 @@ def verify_authorship_at_commit(
     event_commit: str,
     event_position: str | None,
     *,
-    repo_root=None,
-    position_resolver=None,
+    repo_root: str | None = None,
+    position_resolver: Callable[[str], str | None] | None = None,
 ) -> registry.Verdict:
     """Verify ``envelope`` against ONLY the keys valid for the event at ``event_commit``
     (epic gnu-whale-ichor — the git-commit-ancestry validity model).
@@ -622,7 +629,7 @@ def verify_authorship_at_commit(
 
 
 def verify_authorship(
-    envelope: dsse.Envelope, identity_id: str, *, repo_root=None
+    envelope: dsse.Envelope, identity_id: str, *, repo_root: str | None = None
 ) -> registry.Verdict:
     """Verify ``envelope`` as an authorship attestation by ``identity_id``.
 
@@ -645,7 +652,7 @@ def verify_authorship(
 
 
 def verify_authorship_any_key(
-    envelope: dsse.Envelope, identity_id: str, *, repo_root=None
+    envelope: dsse.Envelope, identity_id: str, *, repo_root: str | None = None
 ) -> registry.Verdict:
     """Verify ``envelope`` against ANY key the identity has EVER held (epic gnu-whale-ichor).
 
@@ -675,7 +682,9 @@ def verify_authorship_any_key(
     return registry.verify(AUTHORSHIP_KIND, envelope, trust_root)
 
 
-def identify_signer(envelope: dsse.Envelope, identity_id: str, *, repo_root=None) -> str | None:
+def identify_signer(
+    envelope: dsse.Envelope, identity_id: str, *, repo_root: str | None = None
+) -> str | None:
     """Return the FIRST keyring public key (incl. revoked) whose single-key trust root
     verifies ``envelope``, or ``None`` (epic gnu-whale-ichor / 117b).
 
@@ -747,7 +756,7 @@ def sign_event_authorship(event: dict, key_path: str, principal: str) -> dsse.En
 
 
 def verify_event_authorship(
-    event: dict, envelope: dsse.Envelope, identity_id: str, *, repo_root=None
+    event: dict, envelope: dsse.Envelope, identity_id: str, *, repo_root: str | None = None
 ) -> registry.Verdict:
     """Verify ``envelope`` is a valid authorship Statement over ``event`` by ``identity_id``.
 
