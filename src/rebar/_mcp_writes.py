@@ -96,6 +96,27 @@ def _register_attach_commits(mcp, ann) -> None:
         return AttachCommitsResultOut.model_validate(rebar.attach_commits(ticket_id, commits))
 
 
+def _register_bridge_projects_writes(mcp, ann) -> None:
+    """Register the ``bridge_projects_set``/``bridge_projects_remove`` write tools.
+
+    Its own registrar rather than more nested ``def``s inside ``register_write_tools``:
+    every nested function raises that already-large function's cyclomatic complexity, which
+    the shrink-only complexity baseline gate caps.
+    """
+
+    @mcp.tool(annotations=ann["MUTATE_IDEMPOTENT"])
+    def bridge_projects_set(key: str, repos: list[str]) -> WriteAckOut:
+        """Set a bridge project key's repos (REPLACE semantics; idempotent)."""
+        rebar.bridge_projects_set(key, repos)
+        return _ack()
+
+    @mcp.tool(annotations=ann["MUTATE"])
+    def bridge_projects_remove(key: str) -> WriteAckOut:
+        """Remove a bridge project key from the mapping (error if absent)."""
+        rebar.bridge_projects_remove(key)
+        return _ack()
+
+
 def register_write_tools(mcp, ctx) -> None:
     """Register the write tools on ``mcp`` — a no-op on a read-only server.
 
@@ -362,6 +383,7 @@ def register_write_tools(mcp, ctx) -> None:
         return _ack()
 
     _register_attach_commits(mcp, _ANN)
+    _register_bridge_projects_writes(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
     def sign_manifest(ticket_id: str, manifest: list[str]) -> SignResultOut:
