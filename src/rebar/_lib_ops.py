@@ -100,6 +100,34 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
     return cast("BridgeFsck", findings)
 
 
+def bridge_projects_list(*, repo_root=None) -> dict:
+    """Return the store's bridge-projects mapping ``{key: {"repos": [...]}}``."""
+    store = _engine_module("rebar_reconciler.projects_store")
+    root = Path(config.repo_root(repo_root))
+    return store.read_projects(root)
+
+
+def bridge_projects_set(key, repos, *, repo_root=None) -> None:
+    """Replace ``key``'s repos with ``repos`` in the bridge-projects mapping."""
+    store = _engine_module("rebar_reconciler.projects_store")
+    root = Path(config.repo_root(repo_root))
+    store.set_project(root, key, list(repos))
+
+
+def bridge_projects_remove(key, *, repo_root=None) -> None:
+    """Remove ``key`` from the bridge-projects mapping.
+
+    Raise ``RebarError`` (naming the key) if it is not present.
+    """
+    store = _engine_module("rebar_reconciler.projects_store")
+    root = Path(config.repo_root(repo_root))
+    try:
+        store.remove_project(root, key)
+    except KeyError as exc:
+        message = f"bridge project {key!r} is not in the mapping"
+        raise RebarError(message, returncode=2, stderr=message) from exc
+
+
 def _engine_module(module_name: str):
     """Import one embedded reconciler module under its supported package name."""
     package = "rebar_reconciler"
