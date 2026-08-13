@@ -175,6 +175,25 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
 
 
+def _register_bridge_projects_read(mcp, ann) -> None:
+    """Register the ``bridge_projects_list`` read tool.
+
+    Its own registrar rather than another nested ``def`` inside ``register_read_tools``:
+    every nested function raises that already-large function's cyclomatic complexity, which
+    the shrink-only complexity baseline gate caps.
+    """
+
+    @mcp.tool(annotations=ann["READ_ONLY"])
+    def bridge_projects_list() -> dict:
+        """Return the store's bridge-projects sync mapping ``{key: {"repos": [...]}}``.
+
+        The projects key set IS the store's sync list; each entry names the repos its
+        tickets belong to. A pure store READ (no LLM)."""
+        import rebar
+
+        return rebar.bridge_projects_list()
+
+
 def register_read_tools(mcp, ctx) -> None:
     """Register the always-available read tools on ``mcp`` (see module docstring)."""
     _readonly = partial(_context_gate, ctx, "readonly")
@@ -185,6 +204,8 @@ def register_read_tools(mcp, ctx) -> None:
 
     # ── Read tools ────────────────────────────────────────────────────────────
     _ANN = tool_annotation_presets()
+
+    _register_bridge_projects_read(mcp, _ANN)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def show_ticket(ticket_id: str) -> TicketStateOut:
