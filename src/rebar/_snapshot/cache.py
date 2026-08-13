@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import threading
 from pathlib import Path
+from typing import IO
 
 from rebar._snapshot.git_fetch import interprocess_lock
 from rebar._snapshot.repo_snapshot import (
@@ -139,7 +140,7 @@ def entry_size(path: Path) -> int:
 # --------------------------------------------------------------------------------------
 # Reader-safe file access.
 # --------------------------------------------------------------------------------------
-def open_in_snapshot(handle: SnapshotHandle, relpath: str, mode: str = "rb"):
+def open_in_snapshot(handle: SnapshotHandle, relpath: str, mode: str = "rb") -> IO[bytes]:
     """Open a file under a snapshot, translating a vanished/unreadable entry into a
     :class:`CacheMiss` (the entry was evicted mid-read — re-acquire and retry).
 

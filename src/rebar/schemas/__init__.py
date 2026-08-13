@@ -27,7 +27,11 @@ from __future__ import annotations
 import json
 from importlib.resources import files
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover - typing-only imports (jsonschema ships with the dev extra)
+    from jsonschema import Draft202012Validator
+    from referencing import Registry
 
 __all__ = [
     "BRIDGE_ACCESS_CHECK",
@@ -412,7 +416,7 @@ def names() -> list[str]:
     )
 
 
-def registry():
+def registry() -> Registry:
     """A :class:`referencing.Registry` over all packaged schemas, so cross-file
     ``$ref``s (e.g. ``common.schema.json#/$defs/comment``) resolve.
 
@@ -428,7 +432,7 @@ def registry():
     return Registry().with_resources(resources)
 
 
-def validator(name: str):
+def validator(name: str) -> Draft202012Validator:
     """A draft-2020-12 validator for ``<name>`` with the cross-file registry wired
     in. Use ``validator(name).validate(instance)`` instead of
     ``jsonschema.validate(instance, load(name))`` so ``$ref``s to common resolve.

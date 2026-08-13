@@ -508,15 +508,19 @@ strict_equality = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 
-# ── mypy strictness ratchet: per-package `disallow_untyped_defs` ─────────────────
+# ── mypy strictness ratchet TIER 1: per-package `disallow_untyped_defs` ─────────
 # SHRINK-ONLY ratchet. Packages listed here have every function annotated and are
 # gated at full strictness. A package may only be ADDED to this list (never removed):
-# the exempt set — the src/rebar top-level packages NOT listed here — is
-# {reducer, graph→listed, _store, _io, _snapshot, schemas, _commands, _cli, llm,
-# review_bot, _engine, _engine_support} minus the enabled set, and must only shrink.
-# test_mypy_ratchet.py enforces that the enabled set never loses a member. To promote
-# a package: annotate its remaining defs until `mypy src/rebar/<pkg> --disallow-untyped-defs`
-# is clean, then add it here. See docs/architecture.md "mypy strictness ratchet".
+# the exempt set — the src/rebar top-level packages NOT listed here, currently
+# {reducer, _commands, _engine, llm} — must only shrink. test_mypy_ratchet.py enforces
+# that the enabled set never loses a member. To promote a package: annotate its
+# remaining defs until `mypy src/rebar/<pkg> --disallow-untyped-defs` is clean, then add
+# it here. See docs/architecture.md "mypy strictness ratchet".
+#
+# Tier 1 is NECESSARY BUT NOT SUFFICIENT — a package passes it while still being opaque
+# to the checker and the LSP (see below). TIER 2 (`disallow_any_explicit`, the second
+# override block after this one) is what actually closes that; membership there is a
+# strict subset of this list.
 #
 # THIS RATCHET DOES NOT PROTECT A PORT BOUNDARY (ticket cc77). It requires *an*
 # annotation, never a *useful* one, and there are TWO spellings that satisfy it while
@@ -531,8 +535,38 @@ warn_unused_ignores = true
 # transport boundaries are typed — see docs/architecture.md and
 # tests/unit/rebar_reconciler/test_transport_param_typing_cc77.py, which fails on both.
 [[tool.mypy.overrides]]
-module = ["rebar.graph.*", "rebar.grounding.*"]
+module = [
+    "rebar._cli.*",
+    "rebar._engine_support.*",
+    "rebar._io.*",
+    "rebar._snapshot.*",
+    "rebar._store.*",
+    "rebar.attest.*",
+    "rebar.audit.*",
+    "rebar.graph.*",
+    "rebar.grounding.*",
+    "rebar.metrics.*",
+    "rebar.opcert_service.*",
+    "rebar.review_bot.*",
+    "rebar.schemas.*",
+]
 disallow_untyped_defs = true
+
+# ── ratchet TIER 2: `disallow_any_explicit` ─────────────────────────────────────
+# Tier 1 above requires *an* annotation; `: Any` satisfies it while leaving the
+# parameter as blind as no annotation at all (see the comment block above and ticket
+# cc77). This second tier closes that hole for the packages that carry NO explicit
+# `Any` at all, so neither the type checker nor the LSP can be told "stop looking".
+# SHRINK-ONLY on the same terms as tier 1: a package may only be ADDED, never removed,
+# and `test_mypy_ratchet.py` pins the committed set. To promote a package, replace its
+# explicit `Any`s with real types (NOT `cast()` noise, which hides the same blindness)
+# until `mypy src/rebar/<pkg> --disallow-untyped-defs --disallow-any-explicit` is clean.
+# `disallow_any_explicit` must NEVER be set as a global `[tool.mypy]` key — the residue
+# in `llm` / `_engine` / `_commands` is ~390 explicit `Any` and a wholesale enable would
+# invite exactly that `cast()` noise. See docs/architecture.md "mypy strictness ratchet".
+[[tool.mypy.overrides]]
+module = ["rebar._cli.*", "rebar._snapshot.*"]
+disallow_any_explicit = true
 
 [tool.coverage.run]
 source = ["rebar"]

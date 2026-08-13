@@ -175,7 +175,7 @@ def _workflow(argv: list[str]) -> int:
     return 1
 
 
-def _workflow_edit(args) -> int:
+def _workflow_edit(args: argparse.Namespace) -> int:
     from rebar.llm import errors as _werr
     from rebar.llm.workflow import editor
 
@@ -206,7 +206,7 @@ def _workflow_edit(args) -> int:
     return 0
 
 
-def _workflow_show(args) -> int:
+def _workflow_show(args: argparse.Namespace) -> int:
     from rebar.llm import errors as _werr
     from rebar.llm.workflow import render
 
@@ -218,7 +218,7 @@ def _workflow_show(args) -> int:
     return 0
 
 
-def _workflow_run(args) -> int:
+def _workflow_run(args: argparse.Namespace) -> int:
     import json as _json
 
     import rebar
@@ -258,7 +258,7 @@ def _workflow_run(args) -> int:
     return 0 if res["status"] == "succeeded" else 1
 
 
-def _workflow_read(args) -> int:
+def _workflow_read(args: argparse.Namespace) -> int:
     import json as _json
 
     import rebar
@@ -285,7 +285,7 @@ def _workflow_read(args) -> int:
     return 0
 
 
-def _workflow_new(args) -> int:
+def _workflow_new(args: argparse.Namespace) -> int:
     from rebar import config
     from rebar.llm import errors as _werr
     from rebar.llm.workflow import lint as _lint
@@ -323,7 +323,7 @@ def _workflow_new(args) -> int:
     return 0
 
 
-def _workflow_validate(args) -> int:
+def _workflow_validate(args: argparse.Namespace) -> int:
     import json as _json
 
     from rebar import config

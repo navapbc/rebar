@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -103,7 +104,7 @@ def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:
 
 
 @contextmanager
-def _hlc_lock(rebar_dir: Path):
+def _hlc_lock(rebar_dir: Path) -> Iterator[None]:
     """A dedicated, local exclusive lock on ``.rebar/hlc.lock`` — held only for the
     duration of one RMW, never across the store write lock (no ordering hazard)."""
     import fcntl

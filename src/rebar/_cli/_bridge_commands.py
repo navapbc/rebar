@@ -19,6 +19,7 @@ import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from types import ModuleType
 
 _BRIDGE_ROUTES = {"preview", "sync"}
 
@@ -236,7 +237,7 @@ def _passthrough_help(command: str) -> int:
     return 0
 
 
-def _ref_lock_module():
+def _ref_lock_module() -> ModuleType:
     """Load the engine-scoped ref-lock module for the bridge control verbs."""
     from rebar._engine import engine_dir
 

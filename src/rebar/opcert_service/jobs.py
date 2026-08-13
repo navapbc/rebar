@@ -23,12 +23,16 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from rebar.opcert_service.config import OpcertServiceConfig
 from rebar.opcert_service.keyprov import provisioned_signing_key
 from rebar.opcert_service.ssm import SsmKeyFetcher
 from rebar.opcert_service.workspace import Workspace, discard, prepare_workspace
+
+#: A gate op seam: ``(ticket_id, repo_root) -> result mapping``. `review_plan` and
+#: `verify_completion` both match it, and tests inject fakes with the same shape.
+GateFn = Callable[[str, str], dict]
 
 #: The only kinds a client may request (validated before enqueue).
 VALID_KINDS = ("completion-verifier", "plan-review")
@@ -61,9 +65,9 @@ def run_job(
     kind: str,
     cfg: OpcertServiceConfig,
     ssm_fetcher: SsmKeyFetcher,
-    review_plan_fn=None,
-    verify_completion_fn=None,
-    workspace_factory=None,
+    review_plan_fn: GateFn | None = None,
+    verify_completion_fn: GateFn | None = None,
+    workspace_factory: Callable[[OpcertServiceConfig], Workspace] | None = None,
 ) -> dict:
     """Run one gate job to a terminal state; return the terminal record fields.
 
@@ -100,7 +104,7 @@ def run_job(
     return fields
 
 
-def _dispatch_completion(fields: dict, ticket_id: str, ws: Workspace, fn) -> None:
+def _dispatch_completion(fields: dict, ticket_id: str, ws: Workspace, fn: GateFn | None) -> None:
     """``completion-verifier``: run ``verify_completion`` (PASS|FAIL, RAISES on LLM error) and, on a
     PASS, sign the completion verdict through the shared producer seam, then read back the cert."""
     result = (fn or _default_verify_completion)(ticket_id, ws.repo_root)
@@ -113,7 +117,7 @@ def _dispatch_completion(fields: dict, ticket_id: str, ws: Workspace, fn) -> Non
         _attach_envelope(fields, ticket_id, ws.repo_root, "completion-verifier")
 
 
-def _dispatch_plan_review(fields: dict, ticket_id: str, ws: Workspace, fn) -> None:
+def _dispatch_plan_review(fields: dict, ticket_id: str, ws: Workspace, fn: GateFn | None) -> None:
     """``plan-review``: run ``review_plan`` (PASS|BLOCK|INDETERMINATE; degrades in-band, signs
     internally on a non-blocking PASS), then read back the cert on a PASS."""
     result = (fn or _default_review_plan)(ticket_id, ws.repo_root)
