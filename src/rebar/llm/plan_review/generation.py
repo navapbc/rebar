@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -144,6 +146,20 @@ def review_cancelled() -> bool:
     the Pass-1 ``_chunk`` funnel so a not-yet-started chunk never reaches the runner."""
     scope = _CANCEL_SCOPE.get()
     return scope is not None and scope.event.is_set()
+
+
+def _submit_ctx(ex: ThreadPoolExecutor, fn, *args):
+    """Submit ``fn(*args)`` to the pool carrying a COPY of the current context, so the
+    ContextVars a raw worker thread does NOT inherit still reach the worker: this module's
+    own ``_CANCEL_SCOPE`` (so a worker's ``review_cancelled()`` sees the run-scoped token)
+    AND the gate-session vars (`_in_gate_session` / `_active_code_root`, defined in
+    :mod:`llm.gate_context`) — without which an agentic ``runner.run`` in a worker reads
+    ``in_gate_session()`` == False and ``assert_gated`` raises before any LLM call. Lives here
+    because the cancel scope it must capture is generation-owned; ``pass1``/``container_stage``
+    import it. A FRESH copy per task: a Context cannot be entered concurrently
+    (``copy_context().run`` on the same Context from two threads raises). Evaluated here (the
+    submitting thread) so it captures the active session."""
+    return ex.submit(contextvars.copy_context().run, fn, *args)
 
 
 def own_material_changed(ticket_id: str, baseline: str | None, *, repo_root=None) -> bool:
