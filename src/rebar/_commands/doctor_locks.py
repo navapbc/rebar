@@ -20,12 +20,14 @@ exists:
   number from another host or pid namespace names a different process, or nothing;
 * hold age is :func:`rebar._store.lock_owner._mkdir_lock_age_s` (the lock dir's mtime is
   the acquisition time — the stamp is never refreshed);
-* staleness is :func:`rebar._store.lock_owner._mkdir_lock_is_stale` and NOTHING ELSE.
-  That function owns the decision table — the pid-recycle qualification, the
+* staleness is :func:`rebar._store.lock_owner._mkdir_lock_is_stale` for the mkdir leg and
+  :func:`rebar._store.lock_owner.stamped_file_is_stale` for the file-shaped drain lock —
+  two readers of ONE table and NOTHING ELSE. That table lives in
+  :func:`rebar._store.lock_owner._stamp_is_stale` — the pid-recycle qualification, the
   refuse-without-proof rule (bug yaw-gravel-linen) and the wall-clock ceiling (bug
   larval-tribal-tigermoth). A second staleness heuristic here would be a fork that
-  drifts from the one the lock actually obeys, so there is none: this module asks that
-  function and reports its answer. ``fcntl_held=False`` because doctor holds nothing.
+  drifts from the one the lock actually obeys, so there is none: this module asks those
+  functions and reports their answer. ``fcntl_held=False`` because doctor holds nothing.
 
 **Read-only, absolutely.** Nothing here reclaims, removes, or rewrites a lock, and
 ``doctor --repair`` does not either (repair iterates the link-finding list, which lock
@@ -44,8 +46,10 @@ Four legs are reported. The two tickets-store legs are the dual-window contract
 short RMW lock (:mod:`rebar._store.hlc`) and ``.rebar/enrich-drain.lock`` is the drain
 lock (:mod:`rebar.llm.enrich_drain`). The three fcntl-family legs are kernel-mediated,
 so the kernel drops them when their holder dies and "stale" is not a state they can
-reach; the drain lock is an ``O_EXCL`` file with no owner stamp, so its staleness is
-reported ``not-assessable`` rather than guessed at.
+reach; the drain lock is an ``O_EXCL`` file whose CONTENTS are its owner stamp, so it
+carries a holder and a real staleness verdict from the same shared function (bug
+knavish-stimulated-bluebottle; before it the drain lock was unstamped and this row
+could only report ``not-assessable``).
 """
 
 from __future__ import annotations
@@ -72,9 +76,8 @@ STALENESS_NOT_STALE = "not-stale"
 # a live holder: staleness is not a state it can be in, rather than one we failed to
 # assess.
 STALENESS_NOT_APPLICABLE = "not-applicable"
-# An existence lock with no ownership stamp. We can see that it is held and how old it
-# is, but nothing identifies an owner — and inventing a threshold here would be exactly
-# the forked heuristic this module refuses to write.
+# A leg whose state could not be established at all — the degraded row emitted when a
+# probe raises. Not a verdict about the lock, a statement that the probe failed.
 STALENESS_NOT_ASSESSABLE = "not-assessable"
 
 MECHANISM_FCNTL = "fcntl"
@@ -246,8 +249,14 @@ def _mkdir_report(name: str, lock_dir: str) -> dict[str, Any]:
 def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
     """A report row for an ``O_EXCL`` existence lock: held iff the file is there.
 
-    No ownership stamp exists for this shape, so the row carries the hold age but
-    declines to adjudicate staleness (:data:`STALENESS_NOT_ASSESSABLE`).
+    The lock file carries the v2 ownership stamp as its own contents (bug
+    knavish-stimulated-bluebottle gave the drain lock the discipline the mkdir leg
+    already had), so this decodes host/ns/pid/start, adds the same same-host-only
+    liveness verdict, and asks :func:`rebar._store.lock_owner.stamped_file_is_stale` —
+    the shared decision table, reached by a second reader rather than a second heuristic.
+    A lock written by a rebar predating the stamp reads as unstamped and is adjudicated
+    by that table's wall-clock ceiling, which is exactly how such an orphan gets
+    reclaimed; doctor still only reports it.
     """
     if not os.path.exists(path):
         return {
@@ -259,23 +268,53 @@ def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
             "holder_description": None,
             "pid_state": None,
             "held_seconds": None,
-            "staleness": STALENESS_NOT_ASSESSABLE,
+            "staleness": STALENESS_NOT_STALE,
             "detail": note,
         }
+
+    holder: dict[str, str] | None = None
+    pid_state: str | None = None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stamp: str | None = fh.read().strip()
+    except OSError:
+        stamp = None
+
+    if not stamp:
+        description = "unknown (no ownership stamp)"
+    else:
+        fields = _owner._parse_v2_stamp(stamp)
+        if fields is None:
+            description = "unknown (unrecognised ownership stamp)"
+        elif not fields:
+            description = "unknown (incomplete ownership stamp)"
+        else:
+            holder = {
+                "host": fields["host"],
+                "ns": fields["ns"],
+                "pid": fields["pid"],
+                "start": fields["start"],
+            }
+            pid_state = _owner._describe_stamped_pid(fields)
+            description = (
+                f"host={fields['host']} ns={fields['ns']} "
+                f"pid={fields['pid']} start={fields['start']}"
+            )
+
     age = _file_age_s(path)
+    stale = _owner.stamped_file_is_stale(path)
     held_for = f"{age:.0f}s" if age is not None else "unknown"
     return {
         "name": name,
         "path": path,
         "mechanism": MECHANISM_EXISTENCE,
         "state": STATE_HELD,
-        "holder": None,
-        "holder_description": None,
-        "pid_state": None,
+        "holder": holder,
+        "holder_description": description,
+        "pid_state": pid_state,
         "held_seconds": age,
-        "staleness": STALENESS_NOT_ASSESSABLE,
-        "detail": f"held {held_for}; this lock carries no ownership stamp, so no holder "
-        "can be named and staleness cannot be adjudicated",
+        "staleness": STALENESS_STALE if stale else STALENESS_NOT_STALE,
+        "detail": f"held {held_for} by {description}" + (f", pid {pid_state}" if pid_state else ""),
     }
 
 

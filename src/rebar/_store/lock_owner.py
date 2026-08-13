@@ -1,4 +1,4 @@
-"""Ownership stamps and staleness adjudication for the tickets store's mkdir write lock.
+"""Ownership stamps and staleness adjudication for rebar's stamped locks.
 
 Split out of :mod:`rebar._store.lock` (bug larval-tribal-tigermoth), which had reached the
 800-LOC module cap. The seam is the existing call graph, not an arbitrary cut: everything
@@ -9,8 +9,10 @@ The dependency runs one way, ``lock`` -> ``lock_owner``; nothing here imports ``
 
 The v2 stamp shape, the boot-id host identity, and the refusal-without-proof rule are
 documented in :mod:`rebar._store.lock`'s module docstring, which remains the narrative home
-for the dual-window lock contract. :func:`_mkdir_lock_is_stale` below carries the full
-decision table.
+for the dual-window lock contract. :func:`_stamp_is_stale` below carries the full
+decision table; :func:`_mkdir_lock_is_stale` and :func:`stamped_file_is_stale` are the
+two readers that feed it, for the mkdir lock dir and for a single-file lock respectively
+(the latter added by bug knavish-stimulated-bluebottle for the enrichment drain lock).
 """
 
 from __future__ import annotations
@@ -170,7 +172,9 @@ def _describe_stamped_pid(fields: dict[str, str]) -> str:
 
 
 def _mkdir_lock_age_s(lock_dir: str) -> float | None:
-    """Wall-clock age of *lock_dir* in seconds, or ``None`` if it cannot be stat'd.
+    """Wall-clock age of the lock artifact at *lock_dir* in seconds, or ``None`` if it
+    cannot be stat'd. Named for its first caller; ``os.stat`` is indifferent to whether
+    the artifact is a directory (the mkdir leg) or a file (a stamped single-file lock).
 
     The ownership stamp is written once at acquisition and never refreshed (there is no
     heartbeat), so the lock dir's mtime is the acquisition time — the quantity the stale
@@ -182,7 +186,8 @@ def _mkdir_lock_age_s(lock_dir: str) -> float | None:
 
 
 def _mkdir_lock_age_exceeds_ceiling(lock_dir: str) -> bool:
-    """Whether *lock_dir* is older than :data:`_MKDIR_LOCK_STALE_CEILING_S`.
+    """Whether the lock artifact at *lock_dir* is older than
+    :data:`_MKDIR_LOCK_STALE_CEILING_S`. Dir or file alike, as above.
 
     Fail-closed: an unreadable mtime returns False (keep refusing), so a stat error can
     never itself license a reclaim. Applied ONLY on refuse-without-proof branches that
@@ -225,15 +230,73 @@ def _legacy_stamp_is_stale(stamp: str) -> bool:
 def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
     """Whether a held mkdir lock is provably orphaned and may be reclaimed.
 
+    Reads the stamp out of *lock_dir*'s owner file and hands it to
+    :func:`_stamp_is_stale`, which carries the decision table. An unreadable owner file
+    is table row 1 (refuse, subject to the ceiling). ``unrecognised_via_ceiling=False``
+    keeps this leg's legacy routing: a non-v2 stamp is adjudicated by
+    :func:`_legacy_stamp_is_stale`, because the mkdir lock genuinely has a pre-v2
+    ``<host>:<pid>`` dialect still in the wild.
+
     Set *fcntl_held* only when the caller already holds the exclusive ``fcntl.flock``
     leg for this same tracker — see :func:`_acquire_mkdir` for why that is proof rather
-    than a hint. The decision table:
+    than a hint.
+    """
+    try:
+        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
+            stamp = fh.read().strip()
+    except OSError:
+        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
+    return _stamp_is_stale(stamp, lock_dir, fcntl_held=fcntl_held, unrecognised_via_ceiling=False)
+
+
+def stamped_file_is_stale(path: str) -> bool:
+    """Whether a stamped single-FILE lock at *path* is provably orphaned.
+
+    The file-shaped sibling of :func:`_mkdir_lock_is_stale`, for locks whose ownership
+    stamp is the file's own contents rather than a separate owner file inside a lock dir
+    — today ``.rebar/enrich-drain.lock`` (bug knavish-stimulated-bluebottle). It answers
+    with the SAME decision table, so the pid-recycle qualification, the
+    refuse-without-proof branches and the wall-clock ceiling are inherited rather than
+    forked into a second heuristic.
+
+    Two arguments are fixed for this shape. ``fcntl_held=False``: a file lock has no
+    kernel leg to hold, so there is never that proof. ``unrecognised_via_ceiling=True``:
+    unlike the mkdir lock, this shape has no legacy ``<host>:<pid>`` dialect — it was
+    unstamped entirely before the fix — so unrecognised content means "an orphan from
+    before stamping", and routing it through the ceiling is what lets an already-leaked
+    lock be reclaimed instead of wedging forever. A vanished file reports not-stale; the
+    caller simply retries the create.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stamp = fh.read().strip()
+    except OSError:
+        return _mkdir_lock_age_exceeds_ceiling(path)
+    return _stamp_is_stale(stamp, path, fcntl_held=False, unrecognised_via_ceiling=True)
+
+
+def _stamp_is_stale(
+    stamp: str,
+    artifact_path: str,
+    *,
+    fcntl_held: bool,
+    unrecognised_via_ceiling: bool,
+) -> bool:
+    """Whether the holder named by *stamp* is provably gone. THE staleness authority.
+
+    *artifact_path* is the lock artifact (dir or file) whose mtime measures the hold age
+    for the ceiling; *fcntl_held* is the caller's exclusive-fcntl-leg proof (see
+    :func:`_mkdir_lock_is_stale`); *unrecognised_via_ceiling* selects the routing for a
+    stamp that is not v2, and is the ONLY thing it selects. The decision table:
 
     1. Owner file absent or unreadable → False (a bash-style lock, or one seen in the
        window between ``mkdir`` and the stamp write) — UNLESS the dir has out-aged
        :data:`_MKDIR_LOCK_STALE_CEILING_S`, the wall-clock backstop that stops an
-       unprovable stamp wedging the store forever (9305 rec #1).
-    2. Not a v2 stamp → exactly the legacy behaviour (:func:`_legacy_stamp_is_stale`).
+       unprovable stamp wedging the store forever (9305 rec #1). Handled by the callers
+       above, which cannot produce a stamp to pass here.
+    2. Not a v2 stamp → with *unrecognised_via_ceiling* False, exactly the legacy
+       behaviour (:func:`_legacy_stamp_is_stale`); with it True, no proof of ownership,
+       so the age ceiling decides (the row-1 treatment).
     3. v2 stamp with missing/malformed fields → False, or reclaim past the age ceiling.
     4. v2 stamp from a different :func:`_host_identity` → the genuine foreign-host /
        shared-filesystem case: we cannot observe that host's processes and our own locks
@@ -258,32 +321,29 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
     Non-numeric pid on an otherwise same-host/same-namespace stamp is likewise a
     no-liveness-signal refusal and reclaims past the ceiling.
     """
-    try:
-        with open(os.path.join(lock_dir, _MKDIR_OWNER_FILE), encoding="utf-8") as fh:
-            stamp = fh.read().strip()
-    except OSError:
-        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
 
     fields = _parse_v2_stamp(stamp)
     if fields is None:
+        if unrecognised_via_ceiling:
+            return _mkdir_lock_age_exceeds_ceiling(artifact_path)
         return _legacy_stamp_is_stale(stamp)
     if not fields:
-        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
+        return _mkdir_lock_age_exceeds_ceiling(artifact_path)
 
     if fields["host"] != _host_identity():
-        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
+        return _mkdir_lock_age_exceeds_ceiling(artifact_path)
 
     stamped_ns = None if fields["ns"] == _STAMP_UNKNOWN else fields["ns"]
     if stamped_ns != _read_pid_namespace_id():
         # Same host, different (or unknowable) pid namespace: the stamped pid number is
         # meaningless to us, so the fcntl proof is the only positive evidence — and, short
         # of it, the age ceiling backstops the wedge.
-        return fcntl_held or _mkdir_lock_age_exceeds_ceiling(lock_dir)
+        return fcntl_held or _mkdir_lock_age_exceeds_ceiling(artifact_path)
 
     try:
         pid = int(fields["pid"])
     except ValueError:
-        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
+        return _mkdir_lock_age_exceeds_ceiling(artifact_path)
     if not _pid_alive(pid):
         return True
     stamped_start = None if fields["start"] == _STAMP_UNKNOWN else fields["start"]
@@ -303,7 +363,7 @@ def _mkdir_lock_is_stale(lock_dir: str, *, fcntl_held: bool = False) -> bool:
         # leg. A live owner inside its own hold would still hold that fcntl leg, so we could
         # not have acquired it and could not be here. Arriving here is itself evidence the
         # stamped owner let go: the ceiling only ever fires on an orphan.
-        return _mkdir_lock_age_exceeds_ceiling(lock_dir)
+        return _mkdir_lock_age_exceeds_ceiling(artifact_path)
     if stamped_start is not None and stamped_start != current_start:
         # The pid is live but it is a DIFFERENT process wearing a recycled number.
         return True

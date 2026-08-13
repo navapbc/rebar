@@ -42,25 +42,89 @@ def _rebar_dir(tracker: str) -> str:
     return os.path.join(os.path.dirname(tracker), ".rebar")
 
 
+def _drain_lock_path(tracker: str) -> str:
+    return os.path.join(_rebar_dir(tracker), _DRAIN_LOCK_NAME)
+
+
+def _describe_drain_lock_holder(path: str) -> str:
+    """Human-readable holder of the drain lock at *path*, for a log line.
+
+    Decodes the v2 ownership stamp and adds the shared liveness verdict, so a wedge is
+    attributable without running ``rebar doctor``. Descriptive only — nothing here decides
+    whether the lock may be reclaimed (that is :func:`lock_owner.stamped_file_is_stale`)."""
+    from rebar._store import lock_owner as _owner
+
+    try:
+        with open(path, encoding="utf-8") as fh:
+            stamp = fh.read().strip()
+    except OSError:
+        return "an unreadable drain lock"
+    age = _owner._mkdir_lock_age_s(path)
+    held = f", held {age:.0f}s" if age is not None else ""
+    fields = _owner._parse_v2_stamp(stamp) if stamp else None
+    if not fields:
+        # No holder to name — the age is then the ONLY signal, so it must still be said.
+        return f"an unstamped drain lock (pre-stamp rebar, or a torn stamp){held}"
+    return (
+        f"host={fields['host']} pid={fields['pid']} ({_owner._describe_stamped_pid(fields)}){held}"
+    )
+
+
 def _acquire_advisory_lock(tracker: str) -> int | None:
     """Best-effort non-blocking advisory drain lock. Returns an open fd on success, or None
-    if already held (the caller then skips silently). NOT the store write lock and NOT the
-    optimistic queue claim — this only stops two drain PROCESSES from redundant work."""
+    if genuinely held by another drainer. NOT the store write lock and NOT the optimistic
+    queue claim — this only stops two drain PROCESSES from redundant work.
+
+    The lock file carries the SAME v2 ownership stamp the store's mkdir write lock writes,
+    and a collision is adjudicated by the SAME shared decision table
+    (:func:`lock_owner.stamped_file_is_stale`): pid-recycle qualification, refusal without
+    proof, and the wall-clock ceiling are inherited, not re-invented. Before that, a drainer
+    that died between acquire and release leaked this file forever and every later drain
+    silently skipped (bug knavish-stimulated-bluebottle).
+
+    A provably-orphaned lock is reclaimed LOUDLY and the create retried EXACTLY ONCE; a
+    second collision means another drainer won the race, so we give up rather than loop.
+    A lock whose holder the shared table will not condemn is always respected."""
+    from rebar._store import lock_owner as _owner
+
     rebar_dir = _rebar_dir(tracker)
     try:
         os.makedirs(rebar_dir, exist_ok=True)
-        path = os.path.join(rebar_dir, _DRAIN_LOCK_NAME)
-        return os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-    except FileExistsError:
-        return None
     except OSError:
         return None
+    path = _drain_lock_path(tracker)
+    for attempt in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            if attempt or not _owner.stamped_file_is_stale(path):
+                return None
+            logger.warning(
+                "enrich drain: reclaiming stale drain lock %s held by %s",
+                path,
+                _describe_drain_lock_holder(path),
+            )
+            try:
+                os.unlink(path)
+            except OSError:
+                return None  # someone else got there first; let them drain
+            continue
+        except OSError:
+            return None  # any other open failure: a drain concern never fails a write
+        try:
+            os.write(fd, (_owner._owner_stamp() + "\n").encode("utf-8"))
+        except OSError:
+            # Best-effort, exactly like the mkdir leg's stamp write: an unstamped lock is
+            # still bounded by the shared wall-clock ceiling, so this cannot wedge.
+            logger.warning("enrich drain: could not stamp %s; lock is unattributable", path)
+        return fd
+    return None
 
 
 def _release_advisory_lock(tracker: str, fd: int) -> None:
     try:
         os.close(fd)
-        os.unlink(os.path.join(_rebar_dir(tracker), _DRAIN_LOCK_NAME))
+        os.unlink(_drain_lock_path(tracker))
     except OSError:
         pass
 
@@ -126,7 +190,13 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
     cfg = LLMConfig.from_env(repo_root=repo_root)
     lock_fd = _acquire_advisory_lock(tracker)
     if lock_fd is None:
-        logger.info("enrich drain: advisory lock held by another drain; skipping (exit 0)")
+        # WARNING, not INFO: a skip is normal when two drainers overlap for a moment, but it
+        # is also exactly what a wedged lock looks like, so name the holder rather than
+        # leaving an operator to discover the wedge via doctor days later.
+        logger.warning(
+            "enrich drain: advisory lock held by %s; skipping (exit 0)",
+            _describe_drain_lock_holder(_drain_lock_path(tracker)),
+        )
         return {"skipped": "lock-held", "processed": 0}
 
     processed = 0
