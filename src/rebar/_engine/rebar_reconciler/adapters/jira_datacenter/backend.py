@@ -69,7 +69,12 @@ def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
     codec = WikiTextCodec(rich="dc" in cutover_clients())
     return {
         "summary": ticket.get("title") or "",
-        "description": codec.fit_outbound(ticket.get("description") or ""),
+        # Render, then fit — ``to_wire(fit_outbound(...))``, matching ``_issues.py``'s
+        # create path and ``OutboundFieldMapper``'s update path. Fitting WITHOUT
+        # ``to_wire`` is the half-cutover bug: this site builds a rich codec but would
+        # post raw Markdown on CREATE while every later update posted rendered wiki, so
+        # a freshly created issue read as broken formatting until someone edited it.
+        "description": codec.to_wire(codec.fit_outbound(ticket.get("description") or "")),
         "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
         "priority": LOCAL_PRIORITY_TO_JIRA.get(ticket.get("priority", 2), "Medium"),
         "status": LOCAL_STATUS_TO_JIRA.get(ticket.get("status", "open"), "To Do"),

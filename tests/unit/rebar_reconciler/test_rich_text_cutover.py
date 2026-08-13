@@ -186,6 +186,38 @@ def test_dc_create_path_renders_like_the_update_path(set_flag: Any) -> None:
     assert "h1. Heading" in fields["description"]
 
 
+def test_dc_backend_create_path_renders_like_the_update_path(set_flag: Any) -> None:
+    """The SECOND DC create path, which the test above does not reach.
+
+    ``_map_local_to_dc_fields`` is ``map_ticket_to_remote``'s implementation — a create
+    path entirely separate from ``_issues._translate_create_fields``. It built a rich
+    codec and then applied only ``fit_outbound``, so with the DC cutover ON a created
+    issue carried raw Markdown while every later update carried rendered wiki: the
+    formatting looked broken until somebody edited the issue.
+
+    Having two independent DC create paths is exactly why this is asserted twice. The
+    sibling test passing said nothing about this one.
+    """
+    from rebar_reconciler.adapters.jira_datacenter import backend
+
+    set_flag("dc")
+    fields = backend._map_local_to_dc_fields({"title": "headline", "description": _MD})
+
+    codec = WikiTextCodec(rich=True)
+    assert fields["description"] == codec.to_wire(codec.fit_outbound(_MD))
+    assert "h1. Heading" in fields["description"]
+    assert "# Heading" not in fields["description"]
+
+
+def test_dc_backend_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> None:
+    """Flag off keeps the plain wire on this path too — the rollback must cover both."""
+    from rebar_reconciler.adapters.jira_datacenter import backend
+
+    set_flag("off")
+    fields = backend._map_local_to_dc_fields({"title": "headline", "description": _MD})
+    assert fields["description"] == _MD
+
+
 def test_dc_create_path_is_unchanged_when_flag_is_off(set_flag: Any) -> None:
     from rebar_reconciler.adapters.jira_datacenter import _issues
 
