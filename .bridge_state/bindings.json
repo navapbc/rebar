@@ -13892,10 +13892,24 @@
     },
     "1c79-1d10-26b0-4a4e": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\nThe real-artifact oracle from closed ticket ducal-statuelike-ladybird is valuable, but tests/unit/test_build_provenance.py independently archives the repository and runs python -m build several times. A current macOS job spent 24.34s, 15.53s, and 14.83s in three visible cases, over 54 runner-seconds before the remaining cases. No existing ticket owns test-fixture reuse.\n\n## Plan\nShare immutable clean-source/archive and eligible base-build artifacts at module/session scope, while retaining independent real builds for distinct observable contracts: wheel-from-sdist provenance, empty-env failure, sdist contents, and rebuild-from-sdist preservation.\n\n## Acceptance Criteria\n- [ ] Every existing real wheel/sdist assertion remains and still executes the relevant build boundary.\n- [ ] Clean source extraction and identical prerequisite builds are not repeated per test.\n- [ ] A defect-seeded missing COMMIT still fails the held-out oracle.\n- [ ] Packaging tests remain hermetic and do not reuse artifacts across pytest sessions.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context and measured baseline\n\nThe real-artifact oracle from closed ticket ducal-statuelike-ladybird is valuable, but tests/unit/test_build_provenance.py independently runs git archive plus python -m build in four tests. On the current macOS host the unchanged module took 35.93s. Individually: install-from-sdist 8.40s, wheel-from-sdist 4.69s, sdist-content 4.53s, and empty-env failure 1.81s. Three tests repeat the identical successful clean-tree build with REBAR_BUILD_COMMIT=abc1234; install-from-sdist then performs a distinct second wheel build from the produced sdist.\n\n## OSS consensus and prior decisions\n\nSetuptools builds stable sdist/wheel artifacts once under a session lock and exposes session-scoped readonly fixtures (pypa/setuptools@7d53128, setuptools/tests/fixtures.py#L70-L130). PyPA Build builds a dependency wheel once in a session fixture for downstream tests (pypa/build@bf222f4, tests/test_projectbuilder.py#L427-L438). Closed ticket ducal-statuelike-ladybird requires the real wheel/sdist boundaries but does not require rebuilding an identical prerequisite per assertion. No rejection exists.\n\n## Plan\n\n1. Change only tests/unit/test_build_provenance.py. Create one pytest session-scoped fixture per xdist worker using tmp_path_factory. It performs one git archive of HEAD and one real python -m build with REBAR_BUILD_COMMIT=abc1234.\n2. Return only immutable artifact paths from that fixture: the built wheel and sdist. Consumers inspect these archives read-only. No consumer receives the shared extracted source or output directory, preventing mutation of shared state.\n3. Wheel-from-sdist and sdist-content tests reuse the corresponding real shared artifacts while retaining their exact archive-content assertions.\n4. Install-from-sdist copies/extracts the shared sdist into its function-scoped tmp_path, then performs the distinct real env-unset rebuild there. Empty-env failure keeps its own function-scoped clean tree and real failing build because its environment and observable boundary differ.\n5. Strengthen the existing test module with deterministic build-call counting under a subprocess seam or equivalent fixture-level contract: one successful prerequisite build per pytest worker/session plus the retained empty-env and rebuild-from-sdist calls. Timing remains evidence, never a pass threshold.\n6. RED first against the current per-test rebuild behavior; hold the counter oracle out from the fixture refactor. GREEN, then seed both defects independently: restore a duplicate successful build and remove/corrupt COMMIT in the shared artifact. The counter/provenance oracles must return RED.\n7. Re-run the module serially and with xdist, report individual and total before/after durations, then run lint, typecheck, and the default pytest selection.\n\n## Test contract card\n\nauthoritative_contract: ducal-statuelike-ladybird and tests/unit/test_build_provenance.py require real wheel-from-sdist provenance, empty-env build failure, sdist build-info content, and env-unset rebuild-from-sdist preservation. trigger_preconditions: a clean git archive without .git and REBAR_BUILD_COMMIT=abc1234; separate empty env and env-unset rebuild cases. production_path: python -m build through hatch_build.py, with real wheel/sdist archive inspection. test_tier: real subprocess/package builds; a unit tier cannot prove artifact contents or the sdist-to-wheel boundary. observable_postcondition: identical provenance/failure/content assertions; exactly one identical successful prerequisite build per worker/session, while empty-env failure and rebuild-from-sdist remain distinct real builds. negative_control: empty-env failure does not consume the successful artifact; rebuild operates on a function-local extraction and cannot mutate shared inputs. collateral_invariants: fixture lifetime ends with the pytest session; xdist workers share nothing; no cross-session/on-disk cache; no production file changes. ci_gate: default pytest job and full Gerrit Verified gate.\n\n## Acceptance Criteria\n\n- [ ] Every existing real wheel/sdist assertion remains and still executes the relevant build boundary.\n- [ ] One successful clean-source prerequisite build is performed per pytest worker/session; identical prerequisite archive/build work is not repeated per test.\n- [ ] Shared consumers receive only read-only artifact paths; mutating extraction/rebuild work occurs in function-scoped copies.\n- [ ] A defect-seeded duplicate prerequisite build fails the deterministic call-count oracle, and a defect-seeded missing COMMIT still fails the provenance oracle.\n- [ ] Serial and xdist runs pass and report before/after individual durations; timing is evidence, never a gate.\n- [ ] Packaging tests remain hermetic, add no cross-session cache, and lint/typecheck/default pytest/Gerrit gates pass.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Reuse build-provenance fixtures while preserving real wheel and sdist coverage"
       },
       "created_at": "2026-08-13T05:35:03Z",
@@ -75202,6 +75216,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-31T21:05:19Z"
     },
+    "9843-170c-4d9e-446b": {
+      "created_at": "2026-08-13T18:25:10Z",
+      "jira_id": "4588622",
+      "jira_key": "REB-2864",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T18:25:14Z"
+    },
     "9858-d849-9e95-4ab1": {
       "baseline": {
         "assignee": null,
@@ -114381,6 +114402,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-27T03:35:23Z"
     },
+    "e30d-b5e7-f4de-4f91": {
+      "created_at": "2026-08-13T18:25:18Z",
+      "jira_id": "4588623",
+      "jira_key": "REB-2865",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T18:25:21Z"
+    },
     "e320-7744-a6aa-4000": {
       "baseline": {
         "assignee": null,
@@ -135165,6 +135193,8 @@
     "REB-2859": "d67d-8167-86b5-446c",
     "REB-286": "b5db-7433-b731-444f",
     "REB-2862": "4557-1f33-7a3f-47c7",
+    "REB-2864": "9843-170c-4d9e-446b",
+    "REB-2865": "e30d-b5e7-f4de-4f91",
     "REB-287": "b642-c3ed-0e6c-4090",
     "REB-288": "b711-7224-7de7-41be",
     "REB-289": "b744-4fb9-2d05-4b49",
