@@ -66,12 +66,14 @@ def test_stalled_remote_aborts_on_throughput_not_the_wall_clock(repo, tmp_path, 
     assert "timed out after" not in message, message
 
 
-def test_slow_but_progressing_remote_is_not_aborted(repo, tmp_path):
+def test_slow_but_progressing_remote_is_not_aborted(repo, tmp_path, monkeypatch):
     """The discriminator: sustained throughput above the configured floor is not a stall.
 
-    The remote dribbles above the floor across the production abort window. Any
+    The remote dribbles above the floor across a complete abort window. Any
     implementation keyed on elapsed time rather than throughput fails here."""
-    port, stop = _serve("dribble", seconds=15, rate=4000)
+    monkeypatch.setenv("REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC", "1000")
+    monkeypatch.setenv("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS", "1")
+    port, stop = _serve("dribble", seconds=2, rate=4000)
     try:
         with pytest.raises(git_fetch.SnapshotFetchError) as excinfo:
             git_fetch.fetch_origin(

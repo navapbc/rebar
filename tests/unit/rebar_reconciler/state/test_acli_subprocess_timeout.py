@@ -103,6 +103,26 @@ def _short_timeout(monkeypatch):
     monkeypatch.setattr(acli_subprocess, "_ACLI_DRAIN_SECONDS", 1)
 
 
+@pytest.fixture
+def short_read_retry_timing(monkeypatch):
+    """Install short retry timing and observe each real child from the parent."""
+    real_popen = acli_subprocess.subprocess.Popen
+    spawned_pids: list[int] = []
+    backoffs: list[float] = []
+
+    def recording_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        spawned_pids.append(process.pid)
+        return process
+
+    monkeypatch.setattr(acli_subprocess.subprocess, "Popen", recording_popen)
+    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: 0.1)
+    monkeypatch.setattr(acli_subprocess, "_ACLI_GRACE_SECONDS", 0.1)
+    monkeypatch.setattr(acli_subprocess, "_ACLI_DRAIN_SECONDS", 0.1)
+    monkeypatch.setattr(acli_subprocess, "_backoff_sleep", backoffs.append)
+    return spawned_pids, backoffs
+
+
 # ---------------------------------------------------------------------------
 # Core: grandchild reap (the load-bearing assertion)
 # ---------------------------------------------------------------------------
@@ -169,19 +189,36 @@ def test_write_not_retried_on_timeout(tmp_path):
 
 
 @POSIX_ONLY
-def test_read_retried_then_terminal(tmp_path):
+def test_read_retried_then_terminal(short_read_retry_timing):
     """retry_on_timeout=True -> retries up to _MAX_ATTEMPTS then AcliTimeoutError."""
-    counter = tmp_path / "spawns"
-    counter.write_text("")
+    spawned_pids, backoffs = short_read_retry_timing
+
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [str(counter)],
-            acli_cmd=_fake_cmd(_COUNT_THEN_HANG),
+            [],
+            acli_cmd=_fake_cmd(_SIMPLE_HANG),
             retry_on_timeout=True,
         )
-    assert len(counter.read_text()) == acli_subprocess._MAX_ATTEMPTS, (
+
+    assert len(spawned_pids) == acli_subprocess._MAX_ATTEMPTS, (
         "a READ should retry up to _MAX_ATTEMPTS times before going terminal"
     )
+    assert len(set(spawned_pids)) == len(spawned_pids), (
+        "each retry must spawn a distinct child session"
+    )
+    assert backoffs == [2, 4], f"expected logical retry backoff [2, 4], got {backoffs}"
+
+    remaining = set(spawned_pids)
+    deadline = time.monotonic() + 5
+    while remaining and time.monotonic() < deadline:
+        for pid in tuple(remaining):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                remaining.remove(pid)
+        if remaining:
+            time.sleep(0.01)
+    assert not remaining, f"timed-out ACLI child PIDs survived cleanup: {sorted(remaining)}"
 
 
 def test_acli_timeout_error_is_not_builtin_timeout_error():
