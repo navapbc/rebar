@@ -394,8 +394,14 @@ A finding's alternate shape must come from the supported client-shape matrix:
 
 - `Harness`: Python library, CLI, remote MCP; no Claude Code or Codex dependency.
 - `Target project`: Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.
-- `Platform and venue`: macOS, Windows, Linux, BSD, CI, servers, developer workstations.
+- `Platform and venue`: macOS, Windows, Linux, BSD, CI under any provider (GitHub Actions, GitLab CI, Jenkins, and others), projects with NO CI provider at all, servers, developer workstations.
 - `Project location and access`: in-checkout current working directory, explicitly located workspace, server outside the checkout, no unrestricted-local-filesystem assumption.
+
+One rule under the matrix makes the CI venue concrete: **a capability whose only
+trigger is a specific CI system is not portable.** A plan that schedules recurring or
+automatic work must also name an operation-linked or in-process fallback; naming only a
+CI trigger is itself a finding, whose alternate shape is `a project with no CI provider`
+and whose observable breakage is that the capability never runs at all.
 
 Two non-findings keep it from firing on benign plans:
 `Silence about portability is not a finding`, and

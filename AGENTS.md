@@ -157,6 +157,11 @@ restated here:
   criterion, the reviewer's detection detail), the per-ticket structural quality gates, and
   the `.rebar/criteria_routing.json` overlay → `docs/plan-review-criteria-guide.md` (and
   `rebar explain <criterion-id>`).
+- **Portability** — rebar must work across environments with **diverse CI providers or no
+  CI provider**, so a capability whose only trigger is a specific CI system is not portable
+  (an operation-linked or in-process fallback is required); this is enforced by the blocking
+  `project.portability` plan-review criterion → `docs/plan-review-gate.md` (and
+  `rebar explain project.portability`).
 - **MCP tool set** — the read/write tool inventory and their `outputSchema`s →
   `docs/mcp-reference.md`.
 - **Concurrency** — optimistic concurrency, the parent-first claim/transition cascade, and

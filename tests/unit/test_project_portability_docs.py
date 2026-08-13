@@ -91,7 +91,11 @@ def test_client_shape_matrix():
     matrix = {
         "Harness": "Python library, CLI, remote MCP; no Claude Code or Codex dependency.",
         "Target project": "Ruby, Python, Java, Next.js, .NET, Terraform subprojects in a monorepo.",
-        "Platform and venue": "macOS, Windows, Linux, BSD, CI, servers, developer workstations.",
+        "Platform and venue": (
+            "macOS, Windows, Linux, BSD, CI under any provider (GitHub Actions, "
+            "GitLab CI, Jenkins, and others), projects with NO CI provider at all, "
+            "servers, developer workstations."
+        ),
         "Project location and access": (
             "in-checkout current working directory, explicitly located workspace, "
             "server outside the checkout, no unrestricted-local-filesystem assumption."
@@ -100,6 +104,15 @@ def test_client_shape_matrix():
     for label, value in matrix.items():
         assert label in sub, f"missing client-shape label: {label!r}"
         assert value in sub, f"missing client-shape value for {label!r}"
+
+
+# ── the CI-venue rule mirrors the rubric ─────────────────────────────────────────
+def test_ci_is_a_venue_not_a_dependency():
+    """The doc mirror must carry the rubric's no-CI-provider rule, not drift from it."""
+    sub = _subsection()
+    assert "a capability whose only\ntrigger is a specific CI system is not portable" in sub
+    assert "operation-linked or in-process fallback" in sub
+    assert "a project with no CI provider" in sub
 
 
 # ── both exact non-finding rules ─────────────────────────────────────────────────
