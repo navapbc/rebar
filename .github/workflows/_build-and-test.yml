@@ -445,6 +445,25 @@ jobs:
             exit 1
           fi
           echo "Module-size gate: OK (no src/rebar file exceeds the ${LIMIT}-LOC hard cap; limit locked at $LIMIT)."
+          # Near-cap leading indicator (NON-BLOCKING, always exits 0): surface files approaching
+          # the locked cap BEFORE they breach it, so the next split is not discovered by an
+          # already-blocked contributor. The band is within 10% of the cap — the same rule
+          # code_health.size_near_fraction (default 0.1) uses to drive
+          # module_size_distribution.near_cap_count. Reuses THIS gate's own find|wc -l, so the
+          # cap rule has no second definition and this pass adds no new failure mode.
+          BAND=$(( LIMIT - LIMIT / 10 ))
+          near=$(find src/rebar -name '*.py' | grep -v __pycache__ \
+            | xargs wc -l 2>/dev/null \
+            | awk -v lim="$LIMIT" -v band="$BAND" '$2 != "total" && $1 >= band && $1 <= lim { print $1 " " $2 }' | sort -k2)
+          if [ -n "$near" ]; then
+            echo "Near-cap files (>= ${BAND} LOC, within 10% of the ${LIMIT}-LOC cap) — split proactively before they breach:"
+            while read -r loc path; do
+              [ -n "$path" ] || continue
+              echo "::warning file=${path}::${path} is ${loc} LOC, within 10% of the ${LIMIT}-LOC module-size cap; split it before it breaches the hard cap."
+            done <<< "$near"
+          else
+            echo "Near-cap check: OK (no src/rebar file is within 10% of the ${LIMIT}-LOC cap)."
+          fi
 
       # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
       # and LOCKED against main. Raised ceilings and added entries require an administrator
