@@ -48,7 +48,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Final
+from typing import Any, Final
 
 logger = logging.getLogger(__name__)
 
@@ -322,25 +322,114 @@ def _substitute_line(line: str) -> str:
     return "".join(pieces)
 
 
+_PANDOC_GRACE_SECONDS: int = 3  # SIGTERM grace before SIGKILL
+_PANDOC_DRAIN_SECONDS: int = 2  # bounded post-SIGKILL reap/drain (D-state safe)
+_PANDOC_TIMEOUT_DEFAULT: float = 10.0  # mirrors ReconcilerConfig.dc_pandoc_timeout_s
+
+
+def _pandoc_timeout() -> float:
+    """The per-invocation wall-clock ceiling, from ``reconciler.dc_pandoc_timeout_s``.
+
+    Read at CALL time so an operator can widen it without a redeploy, and
+    fail-SAFE rather than fail-open: an unreadable config, a ``rebar`` package
+    that is not importable (the engine ships as stdlib-only subprocess package
+    data), or a non-positive value all fall back to the built-in default. A
+    timeout of zero would mean "kill pandoc immediately", degrading every unit
+    to raw Markdown — a config fault must not silently disable rendering.
+
+    ``AttributeError`` is in that set for a reason rather than by reflex: the
+    reconciler engine is loaded as package data and can run against a rebar whose
+    config predates this key, and callers substitute partial config objects. A
+    renderer that raised because one field was missing would take down the pass
+    over something it can trivially default.
+    """
+    try:
+        from rebar.config import ConfigError, load_config
+    except ImportError:
+        return _PANDOC_TIMEOUT_DEFAULT
+    try:
+        value = float(load_config().reconciler.dc_pandoc_timeout_s)
+    except (ConfigError, AttributeError, TypeError, ValueError):
+        return _PANDOC_TIMEOUT_DEFAULT
+    return value if value > 0 else _PANDOC_TIMEOUT_DEFAULT
+
+
 def _convert(markdown: str, pandoc: str) -> str | None:
-    """Run pandoc over one unit; ``None`` on any failure (never raises)."""
+    """Run pandoc over one unit; ``None`` on any failure (never raises).
+
+    Spawns pandoc DIRECTLY rather than through pypandoc's ``convert_text``: the
+    high-level API hands back no process handle, and it sets no timeout, so a
+    pathological body can spin the jira reader indefinitely (one corpus body ran
+    13.5 minutes at 95.8% CPU).
+
+    The timeout is enforced caller-side, and on expiry the whole process GROUP is
+    reaped through the shared ``rebar._proc.reap_process_group``. A plain
+    ``subprocess.run(timeout=...)`` would not do: it reaps only the DIRECT child,
+    so a pipe-holding grandchild survives and keeps burning CPU (bug d843,
+    bpo-30154). ``start_new_session=True`` is what makes the child a group leader
+    so the reaper's ``killpg`` has a group to kill; the two go together.
+
+    Note the ONE place this deliberately diverges from the ACLI caller it
+    otherwise mirrors: acli reads nothing from stdin and is spawned with
+    ``stdin=DEVNULL``, whereas pandoc reads the unit FROM stdin. Copying that
+    kwarg would feed pandoc an empty document and silently degrade every unit, so
+    the pipe is explicit here.
+    """
     import subprocess  # local: keeps the module's import surface stdlib-light
 
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             [pandoc, "-f", _PANDOC_FROM, "-t", _PANDOC_TO, *_PANDOC_ARGS],
-            input=markdown,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=30,
+            start_new_session=True,
         )
+    except OSError:
+        logger.debug(_FALLBACK_EVENT, extra={"reason": "conversion_failure"})
+        return None
+    try:
+        stdout, _stderr = proc.communicate(input=markdown, timeout=_pandoc_timeout())
+    except subprocess.TimeoutExpired:
+        _reap_pandoc(proc)
+        logger.debug(_FALLBACK_EVENT, extra={"reason": "timeout"})
+        return None
     except (OSError, subprocess.SubprocessError):
+        _reap_pandoc(proc)
         logger.debug(_FALLBACK_EVENT, extra={"reason": "conversion_failure"})
         return None
-    if completed.returncode != 0:
+    if proc.returncode != 0:
         logger.debug(_FALLBACK_EVENT, extra={"reason": "conversion_failure"})
         return None
-    return _ANCHOR_RE.sub("", completed.stdout).rstrip("\n")
+    return _ANCHOR_RE.sub("", stdout).rstrip("\n")
+
+
+def _reap_pandoc(proc: Any) -> None:
+    """Reap a timed-out pandoc child AND its process group (bug d843).
+
+    Thin wrapper over :func:`rebar._proc.reap_process_group` — the single source
+    of truth for the SIGTERM -> grace -> SIGKILL -> bounded-drain, ESRCH/EPERM
+    guarded, D-state-safe group reap already shared by the ACLI transport and the
+    grounding harness. This caller pins only its own timing constants and log
+    identity; any behaviour change belongs in the shared helper, not here.
+
+    Imported function-locally, like this module's other non-stdlib imports. Never
+    raises: a renderer that cannot reap must still fall back to Markdown rather
+    than take the pass down.
+    """
+    try:
+        from rebar._proc import reap_process_group
+
+        reap_process_group(
+            proc,
+            grace=_PANDOC_GRACE_SECONDS,
+            drain=_PANDOC_DRAIN_SECONDS,
+            label="pandoc",
+            logger=logger,
+        )
+    except Exception:  # noqa: BLE001 — reaping is best-effort; the fallback still stands
+        logger.debug(_FALLBACK_EVENT, extra={"reason": "reap_failure"})
 
 
 def render_markdown_to_wiki(markdown: str) -> str:

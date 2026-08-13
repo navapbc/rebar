@@ -1,0 +1,40 @@
+rebar
+Copyright the rebar contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This NOTICE records third-party components that rebar DISTRIBUTES or invokes and
+whose licences carry obligations beyond Apache-2.0. Ordinary Apache/BSD/MIT
+dependencies resolved from PyPI at install time are not listed here; declared
+dependencies live in pyproject.toml.
+
+--------------------------------------------------------------------------------
+pandoc
+--------------------------------------------------------------------------------
+Component:  pandoc
+Version:    3.6.1
+Licence:    GPL-2.0-or-later
+Upstream:   https://pandoc.org  (source: https://github.com/jgm/pandoc)
+Copyright:  Copyright (C) 2006-2024 John MacFarlane
+
+How it reaches a rebar install
+    pandoc is NOT vendored in this repository and is not a required dependency.
+    The executable is bundled inside the third-party `pypandoc-binary==1.15`
+    wheel, which is pulled in ONLY by the optional `wiki` extra
+    (`pip install rebar[wiki]`). An install without that extra contains no
+    pandoc, and the Data Center wiki renderer degrades to passing Markdown
+    through unchanged.
+
+How rebar uses it
+    The renderer (src/rebar/_engine/rebar_reconciler/adapters/jira_family/
+    wiki_render.py) locates the bundled binary via pypandoc and executes it as a
+    SEPARATE PROCESS, communicating over stdin/stdout. rebar does not link
+    against pandoc, does not embed its code, and does not derive from it.
+
+Obligation
+    pandoc is GPL-2.0-or-later. Anyone REDISTRIBUTING a bundle that includes the
+    pandoc executable — for example a container image or a wheel built with the
+    `wiki` extra baked in — carries the GPL's source-availability obligation for
+    pandoc itself. Upstream source is at the URL above; the pinned version is the
+    one recorded here, and the pin is verified in CI so this entry cannot drift
+    from what is actually shipped.
