@@ -32,7 +32,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import time
 from collections.abc import Callable, Iterable
 from typing import Any
 
@@ -44,8 +43,9 @@ from rebar._store.canonical import canonical_bytes  # the single canonical seria
 # re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
 from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
 from rebar._store.gitutil import (
+    _is_transient_object_write_error,
     _with_index_lock_retry,
-    _with_transient_head_retry,
+    _with_transient_fault_retry,
     discard_unmerged_paths,
     path_is_foreign_to_branch,
 )
@@ -171,54 +171,16 @@ def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> _stag
         raise StoreError("Error: failed to write staging temp file", 1) from exc
 
 
-# git's object database write intermittently fails on CI runners while hashing a blob
-# during ``git add``: the loose-object temp create under ``.git/objects/`` returns
-# ENOENT (Linux: "unable to create temporary file: No such file or directory") or
-# EINVAL (macOS: "… Invalid argument"), surfaced as "failed to insert into database" /
-# "unable to index file" / "fatal: adding files failed". It is a transient
-# filesystem hiccup, NOT a data fault — the identical add succeeds on retry (a Gerrit
-# ``recheck`` on the same patchset passes). Retrying ONLY this signature turns a
-# runner-FS blip from a hard write failure that red-lights unrelated CI into a
-# self-healed write. Bugs vocal-dip-robin / brainy-floral-globefish.
-_TRANSIENT_ADD_MARKERS = (
-    "unable to create temporary file",
-    "failed to insert into database",
-    "unable to index file",
-)
+# The transient object-DB WRITE fault this path rides out — git's loose-object temp create
+# blipping on a CI-runner FS during ``git add``/``git commit`` — is classified and retried by
+# the SHARED seam (``gitutil._TRANSIENT_WRITE_MARKERS`` /
+# :func:`gitutil._with_transient_fault_retry`).
+# The marker family used to live here privately, which left every OTHER caller of the shared
+# write seam unprotected against the identical fault (bug unheedful-custodial-bluebottle); it
+# now has exactly one definition, in gitutil. Re-exported under this module's historical name
+# so a test that pins the classification keeps a symbol to assert on.
+_is_transient_add_error = _is_transient_object_write_error
 _GIT_ADD_ATTEMPTS = 3
-_GIT_ADD_BACKOFF_S = 0.1
-
-
-def _is_transient_add_error(text: str) -> bool:
-    low = text.lower()
-    return any(marker in low for marker in _TRANSIENT_ADD_MARKERS)
-
-
-def _with_transient_add_retry(
-    run_once: Callable[[], subprocess.CompletedProcess[str]],
-    *,
-    attempts: int = _GIT_ADD_ATTEMPTS,
-) -> subprocess.CompletedProcess[str]:
-    """Retry a loose-object-WRITING git invocation on the transient object-DB temp-create
-    signature (:func:`_is_transient_add_error`).
-
-    BOTH ``git add`` (a blob) and ``git commit`` (a tree + a commit object) write loose
-    objects through git's identical ``create_tmpfile`` path, which intermittently blips on a
-    CI-runner FS. Re-running the same add/commit re-writes the same objects (idempotent) and
-    the fault clears, so this used to self-heal ``git add`` only — leaving ``git commit`` to
-    surface the SAME transient as a hard write loss, dropping a concurrent locked write (the
-    enrich-prune concurrency flake). A non-transient failure returns immediately, unchanged."""
-    result: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(1, attempts + 1):
-        result = run_once()
-        if result.returncode == 0:
-            return result
-        if attempt < attempts and _is_transient_add_error(result.stderr or result.stdout or ""):
-            time.sleep(_GIT_ADD_BACKOFF_S * attempt)
-            continue
-        return result
-    assert result is not None  # attempts >= 1, so the loop body ran at least once
-    return result
 
 
 # git's index.lock self-healing (constants + ``_is_index_lock_error`` +
@@ -226,7 +188,7 @@ def _with_transient_add_retry(
 # ``rebar._store.gitutil`` so the claim/transition write path (txn.py) self-heals through the
 # same implementation (bug fix-indexlock-retry). Imported at module top; ``_INDEX_LOCK_STALE_S``
 # is re-exported there for tests. ``_git_add`` below composes gitutil's index.lock retry with
-# event_append's OWN object-DB ``git add`` retry (the ``_TRANSIENT_ADD_MARKERS`` loop).
+# gitutil's runner-FS transient retry (:func:`_with_transient_fault_retry`).
 
 
 # Bound every lock-held git child (c2ba). These run INSIDE ``lock.write_lock`` holding the
@@ -262,15 +224,16 @@ def _git_add(
     failures.
 
     On success or a NON-transient failure returns immediately (behavior unchanged — a
-    real pathspec/permission/UU error still surfaces on the first attempt). On the
-    transient object-DB signature the identical add is retried up to *attempts* times
-    with a short backoff, because re-adding the same paths is idempotent and the fault
-    clears on retry; index.lock contention is ridden out (and a stale lock reclaimed) by
-    :func:`_with_index_lock_retry`. Returns the final :class:`subprocess.CompletedProcess`."""
+    real pathspec/permission/UU error still surfaces on the first attempt). On a transient
+    runner-FS signature the identical add is retried up to *attempts* times with a short
+    backoff by the shared :func:`_with_transient_fault_retry`, because re-adding the same
+    paths is idempotent and the fault clears on retry; index.lock contention is ridden out
+    (and a stale lock reclaimed) by :func:`_with_index_lock_retry`. Returns the final
+    :class:`subprocess.CompletedProcess`."""
 
     return _with_index_lock_retry(
         tracker,
-        lambda: _with_transient_add_retry(
+        lambda: _with_transient_fault_retry(
             lambda: _run_git(["git", "-C", tracker, "add", "--", *relpaths]),
             attempts=attempts,
         ),
@@ -280,23 +243,21 @@ def _git_add(
 
 # raw-git-ok: locked store seam internal
 def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker commit -q --no-verify -m <msg>``, riding out three transients:
-    index.lock contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`;
-    the ``could not parse HEAD`` READ fault via :func:`_with_transient_head_retry` (``git
-    commit`` parses HEAD to set the new commit's parent); and the object-DB temp-create WRITE
-    fault via :func:`_with_transient_add_retry` (``git commit`` also WRITES the new tree +
-    commit loose objects — the same runner-FS blip that strikes ``git add``, previously
-    unretried on commit, which dropped a concurrent locked write). Composed index.lock-OUTER /
-    HEAD-parse / object-DB-INNER — the same gitutil retries the transition/claim path uses. A
+    """``git -C tracker commit -q --no-verify -m <msg>``, riding out two transients:
+    index.lock contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`,
+    and the runner-FS git faults via :func:`_with_transient_fault_retry` — the
+    ``could not parse HEAD`` READ fault (``git commit`` parses HEAD to set the new commit's
+    parent) and the object-DB temp-create WRITE fault (``git commit`` also WRITES the new
+    tree + commit loose objects — the same blip that strikes ``git add``, whose unretried
+    commit once dropped a concurrent locked write). Composed index.lock-OUTER /
+    runner-FS-INNER — the same gitutil retries the transition/claim path uses. A
     non-lock, non-transient failure (including a genuine "nothing to commit" / UU wedge)
     surfaces immediately, unchanged — the caller's UU-recovery path still handles it."""
     return _with_index_lock_retry(
         tracker,
-        lambda: _with_transient_head_retry(
-            lambda: _with_transient_add_retry(
-                lambda: _run_git(
-                    ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
-                )
+        lambda: _with_transient_fault_retry(
+            lambda: _run_git(
+                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
             )
         ),
         force_reclaim=True,
@@ -324,15 +285,12 @@ def _git_commit_paths(
 
     The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
     this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
-    the write lock's braces. Rides out index.lock contention AND the transient
-    ``could not parse HEAD`` read fault via the same composed gitutil retries as
-    :func:`_git_commit`."""
+    the write lock's braces. Rides out index.lock contention AND the transient runner-FS
+    git faults via the same composed gitutil retries as :func:`_git_commit`."""
     argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
     return _with_index_lock_retry(
         tracker,
-        lambda: _with_transient_head_retry(
-            lambda: _with_transient_add_retry(lambda: _run_git(argv))
-        ),
+        lambda: _with_transient_fault_retry(lambda: _run_git(argv)),
         force_reclaim=True,
     )
 
@@ -707,15 +665,10 @@ def _recover_from_unmerged(
         )
     discard_unmerged_paths(tracker, regen, foreign)
     _git_add(tracker, list(event_relpaths))
-    # Same transient ``could not parse HEAD`` (read) AND object-DB temp-create (write)
-    # self-heals as _git_commit — this UU-recovery commit reads HEAD and writes loose
-    # objects too, and must not lose a resolved write to a runner-FS blip.
-    retry = _with_transient_head_retry(
-        lambda: _with_transient_add_retry(
-            lambda: _run_git(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
-            )
-        )
+    # Same runner-FS transient self-heals as _git_commit — this UU-recovery commit reads
+    # HEAD and writes loose objects too, and must not lose a resolved write to a blip.
+    retry = _with_transient_fault_retry(
+        lambda: _run_git(["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg])
     )
     return (retry.returncode == 0, None)
 
@@ -773,12 +726,8 @@ def _recover_from_invalid_object(
     # always does. If it somehow doesn't, the retry commit simply fails → the caller raises.
     read_tree = _run_git(["git", "-C", tracker, "read-tree", "HEAD"])
     _git_add(tracker, list(event_relpaths))
-    retry = _with_transient_head_retry(
-        lambda: _with_transient_add_retry(
-            lambda: _run_git(
-                ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
-            )
-        )
+    retry = _with_transient_fault_retry(
+        lambda: _run_git(["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg])
     )
     healed = retry.returncode == 0
     # An orphan is an EARLIER failed write's file dropped from the index by the reset but left

@@ -394,8 +394,8 @@ def _with_index_lock_retry(
 # set the new commit's parent. Under a SHARED tracker worktree the HEAD commit's loose object
 # in ``.git/objects/`` is transiently unreadable (a runner-FS read hiccup, NOT data
 # corruption), and git aborts with ``fatal: could not parse HEAD`` (exit 128) BEFORE writing
-# anything. It is the READ-side analogue of event_append's WRITE-side object-DB ``git add``
-# transient (``_TRANSIENT_ADD_MARKERS``): the identical invocation succeeds on retry — a
+# anything. It is the READ-side analogue of the WRITE-side object-DB temp-create
+# transient (``_TRANSIENT_WRITE_MARKERS`` below): the identical invocation succeeds on retry — a
 # re-run on the same state passes (a Gerrit ``recheck`` on the same patchset goes green) — so
 # retrying ONLY this signature turns a runner-FS blip from a hard write loss (which red-lights
 # unrelated CI) into a self-healed write. The op is safe to re-run because it failed at the
@@ -415,8 +415,26 @@ _TRANSIENT_HEAD_MARKERS = ("could not parse head",)
 # error``), which are real damage rather than a read blip; a genuinely broken object that
 # happens to also report ``bad object`` still surfaces once the bounded retries are spent.
 _TRANSIENT_OBJECT_MARKERS = ("bad object",)
-_TRANSIENT_HEAD_ATTEMPTS = 3
-_TRANSIENT_HEAD_BACKOFF_S = 0.1
+# The WRITE-side member of the same runner-FS fault family: git's loose-object temp create
+# under ``.git/objects/`` intermittently fails while writing a blob/tree/commit, returning
+# ENOENT on Linux ("unable to create temporary file: No such file or directory") or EINVAL on
+# macOS ("… Invalid argument"), surfaced as "failed to insert into database" / "unable to
+# index file". A filesystem hiccup, NOT a data fault — the identical op succeeds on retry (a
+# Gerrit ``recheck`` on the same patchset passes). Proven on ``git add`` by bugs
+# vocal-dip-robin / brainy-floral-globefish, where these markers first lived privately in
+# event_append; they moved here so EVERY caller of the shared write seam inherits the same
+# self-heal instead of only the ``git add`` path (bug unheedful-custodial-bluebottle, filed
+# after the s3 doctor's ``commit-tree`` hit this fault through :func:`run_git_write` and
+# red-lit CI). One definition, one budget, no second dialect. Like the read-side markers this
+# deliberately does NOT cover git's CORRUPT-object signatures, and a fault that outlives the
+# bounded retries still surfaces.
+_TRANSIENT_WRITE_MARKERS = (
+    "unable to create temporary file",
+    "failed to insert into database",
+    "unable to index file",
+)
+_TRANSIENT_FAULT_ATTEMPTS = 3
+_TRANSIENT_FAULT_BACKOFF_S = 0.1
 
 
 def is_transient_object_read_error(text: str) -> bool:
@@ -428,32 +446,50 @@ def is_transient_object_read_error(text: str) -> bool:
     return any(marker in text.lower() for marker in _TRANSIENT_OBJECT_MARKERS)
 
 
-def _is_transient_head_error(text: str) -> bool:
-    """True if *text* is a transient git READ signature — the HEAD-parse fault or the
-    object-DB ``bad object`` fault (case-insensitive)."""
+def _is_transient_object_write_error(text: str) -> bool:
+    """True if *text* is git's transient object-DB WRITE signature (case-insensitive) — the
+    loose-object temp-create fault of :data:`_TRANSIENT_WRITE_MARKERS`.
+
+    Module-private, unlike the read-side predicate: that one is public because a production
+    caller (the s3 doctor) folds a hint from it into the error it raises, and no caller
+    classifies the write fault that way today. ``event_append`` re-exports this under its own
+    historical name so there is still exactly ONE marker definition."""
+    return any(marker in text.lower() for marker in _TRANSIENT_WRITE_MARKERS)
+
+
+def _is_transient_git_fault(text: str) -> bool:
+    """True if *text* is any transient runner-FS git signature (case-insensitive): the
+    READ-side HEAD-parse and ``bad object`` faults, or the WRITE-side loose-object
+    temp-create fault."""
     low = text.lower()
-    return any(marker in low for marker in _TRANSIENT_HEAD_MARKERS) or (
-        is_transient_object_read_error(low)
+    return (
+        any(marker in low for marker in _TRANSIENT_HEAD_MARKERS)
+        or is_transient_object_read_error(low)
+        or _is_transient_object_write_error(low)
     )
 
 
-def _with_transient_head_retry(
+def _with_transient_fault_retry(
     run_once: Callable[[], subprocess.CompletedProcess],
+    *,
+    attempts: int = _TRANSIENT_FAULT_ATTEMPTS,
 ) -> subprocess.CompletedProcess:
-    """Run *run_once* (an idempotent index-mutating git invocation), retrying ONLY the
-    transient ``could not parse HEAD`` read signature with a bounded backoff. On success or
-    a NON-transient failure the result is returned immediately (behavior unchanged — a real
-    error still surfaces at once). The retried invocation MUST be idempotent: git fails at
-    the HEAD-parse step before writing anything, so re-running the SAME op is safe. This is
-    the INNER composition loop — :func:`run_git_write` wraps it in :func:`_with_index_lock_retry`
-    (index.lock is the OUTER retry, this HEAD-parse transient the inner)."""
+    """Run *run_once* (an idempotent git invocation), retrying ONLY the transient runner-FS
+    signatures of :func:`_is_transient_git_fault` with a bounded backoff. On success or a
+    NON-transient failure the result is returned immediately (behavior unchanged — a real
+    error still surfaces at once), and a transient one that outlives *attempts* returns its
+    failing result, so a persistent fault still fails loudly. The retried invocation MUST be
+    idempotent: the READ faults abort before anything is written, and re-running a
+    content-addressed object write re-writes the same objects. This is the INNER composition
+    loop — :func:`run_git_write` wraps it in :func:`_with_index_lock_retry` (index.lock is the
+    OUTER retry, the runner-FS transient the inner)."""
     result = run_once()
-    for attempt in range(1, _TRANSIENT_HEAD_ATTEMPTS):
+    for attempt in range(1, attempts):
         if result.returncode == 0:
             return result
-        if not _is_transient_head_error(result.stderr or result.stdout or ""):
+        if not _is_transient_git_fault(result.stderr or result.stdout or ""):
             return result
-        _backoff_sleep(_TRANSIENT_HEAD_BACKOFF_S * attempt)
+        _backoff_sleep(_TRANSIENT_FAULT_BACKOFF_S * attempt)
         result = run_once()
     return result
 
@@ -476,13 +512,14 @@ def run_git_write(
     timeout: float = _LOCAL_GIT_TIMEOUT,
 ) -> subprocess.CompletedProcess:
     """``run_git`` for an index-MUTATING op (``add``/``commit``/``reset``…), self-healing
-    git's ``.git/index.lock`` / ref-lock contention AND the transient ``could not parse
-    HEAD`` read fault, serialized behind the per-store advisory git-op lock (bug 9305).
+    git's ``.git/index.lock`` / ref-lock contention AND the transient runner-FS git faults
+    (the ``could not parse HEAD`` / ``bad object`` READ faults and the loose-object
+    temp-create WRITE fault), serialized behind the per-store advisory git-op lock (bug 9305).
     Runs the op and, ONLY on a git lock-conflict signature, reclaims a provably-stale
     index.lock, backs off (jittered, bounded), and retries (see
-    :func:`_with_index_lock_retry`); ONLY on the transient HEAD-parse read signature, backs
-    off and retries the identical (idempotent) op (see :func:`_with_transient_head_retry`).
-    The two compose — the lock conflict is the OUTER retry, the HEAD-parse transient the
+    :func:`_with_index_lock_retry`); ONLY on a transient runner-FS signature, backs
+    off and retries the identical (idempotent) op (see :func:`_with_transient_fault_retry`).
+    The two compose — the lock conflict is the OUTER retry, the runner-FS transient the
     INNER — so each self-heals without interfering. A success or any OTHER failure returns
     at once, so a genuine error is unchanged; a lock conflict that outlives the bounded
     budget returns ONE actionable error naming the lock file. Each attempt is bounded by
@@ -492,8 +529,8 @@ def run_git_write(
     final non-zero exit (default ``False`` so callers that inspect ``returncode`` / raise
     their own error get the result verbatim).
 
-    Safe to route ANY tracker git op through: the lock and HEAD-parse signatures only
-    appear on index-mutating commands, so a read op simply never trips either retry.
+    Safe to route ANY tracker git op through: a read op never produces a lock or an
+    object-write signature, so it simply never trips either retry.
 
     ``timeout`` overrides the :data:`_LOCAL_GIT_TIMEOUT` watchdog for callers that declare
     their own module-level bound (e.g. the s3 doctor's) — the bound travels with the caller
@@ -512,7 +549,7 @@ def run_git_write(
 
     result = _with_index_lock_retry(
         str(tracker),
-        lambda: _with_transient_head_retry(_bounded_once),
+        lambda: _with_transient_fault_retry(_bounded_once),
     )
     if check and result.returncode != 0:
         raise subprocess.CalledProcessError(
