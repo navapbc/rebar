@@ -119,3 +119,108 @@ def test_local_mode_leaves_tickets_path_none(repo_with_origin, gate_tmpdir):
     assert handle.tickets_path is None
     with gate_source.gate_read_root(handle):
         assert current_tickets_root() is None
+
+
+# --------------------------------------------------------------------------------------
+# (d) bug 2a6f — the pin tracks the LIVE store, never the code repo's stale `tickets` mirror
+#
+# `.tickets-tracker/` is a SEPARATE repository. The code repo's `refs/heads/tickets` is only a
+# mirror of it that advances on fetch, so pinning that ref showed the gate an arbitrarily old
+# store — in the wild, 6757 commits behind, which made the completion verifier report recorded
+# comments as nonexistent and block a correct close. The close gate is the path that hurt:
+# `close_precheck` passes `fetch=False` (right for the LOCAL code ref `HEAD`), and that flag was
+# threaded into the ticket pin, taking the no-fetch branch onto the stale mirror.
+# --------------------------------------------------------------------------------------
+def _detach_tracker_as_clone(repo: Path) -> str:
+    """Rebuild `.tickets-tracker` in the layout a long-lived checkout actually has: a STANDALONE
+    CLONE of the tickets branch rather than a linked worktree of the code repo.
+
+    `rebar.init_repo` creates the tracker as a linked worktree, whose refs are the code repo's
+    OWN refs — so `refs/heads/tickets` and the tracker's HEAD are the same pointer and can never
+    disagree. A checkout that has been around a while has the clone layout instead (separate
+    object store, separate refs), and there `refs/heads/tickets` is only a mirror that advances
+    on fetch. That is the layout the bug lives in, so the regression must be exercised in it.
+
+    Returns the code repo's now-frozen `refs/heads/tickets` — the stale sha the pin used to take.
+    """
+    tracker = repo / ".tickets-tracker"
+    remote = _git(tracker, "remote", "get-url", "origin")
+    # `.env-id` is gitignored — it is local state, not branch content — so a clone would not
+    # carry it and every write would refuse with "ticket system not initialized".
+    env_id = (tracker / ".env-id").read_text()
+    _git(tracker, "push", "-q", "origin", "tickets")
+    _git(repo, "worktree", "remove", "--force", ".tickets-tracker")
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", remote, str(tracker)], check=True)
+    (tracker / ".env-id").write_text(env_id)
+    _git(tracker, "config", "user.email", "t@example.com")
+    _git(tracker, "config", "user.name", "Test")
+    _git(tracker, "config", "commit.gpgsign", "false")
+    return _git(repo, "rev-parse", "refs/heads/tickets")
+
+
+def test_close_path_pin_sees_writes_made_after_the_mirror_went_stale(repo_with_origin, gate_tmpdir):
+    """THE regression. Pre-fix this pinned `refs/heads/tickets` and the comment was invisible,
+    so the verifier reported `comments: []` for a ticket that demonstrably had one."""
+    repo, tid = repo_with_origin
+    stale = _detach_tracker_as_clone(repo)
+
+    rebar.comment(tid, "premise validated — evidence recorded here", repo_root=str(repo))
+    assert _git(repo, "rev-parse", "refs/heads/tickets") == stale, (
+        "fixture is not reproducing mirror drift — the write advanced the code repo's ref"
+    )
+
+    # fetch=False is what the close gate passes.
+    root = materialize_tickets(repo_root=str(repo), fetch=False)
+    assert Path(root).name != f"tickets-{stale}", "pinned the stale mirror, not the live store"
+
+    state = rebar.show_ticket(tid, repo_root=root)
+    bodies = [c.get("body", "") for c in state.get("comments") or []]
+    assert any("premise validated" in b for b in bodies), (
+        f"comment written before the pin is not visible in the snapshot: {bodies!r}"
+    )
+
+
+def test_fetch_true_pin_loses_nothing_that_origin_holds(repo_with_origin, gate_tmpdir):
+    """The `fetch=True` consumers (`review-plan`, standalone `verify-completion`, MCP) used to
+    pin `origin/tickets` directly. Preferring the live tracker must not lose content only the
+    remote has — the reconverge-then-confirm rule pulls it in first, and falls back to the old
+    direct pin when it cannot confirm HEAD is at-or-ahead."""
+    repo, tid = repo_with_origin
+    tracker = repo / ".tickets-tracker"
+    remote_url = _git(tracker, "remote", "get-url", "origin")
+
+    # A second agent pushes an event to the shared ref that this checkout has never seen.
+    peer = repo.parent / "peer-tracker"
+    subprocess.run(["git", "clone", "-q", "-b", "tickets", remote_url, str(peer)], check=True)
+    _git(peer, "config", "user.email", "peer@example.com")
+    _git(peer, "config", "user.name", "Peer")
+    _git(peer, "config", "commit.gpgsign", "false")
+    (peer / "from-peer.marker").write_text("written by another agent\n")
+    _git(peer, "add", "from-peer.marker")
+    _git(peer, "commit", "-q", "-m", "peer event")
+    _git(peer, "push", "-q", "origin", "tickets")
+
+    root = Path(materialize_tickets(repo_root=str(repo), fetch=True))
+
+    assert (root / ".tickets-tracker" / "from-peer.marker").is_file(), (
+        "content present only on origin/tickets was lost by the new pin"
+    )
+    # …and the local ticket is still readable from the same snapshot.
+    assert rebar.show_ticket(tid, repo_root=str(root))["title"]
+
+
+def test_falls_back_to_the_ref_chain_when_no_tracker_repo_is_present(
+    repo_with_origin, gate_tmpdir, tmp_path
+):
+    """CI and checkout-less environments have no `.tickets-tracker` to pin from; those must keep
+    the pre-existing `origin/tickets` -> local-branch resolution rather than failing."""
+    repo, tid = repo_with_origin
+    from rebar._snapshot import repo_snapshot as rs
+
+    trackerless = tmp_path / "trackerless"
+    trackerless.mkdir()
+    assert rs._pin_tickets_sha(str(trackerless), "tickets", "origin", fetch=True) is None
+
+    # The real repo (which HAS a tracker) still resolves and reads fine through the chain.
+    root = materialize_tickets(repo_root=str(repo), fetch=True)
+    assert rebar.show_ticket(tid, repo_root=root)["title"]

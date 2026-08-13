@@ -1085,6 +1085,19 @@ When `verify.require_completion_verification_for_close = true`, the completion-v
 gate verifies an **immutable snapshot of the committed tree at your worktree HEAD** by default,
 and — on PASS — signs a `verified-at-sha` attestation bound to that commit.
 
+`--ref` pins the **code** only. The verifier reads the ticket itself from a *separately* pinned
+copy of the ticket store, taken from the live store when the run starts — see
+[repo-snapshot-gates.md](repo-snapshot-gates.md) §"The TICKET store is pinned separately from the
+code". That is why a finding reporting ticket evidence as missing means "not visible in the
+snapshot I read", not "does not exist": if you recorded the evidence after the run began, or the
+write has not committed, re-verify rather than recording it again.
+
+**"No verdict obtainable" is a fault, not a verdict.** If the verifier returns a failure naming no
+criterion — a truncated or garbled structured turn — the gate no longer invents an `(unspecified)`
+criterion for it. It reports the run as a verifier fault and exits **11** (transient — retry). The
+close is still refused, but the right response is to re-run the close, not to hunt for a
+requirement that was never evaluated.
+
 `rebar transition <id> closed --ref <commit>` (library: `transition(..., ref=<commit>)`) targets a
 **specific commit** instead of HEAD: the gate verifies, and signs against, that ref's tree. The
 pre-sign drift guard resolves the **same** ref for its fresh-SHA read, so a fixed commit — whose

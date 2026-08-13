@@ -318,6 +318,12 @@ def _verify_completion(argv: list[str]) -> int:
     else:
         _render_verdict_text(result)
         _render_source_line(result)
+    # A verifier FAULT ("no verdict obtainable", bug 2a6f) is retryable, not a completion
+    # judgement — exit 11 like every other transient degrade, so a caller scripting this verb
+    # can retry instead of treating it as "criteria unmet". Same disposition the close gate
+    # gives it; without this the standalone verb flattened it into the generic exit 1.
+    if result.get("verdict_obtainable") is False:
+        return 11
     return 0 if result.get("verdict") == "PASS" else 1
 
 

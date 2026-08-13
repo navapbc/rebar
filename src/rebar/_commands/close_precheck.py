@@ -365,6 +365,34 @@ def _emit_completion_sidecar(
         )
 
 
+def _raise_on_verifier_fault(
+    result: dict, items: list, ticket_id: str, resolved_id: str, repo_root
+) -> None:
+    """Raise when the verdict is a "no verdict obtainable" FAULT (bug 2a6f), else return.
+
+    ``reconcile_verdict`` marks a non-PASS verdict from which no failing criterion could be
+    identified — a truncated or garbled structured turn. That is the verifier failing to answer,
+    NOT evidence a criterion is unmet, and it used to surface as a bare
+    ``- (unspecified): verifier returned FAIL without itemizing the failing criterion``, leaving
+    the caller with nothing to remediate. Reported here BEFORE the unmet-criteria message so the
+    caller is told to re-run instead of hunting for a requirement that was never evaluated, and
+    with the retryable exit 11 every other transient degrade uses. Still fail-closed — raising
+    means the ticket does not close. A separate function (rather than inline) so the caller's
+    branch count is unchanged."""
+    if result.get("verdict_obtainable") is not False:
+        return
+    detail = str((items[0].get("detail") if items else "") or "")
+    from rebar.llm import completion_sidecar as _cs
+
+    result.setdefault("ticket_id", resolved_id)
+    _emit_completion_sidecar(_cs, result, ticket_id, repo_root, is_pass=False)
+    raise CommandError(
+        f"Error: cannot close {ticket_id}: the completion verifier produced NO usable verdict "
+        f"— {detail} Re-run the close to retry the verification.",
+        returncode=11,
+    )
+
+
 def _completion_precheck(
     ticket_id: str,
     ticket_type: str,
@@ -546,6 +574,9 @@ def _completion_precheck(
             f"  - {(f.get('criterion') or f.get('dimension') or '?')}: {f.get('detail', '')}"
             for f in items[:20]
         ]
+        # "No verdict obtainable" (bug 2a6f) is a VERIFIER FAULT, not a judgement that the work
+        # is incomplete. Raises when marked; a plain return means this is a real FAIL.
+        _raise_on_verifier_fault(result, items, ticket_id, resolved_id, repo_root)
         # Surface the verdict's remediation guidance (set by reconcile_verdict on every FAIL) so
         # the caller is pointed at the evidence channel — documenting proof that a requirement is
         # met as a comment on the ticket — rather than left with only the bare list of criteria.

@@ -103,10 +103,20 @@ def test_op_pass_clean(rebar_repo: Path) -> None:
 
 
 def test_op_fail_without_findings_is_repaired(rebar_repo: Path) -> None:
+    """A FAIL naming no criterion is a VERIFIER FAULT, not an unmet criterion (bug 2a6f).
+
+    This used to assert the repair synthesized a placeholder criterion `(unspecified)`. That
+    placeholder was the defect: it asserted a requirement had failed when in truth nothing had
+    been evaluated, so the close was blocked with nothing to remediate. The repair still
+    guarantees FAIL ⇒ ≥1 finding (and still blocks), but now says what actually happened and
+    marks the run retryable via `verdict_obtainable`.
+    """
     tid = _seed(rebar_repo)
     r = _verify(rebar_repo, tid, {"verdict": "FAIL", "findings": []})
     assert r["verdict"] == "FAIL"
-    assert len(r["findings"]) == 1 and r["findings"][0]["criterion"] == "(unspecified)"
+    assert r["verdict_obtainable"] is False
+    assert len(r["findings"]) == 1
+    assert r["findings"][0]["criterion"] == "(no verdict obtainable)"
 
 
 def test_op_pass_with_failure_finding_flips_to_fail(rebar_repo: Path) -> None:
