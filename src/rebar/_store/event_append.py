@@ -1,27 +1,34 @@
-"""Canonical locked event-commit for the tickets store.
+"""The locked event-commit transaction for the tickets store — and its self-heal.
 
 In-process replacement for the bash write path
-``ticket-append-event.sh`` → ``write_commit_event`` → ``_flock_stage_commit``: takes
+``ticket-append-event.sh`` -> ``write_commit_event`` -> ``_flock_stage_commit``: takes
 a fully-composed event dict (the seam already builds ``{timestamp, uuid,
-event_type, env_id, author, data}``), serialises it to the CANONICAL committed
-bytes, stages it same-filesystem, and under the unified write lock does the atomic
+event_type, env_id, author, data}``), and under the unified write lock does the atomic
 rename + ``git add`` + ``git commit``. ``write_and_push`` additionally runs the
 best-effort push.
+
+**Split by concern.** The write path's two leaf concerns live in their own modules and
+are re-exported here so every existing import path and monkeypatch target keeps working:
+
+- ``_store/event_prepare.py`` — pre-lock validation + CANONICAL serialisation + staging
+  (:data:`EVENT_TYPES`, :class:`StoreError`, :func:`event_filename`,
+  :func:`_prepare_event`). Runs before any lock; holds the byte-parity contract.
+- ``_store/event_commit_git.py`` — the bounded, retry-composed git verbs every lock-held
+  git child is issued through (:func:`_run_git`, :func:`_git_add`, :func:`_git_commit`, …).
+
+What REMAINS here is the transaction itself — the three ``lock.write_lock`` bodies, batch
+rollback, and the push / enrichment-drain hand-off — together with the commit-failure
+SELF-HEAL (:func:`_recover_from_unmerged`, :func:`_recover_from_invalid_object`). The
+self-heal stays with the transaction deliberately: it re-issues ``_git_add`` on its retry
+path, and the store suite patches ``event_append._git_add`` ONCE expecting both the
+happy-path add and the recovery re-add to observe it through this single module global.
 
 **Scope — this is the LOCAL ticket-store write path.** The Jira reconciler
 (``rebar_reconciler/``) is a separate *client* of this store; its inbound
 commit-batcher is a Jira-sync internal, NOT the general local batch-write API. Do
 not conflate the two — see ``docs/architecture.md`` "Two writers, one store".
 
-**Byte parity (the contract).** The committed bytes come from the single canonical
-serializer :func:`rebar._store.canonical.canonical_bytes`
-(``json.dumps(event, ensure_ascii=False, separators=(',', ':'), sort_keys=True)`` with
-NO trailing newline), shared by every live event writer and pinned Python↔Python by
-``tests/interfaces/store/test_canonical_event_bytes.py`` (and the byte contract +
-structural guard in ``tests/unit/test_canonical.py``). This committer serialises the
-*given* dict; it never re-derives author/env_id/uuid/timestamp (those are the seam's).
-
-Exit-code parity (surfaced as ``StoreError.returncode`` → the seam's ``CommandError``):
+Exit-code parity (surfaced as ``StoreError.returncode`` -> the seam's ``CommandError``):
 ``1`` lock timeout / atomic-rename failure / git-commit failure (distinct stderr each),
 ``75`` rebase/merge guard. Mirrors ``_flock_stage_commit`` (which maps its internal
 2/3 to an external return 1).
@@ -31,321 +38,70 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
-import time
+
+# ``subprocess`` is re-exported (redundant alias): the store suite patches
+# ``event_append.subprocess.run``, and it is the SAME cached module object the relocated
+# verbs in ``event_commit_git`` call, so that seam still reaches them.
+import subprocess as subprocess
 from collections.abc import Callable, Iterable
 from typing import Any
 
 from rebar._store import lock as _lock
 from rebar._store import staging as _staging
-from rebar._store.canonical import canonical_bytes  # the single canonical serializer
+
+# Concern leaves, re-exported so every existing ``event_append.NAME`` binding — dotted,
+# ``setattr``/``getattr`` by string, or through an import alias — resolves unchanged, and
+# so the relocated verbs stay reachable through this module's globals for monkeypatching.
+from rebar._store.event_commit_git import (
+    _GIT_ADD_ATTEMPTS as _GIT_ADD_ATTEMPTS,
+)
+from rebar._store.event_commit_git import (
+    _GIT_TIMEOUT as _GIT_TIMEOUT,
+)
+from rebar._store.event_commit_git import (
+    _git_add,
+    _git_commit,
+    _git_commit_paths,
+    _git_rm,
+    _restore_paths,
+    _run_git,
+    _unstage,
+    _with_transient_add_retry,
+)
+from rebar._store.event_commit_git import (
+    _is_transient_add_error as _is_transient_add_error,
+)
+from rebar._store.event_prepare import (
+    EVENT_TYPES as EVENT_TYPES,
+)
+from rebar._store.event_prepare import (
+    StoreError,
+    _ensure_initialized,
+    _prepare_event,
+)
+from rebar._store.event_prepare import (
+    _validate_event as _validate_event,
+)
+from rebar._store.event_prepare import (
+    canonical_bytes as canonical_bytes,
+)
+from rebar._store.event_prepare import (
+    event_filename as event_filename,
+)
 
 # Shared index.lock self-healing (bug fix-indexlock-retry). ``_INDEX_LOCK_STALE_S`` is
 # re-exported here (redundant alias) because a test reads ``event_append._INDEX_LOCK_STALE_S``.
 from rebar._store.gitutil import _INDEX_LOCK_STALE_S as _INDEX_LOCK_STALE_S
+
+# Used directly by the retained self-heal below — NOT part of the relocated verb set.
 from rebar._store.gitutil import (
-    _with_index_lock_retry,
     _with_transient_head_retry,
     discard_unmerged_paths,
     path_is_foreign_to_branch,
 )
 from rebar._store.lock import LockTimeout, RebaseGuard  # re-export for callers
-from rebar.reducer._version import (  # single source of truth for the type names
-    KEY_ADD,
-    KEY_REVOKE,
-    TAG_DELTA,
-)
 
 _log = logging.getLogger(__name__)
-
-# I2 event-type enum (matches write_commit_event's `case` allow-list).
-EVENT_TYPES = frozenset(
-    {
-        "CREATE",
-        "STATUS",
-        "COMMENT",
-        "LINK",
-        "UNLINK",
-        "SNAPSHOT",
-        "SYNC",
-        "REVERT",
-        "EDIT",
-        "ARCHIVED",
-        "FILE_IMPACT",
-        "VERIFY_COMMANDS",
-        "SIGNATURE",
-        # Workflow run-state (epic a88f / WS-C1): a run + its per-step records.
-        "WORKFLOW_RUN",
-        "WORKFLOW_STEP",
-        # Commits-on-ticket (epic a88f / WS-H).
-        "COMMITS",
-        # Tag add/remove deltas (epic P2.3).
-        TAG_DELTA,
-        # Identity key lifecycle (epic gnu-whale-ichor / e165): signed add/revoke.
-        KEY_ADD,
-        KEY_REVOKE,
-        # Plan-review observability sidecar (epic 5fd2 / child db7b). Reducer-IGNORED
-        # (NOT in KNOWN_EVENT_TYPES) so it never enters compiled state / hot paths and
-        # compaction preserves it; it is in this WRITE allow-list so it can be emitted.
-        "REVIEW_RESULT",
-        # Completion-verifier FAIL observability sidecar (ticket 24ec). Reducer-IGNORED
-        # (like REVIEW_RESULT) so it never enters compiled state / hot paths and compaction
-        # preserves it; in this WRITE allow-list so it can be emitted, and in
-        # _NON_REPLAY_KNOWN_TYPES so fsck recognises it and does not warn.
-        "COMPLETION_VERDICT",
-        # Cross-ticket overlap detection digest sidecar (epic only-crave-art / 2d0f).
-        # Reducer-IGNORED (like REVIEW_RESULT) — a content-hash-keyed per-ticket Cupid
-        # digest; in this WRITE allow-list so it can be emitted, in _NON_REPLAY_KNOWN_TYPES
-        # so fsck recognises it and does not warn.
-        "TICKET_DIGEST",
-        # Enrichment queue sidecar events (epic only-crave-art / e1f4): cert-triggered
-        # enqueue with a soak deadline, optimistic claim + lease, and done tombstone.
-        # Reducer-IGNORED (like REVIEW_RESULT/TICKET_DIGEST) — a broker-less queue on the
-        # event store; the drain reduces them out-of-band.
-        "ENQUEUE_ENRICH",
-        "CLAIM_ENRICH",
-        "DONE_ENRICH",
-    }
-)
-
-
-class StoreError(Exception):
-    """A write-path failure carrying the bash-parity ``returncode`` + stderr text."""
-
-    def __init__(self, message: str, returncode: int = 1) -> None:
-        self.returncode = returncode
-        super().__init__(message)
-
-
-def event_filename(timestamp: int, uuid_str: str, event_type: str) -> str:
-    """The I2 filename: ``{timestamp}-{uuid}-{TYPE}.json``."""
-    return f"{timestamp}-{uuid_str}-{event_type}.json"
-
-
-def _ensure_initialized(tracker: str) -> None:
-    """Raise :class:`StoreError` (1) if *tracker* is not an initialized store."""
-    if not os.path.isdir(tracker) or not os.path.exists(os.path.join(tracker, ".git")):
-        raise StoreError("Error: ticket system not initialized. Run 'ticket init' first.", 1)
-
-
-def _validate_event(event: dict[str, Any]) -> tuple[str, Any, Any]:
-    """Return ``(event_type, timestamp, uuid_str)`` for a well-formed event, else
-    raise :class:`StoreError` (1) with the exact bash stderr. No disk/lock effect."""
-    event_type = str(event.get("event_type", "")).upper()
-    timestamp, uuid_str = event.get("timestamp"), event.get("uuid")
-    if not event_type or timestamp is None or not uuid_str:
-        raise StoreError(
-            "Error: event JSON missing required fields (event_type, timestamp, uuid)", 1
-        )
-    if event_type not in EVENT_TYPES:
-        raise StoreError(
-            f"Error: invalid event_type '{event_type}'. Must be one of: CREATE, STATUS, "
-            "COMMENT, LINK, UNLINK, SNAPSHOT, SYNC, REVERT, EDIT, ARCHIVED, FILE_IMPACT, "
-            f"VERIFY_COMMANDS, SIGNATURE, WORKFLOW_RUN, WORKFLOW_STEP, COMMITS, {TAG_DELTA}, "
-            f"{KEY_ADD}, {KEY_REVOKE}, "
-            "REVIEW_RESULT, COMPLETION_VERDICT, TICKET_DIGEST, ENQUEUE_ENRICH, CLAIM_ENRICH, "
-            "DONE_ENRICH",
-            1,
-        )
-    return event_type, timestamp, uuid_str
-
-
-def _prepare_event(tracker: str, ticket_id: str, event: dict[str, Any]) -> _staging.StagedEvent:
-    """Validate the event and stage its CANONICAL bytes for an atomic publish.
-
-    Ticket 021d: a NEW ticket's directory is built inside a scanner-invisible staging path
-    and published by ONE rename at :meth:`StagedEvent.promote`, so the directory and its
-    first event become visible together and an interruption can no longer strand an empty
-    ticket directory (the ``MISSING_CREATE`` + ``FOREIGN_STORE_PATH`` debris signature).
-    This supersedes bug 043f's "the directory is created before its first event" decision
-    at the WRITER only; 043f's actual ruling — that a reader tolerates an event-less
-    directory and never tidies one — is untouched, and still repairs clones that already
-    carry debris, which no writer-side change can do. See ``_store/staging.py``.
-
-    Returns the staged event; raises :class:`StoreError` (1). No lock is held here."""
-    event_type, timestamp, uuid_str = _validate_event(event)
-    filename = event_filename(timestamp, uuid_str, event_type)
-    try:
-        return _staging.stage_event(tracker, ticket_id, filename, canonical_bytes(event))
-    except OSError as exc:
-        raise StoreError("Error: failed to write staging temp file", 1) from exc
-
-
-# git's object database write intermittently fails on CI runners while hashing a blob
-# during ``git add``: the loose-object temp create under ``.git/objects/`` returns
-# ENOENT (Linux: "unable to create temporary file: No such file or directory") or
-# EINVAL (macOS: "… Invalid argument"), surfaced as "failed to insert into database" /
-# "unable to index file" / "fatal: adding files failed". It is a transient
-# filesystem hiccup, NOT a data fault — the identical add succeeds on retry (a Gerrit
-# ``recheck`` on the same patchset passes). Retrying ONLY this signature turns a
-# runner-FS blip from a hard write failure that red-lights unrelated CI into a
-# self-healed write. Bugs vocal-dip-robin / brainy-floral-globefish.
-_TRANSIENT_ADD_MARKERS = (
-    "unable to create temporary file",
-    "failed to insert into database",
-    "unable to index file",
-)
-_GIT_ADD_ATTEMPTS = 3
-_GIT_ADD_BACKOFF_S = 0.1
-
-
-def _is_transient_add_error(text: str) -> bool:
-    low = text.lower()
-    return any(marker in low for marker in _TRANSIENT_ADD_MARKERS)
-
-
-def _with_transient_add_retry(
-    run_once: Callable[[], subprocess.CompletedProcess[str]],
-    *,
-    attempts: int = _GIT_ADD_ATTEMPTS,
-) -> subprocess.CompletedProcess[str]:
-    """Retry a loose-object-WRITING git invocation on the transient object-DB temp-create
-    signature (:func:`_is_transient_add_error`).
-
-    BOTH ``git add`` (a blob) and ``git commit`` (a tree + a commit object) write loose
-    objects through git's identical ``create_tmpfile`` path, which intermittently blips on a
-    CI-runner FS. Re-running the same add/commit re-writes the same objects (idempotent) and
-    the fault clears, so this used to self-heal ``git add`` only — leaving ``git commit`` to
-    surface the SAME transient as a hard write loss, dropping a concurrent locked write (the
-    enrich-prune concurrency flake). A non-transient failure returns immediately, unchanged."""
-    result: subprocess.CompletedProcess[str] | None = None
-    for attempt in range(1, attempts + 1):
-        result = run_once()
-        if result.returncode == 0:
-            return result
-        if attempt < attempts and _is_transient_add_error(result.stderr or result.stdout or ""):
-            time.sleep(_GIT_ADD_BACKOFF_S * attempt)
-            continue
-        return result
-    assert result is not None  # attempts >= 1, so the loop body ran at least once
-    return result
-
-
-# git's index.lock self-healing (constants + ``_is_index_lock_error`` +
-# ``_reclaim_if_stale_index_lock`` + ``_with_index_lock_retry``) now lives in the SHARED
-# ``rebar._store.gitutil`` so the claim/transition write path (txn.py) self-heals through the
-# same implementation (bug fix-indexlock-retry). Imported at module top; ``_INDEX_LOCK_STALE_S``
-# is re-exported there for tests. ``_git_add`` below composes gitutil's index.lock retry with
-# event_append's OWN object-DB ``git add`` retry (the ``_TRANSIENT_ADD_MARKERS`` loop).
-
-
-# Bound every lock-held git child (c2ba). These run INSIDE ``lock.write_lock`` holding the
-# store's MKDIR write lock, so a stuck/contended tracker volume would otherwise hold that lock
-# indefinitely — the residue that made the review-bot ``stop_grace_period`` unprovable and, on a
-# SIGKILL mid-write, orphaned the lock (the 2026-07-31 autodeploy incident). ``_store/push.py``
-# already bounds its git calls with the SAME ``_GIT_TIMEOUT``; this closes the inconsistency.
-_GIT_TIMEOUT = 30
-
-
-# raw-git-ok: locked store seam internal
-def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    """``subprocess.run`` a git command (captured, text) bounded by :data:`_GIT_TIMEOUT`.
-
-    The single entry point for event_append's lock-held git invocations, so every one carries
-    the same wall-clock bound as ``push.py``. Mirrors ``push.py._git``: a hung git is folded
-    into a synthetic FAILED result (returncode 124) rather than raised, so the existing
-    returncode-inspecting callers (and their retry wrappers) fail the write cleanly — which
-    unwinds out of ``write_lock`` and releases the lock — instead of surfacing a new
-    ``TimeoutExpired`` exception type. A genuine ``OSError`` (e.g. git not on PATH) still
-    propagates unchanged, preserving the best-effort helpers' ``except OSError`` behavior."""
-    try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {_GIT_TIMEOUT}s")
-
-
-# raw-git-ok: locked store seam internal
-def _git_add(
-    tracker: str, relpaths: list[str], *, attempts: int = _GIT_ADD_ATTEMPTS
-) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker add -- <relpaths>``, retrying transient object-DB AND index.lock
-    failures.
-
-    On success or a NON-transient failure returns immediately (behavior unchanged — a
-    real pathspec/permission/UU error still surfaces on the first attempt). On the
-    transient object-DB signature the identical add is retried up to *attempts* times
-    with a short backoff, because re-adding the same paths is idempotent and the fault
-    clears on retry; index.lock contention is ridden out (and a stale lock reclaimed) by
-    :func:`_with_index_lock_retry`. Returns the final :class:`subprocess.CompletedProcess`."""
-
-    return _with_index_lock_retry(
-        tracker,
-        lambda: _with_transient_add_retry(
-            lambda: _run_git(["git", "-C", tracker, "add", "--", *relpaths]),
-            attempts=attempts,
-        ),
-        force_reclaim=True,
-    )
-
-
-# raw-git-ok: locked store seam internal
-def _git_commit(tracker: str, commit_msg: str) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker commit -q --no-verify -m <msg>``, riding out three transients:
-    index.lock contention (and reclaiming a stale lock) via :func:`_with_index_lock_retry`;
-    the ``could not parse HEAD`` READ fault via :func:`_with_transient_head_retry` (``git
-    commit`` parses HEAD to set the new commit's parent); and the object-DB temp-create WRITE
-    fault via :func:`_with_transient_add_retry` (``git commit`` also WRITES the new tree +
-    commit loose objects — the same runner-FS blip that strikes ``git add``, previously
-    unretried on commit, which dropped a concurrent locked write). Composed index.lock-OUTER /
-    HEAD-parse / object-DB-INNER — the same gitutil retries the transition/claim path uses. A
-    non-lock, non-transient failure (including a genuine "nothing to commit" / UU wedge)
-    surfaces immediately, unchanged — the caller's UU-recovery path still handles it."""
-    return _with_index_lock_retry(
-        tracker,
-        lambda: _with_transient_head_retry(
-            lambda: _with_transient_add_retry(
-                lambda: _run_git(
-                    ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg]
-                )
-            )
-        ),
-        force_reclaim=True,
-    )
-
-
-# raw-git-ok: locked store seam internal
-def _git_rm(tracker: str, relpaths: list[str]) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker rm -q -- <relpaths>``, riding out index.lock contention (and
-    reclaiming a stale lock) via :func:`_with_index_lock_retry`. Stages the deletions AND
-    removes the worktree files; a non-lock failure surfaces immediately."""
-    return _with_index_lock_retry(
-        tracker,
-        lambda: _run_git(["git", "-C", tracker, "rm", "-q", "--", *relpaths]),
-        force_reclaim=True,
-    )
-
-
-# raw-git-ok: locked store seam internal
-def _git_commit_paths(
-    tracker: str, commit_msg: str, relpaths: list[str]
-) -> subprocess.CompletedProcess[str]:
-    """``git -C tracker commit -q --no-verify -m <msg> -- <relpaths>`` (a PATHSPEC-scoped
-    partial commit), riding out index.lock contention via :func:`_with_index_lock_retry`.
-
-    The pathspec is the point: unlike a bare ``git commit`` (which commits the WHOLE index),
-    this commits ONLY *relpaths*, so it can never sweep an unrelated staged event — belt to
-    the write lock's braces. Rides out index.lock contention AND the transient
-    ``could not parse HEAD`` read fault via the same composed gitutil retries as
-    :func:`_git_commit`."""
-    argv = ["git", "-C", tracker, "commit", "-q", "--no-verify", "-m", commit_msg, "--", *relpaths]
-    return _with_index_lock_retry(
-        tracker,
-        lambda: _with_transient_head_retry(
-            lambda: _with_transient_add_retry(lambda: _run_git(argv))
-        ),
-        force_reclaim=True,
-    )
-
-
-# raw-git-ok: locked store seam internal
-def _restore_paths(tracker: str, relpaths: list[str]) -> None:
-    """Restore *relpaths* to their committed HEAD state in both index and worktree
-    (best-effort). Undoes a staged ``git rm`` whose commit then failed, so a failed delete
-    leaves the store exactly as it was (the events stay present and committed)."""
-    try:
-        _run_git(["git", "-C", tracker, "checkout", "HEAD", "--", *relpaths])
-    except OSError:
-        pass
 
 
 def delete_events(tracker: str | os.PathLike, relpaths: Iterable[str], commit_msg: str) -> int:
@@ -645,22 +401,6 @@ def _maybe_enrich_drain(tracker: str) -> None:
 def _silent_unlink(path: str) -> None:
     try:
         os.unlink(path)
-    except OSError:
-        pass
-
-
-# raw-git-ok: locked store seam internal
-def _unstage(tracker: str | os.PathLike, relative_path: str) -> None:
-    """Drop a staged event from the git index (best-effort).
-
-    An atomic rename followed by ``git add`` leaves the blob STAGED. If the write then
-    fails, unlinking the worktree file alone is not enough: the blob stays in the index
-    and the NEXT successful write (which commits the whole index) durably commits this
-    failed write's phantom event. Mirrors ``_commands.txn._unstage`` — the claim/
-    transition path already carries this fix; the general append path did not.
-    """
-    try:
-        _run_git(["git", "-C", str(tracker), "reset", "-q", "--", relative_path])
     except OSError:
         pass
 
