@@ -372,6 +372,107 @@ def test_sibling_wrapper_names_not_in_name_set(lint, tree):
 
 
 # ---------------------------------------------------------------------------
+# Layer P — R2: the ATTRIBUTE call form (bug 4073-9d4f-c644-44a9)
+#
+# R2 matches the wrapper by the CALLABLE's name, which for an attribute call is
+# the attribute — so `core._git(...)` is linted exactly like a bare `_git(...)`.
+# That is load-bearing for the late-binding idiom in
+# `rebar_reconciler/_ref_lock_push.py`, where the caller's `_ref_lock` module is
+# passed down as `core` so `monkeypatch.setattr(_ref_lock, "_git", ...)` keeps
+# working across the module boundary. Every other R2 test above uses the bare
+# form; these pin the attribute form so the coverage cannot be read as absent.
+# ---------------------------------------------------------------------------
+
+
+def test_wrapper_attribute_form_mutation_verb_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/attr1.py",
+        """
+        def compact(core, repo_root):
+            core._git(repo_root, ["commit", "-m", "compact"])
+            core.run_git(repo_root, ["add", "-A"])
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["wrapper-git-mutation", "wrapper-git-mutation"]
+
+
+def test_wrapper_attribute_receiver_shape_does_not_matter(lint, tree):
+    """`self.`, a nested receiver, and an imported module all resolve alike."""
+    _py(
+        tree,
+        "src/rebar/attr2.py",
+        """
+        from rebar._engine.rebar_reconciler import _ref_lock
+
+        class Store:
+            def compact(self, repo_root):
+                self._git(repo_root, ["commit", "-m", "x"])
+
+        def nested(core, repo_root):
+            core.inner._git(repo_root, ["update-ref", "refs/x", "0" * 40])
+
+        def imported(repo_root):
+            _ref_lock._git(repo_root, ["reset", "--hard"])
+        """,
+    )
+    assert _kinds(lint.check(tree)) == [
+        "wrapper-git-mutation",
+        "wrapper-git-mutation",
+        "wrapper-git-mutation",
+    ]
+
+
+def test_wrapper_attribute_form_opaque_argv_fires_and_marker_silences(lint, tree):
+    _py(
+        tree,
+        "src/rebar/attr3.py",
+        """
+        def delegate(core, repo_root, *args):
+            return core._git(repo_root, *args)
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["unresolvable-argv-wrapper"]
+
+    _py(
+        tree,
+        "src/rebar/attr3.py",
+        """
+        def delegate(core, repo_root, *args):
+            return core._git(repo_root, *args)  # raw-git-ok: seam-internal delegation
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_attribute_form_push_lease_cas_shape_does_not_fire(lint, tree):
+    """The real `_ref_lock_push.push_lease_cas` shape stays clean — on the VERB.
+
+    Its `core._git(...)` call IS seen and its argv IS resolved; it simply carries
+    `push`, which is not a mutation verb. Pinned so the absence of a
+    `# raw-git-ok:` marker on that module reads as a resolved disposition rather
+    than as evidence the attribute form escapes the gate.
+    """
+    _py(
+        tree,
+        "src/rebar/attr4.py",
+        """
+        def push_lease_cas(core, repo_root, ref, old_oid, remote, refspec):
+            return core._git(
+                repo_root,
+                ["push", f"--force-with-lease={ref}:{old_oid}", remote, refspec],
+                timeout=core._REMOTE_TIMEOUT_SECS,
+                check=False,
+            )
+
+        def read(core, repo_root):
+            return core._git(repo_root, ["rev-parse", "HEAD"])
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+# ---------------------------------------------------------------------------
 # Layer W — workflows + shell
 # ---------------------------------------------------------------------------
 
