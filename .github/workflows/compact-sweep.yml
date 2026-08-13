@@ -6,9 +6,10 @@
 # lock for the whole fold — measured at 13m53s on one close, starving every
 # concurrent writer — so bug choosy-arthrodic-barbet took it off the close path.
 #
-# Running it HERE is the point. The runner is a disposable clone with its own .git,
-# its own index and its own store write lock, so the sweep contends with nothing an
-# interactive session is doing. Its result reaches everyone through the ordinary
+# Running it HERE is the point. The runner is a disposable, separate checkout on a
+# separate machine — a fresh clone per run with the store mounted as a `tickets`
+# worktree of it — so the sweep shares no index.lock, no rebar-git-op.lock and no
+# store write lock with anything an interactive session is doing. Its result reaches everyone through the ordinary
 # push/merge path, which is safe by invariant I9 (docs/concurrency.md): a fold adds
 # a SNAPSHOT and renames sources to *.retired, while concurrent sessions only add
 # new event files, so the two merge as a union.
@@ -146,9 +147,55 @@ jobs:
           # Exit 2 means some tickets errored while others folded; the sweep is best-effort
           # housekeeping, so surface it without failing the run. A real invocation error
           # (exit 1) still fails.
-          rebar compact-all "${ARGS[@]}" || rc=$?
+          rebar compact-all "${ARGS[@]}" | tee "${RUNNER_TEMP}/sweep.out" || rc=$?
           if [ "${rc:-0}" = "2" ]; then
             echo "::warning::some tickets failed to compact; they stay live and the next sweep retries them"
           elif [ "${rc:-0}" != "0" ]; then
             exit "${rc}"
           fi
+
+      - name: Report what the sweep did
+        # Telemetry, not decoration: compaction is invisible when it works and equally
+        # invisible when it silently stops, and a store whose sweep has quietly folded nothing
+        # for weeks looks exactly like a healthy one. Publishing the counts on every run makes
+        # "the sweep is doing nothing" a thing someone can SEE without reading logs.
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Compaction sweep"
+            echo ""
+            if [ -s "${RUNNER_TEMP}/sweep.out" ]; then
+              echo '```'
+              tail -n 12 "${RUNNER_TEMP}/sweep.out"
+              echo '```'
+            else
+              echo "_No sweep output captured._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify on sweep failure
+        # Mirrors reconcile-bridge.yml's failure step. Compaction is optional housekeeping, so
+        # a failed sweep is not an emergency — but it must not be SILENT, because the next
+        # signal would otherwise be a store that has grown for months.
+        if: failure()
+        env:
+          GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Bound through env rather than expanded into the script: a `${{ }}` inside a run
+          # block is substituted before the shell sees it, so it is a code-injection surface
+          # even for these tame values. zizmor flags it, correctly.
+          GH_WORKFLOW: ${{ github.workflow }}
+          GH_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          {
+            echo "## :rotating_light: Compaction Sweep run FAILED"
+            echo ""
+            echo "- **Workflow:** \`${GH_WORKFLOW}\`"
+            echo "- **Run:** $GH_RUN_URL"
+            echo "- **Triggered by:** \`${GH_EVENT_NAME}\`"
+            echo ""
+            echo "Events stay live and valid — the next sweep re-folds whatever is pending."
+            echo "A store with no CI still compacts via the operation-linked trigger"
+            echo "(\`compact.trigger\`), so this failure degrades cadence, not correctness."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::error title=Compaction Sweep failed::See run summary — $GH_RUN_URL"

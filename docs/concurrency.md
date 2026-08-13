@@ -296,12 +296,33 @@ Today:
 - **A close never compacts.** It ends after the STATUS write, signing, the force-close audit
   comment and scratch cleanup. Its lock holds are the short per-append acquisitions.
 - **`rebar compact <id>` still folds on demand**, unchanged.
+- **A close TRIGGERS compaction without performing it** — the floor for stores with no CI and
+  no cron. Compaction has to work in environments without either; that is why the original
+  design was linked to an operation, and a schedule alone would leave a library/CLI adopter
+  with no trigger at all. So at the very end of a close — *after* the locked write released the
+  store lock and after the best-effort push — two `O(1)` checks run: does the ticket just
+  written satisfy the two-arm selection (one directory read, independent of store size), or is
+  the last-sweep stamp older than `compact.trigger_interval_s`? If either fires, a **detached
+  worker** runs the same `compact-all` sweep out of band and the session returns immediately.
+  One worker at a time, arbitrated by a stamped advisory lock in `.rebar/` that reuses the
+  store lock's v2 ownership stamp and `lock_owner.stamped_file_is_stale`, so an orphaned lock
+  is reclaimed rather than disabling the trigger forever. `compact.trigger` selects
+  `async` (detach, the default), `always` (inline — for tests/CI) or `off`. Windows is a v1
+  no-op, as the enrichment drain is.
+
+  This does **not** reintroduce the hold that moved compaction out: the P0 was never "a close
+  compacts", it was that an operation agents *wait on* held the store lock for minutes. Here
+  the waited-on operation holds nothing and waits for nothing; the worker's lock profile is
+  that of a manual `rebar compact`.
 - **The standing trigger is `rebar compact-all`, run out of band on a schedule.** The
   `Compaction Sweep` workflow (`.github/workflows/compact-sweep.yml`) runs it **every 6
   hours** (`cron: '0 */6 * * *'`, also `workflow_dispatch`-able with `dry_run` / `limit`), on
-  a disposable CI runner: its own clone, its own `.git`, its own index and its own store write
-  lock, so it shares no `index.lock`, no `rebar-git-op.lock` and no store lock with any
-  interactive session. The result reaches everyone through the ordinary push/merge path, which
+  a disposable CI runner. The isolation that matters is that the runner is a **separate
+  checkout on a separate machine** — a fresh clone per run, with the store mounted as a
+  `tickets` worktree of it — so it shares no `index.lock`, no `rebar-git-op.lock` and no store
+  write lock with any interactive session. (Within the runner the mounted worktree shares that
+  checkout's object store, as any worktree does; that is irrelevant here because nothing else
+  on the runner touches the store.) The result reaches everyone through the ordinary push/merge path, which
   is safe by I9: a fold adds a SNAPSHOT and renames sources to `*.retired`, and concurrent
   sessions only add new event files, so the two merge as a union. There is **no long-lived
   clone to maintain** — each run re-derives the store from `origin/tickets`, and a failed push

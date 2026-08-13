@@ -141,6 +141,23 @@ ticket.display_mode      = "auto"
 ticket.default_assignee  = ""     # assignee `claim` uses when --assignee is omitted (env REBAR_DEFAULT_ASSIGNEE)
 ticket_clarity.threshold = 5      # clarity-check pass threshold (env REBAR_TICKET_CLARITY_THRESHOLD)
 compact.threshold        = 10     # env REBAR_COMPACT_THRESHOLD (alias: COMPACT_THRESHOLD)
+compact.trigger          = "async"  # async | always | off (env REBAR_COMPACT_TRIGGER)
+                        # The OPERATION-LINKED compaction trigger. Compaction does not run on
+                        # the close path any more (it held the store write lock for minutes),
+                        # and the scheduled sweep that replaced it needs CI or cron — which a
+                        # library/CLI adopter does not have. So a close TRIGGERS compaction
+                        # without performing it: after the store lock is released it makes two
+                        # O(1) checks and, if either fires, detaches a worker that runs
+                        # `compact-all` out of band. "always" runs that sweep INLINE instead
+                        # (tests/CI, where a detached child would outlive the assertion);
+                        # "off" disables it for operators who drive compaction themselves.
+                        # A v1 no-op on Windows, mirroring the enrichment drain.
+compact.trigger_interval_s = 21600  # env REBAR_COMPACT_TRIGGER_INTERVAL_S
+                        # How stale the last-sweep stamp may get before a close detaches a
+                        # worker even when the ticket it just wrote needs no folding. Without
+                        # this the floor has a hole: a store whose closed tickets happen never
+                        # to be foldable would never fold the ones that are. Default 6 h,
+                        # matching the scheduled sweep's cadence. 0 disables the staleness arm.
 
 # sync (git-backed store)
 sync.push   = "always"  # always | async | off   (env REBAR_SYNC_PUSH)

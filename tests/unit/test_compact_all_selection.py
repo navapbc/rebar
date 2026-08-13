@@ -315,3 +315,103 @@ def test_no_commit_never_pushes(store: Path, monkeypatch: pytest.MonkeyPatch) ->
     _compact.compact_all_cli(["--no-commit"], repo_root=str(repo))
 
     assert not calls, "--no-commit pushed; it opts out of the commit and its delivery alike"
+
+
+# ── the exit codes the sweep workflow branches on ────────────────────────────────────────────
+def test_a_failed_ticket_fold_yields_exit_2_and_does_not_stop_the_sweep(
+    store: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """`compact-sweep.yml` treats exit 2 as "some tickets failed, warn but pass" and any other
+    non-zero as a hard failure, so the distinction is load-bearing infrastructure rather than
+    cosmetic — and it was untested.
+
+    A failing ticket must not abort the pass either: the sweep is best-effort housekeeping over
+    many independent tickets, and one unreadable ticket wedging the rest would defeat the
+    point.
+    """
+    repo = store
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    good = _seed(repo, "folds fine", comments=3)
+    bad = _seed(repo, "fold explodes", comments=3)
+    for tid in (good, bad):
+        _age_events(_tdir(repo, tid), _HOUR_NS)
+
+    real = _compact.compact_cli
+
+    def flaky(argv, **kwargs):
+        return 1 if argv and argv[0] == bad else real(argv, **kwargs)
+
+    monkeypatch.setattr(_compact, "compact_cli", flaky)
+
+    rc = _compact.compact_all_cli([], repo_root=str(repo))
+    out = capsys.readouterr().out
+
+    assert rc == 2, f"a per-ticket fold failure must yield exit 2, got {rc}\n{out}"
+    assert "1 errors" in out, out
+    assert list(_tdir(repo, good).glob("*-SNAPSHOT.json")), (
+        "one ticket failing must not stop the sweep folding the others"
+    )
+
+
+def test_a_clean_sweep_yields_exit_0(store: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = store
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    tid = _seed(repo, "clean", comments=3)
+    _age_events(_tdir(repo, tid), _HOUR_NS)
+
+    assert _compact.compact_all_cli([], repo_root=str(repo)) == 0
+
+
+# ── selection counts exactly what the fold would squash ──────────────────────────────────────
+def test_a_ticket_own_snapshot_is_not_counted_as_pending_work(store: Path) -> None:
+    """A SNAPSHOT is already-folded STATE, not work.
+
+    It is a KNOWN_EVENT_TYPE whose filename ends in `.json`, so a naive count includes it and
+    every settled ticket then reports one unit of outstanding work forever — a permanent
+    off-by-one that turns the threshold into a churn source at low settings.
+    """
+    from rebar._commands.compact import _foldable_event_count
+    from rebar._store import hlc
+
+    repo = store
+    tid = _seed(repo, "settled", comments=2)
+    assert _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(repo)) == 0
+    tdir = _tdir(repo, tid)
+    assert list(tdir.glob("*-SNAPSHOT.json")), "precondition: folded, so only a SNAPSHOT is live"
+
+    assert _foldable_event_count(str(tdir), hlc.physical_now(), 0) == 0, (
+        "a fully folded ticket must report ZERO pending foldable events"
+    )
+
+
+def test_forward_compat_unknown_event_types_are_not_counted(store: Path) -> None:
+    """The fold PRESERVES an unknown-type event (a newer clone's event kind) rather than
+    squashing it — `_parse_candidate_events` drops it from the candidate set. Counting it here
+    would promise work the fold will not do, and a ticket whose excess was all unknown-type
+    would be selected on every sweep forever."""
+    import json as _json
+
+    from rebar._commands.compact import _foldable_event_count
+    from rebar._store import hlc
+
+    repo = store
+    tid = _seed(repo, "from the future", comments=1)
+    tdir = _tdir(repo, tid)
+    before = _foldable_event_count(str(tdir), hlc.physical_now(), 0)
+
+    # An event this build does not know about, shaped like a real one.
+    future = tdir / "1999999999999999999-ffffffff-1111-4111-8111-ffffffffffff-TELEPORT.json"
+    future.write_text(
+        _json.dumps(
+            {
+                "timestamp": 1999999999999999999,
+                "uuid": "ffffffff-1111-4111-8111-ffffffffffff",
+                "event_type": "TELEPORT",
+                "data": {},
+            }
+        )
+    )
+
+    assert _foldable_event_count(str(tdir), hlc.physical_now(), 0) == before, (
+        "an unknown-type event must not count toward the foldable total — the fold preserves it"
+    )
