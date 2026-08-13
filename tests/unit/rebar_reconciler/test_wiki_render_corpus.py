@@ -9,21 +9,28 @@ The claims are SAFETY claims, not fidelity claims: the DC path is one-way, so wh
 must hold is that nothing is corrupted and that rendering settles.
 
 **Cost discipline.** Rendering the corpus once costs ~884 pandoc subprocess spawns
-(~33s). CI runs the suite under ``-n 3 --timeout=300``, so a test that rendered the
-corpus five times exceeded the per-test timeout and crashed its xdist worker. Two
-things keep this module cheap without weakening any assertion:
+(~48s). CI runs the suite under ``-n 3 --dist worksteal --timeout=300``, so a test
+that rendered the corpus five times exceeded the per-test timeout and crashed its
+xdist worker. Three things keep this module cheap without weakening any assertion:
 
-* every test shares ONE cached render of the corpus (:func:`_rendered`), instead of
-  re-rendering per test; and
+* every test shares ONE pass-1 render of the corpus (the ``corpus_pass1`` fixture),
+  and that render is shared ACROSS xdist workers via a session-scoped on-disk
+  artifact — a process-local ``functools.lru_cache`` was re-filled once per worker,
+  which measured as three ~43s fills under ``-n 3`` versus one ~48s fill serially
+  (ticket 20cb-cbae-e9df-45e3);
+* the fixed-point tests read pass 1 from that same artifact and only compute the
+  passes they actually add; and
 * five-pass identity is proven with TWO renders rather than five — see
   :func:`test_dc_corpus_passes_two_to_five_are_byte_identical`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import re
-from functools import lru_cache
+import time
 from pathlib import Path
 
 import pytest
@@ -51,14 +58,133 @@ def _all_bodies() -> list[str]:
     return [body for name in _STRATA for body in _load(name)]
 
 
-@lru_cache(maxsize=1)
-def _rendered() -> tuple[tuple[str, str], ...]:
-    """Every corpus body paired with its first-pass render, computed ONCE.
+# ── Session-scoped, cross-worker pass-1 artifact ──────────────────────────────
+# A full corpus render is ~884 pandoc spawns. A process-local cache is re-filled by
+# every xdist worker that lands one of the consumers below, so the render is instead
+# published to a file shared by all workers of THIS pytest session.
 
-    Cached because a full corpus render is ~884 pandoc spawns; re-rendering per test
-    is what pushed this module past CI's per-test timeout.
+# Deliberately BELOW CI's ``--timeout=300`` per-test guard, with headroom over the
+# ~48s winner fill: a worker blocked on a crashed or pathologically slow winner
+# renders locally and still finishes inside the timeout instead of being killed by it.
+_FILL_FALLBACK_SECONDS = 150.0
+
+
+def _pandoc_stamp() -> str:
+    """Identify the pandoc build in play: its reported version, path and size.
+
+    The VERSION is what actually decides the output — pandoc's jira writer changes
+    its escaping between releases, which is why the `wiki` extra pins
+    ``pypandoc-binary==1.15`` at all. Reading it costs one ~0.2s subprocess per
+    session.
     """
-    return tuple((body, render_markdown_to_wiki(body)) for body in _all_bodies())
+    path = wiki_render._pandoc_path() or ""
+    try:
+        import pypandoc
+
+        version = str(pypandoc.get_pandoc_version())
+    except Exception:  # noqa: BLE001 — absent extra or unreadable binary
+        version = "unknown"
+    size = str(Path(path).stat().st_size) if path and Path(path).exists() else "0"
+    return f"{version}|{path}|{size}"
+
+
+def _corpus_digest() -> str:
+    """Pin the artifact to the inputs the render is a function of.
+
+    Covers the corpus bodies, the renderer source, and the pandoc version/path/size.
+    Two distinct pandoc builds reporting the same version at the same path and size
+    would collide, so this is a strong practical key rather than a proof.
+    """
+    digest = hashlib.sha256()
+    for name in _STRATA:
+        digest.update((_CORPUS / f"{name}.json").read_bytes())
+    digest.update(Path(wiki_render.__file__).read_bytes())
+    digest.update(_pandoc_stamp().encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def _render(stratum: str) -> list[tuple[str, str]]:
+    return [(body, render_markdown_to_wiki(body)) for body in _load(stratum)]
+
+
+def _probe_order() -> tuple[str, ...]:
+    """Rotate which stratum THIS worker fills first, so workers do not collide.
+
+    Only a scheduling hint: correctness comes from the lock either way. Without it,
+    concurrent whole-corpus consumers all queue on the same stratum and the fill
+    serialises; with it they fill different strata at once, so the wall-clock cost of
+    a cold session is one stratum rather than the whole corpus.
+    """
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    try:
+        index = int(worker.removeprefix("gw"))
+    except ValueError:
+        index = 0
+    shift = index % len(_STRATA)
+    return _STRATA[shift:] + _STRATA[:shift]
+
+
+def _shared_stratum(root: Path, key: str, stratum: str) -> list[tuple[str, str]]:
+    """One stratum's pass-1 render, computed ONCE per session across all workers.
+
+    Exclusion is a lock DIRECTORY (``os.mkdir`` is atomic on POSIX and Windows, so no
+    new dependency is needed). The winner publishes with ``os.replace``, which is
+    atomic — a visible artifact is therefore always complete.
+    """
+    artifact = root / f"dc_wiki_pass1_{key}_{stratum}.json"
+    lock = root / f"dc_wiki_pass1_{key}_{stratum}.lock"
+    deadline = time.monotonic() + _FILL_FALLBACK_SECONDS
+
+    while True:
+        if artifact.exists():
+            return [(body, out) for body, out in json.loads(artifact.read_text(encoding="utf-8"))]
+        try:
+            lock.mkdir()
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                # The holder is gone or pathologically slow. Render locally — i.e.
+                # degrade to the old per-worker behaviour — but deliberately do NOT
+                # remove the lock: only its creator does that. Breaking it here
+                # would let a THIRD worker acquire a lock that a merely-slow holder
+                # then deletes in its own `finally`, so two workers could hold what
+                # is nominally the same lock.
+                return _render(stratum)
+            time.sleep(0.25)
+            continue
+        try:
+            payload = [[body, out] for body, out in _render(stratum)]
+            staging = root / f"dc_wiki_pass1_{key}_{stratum}.{os.getpid()}.tmp"
+            staging.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(staging, artifact)
+            return [(body, out) for body, out in payload]
+        finally:
+            # Retire the lock on the success AND the error path, so a worker that
+            # raises mid-render does not strand every other worker on the fallback.
+            # Safe to remove by name: nothing else ever deletes this directory, so
+            # the lock seen here is always the one acquired above.
+            try:
+                lock.rmdir()
+            except OSError:
+                pass
+
+
+def _shared_pass1(root: Path) -> tuple[tuple[str, str], ...]:
+    """Every corpus body paired with its first-pass render, computed ONCE per session.
+
+    ``root`` is ``tmp_path_factory.getbasetemp().parent`` — under xdist a worker's
+    basetemp is ``pytest-<N>/popen-gw<K>``, so the parent is the session directory
+    every worker shares, and pytest rotates it between sessions.
+    """
+    key = _corpus_digest()
+    by_stratum = {stratum: _shared_stratum(root, key, stratum) for stratum in _probe_order()}
+    # Re-emit in canonical `_all_bodies()` order, whatever order this worker filled in.
+    return tuple(pair for stratum in _STRATA for pair in by_stratum[stratum])
+
+
+@pytest.fixture(scope="session")
+def corpus_pass1(tmp_path_factory: pytest.TempPathFactory) -> tuple[tuple[str, str], ...]:
+    """Every corpus body paired with its first-pass render, shared across workers."""
+    return _shared_pass1(tmp_path_factory.getbasetemp().parent)
 
 
 def test_corpus_cardinality_is_pinned() -> None:
@@ -85,7 +211,9 @@ def test_corpus_carries_no_unscrubbed_secrets() -> None:
     assert not set(re.findall(r"https?://[^\s)>\]]+", blob)) - {"https://example.invalid/redacted"}
 
 
-def test_dc_corpus_protected_excerpts_are_retained() -> None:
+def test_dc_corpus_protected_excerpts_are_retained(
+    corpus_pass1: tuple[tuple[str, str], ...],
+) -> None:
     """The headline safety claim: code is content and never moves.
 
     Covers pandoc's escaping of punctuation inside code spans (``{{\\->}}``), which
@@ -93,18 +221,18 @@ def test_dc_corpus_protected_excerpts_are_retained() -> None:
     """
     offenders = [
         body[:120]
-        for body, out in _rendered()
+        for body, out in corpus_pass1
         if any(fragment not in out for fragment in code_fragments(body))
     ]
 
     assert offenders == []
 
 
-def test_dc_corpus_tables_survive_verbatim() -> None:
+def test_dc_corpus_tables_survive_verbatim(corpus_pass1: tuple[tuple[str, str], ...]) -> None:
     """Every ASCII table is still a table, un-eroded, after rendering."""
     tables = [
         (body, out)
-        for body, out in _rendered()
+        for body, out in corpus_pass1
         if _PIPE_DELIM_RE.search(body) or _BOX_RULE_RE.search(body)
     ]
 
@@ -115,9 +243,11 @@ def test_dc_corpus_tables_survive_verbatim() -> None:
         assert "\\-\\-" not in out
 
 
-def test_dc_corpus_html_comments_survive_exactly() -> None:
+def test_dc_corpus_html_comments_survive_exactly(
+    corpus_pass1: tuple[tuple[str, str], ...],
+) -> None:
     """pandoc DELETES HTML comments; rebar's echo marker is one, so they must survive."""
-    for body, out in _rendered():
+    for body, out in corpus_pass1:
         for marker in _HTML_COMMENT_RE.findall(body):
             assert marker in out
 
@@ -130,7 +260,10 @@ def test_render_is_deterministic() -> None:
 
 
 @pytest.mark.parametrize("stratum", _STRATA)
-def test_dc_corpus_passes_two_to_five_are_byte_identical(stratum: str) -> None:
+def test_dc_corpus_passes_two_to_five_are_byte_identical(
+    stratum: str,
+    corpus_pass1: tuple[tuple[str, str], ...],
+) -> None:
     """Rendering settles: no ratchet, no drift, across the whole corpus.
 
     Proven with TWO renders rather than five. The renderer is a pure deterministic
@@ -142,10 +275,13 @@ def test_dc_corpus_passes_two_to_five_are_byte_identical(stratum: str) -> None:
     checking all five passes, at a fraction of the subprocess cost.
 
     Split per stratum so no single test carries the whole corpus past CI's per-test
-    timeout.
+    timeout. Pass 1 comes from the shared ``corpus_pass1`` artifact — it is the same
+    ``render_markdown_to_wiki(body)`` value this test used to recompute — so only the
+    passes this test actually adds are paid for here.
     """
+    pass1 = dict(corpus_pass1)
     for body in _load(stratum):
-        first = render_markdown_to_wiki(body)
+        first = pass1[body]
         second = render_markdown_to_wiki(first)
         if second == first:
             continue  # fixed point: passes 2-5 are all `first` by determinism
@@ -153,13 +289,13 @@ def test_dc_corpus_passes_two_to_five_are_byte_identical(stratum: str) -> None:
         assert third == second, "rendering did not settle by pass 3"
 
 
-def test_dc_corpus_coverage_ratios() -> None:
+def test_dc_corpus_coverage_ratios(corpus_pass1: tuple[tuple[str, str], ...]) -> None:
     """Richness floors, measured over the committed fixture.
 
     Floors, not equalities: the renderer may only get richer. A drop below either bar
     means eligible units silently started falling back.
     """
-    pairs = _rendered()
+    pairs = corpus_pass1
     changed = [body for body, out in pairs if out != body]
 
     body_ratio = len(changed) / len(pairs)
