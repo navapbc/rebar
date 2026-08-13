@@ -86,6 +86,13 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Removed
 
+- **BREAKING (pre-1.0)** — the deprecated `jira.resolved_statuses` and
+  `reconciler.resolved_statuses` config keys (and their auto-derived
+  `REBAR_JIRA_RESOLVED_STATUSES` / `REBAR_RECONCILER_RESOLVED_STATUSES` env twins) are
+  removed and tombstoned **warn-class**: a config still carrying one keeps loading, logs
+  that the key was removed, and drops it. There is no replacement — resolved/unresolved
+  discrimination is outbound-owned (ADR 0028), so just delete the line. Operator-approved
+  early removal (pre-1.0 pass #3), 2026-08-12.
 - **BREAKING (pre-1.0)** — the bare `REBAR_LLM_MODEL` environment variable is removed
   and tombstoned: setting it now fails loud with a migration error instead of being
   ignored. Use the `[tool.rebar.llm.model_classes]` slots, the per-class

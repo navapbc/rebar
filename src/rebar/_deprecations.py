@@ -89,22 +89,6 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
     # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
     _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
-    # ── config keys: SCHEDULED RETIREMENTS (no replacement) — task 549c ────────
-    # `resolved_statuses` configured the inbound absence probe, whose last consumer went
-    # with task f020. Unlike the rows above these are not superseded by anything — there is
-    # no replacement key, the behaviour simply no longer exists, so `replacement` is "" and
-    # `_message` words it as a retirement.
-    #
-    # They are DEPRECATED rather than tombstoned deliberately. The precedent for retiring a
-    # zero-read-site operator-facing key (`code_health.enabled` below) deletes the field and
-    # tombstones the key, but that was done "per the operator ruling" on bug a573 — sign-off
-    # first. There is no such ruling here, and the key was live and behaviour-affecting as
-    # recently as shipped v0.10.1 (docs of the day told self-hosted operators to set it), so
-    # an existing pyproject.toml plausibly carries it. Keys therefore keep loading and
-    # validating unchanged and merely warn; the hard removal is task f408-64ad-ee41-46b6,
-    # which is blocked on operator sign-off.
-    _scheduled("cfg", "jira.resolved_statuses", ""),
-    _scheduled("cfg", "reconciler.resolved_statuses", ""),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the
@@ -136,6 +120,21 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # and the eval solver still call it. No TOMBSTONE row: the tombstone registry
     # only covers env/cfg/file inputs, so a removed CLI verb / library function /
     # MCP tool simply stops existing, exactly as list-epics and list_epics did.
+    # NOTE (pre-1.0 pass #3, ticket f408 — operator-approved early removal,
+    # 2026-08-12): the same window dropped the two deprecated config keys
+    # `jira.resolved_statuses` and `reconciler.resolved_statuses` (deprecated by task
+    # 549c, which executed the deprecation half and left the removal half blocked on
+    # sign-off — now given). They configured the inbound absence probe, whose last
+    # consumer went with task f020; resolved/unresolved discrimination is
+    # outbound-owned per ADR 0028, so there is NO replacement key — operators simply
+    # delete the line. Both are tombstoned, with their auto-derived env twins, at
+    # `warn` behaviour: they are INERT (nothing read them, and the behaviour they
+    # configured no longer exists), so the load-bearing test that puts a tombstone at
+    # `error` is not met. This deliberately does NOT follow the 6cc4 REBAR_LLM_MODEL
+    # `error` choice above, whose rationale — silently ignoring it would change which
+    # model every operation runs — is exactly the load-bearing argument that does not
+    # transfer here. It follows the inert-cfg precedent instead: `code_health.enabled`,
+    # `code_health.analyzers`, `reconciler.lock_backend`, `reconciler.lock_max_retries`.
 )
 
 REGISTRY: dict[str, Deprecation] = {d.key: d for d in _ENTRIES}
@@ -222,6 +221,10 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     _tomb("env", "REBAR_RECONCILER_LOCK_RETRY_BUDGET", "", "warn"),
     _tomb("env", "REBAR_CODE_HEALTH_ANALYZERS", "", "warn"),
     _tomb("env", "REBAR_CODE_HEALTH_ENABLED", "", "warn"),
+    # The auto-derived (REBAR_<SECTION>_<KEY>) twins of the retired resolved_statuses
+    # config keys below — inert, so warn, per the REBAR_CODE_HEALTH_ENABLED precedent.
+    _tomb("env", "REBAR_JIRA_RESOLVED_STATUSES", "", "warn"),
+    _tomb("env", "REBAR_RECONCILER_RESOLVED_STATUSES", "", "warn"),
     # cfg, error — lifecycle/close gate rename.
     _tomb(
         "cfg",
@@ -241,6 +244,11 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     # operator ruling on bug a573-00ea-2bf6-4eb1 it is dropped rather than wired, with no
     # replacement (its env twin is tombstoned above).
     _tomb("cfg", "code_health.enabled", "", "warn"),
+    # cfg, warn — the retired inbound absence-probe status sets (task 549c deprecated,
+    # task f408 removed under operator sign-off). No replacement: resolved/unresolved
+    # discrimination is outbound-owned (ADR 0028), so an operator just deletes the line.
+    _tomb("cfg", "jira.resolved_statuses", "", "warn"),
+    _tomb("cfg", "reconciler.resolved_statuses", "", "warn"),
     # file, error — the legacy flat config reader.
     _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error"),
     # env, error (llm) — retired LLM step-budget knob (checked in llm.config.from_env).

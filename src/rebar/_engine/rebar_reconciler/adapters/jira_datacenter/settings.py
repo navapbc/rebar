@@ -37,7 +37,8 @@ class JiraDataCenterSettings(NamedTuple):
 
     A ``resolved_statuses`` member was dropped by task 549c: it carried
     ``reconciler.resolved_statuses`` to a transport attribute that nothing ever read, once
-    task f020 deleted the inbound absence probe."""
+    task f020 deleted the inbound absence probe. The config key itself is now gone too,
+    removed by task f408 and left as a warn-class tombstone."""
 
     url: str
     project: str

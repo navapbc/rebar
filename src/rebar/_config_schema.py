@@ -457,12 +457,6 @@ class ReconcilerConfig:
     # options["verify"] value (never a bare False — see transport.py's
     # build_client_from_settings). Empty means "use the library's TLS default".
     ca_bundle: str = ""
-    # DEPRECATED (task 549c) — accepted and validated exactly as before, but nothing reads
-    # it and setting it warns. It fed the DC absence probe, deleted with task f020; 549c
-    # removed the write-only plumbing that carried it to a transport which never consulted
-    # it. Why a deprecation and not a tombstone: see `_deprecations.py`.
-    # read-via: deprecated, inert pending task f408-64ad-ee41-46b6 (hard removal)
-    resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
     # Ceiling (characters) the DC comment sanitizer truncates a comment body to —
     # this instance's `jira.text.field.character.limit`, which is ADMIN-SETTABLE on
     # Data Center (documented range 0-2147483647, where 0 means UNLIMITED). The
@@ -481,12 +475,6 @@ class JiraConfig:
     url: str = ""
     user: str = ""
     project: str = ""
-    # DEPRECATED (task 549c) — accepted and validated exactly as before, but nothing reads
-    # it and setting it warns. Its only consumer, adapters/jira/probe.py, went with the
-    # dormant inbound absence-probe port (task f020). REBAR_JIRA_RESOLVED_STATUSES still
-    # auto-derives from it. Why a deprecation and not a tombstone: see `_deprecations.py`.
-    # read-via: deprecated, inert pending task f408-64ad-ee41-46b6 (hard removal)
-    resolved_statuses: list[str] = field(default_factory=lambda: ["Resolved", "Done", "Cancelled"])
     # Overrides ONLY the url scheme check below (parity with reconciler.allow_insecure);
     # never relaxes certificate verification. Env override auto-derives to
     # REBAR_JIRA_ALLOW_INSECURE. Intended for a loopback/trusted test instance (bug bdb8).
@@ -693,7 +681,6 @@ _SECTIONS: dict[str, dict] = {
         "base_url": lambda v, k: _as_str(v, k),
         "allow_insecure": lambda v, k: _as_bool(v, k),
         "ca_bundle": lambda v, k: _as_str(v, k),
-        "resolved_statuses": lambda v, k: _as_str_list(v, k),
         # `jira.text.field.character.limit`'s own documented range: 0 (= unlimited)
         # through 2147483647 (bug 049e). A negative value is a configuration error,
         # not a synonym for unlimited.
@@ -703,7 +690,6 @@ _SECTIONS: dict[str, dict] = {
         "url": lambda v, k: _as_str(v, k),
         "user": lambda v, k: _as_str(v, k),
         "project": lambda v, k: _as_str(v, k),
-        "resolved_statuses": lambda v, k: _as_str_list(v, k),
         "allow_insecure": lambda v, k: _as_bool(v, k),
     },
     "scratch": {"base_dir": lambda v, k: _as_str(v, k)},

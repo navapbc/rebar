@@ -287,15 +287,6 @@ url            = ""      # env JIRA_URL  (must be https unless allow_insecure=tr
 user           = ""      # env JIRA_USER
 project        = ""      # env JIRA_PROJECT  (the reconciler substitutes "DIG" when empty on CREATE)
 allow_insecure = false   # env REBAR_JIRA_ALLOW_INSECURE — allow a cleartext http:// url
-# DEPRECATED — still accepted and validated, but it has no effect and setting it logs a
-# deprecation warning. It configured the inbound absence probe, which lost every consumer
-# and was then deleted outright (task f020). Task 549c-032f-6cb0-4258 decided DEPRECATE
-# rather than remove: the key was behaviour-affecting as recently as v0.10.1 and the docs
-# of the day told self-hosted operators to set it, so an existing pyproject.toml must keep
-# loading unchanged. Scheduled for removal in v1.0.0; the removal needs operator sign-off
-# and is tracked on task f408-64ad-ee41-46b6. Remove it from your config at your
-# convenience. env (auto-derived) REBAR_JIRA_RESOLVED_STATUSES.
-resolved_statuses = ["Resolved", "Done", "Cancelled"]
 ```
 
 A non-https `jira.url` is REJECTED at config load (an `InsecureUrlError`, naming the
