@@ -28,6 +28,7 @@ investigation hit exactly that and produced zero judge calls.
 from __future__ import annotations
 
 import ast
+import functools
 import pathlib
 from dataclasses import replace
 from typing import Any
@@ -346,13 +347,27 @@ _UNFOLLOWABLE: dict[str, str] = {
 }
 
 
+@functools.cache
+def _parsed(path: pathlib.Path) -> ast.Module:
+    """``ast.parse`` of one source file, memoised for this process.
+
+    The provenance scan reads the same files over and over: ``_verdict`` re-walks the
+    WHOLE tree once per site whose config arrives as a parameter, and ``_functions``
+    walks it again. Memoising by path collapses that to one read+parse per file
+    (ticket fa90-3292-38d4-4fd2). Safe because ``src/rebar`` is READ-ONLY to this
+    suite — no test in this module writes it — and the cache dies with the process,
+    so it can never be served to a later pytest session.
+    """
+    return ast.parse(path.read_text())
+
+
 def _functions() -> dict[str, list[tuple[pathlib.Path, ast.FunctionDef | ast.AsyncFunctionDef]]]:
     """Every function/method in ``src/rebar``, indexed by its bare name (the granularity a call
     site gives us: ``passes.pass2_completion(...)`` and ``pass2_completion(...)`` both resolve by
     ``pass2_completion``)."""
     out: dict[str, list[tuple[pathlib.Path, Any]]] = {}
     for path in sorted(_SRC.rglob("*.py")):
-        tree = ast.parse(path.read_text())
+        tree = _parsed(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 out.setdefault(node.name, []).append((path, node))
@@ -447,7 +462,7 @@ def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
         return "unresolved"
     seen: set[str] = set()
     for caller_path in sorted(_SRC.rglob("*.py")):
-        caller_tree = ast.parse(caller_path.read_text())
+        caller_tree = _parsed(caller_path)
         for node in ast.walk(caller_tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -468,10 +483,9 @@ def _run_request_sites() -> list[tuple[str, str, str]]:
     """``(key, config_expr, verdict)`` for every ``RunRequest(...)`` construction in src/rebar."""
     sites = []
     for path in sorted(_SRC.rglob("*.py")):
-        source = path.read_text()
-        if "RunRequest(" not in source:
+        if "RunRequest(" not in path.read_text():
             continue
-        tree = ast.parse(source)
+        tree = _parsed(path)
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "RunRequest"):
                 continue
@@ -484,21 +498,37 @@ def _run_request_sites() -> list[tuple[str, str, str]]:
     return sites
 
 
-def test_the_provenance_analysis_can_see_the_sites_it_judges() -> None:
+@pytest.fixture(scope="session")
+def run_request_sites() -> list[tuple[str, str, str]]:
+    """The provenance analysis, derived ONCE per test process.
+
+    The four guards below each used to call :func:`_run_request_sites`, re-deriving an
+    identical, immutable answer four times over (ticket fa90-3292-38d4-4fd2). A session
+    fixture is the whole cache: it is bounded by the pytest session that created it, so
+    nothing can survive a source change into a later run.
+    """
+    return _run_request_sites()
+
+
+def test_the_provenance_analysis_can_see_the_sites_it_judges(
+    run_request_sites: list[tuple[str, str, str]],
+) -> None:
     """Guards the guard: if `RunRequest` construction moves behind a factory this scan finds
     nothing and every assertion below passes vacuously."""
-    sites = _run_request_sites()
+    sites = run_request_sites
     assert len(sites) >= 15, f"only {len(sites)} RunRequest sites found — the scan is not working"
     assert all(expr for _, expr, _ in sites), "a RunRequest site passes no config= at all"
 
 
-def test_no_run_request_inherits_the_raw_config_model() -> None:
+def test_no_run_request_inherits_the_raw_config_model(
+    run_request_sites: list[tuple[str, str, str]],
+) -> None:
     """THE general defect: a config minted by ``LLMConfig.from_env()`` reaching a ``RunRequest``
     without crossing the model-class vocabulary. Bug afeb was four instances of it; this fails on
     the next one too, without naming any of them."""
     offenders = {
         key: expr
-        for key, expr, verdict in _run_request_sites()
+        for key, expr, verdict in run_request_sites
         if verdict == "raw" and key not in _CFG_MODEL_BY_DESIGN
     }
     assert not offenders, (
@@ -512,8 +542,10 @@ def test_no_run_request_inherits_the_raw_config_model() -> None:
     )
 
 
-def test_every_unfollowable_site_is_registered_with_a_reason() -> None:
-    unresolved = {key for key, _, verdict in _run_request_sites() if verdict == "unresolved"}
+def test_every_unfollowable_site_is_registered_with_a_reason(
+    run_request_sites: list[tuple[str, str, str]],
+) -> None:
+    unresolved = {key for key, _, verdict in run_request_sites if verdict == "unresolved"}
     assert unresolved <= set(_UNFOLLOWABLE), (
         "new RunRequest site(s) whose config provenance cannot be followed: "
         f"{sorted(unresolved - set(_UNFOLLOWABLE))}. Either declare a model class at the "
@@ -521,10 +553,12 @@ def test_every_unfollowable_site_is_registered_with_a_reason() -> None:
     )
 
 
-def test_neither_registry_has_stale_entries() -> None:
+def test_neither_registry_has_stale_entries(
+    run_request_sites: list[tuple[str, str, str]],
+) -> None:
     """An entry that no longer matches a real site would silently license a future violation."""
     by_verdict: dict[str, set[str]] = {}
-    for key, _, verdict in _run_request_sites():
+    for key, _, verdict in run_request_sites:
         by_verdict.setdefault(verdict, set()).add(key)
     assert set(_CFG_MODEL_BY_DESIGN) <= by_verdict.get("raw", set()), (
         "_CFG_MODEL_BY_DESIGN entries that are no longer raw-config sites: "
