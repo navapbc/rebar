@@ -89,16 +89,6 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
     # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
     _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
-    # ── env aliases: SCHEDULED (a SUPERSESSION, not a rename) ──────────────────
-    # The distinction that decides `_scheduled` vs `_permanent` here, recorded because
-    # it took two wrong turns to settle. The entries above are permanent because
-    # they are RENAMES — the same knob under a better name, so removing them would buy
-    # nothing. REBAR_LLM_MODEL is different in kind: it is SUPERSEDED by a different
-    # interface (the per-class `[tool.rebar.llm.model_classes]` slots), so the old knob
-    # is meant to GO AWAY once callers migrate. That is what `_scheduled` is for, and
-    # the parent epic decided the migration window explicitly. Within the window the
-    # variable still works and fans out to all three classes; it only warns.
-    _scheduled("env", "REBAR_LLM_MODEL", "the [tool.rebar.llm.model_classes] slots"),
     # ── config keys: SCHEDULED RETIREMENTS (no replacement) — task 549c ────────
     # `resolved_statuses` configured the inbound absence probe, whose last consumer went
     # with task f020. Unlike the rows above these are not superseded by anything — there is
@@ -127,6 +117,14 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # backend is the only backend), the CLI list-epics subcommand + --no-sync alias
     # (use `list --type=epic …` / --no-pull), and the MCP list_epics tool (use
     # list_tickets(ticket_type='epic', …)).
+    # NOTE (pre-1.0 pass #3, ticket 6cc4 — operator-approved early removal,
+    # 2026-08-12): the same third breaking window dropped the deprecated bare env
+    # REBAR_LLM_MODEL (use the [tool.rebar.llm.model_classes] slots, or the per-class
+    # REBAR_LLM_<CLASS>_MODEL variables). UNLIKE the review surfaces above this one IS
+    # tombstoned — it is an `env` input, the kind the tombstone registry covers — and
+    # at `error` behaviour, matching REBAR_LLM_MAX_ITERS: silently ignoring a still-set
+    # model id would quietly change which model every operation runs. The CONFIG key
+    # `[tool.rebar.llm].model` is NOT removed; it stays the top-level model knob.
     # NOTE (pre-1.0 pass #3, ticket 97d4 — operator-approved early removal,
     # 2026-08-12): the third breaking removal dropped the single-pass review op's
     # three PUBLIC entry points — the CLI verb `rebar review`, the library
@@ -247,6 +245,9 @@ _TOMBSTONE_REGISTRY: tuple[RemovedInput, ...] = (
     _tomb("file", ".rebar/config.conf", "rebar.toml [tool.rebar]", "error"),
     # env, error (llm) — retired LLM step-budget knob (checked in llm.config.from_env).
     _tomb("env", "REBAR_LLM_MAX_ITERS", "REBAR_LLM_MAX_STEPS", "error"),
+    # env, error (llm) — the retired bare model id (checked in llm.config.from_env).
+    # Ignoring it silently would change which model every operation runs.
+    _tomb("env", "REBAR_LLM_MODEL", "the [tool.rebar.llm.model_classes] slots", "error"),
 )
 
 

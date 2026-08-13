@@ -8,6 +8,30 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — bare `REBAR_LLM_MODEL` env var removed
+
+Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, same window and same
+operator-ruling lever as the two entries below. ADR 0057 made the per-class
+`[tool.rebar.llm.model_classes]` slots the model-selection interface and deprecated the
+bare scalar in v0.11.0; the env var is now **gone**.
+
+| Removed surface | Kind | Use instead |
+|---|---|---|
+| env `REBAR_LLM_MODEL` | env var | the `[tool.rebar.llm.model_classes]` slots, `REBAR_LLM_<CLASS>_MODEL`, or `[tool.rebar.llm].model` |
+
+**This one IS tombstoned, and fails LOUD.** Unlike the review surfaces below (CLI/library/MCP
+kinds the tombstone registry does not cover), `REBAR_LLM_MODEL` is an `env` input an operator
+may still have exported. A still-set value raises a targeted migration error with a non-zero
+exit — `behavior="error"`, matching `REBAR_LLM_MAX_ITERS` — rather than being ignored, because
+silently dropping it would quietly change which model every operation runs. The check lives in
+`LLMConfig.from_env`, so it fires only when the LLM stack actually loads.
+
+**The config key survives.** `[tool.rebar.llm].model` is NOT removed — it remains the
+top-level model knob, now resolving **CLI > `[tool.rebar.llm].model` > `DEFAULT_MODEL`** with
+no env channel. The per-class `REBAR_LLM_<CLASS>_MODEL` variables and the per-step workflow
+`model:` override are untouched. The class-slot precedence loses only its bare-scalar rung and
+is now CLI > per-class env > config table > built-in default. (ticket `6cc4-56f1-6cc6-4c7f`)
+
 ## BREAKING (pre-1.0) — single-pass review public surfaces removed
 
 Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, using the same

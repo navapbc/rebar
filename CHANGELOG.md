@@ -86,6 +86,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Removed
 
+- **BREAKING (pre-1.0)** — the bare `REBAR_LLM_MODEL` environment variable is removed
+  and tombstoned: setting it now fails loud with a migration error instead of being
+  ignored. Use the `[tool.rebar.llm.model_classes]` slots, the per-class
+  `REBAR_LLM_<CLASS>_MODEL` variables, or the top-level `[tool.rebar.llm].model` key —
+  which is NOT removed and still resolves CLI > config > default. Operator-approved
+  early removal (pre-1.0 pass #3), 2026-08-12.
 - **BREAKING (pre-1.0)** — the single-pass review operation's three public entry
   points are removed: the CLI verb `rebar review`, the library function
   `rebar.llm.review_ticket()`, and the MCP `review_ticket` tool. v0.11.0 turned the

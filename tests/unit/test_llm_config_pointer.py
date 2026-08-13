@@ -108,11 +108,14 @@ def test_a_key_only_in_the_discovered_config_survives_the_pointer(
 
 
 def test_env_still_beats_the_pointed_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The pointer sits BELOW the per-key env layer: CLI > env > pointer > discovered."""
-    p = _proj(tmp_path, "[llm]\nmodel = 'discovered-model'\n")
-    _pointer(tmp_path, "[llm]\nmodel = 'pointed-model'\n", monkeypatch)
-    monkeypatch.setenv("REBAR_LLM_MODEL", "env-model")
-    assert _cfg(p).model == "env-model"
+    """The pointer sits BELOW the per-key env layer: CLI > env > pointer > discovered.
+
+    Driven through `model_provider` rather than `model`: the bare REBAR_LLM_MODEL was
+    removed and tombstoned, so `model` no longer HAS an env rung to demonstrate."""
+    p = _proj(tmp_path, "[llm]\nmodel_provider = 'discovered'\n")
+    _pointer(tmp_path, "[llm]\nmodel_provider = 'pointed'\n", monkeypatch)
+    monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "env-provider")
+    assert _cfg(p).model_provider == "env-provider"
 
 
 def test_cli_override_still_beats_the_pointed_file(

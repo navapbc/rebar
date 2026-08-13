@@ -7,10 +7,6 @@ heavy libraries are imported lazily by the runner only when an operation runs.
 
 Environment variables (all optional; sensible defaults):
 
-  REBAR_LLM_MODEL         DEPRECATED (scheduled for removal) — a bare model id that fans
-                          out to ALL THREE model classes. Prefer the per-class
-                          ``[tool.rebar.llm.model_classes]`` slots, or the
-                          ``REBAR_LLM_<CLASS>_MODEL`` variables, which win over this.
                           The runner is the provider-agnostic pydantic_ai runtime
                           (``fake`` is test-only, reachable only via the library
                           ``runner=`` arg).
@@ -279,10 +275,10 @@ def infer_provider(model: str, explicit: str | None = None) -> str | None:
 def resolve_model(cfg: LLMConfig, *, step: str | None = None, workflow: str | None = None) -> str:
     """Resolve the model id for a workflow step by the documented precedence (WS-D3):
 
-        step > workflow > config > env > default
+        step > workflow > config > default
 
-    The first three are explicit here; ``cfg.model`` already folds the last two
-    (the DEPRECATED ``REBAR_LLM_MODEL`` env, else ``DEFAULT_MODEL``). So a per-step ``model:``
+    The first three are explicit here; ``cfg.model`` already folds the last
+    (``[tool.rebar.llm].model``, else ``DEFAULT_MODEL``). So a per-step ``model:``
     (e.g. ``anthropic:claude-opus-4-8`` or ``openai:gpt-4o``) wins, then a
     workflow-level ``model:``, then whatever the config/env/default resolved to.
     Returns a model id consumable by the runner (``provider:model`` or a bare model
@@ -370,11 +366,14 @@ def _read_llm_file_table(repo_root=None) -> dict:
     return _root_config.layer_llm_config_file(discovered)
 
 
-def _llm_str(table: dict, cli: dict, env_name: str, file_key: str, default):
-    """Resolve a string setting: CLI > env > file > default (blank → fall through)."""
+def _llm_str(table: dict, cli: dict, env_name: str | None, file_key: str, default):
+    """Resolve a string setting: CLI > env > file > default (blank → fall through).
+
+    ``env_name=None`` means the setting has NO env channel (CLI + config file only) —
+    used by ``model``, whose bare ``REBAR_LLM_MODEL`` env was removed and tombstoned."""
     if file_key in cli and str(cli[file_key]).strip():
         return str(cli[file_key]).strip()
-    raw = os.environ.get(env_name)
+    raw = os.environ.get(env_name) if env_name is not None else None
     if raw is not None and raw.strip():
         return raw.strip()
     fv = table.get(file_key)
@@ -526,14 +525,19 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls, *, repo_root=None) -> LLMConfig:
-        # Tombstone: the removed REBAR_LLM_MAX_ITERS knob (use REBAR_LLM_MAX_STEPS). This
-        # is enforced HERE (not in the core config layer) so a retired LLM knob fails loud
-        # only when the LLM stack actually loads. RemovedInputError is a BaseException, so
-        # the broad ``except Exception`` in this method's tracker-probe path can't swallow it.
-        if "REBAR_LLM_MAX_ITERS" in os.environ:
-            from rebar._deprecations import RemovedInputError, removed_input
+        # Tombstones: the removed REBAR_LLM_MAX_ITERS (use REBAR_LLM_MAX_STEPS) and the
+        # removed bare REBAR_LLM_MODEL. Enforced HERE (not in the core config layer) so a
+        # retired LLM knob fails loud only when the LLM stack actually loads.
+        # RemovedInputError is a BaseException, so the broad ``except Exception`` in this
+        # method's tracker-probe path can't swallow it.
+        # Tombstone: the removed bare REBAR_LLM_MODEL (use the model_classes slots). Same
+        # placement and rationale as REBAR_LLM_MAX_ITERS above — the CONFIG key
+        # `[tool.rebar.llm].model` is unaffected and still resolves.
+        for _retired in ("REBAR_LLM_MAX_ITERS", "REBAR_LLM_MODEL"):
+            if _retired in os.environ:
+                from rebar._deprecations import RemovedInputError, removed_input
 
-            raise RemovedInputError(removed_input("env", "REBAR_LLM_MAX_ITERS"))
+                raise RemovedInputError(removed_input("env", _retired))
         # The runner is DERIVED, not a public env knob (EV-4). The provider-agnostic
         # in-process ``pydantic_ai`` runner is THE runtime (story d6d1 cutover: the
         # in-process graph stack was dropped after the PydanticAI runner was validated
@@ -578,25 +582,11 @@ class LLMConfig:
         # The agent's rebar ticket tools read the PINNED ticket-store snapshot when a gate
         # set it (None when unset -> the live checkout's store; preserves prior behavior).
         tickets_path = current_tickets_root()
-        # REBAR_LLM_MODEL is deprecated in favour of the per-class model_classes slots. THIS is one
-        # of exactly two env reads of it (the other is the fan-out in model_classes.py), and the
-        # warning belongs at each READ: `resolve_model` hands `resolve_model_string` an
-        # ALREADY-RESOLVED string, where the value is indistinguishable from a config-table `model`
-        # key or a per-step `model:`, so warning there would fire at operators who never set the
-        # variable. Provenance exists only here.
-        #
-        # WARN-WHEN-SET, not warn-when-it-wins: `_llm_str` resolves CLI > env > file > default and
-        # returns early on a CLI hit, so it never even reads the environment when `--model` wins.
-        # Implementing warn-when-it-wins would mean either teaching the shared `_llm_str` about one
-        # of its dozen variables or duplicating its precedence here. An exported deprecated variable
-        # is a migration item whether or not a flag overrode it this run.
-        if os.environ.get("REBAR_LLM_MODEL", "").strip():
-            from rebar._deprecations import warn_deprecated
-
-            warn_deprecated("env:REBAR_LLM_MODEL")
         return cls(
             runner=runner,
-            model=_llm_str(table, cli, "REBAR_LLM_MODEL", "model", DEFAULT_MODEL),
+            # No env channel: the bare REBAR_LLM_MODEL was removed (tombstoned above);
+            # `model` now resolves CLI > [tool.rebar.llm].model > DEFAULT_MODEL.
+            model=_llm_str(table, cli, None, "model", DEFAULT_MODEL),
             model_provider=_llm_str(table, cli, "REBAR_LLM_MODEL_PROVIDER", "model_provider", None),
             base_url=_llm_str(table, cli, "REBAR_LLM_BASE_URL", "base_url", None),
             parse_failure_artifact_dir=_llm_str(

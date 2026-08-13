@@ -334,13 +334,13 @@ deleting the overrides restores the direct-Anthropic path exactly. Nothing else 
 `infra/` competes for that resolution: **`REBAR_LLM_MODEL` appears nowhere under
 `infra/`**, so there is no lower-precedence infra-set value left behind to surprise you.
 
-**Do NOT reach for `REBAR_LLM_MODEL` here.** It is a **deprecated alias** (scheduled for
-removal — see `src/rebar/_deprecations.py`), and its deprecation shim
-(`model_classes._deprecated_bare_model`) fans a single value out to **all three** class
-slots at once. Setting it would collapse the per-pass frontier/standard split the review
-kernel depends on (frontier for the review pass, standard for the verifier downgrade) —
-the exact defect the class slots were introduced to fix. Set the three per-class vars, or
-set none of them.
+**Do NOT reach for `REBAR_LLM_MODEL` here.** It was **REMOVED** (pre-1.0 breaking pass #3)
+and is now tombstoned in `src/rebar/_deprecations.py`: setting it makes every rebar LLM
+operation fail loud with a migration error. While it existed it fanned a single value out to
+**all three** class slots at once, which would collapse the per-pass frontier/standard split
+the review kernel depends on (frontier for the review pass, standard for the verifier
+downgrade) — the exact defect the class slots were introduced to fix. Set the three per-class
+vars, or set none of them.
 
 ### `ANTHROPIC_API_KEY` stays in the container — deliberately
 

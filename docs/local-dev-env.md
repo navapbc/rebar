@@ -263,8 +263,9 @@ standard = { model = "bedrock:us.anthropic.claude-sonnet-4-6" }
 trivial  = { model = "bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0" }
 ```
 
-Do **not** reach for the deprecated bare `REBAR_LLM_MODEL`: it fans one value out to all three
-classes and collapses the per-pass frontier/standard split the gates depend on.
+The bare `REBAR_LLM_MODEL` was **removed** (pre-1.0 breaking pass #3) and now fails loud: it
+fanned one value out to all three classes and collapsed the per-pass frontier/standard split the
+gates depend on.
 
 Confirm which way you are pointed without spending a token — this reads config only:
 

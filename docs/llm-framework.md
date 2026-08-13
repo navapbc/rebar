@@ -242,7 +242,7 @@ REBAR_LLM_BASE_URL=http://127.0.0.1:1234/v1
 A class slot only takes effect for an operation that **declares** that class — the gate
 workflows do so with a step-level `model: frontier` / `model: standard`. An operation that
 declares none resolves the **top-level** model instead
-(`[tool.rebar.llm].model`, else the deprecated `REBAR_LLM_MODEL`, else `DEFAULT_MODEL`), so a
+(`[tool.rebar.llm].model`, else `DEFAULT_MODEL`), so a
 per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o`
 set and this repo's own `[tool.rebar.llm].model` pinned to Bedrock,
 a classless op still ran — and stamped its provenance — as
@@ -250,9 +250,9 @@ a classless op still ran — and stamped its provenance — as
 `openai:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
 class the operation declares) to move a classless operation.
 
-> **`REBAR_LLM_MODEL` is DEPRECATED** (scheduled for removal in v1.0.0). It still works and
-> now applies its value to **all three** classes, warning once per call; any class slot or
-> `REBAR_LLM_<CLASS>_MODEL` you set wins over it. Migrate to the slots above.
+> **`REBAR_LLM_MODEL` was REMOVED** (pre-1.0 breaking pass #3). Setting it now fails loud
+> with a migration error rather than being ignored. Use the class slots above, the
+> `REBAR_LLM_<CLASS>_MODEL` variables, or the top-level `[tool.rebar.llm].model` key.
 
 ### A validated local-model run
 
@@ -383,9 +383,8 @@ for the future code-review op's "deterministic reviewer-selection rules."
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `REBAR_LLM_MODEL` | `claude-opus-4-8` | model id (or a `provider:model` string) |
 | `REBAR_LLM_MODEL_PROVIDER` | inferred | pydantic-ai provider (`anthropic`/`openai`/`google`/…); inferred from the model string if unset |
-| `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_MODEL` | — | the model-class slots (see above); these are the interface, not `REBAR_LLM_MODEL` |
+| `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_MODEL` | — | the model-class slots (see above); these are the interface |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_PROVIDER` | inferred | per-class provider override; rejected if not in `KNOWN_PROVIDER_NAMES` |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_ENDPOINT` | — | per-class OpenAI-compatible endpoint |
 | `REBAR_LLM_BEDROCK_REGION` | — | AWS region for the Bedrock path; **`AWS_REGION` alone does not resolve one** (see §"AWS Bedrock") |
@@ -758,7 +757,7 @@ screen". Module: `rebar.llm.epic_bug_screen`; filter + floor: `rebar.llm.complet
 > The verifier also **defaults to `claude-sonnet-4-6`** — a *decisive* model, not a
 > maximally-thorough one: larger/reasoning models *over-explore more* on bounded agentic tasks
 > (the documented "overthinking" effect), so escalating to a bigger model is the **wrong** lever
-> here. An explicit non-default `REBAR_LLM_MODEL` still wins. The untrusted ticket/file content is delimited and
+> here. An explicit non-default `[tool.rebar.llm].model` still wins. The untrusted ticket/file content is delimited and
 the prompt carries an instruction-hierarchy clause (prompt-injection mitigation, OWASP LLM01).
 
 **Bounded completion recovery.** The ordinary verifier keeps the one-call path

@@ -19,6 +19,7 @@ optional extra, and those are marked.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from types import SimpleNamespace
 
@@ -33,6 +34,23 @@ pytestmark = pytest.mark.unit
 # The model ids below are exactly those measured; see the module docstring.
 _TEMP_FATAL = "us.anthropic.claude-opus-4-7"
 _TEMP_OK = "us.anthropic.claude-sonnet-4-6"
+
+
+@contextlib.contextmanager
+def _model_via_cli(model: str):
+    """Set the top-level model through the surviving CLI rung.
+
+    The bare ``REBAR_LLM_MODEL`` env was removed and tombstoned (pre-1.0 pass #3), so a test
+    that needs a specific model must drive ``LLMConfig.from_env`` through CLI or config,
+    not the environment."""
+    from rebar import config as _root_config
+
+    previous = _root_config.cli_overrides_for("llm")
+    _root_config.set_cli_overrides(_root_config.parse_cli_overrides([f"llm.model={model}"]))
+    try:
+        yield
+    finally:
+        _root_config.set_cli_overrides({"llm": previous} if previous else {})
 
 
 def _bedrock_profile(*, variant="anthropic", json_schema=True, thinking=True):
@@ -485,8 +503,8 @@ def test_bedrock_provider_prefixed_model_still_resolves(monkeypatch) -> None:
     this bites."""
     from rebar.llm.config import LLMConfig, infer_provider
 
-    monkeypatch.setenv("REBAR_LLM_MODEL", "bedrock:us.anthropic.claude-sonnet-4-6")
-    cfg = LLMConfig.from_env()
+    with _model_via_cli("bedrock:us.anthropic.claude-sonnet-4-6"):
+        cfg = LLMConfig.from_env()
     assert cfg.model == "bedrock:us.anthropic.claude-sonnet-4-6"
     assert infer_provider(cfg.model) == "bedrock"
 

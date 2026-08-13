@@ -66,8 +66,8 @@ COMPLETION_REMEDIATION_GUIDANCE = (
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
 # blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
 # in testing) — whereas sonnet converges in ~12s. So default the verifier to sonnet (matching
-# the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets
-# REBAR_LLM_MODEL to a non-default still wins (below). The literal lives in config.py
+# the DSO completion-verifier's `model: sonnet`). An operator who EXPLICITLY sets a
+# non-default `[tool.rebar.llm].model` still wins (below). The literal lives in config.py
 # (VERIFIER_DEFAULT_MODEL) as the single source shared with the plan-review verifier.
 _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
 # Completion verification is inherently more tool-heavy than a single-dimension review: it

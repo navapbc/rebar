@@ -33,7 +33,7 @@ job would mask an all-skip of the Jira tests, and vice versa.
 `_live_llm_ready` sentinel (`tests/external/conftest.py`), so a **new** live-LLM module joins the
 matrix without editing the workflow.
 
-## Provider selection: `REBAR_LLM_CONFIG_FILE`, not `REBAR_LLM_MODEL`
+## Provider selection: `REBAR_LLM_CONFIG_FILE`
 
 Each arm points `REBAR_LLM_CONFIG_FILE` at `.github/llm-providers/<provider>.toml`, a file setting
 **only** `[llm.model_classes]`. Three reasons this is the right instrument rather than bespoke
@@ -47,8 +47,8 @@ per-arm CI wiring:
 3. CI therefore **dogfoods** the override path, giving the pointer live coverage on every run
    instead of only when someone uses it by hand.
 
-The deprecated bare `REBAR_LLM_MODEL` is explicitly not used: it applies one model to all three
-classes, so it cannot express a per-class provider selection (ADR 0057).
+The bare `REBAR_LLM_MODEL` is not an option: it applied one model to all three classes, so it
+could not express a per-class provider selection (ADR 0057), and it has since been removed.
 
 `tests/unit/test_ci_provider_matrix.py::test_an_overlay_repoints_every_class_and_preserves_the_discovered_config`
 runs each committed overlay through rebar's **real** config layering and asserts both halves —

@@ -170,12 +170,12 @@ services:
       # WHY CLASSES AND NOT `REBAR_LLM_MODEL`: the gates name model CLASSES, not model ids
       # (code-review.yaml's base is `frontier` and its verify/coach are `standard`;
       # plan-review.yaml's Pass-1 ladder is `[frontier]`). Filling the slots therefore re-points
-      # every pass in one act while PRESERVING that split. `REBAR_LLM_MODEL` would destroy it:
-      # it is deprecated, and its compatibility shim fans ONE value out to ALL THREE classes —
-      # sonnet-everywhere silently downgrades the Pass-1 finder, opus-everywhere loses the Pass-2
-      # cost downgrade AND renders code-review.yaml's `temperature: 0` greedy pin inoperative,
-      # because Bedrock opus accepts only the default temperature. Both are wrong, in opposite
-      # directions. `REBAR_LLM_MODEL` is deliberately NOT set here and must not be added.
+      # every pass in one act while PRESERVING that split. `REBAR_LLM_MODEL` would have
+      # destroyed it: it fanned ONE value out to ALL THREE classes — sonnet-everywhere silently
+      # downgrades the Pass-1 finder, opus-everywhere loses the Pass-2 cost downgrade AND renders
+      # code-review.yaml's `temperature: 0` greedy pin inoperative, because Bedrock opus accepts
+      # only the default temperature. Both are wrong, in opposite directions. The variable has
+      # since been REMOVED and tombstoned: setting it now fails loud, so it must not be added.
       #
       # ONLY INFERENCE-PROFILE ids are invokable: a bare on-demand `anthropic.claude-*` id
       # returns `ValidationException: … on-demand throughput isn't supported`. The suffixes are

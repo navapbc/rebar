@@ -356,7 +356,6 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # REBAR_LLM_RUNNER is removed (EV-4); the runner is DERIVED — pydantic_ai (d6d1).
     monkeypatch.delenv("REBAR_LLM_EXPERIMENTAL_HARNESS", raising=False)
     monkeypatch.setenv("REBAR_LLM_RUNNER", "fake")  # IGNORED — no longer a knob
-    monkeypatch.setenv("REBAR_LLM_MODEL", "gpt-4o")
     monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "openai")
     monkeypatch.setenv("REBAR_LLM_BASE_URL", "http://localhost:1234/v1")
     monkeypatch.setenv("REBAR_LLM_MAX_STEPS", "7")
@@ -366,7 +365,9 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # EV-4 CONTRACT (behavioral, not a hardcoded default): REBAR_LLM_RUNNER is IGNORED —
     # the runner is derived, so the env value "fake" must NOT take effect.
     assert cfg.runner != "fake"
-    assert cfg.model == "gpt-4o" and cfg.max_iterations == 7
+    # `model` has NO env channel (the bare REBAR_LLM_MODEL was removed + tombstoned);
+    # it resolves CLI > [tool.rebar.llm].model > DEFAULT_MODEL.
+    assert cfg.max_iterations == 7
     assert cfg.model_provider == "openai" and cfg.base_url == "http://localhost:1234/v1"
     assert cfg.langfuse.enabled is True
 

@@ -7,8 +7,8 @@ All four configure the three **model classes** (`trivial`, `standard`, `frontier
 because the operations differ in kind: a plan review's Pass-1 is open-ended reasoning, while a
 completion verifier's check is a decisive yes/no. Sizing them separately is the point.
 
-> The single bare `REBAR_LLM_MODEL` variable is **deprecated** (scheduled for removal in v1.0.0).
-> It still works and applies its value to all three classes, but any slot below wins over it.
+> The single bare `REBAR_LLM_MODEL` variable was **removed** (pre-1.0 breaking pass #3) and now
+> fails loud with a migration error; use the slots below.
 > See [adr/0057-model-classes-and-the-rebar-llm-model-deprecation.md](adr/0057-model-classes-and-the-rebar-llm-model-deprecation.md).
 
 Secrets are **never** put in these tables — an `api_key` on a slot is rejected. Credentials come
@@ -95,4 +95,4 @@ REBAR_LLM_STANDARD_MODEL=openai:gpt-4o rebar review-plan <id>
 ```
 
 Resolution order, per field: `rebar -c llm.<class>.<field>=…` > `REBAR_LLM_<CLASS>_<FIELD>` >
-the config table > the deprecated bare `REBAR_LLM_MODEL` > the built-in default.
+the config table > the built-in default.

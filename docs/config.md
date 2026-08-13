@@ -317,8 +317,9 @@ it into `Config`. The non-secret knobs are settable in the file and resolved
 
 ```toml
 [tool.rebar.llm]
-model          = "claude-opus-4-8"   # env REBAR_LLM_MODEL — DEPRECATED (removal in v1.0.0);
-                                     # prefer [tool.rebar.llm.model_classes] per-class slots
+model          = "claude-opus-4-8"   # top-level model (config/CLI only — the bare
+                                     # REBAR_LLM_MODEL env was removed); prefer the
+                                     # [tool.rebar.llm.model_classes] per-class slots
 model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
 parse_failure_artifact_dir = ""      # env REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR (opt-in raw-reply capture; unset = off)

@@ -121,10 +121,11 @@ def test_precedence_full_chain(tmp_path: Path, monkeypatch) -> None:
     assert _cfg(p).model == "user-model"  # user only
     (p / "rebar.toml").write_text("[llm]\nmodel = 'project-model'\n", encoding="utf-8")
     assert _cfg(p).model == "project-model"  # project beats user
-    monkeypatch.setenv("REBAR_LLM_MODEL", "env-model")
-    assert _cfg(p).model == "env-model"  # env beats project
+    # `model` has NO env rung: the bare REBAR_LLM_MODEL was removed and tombstoned, so the
+    # chain for this key is CLI > project > user > default. (The env rung is still exercised
+    # for env-backed keys — see the model_provider case below.)
     cfg.set_cli_overrides(cfg.parse_cli_overrides(["llm.model=cli-model"]))
-    assert LLMConfig.from_env(repo_root=p).model == "cli-model"  # cli beats env
+    assert LLMConfig.from_env(repo_root=p).model == "cli-model"  # cli beats project
     cfg.set_cli_overrides(None)
 
 
@@ -179,8 +180,10 @@ def test_repo_path_is_runtime_env_only(tmp_path: Path, monkeypatch) -> None:
 def test_malformed_config_falls_back_to_env(tmp_path: Path, monkeypatch) -> None:
     p = _proj(tmp_path)
     (p / "rebar.toml").write_text("[llm]\nmodel = [ broken toml\n", encoding="utf-8")
-    monkeypatch.setenv("REBAR_LLM_MODEL", "env-model")
-    assert _cfg(p).model == "env-model"
+    # Driven through an env-backed key: `model` lost its env rung with the removal of the
+    # bare REBAR_LLM_MODEL, so it can no longer show the degrade-to-env behaviour.
+    monkeypatch.setenv("REBAR_LLM_MODEL_PROVIDER", "env-provider")
+    assert _cfg(p).model_provider == "env-provider"
 
 
 # ── cross-cutting: the core loader treats [tool.rebar.llm] as a reserved section ─

@@ -23,6 +23,8 @@ summarizer, completion sub-call, coach, prerequisite finder) widen via
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 
 from rebar.llm.config import DEFAULT_MAX_TOKENS, LLMConfig
@@ -53,6 +55,23 @@ class _Recorder:
     def run(self, req):
         self.requests.append(req)
         return dict(self._payload)
+
+
+@contextlib.contextmanager
+def _model_via_cli(model: str):
+    """Set the top-level model through the surviving CLI rung.
+
+    The bare ``REBAR_LLM_MODEL`` env was removed and tombstoned (pre-1.0 pass #3), so a test
+    that needs a specific model must drive ``LLMConfig.from_env`` through CLI or config,
+    not the environment."""
+    from rebar import config as _root_config
+
+    previous = _root_config.cli_overrides_for("llm")
+    _root_config.set_cli_overrides(_root_config.parse_cli_overrides([f"llm.model={model}"]))
+    try:
+        yield
+    finally:
+        _root_config.set_cli_overrides({"llm": previous} if previous else {})
 
 
 def _cfg(model: str = "claude-sonnet-4-6") -> LLMConfig:
@@ -245,7 +264,6 @@ def _verify_ctx(inputs: dict) -> StepContext:
 
 
 def test_step_output_budget_model_max_raises_to_model_max(monkeypatch) -> None:
-    monkeypatch.setenv("REBAR_LLM_MODEL", "claude-sonnet-4-6")
     runner = _CapturingRunner({"verifications": []})
     ctx = _verify_ctx(
         {
@@ -254,7 +272,8 @@ def test_step_output_budget_model_max_raises_to_model_max(monkeypatch) -> None:
             "output_budget": "model_max",
         }
     )
-    res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
+    with _model_via_cli("claude-sonnet-4-6"):
+        res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
     assert res.status == "succeeded"
     assert runner.max_tokens == _SONNET_MAX
 
@@ -262,7 +281,6 @@ def test_step_output_budget_model_max_raises_to_model_max(monkeypatch) -> None:
 def test_step_output_budget_combines_with_per_item_scaling(monkeypatch) -> None:
     """On an unmapped model the per-item scaling still raises the cap — the final
     budget is the max of the floor, the per-item scale, and the model-max lookup."""
-    monkeypatch.setenv("REBAR_LLM_MODEL", "some-future-model")
     findings = [{"finding": f"f{i}", "criteria": ["G6"]} for i in range(30)]
     runner = _CapturingRunner({"verifications": []})
     ctx = _verify_ctx(
@@ -273,7 +291,8 @@ def test_step_output_budget_combines_with_per_item_scaling(monkeypatch) -> None:
             "output_budget": "model_max",
         }
     )
-    res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
+    with _model_via_cli("some-future-model"):
+        res = RunnerAgentStep(runner=runner, repo_root=None).run(ctx)
     assert res.status == "succeeded"
     assert runner.max_tokens == 2000 * len(findings)  # scaling wins over the 16000 fallback
 

@@ -12,7 +12,8 @@ WHY THIS FILE EXISTS — and what it does NOT fix (ticket b300). ``llm/config.py
 793 LOC against the absolute 800-line cap in ``.github/module-size-limit.txt`` and is the
 most-imported near-cap module in the repo (fan-in 93), which made ticket d23e's
 ``REBAR_LLM_MODEL`` deprecation alias (measured at 10-16 lines) unlandable against the 7
-lines available. This extraction RELOCATES INERT MASS: the code below has not grown since
+lines available (that alias has since been removed, but the headroom problem
+stands). This extraction RELOCATES INERT MASS: the code below has not grown since
 2026-07-09, so moving it buys headroom without touching the actual absorber. That absorber
 is ``LLMConfig.from_env``, which grows ~10-13 lines per new knob (a field, a resolution
 line, a docstring row) and is untouched here — so this is roughly 15 knobs of runway, NOT
