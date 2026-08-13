@@ -530,6 +530,36 @@ together with `REBAR_SYNC_PUSH=off` to skip both directions; the former private
 
 ---
 
+## Staging a new ticket: `.tmp-newticket-*` (the atomic-create convention)
+
+A ticket directory and its first event are published **together, by one `os.rename`**, which
+is atomic on a single filesystem. The writer builds both inside a staging path
+`<tracker>/.tmp-newticket-<pid>-<uuid4hex>` and renames that directory into the ticket-id
+path (`src/rebar/_store/staging.py`). Previously the directory was created first and its
+CREATE event landed much later, so an interruption in between (host sleep, kill, lock
+timeout) stranded an empty, plausible-looking ticket directory — which `fsck` reports twice,
+as `MISSING_CREATE` **and** `FOREIGN_STORE_PATH`. Eight such directories were swept by hand
+before the fix (ticket `illsuited-erect-ibis`).
+
+**The leading dot is load-bearing.** Every store scanner already skips top-level entries
+beginning with `.` — `fsck._ticket_dirs`, `fsck.foreign_store_path_list`, fsck's JSON check,
+and the plan reducer's `relation_snapshot` — and ticket ids never start with a dot, so the
+two namespaces cannot collide. A staging path is therefore invisible to both checks with no
+scanner change, exactly as the older `.tmp-event-*` event-staging files are. The pid and
+uuid4 make each staging name unique per writer and per call, so concurrent creates cannot
+collide. The rename itself still happens **under the write lock**, so an event never becomes
+visible before the under-lock checks (rebase guard, optimistic-concurrency check) pass.
+
+A bounded, best-effort sweep at ticket-create writer start reclaims staging paths whose
+owning process is provably gone, using the same host + pid-namespace + process-start-time
+ownership stamp the write lock uses (so pid recycling cannot fool it). **This does not
+contradict "tolerate, never tidy"** (bug `043f`): that ruling forbids the writer from
+deleting *store data* — an event-less ticket directory — because doing so races another
+session's in-flight write, and because reader-side tolerance also repairs clones that
+already carry debris. The sweep touches only `.tmp-newticket-*`, the writer's own staging
+area, never a ticket directory. Event-less ticket directories are still tolerated and never
+tidied.
+
 ## Doctrine compliance is a gate
 
 A change that cannot satisfy I1–I9 is **redesigned, not merged**. The executable

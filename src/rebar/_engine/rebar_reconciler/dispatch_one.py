@@ -280,11 +280,9 @@ def create_one(
                 # the jira_key, falling back to a uuid so the alert always lands
                 # under a non-root subdirectory.
                 _alert_dir_key = local_id or jira_key or f"unknown-{_uuid.uuid4()}"
-                _ticket_dir = _alert_root / _alert_dir_key
-                _ticket_dir.mkdir(parents=True, exist_ok=True)
                 _ts = _time.time_ns()
                 _alert_uuid = str(_uuid.uuid4())
-                _alert_path = _ticket_dir / f"{_ts}-{_alert_uuid}-BRIDGE_ALERT.json"
+                _alert_name = f"{_ts}-{_alert_uuid}-BRIDGE_ALERT.json"
                 _alert_event = {
                     "event_type": "BRIDGE_ALERT",
                     "timestamp": _ts,
@@ -299,7 +297,23 @@ def create_one(
                         "tag": "create-identity-write-failed",
                     },
                 }
-                _alert_path.write_text(canonical_str(_alert_event))
+                # Ticket 021d: publish the directory and this first alert together with one
+                # rename. The old shape mkdir'd the directory before serialising the alert,
+                # so a failure in between left an empty directory that fsck reports as
+                # MISSING_CREATE + FOREIGN_STORE_PATH — and this is an error path, the very
+                # place an interruption is most likely.
+                from rebar._store import staging as _staging
+
+                _staged = _staging.stage_event(
+                    str(_alert_root),
+                    _alert_dir_key,
+                    _alert_name,
+                    canonical_str(_alert_event).encode("utf-8"),
+                )
+                try:
+                    _staged.promote()
+                finally:
+                    _staged.discard()  # no-op once published
             except Exception:  # noqa: BLE001 — alert-write failure must not mask the original error (write_err is re-raised below)
                 pass  # alert write failure must not mask original error
             raise write_err
