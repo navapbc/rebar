@@ -313,23 +313,21 @@ def test_ticket_pointer_reporting_never_changes_the_exit_code(gate, tmp_path, ca
     assert "dce2-b93d-4112-451c" in combined, "main must PRINT the report, not just compute it"
 
 
-def test_the_real_schema_parks_exactly_two_markers_against_a_ticket(gate):
+def test_the_real_schema_parks_no_markers_against_a_ticket(gate):
     """Today's expected state, pinned so a newly-parked marker surfaces in review.
 
-    Task f020 deleted the inbound absence-probe port and with it the ONLY reader of
-    ``JiraConfig.resolved_statuses``. Task 549c then decided DEPRECATE-not-remove (the key
-    was behaviour-affecting as recently as v0.10.1, so an existing config must keep
-    loading) and removed the write-only DC plumbing that had been the last read of
-    ``ReconcilerConfig.resolved_statuses`` — so BOTH fields are now inert and both carry a
-    marker pointing at the hard-removal follow-up, f408-64ad-ee41-46b6, which is blocked on
-    operator sign-off. This pin is deliberately EXACT (two reports, naming that ticket)
-    rather than a bare non-empty check: a loosened assertion would let a third, unrelated
-    field be parked against a ticket without anyone noticing.
+    The schema used to park exactly two: task f020 deleted the inbound absence-probe port
+    and with it the ONLY reader of ``JiraConfig.resolved_statuses``, then task 549c removed
+    the write-only DC plumbing that had been the last read of
+    ``ReconcilerConfig.resolved_statuses``, leaving both fields inert behind a marker
+    pointing at the hard-removal follow-up f408-64ad-ee41-46b6. That removal has now landed
+    under operator sign-off — the fields and their markers are gone — so the parked set is
+    empty again. Pinned at EXACTLY zero rather than as a bare bound: a loosened assertion
+    would let an unrelated field be parked against a ticket without anyone noticing, which
+    is the whole point of reporting them.
     """
     reports = gate.ticket_pointer_reports(_REAL_SCHEMA)
-    assert len(reports) == 2, f"exactly two markers parked against a ticket; got {reports!r}"
-    assert all("resolved_statuses" in r for r in reports)
-    assert all("f408-64ad-ee41-46b6" in r for r in reports)
+    assert reports == [], f"no marker should be parked against a ticket; got {reports!r}"
 
 
 def test_ci_wires_the_gate(gate):

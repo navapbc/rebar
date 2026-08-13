@@ -8,6 +8,31 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — the `resolved_statuses` config keys removed
+
+Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, same window and same
+operator-ruling lever as the entries below. Task `f020` deleted the inbound absence-probe
+port that read them; task `549c-032f-6cb0-4258` deprecated the now-inert keys in v0.11.0
+and held the removal for sign-off, which has now been given.
+
+| Removed surface | Kind | Use instead |
+|---|---|---|
+| cfg `[tool.rebar.jira].resolved_statuses` | config key | nothing — delete the line |
+| cfg `[tool.rebar.reconciler].resolved_statuses` | config key | nothing — delete the line |
+| env `REBAR_JIRA_RESOLVED_STATUSES` | env var | nothing — unset it |
+| env `REBAR_RECONCILER_RESOLVED_STATUSES` | env var | nothing — unset it |
+
+**There is no replacement setting.** Resolved/unresolved discrimination is owned by the
+outbound path (ADR 0028); these keys configured the *inbound* absence probe, which no
+longer exists. An operator simply removes the line from `pyproject.toml`.
+
+**Tombstoned `warn`, so nothing breaks on upgrade.** Unlike `REBAR_LLM_MODEL` below,
+these inputs are **inert** — nothing read them, and the behaviour they configured is
+gone — so a still-set key does not abort the command. It logs that the key was removed,
+the key is dropped, and loading continues. That is the same treatment as the other
+retired inert config keys (`code_health.enabled`, `code_health.analyzers`,
+`reconciler.lock_backend`, `reconciler.lock_max_retries`). (ticket `f408-64ad-ee41-46b6`)
+
 ## BREAKING (pre-1.0) — bare `REBAR_LLM_MODEL` env var removed
 
 Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, same window and same

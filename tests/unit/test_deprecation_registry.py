@@ -38,8 +38,10 @@ def test_registry_entries_well_formed() -> None:
         assert entry.name and entry.name.strip(), f"{key}: empty name"
         # A replacement is required for a SUPERSESSION or a rename, and must be absent for a
         # RETIREMENT — a scheduled surface whose behaviour is simply gone, with nothing to
-        # migrate to (task 549c's `cfg:*.resolved_statuses` rows). Permitting empty for a
-        # permanent alias would be meaningless: an alias with nothing to alias.
+        # migrate to. (Task 549c's `cfg:*.resolved_statuses` rows were the example; they
+        # have since been removed outright by task f408 and are now warn-class tombstones.)
+        # Permitting empty for a permanent alias would be meaningless: an alias with
+        # nothing to alias.
         if entry.permanent:
             assert entry.replacement and entry.replacement.strip(), f"{key}: empty replacement"
         else:

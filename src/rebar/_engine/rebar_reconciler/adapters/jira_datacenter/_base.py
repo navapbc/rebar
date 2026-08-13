@@ -83,8 +83,9 @@ class _TransportBase:
     This carried a ``resolved_statuses`` parameter and ``_resolved_statuses`` attribute for
     the inbound absence probe's classifier. That port was deleted with task f020, leaving the
     attribute write-only — stored on every transport and read by nothing — so task 549c
-    removed it. The config keys that fed it survive as deprecated no-ops; see
-    ``_config_schema.JiraConfig.resolved_statuses``.
+    removed it. The config keys that fed it were deprecated by 549c and then removed
+    outright by task f408; they survive only as warn-class tombstones in
+    ``_deprecations._TOMBSTONE_REGISTRY``.
     """
 
     # Declared at class level (type-only) so every capability mixin that inherits
