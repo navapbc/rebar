@@ -200,6 +200,21 @@ it). The limit is single-sourced in `.github/module-size-limit.txt` and **locked
 it requires an administrator to override the gate (a normal contributor change to the limit
 fails CI).
 
+A sibling gate ratchets **per-function complexity** the same way. `make lint` runs
+`python scripts/check_complexity_baseline.py --check`, a **shrink-only** ratchet that freezes
+each symbol's McCabe cyclomatic-complexity ceiling in `.github/complexity-baseline.json` and
+**fails the build on any `new>0` or `increased>0`** — a newly-complex function, or an existing
+one that got *more* complex, breaks CI (an unchanged or *lower* score is fine; a `stale` entry
+that dropped below its ceiling is an allowed improvement). The per-branch threshold is
+single-sourced as `max-complexity = 15` in `pyproject.toml`'s `[tool.ruff.lint.mccabe]`.
+Adding CLI flags, guards, or branches to an already-near-ceiling function predictably trips it.
+The fix is **behavior-preserving extraction** — pull a cluster of branches into a helper (along
+existing call-graph seams, exactly as for the LOC cap) so each function scores under its
+ceiling — **never** bumping the baseline: `--lock`/`--update-stale` are maintenance-only, not a
+contributor's escape hatch. Read a function's current score with
+`ruff check --select C901 <file>`, and check the whole ratchet with
+`python scripts/check_complexity_baseline.py --check`.
+
 ## Navigating the codebase (when editing rebar itself)
 
 This checkout has the **Serena** MCP server configured (LSP-backed, Pyright over `src/rebar`)
