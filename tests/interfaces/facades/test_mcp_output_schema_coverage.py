@@ -92,6 +92,8 @@ EXEMPT_GENERIC: dict[str, str] = {
     "unlink_tickets": "write ack {result, push_status}; no canonical shape",
     "set_file_impact": "write ack {result, push_status}; no canonical shape",
     "set_verify_commands": "write ack {result, push_status}; no canonical shape",
+    "bridge_projects_set": "write ack {result, push_status}; no canonical shape",
+    "bridge_projects_remove": "write ack {result, push_status}; no canonical shape",
     "attach_commits": "returns the small {ticket_id, attached} receipt of a union-add "
     "write (how many SHAs were recorded); there is no canonical schema for it, and the "
     "durable shape consumers read is the ticket's `commits` list, not this ack",
@@ -138,6 +140,9 @@ NO_SCHEMA_EXEMPT: dict[str, str] = {
     "status:'running'} immediately and runs in the background; a plain dict (no "
     "outputSchema) because it is a fire-and-forget START ack, not the run result "
     "(the typed surface is get_workflow_status/result, validated below).",
+    "bridge_projects_list": "pure store READ of the bridge-projects sync mapping "
+    "({key: {repos: [...]}}); returns a plain free-form dict (no pydantic model), so it "
+    "advertises NO outputSchema by design — the durable shape is the store's sync list.",
 }
 
 

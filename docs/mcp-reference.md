@@ -16,6 +16,7 @@ Registered by `register_read_tools` and always exposed — reads never mutate th
 | `bridge_check_access` | Run the six-step live Jira capability check and return its typed verdict. |
 | `bridge_fsck` | Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}. |
 | `bridge_preview` | Compute proposed Jira changes without applying them. |
+| `bridge_projects_list` | Return the store's bridge-projects sync mapping ``{key: {"repos": [...]}}``. |
 | `bridge_status` | Read the durable bridge status snapshot and optional freshness assertion. |
 | `check_ac` | Check the ticket has an Acceptance Criteria block |
 | `clarity_check` | Score ticket clarity (score / verdict / threshold / passed). |
@@ -61,6 +62,8 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `archive_ticket` | Archive a ticket (excludes it from the default list). |
 | `attach_commits` | Retroactively link commits to a ticket by SHA (union-add, idempotent). |
 | `bridge_pause` | Persist a durable reconciliation pause with its operator reason. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
+| `bridge_projects_remove` | Remove a bridge project key from the mapping (error if absent). |
+| `bridge_projects_set` | Set a bridge project key's repos (REPLACE semantics; idempotent). |
 | `bridge_resume` | Clear the durable reconciliation pause. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
 | `bridge_run` | Run one scheduled bridge profile and strictly deliver its ticket events. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
 | `bridge_sync` | Apply proposed Jira changes, optionally with an explicit change limit. _(requires `REBAR_MCP_ALLOW_JIRA_SYNC` and is blocked when read-only)_ |
@@ -125,4 +128,4 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `REBAR_MCP_AUTH_PROXY_SCOPES` | Comma-separated fixed scope set granted to proxy-authenticated principals; empty by default (the principal holds no scopes). |
 | `REBAR_MCP_AUTH_CUSTOM_IMPORT` | The `custom` strategy's `module:factory` import string, resolving to a factory that returns a TokenVerifier; a TRUSTED operator config value that loads and executes the operator-configured code at startup (fail-closed on any load error). |
 
-_58 tools._
+_61 tools._
