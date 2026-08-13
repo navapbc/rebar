@@ -296,12 +296,34 @@ Today:
 - **A close never compacts.** It ends after the STATUS write, signing, the force-close audit
   comment and scratch cleanup. Its lock holds are the short per-append acquisitions.
 - **`rebar compact <id>` still folds on demand**, unchanged.
-- **The standing trigger is an out-of-band sweep** that runs in a *dedicated clone* of the
-  `tickets` branch — its own `.git`, not a worktree of a shared checkout — so it shares no
-  index, no `index.lock`, no `rebar-git-op.lock` and no store write lock with any interactive
-  session. Its result reaches everyone through the ordinary push/merge path, which is safe by
-  I9: a fold adds a SNAPSHOT and renames sources to `*.retired`, and concurrent sessions only
-  add new event files, so the two merge as a union.
+- **The standing trigger is `rebar compact-all`, run out of band on a schedule.** The
+  `Compaction Sweep` workflow (`.github/workflows/compact-sweep.yml`) runs it **every 6
+  hours** (`cron: '0 */6 * * *'`, also `workflow_dispatch`-able with `dry_run` / `limit`), on
+  a disposable CI runner: its own clone, its own `.git`, its own index and its own store write
+  lock, so it shares no `index.lock`, no `rebar-git-op.lock` and no store lock with any
+  interactive session. The result reaches everyone through the ordinary push/merge path, which
+  is safe by I9: a fold adds a SNAPSHOT and renames sources to `*.retired`, and concurrent
+  sessions only add new event files, so the two merge as a union. There is **no long-lived
+  clone to maintain** — each run re-derives the store from `origin/tickets`, and a failed push
+  leaves only local commits on a workspace that is discarded.
+
+  `compact-all` selects a ticket on **either** of two arms:
+
+  1. **Backfill** — it has no SNAPSHOT yet and has at least one foldable event. Every ticket
+     still earns its first SNAPSHOT regardless of size (the historical rule, preserved).
+  2. **Recurrence** — its **foldable** event count exceeds `compact.threshold`, whatever its
+     snapshot state.
+
+  Arm 2 is what makes the sweep RECUR. Selecting on arm 1 alone made `compact-all` a one-time
+  operation: a ticket folded once and since grown had a SNAPSHOT, so it was never folded
+  again. Selecting on arm 2 alone would regress the other way — a ticket with fewer events
+  than the threshold would never get a first SNAPSHOT at all. Both arms converge: after a
+  fold the ticket has a SNAPSHOT and its live count is back under the threshold.
+
+  "Foldable" means older than the compaction horizon, decided by the **same** `is_foldable`
+  predicate the fold itself partitions on. Counting merely *live* events would select tickets
+  whose excess events are all inside the horizon, fold nothing, and select them again forever
+  — so selection and the fold ask one question through one predicate, and cannot drift.
 
 The rule this generalizes: **any new long-running store maintenance belongs out of band, in
 its own clone — not bolted onto a command a person or agent is waiting on.**
