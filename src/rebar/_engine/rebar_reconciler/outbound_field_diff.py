@@ -320,7 +320,9 @@ def diff_canonical_fields(
     baseline = canonical_baseline or {}
     changed: dict[str, Any] = {}
 
-    def _suppressed_by_inbound(field: str, local_val: Any) -> bool:
+    def _suppressed_by_inbound(
+        field: str, local_val: Any, *, normalized_local: str | None = None
+    ) -> bool:
         """Directionality guard: local unchanged since baseline → leave the (differing)
         remote for the inbound differ instead of local-wins clobbering it. Partial-
         tolerant: a field the baseline does not carry never suppresses."""
@@ -330,7 +332,7 @@ def diff_canonical_fields(
             return _assignee_matches(
                 local_val, baseline.get("assignee"), baseline.get("assignee_identity")
             )
-        return _text_matches(local_val, baseline.get(field))
+        return _baseline_form_matches(field, local_val, normalized_local, baseline)
 
     # A live snapshot entry is authoritative for the always-present Jira fields: an
     # absent key means the remote value is that field's natural empty default (the
@@ -347,12 +349,17 @@ def diff_canonical_fields(
 
     # --- description (inbound-mirrored; ADF-fit via the outbound port) ---
     local_desc = ticket.get("description") or ""
-    # Directionality uses the RAW local text (matches the pre-625b ordering, where the
-    # fit was applied only just before the emit compare).
-    if not _suppressed_by_inbound("description", local_desc):
-        fitted = outbound_mapper.map_fields_to_remote(
-            {"description": local_desc}, ticket=ticket
-        ).get("description", local_desc)
+    # The local body as it will READ once Jira stores it. Computed BEFORE the
+    # directionality guard so that guard can match on it as well as on the raw text:
+    # under a lossy one-way rich-text codec the baseline holds ``decode(baseline_wire)``
+    # while the local body is raw Markdown, so a raw-only compare reports "local
+    # changed" on every pass and the description re-emits forever. Matching on either
+    # form only ADDS a way to conclude "unchanged" (see ``_local_matches_baseline``), so
+    # the plain-codec behaviour is unchanged.
+    fitted = outbound_mapper.map_fields_to_remote({"description": local_desc}, ticket=ticket).get(
+        "description", local_desc
+    )
+    if not _suppressed_by_inbound("description", local_desc, normalized_local=fitted):
         # The port also normalizes soft-wrapped prose (the ADF encoder rejoins a
         # hard-wrapped paragraph into one), so the body that lands — and that a later
         # fetch decodes back — is the NORMALIZED form. Route the remote value through
@@ -451,7 +458,7 @@ def diff_canonical_fields(
         for fname in list(changed):
             if (
                 fname in _INBOUND_MIRRORED_FIELDS
-                and not _local_matches_baseline(fname, ticket, baseline)
+                and not _local_matches_baseline(fname, ticket, baseline, normalized_local=fitted)
                 and not _remote_matches_baseline(fname, canonical_remote, baseline)
             ):
                 conflict_sink.append((jira_key, fname))
@@ -461,8 +468,45 @@ def diff_canonical_fields(
     return changed
 
 
-def _local_matches_baseline(field: str, ticket: dict[str, Any], baseline: dict[str, Any]) -> bool:
-    """Whether the LOCAL value for a mirrored field equals the canonical baseline."""
+def _baseline_form_matches(
+    field: str, raw_local: Any, normalized_local: str | None, baseline: dict[str, Any]
+) -> bool:
+    """Whether ``raw_local`` — or the form it takes once Jira stores it — equals baseline.
+
+    Under a lossy one-way rich-text codec the baseline holds ``decode(baseline_wire)``
+    while the local body is raw Markdown, so a raw-only compare reports "changed" on
+    every pass. Accepting EITHER form only ADDS a way to conclude "unchanged", so it
+    cannot start missing an edit the raw compare already caught, and it cannot hide a
+    real edit: if the normalized local equals the baseline, the edit makes no difference
+    to what Jira would store.
+    """
+    if _text_matches(raw_local, baseline.get(field)):
+        return True
+    if field != "description" or normalized_local is None:
+        return False
+    return _text_matches(normalized_local, baseline.get(field))
+
+
+def _local_matches_baseline(
+    field: str,
+    ticket: dict[str, Any],
+    baseline: dict[str, Any],
+    normalized_local: str | None = None,
+) -> bool:
+    """Whether the LOCAL value for a mirrored field equals the canonical baseline.
+
+    ``normalized_local`` is the local body as it will READ once Jira has stored it
+    (``normalize_outbound(fit_outbound(local))``, from the outbound port). It is an
+    ALTERNATIVE match, never a replacement: under a lossy one-way rich-text codec the
+    baseline holds ``decode(baseline_wire)`` while the local body is raw Markdown, so
+    the two differ in FORM on every pass and the differ would re-emit forever even
+    though nothing changed.
+
+    Matching on EITHER form is deliberately conservative — it can only ADD a way to
+    conclude "unchanged", so no previously-detected edit starts being missed. It also
+    cannot hide a real edit: if the normalized local equals the baseline then the edit
+    makes no difference to what Jira would store, so there is nothing to send.
+    """
     if field not in baseline:
         return True
     if field == "assignee":
@@ -477,7 +521,7 @@ def _local_matches_baseline(field: str, ticket: dict[str, Any], baseline: dict[s
         "priority": ticket.get("priority", 2),
         "status": ticket.get("status", "open"),
     }[field]
-    return _text_matches(local_val, baseline.get(field))
+    return _baseline_form_matches(field, local_val, normalized_local, baseline)
 
 
 def _remote_matches_baseline(
