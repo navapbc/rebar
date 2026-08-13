@@ -21,10 +21,7 @@ import uuid as _uuid
 from rebar._commands._seam import (
     CommandError,
     append_event,
-    require_id,
-    require_not_ghost,
     tracker_dir,
-    validate_tag_name,
 )
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -83,6 +80,26 @@ def _compute_alias(ticket_id: str) -> str:
     return compute_genesis_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
+def _apply_bridge_repos(data: dict, bridge_project: str | None, repos) -> None:
+    """Merge the story-cef7 bridge/project fields into a CREATE event's ``data``.
+
+    Split out of :func:`create_core` (which sits at its locked complexity ceiling,
+    ``.github/complexity-baseline.json``). ``bridge_project`` is TRI-STATE and carried
+    PRESENT-ONLY: the ``None`` default means "flag absent — leave state's seeded None";
+    an explicit ``""`` or a real key is stored verbatim so ``""`` (never-sync) and a sync
+    target both survive replay. ``repos`` accepts a CSV string (mirroring ``--tags``) or a
+    list; carried only when provided (the seeded ``[]`` covers the absent case).
+    """
+    if bridge_project is not None:
+        data["bridge_project"] = bridge_project
+    if repos is not None:
+        data["repos"] = (
+            [r.strip() for r in repos.split(",") if r.strip()]
+            if isinstance(repos, str)
+            else [r for r in repos if r]
+        )
+
+
 def create_core(
     ticket_type: str,
     title: str,
@@ -98,6 +115,8 @@ def create_core(
     repo_root=None,
     creation_channel: str,
     detected_by: str | None = None,
+    bridge_project: str | None = None,
+    repos=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
 
@@ -229,6 +248,8 @@ def create_core(
         if _detected_norm:
             data["detected_by"] = _detected_norm
 
+    _apply_bridge_repos(data, bridge_project, repos)
+
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     # Save-time heads-up (ticket 594b): computed AFTER the event lands, so an oversized
     # description is reported the moment it is written instead of at review-plan time.
@@ -250,6 +271,24 @@ def create_core(
     }
 
 
+def _match_long_opt(args: list[str], i: int, name: str):
+    """Match a long option ``--name value`` or ``--name=value`` at ``args[i]``.
+
+    Split out of :func:`create_cli` (at its locked complexity ceiling). Returns
+    ``(value, next_index)`` when it matches, else ``None`` — mirroring the exact
+    ``elif a in (name,) and i + 1 < n`` / ``elif a.startswith(name + "=")`` pair it
+    replaces, so a bare ``--name`` with no following value does NOT match (it falls
+    through to the caller's unknown-option rejection, unchanged).
+    """
+    a = args[i]
+    if a == name and i + 1 < len(args):
+        return args[i + 1], i + 2
+    prefix = f"{name}="
+    if a.startswith(prefix):
+        return a[len(prefix) :], i + 1
+    return None
+
+
 def create_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``create``: parse --output + flags, format output.
 
@@ -268,11 +307,29 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
 
     ticket_type, title = rest[0], rest[1]
     parent = priority = assignee = description = detected_by = None
+    bridge_project = None
+    repos = None
     tags = ""
     i, args = 2, rest
     n = len(args)
     while i < n:
         a = args[i]
+        m = _match_long_opt(args, i, "--bridge-project")
+        if m is not None:
+            bridge_project, i = m
+            continue
+        m = _match_long_opt(args, i, "--repos")
+        if m is not None:
+            repos, i = m
+            continue
+        m = _match_long_opt(args, i, "--detected-by")
+        if m is not None:
+            detected_by, i = m
+            continue
+        m = _match_long_opt(args, i, "--assignee")
+        if m is not None:
+            assignee, i = m
+            continue
         if a in ("--parent",) and i + 1 < n:
             parent = args[i + 1]
             i += 2
@@ -284,18 +341,6 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             i += 2
         elif a.startswith("--priority="):
             priority = a[len("--priority=") :]
-            i += 1
-        elif a in ("--detected-by",) and i + 1 < n:
-            detected_by = args[i + 1]
-            i += 2
-        elif a.startswith("--detected-by="):
-            detected_by = a[len("--detected-by=") :]
-            i += 1
-        elif a in ("--assignee",) and i + 1 < n:
-            assignee = args[i + 1]
-            i += 2
-        elif a.startswith("--assignee="):
-            assignee = a[len("--assignee=") :]
             i += 1
         elif a in ("--description", "-d") and i + 1 < n:
             description = args[i + 1]
@@ -332,6 +377,8 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             repo_root=repo_root,
             creation_channel="cli",
             detected_by=detected_by,
+            bridge_project=bridge_project,
+            repos=repos,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
@@ -373,327 +420,9 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
-# Tags are NOT an EDIT field any more (P2.3): they mutate via TAG_DELTA deltas
-# (--add-tag/--remove-tag/--set-tags), so a whole-field EDIT can never clobber a
-# concurrent tag add. The library/MCP ``edit(tags=...)`` arg is a DEPRECATED alias
-# for --set-tags, intercepted in edit_core before this field set is validated.
-_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "parent")
-_EDIT_USAGE = (
-    "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
-    "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
-    "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]"
-)
-
-
-def _parse_tag_list(value, *, validate: bool) -> list[str]:
-    """Normalise a tag spec (CSV string or list) to a deduped, trimmed tag list.
-
-    ``validate`` rejects empty/whitespace-only/control-char names via the shared
-    :func:`validate_tag_name` (applied to tags ENTERING state — adds/sets);
-    removals skip it (you may legitimately remove a previously-malformed tag, and
-    an empty token there is just dropped). Order-preserving dedup.
-    """
-    if value is None:
-        return []
-    items = value.split(",") if isinstance(value, str) else list(value)
-    out: list[str] = []
-    for raw in items:
-        t = str(raw).strip()
-        if not t:
-            continue  # CSV cleanliness: empty tokens (a,,b / --set-tags="") dropped
-        if validate:
-            t = validate_tag_name(t)  # non-empty here, so only control-char check fires
-        if t not in out:
-            out.append(t)
-    return out
-
-
-def edit_core(
-    ticket_id: str,
-    fields: dict,
-    *,
-    tag_add=None,
-    tag_remove=None,
-    tag_set=None,
-    repo_root=None,
-) -> str | None:
-    """Validate fields and append an EDIT event (mirrors ``ticket_edit``), plus tag
-    add/remove/set deltas as a TAG_DELTA event (P2.3).
-
-    Returns the save-time description-cap warning when this edit wrote a description
-    over ``verify.max_ticket_description_chars`` and the plan-review start-work gate
-    applies (else ``None``); callers emit it on their own channel. Advisory only — the
-    edit has already been appended by then.
-
-    Field guards: unknown-field reject, non-empty title/description, priority 0-4,
-    ticket_type enum, and the ``--parent`` cascade (``null`` detaches; else resolve
-    → exists → not-self → fail-closed status gate (open/in_progress only) → ancestor
-    cycle walk), mapping ``parent`` → ``parent_id`` in the event. Title gets the
-    U+2192→``->`` normalisation; numeric priority is stored as int.
-
-    Tags: ``tag_add``/``tag_remove`` are add/remove deltas; ``tag_set`` (mutually
-    exclusive with add/remove) is a wholesale set COMPILED to a delta against the
-    locally-observed tags (add-wins: a concurrent unobserved remote add survives).
-    (The ``edit_ticket(tags=...)`` set-alias was removed pre-1.0 — DE7; ``tags`` is
-    now just an unknown field, so use ``set_tags``/``add_tags``/``remove_tags``.)
-    """
-    from rebar.reducer import reduce_ticket
-    from rebar.reducer._version import TAG_DELTA
-
-    tracker = tracker_dir(repo_root)
-    fields = dict(fields)
-
-    for name in fields:
-        if name not in _EDIT_FIELDS:
-            raise CommandError(f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}")
-
-    add_list = _parse_tag_list(tag_add, validate=True)
-    remove_list = _parse_tag_list(tag_remove, validate=False)
-    has_set = tag_set is not None
-    set_list = _parse_tag_list(tag_set, validate=True) if has_set else []
-    if has_set and (add_list or remove_list):
-        raise CommandError("Error: --set-tags cannot be combined with --add-tag/--remove-tag")
-    overlap = [t for t in add_list if t in remove_list]
-    if overlap:
-        raise CommandError(f"Error: tag(s) {overlap} given to both --add-tag and --remove-tag")
-    has_tag_op = has_set or bool(add_list) or bool(remove_list)
-
-    if not fields and not has_tag_op:
-        raise CommandError("Error: at least one --field=value pair is required")
-    if not (tracker / ".env-id").is_file():
-        raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
-    resolved = require_id(ticket_id, tracker)
-    require_not_ghost(resolved, tracker)
-
-    out: dict = {}
-    for key, value in fields.items():
-        value = "" if value is None else str(value)
-        if key == "title":
-            if value.strip() == "":
-                raise CommandError(
-                    "Error: --title requires a non-empty value (empty values silently "
-                    "clobber the title; bug 4f50)"
-                )
-            out["title"] = value.replace("→", "->")
-        elif key == "description":
-            if value == "":
-                raise CommandError(
-                    "Error: --description requires a non-empty value (empty values "
-                    "silently clobber prior content; bug e78f-9f79)"
-                )
-            out["description"] = value
-        elif key == "priority":
-            if value not in ("0", "1", "2", "3", "4"):
-                raise CommandError(f"Error: invalid priority '{value}'. Must be 0-4")
-            out["priority"] = int(value)
-        elif key == "ticket_type":
-            if value not in _TYPES:
-                raise CommandError(
-                    f"Error: invalid ticket type '{value}'. "
-                    "Must be one of: bug, epic, story, task, session_log, code_review, identity"
-                )
-            out["ticket_type"] = value
-        elif key == "parent":
-            out["parent_id"] = _resolve_new_parent(value, resolved, tracker, reduce_ticket)
-        else:  # assignee
-            out[key] = value
-
-    warning: str | None = None
-    if out:
-        append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
-        warning = _edit_description_warning(out, resolved, tracker, reduce_ticket)
-
-    if has_tag_op:
-        observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
-        if has_set:
-            # Compile the wholesale set to a delta vs observed (add-wins):
-            # add what's missing, remove observed tags not in the target set.
-            added = [t for t in set_list if t not in observed]
-            removed = [t for t in observed if t not in set_list]
-        else:
-            # No-op suppression: only add what's absent, only remove what's present.
-            added = [t for t in add_list if t not in observed]
-            removed = [t for t in remove_list if t in observed]
-        if added or removed:
-            append_event(
-                resolved,
-                TAG_DELTA,
-                {"added": added, "removed": removed},
-                tracker,
-                repo_root=repo_root,
-            )
-
-    return warning
-
-
-def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) -> str | None:
-    """The save-time description-cap notice for an EDIT that wrote a description.
-
-    Split out of :func:`edit_core` (which sits at its locked complexity ceiling). The
-    ticket type is the one the ticket has AFTER this edit, since the same call may change
-    it. Returns ``None`` when no description was written, the description is within
-    ``verify.max_ticket_description_chars``, or the plan-review start-work gate does not
-    apply — see :func:`rebar._commands.gates.description_cap_warning`.
-    """
-    if "description" not in out:
-        return None
-    from rebar._commands.gates import description_cap_warning
-
-    state = reduce_ticket(str(tracker / resolved)) or {}
-    return description_cap_warning(
-        out["description"],
-        str(out.get("ticket_type") or state.get("ticket_type") or ""),
-        ticket_id=str(state.get("alias") or resolved),
-        cfg_root=os.path.dirname(str(tracker)),
-    )
-
-
-def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> str:
-    """The ``--parent`` validation cascade; returns the resolved parent_id (or ""
-    for the ``null`` detach sentinel)."""
-    if value == "":
-        raise CommandError(
-            "Error: --parent requires a non-empty value (use --parent=null to detach)"
-        )
-    if value == "null":
-        return ""
-    new_parent = resolve_ticket_id(value, str(tracker))
-    if not new_parent or not (tracker / new_parent).is_dir():
-        raise CommandError(f"Error: parent ticket '{value}' does not exist")
-    if new_parent == ticket_id:
-        raise CommandError("Error: ticket cannot be its own parent")
-    status = (reduce_ticket(str(tracker / new_parent)) or {}).get("status", "") or ""
-    if status not in ("open", "in_progress"):
-        if status == "":
-            raise CommandError(
-                f"Error: cannot verify status of parent ticket '{new_parent}' — refusing "
-                f"to re-parent (fail-closed). Verify the ticket exists and is in an active "
-                f"state, then retry."
-            )
-        raise CommandError(
-            f"Error: cannot re-parent to {status} ticket '{new_parent}'. Reopen the parent "
-            f"first with: ticket transition {new_parent} {status} open"
-        )
-    walk_id, count = new_parent, 0
-    while walk_id and count < 64:
-        walk_parent = (reduce_ticket(str(tracker / walk_id)) or {}).get("parent_id", "") or ""
-        if not walk_parent or walk_parent == "None":
-            break
-        if walk_parent == ticket_id:
-            raise CommandError(
-                f"Error: cannot set parent — would create a cycle (ticket {ticket_id} is an "
-                f"ancestor of {new_parent})"
-            )
-        walk_id = walk_parent
-        count += 1
-    return new_parent
-
-
-_TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
-
-
-def edit_cli(argv: list[str], *, repo_root=None) -> int:
-    """CLI route for ``edit``: parse ticket_id + --field pairs +
-    tag-delta flags (--add-tag / --remove-tag / --set-tags)."""
-    if len(argv) < 2:
-        print(_EDIT_USAGE, file=sys.stderr)
-        return 1
-    ticket_id, rest = argv[0], argv[1:]
-    # --review (story a114) is the one VALUELESS flag: pop it BEFORE the
-    # --key=value field loop below (which would otherwise consume the next token
-    # as its value). Handled after edit_core commits — see the tail of this function.
-    review = "--review" in rest
-    if review:
-        rest = [a for a in rest if a != "--review"]
-    fields: dict = {}
-    tag_add: list[str] = []
-    tag_remove: list[str] = []
-    tag_set: list[str] | None = None
-
-    def _accept_tag(name: str, val: str) -> None:
-        nonlocal tag_set
-        items = [t for t in val.split(",")]
-        if name == "add-tag":
-            tag_add.extend(items)
-        elif name == "remove-tag":
-            tag_remove.extend(items)
-        else:  # set-tags
-            tag_set = (tag_set or []) + items
-
-    i, n = 0, len(rest)
-    while i < n:
-        arg = rest[i]
-        if arg.startswith("--") and "=" in arg:
-            name, val = arg[2:].split("=", 1)
-            i += 1
-        elif arg.startswith("--"):
-            name = arg[2:]
-            if i + 1 >= n:
-                print(f"Error: --{name} requires a value", file=sys.stderr)
-                return 1
-            val = rest[i + 1]
-            i += 2
-        else:
-            print(f"Error: unexpected argument '{arg}'", file=sys.stderr)
-            return 1
-
-        if name in _TAG_FLAGS:
-            _accept_tag(name, val)
-        elif name == "tags":
-            print(
-                "Error: --tags is no longer an edit field. Use --set-tags=t1,t2 to "
-                "replace, or --add-tag / --remove-tag to mutate.",
-                file=sys.stderr,
-            )
-            return 1
-        elif name not in _EDIT_FIELDS:
-            print(
-                f"Error: unknown field '{name}'. Allowed: {' '.join(_EDIT_FIELDS)}",
-                file=sys.stderr,
-            )
-            return 1
-        else:
-            fields[name] = val
-    try:
-        edit_warning = edit_core(
-            ticket_id,
-            fields,
-            tag_add=tag_add or None,
-            tag_remove=tag_remove or None,
-            tag_set=tag_set,
-            repo_root=repo_root,
-        )
-    except CommandError as exc:
-        print(exc.message, file=sys.stderr)
-        return exc.returncode
-    # Advisory description-cap heads-up (ticket 594b) on the CLI's stderr channel; the
-    # edit already committed, so it never changes the exit code. Emitted BEFORE --review
-    # so the author sees why the review is about to refuse admission.
-    _warn_stderr(edit_warning)
-    if review:
-        # --review (story a114): re-run the signed plan review strictly AFTER the
-        # EDIT event committed (and its short-lived store lock was released) — the
-        # edit stays committed whatever the verdict, and no store flock is held
-        # while the (possibly multi-minute) review runs. A raising review_plan
-        # propagates via the standard CLI error path. NOT atomic against
-        # concurrent store reconvergence — `rebar review-plan <id> --status` is
-        # the cheap currency check.
-        from rebar import llm  # LAZY — preserves optionality
-
-        resolved = resolve_ticket_id(ticket_id, str(tracker_dir(repo_root))) or ticket_id
-        result = llm.review_plan(resolved, sign=True, repo_root=repo_root)
-        # Lazy in-function import of the _cli helper from a _commands module — the
-        # established pattern (see the lazy `from rebar._cli import _help` in
-        # _commands/transition.py's reopen_cli).
-        from rebar._cli._llm_commands import _disposition_exit_code, _render_plan_review_text
-
-        _render_plan_review_text(result)
-        return _disposition_exit_code(result, indeterminate_code=2)
-    return 0
-
-
-# Extracted along the existing call-graph seam to link_revert.py (module-size
-# policy); re-exported so composer-path callers and monkeypatch sites still work.
+# Extracted along the existing call-graph seams (module-size policy); re-exported
+# so composer-path callers and monkeypatch sites still work.
+from rebar._commands.composer_edit import edit_cli, edit_core  # noqa: E402,F401
 from rebar._commands.link_revert import (  # noqa: E402,F401
     _REVERT_USAGE,
     _link_dry_run,

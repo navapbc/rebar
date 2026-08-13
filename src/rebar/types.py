@@ -103,6 +103,8 @@ class TicketState(TypedDict):
     status: TicketStatus
     priority: int
     tags: list[str]
+    bridge_project: NotRequired[str | None]
+    repos: NotRequired[list[str]]
     assignee: NotRequired[str | None]
     claimed_session: NotRequired[str | None]
     claim_harness: NotRequired[str | None]

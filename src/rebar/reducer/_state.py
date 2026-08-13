@@ -50,6 +50,13 @@ def make_initial_state() -> dict:
         "alias": None,
         "description": "",
         "tags": [],
+        # Bridge/project fields (story cef7). `bridge_project` is TRI-STATE: None is the
+        # deliberate "absent/legacy" sentinel (mirrors file_impact_scope's seeded
+        # sentinel), "" means explicit never-sync, and a non-empty key is a sync target.
+        # Seeded None so a no-flag create leaves it None; the CREATE processor overwrites
+        # it ONLY when the event data actually carries the key (present-only projection).
+        "bridge_project": None,
+        "repos": [],
         "comments": [],
         "deps": [],
         # Managed-reference provenance (story safe-luge-nog): a strictly-monotonic,
