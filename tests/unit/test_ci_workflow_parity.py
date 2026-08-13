@@ -832,6 +832,45 @@ def test_optionality_loop_covers_every_declared_extra() -> None:
     )
 
 
+def test_every_optionality_spec_is_a_declared_extra() -> None:
+    """The loop must not install an extra that does not exist (story 271c).
+
+    The reverse of the test above, and a real drift found by it: the loop carried a
+    stale ``eval:eval`` iteration long after the ``eval`` extra was gone from
+    ``[project.optional-dependencies]``, so that lane installed a non-existent extra
+    and proved nothing. ``mcp`` is exempt — it is a shipped extra with no
+    ``_optional`` probe — and ``union`` is the joint-resolution label, not an extra.
+    """
+    import re
+
+    import tomllib
+
+    from rebar import _optional
+
+    pyproject = tomllib.loads(_read(_ROOT / "pyproject.toml"))
+    declared = set(pyproject["project"]["optional-dependencies"])
+    run = _optionality_loop_step_run()
+    specs = {m.group(1): m.group(2) for m in re.finditer(r'"([a-z0-9_]+):([a-z0-9_,]+)"', run)}
+
+    unknown = {
+        label: target
+        for label, target in specs.items()
+        if label != "union"
+        for part in target.split(",")
+        if part not in declared
+    }
+    assert not unknown, (
+        f"the {_OPTIONALITY_LOOP_JOB!r} venv loop installs extra(s) that are not declared in "
+        f"[project.optional-dependencies]: {sorted(unknown)}. A lane installing a non-existent "
+        "extra proves nothing — remove it or declare the extra."
+    )
+    assert "eval" not in specs, (
+        "the stale `eval:eval` iteration is back: there is no `eval` extra in pyproject.toml."
+    )
+    # Every declared extra with an _optional probe is still covered by the loop.
+    assert set(_optional.EXTRAS) <= set(specs)
+
+
 def _precommit_config_hook_ids() -> set[str]:
     """The set of hook ids declared in .pre-commit-config.yaml."""
     import yaml
