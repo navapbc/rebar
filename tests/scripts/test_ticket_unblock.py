@@ -841,3 +841,127 @@ def test_detect_newly_unblocked_ignores_suggestions_dir(
     assert "ticket-b" in result, (
         f"Expected 'ticket-b' to be newly unblocked (ticket-a closed), got {result!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Characterization: the three tombstone branches of _load_states_with_tombstones
+#
+# All three are driven through the public detect_newly_unblocked. One shared
+# fixture makes them observable: `tkt-target` carries two depends_on LINK events
+# (so the blocking edges live in the TARGET's dir and survive an unreducible
+# blocker dir), one blocker is closed by the batch and one is tombstoned. With a
+# blocker in the batch, `_was_already_unblocked` cannot short-circuit, so the
+# verdict turns entirely on how the tombstoned blocker's status is loaded.
+# ---------------------------------------------------------------------------
+
+
+def _tombstoned_blocker_tracker(tmp_path: Path, tombstone_bytes: str, *, reducible: bool) -> Path:
+    """Build the shared fixture and return the tracker dir.
+
+    ``reducible=False`` leaves ``blk-tomb``'s directory without any event, so
+    ``reduce_ticket`` returns None for it and only the tombstone describes it.
+    """
+    tracker_dir = tmp_path / "tracker"
+    tracker_dir.mkdir()
+
+    _write_ticket(tracker_dir, "tkt-target", status="open")
+    _write_ticket(tracker_dir, "blk-batch", status="open")
+    _write_depends_on_link(tracker_dir, "tkt-target", "blk-batch", timestamp=1500)
+    _write_depends_on_link(tracker_dir, "tkt-target", "blk-tomb", timestamp=1501)
+
+    if reducible:
+        _write_ticket(tracker_dir, "blk-tomb", status="open")
+        blocker_dir = tracker_dir / "blk-tomb"
+    else:
+        blocker_dir = tracker_dir / "blk-tomb"
+        blocker_dir.mkdir()
+    (blocker_dir / ".tombstone.json").write_text(tombstone_bytes)
+
+    return tracker_dir
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_unreducible_dir_with_a_tombstone_yields_a_status_only_stub(
+    unblock: ModuleType, tmp_path: Path
+) -> None:
+    """A dir the reducer cannot read is kept as ``{"status": <tombstone status>}``.
+
+    Pins two things at once: the stub is created at all, and it carries the
+    tombstone's status VERBATIM — ``_read_tombstone_status`` does
+    ``.get("status", "deleted")`` with no validation, so a tombstone recording a
+    non-terminal status produces a non-terminal stub.
+
+    That verbatim propagation is what makes the branch observable: the stub keeps
+    ``blk-tomb`` OPEN, so ``tkt-target`` is not newly unblocked. Drop the branch and
+    ``blk-tomb`` disappears from the state map entirely, at which point
+    ``_is_closed_after_batch``'s "missing dir → tombstoned, treat as closed" fallback
+    takes over and ``tkt-target`` is reported as unblocked.
+    """
+    tracker_dir = _tombstoned_blocker_tracker(
+        tmp_path, json.dumps({"status": "open"}), reducible=False
+    )
+
+    result = unblock.detect_newly_unblocked(
+        closed_ticket_ids=["blk-batch"],
+        tracker_dir=str(tracker_dir),
+        event_source="local-close",
+    )
+
+    assert result == [], (
+        "the tombstone stub must carry its recorded status verbatim, so a stub "
+        f"recording 'open' still blocks tkt-target; got {result!r}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_tombstone_status_overrides_the_reduced_status(unblock: ModuleType, tmp_path: Path) -> None:
+    """A present tombstone wins over the status the events reduce to.
+
+    ``blk-tomb``'s events reduce to ``open``, but the ``{"status": "deleted"}``
+    payload ``rebar delete`` writes overrides that, so the blocker counts as closed
+    and ``tkt-target`` is newly unblocked. Without the override the reduced ``open``
+    would stand and nothing would be unblocked.
+    """
+    tracker_dir = _tombstoned_blocker_tracker(
+        tmp_path, json.dumps({"status": "deleted"}), reducible=True
+    )
+
+    result = unblock.detect_newly_unblocked(
+        closed_ticket_ids=["blk-batch"],
+        tracker_dir=str(tracker_dir),
+        event_source="local-close",
+    )
+
+    assert result == ["tkt-target"], (
+        "the tombstone status must override the reduced 'open' status, closing "
+        f"blk-tomb and unblocking tkt-target; got {result!r}"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_malformed_tombstone_degrades_to_deleted_not_to_absent(
+    unblock: ModuleType, tmp_path: Path
+) -> None:
+    """Unreadable tombstone bytes still count as a tombstone.
+
+    The file's PRESENCE is the signal, so a malformed payload degrades to
+    ``deleted`` (a terminal status) rather than to "no tombstone". ``blk-tomb``'s
+    events reduce to ``open``; the fallback still closes it and unblocks
+    ``tkt-target``. Were the failure to yield "no tombstone" instead, the reduced
+    ``open`` would stand and nothing would be unblocked.
+    """
+    tracker_dir = _tombstoned_blocker_tracker(tmp_path, "{not valid json", reducible=True)
+
+    result = unblock.detect_newly_unblocked(
+        closed_ticket_ids=["blk-batch"],
+        tracker_dir=str(tracker_dir),
+        event_source="local-close",
+    )
+
+    assert result == ["tkt-target"], (
+        "a malformed tombstone must degrade to 'deleted', closing blk-tomb and "
+        f"unblocking tkt-target; got {result!r}"
+    )
