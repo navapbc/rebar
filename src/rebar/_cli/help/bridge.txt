@@ -13,6 +13,7 @@ Commands:
   check-access
             Check Jira access with a create/label/search/delete round-trip
   setup     Interactively configure and validate Jira access
+  projects  Manage the store's bridge-projects sync mapping (list/set/remove)
 
 Preview and sync options:
   --only IDS       Examine only the named local IDs or bound Jira keys
@@ -29,5 +30,10 @@ Status options:
   --target ID       Compare the witness with this environment id
   --max-age AGE     Enable age-based staleness (for example 2h)
   --json            Emit the snapshot as JSON
+
+Projects options:
+  set KEY --repos REPOS
+                   Replace KEY's repos with a comma-separated list ("" for none)
+  remove KEY        Remove KEY from the mapping (non-zero exit if absent)
 
 Run `rebar bridge <command> --help` for command-specific options.

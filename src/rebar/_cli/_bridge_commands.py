@@ -57,7 +57,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="command",
         required=True,
         title="commands",
-        metavar="{preview,run,sync,status,pause,resume,fsck,check-access,setup}",
+        metavar="{preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}",
     )
     preview = commands.add_parser(
         "preview",
@@ -133,6 +133,40 @@ def _parser() -> argparse.ArgumentParser:
         help="Interactively configure and validate Jira access.",
     )
     setup.add_argument("args", nargs=argparse.REMAINDER)
+    projects = commands.add_parser(
+        "projects",
+        help="Manage the store's bridge-projects sync mapping.",
+        description="List, set, or remove the store's bridge-projects sync mapping.",
+    )
+    project_verbs = projects.add_subparsers(
+        dest="projects_verb",
+        required=True,
+        title="projects commands",
+        metavar="{list,set,remove}",
+    )
+    project_verbs.add_parser(
+        "list",
+        help="Print the projects mapping as JSON.",
+        description="Print the projects mapping as JSON.",
+    )
+    projects_set = project_verbs.add_parser(
+        "set",
+        help="Set a project key's repos (replace semantics).",
+        description="Set a project key's repos (replace semantics).",
+    )
+    projects_set.add_argument("key", metavar="KEY")
+    projects_set.add_argument(
+        "--repos",
+        required=True,
+        metavar="REPOS",
+        help="Comma-separated repo list; an empty string stores no repos.",
+    )
+    projects_remove = project_verbs.add_parser(
+        "remove",
+        help="Remove a project key from the mapping.",
+        description="Remove a project key from the mapping.",
+    )
+    projects_remove.add_argument("key", metavar="KEY")
     return parser
 
 
@@ -316,6 +350,30 @@ def _run_profile(parsed: argparse.Namespace) -> int:
     return result["returncode"]
 
 
+def _projects(parsed: argparse.Namespace) -> int:
+    """Handle ``rebar bridge projects {list,set,remove}`` in-process."""
+    import rebar
+    from rebar._errors import RebarError
+
+    verb = parsed.projects_verb
+    if verb == "list":
+        mapping = rebar.bridge_projects_list()
+        sys.stdout.write(json.dumps(mapping) + "\n")
+        return 0
+    if verb == "set":
+        repos = [r for r in parsed.repos.split(",") if r] if parsed.repos else []
+        rebar.bridge_projects_set(parsed.key, repos)
+        return 0
+    if verb == "remove":
+        try:
+            rebar.bridge_projects_remove(parsed.key)
+        except RebarError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
+        return 0
+    raise AssertionError(f"unhandled projects verb: {verb!r}")
+
+
 def bridge_cli(argv: Sequence[str]) -> int:
     """Run the primary bridge command group.
 
@@ -345,4 +403,6 @@ def bridge_cli(argv: Sequence[str]) -> int:
         return _run_profile(parsed)
     if parsed.command == "status":
         return _status(parsed)
+    if parsed.command == "projects":
+        return _projects(parsed)
     return _pause_or_resume(parsed.command, getattr(parsed, "reason", None))
