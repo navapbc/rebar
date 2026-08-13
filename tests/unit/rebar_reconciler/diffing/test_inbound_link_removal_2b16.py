@@ -515,6 +515,29 @@ def _targets(repo: Path, ticket_id: str) -> set[str]:
     return {d.get("target_id") for d in deps}
 
 
+def _confirm_local_deps(repo: Path, source_id: str) -> None:
+    """Seed peer-confirmation evidence for every net-active dep of ``source_id`` (epic a4bd).
+
+    These cells model a peer that HELD the link and then DELETED it, so the link was by
+    construction proven-synchronized at some earlier point. Since a4bd the applier requires
+    that evidence before mirroring a deletion — ``managed_refs`` alone proves only local
+    ownership, never that the peer ever saw the link. Without this seeding the removals below
+    are declined and the cells would fail for a reason unrelated to what they test.
+
+    Seeding from the CURRENT local deps (rather than hard-coding a relation) keeps the helper
+    correct for both the single-relation cells and the e39f double-related pair.
+    """
+    import rebar
+    from rebar_reconciler.peer_confirmations import open_store
+
+    store = open_store(repo)
+    for dep in rebar.show_ticket(source_id, repo_root=repo).get("deps") or []:
+        target, relation = dep.get("target_id"), dep.get("relation")
+        if target and relation:
+            store.record(source_id, target, relation, pass_id="test-a4bd")
+    store.save()
+
+
 def test_end_to_end_a_peer_deleted_link_leaves_the_dep_gone(
     two_linked_tickets: tuple[Path, str, str],
 ) -> None:
@@ -554,6 +577,7 @@ def test_end_to_end_a_peer_deleted_link_leaves_the_dep_gone(
         f"the differ emitted no removal, so the apply layer cannot be exercised: {records!r}"
     )
 
+    _confirm_local_deps(repo, a)
     apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
     applied = apply_records._inbound_update_apply_links({"links": records}, a, repo)
 
@@ -578,6 +602,7 @@ def test_end_to_end_reapply_is_idempotent(
     apply must be a no-op rather than an error that aborts the remaining records.
     """
     repo, a, b = two_linked_tickets
+    _confirm_local_deps(repo, a)
     apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
     payload = {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}
 
@@ -676,6 +701,7 @@ def test_e39f_inbound_removal_converges_for_a_double_related_pair(
         "SETUP FAILED: the pair does not hold two net-active relations"
     )
 
+    _confirm_local_deps(repo, a)
     apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
     applied = apply_records._inbound_update_apply_links(
         {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}, a, repo
@@ -700,6 +726,7 @@ def test_e39f_double_related_reapply_is_idempotent(
 ) -> None:
     """Re-applying the same relation-scoped removal is a counted-zero no-op."""
     repo, a, b = double_related_tickets
+    _confirm_local_deps(repo, a)
     apply_records = importlib.import_module("rebar_reconciler.apply_inbound_records")
     payload = {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}
 

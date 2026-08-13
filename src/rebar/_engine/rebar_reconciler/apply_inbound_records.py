@@ -543,7 +543,7 @@ def _inbound_update_apply_comments(payload, tracker_dir, local_id, written) -> N
             written.append(str(path))
 
 
-def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
+def _inbound_unlink_one(local_id, target_local_id, relation, repo_root, confirm_store=None) -> bool:
     """Mirror a peer link DELETION locally via a RELATION-SCOPED ``rebar.unlink``.
 
     **G5, relation-scoped (tickets 2b16 → e39f).** Links are written keyed on
@@ -568,6 +568,22 @@ def _inbound_unlink_one(local_id, target_local_id, relation, repo_root) -> bool:
     import rebar
     from rebar._commands._seam import tracker_dir
     from rebar._commands.unlink import _get_link_info
+
+    # G3 DISCRIMINATOR (epic a4bd): "managed" proves ownership, NOT that the peer ever saw the
+    # link, and G4 misses the outbound-ADD-deduped case. Require positive evidence instead, so
+    # absence is never read as deletion (full rationale in ``peer_confirmations``).
+    if confirm_store is not None and not confirm_store.is_confirmed(
+        local_id, target_local_id, relation
+    ):
+        logger.warning(
+            "_apply_inbound_update: declining the inbound removal of %s link %s -> %s: no "
+            "peer-confirmation record, so this link was never proven to reach the peer and "
+            "its absence there is not evidence of a deletion",
+            relation,
+            local_id,
+            target_local_id,
+        )
+        return False
 
     try:
         link_uuid, _ = _get_link_info(tracker_dir(repo_root) / local_id, target_local_id, relation)
@@ -625,6 +641,14 @@ def _open_impossible_link_store(repo_root):
     except Exception as exc:  # noqa: BLE001 — fail-open: no memory is worse, not fatal
         logger.debug("_apply_inbound_update: impossible-link store unavailable: %r", exc)
         return None
+
+
+def _open_peer_confirmation_store(repo_root):
+    """The peer-confirmation store, or None if unopenable — which disables the
+    removal-decline for the pass, restoring pre-a4bd behaviour (epic a4bd)."""
+    from rebar_reconciler.peer_confirmations import open_store_or_none
+
+    return open_store_or_none(repo_root)
 
 
 def _skip_impossible_link(skip_store, local_id, target_local_id, relation) -> bool:
@@ -699,6 +723,10 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
         # a permanent verdict after the fact so the next pass can skip it.
         skip_store = _open_impossible_link_store(repo_root)
         skipped: int = 0
+        # Epic a4bd: opened ONCE per pass (never per record) beside the skip store, and
+        # None-when-unopenable so the whole decline degrades to pre-a4bd behaviour.
+        confirm_store = _open_peer_confirmation_store(repo_root)
+        declined: int = 0
 
         for entry in inbound_links:
             if not isinstance(entry, dict):
@@ -725,8 +753,14 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
                         _note_impossible_link(skip_store, local_id, target_local_id, relation, exc),
                     )
             elif action == "remove":
-                if _inbound_unlink_one(local_id, target_local_id, relation, repo_root):
+                if _inbound_unlink_one(
+                    local_id, target_local_id, relation, repo_root, confirm_store
+                ):
                     links_applied += 1
+                elif confirm_store is not None and not confirm_store.is_confirmed(
+                    local_id, target_local_id, relation
+                ):
+                    declined += 1
             else:
                 logger.warning(
                     "_apply_inbound_update: ignoring inbound link record with unknown "
@@ -751,4 +785,13 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
                     skip_store.path,
                 )
             skip_store.save()
+        if declined:
+            # INFO once per pass, like the impossible-link summary: a decline is SAFE, not
+            # an error, but must stay visible — this defect class was silent.
+            logger.info(
+                "_apply_inbound_update: declined %d inbound link removal(s) for %s with no "
+                "peer-confirmation record (never proven to reach the peer)",
+                declined,
+                local_id,
+            )
     return links_applied

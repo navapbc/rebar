@@ -507,6 +507,17 @@ def test_removals_and_healthy_adds_are_untouched(store, apply_records, monkeypat
     applied = apply_records._inbound_update_apply_links(_add_payload(b), a, repo)
     assert applied == 1 and len(calls) == 1, "a possible link must still be written normally"
 
+    # Epic a4bd: the removal branch now requires positive peer-confirmation evidence —
+    # `managed_refs` proves local ownership, never that the peer ever saw the link. The link
+    # was just written above, so seeding its record is what this cell means by "the peer had
+    # it"; without it the removal is DECLINED and this cell would fail for a4bd's reason
+    # rather than reporting on the ADD-side skip it exists to guard.
+    from rebar_reconciler.peer_confirmations import open_store as _open_pc
+
+    _pc = _open_pc(repo)
+    _pc.record(a, b, "blocks", pass_id="test-a4bd")
+    _pc.save()
+
     removed = apply_records._inbound_update_apply_links(
         {"links": [{"action": "remove", "target_id": b, "relation": "blocks"}]}, a, repo
     )
