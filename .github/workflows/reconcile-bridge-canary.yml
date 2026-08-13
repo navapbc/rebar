@@ -26,9 +26,8 @@
 #   * bug-close requires `--reason` prefixed "Fixed:" or "Escalated to user:".
 #
 # Staleness window: default 4h (workflow_dispatch override `alert_window_hours`).
-# The reconcile cadence is a uniform 40 minutes, so the theoretical floor is 2h
-# (3x cadence); 4h keeps the same 2x margin, tolerating a couple of late/contended
-# runs without false alarms.
+# The reconcile cadence is hourly, so the theoretical floor is 3h (3x cadence); the
+# 4h window still clears it, tolerating a late/contended run without false alarms.
 
 name: Reconciler Heartbeat Canary
 

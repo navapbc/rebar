@@ -8,7 +8,7 @@ jobs, 5 macOS, shared across every repo in the org) and queued a Gerrit ``Verifi
 matrix roughly two hours behind tickets-push runs.
 
 The operator directive is absolute: *"The tickets branch should never trigger CI."* Anything
-that must read the store runs on a **schedule** instead — reconcile-bridge every 40 minutes,
+that must read the store runs on a **schedule** instead — reconcile-bridge hourly,
 verify-identity every 6 hours, and so on — so this change removes triggers, never cadence.
 
 The sibling module :mod:`tests.unit.test_ci_main_push_policy` pins the same class of policy
@@ -42,13 +42,9 @@ _PUSH_LANES = ("test.yml", "optionality.yml", "prompt-eval.yml", "verify-identit
 # Schedules that carry the function the removed triggers used to provide. Pinned literally so
 # a future "simplification" cannot quietly widen the store's worst-case sync latency.
 _UNCHANGED_CRONS = {
-    "reconcile-bridge.yml": [
-        # Uniform 40-minute cadence; cron needs three entries over a 2-hour cycle to
-        # express it (see test_bridge_backstop_fires_on_a_uniform_40_minute_cadence).
-        "0 0-23/2 * * *",
-        "40 0-23/2 * * *",
-        "20 1-23/2 * * *",
-    ],
+    # Hourly, off the top of the hour (see
+    # test_bridge_backstop_fires_on_a_uniform_hourly_cadence).
+    "reconcile-bridge.yml": ["23 * * * *"],
     "verify-identity.yml": ["53 */6 * * *"],
     "test.yml": ["41 */6 * * *"],
     "optionality.yml": ["47 */6 * * *"],
@@ -145,7 +141,7 @@ def test_scheduled_coverage_is_unchanged(name: str, crons: list[str]) -> None:
     )
 
 
-# --- Uniform 40-minute bridge backstop (ticket f59a-2d16-68c5-450c) ------------------------
+# --- Hourly bridge backstop (tickets f59a-2d16-68c5-450c, 4557-1f33-7a3f-47c7) ------------
 
 
 def _cron_field_matches(field: str, value: int, lo: int, hi: int) -> bool:
@@ -165,14 +161,18 @@ def _cron_field_matches(field: str, value: int, lo: int, hi: int) -> bool:
     return False
 
 
-def test_bridge_backstop_fires_on_a_uniform_40_minute_cadence() -> None:
-    """The three schedule entries exist to spell a cadence cron cannot express in one.
+def _bridge_schedule() -> list[str]:
+    return [entry["cron"] for entry in _on(_WORKFLOWS / "reconcile-bridge.yml")["schedule"]]
 
-    ``*/40`` would fire at :00 and :40 and then restart the hour — alternating 40- and
-    20-minute gaps. Pinning the three literals alone would not catch a future edit that
-    keeps three entries but breaks uniformity, so derive the fire times and check the gaps.
+
+def test_bridge_backstop_fires_on_a_uniform_hourly_cadence() -> None:
+    """Derive the fire times rather than echoing the literal.
+
+    A literal pin cannot tell a uniform cadence from a lumpy one — ``*/40`` looks like a
+    40-minute schedule and actually alternates 40/20. The bridge is hourly now
+    (RECONCILE_CONTINUOUS is off, so this schedule is the only thing that fires it), and
+    the same derivation guards the hourly form against the same class of edit.
     """
-    entries = [entry["cron"] for entry in _on(_WORKFLOWS / "reconcile-bridge.yml")["schedule"]]
     fires = sorted(
         hour * 60 + minute
         for hour in range(24)
@@ -180,11 +180,35 @@ def test_bridge_backstop_fires_on_a_uniform_40_minute_cadence() -> None:
         if any(
             _cron_field_matches(cron.split()[0], minute, 0, 59)
             and _cron_field_matches(cron.split()[1], hour, 0, 23)
-            for cron in entries
+            for cron in _bridge_schedule()
         )
     )
 
     assert fires, "the bridge backstop must fire at least once a day"
     gaps = {b - a for a, b in itertools.pairwise(fires)}
     gaps.add(fires[0] + 1440 - fires[-1])  # wrap past midnight
-    assert gaps == {40}, f"bridge backstop gaps are not uniformly 40 minutes: {sorted(gaps)}"
+    assert gaps == {60}, f"bridge backstop gaps are not uniformly 60 minutes: {sorted(gaps)}"
+
+
+def test_bridge_backstop_is_a_single_entry() -> None:
+    """The three-entry form existed only to spell 40 minutes; hourly needs no such trick.
+
+    Left behind, a second entry would silently double the cadence the gap check above is
+    meant to protect.
+    """
+    assert len(_bridge_schedule()) == 1, (
+        "hourly is expressible in one cron entry; a second entry is dead weight or a "
+        f"cadence change in disguise: {_bridge_schedule()}"
+    )
+
+
+def test_bridge_backstop_avoids_the_top_of_the_hour() -> None:
+    """:00 is the most contended scheduling slot, and GitHub's scheduler is best-effort.
+
+    Nothing else enforces the off-:00 choice, so an innocuous-looking edit to ``0 * * * *``
+    would quietly make the bridge the likeliest workflow in the repo to be dropped.
+    """
+    minute_field = _bridge_schedule()[0].split()[0]
+    assert minute_field != "0", (
+        "the bridge cron must not fire on the hour (see the workflow comment)"
+    )

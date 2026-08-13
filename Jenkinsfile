@@ -2,12 +2,9 @@ pipeline {
     agent any
 
     triggers {
-        // Uniform 40-minute backstop, mirroring .github/workflows/reconcile-bridge.yml.
-        // Cron has no "every 40 minutes" spelling, so the 2-hour cycle is written as
-        // three entries: :00, :40, 1:20, 2:00, … — every gap is exactly 40 minutes.
-        cron('''0 0-23/2 * * *
-40 0-23/2 * * *
-20 1-23/2 * * *''')
+        // Hourly backstop, mirroring .github/workflows/reconcile-bridge.yml. Off the top
+        // of the hour on purpose — :00 is the most contended scheduling slot.
+        cron('23 * * * *')
     }
 
     options {

@@ -367,7 +367,7 @@ def _heartbeat_description(
 
         The Reconciler Heartbeat Canary ({workflow_file}) detected that
         reconcile-bridge.yml has not completed a successful run within the
-        {window_hours}-hour window (bridge cadence: 40 minutes). Inspect the Actions tab.
+        {window_hours}-hour window (bridge cadence: hourly). Inspect the Actions tab.
 
         ## Expected vs Actual
 

@@ -207,7 +207,7 @@ _DISABLED_422 = (
 def test_redispatch_treats_a_disabled_workflow_422_as_a_benign_no_op(tmp_path: Path) -> None:
     """A converged pass stays GREEN when the loop cannot re-seed onto a disabled workflow.
 
-    The 40-minute schedule documented in the workflow header is the backstop, so failing the
+    The hourly schedule documented in the workflow header is the backstop, so failing the
     job adds no recovery — only a false red that trips heartbeat alerting (runs
     31129551929 / 31129431096).
     """

@@ -13,16 +13,19 @@ Everything else project-specific lives in GitHub repo Variables/Secrets:
 
 | Workflow | File | Cadence | Purpose |
 |----------|------|---------|---------|
-| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | uniform **40-minute** floor; **~two pass durations (this repo: ~14 min)** when `RECONCILE_CONTINUOUS=true` — see [§ Continuous loop](#continuous-loop--running-more-often-than-the-40-minute-floor) | runs `rebar bridge sync`, commits the resulting events back to the `tickets` branch, and pushes |
+| **Reconcile Bridge** | `.github/workflows/reconcile-bridge.yml` | **hourly** (`23 * * * *`); **~two pass durations** when `RECONCILE_CONTINUOUS=true` — see [§ Continuous loop](#continuous-loop--running-more-often-than-the-hourly-floor) | runs `rebar bridge sync`, commits the resulting events back to the `tickets` branch, and pushes |
 | **Reconciler Heartbeat Canary** | `.github/workflows/reconcile-bridge-canary.yml` | every 2 hours | files a rebar bug ticket if the bridge goes stale, and auto-closes it on recovery |
 
-> **Cadence and worst-case latency.** Both cadences were doubled to halve this pair's
-> share of the shared GitHub Actions runner pool (ticket `f59a-2d16-68c5-450c`). The
-> costs are explicit: worst-case reconcile latency doubles (20 → **40 min** backstop),
-> canary detection latency doubles (hourly → **2-hourly** poll), and the staleness
-> window doubles with it (2h → **4h**, keeping the same 2× margin over the 3×-cadence
-> floor). The bridge cron cannot express 40 minutes in one entry, so it is spelled as
-> three entries over a 2-hour cycle; every consecutive gap is exactly 40 minutes.
+> **Cadence and worst-case latency.** Both cadences were reduced to shrink this pair's
+> share of the shared GitHub Actions runner pool — first halved in ticket
+> `f59a-2d16-68c5-450c`, then, once `RECONCILE_CONTINUOUS` was turned off for this
+> project, taken to hourly in ticket `4557-1f33-7a3f-47c7`. The costs are explicit:
+> **worst-case Jira↔rebar sync latency is 1 hour** (the bridge fires once an hour, at
+> `:23` — off the top of the hour because `:00` is the most contended and most
+> frequently dropped scheduling slot). Canary detection latency is **2-hourly** polling
+> against a **4h** staleness window, which still clears the 3×-cadence (3h) floor.
+> The `bridge_run_failures` CloudWatch alarm was retuned to match: it pages on a failed
+> pass in each of two consecutive hours, roughly a 2-hour detection latency.
 
 > The pair is **sufficient** for an automated, durable, bidirectional sync and
 > **necessary** for it to be *reliable* unattended (the canary is the dead-man's
@@ -128,7 +131,7 @@ gh secret set JIRA_API_TOKEN   # paste the token when prompted
 | `BRIDGE_BOT_NAME` | Variable | ❌ | `rebar-bridge[bot]` | both (commit identity) |
 | `BRIDGE_BOT_EMAIL` | Variable | ❌ | `rebar-bridge@users.noreply.github.com` | both |
 | `REBAR_ENV_ID` | Variable | ❌ | `reconciler` | reconcile (event author stamp) |
-| `RECONCILE_CONTINUOUS` | Variable | ❌ | unset (off) | bridge — opt into the continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-40-minute-floor)) |
+| `RECONCILE_CONTINUOUS` | Variable | ❌ | unset (off) | bridge — opt into the continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-hourly-floor)) |
 | `GITHUB_TOKEN` | (auto) | ✅ | provided | canary (Actions API), both (push + self-dispatch) |
 
 ## 4. Copy the workflows
@@ -193,14 +196,14 @@ no-write modes for exactly this:
 > marker — the local store keeps the full text. A local **assignee** that is not a
 > Jira user cannot be set and is skipped (soft-fail); the pass still succeeds.
 
-## Continuous loop — running more often than the 40-minute floor
+## Continuous loop — running more often than the hourly floor
 
 GitHub's `schedule` trigger has a 5-minute floor and is best-effort (runs are
 delayed/dropped under load). To sync **more frequently** than the default
-40-minute cadence, the bridge supports an **opt-in self-rescheduling loop**: each
+hourly cadence, the bridge supports an **opt-in self-rescheduling loop**: each
 run queues the next via `workflow_dispatch` — the [documented exception](https://github.blog/changelog/2022-09-08-github-actions-use-github_token-with-workflow_dispatch-and-repository_dispatch/)
 where the default `GITHUB_TOKEN` *does* create a new run — giving a cadence of
-roughly **two** pass-durations instead of the 40-minute floor. Passes stay **full**
+roughly **two** pass-durations instead of the hourly floor. Passes stay **full**
 (no narrowing of scope), so this does not trade away completeness for frequency.
 
 The chain is **paced**: before queueing its successor, a run sleeps for its own
@@ -217,10 +220,11 @@ Enable it by setting one repo Variable:
 gh variable set RECONCILE_CONTINUOUS --body "true"
 ```
 
-- **Default is OFF.** With the Variable unset (the shipped template default), the
-  bridge runs on the plain 40-minute schedule. Clients who copy the workflow
+- **Default is OFF**, and it is off for **this** project (turned off 2026-08-13 to free
+  the runner). With the Variable unset or false, the bridge runs on the plain hourly
+  schedule and nothing else fires it. Clients who copy the workflow
   verbatim are unaffected unless they explicitly opt in.
-- **The 40-minute schedule stays as a backstop.** If the chain ever stops (a run is
+- **The hourly schedule stays as a backstop.** If the chain ever stops (a run is
   cancelled, or a failure occurs before the re-dispatch step), the next scheduled
   run re-seeds it.
 - **No fan-out, no interruption.** The `concurrency` group + the reconciler's
@@ -258,7 +262,7 @@ without breaking durable sync) and **sufficient** (nothing else is required).
 | **acli download + sha256 verify + auth** | The reconciler shells out to `acli` for all Jira I/O. Pinning + checksum-verifying the binary keeps CI reproducible and supply-chain-safe. |
 | **`timeout-minutes: 60`** | The one-time initial sync creates issues serially via acli (~4 s each), and commit-back persists only on a **completed** pass — so the budget must cover a full bulk pass or progress never converges. 60 is a ceiling, not a duration; steady-state passes finish in minutes. |
 | **`permissions: contents: write`** | The minimum to push to `origin/tickets`. The default `GITHUB_TOKEN` suffices — no PAT. |
-| **`permissions: actions: write`** | Lets a run dispatch its successor for the opt-in continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-40-minute-floor)). Inert when `RECONCILE_CONTINUOUS` is unset; the default `GITHUB_TOKEN` suffices — no PAT. |
+| **`permissions: actions: write`** | Lets a run dispatch its successor for the opt-in continuous loop ([§ Continuous loop](#continuous-loop--running-more-often-than-the-hourly-floor)). Inert when `RECONCILE_CONTINUOUS` is unset; the default `GITHUB_TOKEN` suffices — no PAT. |
 
 ### Reconciler Heartbeat Canary — why each step exists
 

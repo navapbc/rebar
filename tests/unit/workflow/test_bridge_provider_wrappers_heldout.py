@@ -83,11 +83,7 @@ def test_all_provider_wrappers_delegate_to_the_shared_runner() -> None:
 
 def test_github_schedule_and_continuous_redispatch_remain_compatible() -> None:
     workflow = yaml.safe_load(GITHUB.read_text(encoding="utf-8"))
-    assert workflow[True]["schedule"] == [
-        {"cron": "0 0-23/2 * * *"},
-        {"cron": "40 0-23/2 * * *"},
-        {"cron": "20 1-23/2 * * *"},
-    ]
+    assert workflow[True]["schedule"] == [{"cron": "23 * * * *"}]
     assert _github_run_step()["run"].strip() == "rebar bridge run"
     text = GITHUB.read_text(encoding="utf-8")
     assert "RECONCILE_CONTINUOUS" in text
