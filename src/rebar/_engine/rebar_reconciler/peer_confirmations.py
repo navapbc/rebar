@@ -314,6 +314,25 @@ def backfill_from_managed_refs(
     return written
 
 
+def open_store_or_none(repo_root: Any) -> PeerConfirmationStore | None:
+    """The store, or ``None`` when it cannot be opened.
+
+    Mirrors ``apply_inbound_records._open_impossible_link_store``. ``None`` disables
+    the removal-decline check for the whole pass and restores exactly the pre-a4bd
+    behaviour: the evidence is an optimisation of SAFETY, never a precondition for
+    applying a removal. Failing closed here would be worse than the blind spot — an
+    unreadable sidecar would freeze inbound removal convergence entirely.
+
+    It lives here rather than in ``apply_inbound_records`` because that module is
+    within 50 lines of the 800-line cap.
+    """
+    try:
+        return open_store(repo_root)
+    except Exception as exc:  # noqa: BLE001 — fail-open: no evidence is worse, not fatal
+        logger.debug("peer_confirmations: store unavailable: %r", exc)
+        return None
+
+
 def open_store(repo_root: Any) -> PeerConfirmationStore:
     """Open the store for ``repo_root``'s tracker dir."""
     from rebar._commands._seam import tracker_dir
