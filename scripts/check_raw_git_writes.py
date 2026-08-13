@@ -22,7 +22,14 @@ Two deterministic layers, each matched to what is statically decidable:
     ``unresolvable-argv``.
   - R2: a CALL to a shared git wrapper BY NAME (``run_git``, ``run_git_write``,
     ``_run_git``, ``_git``) passing a mutation verb resolved by the same
-    tracking: a string literal anywhere in the arguments including nested
+    tracking. The name is taken from the CALLABLE, which for an attribute call
+    is the ATTRIBUTE — so ``core._git(...)``, ``self._git(...)`` and
+    ``mod.run_git(...)`` are linted exactly like a bare ``_git(...)``,
+    whatever the receiver. That covers the late-binding idiom where a module
+    object is passed down as a parameter (``rebar_reconciler/_ref_lock_push.py``)
+    to keep ``monkeypatch.setattr(mod, "_git", ...)`` working across a module
+    boundary. The verb is resolved by the same tracking:
+    a string literal anywhere in the arguments including nested
     list literals, a local list passed plain or splatted, or — fail-closed —
     an opaque argv forwarded to the wrapper (``unresolvable-argv-wrapper``).
     Sibling wrapper names (``_git_ok``/``_git_fetch``/``_git_push``) are NOT
