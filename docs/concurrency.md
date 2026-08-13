@@ -277,6 +277,35 @@ compaction-like operations MUST never retire an event whose content a
 not-yet-folded state could still need, and never assume the per-clone lock
 excludes remote writers.
 
+### I9b — Compaction runs out of band, never on the close path
+Compaction is the store's longest lock holder, and it is **optional housekeeping** — an
+unfolded event log is completely valid, and the reducer replays it. So it must never sit in
+the path of an interactive command.
+
+Closing a ticket used to run it inline (`_compact_on_close`). That held the ONE store write
+lock for the whole fold — read, reduce, authorship ledger, snapshot write, retire renames, and
+the git `add`/`commit`, whose nested `_store_git_op_lock` wait and index-lock retry budget
+stack *inside* that hold with no aggregate ceiling. Measured on the rebar store, one close
+held the lock for **13m53s** and three others the same hour held ~2.5 min each; every
+concurrent writer burned its acquire budget and lost writes. The stand-aside probe added
+earlier could not help, because the closing process had released the lock seconds before its
+own probe, so the store always read free.
+
+Today:
+
+- **A close never compacts.** It ends after the STATUS write, signing, the force-close audit
+  comment and scratch cleanup. Its lock holds are the short per-append acquisitions.
+- **`rebar compact <id>` still folds on demand**, unchanged.
+- **The standing trigger is an out-of-band sweep** that runs in a *dedicated clone* of the
+  `tickets` branch — its own `.git`, not a worktree of a shared checkout — so it shares no
+  index, no `index.lock`, no `rebar-git-op.lock` and no store write lock with any interactive
+  session. Its result reaches everyone through the ordinary push/merge path, which is safe by
+  I9: a fold adds a SNAPSHOT and renames sources to `*.retired`, and concurrent sessions only
+  add new event files, so the two merge as a union.
+
+The rule this generalizes: **any new long-running store maintenance belongs out of band, in
+its own clone — not bolted onto a command a person or agent is waiting on.**
+
 ### I9a — Creation-channel provenance across a full downgrade (pause `compact`)
 `creation_channel` / `creation_channel_inferred` are additive genesis fields (see
 [event-schema.md](event-schema.md)). They ride the CREATE `data` and, after compaction,
@@ -295,8 +324,9 @@ Only the **third** state loses the field from the *durable* SNAPSHOT, and compac
 **only** operation that can produce it. Therefore:
 
 - **STOP every `rebar compact` invocation for the entire downgrade window.** Pause scheduled
-  compaction and `compact` / `compact-all`, and do not close tickets through a compact-on-close
-  path, until every clone is back on a binary that understands the field. With `compact`
+  compaction and `compact` / `compact-all` until every clone is back on a binary that
+  understands the field. (Closing a ticket does **not** compact it — see
+  "Compaction runs out of band" below — so no close can enter state 3.) With `compact`
   paused, no ticket can enter state 3, so the downgrade is fully lossless (states 1–2 retain
   the value).
 - **If the pause is violated, capture the affected IDs.** The tickets compacted during the
