@@ -321,6 +321,16 @@ gate compares the change's limit against `main`'s and fails any change to it, so
 or lowering the 800 value requires an **administrator** to override the gate
 (force-submit) — a normal contributor cannot change the limit through the review process.
 
+The gate itself lives in exactly one place — the reusable
+`.github/workflows/_build-and-test.yml` step that both `gerrit-verify.yaml` and `test.yml`
+*call* — so its rule has a single definition. Alongside the hard-cap failure, that same step
+runs a **non-blocking near-cap leading indicator**: it emits a `::warning::` for every
+`src/rebar/**/*.py` file within 10% of the cap (>= `LIMIT - LIMIT/10` LOC, e.g. >= 720 at the
+800 cap) and always exits 0. The band is the same 10% `code_health.size_near_fraction` (default
+0.1) uses to compute `module_size_distribution.near_cap_count`, and the pass reuses the gate's
+own `find | wc -l` rather than defining the rule twice. The hard cap tells you *after* a file is
+already over; this surfaces the next split *before* a contributor is blocked by it.
+
 
 `src/rebar/__init__.py` was **split** along its concern seams (ticket S3 / 4532),
 **reversing** the earlier "KEEP as one surface" decision: the ~50 public wrapper
