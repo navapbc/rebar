@@ -1,0 +1,148 @@
+# rebar — out-of-band compaction sweep
+#
+# Folds every ticket whose foldable event count exceeds `compact.threshold` into a
+# SNAPSHOT, then pushes once. This is the store's ONLY standing compaction trigger:
+# compaction used to run inline on every close, where it held the ONE store write
+# lock for the whole fold — measured at 13m53s on one close, starving every
+# concurrent writer — so bug choosy-arthrodic-barbet took it off the close path.
+#
+# Running it HERE is the point. The runner is a disposable clone with its own .git,
+# its own index and its own store write lock, so the sweep contends with nothing an
+# interactive session is doing. Its result reaches everyone through the ordinary
+# push/merge path, which is safe by invariant I9 (docs/concurrency.md): a fold adds
+# a SNAPSHOT and renames sources to *.retired, while concurrent sessions only add
+# new event files, so the two merge as a union.
+#
+# There is no long-lived clone to keep fresh: every run re-derives the store from
+# origin/tickets, and a failed push leaves only local commits on a workspace that is
+# discarded. Nothing accumulates, so there is no stale-clone cleanup to get wrong.
+#
+# Cadence is 6-hourly — compaction is optional housekeeping whose only cost when
+# deferred is disk, so this trades a little store size for a trigger that is cheap
+# and never urgent. Single-flight (cancel-in-progress: false) so a long sweep
+# finishes before the next one starts.
+
+name: Compaction Sweep
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List what would be folded, fold nothing'
+        required: false
+        default: false
+        type: boolean
+      limit:
+        description: 'Stop after this many tickets (0 = no limit)'
+        required: false
+        default: '0'
+        type: string
+
+concurrency:
+  group: compact-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    name: Fold over-threshold tickets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the folded SNAPSHOTs back to the tickets orphan branch
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: true # the mounted worktree reuses these creds to push
+          filter: blob:none
+          # Full history (NOT shallow). A shallow graft defeats git's merge-base
+          # computation, so reconciling a compaction — which retires source event files —
+          # against the remote resurrects them, i.e. SNAPSHOT_INCONSISTENT corruption
+          # (bug saggy-pupil-plant / f193). The tickets store MUST be reconciled with full
+          # history + merge, never shallow + rebase. Same reason reconcile-bridge.yml does it.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version-file: .github/python-version.txt
+
+      - name: Install rebar
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Mount tickets branch as a worktree
+        # The store lives on the `tickets` orphan branch at the repo root. Mount it as
+        # .tickets-tracker on the ACTUAL `tickets` branch (not detached) so tracker.branch
+        # matches and `rebar fsck` does not WARN on a mismatch. Same recipe as
+        # reconcile-bridge.yml — the proven way to give a CI job a writable store.
+        run: |
+          set -euo pipefail
+          git fetch origin '+tickets:refs/remotes/origin/tickets'
+          rm -rf .tickets-tracker
+          git worktree add -B tickets .tickets-tracker origin/tickets
+
+      - name: Configure tickets merge driver
+        # .bridge_state/* uses merge=ours; define that custom driver before the push-retry
+        # loop can merge origin/tickets into the mounted worktree.
+        run: git config merge.ours.driver true
+
+      - name: Configure git identity for the sweep bot
+        # --global so the checkout and the mounted .tickets-tracker worktree both inherit it.
+        # Without an identity, `git commit` fails exit 128 ("empty ident name") on CI runners.
+        # The email defaults to the Rebar Bot authorship identity so the inline signing seam's
+        # git-email fallback resolves swept SNAPSHOTs to that identity.
+        env:
+          SWEEP_BOT_NAME: ${{ vars.BRIDGE_BOT_NAME || 'rebar-bridge[bot]' }}
+          SWEEP_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'joeoakhart+bot@navapbc.com' }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "${SWEEP_BOT_NAME}"
+          git config --global user.email "${SWEEP_BOT_EMAIL}"
+
+      - name: Materialize the Rebar Bot signing key
+        # The inline signing seam signs only when identity.signing_key resolves. Materialize
+        # the key to a 0600 file under $RUNNER_TEMP (discarded at job end) and export its
+        # path. Unset => SNAPSHOTs are written unsigned, the same advisory posture as
+        # reconciler writes. The store's own env id needs no bootstrap: it is read from
+        # <tracker>/.env-id, which is content of the tickets branch, so the mounted worktree
+        # carries it automatically.
+        env:
+          REBAR_BOT_SIGNING_KEY: ${{ secrets.REBAR_BOT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${REBAR_BOT_SIGNING_KEY:-}" ]; then
+            echo "REBAR_BOT_SIGNING_KEY unset — swept SNAPSHOTs will be unsigned (advisory)"
+            exit 0
+          fi
+          echo "::add-mask::${REBAR_BOT_SIGNING_KEY}"
+          KEYFILE="${RUNNER_TEMP}/rebar-bot-signing-key"
+          install -m 600 /dev/null "${KEYFILE}"
+          printf '%s\n' "${REBAR_BOT_SIGNING_KEY}" > "${KEYFILE}"
+          echo "REBAR_IDENTITY_SIGNING_KEY=${KEYFILE}" >> "${GITHUB_ENV}"
+          echo "Materialized bot signing key to ${KEYFILE} (0600)"
+
+      - name: Run the sweep
+        env:
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          LIMIT: ${{ inputs.limit || '0' }}
+        run: |
+          set -euo pipefail
+          ARGS=()
+          if [ "${DRY_RUN}" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ "${LIMIT}" != "0" ]; then ARGS+=("--limit=${LIMIT}"); fi
+          # Exit 2 means some tickets errored while others folded; the sweep is best-effort
+          # housekeeping, so surface it without failing the run. A real invocation error
+          # (exit 1) still fails.
+          rebar compact-all "${ARGS[@]}" || rc=$?
+          if [ "${rc:-0}" = "2" ]; then
+            echo "::warning::some tickets failed to compact; they stay live and the next sweep retries them"
+          elif [ "${rc:-0}" != "0" ]; then
+            exit "${rc}"
+          fi

@@ -27,10 +27,12 @@ SNAPSHOT bytes go through the single canonical serializer
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 
 from rebar import config
+from rebar._commands._compact_policy import is_foldable
 from rebar._commands.compact_rebuild import (
     get_rebuild_count,
     rebuild_snapshot_from_full_log,
@@ -43,6 +45,7 @@ from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public p
     _sync_before_compact,
 )
 from rebar._engine_support.resolver import resolve_ticket_id
+from rebar._store import hlc
 
 __all__ = [
     "compact_all_cli",
@@ -141,11 +144,71 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
 
 
 # ── compact-all ──────────────────────────────────────────────────────────────
-def _scan_snapshot_state(tracker: str) -> tuple[list[str], int]:
-    """Return (ticket ids lacking a SNAPSHOT, count already having one), scanning
-    ticket dirs (those with at least one event JSON), sorted by name."""
+def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
+    """How many of *ticket_dir*'s live events the fold would actually squash right now.
+
+    Deliberately asks the SAME question :func:`compact_txn._compact_locked` asks, through the
+    SAME predicate (:func:`rebar._commands._compact_policy.is_foldable`) and the same
+    configured horizon, so selection and work cannot drift. Counting merely LIVE events
+    instead would select a ticket whose excess events are all inside the horizon; the fold
+    would write nothing, and the next sweep would select it again — churn.
+
+    Matches the fold's candidate set: ``*.json``, excluding dotfiles, already-retired sources
+    and ``-SYNC.json`` bridge metadata. An unreadable or undecodable file counts as foldable
+    with an unknown timestamp only when the horizon is off, mirroring ``is_foldable``'s
+    treatment of a ``None`` timestamp."""
+    count = 0
+    try:
+        names = os.listdir(ticket_dir)
+    except OSError:
+        return 0
+    for name in names:
+        if name.startswith(".") or not name.endswith(".json") or name.endswith("-SYNC.json"):
+            continue
+        try:
+            with open(os.path.join(ticket_dir, name), encoding="utf-8") as fh:
+                raw_ts = json.load(fh).get("timestamp")
+        except (json.JSONDecodeError, OSError):
+            raw_ts = None
+        ts = raw_ts if isinstance(raw_ts, int) else None
+        if is_foldable(ts, now, horizon):
+            count += 1
+    return count
+
+
+def _scan_snapshot_state(
+    tracker: str, threshold: int = 0, horizon: int = 0
+) -> tuple[list[str], int]:
+    """Return (ticket ids worth compacting, count of the rest), sorted by name.
+
+    A ticket is selected on EITHER of two arms — this is a widening of the historical rule,
+    deliberately not a replacement:
+
+    * **Backfill** (the historical arm, preserved): it has no ``-SNAPSHOT.json`` and has at
+      least one foldable event. Every ticket still earns its first SNAPSHOT regardless of size.
+    * **Recurrence** (the new arm): its FOLDABLE event count exceeds *threshold*, whatever its
+      snapshot state.
+
+    The recurrence arm is why this exists. Selecting ONLY on the backfill arm made
+    ``compact-all`` a one-time operation: a ticket folded once and since grown by hundreds of
+    events had a SNAPSHOT, so it was never folded again. That was survivable while every close
+    compacted inline; since compaction left the close path (bug choosy-arthrodic-barbet) this
+    sweep is the store's ONLY standing trigger, and a trigger that cannot re-fire is no
+    trigger.
+
+    Selecting ONLY on the threshold arm would have been a silent regression in the other
+    direction — a ticket with fewer events than the threshold would never get a first SNAPSHOT
+    at all — which is why both arms are kept.
+
+    Both arms converge. After a backfill the ticket has a SNAPSHOT (arm 1 no longer applies)
+    and its live count is back below the threshold (arm 2 does not apply), so the next sweep
+    leaves it alone.
+
+    ``threshold=0`` / ``horizon=0`` keep the historical call shape working — every live event
+    is foldable at horizon 0, so any ticket with events is selected."""
     needs: list[str] = []
-    already = 0
+    rest = 0
+    now = hlc.physical_now()
     try:
         entries = sorted(os.scandir(tracker), key=lambda e: e.name)
     except OSError:
@@ -153,14 +216,16 @@ def _scan_snapshot_state(tracker: str) -> tuple[list[str], int]:
     for entry in entries:
         if not entry.is_dir() or entry.name.startswith("."):
             continue
-        names = os.listdir(entry.path)
-        if not any(n.endswith(".json") for n in names):
-            continue
-        if any(n.endswith("-SNAPSHOT.json") for n in names):
-            already += 1
-        else:
+        foldable = _foldable_event_count(entry.path, now, horizon)
+        try:
+            has_snapshot = any(n.endswith("-SNAPSHOT.json") for n in os.listdir(entry.path))
+        except OSError:
+            has_snapshot = True  # unreadable: never select it, the fold would fail anyway
+        if foldable > threshold or (foldable > 0 and not has_snapshot):
             needs.append(entry.name)
-    return needs, already
+        else:
+            rest += 1
+    return needs, rest
 
 
 def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
@@ -210,8 +275,41 @@ def _commit_backfill(tracker: str, compacted: int) -> None:
     push.push_after_commit(tracker)
 
 
+def _best_effort_push(tracker: str, no_commit: bool) -> None:
+    """Honour the sweep's best-effort push contract on the paths that commit NOTHING.
+
+    The push is about not stranding commits, so it must not depend on whether this sweep
+    happened to fold anything: an earlier write in the same session can be sitting unpushed,
+    and a sweep is often the last thing to run. Previously this rode along for free because
+    every selected ticket was counted as compacted (even a fold that wrote nothing), so
+    ``compacted > 0`` was effectively "we selected something". Now that the count is honest,
+    a sweep that folds nothing would silently skip the push — so the two are decoupled.
+
+    ``--no-commit`` opts out, exactly as it does for the commit itself."""
+    if no_commit:
+        return
+    from rebar._store import push
+
+    push.push_after_commit(tracker)
+
+
+def _snapshot_names(ticket_dir: str) -> set[str]:
+    """The ticket dir's current ``*-SNAPSHOT.json`` filenames (empty on any read error)."""
+    try:
+        return {n for n in os.listdir(ticket_dir) if n.endswith("-SNAPSHOT.json")}
+    except OSError:
+        return set()
+
+
 def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar compact-all`` entry — backfill SNAPSHOTs for tickets lacking one."""
+    """``rebar compact-all`` entry — the recurring store-wide compaction sweep.
+
+    Selects every ticket whose FOLDABLE event count exceeds ``compact.threshold`` and folds
+    it, so a ticket that was compacted before and has since grown is folded again. Backfilling
+    a ticket that has no SNAPSHOT yet is the same rule applied to a whole log. Since
+    compaction left the close path (bug choosy-arthrodic-barbet) this sweep is the store's
+    only standing trigger, and it is meant to run OUT OF BAND — in a disposable clone, on a
+    schedule — so it never contends for an interactive session's store lock."""
     import contextlib
     import io
 
@@ -224,12 +322,20 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: tracker dir not found: {tracker}\n")
         return 1
 
-    needs, already = _scan_snapshot_state(tracker)
+    try:
+        _cfg = config.load_config(repo_root).compact
+        threshold, horizon = _cfg.threshold, _cfg.COMPACTION_HORIZON_NS
+    except config.ConfigError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
+
+    needs, already = _scan_snapshot_state(tracker, threshold, horizon)
     total_needs = len(needs)
-    sys.stdout.write(f"Tickets already with SNAPSHOT : {already}\n")
-    sys.stdout.write(f"Tickets needing compaction     : {total_needs}\n")
+    sys.stdout.write(f"Tickets needing no compaction : {already}\n")
+    sys.stdout.write(f"Tickets needing compaction    : {total_needs}\n")
     if total_needs == 0:
         sys.stdout.write("Nothing to do.\n")
+        _best_effort_push(tracker, no_commit)
         return 0
 
     if dry_run:
@@ -244,25 +350,37 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         total_needs = limit
 
     compacted = 0
+    skipped = 0
     error_ids: list[str] = []
     sys.stdout.write(f"\nCompacting {total_needs} tickets...\n")
-    sys.stdout.write("(each dot = 1 ticket; E = error)\n")
+    sys.stdout.write("(. = folded; - = nothing to fold; E = error)\n")
     for tid in needs:
+        # Count a ticket as compacted only when a NEW SNAPSHOT actually appeared. The return
+        # code cannot answer this: _compact_locked returns 0 for a successful fold AND for
+        # every no-op branch (below threshold, nothing older than the horizon, no safe
+        # placement gap), so `rc == 0` counted all of them as work — inflating the tally and
+        # hiding a sweep that folded nothing. Observing the artifact is uniform across all
+        # three branches and needs no change to the fold's return contract.
+        before = _snapshot_names(os.path.join(tracker, tid))
         with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
             rc = compact_cli(
                 [tid, "--threshold=0", "--skip-sync", "--no-commit"], repo_root=repo_root
             )
-        if rc == 0:
+        if rc != 0:
+            error_ids.append(tid)
+            sys.stdout.write("E")
+        elif _snapshot_names(os.path.join(tracker, tid)) - before:
             compacted += 1
             sys.stdout.write(".")
         else:
-            error_ids.append(tid)
-            sys.stdout.write("E")
+            skipped += 1
+            sys.stdout.write("-")
         sys.stdout.flush()
 
     sys.stdout.write("\n\n")
     sys.stdout.write(
-        f"Done: {compacted} compacted, {len(error_ids)} errors (of {total_needs} attempted)\n"
+        f"Done: {compacted} compacted, {skipped} nothing to fold, {len(error_ids)} errors "
+        f"(of {total_needs} attempted)\n"
     )
     if error_ids:
         sys.stderr.write("Errored tickets:\n")
@@ -270,6 +388,8 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stderr.write(f"  {tid}\n")
 
     if compacted > 0 and not no_commit:
-        _commit_backfill(tracker, compacted)
+        _commit_backfill(tracker, compacted)  # commits, then pushes
+    else:
+        _best_effort_push(tracker, no_commit)
 
     return 2 if error_ids else 0
