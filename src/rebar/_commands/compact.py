@@ -28,6 +28,7 @@ SNAPSHOT bytes go through the single canonical serializer
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 
@@ -46,6 +47,9 @@ from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public p
 )
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import hlc
+from rebar._store import lock as _lock
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "compact_all_cli",
@@ -65,8 +69,14 @@ def _usage() -> int:
     return 1
 
 
-def compact_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar compact <id>`` entry."""
+def compact_cli(
+    argv: list[str], *, repo_root=None, position_commits: dict[str, str] | None = None
+) -> int:
+    """``rebar compact <id>`` entry.
+
+    ``position_commits`` is the OPTIONAL prebuilt position->commit map the store-wide sweep
+    threads in so the authorship-ledger history walk does not run inside the store write lock
+    (see :func:`compact_all_cli`). Absent, the fold builds its own per-ticket map as before."""
     if len(argv) < 1:
         return _usage()
     tracker = str(config.tracker_dir(repo_root))
@@ -131,7 +141,15 @@ def compact_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stdout.write(f"below threshold ({preflock} <= {threshold}) — skipping compaction\n")
         return 0
 
-    rc = _compact_locked(tracker, ticket_id, ticket_dir, threshold, no_commit, horizon)
+    rc = _compact_locked(
+        tracker,
+        ticket_id,
+        ticket_dir,
+        threshold,
+        no_commit,
+        horizon,
+        position_commits=position_commits,
+    )
     # A successful compaction commits a SNAPSHOT inline (not via write_and_push), so
     # push it best-effort — unless --no-commit (nothing committed) or --skip-sync
     # (the caller owns sync: compact-on-close passes it and the transition pushes;
@@ -272,12 +290,23 @@ def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
 
 
 # raw-git-ok: store-maintenance command, seam-internal
-def _commit_backfill(tracker: str, compacted: int) -> None:
+def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None = None) -> None:
     """Commit + push the batch of backfilled SNAPSHOTs (one commit for the whole run;
     the per-ticket calls passed ``--skip-sync`` to defer the push here — bug
-    prone-octet-cheek)."""
+    prone-octet-cheek).
+
+    ``folded_ids`` scopes the staging to the tickets this run actually folded; ``None`` keeps
+    the historical whole-tree behaviour for callers that do not track them."""
     sys.stdout.write(f"Staging and committing {compacted} new SNAPSHOT files...\n")
-    _git(tracker, "add", "-A")
+    # Stage ONLY the ticket dirs this sweep folded. `git add -A` staged the whole tree, so a
+    # concurrent writer's freshly-written event file — sitting in the worktree for the
+    # milliseconds between its rename and its own commit — was swept into the compaction commit
+    # and landed under a "chore: backfill SNAPSHOT files" message. Not data loss, but another
+    # session's event committed by us, under a message that does not describe it.
+    if folded_ids:
+        _git(tracker, "add", "--", *[f"{tid}/" for tid in sorted(folded_ids)])
+    else:
+        _git(tracker, "add", "-A")
     if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
         sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
         return
@@ -330,6 +359,116 @@ def _snapshot_names(ticket_dir: str) -> set[str]:
         return set()
 
 
+def _sweep_should_yield(tracker: str, done: int) -> bool:
+    """Whether the sweep should stand aside for a foreground writer, checked BETWEEN tickets.
+
+    The trigger probes the store lock once before starting, which only helps a sweep that was
+    never going to hurt: a run that begins on a quiet store and then folds for minutes never
+    looks again, so every writer arriving mid-run waits it out. Compaction is optional
+    housekeeping — it yields, and the remaining tickets keep for the next pass.
+
+    A separate function rather than an inline branch because ``compact_all_cli`` sits at the
+    C901 threshold and ``.github/complexity-baseline.json`` admits no new debt."""
+    if not _lock.write_lock_is_busy(tracker):
+        return False
+    sys.stdout.write("\n")
+    logger.info(
+        "compaction sweep yielding after %d ticket(s): store write lock busy (holder: %s); "
+        "the remaining events stay live for the next sweep",
+        done,
+        _lock.describe_lock_holder(tracker),
+    )
+    return True
+
+
+def _sweep_one_ticket(
+    tracker: str, tid: str, repo_root, position_commits: dict[str, str] | None
+) -> str:
+    """Fold ONE ticket for the sweep; return its progress character.
+
+    ``"."`` folded, ``"-"`` nothing to fold, ``"E"`` errored. The outcome is decided by the
+    ARTIFACT — did a new ``*-SNAPSHOT.json`` appear — not by the return code, because
+    ``_compact_locked`` returns 0 for a successful fold AND for every no-op branch (below
+    threshold, nothing older than the horizon, no safe placement gap). Counting ``rc == 0`` as
+    work inflated the tally and hid a sweep that folded nothing."""
+    import contextlib
+    import io
+
+    before = _snapshot_names(os.path.join(tracker, tid))
+    with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
+        rc = compact_cli(
+            [tid, "--threshold=0", "--skip-sync", "--no-commit"],
+            repo_root=repo_root,
+            position_commits=position_commits,
+        )
+    if rc != 0:
+        return "E"
+    return "." if _snapshot_names(os.path.join(tracker, tid)) - before else "-"
+
+
+def _sweep_position_map(repo_root) -> dict[str, str] | None:
+    """The ONE history walk for a whole sweep, built BEFORE any lock is taken.
+
+    Without this, each ticket's authorship ledger ran its own ``git log --full-history`` walk
+    INSIDE the store write lock (``compact_txn._build_authorship_ledger``). That is bug 7084
+    one scale up: 7084 found the same walk running per signed EVENT and batched it to
+    per-TICKET, which was right for compact-on-close because it folds ONE ticket. Once
+    ``compact-all`` became the standing sweep, per-ticket became the new per-event — thousands
+    of full-history walks, each holding the global write lock, observed live as a fresh git
+    child every few seconds at 100% CPU while every writer in the fleet stalled.
+
+    ``git log`` is read-only and never needed the lock. Building the map once costs one walk
+    for the entire run and leaves the locked section with only the SNAPSHOT write, the renames
+    and the commit.
+
+    MUST be the POSITION-keyed builder. The ledger looks up by position, so the path-keyed
+    :func:`~rebar.attest.authorship.build_introducing_commit_map` would miss every entry and
+    fall silently back to per-event walks — same output, same cost, no error to notice.
+
+    Returns ``None`` — never an empty dict — when the map cannot be built or comes back empty,
+    and that distinction is load-bearing rather than stylistic.
+    :func:`compact_txn._build_authorship_ledger` rebuilds its own per-ticket map only when the
+    argument ``is None``; an empty dict is a perfectly valid map that simply misses every
+    lookup, so passing ``{}`` would send every event down the per-EVENT fallback
+    (``resolve_event_commit``, then ``resolve_position_commit``) INSIDE the store write lock.
+    That is not a degradation to the old behaviour — it is the full bug-7084 pathology, worse
+    than the per-ticket walk this function exists to remove. ``None`` degrades honestly: each
+    fold rebuilds its own per-ticket map, exactly as before this optimisation."""
+    from rebar.attest import authorship as _authorship
+
+    try:
+        built = _authorship.build_position_commit_map(repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — an unbuildable map degrades to per-ticket walks, never fails the sweep
+        return None
+    return built or None
+
+
+def _run_sweep(tracker: str, needs: list[str], repo_root) -> tuple[int, int, set[str], list[str]]:
+    """Fold each selected ticket; return ``(compacted, skipped, folded_ids, error_ids)``.
+
+    Extracted from :func:`compact_all_cli` so that function stays under the C901 threshold —
+    ``.github/complexity-baseline.json`` is shrink-only and admits no new debt."""
+    position_commits = _sweep_position_map(repo_root)
+    compacted = 0
+    skipped = 0
+    folded_ids: set[str] = set()
+    error_ids: list[str] = []
+    for tid in needs:
+        if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
+            break
+        outcome = _sweep_one_ticket(tracker, tid, repo_root, position_commits)
+        if outcome == "E":
+            error_ids.append(tid)
+        elif outcome == ".":
+            compacted += 1
+            folded_ids.add(tid)
+        else:
+            skipped += 1
+        sys.stdout.write(outcome)
+        sys.stdout.flush()
+    return compacted, skipped, folded_ids, error_ids
+
+
 def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar compact-all`` entry — the recurring store-wide compaction sweep.
 
@@ -339,8 +478,6 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     compaction left the close path (bug choosy-arthrodic-barbet) this sweep is the store's
     only standing trigger, and it is meant to run OUT OF BAND — in a disposable clone, on a
     schedule — so it never contends for an interactive session's store lock."""
-    import contextlib
-    import io
 
     dry_run, limit, no_commit, early_rc = _compact_all_parse(argv)
     if early_rc is not None:
@@ -378,33 +515,9 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         needs = needs[:limit]
         total_needs = limit
 
-    compacted = 0
-    skipped = 0
-    error_ids: list[str] = []
     sys.stdout.write(f"\nCompacting {total_needs} tickets...\n")
     sys.stdout.write("(. = folded; - = nothing to fold; E = error)\n")
-    for tid in needs:
-        # Count a ticket as compacted only when a NEW SNAPSHOT actually appeared. The return
-        # code cannot answer this: _compact_locked returns 0 for a successful fold AND for
-        # every no-op branch (below threshold, nothing older than the horizon, no safe
-        # placement gap), so `rc == 0` counted all of them as work — inflating the tally and
-        # hiding a sweep that folded nothing. Observing the artifact is uniform across all
-        # three branches and needs no change to the fold's return contract.
-        before = _snapshot_names(os.path.join(tracker, tid))
-        with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
-            rc = compact_cli(
-                [tid, "--threshold=0", "--skip-sync", "--no-commit"], repo_root=repo_root
-            )
-        if rc != 0:
-            error_ids.append(tid)
-            sys.stdout.write("E")
-        elif _snapshot_names(os.path.join(tracker, tid)) - before:
-            compacted += 1
-            sys.stdout.write(".")
-        else:
-            skipped += 1
-            sys.stdout.write("-")
-        sys.stdout.flush()
+    compacted, skipped, folded_ids, error_ids = _run_sweep(tracker, needs, repo_root)
 
     sys.stdout.write("\n\n")
     sys.stdout.write(
@@ -417,7 +530,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stderr.write(f"  {tid}\n")
 
     if compacted > 0 and not no_commit:
-        _commit_backfill(tracker, compacted)  # commits, then pushes
+        _commit_backfill(tracker, compacted, folded_ids)  # commits, then pushes
     else:
         _best_effort_push(tracker, no_commit=no_commit, dry_run=dry_run)
 

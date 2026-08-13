@@ -69,7 +69,9 @@ def _snapshot_strip_keys() -> set[str]:
     return {"updated_at", "signature"}
 
 
-def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
+def _build_authorship_ledger(
+    event_paths: list[str], repo_root, *, position_commits: dict[str, str] | None = None
+) -> list[dict]:
     """Independently scan the folded event files and build the SNAPSHOT authorship ledger
     (epic gnu-whale-ichor / 117b): one ``{event_uuid, content_hash, signature, signer_pubkey,
     position}`` record per folded event that carries an ``author_sig``. This preserves the
@@ -85,7 +87,21 @@ def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
     presence-only count lives in ``compiled_state`` already). Best-effort throughout — a
     lookup/decode failure records ``null`` rather than raising.
 
-    The introducing commits are resolved for the WHOLE ticket in ONE directory-scoped
+    ``position_commits`` is an OPTIONAL prebuilt position->commit map. Supplied, it is used
+    verbatim and NO ``git log`` runs here at all — which is the whole point for the store-wide
+    sweep: :func:`compact_all_cli` builds ONE map for the entire run
+    (:func:`~rebar.attest.authorship.build_position_commit_map`) before taking any lock, so the
+    per-ticket walk below never executes inside the store write lock. It MUST be the
+    POSITION-keyed map: the lookup below is ``position_commits.get(position_str)``, so the
+    path-keyed :func:`~rebar.attest.authorship.build_introducing_commit_map` would miss every
+    entry and fall silently back to the per-event resolver — correct output, unchanged cost,
+    nothing to notice.
+
+    Left ``None`` (the single-ticket ``rebar compact`` path, and the fsck rebuild in
+    ``compact_rebuild``) it builds its own per-ticket map exactly as before, which is the right
+    cost when folding ONE ticket.
+
+    The introducing commits are otherwise resolved for the WHOLE ticket in ONE directory-scoped
     ``git log`` walk (:func:`~rebar.attest.authorship.build_ticket_position_commit_map`),
     not one full-history walk per signed event. That per-event form was 99.2% of a
     measured 48.1s ``compact-on-close`` — all of it inside the store write lock, starving
@@ -95,11 +111,12 @@ def _build_authorship_ledger(event_paths: list[str], repo_root) -> list[dict]:
     wrong or missing commit in the attestation chain."""
     from rebar.attest import authorship, dsse
 
-    position_commits: dict[str, str] = {}
-    if event_paths:
-        position_commits = authorship.build_ticket_position_commit_map(
-            os.path.dirname(event_paths[0]), repo_root=repo_root
-        )
+    if position_commits is None:
+        position_commits = {}
+        if event_paths:
+            position_commits = authorship.build_ticket_position_commit_map(
+                os.path.dirname(event_paths[0]), repo_root=repo_root
+            )
 
     ledger: list[dict] = []
     for path in event_paths:
@@ -332,6 +349,7 @@ def _compact_locked(
     threshold: int,
     no_commit: bool,
     horizon: int = 0,
+    position_commits: dict[str, str] | None = None,
 ) -> int:
     """The locked compaction critical section. Returns 0 on success (prints
     EVENT_COUNT + the compacted line), 0 on below-threshold-inside-lock (prints the
@@ -406,7 +424,9 @@ def _compact_locked(
         # events and preserve each SIGNED one so verify-authorship can re-verify it after
         # the raw files are retired. Derive repo_root from the tracker (no repo_root here).
         compiled_state["authorship_ledger"] = _build_authorship_ledger(
-            fold_files, os.path.dirname(os.path.realpath(tracker))
+            fold_files,
+            os.path.dirname(os.path.realpath(tracker)),
+            position_commits=position_commits,
         )
         status = compiled_state.get("status", "")
         if status in ("error", "fsck_needed"):
