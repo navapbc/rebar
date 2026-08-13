@@ -1,31 +1,66 @@
-"""rebar library — write path (ticket lifecycle, mutations, and signing).
+"""rebar library — write path (ticket genesis and the status lifecycle).
 
 The wrapper bodies for the public write/mutation surface, split out of the
 ``rebar`` package facade (``__init__.py``) so that facade stays a thin re-export
 namespace (ticket S3 / 4532). ``rebar.<name>`` re-exports every public function
-here; the private ``_python_leaf`` helper (the Tier B leaf-write adapter) lives
-here too and is re-exported as ``rebar._python_leaf``.
+here.
+
+This module was itself split by concern once it reached the 800-line cap (ticket
+4631-5598-7127-4a56). What remains is ticket genesis (``create_ticket`` / ``idea``)
+and the optimistic-concurrency status lifecycle (``transition`` / ``claim`` /
+``reopen``) — the ticket's own state machine. The other five concerns moved to:
+
+* ``rebar._lib_mutations`` — leaf writes (holds ``_python_leaf``), session logs,
+  store maintenance;
+* ``rebar._lib_identity`` — identity entities, key material, manifest signing.
+
+Both are re-exported below, so every pre-split import path still resolves:
+``rebar.<name>``, ``rebar._lib_writes.<name>``, and ``rebar._python_leaf``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar import config
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
 from rebar._errors import ConcurrencyError, RebarError
 
+# ── Re-exports of the concerns split out of this module ──────────────────────
+# Kept so ``rebar/__init__.py`` (which re-exports all 27 names from here) and
+# ``rebar/_lib_gates.py`` (which imports ``_python_leaf``) need no edit, and so any
+# ``rebar._lib_writes.<name>`` reference keeps resolving.
+from rebar._lib_identity import (  # noqa: F401
+    add_identity_key,
+    create_identity,
+    create_placeholder,
+    ensure_identity_for,
+    resolve_current_identity,
+    revoke_identity_key,
+    sign_manifest,
+    use_identity,
+    verify_signature,
+)
+from rebar._lib_mutations import (  # noqa: F401
+    _python_leaf,
+    append_session_log,
+    archive,
+    attach_commits,
+    comment,
+    compact,
+    edit_ticket,
+    link,
+    start_session_log,
+    tag,
+    unlink,
+    untag,
+)
+
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING —
     # ``from __future__ import annotations`` makes every annotation a string, so
     # these names never need to exist at runtime (zero import cost, no cycle).
-    from rebar.types import (
-        ClaimResult,
-        CreateResult,
-        SignResult,
-        TransitionResult,
-        VerifySignatureResult,
-    )
+    from rebar.types import ClaimResult, CreateResult, TransitionResult
 
 
 # ── Initialization ───────────────────────────────────────────────────────────
@@ -180,153 +215,6 @@ def idea(
     if not return_alias:
         return res["id"]
     return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
-
-
-def create_identity(
-    name: str,
-    email: str,
-    mappings: list[dict] | None = None,
-    keys: list[str] | None = None,
-    *,
-    tags: list[str] | None = None,
-    repo_root=None,
-    return_alias: bool = False,
-    _creation_channel: str = "python",
-) -> str | CreateResult:
-    """Mint an ``identity`` entity ticket in one CREATE event; return its id.
-
-    ``name`` becomes the title; ``email`` / ``mappings`` (``{provider, external_id}``)
-    / ``keys`` (OpenSSH authorized-keys lines) ride the CREATE payload and surface in
-    compiled state. ``tags`` (e.g. ``["placeholder"]`` for a ghost) ride the SAME CREATE
-    event atomically. Returns the canonical 16-hex id (default), or ``{"id", "alias"}``
-    with ``return_alias=True`` — same shape as :func:`create_ticket`.
-
-    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
-    ``"python"``; the MCP adapter passes ``"mcp"``.
-    """
-    from rebar._commands import identity as _identity
-    from rebar._commands._seam import CommandError
-
-    try:
-        res = _identity.create_identity_core(
-            name,
-            email,
-            mappings=mappings,
-            keys=keys,
-            tags=tags,
-            repo_root=repo_root,
-            creation_channel=_creation_channel,
-        )
-    except CommandError as exc:
-        raise RebarError(
-            f"rebar identity create failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-    if not return_alias:
-        return res["id"]
-    return {"id": res["id"], "alias": res["alias"] or ""}
-
-
-def ensure_identity_for(
-    provider: str,
-    external_id: str,
-    display_name: str,
-    *,
-    repo_root=None,
-    creation_channel: str = "python",
-) -> str:
-    """Resolve-or-mint the identity for an inbound ``(provider, external_id)`` user; return
-    its id (2f13). Idempotent: reuses an existing mapping (upgrading a placeholder's title
-    in place when it is still a ghost), else mints a ``placeholder`` identity. Never raises
-    on a lookup problem — see :func:`rebar._commands.identity.ensure_identity_for`.
-
-    ``creation_channel`` (story e622) is threaded to a minted placeholder's genesis CREATE;
-    it defaults to ``"python"`` and the Jira inbound path passes ``"jira"``."""
-    from rebar._commands import identity as _identity
-
-    return _identity.ensure_identity_for(
-        provider,
-        external_id,
-        display_name,
-        repo_root=repo_root,
-        creation_channel=creation_channel,
-    )
-
-
-def create_placeholder(
-    provider: str,
-    external_id: str,
-    display_name: str,
-    *,
-    repo_root=None,
-) -> str:
-    """Resolve-or-mint the placeholder identity for ``(provider, external_id)``; return its id
-    (117b). A thin alias for :func:`ensure_identity_for` — see
-    :func:`rebar._commands.identity.create_placeholder`."""
-    from rebar._commands import identity as _identity
-
-    return _identity.create_placeholder(provider, external_id, display_name, repo_root=repo_root)
-
-
-def add_identity_key(identity_id, public_key, *, signature=None, repo_root=None) -> None:
-    """Add ``public_key`` to an identity's epoch-scoped keyring (epic gnu-whale-ichor).
-
-    GENESIS/TOFU: the first key on a keyless identity is added trust-on-first-use (no
-    signature). NON-GENESIS: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
-    ``authorship.keyop_payload("KEY_ADD", identity_id, public_key)``) is REQUIRED and must
-    verify against a currently-valid key, or the rotation is refused (``RebarError``)."""
-    from rebar._commands import identity as _identity
-    from rebar._commands._seam import CommandError
-
-    try:
-        _identity.add_identity_key(
-            identity_id, public_key, signature=signature, repo_root=repo_root
-        )
-    except CommandError as exc:
-        raise RebarError(
-            f"rebar identity key add failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-
-
-def revoke_identity_key(identity_id, public_key, *, signature, repo_root=None) -> None:
-    """Revoke ``public_key`` from an identity's keyring (epic gnu-whale-ichor).
-
-    Always signed: ``signature`` (a :class:`~rebar.attest.dsse.Envelope` over
-    ``authorship.keyop_payload("KEY_REVOKE", identity_id, public_key)``) is REQUIRED and
-    must verify against a currently-valid key, or the revoke is refused (``RebarError``)."""
-    from rebar._commands import identity as _identity
-    from rebar._commands._seam import CommandError
-
-    try:
-        _identity.revoke_identity_key(
-            identity_id, public_key, signature=signature, repo_root=repo_root
-        )
-    except CommandError as exc:
-        raise RebarError(
-            f"rebar identity key revoke failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-
-
-def use_identity(identity_id: str, *, repo_root=None) -> None:
-    """Point ``.rebar/current_identity`` at ``identity_id`` (a local, git-ignored
-    pointer — never propagated across machines)."""
-    from rebar._commands import identity as _identity
-
-    _identity.use_identity(identity_id, repo_root=repo_root)
-
-
-def resolve_current_identity(*, repo_root=None) -> str | None:
-    """Resolve the current self-identity (opt-in; returns ``None`` on any miss, never
-    raises). Prefers the ``.rebar/current_identity`` pointer, else a case-insensitive
-    ``git config user.email`` match against identity tickets."""
-    from rebar._commands import identity as _identity
-
-    return _identity.resolve_current_identity(repo_root=repo_root)
 
 
 def transition(
@@ -488,313 +376,3 @@ def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
     :func:`transition`, still optimistic-concurrency (raises ConcurrencyError if
     the ticket is not currently ``closed``)."""
     return transition(ticket_id, "closed", "open", repo_root=repo_root)
-
-
-def _python_leaf(fn, *args, repo_root, what: str, **kwargs) -> Any:
-    """Run a Tier B leaf write in-process — the sole path since the cutover.
-
-    Tier B retired its kill-switch after the soak (docs/bash-migration.md §4); the
-    library/MCP write surface now calls ``rebar._commands`` directly. A command
-    failure is mapped onto RebarError so the exit-code contract is unchanged.
-    Extra keyword arguments are forwarded verbatim to ``fn`` (e.g. ``source=`` for
-    comment provenance).
-
-    Returns whatever ``fn`` returns. Most leaf writes return None and their callers
-    ignore this, so widening it is additive; ``link`` relies on it to carry the
-    hierarchy-escalation record back out (bug fec5-d8bb-86cd-453e). Forking a
-    separate helper for that one caller would have duplicated the
-    ``CommandError -> RebarError`` mapping below, which is the single thing keeping
-    the library's exit-code contract uniform.
-    """
-    from rebar._commands._seam import CommandError
-
-    try:
-        return fn(*args, repo_root=repo_root, **kwargs)
-    except CommandError as exc:
-        raise RebarError(
-            f"rebar {what} failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-
-
-def comment(
-    ticket_id: str,
-    body: str,
-    *,
-    source: dict | None = None,
-    repo_root=None,
-    allow_secret_pattern: str = "",
-) -> None:
-    """Append a comment. ``source`` (P1.2 import): optional per-comment provenance
-    (``source_author``/``source_created_at``) preserved on the imported comment.
-
-    ``allow_secret_pattern``: audited force override for the write-time secret screen
-    (bug e7a9) — a non-empty reason lets a refused body through and is recorded on the
-    event. Deliberately not exposed over MCP."""
-    from rebar._commands import leaf
-
-    _python_leaf(
-        leaf.comment,
-        ticket_id,
-        body,
-        source=source,
-        repo_root=repo_root,
-        allow_secret_pattern=allow_secret_pattern,
-        what="comment",
-    )
-
-
-def append_session_log(
-    entry: str,
-    *,
-    summary=None,
-    relates_to=None,
-    discovered_from=None,
-    repo_root=None,
-    _creation_channel: str = "python",
-) -> dict:
-    """Append ``entry`` to the current session_log, creating one on first use.
-
-    A convenience over ``create`` + ``comment``: the first call creates a
-    ``session_log`` (titled ``summary`` or a default) and records it as the
-    current log via a local pointer; subsequent calls append to that same log.
-    Optional ``relates_to`` / ``discovered_from`` link the log to the work it
-    documents (blocking links remain refused). Returns
-    ``{"id", "alias", "created"}``.
-
-    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
-    ``"python"``; the MCP adapter passes ``"mcp"`` — it stamps the session_log's genesis
-    CREATE when this call creates one."""
-    from rebar._commands import session_log
-    from rebar._commands._seam import CommandError
-
-    try:
-        return session_log.append(
-            entry,
-            summary=summary,
-            relates_to=relates_to,
-            discovered_from=discovered_from,
-            repo_root=repo_root,
-            creation_channel=_creation_channel,
-        )
-    except CommandError as exc:
-        raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
-
-
-def start_session_log(
-    *,
-    summary=None,
-    relates_to=None,
-    discovered_from=None,
-    repo_root=None,
-    _creation_channel: str = "python",
-) -> dict:
-    """Explicitly create a NEW session_log and make it the current one (rotating
-    away from any prior log). Returns ``{"id", "alias"}``.
-
-    ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
-    ``"python"``; the MCP adapter passes ``"mcp"``."""
-    from rebar._commands import session_log
-    from rebar._commands._seam import CommandError
-
-    try:
-        return session_log.start(
-            summary=summary,
-            relates_to=relates_to,
-            discovered_from=discovered_from,
-            repo_root=repo_root,
-            creation_channel=_creation_channel,
-        )
-    except CommandError as exc:
-        raise RebarError(exc.message, returncode=exc.returncode, stderr=exc.message) from None
-
-
-def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
-    """Edit ticket fields: title, priority, assignee, ticket_type, description.
-
-    Tags (P2.3): use ``add_tags``/``remove_tags``/``set_tags`` (lists or CSV) to
-    mutate via convergent TAG_DELTA deltas. (The ``tags=`` set-alias was removed
-    pre-1.0 — DE7; it is now rejected as an unknown field.) Returns the save-time
-    description-cap warning (``None`` when silent; ALSO logged), for MCP to surface.
-    """
-    tag_add = fields.pop("add_tags", None)
-    tag_remove = fields.pop("remove_tags", None)
-    tag_set = fields.pop("set_tags", None)
-    normalized = {}
-    for key, value in fields.items():
-        if value is None:
-            continue
-        normalized[key] = str(value)
-    from rebar._commands import composer
-
-    warning = _python_leaf(
-        composer.edit_core,
-        ticket_id,
-        normalized,
-        repo_root=repo_root,
-        what="edit",
-        tag_add=tag_add,
-        tag_remove=tag_remove,
-        tag_set=tag_set,
-    )
-    return _warn_description_cap(warning)
-
-
-def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:
-    """Link two tickets.
-
-    ``relation`` must be one of the seven canonical relations: blocks, depends_on,
-    relates_to, duplicates, supersedes, discovered_from, caused_by.
-
-    Returns the REDIRECT record when hierarchy escalation recorded a DIFFERENT pair
-    than the one asked for, else None. The CLI prints that record; this path cannot
-    (stdout is suppressed so rebar-mcp's stdio JSON-RPC stream stays intact), so
-    returning it is how a library or MCP caller learns the substitution happened
-    instead of believing the requested edge was written (bug 1803-df54-18bb-4881).
-    """
-    from rebar._commands import composer
-
-    def _link(i, j, rel, *, repo_root):
-        return composer.link_core(i, j, rel, repo_root=repo_root, quiet=True)
-
-    return _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
-
-
-def unlink(id1: str, id2: str, relation: str | None = None, *, repo_root=None) -> None:
-    from rebar._commands import unlink as _unlink_cmd
-
-    _python_leaf(_unlink_cmd.unlink_core, id1, id2, relation, repo_root=repo_root, what="unlink")
-
-
-def tag(ticket_id: str, tag: str, *, repo_root=None) -> None:
-    from rebar._commands import leaf
-
-    _python_leaf(leaf.tag, ticket_id, tag, repo_root=repo_root, what="tag")
-
-
-def untag(ticket_id: str, tag: str, *, repo_root=None) -> None:
-    from rebar._commands import leaf
-
-    _python_leaf(leaf.untag, ticket_id, tag, repo_root=repo_root, what="untag")
-
-
-def archive(ticket_id: str, *, repo_root=None) -> None:
-    from rebar._commands import leaf
-
-    _python_leaf(leaf.archive, ticket_id, repo_root=repo_root, what="archive")
-
-
-def compact(ticket_id: str | None = None, *, repo_root=None) -> None:
-    # In-process (Tier E E3): compact-on-id via the shared compaction core
-    # (ticket-compact.sh retired from this path). Output is captured (the bash
-    # library wrapper captured it too); failures raise RebarError.
-    import contextlib
-    import io
-
-    from rebar._commands import compact as _compact
-
-    out, err = io.StringIO(), io.StringIO()
-    argv = [ticket_id] if ticket_id else []
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        rc = _compact.compact_cli(argv, repo_root=repo_root)
-    if rc != 0:
-        raise RebarError(
-            f"rebar compact failed (exit {rc}): {err.getvalue().strip()}",
-            returncode=rc,
-            stderr=err.getvalue(),
-        )
-
-
-def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
-    """Attach commit SHAs to a ticket as a durable, union-merged ``commits`` list
-    (epic a88f / WS-H). ``commits`` is a list of SHA strings or {sha, message?,
-    author?, …} records. Convergent (union by sha) and NOT synced to Jira. Returns
-    ``{ticket_id, attached}``."""
-    from rebar._commands import _seam
-    from rebar._commands._seam import CommandError
-    from rebar._engine_support import commit_impact
-
-    tracker = _seam.tracker_dir(repo_root)
-    tid = _seam.require_id(ticket_id, tracker)
-    _seam.require_not_ghost(tid, tracker)
-    records = []
-    for c in commits:
-        if isinstance(c, str) and c:
-            records.append({"sha": c})
-        elif isinstance(c, dict) and c.get("sha"):
-            records.append(c)
-        else:
-            raise RebarError(f"invalid commit entry {c!r}: need a sha string or {{sha, …}} dict")
-    # ALL-OR-NOTHING: the WHOLE batch is validated before anything is appended, so one bad
-    # SHA never leaves a half-recorded attachment. The CLI and the MCP tool inherit this by
-    # construction — they all route through THIS seam.
-    unresolvable = commit_impact.unresolvable_shas([r["sha"] for r in records], tracker)
-    if unresolvable:
-        raise RebarError(
-            f"cannot attach commits: {', '.join(unresolvable)} did not resolve to a commit "
-            "in this repository; nothing was recorded"
-        )
-    try:
-        _seam.append_event(tid, "COMMITS", {"commits": records}, tracker, repo_root=repo_root)
-    except CommandError as exc:
-        raise RebarError(
-            f"rebar attach-commits failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-    return {"ticket_id": tid, "attached": len(records)}
-
-
-# ── Cryptographic manifest signing (environment-bound) ────────────────────────
-def sign_manifest(ticket_id: str, manifest, *, repo_root=None) -> SignResult:
-    """Sign a manifest of verified steps for a ticket with the environment key.
-
-    ``manifest`` is a list of verified-step strings (or a JSON-array string).
-    Computes an HMAC-SHA256 signature with the environment-specific signing key
-    (``REBAR_SIGNING_KEY`` or the gitignored ``.signing-key``), persists it as a
-    SIGNATURE event, and returns the record
-    ``{ticket_id, manifest, algorithm, signature, key_id, head_sha, signed_at}``.
-    """
-    from rebar import signing
-    from rebar.signing import SigningError
-
-    try:
-        return cast("SignResult", signing.sign_manifest(ticket_id, manifest, repo_root=repo_root))
-    except SigningError as exc:
-        raise RebarError(
-            f"rebar sign failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
-
-
-def verify_signature(
-    ticket_id: str, *, kind: str | None = None, repo_root=None
-) -> VerifySignatureResult:
-    """Certify a ticket's recorded verified steps against its signature.
-
-    Returns a verdict dict ``{ticket_id, verified, verdict, reason, manifest,
-    ...}``. ``verdict`` is ``certified`` (steps match the signature under this
-    environment's key), ``mismatch`` (steps altered / signature invalid),
-    ``foreign_key`` (signed by a different environment), or ``unsigned``. Raises
-    :class:`RebarError` only when the ticket id cannot be resolved.
-
-    ``kind`` selects which attestation to verify (epic dark-acme-lumen): ``None`` (default)
-    verifies the most-recent signature (back-compatible); an explicit kind (e.g.
-    ``"completion-verifier"``) verifies that kind strictly from the kind-keyed map.
-    """
-    from rebar import signing
-    from rebar.signing import SigningError
-
-    try:
-        return cast(
-            "VerifySignatureResult",
-            signing.verify_signature(ticket_id, kind=kind, repo_root=repo_root),
-        )
-    except SigningError as exc:
-        raise RebarError(
-            f"rebar verify-signature failed (exit {exc.returncode}): {exc.message}",
-            returncode=exc.returncode,
-            stderr=exc.message,
-        ) from None
