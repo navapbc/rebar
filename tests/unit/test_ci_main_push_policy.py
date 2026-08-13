@@ -299,11 +299,11 @@ def test_gerrit_verify_stays_a_dispatch_only_patchset_gate() -> None:
 
 
 def test_reconcilers_keep_their_own_schedules_and_never_cancel() -> None:
-    for name, cron in (
-        ("reconcile-bridge.yml", "*/20 * * * *"),
-        ("reconcile-bridge-canary.yml", "0 * * * *"),
+    for name, crons in (
+        ("reconcile-bridge.yml", ["0 0-23/2 * * *", "40 0-23/2 * * *", "20 1-23/2 * * *"]),
+        ("reconcile-bridge-canary.yml", ["0 */2 * * *"]),
     ):
-        assert _crons(name) == [cron], f"{name} is a separate mechanism; leave it alone"
+        assert _crons(name) == crons, f"{name} is a separate mechanism; leave it alone"
         assert _load(name)["concurrency"]["cancel-in-progress"] is False, (
             f"{name} must not cancel — a reconciler run is not superseded by a later one"
         )

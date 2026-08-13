@@ -1,6 +1,6 @@
 # rebar — Jira <-> rebar Reconcile Bridge
 #
-# Runs the drift-healing reconciler on a ~20-minute cadence to keep the Jira
+# Runs the drift-healing reconciler on a uniform 40-minute cadence to keep the Jira
 # project (JIRA_PROJECT) and the local rebar `tickets` store in sync.
 #
 # This is a TEMPLATE: client projects copy this file verbatim and set the repo
@@ -17,11 +17,14 @@
 # Continuous loop (OPT-IN, default OFF): set repo Variable RECONCILE_CONTINUOUS=true
 # to have each run re-dispatch the next via workflow_dispatch (the documented
 # exception where the default GITHUB_TOKEN *does* create a new run), giving
-# ~pass-duration cadence instead of the */20 floor — without shrinking pass scope.
-# The */20 schedule stays as a backstop that re-seeds the chain if it ever stops.
-# Leave the Variable unset (the TEMPLATE default) and the bridge behaves exactly as
-# before: a plain */20 schedule. Enable it ONLY on a public repo or a self-hosted
-# runner — hosted runners bill wall-clock for the near-continuous chain.
+# a cadence of two pass durations instead of the 40-minute floor — without shrinking
+# pass scope. The chain is PACED: the re-dispatch step below sleeps for the pass's own
+# elapsed duration before queueing the successor, so the chain's period is 2x a pass
+# rather than 1x (ticket f59a-2d16-68c5-450c). The 40-minute schedule stays as a
+# backstop that re-seeds the chain if it ever stops. Leave the Variable unset (the
+# TEMPLATE default) and the bridge behaves exactly as before: a plain 40-minute
+# schedule. Enable it ONLY on a public repo or a self-hosted runner — hosted runners
+# bill wall-clock for the chain, and the pacing sleep is billed too.
 #
 # rebar divergences from DSO's reconcile-bridge (see docs/jira-sync-setup.md
 # "Necessary & sufficient"):
@@ -35,8 +38,14 @@
 name: Reconcile Bridge
 
 on:
+  # Uniform 40-minute backstop. Cron has no "every 40 minutes" spelling — `*/40` would
+  # fire at :00 and :40 and then restart the hour, giving alternating 40/20-minute gaps.
+  # Three entries over a 2-hour cycle are the standard uniform form: :00, :40, 1:20,
+  # 2:00, 2:40, 3:20, … — every consecutive gap is exactly 40 minutes.
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '0 0-23/2 * * *'
+    - cron: '40 0-23/2 * * *'
+    - cron: '20 1-23/2 * * *'
   workflow_dispatch:
     inputs:
       mode:
@@ -100,6 +109,14 @@ jobs:
           # corruption (bug saggy-pupil-plant / f193). The tickets store MUST be
           # reconciled with full history + merge, never shallow + rebase.
           fetch-depth: 0
+
+      - name: Record the pass start time (chain pacing)
+        # Read by the paced re-dispatch step at the end of the job to compute how long
+        # this pass took. Exported via $GITHUB_ENV because a job-level `env:` cannot be
+        # computed. Kept first-ish so it measures the whole pass, install included.
+        run: |
+          set -euo pipefail
+          echo "PASS_STARTED_EPOCH=$(date +%s)" >> "${GITHUB_ENV}"
 
       - name: Validate Jira configuration
         env:
@@ -296,7 +313,20 @@ jobs:
         # the chain cannot fan out.
         #
         # Gated on RECONCILE_CONTINUOUS so the template default (Variable unset) keeps
-        # the plain */20 schedule — clients on private repos are unaffected.
+        # the plain 40-minute schedule — clients on private repos are unaffected.
+        #
+        # PACING (ticket f59a-2d16-68c5-450c): re-dispatching immediately made the chain's
+        # inter-invocation period exactly ONE pass duration (~7 min in this repo). Sleeping
+        # for the pass's own elapsed time first makes it TWO — the doubling the operator
+        # asked for, self-tuning at any pass duration so a client copying this TEMPLATE gets
+        # it without a repo-specific literal. Bounded three ways, all plain literals:
+        #   * PASS_STARTED_EPOCH unset or non-numeric -> pacing skipped entirely. The step
+        #     runs under `set -euo pipefail` and the workflow-lint harness executes this body
+        #     with only PATH+MODE in the environment, so arithmetic must never see an empty
+        #     string.
+        #   * the sleep is capped at 900 s (15 min);
+        #   * pacing is skipped once elapsed >= 1800 s (30 min) — a pass that slow already
+        #     paces itself, and the rest of the `timeout-minutes: 60` budget must stay free.
         #
         # if: !cancelled() — a FAILED pass still re-seeds the chain (resilience),
         # while CANCELLING a run is a clean kill switch. Flipping the Variable off
@@ -307,12 +337,27 @@ jobs:
         run: |
           set -euo pipefail
           echo "RECONCILE_CONTINUOUS=true — re-dispatching to sustain the loop (mode=${MODE})."
+          started="${PASS_STARTED_EPOCH:-}"
+          if ! printf '%s' "${started}" | grep -Eq '^[0-9]+$'; then
+            echo "PASS_STARTED_EPOCH unset or non-numeric — chain pacing skipped for this run."
+          else
+            elapsed=$(( $(date +%s) - started ))
+            [ "${elapsed}" -lt 0 ] && elapsed=0
+            if [ "${elapsed}" -ge 1800 ]; then
+              echo "Pass took ${elapsed}s (>= 1800s) — already self-pacing, no pacing sleep."
+            else
+              pause="${elapsed}"
+              [ "${pause}" -gt 900 ] && pause=900
+              echo "Pacing the chain: pass took ${elapsed}s, sleeping ${pause}s so the chain's period is two pass durations."
+              sleep "${pause}"
+            fi
+          fi
           # Bug 8aed: a bare `gh workflow run` here let a transient re-dispatch failure fail
           # an ALREADY-CONVERGED pass. When the workflow is disabled, gh exits non-zero with
           # `HTTP 422: Cannot trigger a 'workflow_dispatch' on a disabled workflow`, and
           # `set -e` turned that into a red run whose reconcile had fully succeeded (runs
           # 31129551929 / 31129431096) — tripping the heartbeat/alerting path for a non-problem.
-          # Re-seeding is already self-healing: the */20 schedule above is the documented
+          # Re-seeding is already self-healing: the 40-minute schedule above is the documented
           # backstop that restarts the chain. So the disabled-workflow 422 is a benign no-op.
           # The downgrade is deliberately NARROW — it requires BOTH the 422 status and the
           # disabled-workflow phrase, so an unrelated 422 (and every auth/404/network/rate-limit
@@ -325,7 +370,7 @@ jobs:
           fi
           if printf '%s' "${dispatch_out}" | grep -q 'HTTP 422' \
             && printf '%s' "${dispatch_out}" | grep -qi 'disabled workflow'; then
-            echo "::warning::Re-dispatch skipped: this workflow is disabled (HTTP 422). The reconcile pass itself converged; the */20 schedule backstop re-seeds the continuous loop once the workflow is re-enabled."
+            echo "::warning::Re-dispatch skipped: this workflow is disabled (HTTP 422). The reconcile pass itself converged; the 40-minute schedule backstop re-seeds the continuous loop once the workflow is re-enabled."
             exit 0
           fi
           echo "::error::Re-dispatch failed (exit ${dispatch_rc}) — see the captured gh output above"
