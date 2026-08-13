@@ -24,7 +24,14 @@ from rebar._commands._seam import (
     require_id,
     require_not_ghost,
     tracker_dir,
-    validate_tag_name,
+)
+from rebar._commands.composer_edit import (
+    _apply_tag_deltas,
+    _edit_description_warning,
+    _edit_repos_list,
+    _enforce_promote_only,
+    _parse_tag_list,
+    _resolve_new_parent,
 )
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 from rebar._engine_support.resolver import resolve_ticket_id
@@ -83,6 +90,26 @@ def _compute_alias(ticket_id: str) -> str:
     return compute_genesis_alias(ticket_id) or ticket_id.replace("-", "")[:8]
 
 
+def _apply_bridge_repos(data: dict, bridge_project: str | None, repos) -> None:
+    """Merge the story-cef7 bridge/project fields into a CREATE event's ``data``.
+
+    Split out of :func:`create_core` (which sits at its locked complexity ceiling,
+    ``.github/complexity-baseline.json``). ``bridge_project`` is TRI-STATE and carried
+    PRESENT-ONLY: the ``None`` default means "flag absent — leave state's seeded None";
+    an explicit ``""`` or a real key is stored verbatim so ``""`` (never-sync) and a sync
+    target both survive replay. ``repos`` accepts a CSV string (mirroring ``--tags``) or a
+    list; carried only when provided (the seeded ``[]`` covers the absent case).
+    """
+    if bridge_project is not None:
+        data["bridge_project"] = bridge_project
+    if repos is not None:
+        data["repos"] = (
+            [r.strip() for r in repos.split(",") if r.strip()]
+            if isinstance(repos, str)
+            else [r for r in repos if r]
+        )
+
+
 def create_core(
     ticket_type: str,
     title: str,
@@ -98,6 +125,8 @@ def create_core(
     repo_root=None,
     creation_channel: str,
     detected_by: str | None = None,
+    bridge_project: str | None = None,
+    repos=None,
 ) -> dict:
     """Validate, compose, and append a CREATE event; return ``{id, alias, title}``.
 
@@ -229,6 +258,8 @@ def create_core(
         if _detected_norm:
             data["detected_by"] = _detected_norm
 
+    _apply_bridge_repos(data, bridge_project, repos)
+
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
     # Save-time heads-up (ticket 594b): computed AFTER the event lands, so an oversized
     # description is reported the moment it is written instead of at review-plan time.
@@ -250,6 +281,24 @@ def create_core(
     }
 
 
+def _match_long_opt(args: list[str], i: int, name: str):
+    """Match a long option ``--name value`` or ``--name=value`` at ``args[i]``.
+
+    Split out of :func:`create_cli` (at its locked complexity ceiling). Returns
+    ``(value, next_index)`` when it matches, else ``None`` — mirroring the exact
+    ``elif a in (name,) and i + 1 < n`` / ``elif a.startswith(name + "=")`` pair it
+    replaces, so a bare ``--name`` with no following value does NOT match (it falls
+    through to the caller's unknown-option rejection, unchanged).
+    """
+    a = args[i]
+    if a == name and i + 1 < len(args):
+        return args[i + 1], i + 2
+    prefix = f"{name}="
+    if a.startswith(prefix):
+        return a[len(prefix) :], i + 1
+    return None
+
+
 def create_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``create``: parse --output + flags, format output.
 
@@ -268,11 +317,29 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
 
     ticket_type, title = rest[0], rest[1]
     parent = priority = assignee = description = detected_by = None
+    bridge_project = None
+    repos = None
     tags = ""
     i, args = 2, rest
     n = len(args)
     while i < n:
         a = args[i]
+        m = _match_long_opt(args, i, "--bridge-project")
+        if m is not None:
+            bridge_project, i = m
+            continue
+        m = _match_long_opt(args, i, "--repos")
+        if m is not None:
+            repos, i = m
+            continue
+        m = _match_long_opt(args, i, "--detected-by")
+        if m is not None:
+            detected_by, i = m
+            continue
+        m = _match_long_opt(args, i, "--assignee")
+        if m is not None:
+            assignee, i = m
+            continue
         if a in ("--parent",) and i + 1 < n:
             parent = args[i + 1]
             i += 2
@@ -284,18 +351,6 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             i += 2
         elif a.startswith("--priority="):
             priority = a[len("--priority=") :]
-            i += 1
-        elif a in ("--detected-by",) and i + 1 < n:
-            detected_by = args[i + 1]
-            i += 2
-        elif a.startswith("--detected-by="):
-            detected_by = a[len("--detected-by=") :]
-            i += 1
-        elif a in ("--assignee",) and i + 1 < n:
-            assignee = args[i + 1]
-            i += 2
-        elif a.startswith("--assignee="):
-            assignee = a[len("--assignee=") :]
             i += 1
         elif a in ("--description", "-d") and i + 1 < n:
             description = args[i + 1]
@@ -332,6 +387,8 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             repo_root=repo_root,
             creation_channel="cli",
             detected_by=detected_by,
+            bridge_project=bridge_project,
+            repos=repos,
         )
     except CommandError as exc:
         if fmt == "json" and exc.error_code:
@@ -373,39 +430,42 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     return 0
 
 
+# Extracted along the existing call-graph seams (module-size policy); re-exported
+# so composer-path callers and monkeypatch sites still work.
+from rebar._commands.link_revert import (  # noqa: E402,F401
+    _REVERT_USAGE,
+    _link_dry_run,
+    link_cli,
+    link_core,
+    revert_cli,
+    revert_core,
+)
+
+# ── EDIT surface ─────────────────────────────────────────────────────────────
 # Tags are NOT an EDIT field any more (P2.3): they mutate via TAG_DELTA deltas
 # (--add-tag/--remove-tag/--set-tags), so a whole-field EDIT can never clobber a
 # concurrent tag add. The library/MCP ``edit(tags=...)`` arg is a DEPRECATED alias
 # for --set-tags, intercepted in edit_core before this field set is validated.
-_EDIT_FIELDS = ("title", "priority", "assignee", "ticket_type", "description", "parent")
+_EDIT_FIELDS = (
+    "title",
+    "priority",
+    "assignee",
+    "ticket_type",
+    "description",
+    "parent",
+    "bridge_project",
+    "repos",
+)
 _EDIT_USAGE = (
     "Usage: ticket edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] "
     "[--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] "
     "[--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--review]"
 )
 
+_TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
 
-def _parse_tag_list(value, *, validate: bool) -> list[str]:
-    """Normalise a tag spec (CSV string or list) to a deduped, trimmed tag list.
-
-    ``validate`` rejects empty/whitespace-only/control-char names via the shared
-    :func:`validate_tag_name` (applied to tags ENTERING state — adds/sets);
-    removals skip it (you may legitimately remove a previously-malformed tag, and
-    an empty token there is just dropped). Order-preserving dedup.
-    """
-    if value is None:
-        return []
-    items = value.split(",") if isinstance(value, str) else list(value)
-    out: list[str] = []
-    for raw in items:
-        t = str(raw).strip()
-        if not t:
-            continue  # CSV cleanliness: empty tokens (a,,b / --set-tags="") dropped
-        if validate:
-            t = validate_tag_name(t)  # non-empty here, so only control-char check fires
-        if t not in out:
-            out.append(t)
-    return out
+# Dashed CLI spellings mapped to their `_EDIT_FIELDS` state-field name (story cef7).
+_EDIT_FLAG_ALIASES = {"bridge-project": "bridge_project"}
 
 
 def edit_core(
@@ -438,7 +498,6 @@ def edit_core(
     now just an unknown field, so use ``set_tags``/``add_tags``/``remove_tags``.)
     """
     from rebar.reducer import reduce_ticket
-    from rebar.reducer._version import TAG_DELTA
 
     tracker = tracker_dir(repo_root)
     fields = dict(fields)
@@ -466,8 +525,13 @@ def edit_core(
     require_not_ghost(resolved, tracker)
 
     out: dict = {}
-    for key, value in fields.items():
-        value = "" if value is None else str(value)
+    for key, raw_value in fields.items():
+        # `repos` carries a list (or a CSV string) — normalise BEFORE the blanket str()
+        # coercion below would stringify a list into its repr. Freely editable, no guard.
+        if key == "repos":
+            out["repos"] = _edit_repos_list(raw_value)
+            continue
+        value = "" if raw_value is None else str(raw_value)
         if key == "title":
             if value.strip() == "":
                 raise CommandError(
@@ -498,98 +562,19 @@ def edit_core(
         else:  # assignee
             out[key] = value
 
+    # Promote-only guard (story cef7): `bridge_project` may be set on an UNBOUND ticket
+    # but never changed once the ticket already holds a tracker binding.
+    _enforce_promote_only(out, resolved, tracker)
+
     warning: str | None = None
     if out:
         append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
         warning = _edit_description_warning(out, resolved, tracker, reduce_ticket)
 
     if has_tag_op:
-        observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
-        if has_set:
-            # Compile the wholesale set to a delta vs observed (add-wins):
-            # add what's missing, remove observed tags not in the target set.
-            added = [t for t in set_list if t not in observed]
-            removed = [t for t in observed if t not in set_list]
-        else:
-            # No-op suppression: only add what's absent, only remove what's present.
-            added = [t for t in add_list if t not in observed]
-            removed = [t for t in remove_list if t in observed]
-        if added or removed:
-            append_event(
-                resolved,
-                TAG_DELTA,
-                {"added": added, "removed": removed},
-                tracker,
-                repo_root=repo_root,
-            )
+        _apply_tag_deltas(resolved, tracker, repo_root, has_set, set_list, add_list, remove_list)
 
     return warning
-
-
-def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) -> str | None:
-    """The save-time description-cap notice for an EDIT that wrote a description.
-
-    Split out of :func:`edit_core` (which sits at its locked complexity ceiling). The
-    ticket type is the one the ticket has AFTER this edit, since the same call may change
-    it. Returns ``None`` when no description was written, the description is within
-    ``verify.max_ticket_description_chars``, or the plan-review start-work gate does not
-    apply — see :func:`rebar._commands.gates.description_cap_warning`.
-    """
-    if "description" not in out:
-        return None
-    from rebar._commands.gates import description_cap_warning
-
-    state = reduce_ticket(str(tracker / resolved)) or {}
-    return description_cap_warning(
-        out["description"],
-        str(out.get("ticket_type") or state.get("ticket_type") or ""),
-        ticket_id=str(state.get("alias") or resolved),
-        cfg_root=os.path.dirname(str(tracker)),
-    )
-
-
-def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> str:
-    """The ``--parent`` validation cascade; returns the resolved parent_id (or ""
-    for the ``null`` detach sentinel)."""
-    if value == "":
-        raise CommandError(
-            "Error: --parent requires a non-empty value (use --parent=null to detach)"
-        )
-    if value == "null":
-        return ""
-    new_parent = resolve_ticket_id(value, str(tracker))
-    if not new_parent or not (tracker / new_parent).is_dir():
-        raise CommandError(f"Error: parent ticket '{value}' does not exist")
-    if new_parent == ticket_id:
-        raise CommandError("Error: ticket cannot be its own parent")
-    status = (reduce_ticket(str(tracker / new_parent)) or {}).get("status", "") or ""
-    if status not in ("open", "in_progress"):
-        if status == "":
-            raise CommandError(
-                f"Error: cannot verify status of parent ticket '{new_parent}' — refusing "
-                f"to re-parent (fail-closed). Verify the ticket exists and is in an active "
-                f"state, then retry."
-            )
-        raise CommandError(
-            f"Error: cannot re-parent to {status} ticket '{new_parent}'. Reopen the parent "
-            f"first with: ticket transition {new_parent} {status} open"
-        )
-    walk_id, count = new_parent, 0
-    while walk_id and count < 64:
-        walk_parent = (reduce_ticket(str(tracker / walk_id)) or {}).get("parent_id", "") or ""
-        if not walk_parent or walk_parent == "None":
-            break
-        if walk_parent == ticket_id:
-            raise CommandError(
-                f"Error: cannot set parent — would create a cycle (ticket {ticket_id} is an "
-                f"ancestor of {new_parent})"
-            )
-        walk_id = walk_parent
-        count += 1
-    return new_parent
-
-
-_TAG_FLAGS = ("add-tag", "remove-tag", "set-tags")
 
 
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
@@ -636,6 +621,10 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             print(f"Error: unexpected argument '{arg}'", file=sys.stderr)
             return 1
+
+        # `--bridge-project` reads more naturally with a dash but the state field (and
+        # `_EDIT_FIELDS`) is `bridge_project`; accept the dashed spelling as an alias.
+        name = _EDIT_FLAG_ALIASES.get(name, name)
 
         if name in _TAG_FLAGS:
             _accept_tag(name, val)
@@ -690,15 +679,3 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         _render_plan_review_text(result)
         return _disposition_exit_code(result, indeterminate_code=2)
     return 0
-
-
-# Extracted along the existing call-graph seam to link_revert.py (module-size
-# policy); re-exported so composer-path callers and monkeypatch sites still work.
-from rebar._commands.link_revert import (  # noqa: E402,F401
-    _REVERT_USAGE,
-    _link_dry_run,
-    link_cli,
-    link_core,
-    revert_cli,
-    revert_core,
-)

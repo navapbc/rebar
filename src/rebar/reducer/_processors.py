@@ -98,6 +98,13 @@ def process_create(
         state["alias"] = compute_alias(ticket_id)
     state["description"] = data.get("description") or ""
     state["tags"] = data.get("tags", [])
+    # Bridge/project fields (story cef7). `bridge_project` is projected PRESENT-ONLY via a
+    # key-presence check (NOT truthiness) so the three states stay distinguishable after
+    # replay: absent key leaves the seeded None, an explicit "" projects "" (never-sync),
+    # and a non-empty key projects the sync target. `repos` defaults to the seeded [].
+    if "bridge_project" in data:
+        state["bridge_project"] = data["bridge_project"]
+    state["repos"] = data.get("repos", state.get("repos", []))
     # Provenance (P1.2 import): a ticket re-created by `rebar import` carries the
     # ORIGINAL store's id/date/author/env as source_* on the CREATE data (fresh
     # local id + fresh HLC timestamp are used for the new event; foreign HLC

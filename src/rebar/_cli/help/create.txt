@@ -1,2 +1,3 @@
-Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--output json]
+Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--bridge-project <key>] [--repos <r1,r2>] [--output json]
 Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).
+Bridge project: --bridge-project sets the ticket's target bridge project key (tri-state) — omit for the unbound/legacy default, "" (empty) to mark never-sync, or a key (e.g. REB) to bind. --repos sets the associated repositories (CSV, mirroring --tags).
