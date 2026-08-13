@@ -370,3 +370,60 @@ def test_get_all_blocked_by_accumulates_targets_without_a_ticket_dir(tmp_path: P
     assert "tkt-seed" not in blocked, (
         f"the seed must not appear in the result (it is visited, not accumulated), got {blocked!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Characterization: check_cycle_at_level refuses to traverse ACROSS levels
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_check_cycle_at_level_refuses_a_target_at_another_level(tmp_path: Path) -> None:
+    """A dep whose target sits at another level is never traversed into.
+
+    Pins the TARGET-side guard — the single `_is_at_level` call in
+    `_same_level_neighbors` — which is distinct from the inline CURRENT-side
+    `state.get("ticket_type", ...) != level` early-return on the node being expanded.
+    Every other `check_cycle_at_level` test uses one uniform level, so nothing else
+    exercises it.
+
+    The probe must be a DIRECT cross-level edge whose far end IS `source_id`: `bfs`
+    accumulates what `neighbors_fn` yields, so with the guard in place nothing is
+    accumulated from `epic-B` and the verdict is False. Deleting the `_is_at_level`
+    call makes `task-M` be yielded and accumulated, flipping the verdict to True.
+    """
+    check_cycle_at_level = _get_check_cycle_at_level()
+    tracker = tmp_path / ".tickets-tracker"
+    _make_ticket(tracker, "epic-B", ticket_type="epic")
+    _make_ticket(tracker, "task-M", ticket_type="task")
+    _write_link_event("epic-B", "task-M", "depends_on", str(tracker))
+
+    assert check_cycle_at_level("task-M", "epic-B", "epic", str(tracker)) is False, (
+        "a dep target whose ticket_type differs from the queried level must not be "
+        "traversed into, so task-M is unreachable from epic-B at the 'epic' level"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_check_cycle_at_level_does_not_route_through_a_lower_level_hop(tmp_path: Path) -> None:
+    """A lower-level hop cannot reconnect two nodes at the queried level.
+
+    End-to-end companion to the target-side probe above: `epic-B → task-M → epic-A`
+    is a real dependency chain, but at the 'epic' level the walk stops at `task-M`
+    (both guards refuse it), so `epic-A` is unreachable and adding `epic-A → epic-B`
+    is NOT reported as a cycle.
+    """
+    check_cycle_at_level = _get_check_cycle_at_level()
+    tracker = tmp_path / ".tickets-tracker"
+    _make_ticket(tracker, "epic-A", ticket_type="epic")
+    _make_ticket(tracker, "epic-B", ticket_type="epic")
+    _make_ticket(tracker, "task-M", ticket_type="task")
+    _write_link_event("epic-B", "task-M", "depends_on", str(tracker), timestamp=1500)
+    _write_link_event("task-M", "epic-A", "depends_on", str(tracker), timestamp=1501)
+
+    assert check_cycle_at_level("epic-A", "epic-B", "epic", str(tracker)) is False, (
+        "an epic → task → epic chain must not count as an epic-level cycle: the "
+        "traversal is confined to one level at BOTH ends of every edge"
+    )
