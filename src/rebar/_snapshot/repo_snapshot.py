@@ -531,6 +531,85 @@ def materialize(
 _TRACKER_DIRNAME = ".tickets-tracker"
 
 
+def _pin_tickets_sha(
+    root_dir: str, ref: str, remote: str, *, fetch: bool
+) -> tuple[str, str] | None:
+    """Resolve the ticket-store pin from the LIVE tracker repo, or ``None`` to use the
+    caller's ``origin/<ref>`` -> local-branch chain (bug 2a6f).
+
+    Returns ``(sha, source_dir)`` — ``source_dir`` being the repo that owns the objects.
+
+    ``None`` is returned whenever the tracker repo is not usable as a pin source (absent —
+    CI, a checkout-less environment — or not a git repo). Otherwise:
+
+    * ``fetch=True`` (``review-plan``, standalone ``verify-completion``, MCP): reconverge the
+      tracker with ``<remote>/<ref>`` FIRST, un-throttled, then CONFIRM the outcome — the
+      store's :func:`~rebar._store.sync.reconverge` returns ``None`` on success and on every
+      failure/early-out alike, so it carries no usable signal and we ask git directly with
+      ``merge-base --is-ancestor``. Only a confirmed at-or-ahead ``HEAD`` is pinned; anything
+      else (fetch failed, lock timeout, no remote-tracking ref) returns ``None`` so the caller
+      falls back to today's exact behaviour. That keeps "no content visible today is lost" an
+      unconditional invariant rather than one contingent on a throttle window being open.
+    * ``fetch=False`` (the close gate, which passes it for the LOCAL code ref ``HEAD``): pin
+      tracker ``HEAD`` as-is. It is still current-at-close, and never the stale mirror.
+    """
+    from rebar.config import ConfigError as _ConfigError
+    from rebar.config import tickets_branch as _tickets_branch
+    from rebar.config import tracker_dir as _tracker_dir
+
+    try:
+        tracker = str(_tracker_dir(root_dir))
+    except _ConfigError:
+        return None
+    if not os.path.isdir(tracker):
+        return None
+    # Ask git, don't stat `.git` — the tracker is a standalone CLONE in a long-lived checkout
+    # (`.git` is a directory) but a linked WORKTREE of the code repo in a freshly initialized
+    # one (`.git` is a FILE). Only the clone layout can drift, but both must resolve here, and
+    # a `.git`-is-a-dir test silently excludes the worktree layout.
+    probe = subprocess.run(
+        ["git", "-C", tracker, "rev-parse", "--git-dir"], capture_output=True, text=True
+    )
+    if probe.returncode != 0:
+        return None
+
+    if fetch:
+        try:
+            branch = _tickets_branch(root_dir)
+        except _ConfigError:
+            branch = ref
+        try:
+            from rebar._store.sync import reconverge as _reconverge
+
+            _reconverge(tracker)
+        except Exception:  # noqa: BLE001 — best-effort freshness; the confirm below decides
+            pass
+        # Confirm, don't assume: HEAD must contain everything the shared ref holds.
+        probe = subprocess.run(
+            [
+                "git",
+                "-C",
+                tracker,
+                "merge-base",
+                "--is-ancestor",
+                f"{remote}/{branch}",
+                "HEAD",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if probe.returncode != 0:
+            return None
+
+    head = subprocess.run(
+        ["git", "-C", tracker, "rev-parse", "HEAD"], capture_output=True, text=True
+    )
+    sha = (head.stdout or "").strip()
+    if head.returncode != 0 or not sha:
+        return None
+    return sha, tracker
+
+
 def materialize_tickets(
     ref: str = "tickets",
     *,
@@ -549,7 +628,15 @@ def materialize_tickets(
     build-dir + atomic-``rename`` + cache-hit-by-path pattern. The returned ROOT
     (``<store>/tickets-<sha>``) is what a gate points its rebar ticket tools at:
     ``config.tracker_dir(<root>)`` resolves to the ``.tickets-tracker/`` subdir holding the
-    materialized event dirs. Fails closed (no path) on error, like :func:`materialize`."""
+    materialized event dirs. Fails closed (no path) on error, like :func:`materialize`.
+
+    The pin is taken from the LIVE tracker repo's ``HEAD`` whenever that repo is on disk (bug
+    2a6f): the tracker is a SEPARATE repository, so the code repo's ``refs/heads/tickets`` is
+    only a mirror that advances on fetch — pinning it made the gate read an arbitrarily stale
+    store (measured in the wild at 6757 commits behind) and report recorded comments as
+    nonexistent. Tracker ``HEAD`` is the state every other rebar read sees, so the pin is
+    current-by-construction and the gate's deterministic half (which reads the live store)
+    agrees with the agent's ``show_ticket``. See :func:`_pin_tickets_sha`."""
     root_dir = str(repo_root) if repo_root else "."
     # Prefer <remote>/<ref> when the configured tickets remote exists (fetch first, so we
     # pin the SHARED store, not a stale local copy — matching how the code path resolves the
@@ -564,16 +651,23 @@ def materialize_tickets(
         remote = _tickets_remote(root_dir)
     except _ConfigError:
         remote = "origin"
-    # blobless=False on every fetching resolution — this ref is about to be materialized.
-    if fetch and has_remote(root_dir, remote):
-        try:
-            sha = resolve_ref(
-                f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote, blobless=False
-            )
-        except SnapshotRefError:
-            sha = resolve_ref(ref, repo_root, fetch=False)
+    # Prefer the LIVE tracker repo's HEAD (bug 2a6f) — see the docstring. `source_dir` is the
+    # repo the tree is materialized FROM: the tracker owns those objects, the code repo may not.
+    pinned = _pin_tickets_sha(root_dir, ref, remote, fetch=fetch)
+    if pinned is not None:
+        sha, source_dir = pinned
     else:
-        sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
+        source_dir = root_dir
+        # blobless=False on every fetching resolution — this ref is about to be materialized.
+        if fetch and has_remote(root_dir, remote):
+            try:
+                sha = resolve_ref(
+                    f"{remote}/{ref}", repo_root, fetch=fetch, remote=remote, blobless=False
+                )
+            except SnapshotRefError:
+                sha = resolve_ref(ref, repo_root, fetch=False)
+        else:
+            sha = resolve_ref(ref, repo_root, fetch=fetch, blobless=False)
     store = store_root()
     dest = store / f"tickets-{sha}"
     if dest.is_dir():
@@ -586,9 +680,11 @@ def materialize_tickets(
     tracker = build / _TRACKER_DIRNAME
     try:
         # Same probe-gated, one-RPC top-up as the code path — against the already-resolved
-        # tickets remote (sync.remote), never a hardcoded "origin".
-        _ensure_blobs_present(root_dir, sha, remote)
-        _materialize_tree(root_dir, sha, tracker)
+        # tickets remote (sync.remote), never a hardcoded "origin". Both run against
+        # `source_dir`: when the pin came from the tracker repo, only that repo is guaranteed
+        # to hold the commit's objects.
+        _ensure_blobs_present(source_dir, sha, remote)
+        _materialize_tree(source_dir, sha, tracker)
         _fsync_dir(build)
         try:
             os.rename(build, dest)

@@ -367,6 +367,12 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "trace_id": v.get("trace_id"),
         "material_fingerprint": material,
     }
+    # Carry the verifier-FAULT marker (bug 2a6f) onto the durable record when set, so a run
+    # that produced no usable verdict stays queryable AS a fault instead of looking, forever
+    # after, like a genuine unmet criterion. Only written when present, so every existing
+    # FAIL record keeps its exact prior shape.
+    if v.get("verdict_obtainable") is False:
+        payload["verdict_obtainable"] = False
     if metrics is not None:
         payload["metrics"] = dict(metrics)
     return payload

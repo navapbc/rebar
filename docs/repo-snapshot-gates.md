@@ -68,6 +68,38 @@ where you run the command. Run any `HEAD`-based gate — above all the `transiti
 close gate — from the worktree/branch that holds the code to be verified. An explicit
 branch/tag/SHA `ref` stays fully cwd-independent.
 
+## The TICKET store is pinned separately from the code
+
+`ref` / `--ref` selects the **code** snapshot. The ticket store is not in it: tickets live on the
+orphan `tickets` branch, checked out at the gitignored `.tickets-tracker/`, so a code snapshot has
+no `.tickets-tracker/` at all. Attested mode therefore materializes a **second, separate** pinned
+copy of the ticket store and points the agent's `show_ticket` tool at that
+(`materialize_tickets` → `SnapshotHandle.tickets_path` → `LLMConfig.tickets_path`). Two
+consequences worth knowing:
+
+- **`--ref` does not move the ticket view.** Verifying an older code ref does not show you the
+  tickets as of that commit; the two pins are independent.
+- **The ticket pin tracks the LIVE store, not `refs/heads/tickets`.** It is taken from the
+  tracker's own `HEAD` — the state every other rebar read sees — so it is current when the gate
+  starts. For a gate that may touch the network (`review-plan`, standalone `verify-completion`,
+  MCP) the tracker is first reconverged with `<remote>/tickets` and the result *confirmed*
+  (`merge-base --is-ancestor`) before it is pinned, falling back to pinning `<remote>/tickets`
+  directly if that cannot be confirmed — so the pinned store never holds less than the shared ref.
+
+It is still a **snapshot**, taken once when the run starts. A comment or edit written *after* the
+run begins, or one not yet committed to the store, is not in it. That is why a verifier finding
+should be read as *"not visible in the ticket snapshot I read"* rather than "no such record
+exists" — the completion verifier is instructed to word it that way. If a finding claims evidence
+you know you recorded is missing, check that the write committed, then re-verify; do not re-record
+it.
+
+Historically this pin was taken from the code repo's local `refs/heads/tickets` whenever the
+caller passed `fetch=False` (which the close gate does, correctly, for the *code* ref `HEAD`).
+`.tickets-tracker/` is a separate repository in a long-lived checkout, so that ref is only a
+mirror advanced by fetch — it drifted arbitrarily far behind (6757 commits on the checkout where
+this was found) and the completion verifier reported recorded comments as nonexistent, blocking
+correct closes. See ticket `2a6f-fc43-ab3e-497f`.
+
 ## Private-repo fetch credentials + descriptive errors
 
 Attested mode `git fetch`es the verified ref from `origin`, so a server pointed at a

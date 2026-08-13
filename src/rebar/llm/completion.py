@@ -60,7 +60,11 @@ COMPLETION_REMEDIATION_GUIDANCE = (
     "reasoning that ties the evidence to the criterion). The completion verifier reads this "
     "ticket's comments, so properly tagged evidence you record there is taken into account on "
     "the next verification. An untagged external criterion cannot be satisfied by a ticket "
-    "comment alone. Then re-verify."
+    "comment alone. Then re-verify. Note that a finding reporting a ticket record as absent "
+    "means it was NOT VISIBLE IN THE TICKET SNAPSHOT THE VERIFIER READ — that snapshot is "
+    "pinned when the run starts, so a record written after the pin, or not yet committed to "
+    "the store, reads as missing even though it exists; re-verify after the write lands "
+    "rather than re-recording evidence you already wrote."
 )
 # Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
@@ -439,17 +443,80 @@ def epic_bug_candidates(ticket_id: str, repo_root) -> tuple[list[dict], int]:
     return kept, max(0, len(qualifying) - len(kept))
 
 
+NO_VERDICT_CRITERION = "(no verdict obtainable)"
+
+
+def _is_no_verdict_fault(result: dict, items: list) -> bool:
+    """Whether ``result`` is an ALREADY-reconciled "no verdict obtainable" fault (bug 2a6f) —
+    i.e. it carries the framework marker AND its findings are exactly the fault finding this
+    module synthesizes. Keying on the framework-owned criterion label (not on the marker
+    alone) is what stops a model from minting the retryable disposition for itself by
+    emitting ``verdict_obtainable`` in its own structured output."""
+    return (
+        result.get("verdict_obtainable") is False
+        and len(items) == 1
+        and isinstance(items[0], dict)
+        and items[0].get("criterion") == NO_VERDICT_CRITERION
+    )
+
+
+def _findings_from_criteria(criteria) -> list[dict]:
+    """Rebuild failure findings from the positive per-criterion manifest (bug 2a6f).
+
+    A verdict may arrive non-PASS with an empty ``findings`` but a populated ``criteria``
+    manifest carrying ``met: false`` entries — the failures ARE known, they just were not
+    mirrored into the failures-only list. Recovering them names real criteria instead of
+    reporting a fault, so this is tried BEFORE the no-verdict-obtainable path. Anything
+    malformed yields no findings, which falls through to that path."""
+    if not isinstance(criteria, list):
+        return []
+    out: list[dict] = []
+    for record in criteria:
+        if not isinstance(record, dict) or record.get("met") is not False:
+            continue
+        name = str(record.get("criterion") or "").strip()
+        if not name:
+            continue
+        out.append(
+            {
+                "criterion": name,
+                "severity": "high",
+                "dimension": "completion",
+                "detail": (
+                    "recorded as NOT met in the verifier's per-criterion evaluation "
+                    "(recovered from the criteria manifest, which the verdict did not mirror "
+                    "into its findings)."
+                ),
+            }
+        )
+    return out
+
+
 def reconcile_verdict(result: dict) -> None:
     """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
 
     The agent emits the verdict; this is a deterministic guardrail, NOT a re-judge:
     * normalize ``verdict`` — upper-case; exactly ``PASS`` is PASS, anything else FAIL
       (fail-safe: a garbled verdict never silently passes);
-    * ``FAIL`` with no findings → synthesize one placeholder finding (the contract is
-      FAIL ⇒ ≥1 finding; this is the sloppy-model case the shape-only schema lets reach here);
+    * ``FAIL`` with no findings → recover the failing criteria from the positive ``criteria``
+      manifest when it names any (the contract is FAIL ⇒ ≥1 finding), else record that NO
+      verdict was obtainable — see below;
     * ``PASS`` with findings → flip to ``FAIL`` (the prompt defines findings as failures-only,
       so a listed failure must block — keyed on the EXISTENCE of a failure finding, not on
       severity, so it stays consistent with "the agent emits the verdict").
+
+    **"No verdict obtainable" (bug 2a6f).** A FAIL that names no criterion is not evidence the
+    work is incomplete — it is the verifier failing to produce a usable answer (a truncated or
+    garbled structured turn; ``verdict`` absent entirely also lands here, since anything that is
+    not exactly ``PASS`` normalizes to FAIL). Reporting that as an unmet criterion invented a
+    requirement the ticket never had and left the caller with no remediation path. It is now
+    marked with ``verdict_obtainable=False`` so callers can distinguish a verifier FAULT from a
+    judgement. The marker is framework-set and rides ALONGSIDE the ``{PASS, FAIL}`` vocabulary
+    rather than adding a third token, so the normalizing fail-safe above, the schema, and every
+    existing consumer's blocking behaviour are unchanged: the verdict stays ``FAIL`` and still
+    blocks. The decision keys on FINDINGS, not on ``criteria`` — the workflow path populates
+    ``result["criteria"]`` before delegating here, so a genuine fault can arrive carrying a
+    criteria manifest.
     """
     raw = str(result.get("verdict", "")).strip().upper()
     verdict = "PASS" if raw == "PASS" else "FAIL"
@@ -457,14 +524,35 @@ def reconcile_verdict(result: dict) -> None:
     if verdict == "PASS" and items:
         verdict = "FAIL"
     if verdict == "FAIL" and not items:
-        items = [
-            {
-                "criterion": "(unspecified)",
-                "severity": "high",
-                "dimension": "completion",
-                "detail": "verifier returned FAIL without itemizing the failing criterion.",
-            }
-        ]
+        items = _findings_from_criteria(result.get("criteria"))
+        if items:
+            # Real, named criteria recovered from the positive manifest — a judgement, not a
+            # fault, and a far better diagnostic than the placeholder this used to emit.
+            result.pop("verdict_obtainable", None)
+        else:
+            items = [
+                {
+                    "criterion": NO_VERDICT_CRITERION,
+                    "severity": "high",
+                    "dimension": "completion",
+                    "detail": (
+                        "the completion verifier did not produce a usable verdict: it returned "
+                        "a non-PASS result naming no criterion. This is a VERIFIER FAULT, not "
+                        "evidence that a criterion is unmet — no criterion was evaluated "
+                        "against. Re-run the verification; if it recurs, capture the run's logs."
+                    ),
+                }
+            ]
+            result["verdict_obtainable"] = False
+    elif not _is_no_verdict_fault(result, items):
+        # Clear a stale/undeserved marker — but NOT when this verdict is an
+        # already-reconciled fault. `reconcile_verdict` runs a second time on the sidecar
+        # path (over an in-place-mutated copy), where `findings` now holds the fault finding
+        # this function itself synthesized; popping there would strip the marker from the
+        # durable record and the fault would look like a genuine unmet criterion forever
+        # after. Recognised by the framework-owned criterion label, so a model cannot mint
+        # the marker by supplying it in its own output.
+        result.pop("verdict_obtainable", None)
     result["verdict"] = verdict
     result["findings"] = items
     # Coach the caller toward the evidence channel on ANY failure: a criterion that is already
