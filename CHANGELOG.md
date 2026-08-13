@@ -12,6 +12,17 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Removed
 
+- **Closing a ticket no longer compacts it.** Compaction was the store's longest write-lock
+  holder and it ran inline on every close: measured on the rebar store, one close held the ONE
+  tickets write lock for 13m53s and three others the same hour held ~2.5 min each, starving
+  every concurrent writer. Compaction is optional housekeeping — an unfolded event log is
+  completely valid and the reducer replays it — so the trigger is removed and a close now ends
+  after its STATUS write, signing, the force-close audit comment and scratch cleanup. Its lock
+  holds are the short per-append acquisitions. `rebar compact <id>` still folds on demand and
+  is unchanged; the standing trigger becomes an out-of-band sweep that runs in a dedicated
+  clone of the `tickets` branch. The only user-visible effect is that ticket event logs stay
+  unfolded for longer — larger on disk, identical in meaning. See `docs/concurrency.md` §I9b.
+
 - **BREAKING — `purge-bridge` is removed with no compatibility alias.** Invoking it follows the
   standard unknown-subcommand path and exits non-zero. No persisted data format changes.
 

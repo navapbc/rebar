@@ -18,6 +18,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 import rebar
 from rebar._store.canonical import canonical_bytes
 
@@ -36,14 +38,22 @@ def _event_files(tracker: Path) -> list[Path]:
     return out
 
 
-def test_every_committed_event_is_canonical_bytes(rebar_repo: Path):
+def test_every_committed_event_is_canonical_bytes(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
     repo = str(rebar_repo)
+    # Fold unconditionally when the explicit compact below runs: the default threshold and
+    # compaction horizon would both skip a small, freshly-written ticket, and a skipped fold
+    # would silently drop SNAPSHOT from the type-coverage assertion at the end.
+    monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
+    monkeypatch.setenv("REBAR_COMPACTION_HORIZON_NS", "0")
 
     epic = rebar.create_ticket("epic", "parity epic", repo_root=repo)
     task = rebar.create_ticket("task", "parity task", repo_root=repo)
 
     # task: lifecycle left at in_progress (NOT closed) so each producer's event
-    # file survives for the type-coverage assertion — closing auto-compacts.
+    # file survives for the type-coverage assertion — the explicit compact below
+    # would otherwise fold them.
     # _seam-committed producers (already canonical pre-P1.0 — the baseline):
     rebar.comment(task, "héllo 世界 — non-ascii body", repo_root=repo)
     rebar.edit_ticket(task, description="updated desc", repo_root=repo)
@@ -56,11 +66,16 @@ def test_every_committed_event_is_canonical_bytes(rebar_repo: Path):
     rebar.link(task, epic, "discovered_from", repo_root=repo)
     rebar.claim(task, assignee="me", repo_root=repo)  # STATUS(open→in_progress) + EDIT
 
-    # A throwaway ticket closed to exercise the SNAPSHOT writer (compact-on-close
-    # squashes its events into one SNAPSHOT, so keep it separate from `task`).
+    # A throwaway ticket compacted to exercise the SNAPSHOT writer, kept separate from
+    # `task` so the fold cannot swallow the per-producer events asserted above. The compact
+    # is EXPLICIT: closing no longer compacts (bug choosy-arthrodic-barbet moved compaction
+    # out of band), so relying on the close to produce a SNAPSHOT would silently stop
+    # covering the SNAPSHOT writer — which is exactly what the type-coverage assertion at the
+    # end of this test exists to catch.
     snap = rebar.create_ticket("task", "snapshot fodder", repo_root=repo)
     rebar.claim(snap, assignee="me", repo_root=repo)
-    rebar.transition(snap, "in_progress", "closed", repo_root=repo)  # → compact-on-close SNAPSHOT
+    rebar.transition(snap, "in_progress", "closed", repo_root=repo)
+    rebar.compact(snap, repo_root=repo)  # → SNAPSHOT
 
     tracker = rebar_repo / ".tickets-tracker"
     files = _event_files(tracker)

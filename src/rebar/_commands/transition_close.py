@@ -7,8 +7,7 @@ their LOAD-BEARING order (verify -> close -> sign): the unresolved-open-children
 structural guard, the completion-verification precheck (:func:`_completion_precheck`
 / :func:`_verdict_manifest`, run OUTSIDE the write lock), the locked
 ``txn.transition_core`` write, post-close signing of the PASS attestation, the
-force-close audit comment, and compact-on-close + per-ticket scratch cleanup +
-best-effort push.
+force-close audit comment, and per-ticket scratch cleanup + best-effort push.
 
 This module MUST NOT import :mod:`.transition` (no back-edge): the recursion into
 ``transition_compute`` lives in ``_cascade_open_parent``, which stays there, so the
@@ -87,53 +86,6 @@ def _raise_plan_review_close_gate_error(ticket_id: str, check: dict[str, object]
         f"Run rebar review-plan {ticket_id} separately, then retry close.",
         returncode=1,
     )
-
-
-def _compact_on_close(repo_root: str, ticket_id: str) -> None:
-    """Compact-on-close: squash the event log into a SNAPSHOT (non-blocking, output
-    silenced). In-process via rebar._commands.compact; --threshold=0 --skip-sync,
-    commit kept.
-
-    SKIPPED when the store write lock is already busy (bug 7084 / remediation R3).
-    Compaction is the store's longest lock holder and it is entirely OPTIONAL work — a
-    housekeeping fold of an event log that is completely valid unfolded. Taking the lock
-    behind a queue of foreground writers is what starved them: measured, a 48.1s
-    compact-on-close consumed six concurrent writers' entire 60s budget and all six
-    writes were lost. Standing aside costs nothing, because a skip is a NO-OP for
-    correctness: the raw events stay live and the next compaction (the next close of this
-    ticket, or an explicit ``rebar compact``) folds them.
-
-    No floor is needed for this project's INTERMITTENT load — a skipped fold is picked up
-    by a later uncontended run. Under genuinely SUSTAINED contention compaction could be
-    deferred for a long time, which is why the skip is logged at WARNING rather than
-    swallowed: a skipped compaction that never runs again must not be silent.
-
-    The probe is advisory and racy by nature (:func:`~rebar._store.lock.write_lock_is_busy`
-    describes an instant). That is harmless here in both directions: a false "free" just
-    means we take the lock as we do today, and a false "busy" just defers optional work."""
-    import contextlib
-    import io
-
-    from rebar._commands import compact as _compact
-    from rebar._store import lock as _lock
-
-    tracker = str(config.tracker_dir(repo_root))
-    if _lock.write_lock_is_busy(tracker):
-        logger.warning(
-            "compact-on-close skipped for %s: store write lock busy (holder: %s); "
-            "the events stay live and the next compaction folds them",
-            ticket_id,
-            _lock.describe_lock_holder(tracker),
-        )
-        return
-
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-            _compact.compact_cli([ticket_id, "--threshold=0", "--skip-sync"], repo_root=repo_root)
-    except Exception:
-        logger.warning(
-            "compact-on-close failed for %s; continuing (close stands)", ticket_id, exc_info=True
-        )
 
 
 def _is_full_sha(s: object) -> bool:
@@ -363,7 +315,7 @@ def close_ticket(
     completion-verification precheck (runs the verifier OUTSIDE the write lock, blocks
     fail-closed on FAIL / unavailable-LLM, returns the manifest to sign on PASS), the
     locked write, then — only AFTER a confirmed close — signing the PASS attestation,
-    the force-close audit comment, and compact-on-close + per-ticket scratch cleanup. A
+    the force-close audit comment, and per-ticket scratch cleanup. A
     non-close transition falls through to just the locked write. Both paths end with a
     best-effort push (transition_core commits inline, not via write_and_push)."""
     # Open-children guard + newly_unblocked (one batch pass), only on close.
@@ -522,14 +474,28 @@ def close_ticket(
                 exc_info=True,
             )
 
+    # Compaction is NOT run here (bug choosy-arthrodic-barbet). It used to be, and it was the
+    # store's longest lock holder BY FAR: `compact_txn._compact_locked` takes the ONE store
+    # write lock and holds it for the whole fold — read, reduce, authorship ledger, snapshot
+    # write, retire renames, and the git add/commit, whose nested `_store_git_op_lock` wait and
+    # index-lock retry budget stack INSIDE that hold with no aggregate ceiling. Measured on the
+    # rebar store: a single close held the lock for 13m53s, and three others the same hour held
+    # ~2.5min each, starving every concurrent writer. The 7084 stand-aside probe could not help,
+    # because the closing process had released the lock seconds earlier so the store always read
+    # free to its own probe.
+    #
+    # Removing the trigger is safe because compaction is OPTIONAL housekeeping, never a
+    # correctness step: an unfolded event log is completely valid and the reducer replays it.
+    # `rebar compact <id>` still folds on demand, and the standing trigger is now an
+    # out-of-band sweep that runs in a DEDICATED CLONE of the tickets branch, so it contends
+    # with no interactive session's store lock at all.
     if target_status == "closed":
-        _compact_on_close(repo_root_str, ticket_id)
         scratch.cleanup_for_ticket(repo_root_str, ticket_id)
 
-    # The STATUS (and compact-on-close SNAPSHOT) commits are now in the local
-    # tickets branch but unpushed — txn.transition_core commits inline and does not
-    # go through write_and_push. Trigger the same best-effort push so a trailing
-    # transition (the last write of a session) isn't stranded (bug prone-octet-cheek).
+    # The STATUS commit is now in the local tickets branch but unpushed —
+    # txn.transition_core commits inline and does not go through write_and_push. Trigger
+    # the same best-effort push so a trailing transition (the last write of a session)
+    # isn't stranded (bug prone-octet-cheek).
     from rebar._store import push
 
     push.push_after_commit(tracker)

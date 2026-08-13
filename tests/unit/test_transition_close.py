@@ -280,9 +280,8 @@ def test_force_close_reason_is_written_onto_the_close_status_event(repo, monkeyp
     """AC1: the reason lands on the STATUS event itself — which IS the close's own locked
     write, so its durability costs no additional lock acquisition.
 
-    Compaction is disabled here only so the individual event survives to be read; it absorbs
-    events into a SNAPSHOT on close and is orthogonal to what this asserts."""
-    monkeypatch.setattr(transition_close, "_compact_on_close", lambda *a, **k: None)
+    The close no longer compacts (bug choosy-arthrodic-barbet), so the individual event
+    survives to be read without disabling anything."""
     tid = _open_ticket(repo)
     monkeypatch.chdir(repo)
     from rebar._cli import main
@@ -310,7 +309,6 @@ def test_the_reason_is_readable_from_reduced_state(repo, monkeypatch):
 def test_an_unforced_close_omits_the_key_entirely(repo, monkeypatch):
     """AC3: present-only. An ordinary close must stay byte-identical to the pre-change event
     shape, so absence of the key is itself the signal that the close was NOT forced."""
-    monkeypatch.setattr(transition_close, "_compact_on_close", lambda *a, **k: None)
     tid = _open_ticket(repo)
 
     rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
