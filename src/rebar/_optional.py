@@ -45,6 +45,11 @@ EXTRAS: dict[str, tuple[str, str]] = {
         "run inside the fail-open worker boundary",
     ),
     "metrics": ("lizard", "code-health metrics analyzers"),
+    "wiki": (
+        "pypandoc",
+        "the Jira Data Center Markdown-to-wiki renderer (bundles pandoc in the wheel); "
+        "without it the DC rich-text path returns Markdown unchanged",
+    ),
     "adf": (
         "marklas",
         "Markdown-aware Jira Cloud ADF conversion (headings/lists/code/marks); "

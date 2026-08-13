@@ -150,6 +150,9 @@ EXEMPT = {
     # committed fixture itself is clean. Removing the mapping would let the retired
     # spelling back into a tracked file.
     "scripts/build_cloud_adf_corpus.py",
+    # Same rationale for the DC wiki corpus generator: it names the retired flag because
+    # its scrub maps it to the current spelling when freezing captured ticket prose.
+    "scripts/build_dc_wiki_corpus.py",
     # Frozen LLM-experiment corpora. Their content is recorded experiment INPUT; rewriting
     # them would corrupt the record the experiments' conclusions rest on.
     "docs/experiments/plan-review-gate/runs/e6_selfconsistency_inputs.jsonl",
