@@ -49,14 +49,27 @@ def _build(tree: Path, outdir: Path, env_extra: dict) -> subprocess.CompletedPro
     )
 
 
-def _wheel_commit(outdir: Path) -> str | None:
-    wheels = list(outdir.glob("*.whl"))
-    assert wheels, "no wheel produced"
-    with zipfile.ZipFile(wheels[0]) as zf:
+def _wheel_commit(wheel: Path) -> str | None:
+    with zipfile.ZipFile(wheel) as zf:
         name = next(n for n in zf.namelist() if n.endswith("rebar/_build_info.py"))
         ns: dict = {}
         exec(zf.read(name).decode(), ns)
         return ns.get("COMMIT")
+
+
+@pytest.fixture(scope="session")
+def built_artifacts(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    """Build the shared successful prerequisite once per pytest worker/session."""
+    root = tmp_path_factory.mktemp("build-provenance")
+    tree = _clean_tree(root / "src")
+    out = root / "dist"
+    cp = _build(tree, out, {"REBAR_BUILD_COMMIT": "abc1234"})
+    assert cp.returncode == 0, f"build failed: {cp.stderr[-2000:]}"
+    wheel = next(out.glob("*.whl"), None)
+    sdist = next(out.glob("*.tar.gz"), None)
+    assert wheel is not None, "no wheel produced"
+    assert sdist is not None, "no sdist produced"
+    return wheel, sdist
 
 
 # ── helper precedence (HAPPY — defines the contract) ──────────────────────────
@@ -95,15 +108,12 @@ def test_helper_raises_when_env_set_but_empty() -> None:
         mod._resolve_build_commit(REPO, existing=None, env={"REBAR_BUILD_COMMIT": ""})
 
 
-def test_wheel_from_sdist_bakes_env_commit(tmp_path: Path) -> None:
+def test_wheel_from_sdist_bakes_env_commit(built_artifacts: tuple[Path, Path]) -> None:
     """The core defect: `python -m build` builds the wheel from the extracted sdist (no
     .git); with the fix + REBAR_BUILD_COMMIT set, the WHEEL bakes that exact short SHA
     (today, unfixed, this yields None)."""
-    tree = _clean_tree(tmp_path / "src")
-    out = tmp_path / "dist"
-    cp = _build(tree, out, {"REBAR_BUILD_COMMIT": "abc1234"})
-    assert cp.returncode == 0, f"build failed: {cp.stderr[-2000:]}"
-    assert _wheel_commit(out) == "abc1234", "wheel-from-sdist did not bake REBAR_BUILD_COMMIT"
+    wheel, _sdist = built_artifacts
+    assert _wheel_commit(wheel) == "abc1234", "wheel-from-sdist did not bake REBAR_BUILD_COMMIT"
 
 
 def test_build_fails_when_env_set_but_empty(tmp_path: Path) -> None:
@@ -113,30 +123,24 @@ def test_build_fails_when_env_set_but_empty(tmp_path: Path) -> None:
     assert cp.returncode != 0, "an empty REBAR_BUILD_COMMIT (release context) must fail the build"
 
 
-def test_sdist_ships_build_info(tmp_path: Path) -> None:
+def test_sdist_ships_build_info(built_artifacts: tuple[Path, Path]) -> None:
     """The sdist must contain _build_info.py so an install-from-sdist rebuild has a baked
     SHA to preserve (step 2)."""
     import tarfile
 
-    tree = _clean_tree(tmp_path / "src")
-    out = tmp_path / "dist"
-    cp = _build(tree, out, {"REBAR_BUILD_COMMIT": "abc1234"})
-    assert cp.returncode == 0, f"build failed: {cp.stderr[-2000:]}"
-    sdists = list(out.glob("*.tar.gz"))
-    assert sdists, "no sdist produced"
-    with tarfile.open(sdists[0]) as tf:
+    _wheel, sdist = built_artifacts
+    with tarfile.open(sdist) as tf:
         assert any(n.endswith("rebar/_build_info.py") for n in tf.getnames()), (
             "sdist does not ship _build_info.py — install-from-sdist would lose provenance"
         )
 
 
-def test_install_from_sdist_preserves_commit(tmp_path: Path) -> None:
+def test_install_from_sdist_preserves_commit(
+    tmp_path: Path, built_artifacts: tuple[Path, Path]
+) -> None:
     """Rebuild a wheel FROM the shipped sdist with NO env var and NO .git — the baked SHA
     the sdist carried must be PRESERVED (step 2), not overwritten with None."""
-    tree = _clean_tree(tmp_path / "src")
-    out1 = tmp_path / "dist1"
-    assert _build(tree, out1, {"REBAR_BUILD_COMMIT": "abc1234"}).returncode == 0
-    sdist = next(out1.glob("*.tar.gz"))
+    _wheel, sdist = built_artifacts
     # Extract the sdist (its _build_info.py pins the commit seeded above) and rebuild the wheel
     # from it with the env var UNSET — the preserve-existing path must keep that pinned value.
     import tarfile
@@ -149,6 +153,8 @@ def test_install_from_sdist_preserves_commit(tmp_path: Path) -> None:
     out2 = tmp_path / "dist2"
     cp = _build(inner, out2, {})  # no REBAR_BUILD_COMMIT, no .git
     assert cp.returncode == 0, f"rebuild-from-sdist failed: {cp.stderr[-2000:]}"
-    assert _wheel_commit(out2) == "abc1234", (
+    wheel = next(out2.glob("*.whl"), None)
+    assert wheel is not None, "no wheel produced"
+    assert _wheel_commit(wheel) == "abc1234", (
         "install-from-sdist lost the baked COMMIT (preserve-existing broken)"
     )
