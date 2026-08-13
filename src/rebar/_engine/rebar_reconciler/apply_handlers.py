@@ -42,6 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler import peer_state
 from rebar_reconciler._backend import BackendAssigneeNotFoundError
 from rebar_reconciler.batch_dispatch import create_one, delete_one, update_one
 from rebar_reconciler.pass_io import (
@@ -185,6 +186,96 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     return HandlerResult(outcome)
 
 
+def _rich_cutover_active() -> bool:
+    """Whether ANY client is cut over to the rich-text wire (story 3388).
+
+    Reads ``reconciler.rich_text_cutover`` at CALL time, never at import, so
+    flipping the flag needs no redeploy. Fails CLOSED — an unreadable or absent
+    config, or a ``rebar`` package that is not importable at all (the engine ships
+    as stdlib-only subprocess package data), all answer False — so a config fault
+    can never silently switch this on.
+
+    This deliberately does NOT call ``adapters.jira_family.rich_text.
+    cutover_clients``, which answers the same question for the codecs. Core must
+    not import the vendor package: the dependency direction is one-way (concrete
+    backends import ``jira_family``; it never imports core back), and
+    ``config.local_to_jira_status`` documents the same choice for the status map —
+    a second independent read, kept honest by a PARITY TEST rather than by an
+    import that would invert the layering.
+
+    With the flag off (the default) every caller below is skipped, so the
+    plain-wire behaviour is byte-identical to before the cutover shipped.
+    """
+    try:
+        from rebar.config import ConfigError, load_config
+    except ImportError:
+        return False
+    try:
+        return load_config().reconciler.rich_text_cutover in ("cloud", "dc", "both")
+    except (ConfigError, AttributeError):
+        # AttributeError is in the set deliberately: the engine is loaded as package
+        # data and can run against a rebar whose config predates this key, and callers
+        # substitute partial config objects. Failing closed over a missing field beats
+        # taking the apply path down over one we can default.
+        return False
+
+
+def _observe_rich_reemit(
+    ctx: BatchApplyContext, local_id: str, jira_key: Any, fields_synced: dict
+) -> None:
+    """Bound a non-converging rich-text body with ONE post-push GET.
+
+    The DC codec is one-way and lossy, so a body is not guaranteed to reach a
+    codec fixed point: the differ can decide the local body still differs from the
+    baseline, push an identical wire, and decide the same thing again next pass.
+    Nothing in the plain-wire design detects that, because under a lossless codec
+    it cannot happen.
+
+    So each CONFIRMED description push is recorded against the binding
+    (``peer_state.note_rich_emit``), and when the same wire has gone out
+    ``RICH_REEMIT_OBSERVE_AT`` times in a row this reads the body back ONCE and
+    overlays what Jira actually stored onto the fields this mutation synced. That
+    overlay reaches the baseline the way every other confirmed write does — as a
+    ``synced_fields`` entry consumed by ``reconcile._advance_baselines``, which
+    calls ``binding_store.merge_baseline``. **This function never writes a
+    baseline itself**; ``_advance_baselines`` remains the sole baseline writer, and
+    that invariant is why the observation is expressed as an overlay rather than a
+    direct ``set_baseline`` here.
+
+    Fail-open throughout: a missing binding, a store predating the fields, or a
+    failed GET leaves the pushed value in place, which is exactly today's
+    behaviour. The cost is bounded to one extra REST call per divergence episode
+    (the threshold is an equality, so the episode does not re-charge every pass).
+
+    ``all_bindings`` rebuilds the outer mapping on each call, so this is O(bindings)
+    per description push rather than a lookup. That is deliberate: it is the only
+    PUBLIC way to reach a binding record, ``binding_store.py`` sits at the module-size
+    cap and cannot carry a narrower accessor, and the work is a few thousand dict
+    inserts against a REST round-trip in the same breath. If that file is ever split
+    along a call-graph seam, give it a single-entry accessor and use it here.
+    """
+    wire = fields_synced.get("description")
+    if wire is None or ctx.binding_store is None or not _rich_cutover_active():
+        return
+    try:
+        entry = ctx.binding_store.all_bindings().get(local_id)
+        if not isinstance(entry, dict):
+            return
+        if peer_state.note_rich_emit(entry, wire) != peer_state.RICH_REEMIT_OBSERVE_AT:
+            return
+        if not jira_key or ctx.client is None:
+            return
+        observed = ctx.client.get_issue_by_rest(str(jira_key)).get("fields", {}).get("description")
+    except Exception as exc:  # noqa: BLE001 — best-effort observation; never break a pass
+        print(f"RECON: rich_reemit_observe_failed key={jira_key} ({exc})", file=sys.stderr)
+        return
+    ctx.rest_calls += 1
+    if observed is None:
+        return
+    ctx.synced_fields.setdefault(local_id, {})["description"] = observed
+    print(f"RECON: rich_reemit_observed key={jira_key}", file=sys.stderr)
+
+
 def _make_link_confirm(mutation: dict, ctx: BatchApplyContext):
     """Build the peer-confirmation sink for one outbound UPDATE (epic a4bd), or None.
 
@@ -316,6 +407,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
     _local_id = mutation.get("local_id")
     if _local_id and _fields_synced:
         ctx.synced_fields.setdefault(str(_local_id), {}).update(_fields_synced)
+        _observe_rich_reemit(ctx, str(_local_id), mutation.get("key"), _fields_synced)
     # Bug 6afc-20ee-84e5-4dd5: surface swallowed comment failures. NON-fatal —
     # the scalar update above genuinely succeeded — so we record them in a
     # dedicated field rather than overwriting outcome["error"], mirroring the

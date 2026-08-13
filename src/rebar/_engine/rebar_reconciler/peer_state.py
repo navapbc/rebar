@@ -29,6 +29,8 @@ None of them touch binding lifecycle.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from rebar_reconciler.inbound_fields import normalize_baseline_value
@@ -76,7 +78,9 @@ def set_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, Any]
     baseline = {k: normalize_baseline_value(k, fields[k]) for k in _BASELINE_FIELDS if k in fields}
     if entry.get("baseline") == baseline:
         return
+    previous = entry.get("baseline") or {}
     entry["baseline"] = baseline
+    _clear_rich_reemit_on_body_refresh(entry, previous, baseline)
 
 
 def merge_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, Any]) -> None:
@@ -117,6 +121,96 @@ def merge_baseline(bindings: dict[str, Any], local_id: str, fields: dict[str, An
     if merged == baseline:
         return
     entry["baseline"] = merged
+    _clear_rich_reemit_on_body_refresh(entry, baseline, merged)
+
+
+# -- rich-text emit state (story 3388) ---------------------------------------
+#
+# Two fields stored INLINE on the binding beside ``baseline``: ``rich_sha`` (the
+# digest of the description wire rebar last pushed) and ``rich_reemit`` (how many
+# times in a row that identical wire has been re-pushed). They exist because the
+# DC codec is one-way and lossy, so a body is not guaranteed to reach a codec
+# fixed point; the pair bounds that tail instead of assuming it away.
+#
+# Both obey epic 0303's churn discipline: fixed size, change-gated, never a
+# per-pass timestamp. A pass that pushes no description writes neither field, and
+# a converging body never stores ``rich_reemit`` at all (absent means zero).
+
+RICH_REEMIT_OBSERVE_AT = 2
+"""Re-emit count at which the caller should OBSERVE the body Jira actually stored.
+
+Two means the same wire has been pushed three times (0, 1, 2) without the
+baseline moving underneath it — no longer explicable as one pass of lag, so the
+next step is evidence rather than another blind re-push. It is an equality
+threshold, not a floor, so the observation costs exactly one GET per divergence
+episode however long the episode lasts.
+"""
+
+
+def rich_sha(wire: Any) -> str:
+    """A change-gate digest of a rendered rich-text wire: 16 hex chars = 8 bytes.
+
+    Shape-tolerant because the two clients' wires differ in kind — Cloud sends an
+    ADF *dict*, Data Center a wiki *string* — so a non-string is serialized with
+    sorted keys first, making the digest independent of dict ordering.
+
+    Truncation is deliberate. This gates a re-emit; it authenticates nothing, and
+    the field is carried on every binding in every committed version of the
+    store, so its SIZE is the design constraint (0303).
+    """
+    payload = wire if isinstance(wire, str) else json.dumps(wire, sort_keys=True, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def note_rich_emit(entry: dict[str, Any], wire: Any) -> int:
+    """Record that ``wire`` was CONFIRMEDLY pushed as this binding's description.
+
+    Returns how many times in a row the SAME wire has now been pushed: 0 the first
+    time a given wire goes out, 1 the next time, and so on. A body that converges
+    is pushed once and then never again, so the count never leaves 0 and
+    ``rich_reemit`` is never written — which is what keeps a no-op pass at zero
+    changed entries.
+
+    Change-gated in both directions: ``rich_sha`` is written only when the wire
+    actually differs from the last one, and a differing wire RESETS the counter,
+    so a genuinely edited body never inherits the previous body's re-emit history.
+
+    ``entry`` is the LIVE binding record — ``BindingStore.all_bindings()`` copies
+    only the outer mapping, so mutating an entry in place is persisted by the
+    store's own ``save()``. That is the same no-new-commit-surface property
+    ``set_baseline`` relies on (ADR 0026 §Consequences), and it is why this takes
+    an entry rather than the bindings mapping: the caller already holds the record
+    it means to annotate, and cannot annotate one that does not exist.
+    """
+    sha = rich_sha(wire)
+    if entry.get("rich_sha") != sha:
+        entry["rich_sha"] = sha
+        entry.pop("rich_reemit", None)
+        return 0
+    count = int(entry.get("rich_reemit") or 0) + 1
+    entry["rich_reemit"] = count
+    return count
+
+
+def _clear_rich_reemit_on_body_refresh(
+    entry: dict[str, Any], previous: dict[str, Any], updated: dict[str, Any]
+) -> None:
+    """End a re-emit episode when the baseline's BODY moves.
+
+    The counter is waiting for exactly one thing: fresh evidence of what Jira
+    stores for this description. A baseline whose description has changed IS that
+    evidence, whatever produced it — the pass-start fetch or the observed-after-
+    push overlay — so the episode is over and the count starts again from zero.
+
+    Gated on the description alone. A baseline write driven by some other field
+    (status, assignee) says nothing about the body, and clearing on it would let a
+    body loop indefinitely while an unrelated field churned beside it.
+
+    ``rich_sha`` is deliberately left alone: it records the last wire we SENT,
+    which a baseline refresh does not change.
+    """
+    if previous.get("description") != updated.get("description"):
+        entry.pop("rich_reemit", None)
 
 
 def get_peer_parent(bindings: dict[str, Any], local_id: str) -> str | None:
