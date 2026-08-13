@@ -49,6 +49,7 @@ _EXPECTED_NAMES: dict[str, str] = {
     "dependency-advisory-canary.yml": "Dependency Advisory Canary",
     "jira-dc-capability-map.yml": "Jira DC Capability Map",
     "structured-output-baseline.yml": "Structured-Output Baseline",
+    "compact-sweep.yml": "Compaction Sweep",
 }
 
 # The one filename permitted to keep the `.yaml` extension (Gerrit g2p match).
