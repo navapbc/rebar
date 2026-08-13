@@ -168,6 +168,11 @@ rebar comment <id> "Root cause was an unclamped index; fix in pager.py."
 The store **auto-pushes**, so a comment body is published the moment it is written. Two
 rules follow.
 
+(A third consequence is for whoever runs your CI: every write pushes the `tickets`
+branch, so a pipeline that builds all branches runs once per comment. Configure CI so
+that branch triggers **no** workflow, and put anything that must read the store on a
+schedule — see [concurrency.md](concurrency.md#outbound--push-on-every-write).)
+
 **Never build a body from an unquoted shell command substitution.** On 2026-08-03 a
 session ran the equivalent of `rebar comment <id> "$(env)"` and published a full
 environment dump carrying seven live credentials. GitHub push protection then rejected

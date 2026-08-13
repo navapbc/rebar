@@ -14,7 +14,10 @@ on:
     # reports "is main healthy NOW" instead of a per-commit verdict that cancellation
     # rendered as red X's (ticket 03ef-6fb5-158b-4abd). Pre-merge gating is unchanged: the
     # SAME reusable runs against the patchset in the Verified lane.
-    branches-ignore: ["feature/**", "main"]
+    # `tickets` is rebar's event log: every ticket write auto-pushes it, so a trigger here
+    # multiplies each comment into a CI run and starves the runner pool. It carries no code
+    # — never CI it (ticket refractive-conceptual-sunbear).
+    branches-ignore: ["feature/**", "main", "tickets"]
   pull_request: {}
   workflow_dispatch: {}
   schedule:
