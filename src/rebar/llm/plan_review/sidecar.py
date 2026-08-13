@@ -21,7 +21,7 @@ import json
 import logging
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
 from .manifest import ManifestFormatError, ReviewPhaseMetadata, validate_review_phase_metadata
@@ -389,26 +389,86 @@ def surfaced_findings(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     ]
 
 
-def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
+def _material_changed(ticket_id: str, result: Mapping[str, Any], *, repo_root=None) -> bool:
+    """True only when the prior review's ``material_fingerprint`` and the ticket's CURRENT one
+    are BOTH resolvable and DIFFER — the recall suppression condition (bug
+    deceitful-flannel-jerboa). Fail-open by design: an absent prior stamp, an unresolvable
+    current one, or any error answers False (recall stays enabled, as before this guard), so a
+    degraded fingerprint read can never silently disable the backstop."""
+    prior = result.get("material_fingerprint")
+    if not isinstance(prior, str) or not prior:
+        return False
+    try:
+        from .attest import current_material_fingerprint
+
+        current = current_material_fingerprint(ticket_id, repo_root=repo_root)
+    except Exception:  # noqa: BLE001 — best-effort: unresolvable current stamp -> no suppression
+        return False
+    return bool(current) and current != prior
+
+
+def prior_concerns(
+    ticket_id: str, *, repo_root=None, coverage: MutableMapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """The prior-review findings worth re-checking on this ticket: from the most-recent
     REVIEW_RESULT sidecar, those that scored NEAR/ABOVE the bar — ``priority >=
     RECALL_MIN_PRIORITY`` AND ``decision`` in ``{"block", "advisory"}`` (the lowercase strings
     pass3_decide emits; excludes "dropped"/"indeterminate") — highest-priority first, capped at
     ``RECALL_CAP``.
 
+    TWO ELIGIBILITY GUARDS beyond the score filter (bug deceitful-flannel-jerboa) — without
+    them recall is not a one-shot backstop but a permanent RATCHET, and a finding the plan has
+    since fixed replays verbatim on every later review, forever:
+
+    - **The prior finding must carry GROUNDING EVIDENCE.** A recalled candidate is injected with
+      the concern's evidence so Pass-2 can re-ground it against the CURRENT plan; a prior
+      finding that persisted NO evidence gives the verifier nothing to test, so
+      ``evidence_entails_finding`` degenerates into confirming a bare assertion and the
+      ``claims_absence``/``absence_confirmed_in_context`` veto in ``decide.py`` never fires.
+      Excluding those is also what BREAKS the ratchet: an evidence-less surfaced finding is
+      exactly what a previous recall injection leaves behind (``run_pass1`` injected
+      ``evidence: []``, and ``build_payload._slim`` persists it), so a replay can never seed
+      another replay. Works against already-written v2 sidecars — no migration.
+    - **The material must be UNCHANGED.** Recall exists for verdict-flips on IDENTICAL material
+      (see this section's header): there, a finding the fresh finder missed is a finder miss
+      worth re-checking. When the ticket's material has CHANGED since the prior review, the
+      fresh finder's silence is evidence the EDIT RESOLVED the finding, not a miss — replaying
+      it verbatim is memory, not review. So a prior sidecar whose ``material_fingerprint``
+      differs from ``attest.current_material_fingerprint`` suppresses recall entirely. Both
+      fingerprints must be present to compare; a missing one leaves recall enabled (best-effort,
+      the sidecar's standing posture).
+
     Best-effort and NEVER raises (mirrors the sidecar's observability posture): a missing or
     unreadable sidecar returns ``[]`` and recall becomes a no-op. Each concern carries the prior
-    ``finding``/``suggested_fix``/``criteria``/``location`` + its ``norm_id`` so the caller can
-    match it against the fresh findings without recomputing the fingerprint."""
+    ``finding``/``suggested_fix``/``criteria``/``location``/``evidence``/``impact`` + its
+    ``norm_id`` so the caller can inject a re-groundable candidate and match it against the
+    fresh findings without recomputing the fingerprint.
+
+    ``coverage`` is an OPTIONAL observability sink: when supplied, a suppressed or narrowed
+    recall stamps ``coverage["recall_suppressed"]`` with the reason, so a review that returned
+    no candidates records WHY rather than looking identical to "no prior review"."""
     try:
         result = latest_review_result(ticket_id, repo_root=repo_root)
         if not result:
             return []
-        eligible = [
+        if _material_changed(ticket_id, result, repo_root=repo_root):
+            logger.info(
+                "recall suppressed: ticket material changed since the prior review "
+                "(the fresh finder rules on changed material)"
+            )
+            if coverage is not None:
+                coverage["recall_suppressed"] = "material-changed"
+            return []
+        scored = [
             f
             for f in surfaced_findings(result)
             if float(f.get("priority") or 0.0) >= RECALL_MIN_PRIORITY
         ]
+        # No grounding to re-ground with -> ineligible (and this is the previous injection's
+        # own signature, so the ratchet cannot close).
+        eligible = [f for f in scored if f.get("evidence")]
+        if coverage is not None and len(eligible) < len(scored):
+            coverage["recall_suppressed"] = "ungrounded-prior"
         eligible.sort(key=lambda f: float(f.get("priority") or 0.0), reverse=True)
         return [
             {
@@ -416,6 +476,15 @@ def prior_concerns(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]]:
                 "suggested_fix": f.get("suggested_fix", ""),
                 "criteria": list(f.get("criteria", []) or []),
                 "location": f.get("location", ""),
+                # The prior finding's OWN grounding, carried so the Pass-2 verifier re-grounds
+                # the quotes against the current plan instead of judging a bare restatement.
+                "evidence": list(f.get("evidence") or []),
+                # The Pass-1 impact PROSE, when the payload still has it. `_slim` persists the
+                # key ``impact`` as the Pass-3 NUMERIC impact (pass3_over_findings merges the
+                # decision over the finding), so on a normal sidecar this resolves to "" — the
+                # same value the injection used before. Guarded by type rather than dropped so a
+                # payload that does carry the prose feeds it through instead of discarding it.
+                "impact": f["impact"] if isinstance(f.get("impact"), str) else "",
                 "norm_id": f.get("norm_id") or norm_id(f),
             }
             for f in eligible[:RECALL_CAP]
@@ -627,6 +696,13 @@ def build_payload(
             "group_id": f.get("group_id"),
             "is_primary": f.get("is_primary"),
             "group_criteria": f.get("group_criteria"),
+            # RECALL PROVENANCE (bug deceitful-flannel-jerboa): did this finding enter the
+            # review as a re-surfaced prior concern (`run_pass1`'s `_recall` marker) rather than
+            # from the fresh Pass-1 finder? Persisted so a replay chain is visible offline —
+            # the ratchet that motivated the fix was only diagnosable by inferring it from an
+            # empty `evidence` list. Nothing reads this to decide anything; `prior_concerns`
+            # gates on grounding evidence + material identity, not on this flag.
+            "recalled": bool(f.get("_recall")),
         }
 
     _baseline_sha = review_code_sha(repo_root)

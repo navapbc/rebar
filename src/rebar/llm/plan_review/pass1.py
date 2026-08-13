@@ -636,7 +636,8 @@ def run_pass1(
     # WITHOUT any prior findings (independence by construction; ADR 0008 Inv. 1 / the pinned
     # test_prior_findings_only_reach_the_novelty_seam). A candidate the current plan resolved fails
     # Pass-2 validity and is dropped — recall never blocks on memory alone. Best-effort + bounded.
-    concerns = sidecar.prior_concerns(ctx.ticket_id, repo_root=ctx.tickets_root)
+    # Re-groundable ONLY if the evidence rides along (below); `prior_concerns` gates the rest.
+    concerns = sidecar.prior_concerns(ctx.ticket_id, repo_root=ctx.tickets_root, coverage=coverage)
     if concerns:
         seen = {sidecar.norm_id(f) for f in findings}
         recalled = 0
@@ -651,8 +652,8 @@ def run_pass1(
                     "suggested_fix": c.get("suggested_fix", ""),
                     "criteria": list(c.get("criteria", []) or []),
                     "location": c.get("location", ""),
-                    "evidence": [],
-                    "impact": "",
+                    "evidence": list(c.get("evidence") or []),
+                    "impact": c.get("impact", ""),
                     # internal observability marker (underscore-prefixed, like _too_big / _shed)
                     "_recall": True,
                 }

@@ -66,7 +66,7 @@ def test_recall_reads_prior_concerns_via_tickets_root(monkeypatch) -> None:
     feeding it the code snapshot silently returns no concerns (recall disabled)."""
     seen: dict[str, object] = {}
 
-    def _fake_pc(ticket_id, *, repo_root=None):
+    def _fake_pc(ticket_id, *, repo_root=None, **_):
         seen["root"] = repo_root
         return []
 
