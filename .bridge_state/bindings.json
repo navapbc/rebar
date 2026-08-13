@@ -71357,6 +71357,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-29T23:48:53Z"
     },
+    "9151-907b-471d-4a38": {
+      "created_at": "2026-08-13T08:48:56Z",
+      "jira_id": "4588578",
+      "jira_key": "REB-2847",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T08:49:00Z"
+    },
     "918c-589a-fc4a-4c52": {
       "baseline": {
         "assignee": {
@@ -75334,10 +75341,24 @@
     },
     "98f7-28b9-b39a-4ca2": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem (resolved during this ticket's lifetime \u2014 this ticket now verifies the fix)\n\nEpic `0e68-41eb-5782-4336` (outrageous-uncultured-wildebeast) had a 10,135-character description, over the 8,000-char review admission cap (`7cf80009d9`). `review-plan` on the epic returned a single blocking P4 admission finding without running the LLM, so the epic could not earn a plan-review attestation \u2014 and the parent-first claim cascade therefore blocked EVERY child of the epic (discovered when `bloated-shadeful-lamprey`'s claim failed with \"Parent error: no certified plan-review attestation\").\n\n## State at planning time\n\nThe epic's description has ALREADY been condensed by the session owner: the description field now measures 7389 characters (under the cap), and the full 10,135-char original is preserved verbatim as an epic comment dated 2026-08-13. Editing the epic changes only the epic's OWN material fingerprint \u2014 children's attestations bind their own material (material_diff.material_basis), not the parent's, so no sibling attestation was invalidated by the edit.\n\n## Remaining work (verification only; no further edits prescribed)\n\nRun the epic's plan review to earn the certified PASS the cascade requires, then prove the cascade is unblocked with a child claim.\n\n## Acceptance Criteria\n\n- [ ] `0e68-41eb-5782-4336`'s description field measures at most 8,000 characters; checked by reading the field and reporting the measured length.\n- [ ] `rebar review-plan 0e68-41eb-5782-4336` admits the plan \u2014 no P4 admission finding in the result; checked by inspecting the review output's blocking list.\n- [ ] `rebar review-plan 0e68-41eb-5782-4336` returns a certified PASS with zero blocking findings and a persisted, signed plan-review attestation (checked with `--status`; if a PASS fails to persist, `rebar sign-review` is the recovery), before the claim check below.\n- [ ] A child of the epic can be claimed without the parent cascade failing; checked by `rebar claim bloated-shadeful-lamprey` exiting 0 (its own plan-review attestation is already certified and its material unchanged).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Oversized epic description blocks the parent-first claim cascade"
       },
       "created_at": "2026-08-13T08:07:31Z",
@@ -114340,7 +114361,7 @@
         },
         "description": "## Context / Problem\n\n`tests/unit/test_live_jira_dc_provisioning.py:195` (`test_a_missing_epic_field_aborts_provisioning`) stubs `_request` so `/rest/api/2/field` returns a body with `Epic Name` but WITHOUT `Epic Link`, then calls `harness._assert_project_capabilities(\"RBTEST\")`. The missing field is permanently absent under the stub, so the readiness poll can only expire \u2014 and it expires against the real PRODUCTION budget.\n\nThat budget is `scripts/jira_dc_field_readiness.py:114`, `FIELD_READY_BUDGET_S = 120.0`, polled every `FIELD_POLL_INTERVAL_S = 1.0` (line 95). `await_required_fields` (line 226) loops `request` -> `if monotonic() >= deadline: break` -> `sleep(interval)`, so the unit test performs ~120 stub reads and sleeps ~120 real seconds to learn something the stub decided up front. That matches the filed 120.39-121.03s.\n\nThe seam is already provided. `_assert_project_capabilities` (`tests/external/live_jira_dc/conftest.py:580-581`) does NOT rely on the module constant: it computes `field_budget = _field_ready_timeout()` and passes `budget=field_budget` explicitly. `_field_ready_timeout()` (line 157) reads the `JIRA_DC_FIELD_READY_TIMEOUT` environment variable and only falls back to `FIELD_READY_BUDGET_S` when it is unset. And `await_required_fields` documents (line 252) that at least one attempt is always made \"even with a zero or negative allowance \u2014 the answer must come from an observation, never from arithmetic\".\n\n## Approach\n\nSet the readiness budget to zero for this one test through the environment variable the production code already honours, and assert the resulting poll count.\n\n* `monkeypatch.setenv(\"JIRA_DC_FIELD_READY_TIMEOUT\", \"0\")` inside the test.\n  `monkeypatch` restores the environment at teardown, so no other test and no\n  production path sees it; the committed `FIELD_READY_BUDGET_S` stays `120.0`.\n  Going through the env var rather than rebinding `FIELD_READY_BUDGET_S` is what\n  makes this deterministic: the caller passes `budget=` explicitly, so a constant\n  rebind would be silently defeated whenever `JIRA_DC_FIELD_READY_TIMEOUT` is\n  already set in the ambient environment, whereas `setenv` overrides it either way.\n* With a zero budget the loop is fully DETERMINISTIC rather than merely fast: one\n  attempt is made unconditionally, `monotonic() >= deadline` is then true, and the\n  loop breaks BEFORE `sleep` is ever called. So the test asserts that the stub saw\n  exactly ONE `/rest/api/2/field` read.\n\nThat single assertion is the required guard, and it is stronger than a timing budget: reaching a real sleep is only possible by going round the loop again, which necessarily produces a second field read and fails the count. It contains no wall-clock assertion.\n\n`_stub_request` (line 72) already returns its recorded `(method, path, payload)` list, so the poll count is available without new plumbing.\n\nThis is the mechanism the sibling suite already uses \u2014 `tests/unit/test_live_jira_dc_conftest.py:296` sets the same environment variable for the same reason \u2014 so it adds no new pattern to the tree. A fake `sleep`/`monotonic` pair was rejected: `await_required_fields` accepts them, but `_assert_project_capabilities` does not forward them, so injecting would mean changing a production signature to serve a test.\n\n## Scope\n\n* `tests/unit/test_live_jira_dc_provisioning.py` \u2014 set the zero budget and assert the\n  poll count in `test_a_missing_epic_field_aborts_provisioning`; note why in the\n  test docstring.\n\nNo production change: `scripts/jira_dc_field_readiness.py` and `tests/external/live_jira_dc/conftest.py` are read but not modified.\n\n## Testing\n\n* Happy path \u2014 the test still raises `AssertionError` naming `Epic Link`, i.e. the\n  existing assertion is untouched, and now also pins one field read.\n* Failure/edge path \u2014 the guard is proven by seeding: temporarily removing the\n  `setenv` is confirmed to make the poll-count assertion FAIL (many reads), not\n  merely run slowly. Seed reverted, not committed.\n* Ambient-environment check \u2014 the test is also run with\n  `JIRA_DC_FIELD_READY_TIMEOUT=300` already exported, confirming the `setenv`\n  overrides an ambient value rather than being defeated by it.\n* Isolation check \u2014 the neighbouring readiness tests and the rest of the module\n  still pass in the same session, confirming `monkeypatch` restored the env.\n* Production-default check \u2014 `FIELD_READY_BUDGET_S` is still `120.0` in the\n  committed tree, read directly from the source.\n* Whole-suite regression \u2014 the CI pytest command is green.\n\nNo wall-clock or timing-budget assertion is added; savings go in ticket comments.\n\n## Acceptance Criteria\n\n- [x] `test_a_missing_epic_field_aborts_provisioning` still raises the same\n      `AssertionError` naming `Epic Link` \u2014 verified by the unchanged\n      `pytest.raises` plus substring assertion still passing.\n- [x] The test asserts exactly one `/rest/api/2/field` read, which proves the\n      expiry path ran without reaching `sleep` \u2014 verified by the new assertion\n      passing and by the seeded-budget run failing it.\n- [x] The test completes in under 2 seconds where it took ~120s \u2014 measured with\n      `pytest --durations` and posted as a before/after ticket comment.\n- [x] `scripts/jira_dc_field_readiness.py` and\n      `tests/external/live_jira_dc/conftest.py` are byte-identical to `origin/main`,\n      confirmed by an empty `git diff --stat origin/main -- <those paths>`, so\n      production readiness defaults are unchanged.\n- [x] The rest of `tests/unit/test_live_jira_dc_provisioning.py` and\n      `tests/unit/test_live_jira_dc_conftest.py` pass in one session, showing the\n      env override did not leak.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Missing-field unit test burns the full 120-second Jira readiness budget"
       },
       "created_at": "2026-08-13T05:30:26Z",
@@ -134867,6 +134888,7 @@
     "REB-2840": "c5e3-5eee-6048-4442",
     "REB-2842": "98f7-28b9-b39a-4ca2",
     "REB-2844": "355b-11d4-e62c-4eb4",
+    "REB-2847": "9151-907b-471d-4a38",
     "REB-285": "b533-485d-d5df-448f",
     "REB-286": "b5db-7433-b731-444f",
     "REB-287": "b642-c3ed-0e6c-4090",
