@@ -13,6 +13,17 @@ hazards from the DC experiment motivate this file:
 The third property is the one that makes the other two safe to ship: this story
 changes ROBUSTNESS only. Rendered output must be byte-identical to the landed
 renderer, so a hardening change can never quietly alter what lands in Jira.
+
+**Cost discipline.** Proving that third property over the whole committed corpus
+costs ~1768 pandoc spawns — 884 renderable units, each rendered twice (the new
+path and the oracle). As ONE test function that measured 91.6s idle but 504.8s
+under CPU saturation — past CI's ``--timeout=300``. Because CI passes
+``--timeout-method=thread``, pytest-timeout ``os._exit(1)``s the whole xdist
+worker rather than failing the test, so the run reported
+``worker 'gwN' crashed`` with no traceback (bug 0078-fa3e-05d1-4e12). The
+comparison is therefore split into fixed-size chunks — see
+:data:`_EQUIVALENCE_CHUNK`. Every unit is still compared; only the per-test
+wall clock changes.
 """
 
 from __future__ import annotations
@@ -376,16 +387,50 @@ def _renderable_units() -> list[str]:
 
 
 # Every Nth renderable unit. 1 = the WHOLE committed corpus, which is what this
-# ships with: ~880 units, each rendered twice (new path and oracle), measured at
-# ~90s — the same order as the existing corpus suite, so full coverage is
-# affordable and the AC is met literally rather than by sample. Raise this only
-# if the corpus grows enough to make that untrue; the strata are walked in order
-# (code_arrow, table, prose) so any stride still spreads across all three.
+# ships with: full coverage, so the AC is met literally rather than by sample.
+# The strata are walked in order (code_arrow, table, prose) so any stride still
+# spreads across all three.
 _EQUIVALENCE_STRIDE = 1
+
+# Units compared per test case. This bounds the per-test wall clock, which is the
+# whole point: at stride 1 the corpus is ~884 units and a single test function
+# comparing all of them measured 91.6s idle and 504.8s under CPU saturation — past
+# CI's 300s per-test guard, which kills the xdist worker outright (see the module
+# docstring). Because the chunk size is FIXED, growing the corpus adds CASES and
+# never lengthens one, so the guard cannot be re-crossed by fixture growth. Tune
+# this only to trade case count against per-case cost; it changes nothing about
+# what is compared.
+_EQUIVALENCE_CHUNK = 40
+
+
+def _equivalence_chunks() -> list[list[str]]:
+    """The sampled corpus, sliced into fixed-size batches of units."""
+    sampled = _renderable_units()[::_EQUIVALENCE_STRIDE]
+    return [sampled[i : i + _EQUIVALENCE_CHUNK] for i in range(0, len(sampled), _EQUIVALENCE_CHUNK)]
+
+
+_CHUNKS = _equivalence_chunks()
+
+
+def test_the_equivalence_chunks_cover_every_renderable_unit() -> None:
+    """Chunking must not quietly drop units — that would hollow out the check below.
+
+    Cheap and pandoc-free, so it is the one place the corpus-wide invariants live:
+    the chunks reassemble to exactly the sampled corpus, in order, and there are
+    enough units for the comparison to be evidence rather than a spot check. That
+    floor cannot sit inside a chunk, since no single chunk meets it.
+    """
+    units = _renderable_units()
+    assert units, "the corpus produced no renderable units — fixture regression"
+    sampled = units[::_EQUIVALENCE_STRIDE]
+    assert [unit for chunk in _CHUNKS for unit in chunk] == sampled
+    assert len(sampled) >= 100, f"stride too coarse to be evidence: {len(sampled)} units"
+    assert all(len(chunk) <= _EQUIVALENCE_CHUNK for chunk in _CHUNKS)
 
 
 @_NEEDS_PANDOC
-def test_rendered_output_is_byte_identical_to_the_landed_renderer() -> None:
+@pytest.mark.parametrize("chunk_index", range(len(_CHUNKS)))
+def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: int) -> None:
     """New path vs the pre-hardening oracle, over every unit of the committed corpus.
 
     This is what licenses the change: swapping ``subprocess.run`` for a ``Popen``
@@ -398,11 +443,15 @@ def test_rendered_output_is_byte_identical_to_the_landed_renderer() -> None:
     for its idempotence and no-decay assertions, so a rendering change would
     surface there too — but only as "some property moved". This says the stronger
     thing: the bytes are the same ones the landed renderer produced.
+
+    One chunk per case: the corpus is covered by the parametrization as a whole
+    (pinned by the coverage test above), while each case stays a small, fixed
+    fraction of the per-test timeout no matter how contended the runner is.
     """
     pandoc = str(_PANDOC)
-    units = _renderable_units()
-    assert units, "the corpus produced no renderable units — fixture regression"
-    sampled = units[::_EQUIVALENCE_STRIDE]
-    assert len(sampled) >= 100, f"stride too coarse to be evidence: {len(sampled)} units"
-    for prepared in sampled:
-        assert _convert(prepared, pandoc) == _legacy_convert(prepared, pandoc)
+    offset = chunk_index * _EQUIVALENCE_CHUNK
+    for position, prepared in enumerate(_CHUNKS[chunk_index]):
+        assert _convert(prepared, pandoc) == _legacy_convert(prepared, pandoc), (
+            f"corpus unit {offset + position} rendered differently from the landed "
+            f"renderer: {prepared!r}"
+        )
