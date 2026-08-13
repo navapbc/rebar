@@ -4,9 +4,17 @@
 ``runner.py`` sat at exactly 800 LOC (the repo's hard cap in
 ``.github/module-size-limit.txt``), and two queued provider-seam stories need to add
 lines to it. This module holds the bounded structured-output retry driver
-(``_pai_structured``) and its small support cluster — usage extraction, the
-zeroed-usage telemetry warning, and the per-request iteration/token-budget
-helpers — verbatim, with no behaviour change.
+(``_pai_structured``) and its small support cluster — usage extraction and the
+per-request iteration/token-budget helpers — verbatim, with no behaviour change.
+
+This module itself later reached the cap and was split the same way (task
+solitary-burly-acouchi), by RESPONSIBILITY along the seams that already existed: the run
+MECHANISM stayed here, cache-effectiveness DIAGNOSTICS moved to ``cache_diagnostics``, and
+failure INTERPRETATION moved to ``run_failure``. Both are one-way dependencies (this module
+imports them, never the reverse), so new diagnostics or failure-classification logic has its
+own small home instead of re-inflating this one. Their public names are re-exported below so
+every pre-split import path — ``from rebar.llm.structured_run import interpret_failure`` and
+friends — keeps resolving unchanged.
 
 Leaf module (the ``anthropic_model.py`` / ``capabilities.py`` convention): this module
 imports NOTHING from ``runner`` at runtime — the one annotation that names
@@ -19,163 +27,56 @@ from __future__ import annotations
 
 import logging
 import math
-import time
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 from rebar.llm import usage_log
-from rebar.llm.capabilities import CACHE_MIN_PREFIX_TOKENS, ModelCapabilities
+from rebar.llm.cache_diagnostics import (
+    _warn_if_zeroed_usage,
+    cache_write_never_read,
+    estimate_marked_prefix_tokens,
+    warn_if_cache_ineffective,
+    warn_if_cache_write_never_read,
+)
+from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.errors import (
-    LLMBudgetExhaustedError,
     LLMConfigError,
-    LLMError,
-    LLMUnavailableError,
-    RunawayToolLoopError,
     StructuredOutputError,
     UnretryableOutputError,
+)
+from rebar.llm.run_failure import (
+    FailureContext,
+    _write_parse_failure_artifact,
+    interpret_failure,
 )
 
 if TYPE_CHECKING:
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import RunRequest
 
+# Re-exported so the split is invisible to every caller: `runner.py`, `usage_report.py` and
+# the existing test suite import these names FROM HERE, and `test_structured_run_seam.py`
+# asserts `hasattr(structured_run, "_warn_if_zeroed_usage")`. Listing them in `__all__` is
+# what marks them as deliberate re-exports (rather than unused imports) — the private two are
+# included for the same compatibility reason, not because they are public API.
+__all__ = [
+    "FailureContext",
+    "_extract_usage",
+    "_pai_check_config",
+    "_pai_structured",
+    "_warn_if_zeroed_usage",
+    "_write_parse_failure_artifact",
+    "build_model_settings",
+    "build_usage_limits",
+    "cache_write_never_read",
+    "effective_max_iterations",
+    "effective_max_tokens",
+    "estimate_marked_prefix_tokens",
+    "interpret_failure",
+    "warn_if_cache_ineffective",
+    "warn_if_cache_write_never_read",
+]
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class FailureContext:
-    """The bounded, per-call facts ``interpret_failure`` needs to enrich/classify a raised
-    exception (ADR 0056 decision 3) — everything the three ``except`` arms of
-    ``PydanticAIRunner.run()`` used to close over as locals, threaded explicitly instead."""
-
-    call_label: str
-    execution_mode: str
-    ran_model: str
-    req_limit: int
-    eff_max_iter: int
-    started_at: float  # time.monotonic() at call start; elapsed computed inside
-
-
-def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContext) -> NoReturn:
-    """The ``except`` spine of ``PydanticAIRunner.run()`` (ADR 0056 decision 3), lifted out
-    verbatim as a plain function. ALWAYS raises — never returns.
-
-    Dispatches on the exception type via ``isinstance``, in exactly this order (the order IS
-    the contract — see the ADR and the module-level test):
-
-    1. ``UsageLimitExceeded`` — rebar's own step-budget stop, not a provider outage.
-    2. ``RunawayToolLoopError`` — the in-flight loop breaker (bug c827); rebar aborting
-       its own repeating run. A special case BEFORE the broad ``LLMError`` arm, whose
-       blanket diagnostic overwrite would lose the guard's raise-time repetition keys —
-       and never the provider-outage sweep.
-    3. ``LLMError`` — already typed; enrich in place and re-raise the SAME object.
-    4. anything else — try the sampling-parameter-rejection translation FIRST (a provider
-       rejecting e.g. ``temperature`` must fail loudly/actionably, not be swept into the
-       broad provider-outage bucket below); only if that returns ``None`` does the generic
-       ``LLMUnavailableError`` path run.
-    """
-    from pydantic_ai.exceptions import UsageLimitExceeded
-
-    tool_calls_limit = max(8, ctx.eff_max_iter)
-    if isinstance(exc, UsageLimitExceeded):
-        # Computed BEFORE the log line so the repetition summary can be reported alongside the
-        # budget numbers — a runaway that burned its budget on one repeated tool call reads very
-        # differently from one that made steady progress.
-        budget_diag = usage_log.failure_usage(
-            run_messages,
-            request_limit=ctx.req_limit,
-            tool_calls_limit=tool_calls_limit,
-        )
-        logger.warning(
-            "llm call [%s] mode=%s model=%s hit step budget "
-            "(request_limit=%d max_iterations=%d) in %.1fs %s",
-            ctx.call_label,
-            ctx.execution_mode,
-            ctx.ran_model,
-            ctx.req_limit,
-            ctx.eff_max_iter,
-            time.monotonic() - ctx.started_at,
-            usage_log.format_repetition(budget_diag),
-        )
-        budget_err = LLMBudgetExhaustedError(
-            f"agent exceeded its step budget (max_iterations={ctx.eff_max_iter}; "
-            "~1 model request per tool call). Raise REBAR_LLM_MAX_STEPS or narrow "
-            "the task."
-        )
-        budget_err.diagnostic = budget_diag  # type: ignore[attr-defined]
-        raise budget_err from exc
-    if isinstance(exc, RunawayToolLoopError):
-        # Merge the run-shape counters (requests/limits/tokens) UNDER the guard's
-        # raise-time keys: those are the ground truth of what tripped, so they win on
-        # conflict over the message-derived recomputation.
-        merged: dict[str, Any] = {
-            **usage_log.failure_usage(
-                run_messages, request_limit=ctx.req_limit, tool_calls_limit=tool_calls_limit
-            ),
-            **exc.diagnostic,
-        }
-        exc.diagnostic = merged
-        logger.warning(
-            "llm call [%s] mode=%s model=%s aborted a runaway tool-call loop in %.1fs %s",
-            ctx.call_label,
-            ctx.execution_mode,
-            ctx.ran_model,
-            time.monotonic() - ctx.started_at,
-            usage_log.format_repetition(merged),
-        )
-        raise exc
-    if isinstance(exc, LLMError):
-        # Preserve the typed failure while attaching bounded counters from
-        # the failed run (no prompt/tool content).
-        exc.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-            run_messages,
-            request_limit=ctx.req_limit,
-            tool_calls_limit=tool_calls_limit,
-        )
-        raise exc
-    # A SYSTEMIC provider failure (auth / missing key / connection / rate-limit). Unify
-    # into the provider-agnostic LLMUnavailableError so every prompt-using client gets ONE
-    # recognizable "LLM couldn't run" signal — never a swallowed empty result
-    # (fuel-posse-ball).
-    # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g. Bedrock's
-    # "temperature is deprecated for this model" on a model NOT in the capabilities.py
-    # denylist) must fail LOUDLY and ACTIONABLY, not be misclassified as an opaque outage by
-    # the broad LLMUnavailableError path below. Only when this returns None (not a
-    # sampling-parameter rejection) does the existing path run, unchanged.
-    from rebar.llm.failure import translate_sampling_parameter_rejection
-
-    sampling_err = translate_sampling_parameter_rejection(exc, ctx.ran_model)
-    if sampling_err is not None:
-        sampling_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-            run_messages,
-            request_limit=ctx.req_limit,
-            tool_calls_limit=tool_calls_limit,
-        )
-        raise sampling_err from exc
-    logger.warning(
-        "llm call [%s] mode=%s model=%s FAILED in %.1fs: %s",
-        ctx.call_label,
-        ctx.execution_mode,
-        ctx.ran_model,
-        time.monotonic() - ctx.started_at,
-        exc,
-    )
-    provider_err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
-    provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
-        run_messages,
-        request_limit=ctx.req_limit,
-        tool_calls_limit=tool_calls_limit,
-    )
-    # Attach the classified disposition as METADATA (story civilized-immediate-mamba). This
-    # does NOT change the raised type — every existing `except LLMUnavailableError` still
-    # catches, and the per-seam wiring + exit-code use is story blackbear's. Kept total
-    # (classify_llm_failure never raises), so enriching the error can't mask it.
-    from rebar.llm.failure import ClassifyContext, classify_llm_failure
-
-    provider_err.outcome = classify_llm_failure(  # type: ignore[attr-defined]
-        exc, ClassifyContext(model=ctx.ran_model)
-    )
-    raise provider_err from exc
 
 
 # Max chars of the model's faulty prior reply echoed back in the bounded-retry reask
@@ -299,44 +200,6 @@ def _pai_structured(
         if path is not None:
             raise type(last)(f"{last} [raw reply captured: {path}]") from last
     raise last  # exhausted the bounded retry; surface the last validation error
-
-
-def _write_parse_failure_artifact(
-    artifact_dir: str, *, reply: str, model: str, contract: str, attempts: int
-) -> str | None:
-    """Best-effort capture of the raw model reply on FINAL structured-parse failure (story
-    2fd6). Writes ONE JSON artifact into ``artifact_dir`` and returns its path, then rotates the
-    directory to the newest 20 ``*.json`` files. ANY error (mkdir/permission/disk) is swallowed
-    and ``None`` is returned — it MUST NEVER raise, so the caller's original parse error is never
-    masked."""
-    try:
-        import json
-        import uuid
-        from datetime import datetime, timezone
-        from pathlib import Path
-
-        now = datetime.now(timezone.utc)
-        d = Path(artifact_dir)
-        d.mkdir(parents=True, exist_ok=True)
-        stamp = now.strftime("%Y%m%dT%H%M%S%f")
-        path = d / f"parse-failure-{stamp}-{uuid.uuid4().hex[:8]}.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "reply": reply,
-                    "model": str(model),
-                    "contract": str(contract),
-                    "attempts": int(attempts),
-                    "timestamp": now.isoformat(),
-                }
-            )
-        )
-        existing = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime)
-        for stale in existing[:-20]:
-            stale.unlink()
-        return str(path)
-    except Exception:  # noqa: BLE001 — best-effort capture must never mask the parse error
-        return None
 
 
 def build_model_settings(
@@ -528,229 +391,6 @@ def _extract_usage(run_result) -> dict[str, int]:
         # step-budget headroom — bug 59bc); 0/absent for a single-turn call.
         "requests": int(getattr(u, "requests", 0) or 0),
     }
-
-
-def warn_if_cache_ineffective(
-    usage: dict,
-    *,
-    caching_requested: bool,
-    model: str,
-    marked_prefix_tokens: int | None = None,
-    cache_min_prefix_tokens: int = CACHE_MIN_PREFIX_TOKENS,
-) -> None:
-    """Telemetry-only WARNING (never a block) when prompt caching was REQUESTED but reports
-    ZERO effect (story S3/2932).
-
-    MEASURED against real AWS: ``us.`` AND ``global.`` opus-4-5 both report cache_read=0 AND
-    cache_write=0 while billing the FULL input tokens (4029 in the measured run) — no error,
-    no warning from the provider. Caching is MODEL-dependent, not profile-prefix-dependent (a
-    controlled same-model `us.` vs `global.` comparison proved the prefix is not the variable).
-    Without this warning an operator silently pays full price on every call, forever, with no
-    signal anything is wrong.
-
-    This is DELIBERATELY a separate predicate from ``_warn_if_zeroed_usage`` above: that one
-    fires on ``input_tokens == 0`` (a request that plausibly never happened), whereas here
-    ``input_tokens`` is healthy/nonzero (a REAL request was billed) — the existing predicate
-    would never fire for this case. An ineffective cache is a COST problem, not a correctness
-    one, so this is WARNING-level observability only and never raises/blocks.
-
-    Bounded BELOW by ``CACHE_MIN_PREFIX_TOKENS`` (bug 7a79). The claim being made is "a
-    cacheable prompt silently failed to cache", which requires the prompt to have been
-    cacheable: below the floor the anthropic cache never writes or reads, so zero/zero is the
-    CORRECT reading and no configuration change could alter it. Unbounded, the predicate fired
-    on every small call — ~20 lines per ``rebar review-plan`` run, on the same runs whose
-    AGGREGATE usage reported ``cache_write_tokens > 0`` — which both contradicted the run's own
-    telemetry and trained operators to filter out the one signal that catches real cost bleed.
-    The floor makes the warning mean what it says; the above-floor detection is unchanged.
-
-    Bug e3cd corrected BOTH halves of that bound.
-
-    * ``cache_min_prefix_tokens`` is now the CALLER'S per-model floor (read off
-      ``ModelCapabilities``), not a model-blind 4096. It defaults to the conservative global
-      so an un-updated caller keeps today's exact behavior.
-    * ``marked_prefix_tokens`` is the size of the MARKED PREFIX -- the bytes ahead of the
-      ``cache_control`` breakpoint -- which is what actually governs whether the cache
-      engages. The old predicate tested total ``input_tokens``, so a call with a 150-token
-      marked prefix behind a 7000-token UNMARKED user message cleared the floor on totals
-      while being uncacheable in fact. When it is None (a caller that cannot measure it) the
-      pre-existing total-based predicate applies unchanged.
-
-    With the marked prefix known there are two distinct, mutually exclusive reports, because
-    they have different causes and therefore different remedies:
-
-    A. marked prefix AT/ABOVE the floor, zero/zero -> the prompt WAS cacheable and the cache
-       silently did not engage. The original story-S3 signal, retargeted.
-    B. marked prefix BELOW the floor while a floor's worth of payload rides OUTSIDE the
-       breakpoint -> the prompt can never cache as marked, and the changeable thing is where
-       the breakpoint sits. Reporting the total here (as the old predicate did) named the
-       wrong quantity and so implied the wrong remedy, since the prompt looks plenty big.
-
-    Case B is deliberately bounded by ``unmarked >= floor`` rather than firing on every small
-    marked prefix: the signal is "a cacheable-sized payload is riding outside the breakpoint",
-    not "the prefix is small". Without that bound this would re-create the 7a79 spam."""
-    if not (
-        caching_requested
-        and usage.get("cache_read_tokens", 0) == 0
-        and usage.get("cache_write_tokens", 0) == 0
-    ):
-        return
-
-    input_tokens = usage.get("input_tokens", 0)
-
-    if marked_prefix_tokens is None:
-        if input_tokens >= cache_min_prefix_tokens:
-            logger.warning(
-                "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
-                "cache_write=%s) despite input_tokens=%s - caching is model-dependent and can "
-                "fail silently (no error from the provider); the operator is paying full "
-                "input price on every call",
-                model,
-                usage.get("cache_read_tokens", 0),
-                usage.get("cache_write_tokens", 0),
-                input_tokens,
-            )
-        return
-
-    if marked_prefix_tokens >= cache_min_prefix_tokens:
-        logger.warning(
-            "llm prompt caching requested for model=%s but had NO effect (cache_read=%s, "
-            "cache_write=%s) despite a marked prefix of %s tokens, at/above this model's "
-            "%s-token minimum - caching is model-dependent and can fail silently (no error "
-            "from the provider); the operator is paying full input price on every call",
-            model,
-            usage.get("cache_read_tokens", 0),
-            usage.get("cache_write_tokens", 0),
-            marked_prefix_tokens,
-            cache_min_prefix_tokens,
-        )
-        return
-
-    if input_tokens - marked_prefix_tokens >= cache_min_prefix_tokens:
-        logger.warning(
-            "llm prompt caching requested for model=%s but CANNOT engage: only %s tokens sit "
-            "ahead of the cache breakpoint, below this model's %s-token minimum, while %s of "
-            "the %s billed input tokens ride AFTER it unmarked - the provider declines a "
-            "sub-minimum prefix silently (no error, cache_read=%s cache_write=%s). The "
-            "changeable thing is where the breakpoint sits, not the size of the prompt",
-            model,
-            marked_prefix_tokens,
-            cache_min_prefix_tokens,
-            input_tokens - marked_prefix_tokens,
-            input_tokens,
-            usage.get("cache_read_tokens", 0),
-            usage.get("cache_write_tokens", 0),
-        )
-
-
-def cache_write_never_read(records: list[dict], *, min_calls: int = 2) -> bool:
-    """True when a RUN's caching calls all WROTE the cache and NONE ever READ it (bug 1dbe).
-
-    The per-call :func:`warn_if_cache_ineffective` cannot see this shape: each individual
-    write>0/read==0 call is BENIGN in isolation (the first call of any warm-then-reuse
-    sequence writes and reads nothing). The pathology is only visible ACROSS a run's calls —
-    "every caching call paid the write PREMIUM and not one collected the read DISCOUNT" — which
-    is exactly the state bug 1dbe measured (three plan-review passes each writing thousands of
-    tokens, every read zero, on back-to-back runs). It stayed invisible because the only cache
-    telemetry fired on write==0 AND read==0.
-
-    Fires only with at least ``min_calls`` (default 2) CACHING calls — a call is "caching" here
-    iff it wrote OR read a cache (``cache_write_tokens`` or ``cache_read_tokens`` present and
-    nonzero). A single caching call is the legitimate first write and is never flagged; a run
-    with no caching calls at all is out of scope (the write==0/read==0 predicate owns that).
-    Returns True iff every caching call wrote (>0) and every caching call read exactly 0."""
-    caching = [
-        r
-        for r in records
-        if int(r.get("cache_write_tokens", 0) or 0) or int(r.get("cache_read_tokens", 0) or 0)
-    ]
-    if len(caching) < min_calls:
-        return False
-    return all(
-        int(r.get("cache_write_tokens", 0) or 0) > 0
-        and int(r.get("cache_read_tokens", 0) or 0) == 0
-        for r in caching
-    )
-
-
-def warn_if_cache_write_never_read(records: list[dict], *, model: str = "?") -> None:
-    """Telemetry-only WARNING (never a block) for the write-every-call-never-read run shape
-    (bug 1dbe) — the aggregate companion to the per-call :func:`warn_if_cache_ineffective`.
-
-    Called over a RUN's usage records (e.g. from :func:`rebar.llm.usage_log.summarize`). When
-    :func:`cache_write_never_read` holds, the operator is paying the cache-WRITE premium on
-    every call and collecting the read discount on none — pure loss — most often because the
-    marked prefix varies per call (no breakpoint sits at the byte-identical shared segment).
-    Observability only; a run that genuinely never re-uses a prefix is at worst a benign
-    warning."""
-    if not cache_write_never_read(records):
-        return
-    caching = [
-        r
-        for r in records
-        if int(r.get("cache_write_tokens", 0) or 0) or int(r.get("cache_read_tokens", 0) or 0)
-    ]
-    total_write = sum(int(r.get("cache_write_tokens", 0) or 0) for r in caching)
-    logger.warning(
-        "llm prompt caching WROTE on every one of %s caching call(s) (model=%s) and was READ "
-        "by NONE (%s cache_write tokens billed at premium, cache_read=0 across the run) - the "
-        "marked prefix likely varies per call, so no breakpoint sits at the byte-identical "
-        "shared segment; the write premium is pure loss until one does",
-        len(caching),
-        model,
-        total_write,
-    )
-
-
-def estimate_marked_prefix_tokens(cache_settings: Any, *, system_prompt: str) -> int | None:
-    """Estimated size of the bytes AHEAD of the cache breakpoint, or ``None`` if unknowable.
-
-    ``warn_if_cache_ineffective`` needs the MARKED PREFIX, not the total input (bug e3cd), and
-    the only component that can name it is the one that decided where the breakpoint goes.
-    ``capabilities.cache_settings_for`` always sets the instructions + tool-definitions
-    breakpoints, and pydantic-ai puts ``cache_control`` on the LAST SYSTEM BLOCK for the
-    former, so the marked prefix is the system prompt. Bug dd27 added a THIRD, message-tail
-    breakpoint on the multi-turn arm; it sits BEHIND the system prompt, so it can only enlarge
-    the truly-cached span and never shrinks the prefix estimated here — the estimate stays
-    conservative in the same direction as the two below.
-
-    Two deliberate conservatisms, both erring toward NOT warning:
-
-    * Tool definitions render AHEAD of the system prompt and are inside the marked span, but
-      they are not sized here (their serialized JSON is not available at this seam). Omitting
-      them UNDER-counts, which can only suppress a warning, never manufacture one. It is a
-      no-op on rebar's single-turn calls, which send no tools.
-    * Returning ``None`` when no instructions breakpoint is set routes the caller back to the
-      pre-existing total-``input_tokens`` predicate rather than asserting a marked size that
-      was never established.
-
-    The chars/4 estimate matches ``plan_review.det_floor.est_tokens``, imported lazily to keep
-    this leaf module free of a package that imports back into ``llm``."""
-    if not cache_settings:
-        return None
-    if not (
-        cache_settings.get("anthropic_cache_instructions")
-        or cache_settings.get("bedrock_cache_instructions")
-    ):
-        return None
-    from rebar.llm.plan_review.det_floor import est_tokens
-
-    return est_tokens(system_prompt)
-
-
-def _warn_if_zeroed_usage(usage: dict) -> None:
-    """Telemetry-only WARNING (never a block) when a REAL run reports all-zero token usage
-    despite having made a request — the #5360 zeroed-adapter signal. Observability, not
-    load-bearing; a genuinely tiny run is at worst a benign warning."""
-    if (
-        usage.get("requests", 0) > 0
-        and usage.get("input_tokens", 0) == 0
-        and usage.get("output_tokens", 0) == 0
-    ):
-        logger.warning(
-            "llm usage looks zeroed/implausible (requests=%s, input=0, output=0) — the "
-            "provider adapter may be under-reporting usage",
-            usage.get("requests"),
-        )
 
 
 # ── pydantic-ai import + config preflight ─────────────────────────────────────────────
