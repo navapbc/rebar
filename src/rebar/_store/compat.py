@@ -53,11 +53,14 @@ __all__ = [
 CURRENT_FORMAT_VERSION = 1
 KNOWN_FORMAT_VERSIONS: frozenset[int] = frozenset({0, 1})
 
-# Capabilities this binary provides. v1.0 introduces the record itself but declares
-# no named capability yet, so the set is empty: any capability a record *requires* is
-# by definition unknown to v1.0 and fails the gate closed (a forward-compat guard —
-# a newer rebar that adds a capability will list it here so its stores validate).
-KNOWN_CAPABILITIES: frozenset[str] = frozenset()
+# Capabilities this binary provides. Any capability a record *requires* that is NOT
+# listed here is by definition unknown to this binary and fails the gate closed (a
+# forward-compat guard — a newer rebar that adds a capability lists it here so its
+# stores validate). ``multi-project-bridge`` is registered as the expand half of the
+# expand/contract rollout (docs/migrations.md): binaries learn to recognise it — and
+# so pass, rather than fail closed, on a store that declares it — before anything
+# stamps the requirement.
+KNOWN_CAPABILITIES: frozenset[str] = frozenset({"multi-project-bridge"})
 
 # The committed record's filename, under the tracker root (tickets-branch worktree).
 COMPAT_FILENAME = ".store-compat.json"
