@@ -203,6 +203,13 @@ try:
 
         result: str
         push_status: PushStatusOut | None = None
+        # Ticket 594b: the save-time description-cap notice. Same reasoning as
+        # push_status — an MCP client reads only the tool result, so a warning that
+        # exists solely on the server's stderr is undeliverable on this surface.
+        # Present (non-null) only when the write put the description over
+        # verify.max_ticket_description_chars while the plan-review start-work gate
+        # is enabled; advisory, and the write still succeeded.
+        description_warning: str | None = None
 
     class FileImpactItemOut(_Out):
         path: str
@@ -217,6 +224,8 @@ try:
         id: str
         alias: str | None = None
         push_status: PushStatusOut | None = None
+        #: Advisory save-time description-cap notice (ticket 594b); see WriteAckOut.
+        description_warning: str | None = None
 
     class ClaimResultOut(_Out):
         ticket_id: str

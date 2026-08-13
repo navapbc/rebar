@@ -50,6 +50,17 @@ _USAGE = (
 )
 
 
+def _warn_stderr(message: str | None) -> None:
+    """Print an advisory ``Warning:`` line to stderr, or nothing when there is none.
+
+    The branch lives here rather than in ``create_cli``/``edit_cli`` because both sit at
+    their locked complexity ceiling (``.github/complexity-baseline.json``); it is also the
+    one place the CLI's warning prefix is spelled.
+    """
+    if message:
+        print(f"Warning: {message}", file=sys.stderr)
+
+
 def _new_ticket_id() -> str:
     """Fresh 16-hex canonical ticket id (``xxxx-xxxx-xxxx-xxxx``), as bash generates."""
     u = _uuid.uuid4().hex
@@ -219,7 +230,24 @@ def create_core(
             data["detected_by"] = _detected_norm
 
     append_event(ticket_id, "CREATE", data, tracker, repo_root=repo_root)
-    return {"id": ticket_id, "alias": alias or None, "title": title}
+    # Save-time heads-up (ticket 594b): computed AFTER the event lands, so an oversized
+    # description is reported the moment it is written instead of at review-plan time.
+    # Advisory only — each surface emits it on its own channel (CLI stderr, library
+    # logger, MCP result field); the create itself is unaffected either way.
+    from rebar._commands.gates import description_cap_warning
+
+    warning = description_cap_warning(
+        description,
+        ticket_type,
+        ticket_id=alias or ticket_id,
+        cfg_root=os.path.dirname(str(tracker)),
+    )
+    return {
+        "id": ticket_id,
+        "alias": alias or None,
+        "title": title,
+        "description_warning": warning,
+    }
 
 
 def create_cli(argv: list[str], *, repo_root=None) -> int:
@@ -339,6 +367,9 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             "(the file-impact-coverage gate will otherwise flag it).",
             file=sys.stderr,
         )
+    # Same stderr channel for the description-cap heads-up (ticket 594b): the create
+    # already succeeded, so this is advisory and the exit code stays 0.
+    _warn_stderr(res.get("description_warning"))
     return 0
 
 
@@ -385,9 +416,14 @@ def edit_core(
     tag_remove=None,
     tag_set=None,
     repo_root=None,
-) -> None:
+) -> str | None:
     """Validate fields and append an EDIT event (mirrors ``ticket_edit``), plus tag
     add/remove/set deltas as a TAG_DELTA event (P2.3).
+
+    Returns the save-time description-cap warning when this edit wrote a description
+    over ``verify.max_ticket_description_chars`` and the plan-review start-work gate
+    applies (else ``None``); callers emit it on their own channel. Advisory only — the
+    edit has already been appended by then.
 
     Field guards: unknown-field reject, non-empty title/description, priority 0-4,
     ticket_type enum, and the ``--parent`` cascade (``null`` detaches; else resolve
@@ -462,8 +498,10 @@ def edit_core(
         else:  # assignee
             out[key] = value
 
+    warning: str | None = None
     if out:
         append_event(resolved, "EDIT", {"fields": out}, tracker, repo_root=repo_root)
+        warning = _edit_description_warning(out, resolved, tracker, reduce_ticket)
 
     if has_tag_op:
         observed = list((reduce_ticket(str(tracker / resolved)) or {}).get("tags") or [])
@@ -484,6 +522,30 @@ def edit_core(
                 tracker,
                 repo_root=repo_root,
             )
+
+    return warning
+
+
+def _edit_description_warning(out: dict, resolved: str, tracker, reduce_ticket) -> str | None:
+    """The save-time description-cap notice for an EDIT that wrote a description.
+
+    Split out of :func:`edit_core` (which sits at its locked complexity ceiling). The
+    ticket type is the one the ticket has AFTER this edit, since the same call may change
+    it. Returns ``None`` when no description was written, the description is within
+    ``verify.max_ticket_description_chars``, or the plan-review start-work gate does not
+    apply — see :func:`rebar._commands.gates.description_cap_warning`.
+    """
+    if "description" not in out:
+        return None
+    from rebar._commands.gates import description_cap_warning
+
+    state = reduce_ticket(str(tracker / resolved)) or {}
+    return description_cap_warning(
+        out["description"],
+        str(out.get("ticket_type") or state.get("ticket_type") or ""),
+        ticket_id=str(state.get("alias") or resolved),
+        cfg_root=os.path.dirname(str(tracker)),
+    )
 
 
 def _resolve_new_parent(value: str, ticket_id: str, tracker, reduce_ticket) -> str:
@@ -593,7 +655,7 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             fields[name] = val
     try:
-        edit_core(
+        edit_warning = edit_core(
             ticket_id,
             fields,
             tag_add=tag_add or None,
@@ -604,6 +666,10 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    # Advisory description-cap heads-up (ticket 594b) on the CLI's stderr channel; the
+    # edit already committed, so it never changes the exit code. Emitted BEFORE --review
+    # so the author sees why the review is about to refuse admission.
+    _warn_stderr(edit_warning)
     if review:
         # --review (story a114): re-run the signed plan review strictly AFTER the
         # EDIT event committed (and its short-lived store lock was released) — the
