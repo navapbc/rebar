@@ -106,13 +106,15 @@ rebar transition <id> idea open
 
 ## Claiming and transitioning
 
-**Claim** atomically moves an `open` ticket to `in_progress` and sets the assignee.
+**Claim** atomically moves an `open` ticket to `in_progress` and sets the assignee to
+the configured `ticket.default_assignee` (see [config.md](config.md)). An explicit
+`--assignee` overrides it, and must be a Jira-resolvable identity — an email or accountId.
 This is how ownership is established — if someone else already claimed it you get a
 non-zero exit (a normal "taken" signal, not a crash), so pick another ticket rather
 than forcing:
 
 ```sh
-rebar claim <ticket-id> --assignee alice
+rebar claim <ticket-id>
 ```
 
 **Transition** moves a ticket between statuses. You can pass the current and target
@@ -231,7 +233,7 @@ the two tickets' nearest common ancestor. Remove a link with `rebar unlink <a> <
 ```sh
 rebar tag <id> needs-review
 rebar untag <id> needs-review
-rebar edit <id> --priority=1 --assignee=bob --add-tag=urgent
+rebar edit <id> --priority=1 --assignee=alice@example.com --add-tag=urgent
 ```
 
 ## Session logs — durable working notes

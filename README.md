@@ -41,13 +41,13 @@ MCP server config so agents can drive the same loop over MCP. `rebar --help` (an
 rebar init
 tid=$(rebar create task "Add a login page" | tail -1)   # capture the new ticket id
 rebar ready                                              # lists it as ready to work
-rebar claim "$tid" --assignee alice                     # open -> in_progress
+rebar claim "$tid"                                       # open -> in_progress
 rebar transition "$tid" in_progress closed              # in_progress -> closed
 ```
 ```python
 import rebar                                            # the same loop via the Python library
 tid = rebar.create_ticket("task", "Add a login page")
-rebar.claim(tid, assignee="alice")
+rebar.claim(tid)
 rebar.transition(tid, "in_progress", "closed")
 ```
 ```json
