@@ -111435,6 +111435,20 @@
       "state": "confirmed",
       "updated_at": "2026-07-16T19:48:11Z"
     },
+    "defc-658e-bfe1-4cab": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe graph loader/BFS centralization (985c-32d2-e828-4e6a, Gerrit 1708) named two behaviours as explicit helpers that had previously been inline. The rebar code-review bot flagged both as untested. The gaps are PRE-EXISTING \u2014 the same logic was uncovered while inline \u2014 but naming them made them visible.\n\n## Gaps\n1. `_graph.py::_is_at_level` \u2014 the target-side level guard in `check_cycle_at_level` refuses to traverse into a neighbour whose `ticket_type` differs from the queried level. Every existing `check_cycle_at_level` test in tests/scripts/graph/test_graph_cycles.py uses a single uniform level, so the cross-level refusal is never exercised: a regression that dropped the guard would keep the suite green.\n2. `_unblock.py::_load_states_with_tombstones` \u2014 three behaviours have no test driving them through `detect_newly_unblocked`: (a) a dir whose reduce returns None but which has a `.tombstone.json` yields a status-only stub, (b) a present tombstone's status OVERRIDES the reduced status, (c) a malformed/unreadable tombstone degrades to `deleted` rather than to 'no tombstone'.\n\n## Approach\nAdd characterization tests only \u2014 no production change. Follow the pattern of `test_get_all_blocked_by_accumulates_targets_without_a_ticket_dir` (added by 985c): assert the behaviour that exists today, so the tests pin the contract rather than propose a new one.\n\n- tests/scripts/graph/test_graph_cycles.py: a tracker where an epic-level cycle is only closable via a task-level neighbour, asserting `check_cycle_at_level(..., level='epic')` returns False because the cross-level hop is refused.\n- tests/scripts/test_ticket_unblock.py: one test per tombstone behaviour (a)/(b)/(c), driven through the public `detect_newly_unblocked` rather than the private helper.\n\n## Acceptance Criteria\n- [ ] A test fails if `_is_at_level`'s target-side level check is removed from `_same_level_neighbors` (verified by deleting the guard locally and observing the new test go red).\n- [ ] A test fails if the tombstone-status override in `_load_states_with_tombstones` is removed.\n- [ ] A test fails if the reduce-returns-None + tombstone-present stub branch is removed.\n- [ ] A test fails if the malformed-tombstone fallback stops defaulting to `deleted`.\n- [ ] No file under src/rebar is modified (verified: `git diff --name-only` lists only test files).\n- [ ] make lint and make typecheck are green.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Cover graph traversal seams surfaced by the loader/BFS refactor"
+      },
+      "created_at": "2026-08-13T06:40:38Z",
+      "jira_key": "REB-2839",
+      "peer_parent": "REB-2686",
+      "state": "confirmed",
+      "updated_at": "2026-08-13T06:40:38Z"
+    },
     "df2c-e4b8-496d-4698": {
       "baseline": {
         "assignee": {
@@ -134691,6 +134705,7 @@
     "REB-2836": "b432-c9dc-c1b4-4a45",
     "REB-2837": "f7da-baae-3c93-47e2",
     "REB-2838": "8d78-ef59-83cd-4d76",
+    "REB-2839": "defc-658e-bfe1-4cab",
     "REB-284": "b4cd-7db9-92f2-4e1f",
     "REB-285": "b533-485d-d5df-448f",
     "REB-286": "b5db-7433-b731-444f",
