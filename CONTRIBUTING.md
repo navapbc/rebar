@@ -234,6 +234,34 @@ Each push is a new **patchset**. Both bots re-run: the review-bot re-reviews (LL
 re-runs and re-votes `Verified`. Resolve any inline comments (mark them **Done**/resolved)
 so `-has:unresolved` is satisfied.
 
+#### Hold a change with known issues in **Work In Progress**
+
+If a pushed change has known unresolved issues — findings you are still folding in, a
+defect you spotted after pushing, or any deliberate hold — mark it **WIP immediately**.
+Gerrit will not let a WIP change be submitted, so this is the hold itself, not a note
+about one:
+
+```bash
+# at push time, if you already know it isn't ready
+git push gerrit HEAD:refs/for/main%wip
+
+# on a change that is already up (n = the change number)
+curl -u "$USER:$PASS" -X POST https://rebar.solutions.navateam.com/a/changes/<n>/wip
+# …and when it's resolved:
+curl -u "$USER:$PASS" -X POST https://rebar.solutions.navateam.com/a/changes/<n>/ready
+```
+
+`%ready` on the next push does the same as the `/ready` call. The Gerrit UI's **Mark as
+work in progress** / **Mark as ready** buttons are equivalent.
+
+**Why the ticket comment isn't enough.** A hold recorded in a ticket, a session log, or a
+Gerrit comment is *advisory*: it relies on whoever submits next having read it. WIP is
+*enforceable* — it is the only hold every submitter, human or bot or another agent
+session, is structurally forced to respect. Change 1727 is the worked example: five known
+defects were recorded on its ticket and a peer session, correctly following the standing
+"both votes green ⇒ Submit" rule (§2e), submitted it anyway. Both votes being green is a
+statement about the gates, never about whether *you* think the change is done.
+
 ### 2e. Submit
 **Land with a plain Gerrit Submit once both votes are green.** Once your change has
 **`LLM-Review +1` AND `Verified +1`** and no unresolved comments, land it yourself with a plain

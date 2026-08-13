@@ -255,6 +255,10 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
 - **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref creates a Gerrit
   change; it does not touch `main`). Iterate on findings with `git commit --amend --no-edit`
   (keep the `Change-Id`) + re-push.
+- **A change with known issues goes in WIP, not in a comment.** `…refs/for/main%wip` at push
+  time, or `POST /a/changes/<n>/wip` on an existing change (`%ready` / `…/ready` to release);
+  a hold recorded only on the ticket is advisory, and another session will submit past it →
+  [CONTRIBUTING.md](CONTRIBUTING.md) §2d.
 - **The gate:** a change is submittable only at **`LLM-Review +1` AND `Verified +1` AND no
   unresolved comments** — only the bots/admins cast either label, so you cannot self-approve.
   A `Verified -1` is a CI failure: open the run and read it. `recheck` only for a **provably

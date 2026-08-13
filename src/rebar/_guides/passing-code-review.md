@@ -30,6 +30,13 @@ commit ──▶ [rebar review-code — optional local preview] ──▶ git pu
 Iterate by **amending the same commit** (`git commit --amend --no-edit`, keep the `Change-Id`)
 and re-pushing — each push is a new patchset and both bots re-run.
 
+**While a change has known unresolved issues, hold it in Gerrit's Work In Progress state** —
+`git push origin HEAD:refs/for/main%wip` at push time, or `POST /a/changes/<n>/wip` on a change
+already up (`%ready` / `POST …/ready` to release it). A hold recorded only in a ticket comment
+is advisory and invisible to whoever submits next; WIP is enforceable, because Gerrit refuses to
+submit a WIP change. See
+[CONTRIBUTING.md](https://github.com/navapbc/rebar/blob/main/CONTRIBUTING.md) §2d.
+
 ## Before you push — the commit checklist
 
 CI's `Verified` gate rejects the push outright if any of these is missing:
