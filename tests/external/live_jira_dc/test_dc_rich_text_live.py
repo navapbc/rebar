@@ -39,6 +39,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import pytest
 from _bridge_output import converged_pass_problem, wrote_nothing_problem
 from _dc_support import live_jira_ready
 from _dc_support import run_bridge as _run_bridge
@@ -58,13 +59,18 @@ def _uniq(prefix: str) -> str:
 
 
 def _rich_markdown(heading: str, bold: str, code: str) -> str:
-    """A representative rich body: a level-1 heading, a bold span, and a fenced code block.
+    """A representative rich body: a level-1 heading, a bold span, and a code macro.
 
-    Markdown on the local side; the DC rich codec (story 5c0e) converts it to Jira wiki
-    (`h1.` / `*bold*` / `{code}`), which the real renderer then turns into HTML — the thing
-    this module asserts on.
+    The heading and the bold span are authored as Markdown (``# ``, ``**foo**``); the
+    DC rich codec (story 271c's renderer, gated by the 3388 cutover) renders them to Jira
+    wiki (``h1.`` / ``*bold*``), which the real renderer then turns into HTML — the thing
+    this module asserts on. The code fragment is authored as a Jira ``{code}`` macro
+    directly: the renderer LOCKS code verbatim (a Markdown fenced block passes through as
+    literal back-ticks, never a macro — ``wiki_render`` classifies ``{code}``/fences as
+    ``_EXACT``), so the only wire that yields a rendered ``<pre>`` code panel is a real
+    ``{code}`` block, which the codec passes through unchanged for Jira to render.
     """
-    return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n```\n{code}\n```\n"
+    return f"# {heading}\n\nA paragraph with **{bold}** emphasis.\n\n{{code}}\n{code}\n{{code}}\n"
 
 
 def _wait_until_search_reflects(
@@ -167,6 +173,7 @@ def test_live_rich_text_renders_and_echo_is_safe(
     jira_dc_project: str,
     bound_dc_issue: Any,
     dc_request: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """AC1 + AC2 (echo half): a pushed rich body renders to HTML, and a second pass re-pushes
     nothing.
@@ -184,6 +191,17 @@ def test_live_rich_text_renders_and_echo_is_safe(
     """
     local_id, key = bound_dc_issue
     dc_transport.project = jira_dc_project
+
+    # Enable the DC rich-text cutover (story 3388) for the reconcile subprocesses this test
+    # spawns. The cutover ships OFF (``reconciler.rich_text_cutover`` defaults to ``off``), so
+    # ``WikiTextCodec.to_wire`` is the IDENTITY by default and a rich body would reach Jira as
+    # raw Markdown (``# x`` renders as an ordered list, not ``<h1>``). This is exactly the
+    # residual risk graywolf exists to prove is CLOSED when the flag is on: with the cutover
+    # enabled the codec renders Markdown to wiki markup and Jira produces the expected HTML.
+    # ``run_bridge`` builds the subprocess env from ``os.environ`` (via ``engine_env``), so the
+    # canonical env override reaches ``cutover_clients()`` in the child; ``monkeypatch`` reverts
+    # it after the test.
+    monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "dc")
 
     heading = _uniq("graywolf-heading")
     bold = _uniq("graywolf-bold")
