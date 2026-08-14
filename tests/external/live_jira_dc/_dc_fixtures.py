@@ -100,6 +100,34 @@ def fetch_tickets(
     raise AssertionError("unreachable: attempts must be >= 1")  # pragma: no cover
 
 
+def scrub_bridge_state(tracker: Path, *, commit: bool = False) -> list[str]:
+    """Remove every ``.bridge_state*`` binding/snapshot cache from *tracker*.
+
+    Matched as a GLOB so a renamed sibling cannot survive merely because its exact name
+    is not enumerated. Returns the names removed (for a caller that wants to assert on them).
+
+    ``commit=True`` also stages the removal and commits it, for the SECOND scrub pass — the
+    one that runs AFTER :func:`run_ensures`. The registry's ``projects-seed`` unit
+    (``rebar._store.project_ensures.seed_projects_mapping_unit``, ticket 462d / epic 0303)
+    unconditionally re-creates and COMMITS ``.bridge_state/projects.json`` when its
+    tree-check no longer finds the blob — which is exactly the state the first scrub leaves.
+    That seed unit post-dates this scrub (added 2026-08-13, after the J11 store-copy fixture),
+    so converging the copy re-introduces the very cache the scrub removed; re-scrubbing and
+    committing after convergence is what keeps the copy free of it (bug 91aa)."""
+    removed: list[str] = []
+    for path in sorted(tracker.glob(".bridge_state*")):
+        subprocess.run(["rm", "-rf", str(path)], check=True)
+        removed.append(path.name)
+    if commit and removed:
+        subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
+        subprocess.run(
+            ["git", "commit", "-q", "--no-verify", "-m", "re-scrub .bridge_state after converge"],
+            cwd=tracker,
+            check=True,
+        )
+    return removed
+
+
 @pytest.fixture
 def dc_transport(jira_dc_pat: str, jira_dc_base_url: str) -> Any:
     """A REAL ``JiraDataCenterTransport`` against the live harness.
@@ -218,8 +246,7 @@ def dc_store_copy_repo(
 
     # SCRUB: every binding/snapshot artifact, matched as a GLOB so a renamed sibling
     # cannot survive merely because its exact name is not enumerated.
-    for path in sorted(tracker.glob(".bridge_state*")):
-        subprocess.run(["rm", "-rf", str(path)], check=True)
+    scrub_bridge_state(tracker)
 
     _init(tracker, "tickets")
     subprocess.run(["git", "add", "-A"], cwd=tracker, check=True)
@@ -242,6 +269,13 @@ def dc_store_copy_repo(
         "ensure-registry did not create the store marker `.env-id`; every library write "
         "against this copy would fail with 'ticket system not initialized'"
     )
+
+    # RE-SCRUB after converging. `run_ensures` runs the `projects-seed` unit (ticket 462d /
+    # epic 0303), which re-creates and commits `.bridge_state/projects.json` because the first
+    # scrub deleted the blob its tree-check looks for. That unit was added AFTER this fixture,
+    # so its seed silently resurrects the cache the scrub removed (bug 91aa) — remove it again,
+    # committing the deletion so the copy the isolation cell inspects carries no `.bridge_state`.
+    scrub_bridge_state(tracker, commit=True)
 
     (work / "rebar.toml").write_text(
         textwrap.dedent(f"""
