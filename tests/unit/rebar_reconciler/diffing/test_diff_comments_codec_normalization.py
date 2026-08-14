@@ -128,19 +128,28 @@ def test_new_comment_under_non_identity_codec_is_still_emitted(differ, adf_codec
     assert out[0]["action"] == "add"
 
 
-def test_without_an_injected_codec_todays_baseline_behaviour_is_unchanged(differ) -> None:
-    """No caller passes a real codec in production yet (ticket a32a is about
-    the SEAM, not about wiring a converter that doesn't exist) — so with no
-    ``codec`` argument, behaviour must be byte-identical to before this
-    ticket: a soft-wrapped local body that Jira echoes back VERBATIM (today's
-    actual behaviour, per the ticket: Cloud sends plain text via ACLI, no ADF
-    encoding is computed for comments) still dedups with zero mutations.
+def test_without_an_injected_codec_todays_baseline_behaviour_is_unchanged(
+    differ, adf_codec
+) -> None:
+    """emersed-specific-mutt flips the ``_resolve_codec`` default from the a32a
+    ``_IdentityCodec`` to the REAL Cloud ``AdfCodec`` (the DC comment-diff
+    dedup-key migration 3388 deferred to this story), so the local dedup key is
+    now normalized the way the LANDED wire is — even when no caller injects a
+    codec. The send path ADF-encodes, so Jira stores the NORMALIZED (soft-wrap
+    rejoined) form, and the un-injected diff converges against it with zero
+    mutations. (Before this story the default was identity and this asserted a
+    verbatim echo; that premise — "Cloud sends plain text, no ADF" — is exactly
+    what this story overturns.)
     """
     jira_key = "DIG-A32A-3"
-    body = "first line of prose\nsoft-wrapped continuation"
-    ticket = _ticket_with_comments([body])
-    snapshot = _jira_snapshot_with_comments(jira_key, [body])
+    local_raw = "first line of prose\nsoft-wrapped continuation"
+    jira_stored = adf_codec.normalize_outbound(local_raw)
+    assert jira_stored != local_raw, "fixture must exercise a real, non-identity transform"
 
+    ticket = _ticket_with_comments([local_raw])
+    snapshot = _jira_snapshot_with_comments(jira_key, [jira_stored])
+
+    # No ``codec`` argument: the flipped default resolves to the real AdfCodec.
     out = differ._diff_comments(ticket, jira_key, snapshot)
 
     assert out == []

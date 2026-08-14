@@ -30,7 +30,6 @@ from rebar_reconciler.adapters.jira.acli_subprocess import (
     _ASSIGNEE_PERMISSION_ERROR,
 )
 from rebar_reconciler.adapters.jira.adf import text_to_adf as _text_to_adf  # canonical location
-from rebar_reconciler.adapters.jira.jira_fields import _sanitize_comment
 from rebar_reconciler.adapters.jira_family import (
     LOCAL_PRIORITY_TO_JIRA as _LOCAL_PRIORITY_TO_JIRA,
 )
@@ -495,11 +494,26 @@ def add_comment(
     *,
     acli_cmd: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Add a comment to a Jira issue via ACLI."""
-    # Bug 6afc-20ee-84e5-4dd5: guard Jira's 32,767-char comment limit before the
-    # send (ACLI exits 0 on an over-length rejection, so an unguarded body fails
-    # silently and re-emits every pass).
-    body = _sanitize_comment(body)
+    """Add a comment to a Jira issue via ACLI.
+
+    emersed-specific-mutt: the Cloud comment path now ADF-encodes the body the
+    same way the description path does, routed through the ``RichTextCodec``
+    contract. Order is load-bearing and mirrors ``AdfCodec.fit_outbound``:
+    FIT THE TEXT FIRST (``fit_outbound`` measures the serialized ADF against
+    Jira's limit), THEN ``json.dumps(to_wire(fitted))``. The plaintext
+    ``_sanitize_comment`` guard is NOT run on the serialized ADF — its byte
+    length is far longer than the text it measures, so it would slice the JSON
+    mid-structure into a payload ACLI rejects. ``--body`` accepts ADF (confirmed
+    by ``acli jira workitem comment create --help``: "plain text or Atlassian
+    Document Format (ADF)"). The codec is built exactly as
+    ``adapters/jira/backend.py`` builds it, so ``reconciler.rich_text_cutover``
+    (story 3388, ships ``off``) governs rendering.
+    """
+    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+
+    codec = AdfCodec(rich="cloud" in cutover_clients())
+    body_arg = json.dumps(codec.to_wire(codec.fit_outbound(body)))
     cmd = [
         "jira",
         "workitem",
@@ -508,7 +522,7 @@ def add_comment(
         "--key",
         jira_key,
         "--body",
-        body,
+        body_arg,
         "--json",
     ]
     result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)

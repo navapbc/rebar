@@ -3,21 +3,22 @@
 Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
 `.tickets-tracker/.bridge_state/bindings.json` on the tickets branch.  # tickets-boundary-ok
 
-Write-ahead protocol: bind_pending(local_id) + save(); client.create_issue()
-→ DIG-NNNN; record_pending_key(local_id, jira_key) + save() — persisted on the
-STILL-pending entry BEFORE the rebar-id label is attached (story 9622); plant
-the rebar-id label/property; bind_confirm(local_id, jira_key) + save(). The
-keyed-pending write is what makes recovery deterministic: if the process is
-hard-killed between create and label, the pending entry already carries the
-``jira_key``, so recovery re-attaches the label and confirms WITHOUT any Jira
-search (no duplicate). ``jira_key`` on a ``pending`` entry is an additive
-SUB-state of the ADR-0027 ``pending`` state, not a new enumerated state.
+Write-ahead protocol (story 9622): bind_pending + save(); create_issue() →
+DIG-NNNN; record_pending_key + save() — persisted on the STILL-pending entry
+BEFORE the rebar-id label is attached; plant the label/property; bind_confirm +
+save(). The keyed-pending write makes recovery deterministic: a hard-kill between
+create and label leaves the ``jira_key`` on the pending entry, so recovery
+re-attaches the label and confirms with NO Jira search (no duplicate).
+``jira_key`` on a ``pending`` entry is an additive SUB-state of the ADR-0027
+``pending`` state, not a new enumerated state.
 
-Recovery (next pass startup, recover_pending_bindings(client, failure_sink=…)):
-keyed-pending (has ``jira_key``) → retro-attach the rebar-id label/property
-(idempotent) and confirm, NO search; keyless-pending → search Jira for the
-rebar-id label, confirm if found, else unbind (the create never reached Jira);
-any per-entry error → append ``{local_id, reason}`` to ``failure_sink``, continue.
+Recovery (next pass, recover_pending_bindings): keyed-pending → retro-attach
+label/property (idempotent) and confirm, NO search; keyless-pending → search Jira
+for the rebar-id label, confirm if found else unbind; per-entry error → append
+``{local_id, reason}`` to ``failure_sink`` and continue.
+
+Comment sync (emersed-specific-mutt): a ``comment_ids`` map (local_comment_key
+HLC → Jira comment ID) makes comment mirroring append-only/idempotent.
 """
 
 from __future__ import annotations
@@ -48,13 +49,12 @@ class BindingPersistError(RuntimeError):
 
 #: How long a keyless-pending binding is treated as "the create may have landed but is not
 #: indexed yet" (bug 21fc). Jira DC's Lucene index is eventually consistent and
-#: JRASERVER-70423 documents a real-world lag of 2,991 seconds, so this is deliberately
-#: LARGER than that observation: the cost of waiting is a delayed create, the cost of not
-#: waiting is a duplicate Jira issue, and only one of those is reversible.
+#: JRASERVER-70423 documents a 2,991s lag, so this is deliberately LARGER: the cost of
+#: waiting is a delayed create, of not waiting a duplicate — only one is reversible.
 _INDEX_LAG_GRACE_SECONDS = 3600.0
 
-#: Consecutive negative searches required before absence is treated as corroborated. A
-#: single miss is exactly what a lagging index produces for an issue that DOES exist.
+#: Consecutive negative searches required before absence is treated as corroborated (a
+#: single miss is exactly what a lagging index produces for an issue that DOES exist).
 _MISSES_BEFORE_UNBIND = 3
 
 
@@ -89,6 +89,9 @@ _EMPTY_STORE: dict[str, Any] = {
     "version": 2,
     "bindings": {},
     "reverse": {},
+    # emersed-specific-mutt: append-only comment sync map, local_comment_key(HLC)
+    # -> Jira comment ID. Accessed via setdefault/get so legacy stores still record.
+    "comment_ids": {},
 }
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
@@ -121,16 +124,12 @@ def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
     """The issue's CURRENT key, looked up by its immutable numeric id (bug 7c26).
 
     ``GET /rest/api/{2,3}/issue/{issueIdOrKey}`` accepts an id wherever it accepts a
-    key, on BOTH deployments, so this needs no new transport member and no
-    vendor-specific branch: it reuses ``get_issue_by_rest`` — the same
-    primary-store read the absence probe itself uses, so it is not subject to
-    search-index lag (bug 21fc's hazard does not apply here).
-
-    Returns ``""`` — meaning "no answer, treat the absence as real" — when the client
-    predates the member, when the lookup raises (including the 404 that says the issue
-    is genuinely gone, not moved), or when the payload carries no string key. Every
-    failure mode therefore falls THROUGH to the unchanged absence bookkeeping rather
-    than suppressing it: a recovery that cannot be proven must never mask a deletion.
+    key on BOTH deployments, so this reuses ``get_issue_by_rest`` (the same
+    primary-store read the absence probe uses — not subject to search-index lag,
+    bug 21fc). Returns ``""`` — "no answer, treat the absence as real" — when the
+    client predates the member, the lookup raises (incl. a genuine-gone 404), or the
+    payload carries no string key, so every failure mode falls THROUGH to the
+    unchanged absence bookkeeping rather than masking a deletion.
     """
     fn = getattr(client, "get_issue_by_rest", None)
     if fn is None:
@@ -148,30 +147,26 @@ def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
 class BindingStore:
     """Bidirectional local-id ↔ jira-key binding store.
 
-    All mutations are in-memory until ``save()`` is called.
-    ``save()`` uses tempfile + ``os.replace`` for atomic writes.
+    Mutations are in-memory until ``save()`` (tempfile + ``os.replace``, atomic).
     """
 
     def __init__(self, tracker_dir: Path) -> None:
         self._path = tracker_dir / ".bridge_state" / "bindings.json"
         self._get_rotation_path = self._path.with_name("get_rotation.json")
-        # Bug 1e08: retired (soft-deleted) bindings live in a sibling file so
-        # the live store stays clean and retirement is reversible.
+        # Bug 1e08: retired (soft-deleted) bindings live in a sibling file so the
+        # live store stays clean and retirement is reversible.
         self._retired_path = tracker_dir / ".bridge_state" / "bindings-retired.json"
-        # repo_root is needed so lifecycle alerts (binding-retired,
-        # retired-file-corrupt) reach bridge_alerts. The tracker_dir is
-        # ``<repo_root>/.tickets-tracker``; the alert store keys off repo_root.
+        # repo_root: lifecycle alerts (binding-retired, retired-file-corrupt) key off
+        # it. tracker_dir is ``<repo_root>/.tickets-tracker``.
         self._repo_root = tracker_dir.parent
         self._data = self._load()
         self._get_rotation = get_rotation.load(self._get_rotation_path)
         get_rotation.merge_legacy(self._get_rotation, self._data["bindings"])
         self._retired: set[str] = self._load_retired()
-        # Bug 3b5f: the reverse of the retired file — {local_id: jira_key} — so the
-        # outbound differ can ask "was THIS local ticket's pairing confirmed-deleted?"
-        # without re-reading the file once per unbound ticket per pass. Kept in
-        # lock-step with ``_retired`` by ``_retire`` / ``unretire``. A legacy
-        # list-form retired file carries no local_ids, so this degrades to empty —
-        # fail-open, matching ``_load_retired``.
+        # Bug 3b5f: reverse of the retired file — {local_id: jira_key} — so the
+        # outbound differ can ask "was THIS local ticket confirmed-deleted?" without
+        # re-reading the file per unbound ticket. Kept in lock-step with ``_retired``
+        # by ``_retire``/``unretire``; a legacy list-form file degrades to empty.
         self._retired_locals: dict[str, str] = {
             str(entry["local_id"]): key
             for key, entry in self._retired_entries().items()
@@ -186,13 +181,10 @@ class BindingStore:
                 with open(self._path, encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, ValueError, OSError) as exc:
-                # Fail CLOSED: corrupt or conflict-marked bindings.json must
-                # never silently degrade to empty bindings.  An empty store
-                # treats every local ticket as unbound → emits CREATE mutations
-                # for all of them on the next pass → mass duplicate Jira issues.
-                #
-                # Recovery hint: resolve the git merge conflict in the file or
-                # restore it from the most recent commit on the tickets branch.
+                # Fail CLOSED: a corrupt/conflict-marked bindings.json degrading to an
+                # empty store would treat every ticket as unbound → mass duplicate
+                # creates. Abort instead; recover by resolving the conflict or restoring
+                # the file from the tickets branch.
                 raise ValueError(
                     f"bindings.json is corrupt or contains git conflict markers "
                     f"and cannot be parsed — aborting reconcile pass to prevent "
@@ -207,11 +199,9 @@ class BindingStore:
     def _load_retired(self) -> set[str]:
         """Load the retired-binding set. FAIL-OPEN (bug 1e08, I2).
 
-        Contrast bindings.json (fail-closed): a retired binding wrongly treated
-        as live costs exactly one wasted GET (it re-404s → re-retires after
-        GRACE), never a re-emit (a 404 emits nothing). So a corrupt retired file
-        degrades to an empty retired-set + a deduped alert rather than aborting
-        the pass.
+        Contrast bindings.json (fail-closed): a retired binding wrongly treated as
+        live costs one wasted GET (it re-404s → re-retires), never a re-emit — so a
+        corrupt retired file degrades to an empty set + a deduped alert.
         """
         if not self._retired_path.exists():
             return set()
@@ -333,26 +323,21 @@ class BindingStore:
 
     def is_keyless_pending_within_grace(self, local_id: str) -> bool:
         """True while a KEYLESS-pending binding is young enough that a negative Jira
-        search proves nothing — i.e. while the create may have landed but not indexed.
+        search proves nothing — i.e. the create may have landed but not indexed.
 
-        **This is what the outbound create gate must consult, and it is the half that
-        actually prevents a duplicate.** ``outbound_differ`` gates the create on
-        ``get_jira_key(local_id) is None``, and a keyless-pending entry HAS
-        ``jira_key: None`` — so that branch cannot tell "never created" from "created,
-        then we crashed before recording the key, and Jira has not indexed it yet".
-        Without this signal the create is emitted while recovery is still waiting out the
-        index lag, and ``create_one``'s dedup search misses for the SAME eventual-
-        consistency reason, writing a SECOND Jira issue for the ticket. That is the only
-        known path where rebar writes wrong data rather than reading incomplete data
-        (bug 21fc).
+        This is the half that actually prevents a duplicate. ``outbound_differ`` gates
+        the create on ``get_jira_key(local_id) is None``, and a keyless-pending entry
+        HAS ``jira_key: None`` — so that branch cannot tell "never created" from
+        "created, then we crashed before recording the key, and Jira has not indexed it
+        yet". Without this signal the create is emitted while recovery is still waiting
+        out the index lag, and ``create_one``'s dedup search misses for the SAME
+        eventual-consistency reason, writing a SECOND Jira issue (bug 21fc, the only
+        known path where rebar writes wrong data rather than reading incomplete data).
 
-        Deferring is safe in both directions: if the issue does exist,
-        ``recover_pending_bindings`` binds to it once the index catches up; if it truly
-        never landed, the grace window expires and the create is emitted on a later pass.
-        A delayed create is recoverable; a duplicate is not.
-
-        KEYLESS only: a keyed-pending entry is recovered deterministically by retro-attach
-        (no search), so it is already safe and must not be conflated with this state.
+        Deferring is safe both ways: if the issue exists,
+        ``recover_pending_bindings`` binds it once the index catches up; if it never
+        landed, the grace expires and the create is emitted later. KEYLESS only: a
+        keyed-pending entry is recovered deterministically by retro-attach.
         """
         entry = self._data["bindings"].get(local_id)
         if entry is None or entry.get("state") != "pending" or entry.get("jira_key"):
@@ -388,10 +373,9 @@ class BindingStore:
         """Record the Jira key on a STILL-pending entry (write-ahead step 3).
 
         Called the instant ``create_issue`` returns a key, BEFORE the rebar-id
-        label is attached, so a hard crash in the create->label window leaves a
-        pending entry that recovery can confirm deterministically (no search).
-        The entry stays ``state='pending'`` — only the ``jira_key`` is filled in.
-        If no pending entry exists yet (defensive), one is created.
+        label is attached, so a crash in the create->label window leaves a pending
+        entry recovery can confirm deterministically (no search). The entry stays
+        ``state='pending'``; if none exists yet (defensive), one is created.
         """
         now = _now_iso()
         entry = self._data["bindings"].get(local_id)
@@ -482,15 +466,12 @@ class BindingStore:
     def record_jira_id(self, local_id: str, jira_id: str) -> None:
         """Capture the immutable numeric id on an EXISTING binding (bug 7c26).
 
-        Deliberately a separate method rather than a parameter on ``bind_confirm`` /
-        ``record_pending_key``: this store is SHARED WITH CLOUD, and those methods sit
-        on the live Cloud bridge's write-ahead path. Leaving their signatures and
-        semantics untouched keeps the capture purely additive.
-
-        In-memory until :meth:`save` — the caller persists it with the same write that
-        records the key, so the id and the key never disagree on disk. A no-op for an
-        unbound local id, an empty id, or a re-record of the same value (so it never
-        churns ``updated_at``).
+        A separate method rather than a parameter on ``bind_confirm`` /
+        ``record_pending_key``: this store is SHARED WITH CLOUD and those methods
+        sit on the live write-ahead path, so keeping their signatures untouched
+        makes the capture purely additive. In-memory until :meth:`save` (the
+        caller persists it with the same write that records the key). A no-op for
+        an unbound local id, an empty id, or a re-record of the same value.
         """
         entry = self._data["bindings"].get(local_id)
         if entry is None or not jira_id:
@@ -499,6 +480,37 @@ class BindingStore:
             return
         entry["jira_id"] = str(jira_id)
         entry["updated_at"] = _now_iso()
+
+    # -- comment-ID map (append-only comment sync; emersed-specific-mutt) ---
+
+    def record_comment_id(self, local_comment_key: str, jira_comment_id: str) -> None:
+        """Persist a COMMENT-HLC-key -> Jira-comment-ID pairing and ``save()`` NOW.
+
+        The map identifies an already-mirrored comment by the COMMENT event's HLC
+        ``timestamp`` (a stable, unique ``local_comment_key``), not by body — so
+        same-text comments never collide and an edited body is not seen as new.
+        Unlike :meth:`record_jira_id`, this ``save()``s IMMEDIATELY (write-ahead):
+        it is called on the successful ``add_comment`` return, and the durable
+        entry is what the outbound differ's PRIMARY skip keys on, so a crash after
+        the Jira post cannot re-post (closes the DIG-5301 duplicate class).
+
+        Append-only and idempotent: an identical re-record is a no-op (no ``save``
+        churn); a key is never remapped to a different id.
+        """
+        key = str(local_comment_key)
+        comment_ids = self._data.setdefault("comment_ids", {})
+        if comment_ids.get(key) == str(jira_comment_id):
+            return
+        comment_ids[key] = str(jira_comment_id)
+        self.save()
+
+    def comment_id_for(self, local_comment_key: str) -> str | None:
+        """The recorded Jira comment ID for an HLC key, or ``None`` when unmapped."""
+        return self._data.get("comment_ids", {}).get(str(local_comment_key))
+
+    def is_comment_mapped(self, local_comment_key: str) -> bool:
+        """True once :meth:`record_comment_id` has persisted this HLC key."""
+        return str(local_comment_key) in self._data.get("comment_ids", {})
 
     # -- absence lifecycle (bug 1e08) --------------------------------------
 
@@ -721,25 +733,18 @@ class BindingStore:
 
         For each pending binding:
 
-        - **Keyed-pending** (the entry already carries a ``jira_key`` — the
-          write-ahead recorded it the instant ``create_issue`` returned, BEFORE
-          the rebar-id label was attached): the create landed and the key is
-          known, so retro-attach the rebar-id label + ``local_id`` entity
-          property (idempotent — harmless if a prior partial attach already
-          landed them) and confirm. NO Jira search — deterministic, so a hard
-          crash in the create->label window yields NO duplicate.
-        - **Keyless-pending** (no ``jira_key`` — the crash was before/during
-          create): search Jira for the ``rebar-id:{local_id}`` label (canonical
-          colon form), falling back to the legacy ``rebar-id-{local_id}`` hyphen
-          form. Confirm if found; unbind if not (the create never reached Jira).
+        - **Keyed-pending** (entry carries a ``jira_key`` — the write-ahead
+          recorded it the instant ``create_issue`` returned, before the label was
+          attached): the create landed, so retro-attach the rebar-id label +
+          ``local_id`` entity property (idempotent) and confirm. NO Jira search —
+          deterministic, so a crash in the create->label window yields NO duplicate.
+        - **Keyless-pending** (no ``jira_key`` — crash before/during create): search
+          Jira for the ``rebar-id:{local_id}`` label (colon form, legacy hyphen
+          fallback). Confirm if found; unbind if not (the create never reached Jira).
 
-        Any per-entry error (a failed search or a failed retro-attach) is
-        appended to ``failure_sink`` as ``{local_id, reason}`` and skipped
-        (the entry stays pending for the next pass) — the recovery is loud but
-        non-fatal and a single bad entry never aborts the rest.
-
-        Returns the count of RESOLVED bindings (confirmed or unbound); failed
-        entries are NOT counted (they remain pending). ``client`` must expose
+        Any per-entry error is appended to ``failure_sink`` as ``{local_id, reason}``
+        and skipped (loud but non-fatal; the entry stays pending). Returns the count
+        of RESOLVED bindings (confirmed or unbound). ``client`` must expose
         ``search_issues`` / ``add_label`` / ``set_entity_property``.
         """
         recovered = 0
@@ -767,14 +772,12 @@ class BindingStore:
                     self.bind_confirm(local_id, results[0]["key"])
                     recovered += 1
                     continue
-                # A NEGATIVE SEARCH IS NOT PROOF OF ABSENCE ON DC (bug 21fc). The keyless
-                # state is entered precisely when we crashed during create_issue — i.e.
-                # exactly when the issue may exist but not yet be indexed. Jira DC's Lucene
-                # index is eventually consistent (JRASERVER-70423: a 2,991s lag observed),
-                # and unbinding here makes the NEXT pass create a duplicate. So absence
-                # must be CORROBORATED: repeated misses AND an entry old enough that the
-                # documented lag cannot explain them. Until then the entry stays pending
-                # and is retried — a delayed create is recoverable, a duplicate is not.
+                # A NEGATIVE SEARCH IS NOT PROOF OF ABSENCE ON DC (bug 21fc): the keyless
+                # state is entered on a crash during create_issue — exactly when the issue
+                # may exist but not yet be indexed (Jira DC's Lucene index is eventually
+                # consistent, JRASERVER-70423: 2,991s lag). Unbinding here makes the next
+                # pass create a duplicate, so absence must be CORROBORATED: repeated misses
+                # AND an entry too old for the documented lag to explain. Else stay pending.
                 misses = int(entry.get("search_miss_count") or 0) + 1
                 entry["search_miss_count"] = misses
                 entry["updated_at"] = _now_iso()
@@ -784,8 +787,6 @@ class BindingStore:
                 ):
                     self.unbind(local_id)
                     recovered += 1
-                # else: still pending — deliberately NOT counted as resolved, or the caller
-                # reads "recovered" as "settled".
             except Exception as exc:  # noqa: BLE001 — loud-but-non-fatal: record and continue
                 if failure_sink is not None:
                     failure_sink.append({"local_id": local_id, "reason": repr(exc)})

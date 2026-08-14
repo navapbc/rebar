@@ -360,6 +360,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
             subop_applied=_subop,
             fields_synced=_fields_synced,
             link_confirm=_link_confirm,
+            binding_store=ctx.binding_store,
         )
     except urllib.error.HTTPError as exc:
         # Bug tan-coin-atone (6614-43cd-3a48-4f63): an outbound update against a

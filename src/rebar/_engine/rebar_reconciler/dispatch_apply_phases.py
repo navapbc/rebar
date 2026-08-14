@@ -306,11 +306,40 @@ def _update_one_filter_fields(fields, mutation) -> dict:
     return {k: v for k, v in fields.items() if k in _OUTBOUND_BATCH_ALLOWLIST}
 
 
+def _record_comment_id(binding_store, entry, add_comment_result) -> None:
+    """Persist the returned Jira comment ID against ``entry``'s local_comment_key.
+
+    emersed-specific-mutt (append-only comment sync). ``add_comment`` returns
+    ``{"id": ...}``; this captures that ID and records it via the binding_store's
+    write-ahead ``record_comment_id`` map, keyed on the COMMENT event's HLC
+    (``entry["local_comment_key"]``), so a re-sync never re-posts the comment.
+
+    Every dependency is optional and guarded, so this is a no-op — never an error —
+    when the store is absent (legacy caller / stub), the entry carries no key, the
+    result carries no id, or the store predates ``record_comment_id``. Shared by
+    both enactment sites (``create_one`` and ``_update_one_dispatch_comments``) so
+    they cannot drift.
+    """
+    if binding_store is None or not isinstance(entry, dict):
+        return
+    key = entry.get("local_comment_key")
+    if not key:
+        return
+    comment_id = add_comment_result.get("id") if isinstance(add_comment_result, dict) else None
+    if not comment_id:
+        return
+    recorder = getattr(binding_store, "record_comment_id", None)
+    if recorder is not None:
+        recorder(key, comment_id)
+
+
 def _update_one_dispatch_comments(
-    mutation, client: TicketTransport, issue_key, comment_errors
+    mutation, client: TicketTransport, issue_key, comment_errors, binding_store=None
 ) -> tuple[int, int]:
     """Phase: dispatch comment-add sub-ops (in-band capture into comment_errors).
-    Returns (computed, applied) counts."""
+    Returns (computed, applied) counts. emersed-specific-mutt: when ``binding_store``
+    is provided, the returned Jira comment ID is persisted against the entry's
+    ``local_comment_key`` so a re-sync does not re-post the comment (append-only)."""
     _comments_computed = _comments_applied = 0
 
     comments = mutation.get("comments", []) or []
@@ -341,8 +370,11 @@ def _update_one_dispatch_comments(
             _comments_computed += 1
             try:
                 # Story 9622 (D2): single-attempt, no retry (see create-path note).
-                cast("SupportsComments", client).add_comment(issue_key, body)
+                _comment_result = cast("SupportsComments", client).add_comment(issue_key, body)
                 _comments_applied += 1
+                # emersed-specific-mutt: persist the returned Jira comment ID against
+                # the entry's local_comment_key so a re-sync does not re-post it.
+                _record_comment_id(binding_store, entry, _comment_result)
             except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                 # Bug 6afc-20ee-84e5-4dd5: non-fatal, but surface it so the batch
                 # outcome no longer reports error=None for a mutation whose

@@ -156,7 +156,11 @@ def _apply_outbound_update(
     # plain module-level import is safe — no cycle.
     batch = _mutation_to_batch_dict(mutation)
     comment_errors: list[str] = []
-    update_result = update_one(batch, client, comment_errors=comment_errors)
+    # emersed-specific-mutt: forward binding_store (delivered via _apply_typed's var-kw)
+    # so the comment-ID map is recorded on this typed-dispatch path too.
+    update_result = update_one(
+        batch, client, comment_errors=comment_errors, binding_store=_kwargs.get("binding_store")
+    )
 
     payload: dict[str, Any] = {"update_result": update_result}
     if comment_errors:

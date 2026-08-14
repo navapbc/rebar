@@ -1,23 +1,17 @@
-"""Story 3388 — the rich-text cutover must not disturb the COMMENT dedup key.
+"""Story 3388 → landed by emersed-specific-mutt: the comment path renders through
+the flag-governed codec and stays convergent.
 
-The cutover redefines ``WikiTextCodec.normalize_outbound`` in rich mode: it is
-DERIVED from ``to_wire``, so for Data Center it now renders Markdown to wiki
-markup instead of being the identity. That operation is shared. Descriptions want
-the new behaviour; the comment path emphatically does not.
-
-``outbound_comments._diff_comments`` builds its LOCAL comparison key by routing
-the body through the injected codec's ``normalize_outbound`` (ticket a32a). If
-the cutover reached that seam, every already-mirrored comment's key would shift
-from the raw body to its RENDERED form while Jira still holds the plain text —
-so every local comment would read as absent, and the differ would re-post the
-project's entire comment history on the next pass. That failure is loud,
-irreversible from Jira's side, and would land the moment an operator flipped a
-flag that says nothing about comments.
-
-Comment rendering belongs to story ``emersed-specific-mutt`` (789c); until then
-the comment path stays on the plain key. These pin that, from both directions:
-the flag does not reach the resolved codec, and the resulting diff is identical
-with the flag off and on.
+The rich-text cutover redefines ``normalize_outbound`` in rich mode (derived from
+``to_wire``: DC renders Markdown to wiki, Cloud round-trips through ADF). Story
+3388 moved DESCRIPTIONS onto that codec but DEFERRED the comment path to
+``emersed-specific-mutt`` (789c) — which this file now belongs to. This story
+flips the comment path onto the SAME flag-governed ``RichTextCodec`` for BOTH the
+send surface (``acli`` ADF encode / DC wiki render) AND the LOCAL dedup key, so
+the two move together: Jira holds the RENDERED wire, the local key is normalized
+to that same form, and an already-mirrored comment is never re-posted at ANY flag
+setting. These pin that migrated convergence — the codec is now the real,
+flag-sensitive one (no longer the a32a ``_IdentityCodec``), and a comment whose
+Jira-stored body is the codec's rendered form suppresses cleanly.
 """
 
 from __future__ import annotations
@@ -104,52 +98,58 @@ def test_the_rendered_form_really_does_differ(set_flag) -> None:
     assert WikiTextCodec(rich=True).normalize_outbound(_MARKDOWN_COMMENT) != _MARKDOWN_COMMENT
 
 
-def test_the_comment_codec_stays_the_identity_with_the_flag_on(comments, set_flag) -> None:
-    """The flag must not reach the comment path's resolved codec at all.
+def test_the_comment_codec_is_the_real_flag_governed_codec(comments, set_flag) -> None:
+    """emersed-specific-mutt: the comment path's resolved codec is the REAL,
+    flag-governed ``RichTextCodec`` (no longer the a32a ``_IdentityCodec``).
 
-    Asserted on the RESOLVER rather than only on outcomes, because that is where
-    a future change would wire the cutover in — the diff-level assertions below
-    would then fail too, but this says exactly which seam moved.
-    """
+    Asserted on the RESOLVER because that is the seam this story moved: the
+    ``rich`` mode of the resolved codec tracks ``reconciler.rich_text_cutover``,
+    so with the flag OFF it renders plain and with the flag ON it renders rich."""
+    set_flag("off")
+    off = comments._resolve_codec(None)
+    assert not isinstance(off, comments._IdentityCodec)
+    assert off._rich is False
+
     set_flag("both")
-    resolved = comments._resolve_codec(None)
-    assert isinstance(resolved, comments._IdentityCodec)
-    assert resolved.normalize_outbound(_MARKDOWN_COMMENT) == _MARKDOWN_COMMENT
+    on = comments._resolve_codec(None)
+    assert not isinstance(on, comments._IdentityCodec)
+    assert on._rich is True
 
 
 @pytest.mark.parametrize("flag", ["off", "cloud", "dc", "both"])
 def test_an_already_mirrored_markdown_comment_is_never_re_posted(
-    differ, set_flag, flag: str
+    differ, comments, set_flag, flag: str
 ) -> None:
     """The consequence that matters: no duplicate re-post, at any flag setting.
 
-    Jira holds the comment as the plain Markdown rebar sent. If the cutover
-    reached the dedup key the local side would become rendered wiki, match
-    nothing, and re-post the whole history.
-    """
+    Post-migration the SEND path renders, so Jira holds the comment in the codec's
+    RENDERED form. The local dedup key is normalized through that SAME flag-governed
+    codec, so the already-mirrored comment matches and is suppressed — the
+    append-only convergence guarantee, at every flag value."""
     set_flag(flag)
     jira_key = "DIG-3388-1"
+    # Jira holds what the send path would land: the codec's rendered wire.
+    codec = comments._resolve_codec(None)
+    jira_stored = codec.normalize_outbound(_MARKDOWN_COMMENT)
     ticket = _ticket_with_comments([_MARKDOWN_COMMENT])
-    snapshot = _jira_snapshot_with_comments(jira_key, [_MARKDOWN_COMMENT])
+    snapshot = _jira_snapshot_with_comments(jira_key, [jira_stored])
 
     assert differ._diff_comments(ticket, jira_key, snapshot) == []
 
 
-def test_the_comment_diff_is_identical_with_the_flag_off_and_on(differ, set_flag) -> None:
-    """Same inputs, both flag states, same mutations — including the NEW comment.
-
-    Comparing a mixed case (one already mirrored, one genuinely new) rather than
-    only the suppressed one, so the pin also catches a cutover that shifted the
-    key in a way that still emitted something, just something different.
-    """
+def test_the_comment_diff_converges_at_each_flag(differ, comments, set_flag) -> None:
+    """Mixed case (one already mirrored, one genuinely new) converges at BOTH flag
+    states: the mirrored comment (stored in its codec-rendered form) is suppressed
+    and exactly the one new comment emits — whether the flag is off or on."""
     jira_key = "DIG-3388-2"
-    ticket = _ticket_with_comments([_MARKDOWN_COMMENT, "## Second\n\nbrand new\n"])
-    snapshot = _jira_snapshot_with_comments(jira_key, [_MARKDOWN_COMMENT])
+    new_comment = "## Second\n\nbrand new\n"
 
-    set_flag("off")
-    before = differ._diff_comments(ticket, jira_key, snapshot)
-    set_flag("both")
-    after = differ._diff_comments(ticket, jira_key, snapshot)
+    for flag in ("off", "both"):
+        set_flag(flag)
+        codec = comments._resolve_codec(None)
+        jira_stored = codec.normalize_outbound(_MARKDOWN_COMMENT)
+        ticket = _ticket_with_comments([_MARKDOWN_COMMENT, new_comment])
+        snapshot = _jira_snapshot_with_comments(jira_key, [jira_stored])
 
-    assert before == after
-    assert len(after) == 1, f"exactly the one genuinely new comment should emit: {after!r}"
+        out = differ._diff_comments(ticket, jira_key, snapshot)
+        assert len(out) == 1, f"flag={flag}: exactly the one new comment should emit: {out!r}"
