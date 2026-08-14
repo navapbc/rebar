@@ -10891,10 +10891,24 @@
     },
     "1734-7c6d-5a6a-48fd": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\nThe inbound fetcher can only see one tracker project. `_build_snapshot` resolves a single `query_project` and builds one JQL pair \u2014 active and recent-done \u2014 from it (`fetcher.py:313-406`), then runs its three enrichment passes \u2014 parent, comment, issuelink maps \u2014 against that one project key (`fetcher.py:408-560`). A store that lists several projects in its mapping still ingests only one of them, and single-project enrichment would silently drop parent/comment/issuelink data for every project but one. Inbound-created tickets also never record which project they came from, so the `bridge_project`/`repos` fields added by cef7 stay unset on inbound tickets.\n\n## Approach\n\n**Fan out per project (fetcher.py).** Replace the single `query_project` with the store's project SET: `projects_store.read_projects(repo_root).keys()`. For EACH project, issue the existing `jqls_for(project)` pair AND run all three enrichment passes (`get_parent_map` / `get_comment_map` / `get_issuelinks_map`) scoped to that project key, merging every result into the ONE shared `snapshot` dict (deduped by the existing `seen_keys`). This reuses `jqls_for` and `_validate_project_key` unchanged, so bug 626d's JQL-injection guard keeps applying to every key with no new interpolation site, and the per-query truncation ceiling (`_ACLI_CEILING`, raising `SilentTruncationError`) stays scoped per project \u2014 a busy project cannot exhaust a shared budget on behalf of the others. When the mapping is unseeded (empty), fall back to the single `[query_project]` list so the exact pre-change query pair and single enrichment pass are issued \u2014 single-project behaviour is byte-for-byte untouched.\n\n**Failure semantics across the fan-out.** Base-query exceptions (transport/network, malformed response, `SilentTruncationError`) propagate and fail the whole pass, exactly as today \u2014 fanning out multiplies failure points but each is fail-closed, so no partial snapshot is written. The three enrichment passes keep their existing per-pass fail-open degradation (log + continue), applied independently per project; a `BackendPaginationStallError` still re-raises past the handlers (a stalled pager is a truncated read).\n\n**Record source project + default repos (apply_inbound_records.py).** Provenance needs NO new channel through the snapshot: the snapshot is keyed by jira key, `_apply_inbound_create` derives `jira_key = mutation.target`, and the CREATE writer `_inbound_create_write_create_event` ALREADY receives `jira_key` and `repo_root`. The source project IS `jira_key`'s prefix (`DIG-123` \u2192 `DIG`, the same `rsplit(\"-\", 1)[0]` idiom the fetcher's parent-key derivation uses). A new leaf helper `projects_store.resolve_inbound_bridge_fields(jira_key, repo_root) -> dict` returns `{\"bridge_project\": <prefix>, \"repos\": mapping.projects.get(prefix, {}).get(\"repos\", [])}`; the create site stamps both fields in ONE line \u2014 `create_data.update(...)` \u2014 beside the existing `creation_channel` stamp (`apply_inbound_records.py:221`). No signature change and no `apply_inbound.py` edit are required, and the net addition to `apply_inbound_records.py` (already 797 LOC, near the 800 cap) is the import + the update call \u2014 two lines, staying under the cap.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/fetcher.py` \u2014 fan out the base JQL pair AND all three\n  enrichment passes once per configured project into the shared snapshot; per-project ceiling;\n  unseeded-mapping fallback to the single configured project.\n- `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 new `resolve_inbound_bridge_fields`\n  leaf helper (derive source project from the jira key, default repos from that project's mapping\n  entry).\n- `src/rebar/_engine/rebar_reconciler/apply_inbound_records.py` \u2014 stamp `bridge_project` + `repos`\n  at the CREATE write site via the helper (net +2 lines; module is near the size cap).\n- tests under `tests/`.\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful verified fake fed production-shaped Jira fixtures. The fake must RECORD the queries and enrichment calls it issues, because \"one JQL pair AND one enrichment pass per project\" is itself the contract under test and is invisible to a result-only assertion.\n\n- Happy path: a mapping with two projects issues exactly two JQL pairs and one enrichment pass per\n  project (parent/comment/issuelink), and the merged snapshot carries issues AND enrichment data\n  from BOTH projects.\n- Postcondition: each inbound-created ticket records its source project in `bridge_project` and its\n  `repos` equal that project's mapping entry; checked on tickets created from a two-project\n  fixture.\n- Ceiling is per project: one project exceeding `_ACLI_CEILING` raises `SilentTruncationError`\n  naming it, while a second under-limit project still ingests \u2014 proving the budget is not shared.\n- Empty result: a listed project returning zero issues contributes nothing and does not fail the\n  pass.\n- Single-project regression: an unseeded mapping issues the identical query pair and single\n  enrichment pass as before this change; checked by comparing recorded queries/calls.\n\n## Acceptance Criteria\n\n- [ ] A two-project mapping issues one JQL pair AND one enrichment pass (parent/comment/issuelink\n      maps) per project in a single pass, with both projects' issues and enrichment data present in\n      the merged snapshot; checked by a fake transport recording issued queries and enrichment\n      calls and asserting the exact per-project counts and contents.\n- [ ] Each inbound-created ticket records its source project in `bridge_project` and the repos from\n      that project's mapping entry in `repos`; checked by asserting both fields on tickets created\n      from a two-project fixture.\n- [ ] The truncation ceiling applies per project, not as a shared budget; checked by a test where\n      one project exceeds it (raising `SilentTruncationError`) and a second under-limit project\n      still ingests successfully.\n- [ ] A single-project (unseeded) mapping issues an identical query pair and single enrichment pass\n      to the pre-change behaviour; checked by a regression test comparing the recorded\n      queries/calls.\n- [ ] A configured project returning zero issues does not fail the pass; checked by an\n      empty-result fixture.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Multi-project inbound fetch: per-project JQL fan-out and source-project recording"
       },
       "created_at": "2026-08-08T03:37:35Z",
@@ -13989,10 +14003,24 @@
     },
     "1d71-a76c-04f6-4642": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nFollow-up (fix b) discovered during creatable-foldable-arthropods (fix a, merged as a0fc8d43556 / Gerrit 1761). Fix (a) stopped the runaway-loop guard from counting memo-served repeats as loop evidence. A second, independent defect remains in the completion verifier's evidence-banking path: at SEARCH EXHAUSTION, `BOUNDED_FALLBACK_EVIDENCE` banks `met=false` \u2014 i.e. \"the criterion is unmet\" \u2014 when what the run actually established is only \"the search budget ran out before sufficient evidence was found\". Banking a hard negative from an exhausted search misattributes absence-of-evidence as evidence-of-absence: subsequent verifier passes (and the close gate) treat the criterion as affirmatively failed, producing false FAIL verdicts on tickets whose evidence exists but was not reached within the window.\n\n## Proposed fix\nMake the banked evidence TRI-STATE: `met=true`, `met=false` (a positive refutation was actually found), and `insufficient_evidence` (search exhausted / budget hit / window truncated without a determination). At search exhaustion, `BOUNDED_FALLBACK_EVIDENCE` must bank `insufficient_evidence`, never `met=false`. Downstream consumers (verdict composer, close gate messaging) must distinguish the two: `insufficient_evidence` yields an INDETERMINATE-style outcome with the existing remediation messaging (re-verify, widen scope, or operator-attest), not a FAIL.\n\n## Scope\n- The evidence-banking site(s) in the completion-verifier workflow where BOUNDED_FALLBACK_EVIDENCE is constructed at exhaustion.\n- The evidence schema/consumer seam that renders per-criterion verdicts from banked evidence.\n- Tests: a search-exhaustion run banks insufficient_evidence (not met=false); a genuine refutation still banks met=false; verdict rendering distinguishes the two.\n\n## Acceptance criteria\n- [ ] At search exhaustion, banked fallback evidence is `insufficient_evidence`, not `met=false`; checked by a new unit test.\n- [ ] A genuine positive refutation still banks `met=false` and still yields FAIL; checked by a guard test.\n- [ ] Verdict composition renders `insufficient_evidence` as indeterminate-with-remediation, not FAIL; checked by a rendering test.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\nGuard/memo interaction (fix a, landed); verifier prompt changes; retry policy.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Completion verifier banks met=false at search exhaustion \u2014 should bank insufficient_evidence (tri-state)"
       },
       "created_at": "2026-08-14T08:49:35Z",
@@ -21107,6 +21135,13 @@
       "peer_parent": "REB-1550",
       "state": "confirmed",
       "updated_at": "2026-07-25T02:02:02Z"
+    },
+    "2aaf-90b9-4a31-43bf": {
+      "created_at": "2026-08-14T17:43:21Z",
+      "jira_id": "4588735",
+      "jira_key": "REB-2925",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T17:43:24Z"
     },
     "2ad8-f56e-7bc2-4948": {
       "baseline": {
@@ -30924,241 +30959,15 @@
     "3e28-f913-d06b-471a": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Replace hardcoded `.tickets-tracker` worktree/symlink-dir literals with `tracker_dir()`",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(or its basename) so a custom dir is created, symlinked, and gitignored correctly.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Call sites in `src/rebar/_commands/init.py`:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- line 152: dir creation `os.path.join(repo, \".tickets-tracker\")`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- line 199: the git `_exclude(...)` it writes \u2014 must use the resolved basename so a custom",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  dir is auto-gitignored.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- line 418: the worktree-path resolver (`.../<main worktree>/.tickets-tracker`).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- lines 461-469: symlink name at the repo root.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `init` uses `tracker_dir()`/its basename for dir creation, symlink, and exclude.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] A custom `tracker.dir` is created, symlinked at the repo root, and added to git excludes.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Default `.tickets-tracker` behavior is byte-for-byte unchanged.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Files",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `src/rebar/_commands/init.py`",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Depends on",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Child 2 (canonical `tracker_dir()` resolver).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Review refinements (plan-review gate)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- E1 (conf 0.71): assert REMOVAL, not just replacement \u2014 no hardcoded `.tickets-tracker`",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  string literals remain in init's migrated paths after the change (grep-style assertion).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] A check/test asserts zero residual `.tickets-tracker` literals in the migrated init paths.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## What\nReplace hardcoded `.tickets-tracker` worktree/symlink-dir literals with `tracker_dir()`\n(or its basename) so a custom dir is created, symlinked, and gitignored correctly.\n\nCall sites in `src/rebar/_commands/init.py`:\n- line 152: dir creation `os.path.join(repo, \".tickets-tracker\")`.\n- line 199: the git `_exclude(...)` it writes \u2014 must use the resolved basename so a custom\n  dir is auto-gitignored.\n- line 418: the worktree-path resolver (`.../<main worktree>/.tickets-tracker`).\n- lines 461-469: symlink name at the repo root.\n\n## Acceptance Criteria\n- [ ] `init` uses `tracker_dir()`/its basename for dir creation, symlink, and exclude.\n- [ ] A custom `tracker.dir` is created, symlinked at the repo root, and added to git excludes.\n- [ ] Default `.tickets-tracker` behavior is byte-for-byte unchanged.\n\n## Files\n- `src/rebar/_commands/init.py`\n\n## Depends on\n- Child 2 (canonical `tracker_dir()` resolver).\n\n## Review refinements (plan-review gate)\n- E1 (conf 0.71): assert REMOVAL, not just replacement \u2014 no hardcoded `.tickets-tracker`\n  string literals remain in init's migrated paths after the change (grep-style assertion).\n- [ ] A check/test asserts zero residual `.tickets-tracker` literals in the migrated init paths.",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "migrate worktree-dir call sites in init (creation/symlink/exclude) to tracker_dir()"
       },
       "baseline_advanced_at": "2026-07-24T00:02:42Z",
       "created_at": "2026-06-25T22:59:13Z",
       "jira_key": "REB-98",
+      "peer_parent": "REB-200",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:13Z"
     },
@@ -58807,7 +58616,7 @@
         "assignee": null,
         "description": "## Context\nThe completed Gerrit Verified latency RCA optimized the macOS completion path, but Ubuntu jobs still occupy scarce org-wide runners for 11-14 minutes and contribute to queue contention. Follow-up questions identify three candidate levers: replace repeated Pandoc corpus rendering with static expected results plus a smaller boundary test, remove redundant work from the exhaustive 1,440-minute bridge cadence proof, and move genuinely live Jira DC coverage out of the per-change hot path while retaining fast unit coverage. This work must preserve behavioral coverage and must not use extra parallel jobs or unchanged aggregate runner usage.\n\n## Plan\n- Build a dated Ubuntu runner-time dossier from final post-remediation run 31752047186, pytest duration logs, workflow routing, and focused local runtime experiments.\n- For Pandoc and render_unit, map every current assertion to the code boundary it exercises; compare static golden fixtures, a bounded real-Pandoc contract sample, and full-corpus external execution using defect-seeded experiments to detect any coverage loss.\n- For the bridge cadence test, discriminate between the cost of the 1,440 arithmetic checks and invariant workflow YAML I/O; prefer hoisting invariant I/O if it preserves the exhaustive proof.\n- Inventory expensive Jira DC/default-tier tests, identify which require a real Jira or external binary, and map them to faster existing or new unit contracts before proposing any lane move.\n- Compare each candidate with current practice in popular actively maintained OSS projects and search tracker history for prior acceptance or rejection.\n- Record a confirmed RCA and measured runner-time/wall-time savings. Create linked implementation tickets only for remediations that preserve coverage; under the operator standing approval, implement those matching OSS consensus through Gerrit.\n\n## Acceptance Criteria\n- [ ] Every Ubuntu operation or test phase over 30 seconds in the final sample is attributed to a specific mechanism and measured with a focused baseline.\n- [ ] Pandoc corpus, render_unit, bridge cadence, and Jira DC lane-move proposals each have an assertion-level coverage map and an A/B runtime estimate.\n- [ ] Each proposal cites tracker history and practices from popular actively maintained OSS projects.\n- [ ] No accepted remediation removes an assertion, behavioral equivalence class, OS/Python cell, or external boundary; moved coverage has an explicit destination and schedule.\n- [ ] Runner-minute and expected queue-pressure savings are quantified without counting parallel matrix time as critical-path wall time.\n- [ ] Every consensus-backed remediation is implemented on a linked ticket, passes repository gates and Gerrit LLM-Review +1 plus Verified +1, and merges before this task closes.\n- [ ] Non-consensus or coverage-risking proposals are summarized with evidence and left for operator disposition.",
         "priority": "High",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Reduce Ubuntu CI runner occupancy without losing test coverage"
       },
       "created_at": "2026-08-14T03:16:27Z",
@@ -67696,9 +67505,17 @@
       "updated_at": "2026-08-06T19:06:46Z"
     },
     "8a8e-71b5-4519-4426": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nDocumentation-only Gerrit changes currently consume the complete OS/Python matrix plus mutation, packaging, optionality, identity, eval, and golden-path jobs. The operator approved a reduced lane only when trusted classification proves every changed path is documentary. Python, shell, workflows/actions, dependencies/locks, builds, tests/fixtures, configuration/policy, unknown paths, and unavailable diffs always select full Verify. Docs-only Verify retains every documentation-related generated-doc, drift, index, cross-reference, quickstart, and reference-validation gate.\n\n## Trust and diff contract\nThe routing decision controls Verified and therefore runs only from trusted `origin/main`, mirroring the existing trusted-main vote normalizer. The routing job checks out the exact patchset as data and separately sparse-checks out the classifier plus complete allowlist from `origin/main` with credentials disabled. It never imports, sources, or executes patchset-controlled classifier logic or configuration. The exact change set is `HEAD^..HEAD`; the job explicitly deepens the mirror-first checkout until `HEAD^` resolves, using the existing dependency-audit pattern. A normally completing classifier emits `route=full` for parent-resolution failure, an empty or malformed path list, or any non-allowlisted path. If the classifier job itself fails or is cancelled before emitting an output, every full-route job uses `always() && (needs.classifier.result != 'success' || needs.classifier.outputs.route == 'full')` and therefore still runs; the docs-only job requires classifier success plus `route=docs-only` and cannot run. The failed classifier result remains in `vote.needs` and blocks Verified even when fallback full jobs pass.\n\nNative GitHub `paths:` and patchset-local filtering are rejected because this workflow is Gerrit `workflow_dispatch` and the security-sensitive decision must not come from the untrusted patchset tree. The new classifier may reuse the existing `dependency_audit.changed_files` parsing seam from trusted main if its error contract fits; otherwise it must preserve the same fail-closed semantics.\n\n## Shared documentation gates\nInventory the current inline gates and extract only the documentation-relevant steps into `.github/actions/docs-gates/action.yml`. Both callers first perform their already-required checkout and Python/uv setup, then invoke the same composite action. The action does not own checkout. This form avoids adding a new runner/job to the full lane while single-sourcing gate commands; a separate reusable-workflow job was rejected because it would increase full-lane runner usage, contrary to the contention constraint. Inline copies are removed.\n\nPreflight and migrate every structural consumer that reads `_build-and-test.yml`: `test_gate_step_tree_skew.py`, `test_ci_workflow_parity.py`, `test_check_adr_numbers_heldout.py`, `test_check_config_reads_heldout.py`, `test_complexity_baseline.py`, `test_extra_coverage_guard.py`, `test_git_floor_gate_tree_skew.py`, `test_dependency_advisory_wiring.py`, and `test_worktree_python_pin.py`. Each affected invariant must follow the extracted action rather than be weakened or deleted; consumers of gates that remain inline stay unchanged.\n\n## Routing and aggregation\n- Add an unconditional trusted classifier job after clear-vote and ticket resolution.\n- A proven docs-only patchset runs one Ubuntu docs-only job that invokes the shared action.\n- Full build/test, mutation, optionality, artifact, eval, golden-path, and identity jobs run only on the full route.\n- Add classifier and docs-only results to `vote.needs`; make normalization route-aware so exactly one route must execute and skipped jobs from the other route are neutral. A classifier-job failure runs the full fallback route and also blocks Verified. A missing lane, executed-job failure, or docs-gate failure blocks Verified.\n- Update `scripts/check_verify_gate_parity.py` and its tests so the docs-only gate cannot be omitted from vote aggregation.\n- Create parameterized `tests/scripts/test_classify_gerrit_verify_change.py` cases for every documented path category, exact `HEAD^..HEAD` parent handling, malformed/empty input, classifier exceptions, and the successful docs-only control; gate them with `python -m pytest tests/scripts/test_classify_gerrit_verify_change.py`.\n- Preserve clear-vote, resolvable-ticket, secret, and vote-key boundaries.\n- Document the allowlist rationale, fail-closed rule, and safe extension process in `CONTRIBUTING.md`.\n- Measure the first genuine docs-only run against change 1778 / run 31817494677. Back-out is a Gerrit revert restoring unconditional full Verify.\n\n## Acceptance Criteria\n- [ ] Allowlisted documentation-only paths select the docs-only route.\n- [ ] Any Python path selects full Verify.\n- [ ] Any shell or executable path selects full Verify.\n- [ ] Any workflow or action path selects full Verify.\n- [ ] Any dependency or lockfile path selects full Verify.\n- [ ] Any test or fixture path selects full Verify.\n- [ ] Any repository configuration or policy path selects full Verify.\n- [ ] Any unrecognized path selects full Verify.\n- [ ] An empty, malformed, unreadable, or parentless diff selects full Verify.\n- [ ] Classifier logic and the complete allowlist execute only from trusted `origin/main`.\n- [ ] A patchset modifying routing logic, workflow, or action cannot select docs-only Verify.\n- [ ] Documentation gates have one extracted definition and no copied command list.\n- [ ] The shared gate retains ADR number, index, and cross-reference validation.\n- [ ] The shared gate retains docs-index and README quickstart validation.\n- [ ] The shared gate retains CLI, MCP, and env-registry drift validation.\n- [ ] The inventory test retains every other current documentation-related guard.\n- [ ] Existing workflow-structure tests follow extracted gates without losing assertions.\n- [ ] Docs-only Verify skips the OS/Python matrix and mutation.\n- [ ] Docs-only Verify skips optionality, artifact, eval, golden-path, and identity jobs.\n- [ ] Full Verify uses no additional runner job for documentation gates.\n- [ ] The resolvable-ticket and clear-vote gates remain unconditional.\n- [ ] `vote.needs` includes every route result required for fail-closed Verified.\n- [ ] A classifier job failure still runs every full-route job.\n- [ ] A classifier job failure cannot yield Verified +1.\n- [ ] A failed documentation gate cannot yield Verified +1.\n- [ ] Workflow policy tests, lint, and typecheck pass.\n- [ ] `CONTRIBUTING.md` explains the docs-only allowlist contract and safe extension rule.\n- [ ] [operator-attested] Gerrit LLM-Review reaches +1; record change, patchset, vote, and timestamp.\n  provenance: environment=production Gerrit; principal=rebar-review-bot; privilege_posture=production-equivalent; instrument=live-call \u2014 the production review bot vote is the contract.\n- [ ] [operator-attested] Gerrit Verified reaches +1; record change, workflow run, patchset, vote, and timestamp.\n  provenance: environment=production GitHub Actions and Gerrit; principal=rebar-ci-bot; privilege_posture=production-equivalent; instrument=live-call \u2014 the production CI vote exercises the deployed workflow.\n- [ ] [operator-attested] The merged SHA and merge timestamp are recorded before closure.\n  provenance: environment=production Gerrit; principal=authenticated submitter; privilege_posture=production-equivalent; instrument=live-call \u2014 Gerrit merge state is authoritative.\n- [ ] [operator-attested] Genuine docs-only wall clock and runner-minutes are compared with run 31817494677.\n  provenance: environment=production GitHub Actions; principal=rebar-ci-bot; privilege_posture=production-equivalent; instrument=live-call \u2014 production job timestamps and conclusions provide the measurement.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Use a docs-only Gerrit Verify lane without losing documentation gates"
+      },
       "created_at": "2026-08-14T16:41:25Z",
       "jira_id": "4588730",
       "jira_key": "REB-2922",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T16:41:29Z"
     },
@@ -72225,542 +72042,9 @@
     "9622-17ce-daa6-4778": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The 2026-07-08 principal-architect audit (Reliability finding #3) found reconciler safety mechanisms that are implemented, tested, and **never called in production** - the safety they promise is illusory:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. **Create->label crash window double-creates Jira issues.** `dispatch_one.py:241-256` runs `create_issue` -> adds the `rebar-id:` label the JQL dedup keys on -> binds in memory only; bindings persist only at end of pass. A hard crash between create and label leaves an orphan issue invisible to dedup; the re-run duplicates it.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. **The write-ahead/recovery protocol is dead code - and miswired.** `bind_pending` has zero production callers, and `run_differs.py:351` passes the applier MODULE (no `search_issues`) to `recover_pending_bindings`, so real recovery `AttributeError`s into a fail-open swallow.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. **Crashed pass deadlocks reconciliation forever.** Lease `steal()` is implemented/tested (`_ref_lock.py:516-535`) but the held-ref path unconditionally exits 3 (`__main__.py:499-505`); after SIGKILL the remote `refs/reconciler/lock` persists until an operator hand-deletes it.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "4. **The REST-transport write path never retries transient HTTP failures.** `acli_rest.py:58-63` re-raises every `HTTPError` and `_call_with_retry` (`dispatch_one.py:100-144`) only catches `JiraAPIError`/`TimeoutError` - `urllib.error.HTTPError` is an `OSError`/`URLError` subclass it never catches, so the REST-transport writes get zero retry.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "**Transport map (verified, drives the whole design).** rebar's Jira client has TWO floors: the **REST floor** (`acli_rest.py`, raises raw `urllib.error.HTTPError`) and the **subprocess floor** (`acli_subprocess._run_acli`, raises `AcliMutationError`/`RetryExhaustedError`/`CalledProcessError`, NEVER `HTTPError`). Of the `_call_with_retry` call sites, only **four** route through REST and can raise `HTTPError`, and ALL FOUR are IDEMPOTENT writes: `dispatch_one.py:254` `set_entity_property`, `:483` `set_parent`, `:543` `update_issue` (priority/status/assignee legs), and `apply_inbound_records.py:181` `set_entity_property`. `create_issue`, `add_label`, `remove_label`, `add_comment`, `delete_issue`, `search_issues`, `get_issue`, `set_relationship` are ALL subprocess-floor. This has two consequences: (a) reviving HTTPError retry gives real resilience to exactly those four idempotent REST writes - retrying them needs NO dedup; (b) `create_issue` is NEVER retried by `_call_with_retry`, so a per-retry create dedup guard has no valid target - create's idempotency is provided by the write-ahead recovery (D1, cross-pass), the existing pre-create rebar-id JQL dedup (`dispatch_one.py:196`, in-pass), and C4's subprocess 429 loop (in-pass). Audit finding #2 is thus covered WITHOUT a new dedup guard.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Wire each mechanism into its intended call site, smallest-change-first (see Design decisions D1-D4, Sequencing, Findings triage).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. **Revive the retry layer WITHOUT a boundary translation.** Extend `_call_with_retry` (dispatch_one.py:100-144) to ALSO catch a retryable `urllib.error.HTTPError` in addition to `JiraAPIError`/`TimeoutError`, leaving acli_rest's raw-`HTTPError` raise UNCHANGED (the 8+ raw-HTTPError catchers rely on it). `HTTPError.code` 429 -> retry honoring `Retry-After` header when present, else ADR-0036 jittered backoff; 5xx -> jittered backoff; 4xx (incl. 404 on an absent entity property) -> re-raised raw immediately, mirroring the existing `400 <= status < 500` fast-fail branch (`dispatch_one.py:129`) so the absent-property 404 semantics are preserved. Backoff per ADR 0036: `2**(attempt+1) + rand[0,1)` s, capped 60s; max_retries=3. Because `_call_with_retry` is re-exported via `batch_dispatch` and imported by `apply_outbound.py`/`apply_inbound.py`/`apply_inbound_records.py`, this uniformly benefits every call site (intended - `apply_inbound_records.py:181`'s `set_entity_property` is one of the four REST beneficiaries); those modules need no edits and their existing tests must stay green.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. **Deterministic write-ahead recovery (D1).** Persist `bind_pending` BEFORE `create_issue`; on the returned key, `record_pending_key(local_id, jira_key)` and persist AGAIN BEFORE `add_label`. Hoist the `AcliClient` (built at run_differs.py:393) ABOVE the recovery call; pass it (not the applier module) to `recover_pending_bindings`. LOUD failures: `alert_store` bridge alert + a nonzero `recovery_failures` pass tally.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. **Comments single-attempt (D2).** Unwrap `add_comment` from `_call_with_retry` at `dispatch_one.py:341` (create path) and `:610` (update path) -> single-attempt bare call feeding the existing non-fatal `comment_errors` list.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "4. **Crashed-pass lease steal (D3).** In `__main__.py`'s held-lock path, attempt `steal()` instead of unconditional exit 3, behind kill-switch `REBAR_RECONCILER_LOCK_STEAL` (default ON).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(No per-retry create dedup guard and no `acli.py` search-cache change - see the transport-map rationale above; create is not retried at this layer.)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "In:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `dispatch_one.py`: `_call_with_retry` gains an `except urllib.error.HTTPError` clause (429 Retry-After/backoff, 5xx backoff, 4xx incl. 404 fast-fail; ADR-0036 formula); `bind_pending`+persist before create, `record_pending_key`+persist after create/before label; **unwrap `add_comment` from `_call_with_retry` at BOTH `:341` and `:610`** -> single-attempt bare call feeding `comment_errors` (D2).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `run_differs.py`: hoist the `AcliClient` above the recovery call; pass it to `recover_pending_bindings` with a `failure_sink` list; emit an `alert_store` alert per failure; set `ctx.recovery_failures = len(failure_sink)` (see D4 for the channel).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `binding_store.py`: add `record_pending_key(local_id, jira_key) -> None` (sets `jira_key` on an existing pending entry, keeps `state='pending'`, `save()`s); add a `BindingPersistError`; extend `recover_pending_bindings(client, *, failure_sink: list[dict] | None = None) -> int` (**return type stays `int`** - existing `test_binding_store.py` int assertions unaffected) with the deterministic branch (confirm a keyed-pending record with NO Jira search; keyless -> `search_issues` fallback; append `{local_id, reason}` to `failure_sink` on error); update the module docstring for the keyed-pending invariant.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `reconcile.py`: read `ctx.recovery_failures` into the pass `result` dict (beside `mutation_failures`) and the `sync_pass_end` log.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `__main__.py`: hoist `pass_id` generation ABOVE the `check_pass_lock` block (so it is the `steal()` holder); held-lock path calls `steal_pass_lock` and, on a steal-win, sets `acquired=True`, threads the new oid into `lock_oid`, starts the heartbeat, and SKIPS the unconditional `acquire_pass_lock`; add the `REBAR_RECONCILER_LOCK_STEAL` kill-switch.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `_advisory_lock.py`: thin `steal_pass_lock(holder, repo_root, *, sleep_fn=time.sleep) -> str | None` wrapping `_ref_lock.steal(...)`; on an unexpected exception from `steal()` (git transport/permission error), it is caught, logged, and treated as \"not stolen\" (fail-closed -> exit 3), never crashing the pass.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- `docs/env-vars.md` + the env registry: register `REBAR_RECONCILER_LOCK_STEAL` (run the `gen_env_registry.py` generator) so the CI env-drift gate stays green.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Tests: `tests/unit/rebar_reconciler/` (retry/write-ahead/recovery/steal/comment) and `tests/scripts/bridge/`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Read-only (relied on, not changed): `acli_rest.py` (raw HTTPError raise UNCHANGED); `_ref_lock.py` (`steal()` already implemented); `apply_outbound.py`/`apply_inbound.py`/`apply_inbound_records.py` (inherit the `_call_with_retry` HTTPError behavior uniformly - existing tests must stay green).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Out (justified): bulk-path 429 + `_call_with_backoff` (C4); inbound status mapping (audit-remediation epic). Deferred with rationale (Findings triage): unresolvable-pending TTL; live E2E run; `recovery_failures` as an exit gate.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Design decisions (resolved from code facts)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **D1 - create->label window closed DETERMINISTICALLY.** acli `create_issue` cannot carry the rebar-id label atomically (`--labels` is a destructive SET-REPLACE). Instead the pending binding records the `jira_key` the instant `create_issue` returns (persisted before `add_label`), so `recover_pending_bindings` confirms a keyed pending record with NO Jira search. Only a keyless pending record uses the label `search_issues` fallback. **Persist-failure is ITEM-SCOPED:** `bind_pending`/`record_pending_key` persist failure raises `BindingPersistError`, `create_issue` is then NOT called for that mutation, the mutation outcome gets an `error` key (which increments `mutation_failures` via the existing outcome accounting) and an `alert_store` alert is emitted; the pass CONTINUES with remaining mutations. **keyed-pending is a SUB-state, not a new ADR-0027 state:** the record stays `state='pending'` (the ADR-0027 enumerated state) with an additive `jira_key` field populated - it does NOT add a fourth state to `pending|confirmed|retired`, so ADR 0027's state machine is unchanged (the module docstring records the sub-state). **Rollback semantics (accurate):** rolling back to the pre-plan reconciler causes NO store corruption (a keyed-pending is a valid pending shape; old code ignores the extra `jira_key` field), BUT the old code FORFEITS the new deterministic protection for any record currently in the create->label window - it label-searches, misses (the label is not yet attached in that exact window), and unbinds -> the create is re-attempted next pass (the pre-existing duplicate risk this ticket removes). So rollback is safe but re-exposes the original window; it does not create a new failure mode.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **D2 - comments scoped OUT of the retry guard.** No cheap Jira-side idempotency key exists for a comment (posted verbatim through the `acli_subprocess` floor), and a duplicate comment is low-harm vs. a duplicate issue; a visible `[rebar-cid]` trailer would pollute every synced comment. So `add_comment` is unwrapped from `_call_with_retry` at `dispatch_one.py:341` AND `:610` and posted SINGLE-attempt; a failed post appends to `comment_errors` and is re-emitted by the comment differ next pass (eventually-consistent). The real failure `add_comment` raises is `AcliMutationError`/`RetryExhaustedError` (subprocess floor), NOT `HTTPError` - the test injects that real type and asserts exactly one call.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **D3 - lease expiry uses `steal()` itself.** `_ref_lock` treats `heartbeat_ns` as diagnostic-only and determines expiry behaviorally via `steal()` (read -> sleep one `lease_secs` -> re-check `(oid,fence)` progress). The held-lock path calls `advisory.steal_pass_lock(pass_id, repo_root)`, whose None-return discrimination protocol is documented ON the wrapper (co-located, not only in the caller):",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  - **new oid** -> stale lease STOLEN: set `acquired=True`, thread the new oid into `lock_oid`, START the heartbeat against it (mirroring `__main__.py:544-549`), SKIP the unconditional `acquire_pass_lock`, proceed.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  - **None** -> re-read the ref: **still held** (live holder) -> **exit 3**; **freed** (holder released during our sleep) -> normal `acquire_pass_lock` (won -> proceed; lost to a racer -> exit 3).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  - **`steal()` raises** (git transport/permission error) -> caught in the wrapper, logged, treated as not-stolen -> **exit 3** (fail-closed, never crashes the pass).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  `pass_id` is generated BEFORE the lock check so it is the steal `holder`. Steal sleeps one `lock_lease_secs` (default 120s); a structured log is emitted at the START of the sleep and on a successful steal (prior holder + new oid, `lease_steal` event); `sleep_fn` is injected in tests. The whole branch is behind `REBAR_RECONCILER_LOCK_STEAL` (default ON) - OFF reverts to unconditional exit-3 (ops back-out, tested).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **D4 - `recovery_failures` threading via ctx (run_differs returns None).** `run_differs_mod.run_differs(ctx, ...)` is a procedure that populates `ctx` and returns `None`, so the count is threaded on the context object, NOT a return value: `recover_pending_bindings(client, *, failure_sink=None) -> int` KEEPS its `int` return (recovered count) and appends failures to the caller-supplied `failure_sink`; `run_differs` sets `ctx.recovery_failures = len(failure_sink)`; `reconcile.py` reads `ctx.recovery_failures` into the `result` dict (beside `mutation_failures`) and `sync_pass_end`. Observability-only, intentionally NOT wired into `__main__.py`'s `mutation_failures` exit gate (`:345`): recovery is best-effort/fail-open, so a transient Jira search hiccup must not fail an otherwise-clean pass.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Sequencing (one change, addresses decomposition finding)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The four fixes are the single \"revive the dead reconciler safety machinery\" workstream from the audit; each has its OWN independent unit test and none depends on another's runtime, but they share one small reconciler test surface and overlap in `dispatch_one.py` (retry + write-ahead + comment-unwrap). Landing them as one Gerrit change avoids four near-trivial stacked changes with repeated rebase/review overhead; each AC is independently verifiable. Fix 4 is additionally behind its own kill-switch, disable-able in production independent of the others.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Findings triage (deferrals justified)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **Unresolvable-pending TTL/retirement** (0.264): DEFERRED to a discovered-from follow-up; a pending record that cannot resolve stays pending and re-alerts each pass (24h-deduped).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **Live end-to-end AC** (0.0): DEFERRED - this ticket is code-only per the epic decomposition; live exercise is owned by sibling D1 (close-ferreous-cardinal) + the reconcile-bridge GHA.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **`recovery_failures` exit gate** (0.0): INTENTIONAL non-gate - see D4.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- **Kill-switches for fixes 1-3** (0.0): fix 1 (HTTPError retry) only ADDS retries to previously-unretried idempotent REST writes (strictly safer, no behavior inversion); fix 2 (write-ahead) and fix 3 (comment-unwrap) change failure-path behavior only. A revert-by-commit is the back-out for these; only fix 4 (held-lock behavior inversion on a critical path) warrants a runtime kill-switch, which it has.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `_call_with_retry` retries a retryable `HTTPError`: `code` 429 honoring `Retry-After` when PRESENT, else jittered backoff (`2**(attempt+1)+rand[0,1)`, cap 60s); 5xx with the same backoff; non-retryable 4xx (incl. 404) re-raised raw - WITHOUT translating at `acli_rest.py`, a test asserts the raw `HTTPError` raise from `acli_rest` is unchanged so raw-`HTTPError` catchers (e.g. apply_handlers.py:151's 404) still see raw `HTTPError`. Both header-present and header-absent 429 paths, a 5xx, and a fast-failed 404 are tested. Proof: `tests/unit/rebar_reconciler/test_retry_httperror.py`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Write-ahead is deterministic (D1): `bind_pending` persisted BEFORE `create_issue`; `record_pending_key` persisted BEFORE `add_label`. `recover_pending_bindings` confirms any keyed-pending record (retro-attaching the label idempotently) with NO Jira search -> crash between create and label yields NO duplicate; keyless pending falls back to `search_issues` (confirm if found, else unbind). Tests: (a) crash after create+key-persist, before label -> next pass confirms, no duplicate; (b) crash before create -> fallback unbind; (c) `bind_pending`/`record_pending_key` persist failure raises `BindingPersistError`, **`create_issue` is asserted NOT called**, the mutation is recorded failed (mutation_failures increments) + an `alert_store` alert fires, and the pass continues. Proof: `tests/unit/rebar_reconciler/test_write_ahead_recovery.py`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `recover_pending_bindings` receives the hoisted `AcliClient` (exposing `search_issues`, not the applier module) and a `failure_sink` list (its `int` return unchanged); a recovery failure appends to `failure_sink`, emits an `alert_store` bridge alert, AND surfaces a nonzero `recovery_failures` (via `ctx.recovery_failures`) on the pass `result` + `sync_pass_end` log, instead of the silent swallow. Proof: `tests/unit/rebar_reconciler/test_recovery_loud_failures.py`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Comments post single-attempt (D2): `add_comment` is unwrapped from `_call_with_retry` at BOTH `:341` and `:610`; a test injects `AcliMutationError`/`RetryExhaustedError` on `add_comment` and asserts it is called EXACTLY once and recorded to `comment_errors` (no duplicate post). Proof: `tests/unit/rebar_reconciler/test_comment_single_attempt.py`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Held-lock path (D3, behind `REBAR_RECONCILER_LOCK_STEAL`) - FIVE test cases with injected `sleep_fn`: (1) steal returns new oid -> `acquired=True`, oid threaded into `lock_oid`, heartbeat started, acquire skipped, proceed; (2) None + still-held -> exit 3; (3a) None + freed + acquire wins -> proceed; (3b) None + freed + acquire lost -> exit 3; (4) kill-switch OFF -> unconditional exit 3 (no steal attempted). `steal()` raising is covered too (-> exit 3, no crash). Proof: `tests/unit/rebar_reconciler/test_lock_steal.py`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] `REBAR_RECONCILER_LOCK_STEAL` is registered in `docs/env-vars.md` via the env registry so the CI env-drift gate passes.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Both test locations green: `python -m pytest tests/scripts/bridge/ -q` AND `python -m pytest tests/unit/rebar_reconciler/ -q`.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\n\nThe 2026-07-08 principal-architect audit (Reliability finding #3) found reconciler safety mechanisms that are implemented, tested, and **never called in production** - the safety they promise is illusory:\n\n1. **Create->label crash window double-creates Jira issues.** `dispatch_one.py:241-256` runs `create_issue` -> adds the `rebar-id:` label the JQL dedup keys on -> binds in memory only; bindings persist only at end of pass. A hard crash between create and label leaves an orphan issue invisible to dedup; the re-run duplicates it.\n2. **The write-ahead/recovery protocol is dead code - and miswired.** `bind_pending` has zero production callers, and `run_differs.py:351` passes the applier MODULE (no `search_issues`) to `recover_pending_bindings`, so real recovery `AttributeError`s into a fail-open swallow.\n3. **Crashed pass deadlocks reconciliation forever.** Lease `steal()` is implemented/tested (`_ref_lock.py:516-535`) but the held-ref path unconditionally exits 3 (`__main__.py:499-505`); after SIGKILL the remote `refs/reconciler/lock` persists until an operator hand-deletes it.\n4. **The REST-transport write path never retries transient HTTP failures.** `acli_rest.py:58-63` re-raises every `HTTPError` and `_call_with_retry` (`dispatch_one.py:100-144`) only catches `JiraAPIError`/`TimeoutError` - `urllib.error.HTTPError` is an `OSError`/`URLError` subclass it never catches, so the REST-transport writes get zero retry.\n\n**Transport map (verified, drives the whole design).** rebar's Jira client has TWO floors: the **REST floor** (`acli_rest.py`, raises raw `urllib.error.HTTPError`) and the **subprocess floor** (`acli_subprocess._run_acli`, raises `AcliMutationError`/`RetryExhaustedError`/`CalledProcessError`, NEVER `HTTPError`). Of the `_call_with_retry` call sites, only **four** route through REST and can raise `HTTPError`, and ALL FOUR are IDEMPOTENT writes: `dispatch_one.py:254` `set_entity_property`, `:483` `set_parent`, `:543` `update_issue` (priority/status/assignee legs), and `apply_inbound_records.py:181` `set_entity_property`. `create_issue`, `add_label`, `remove_label`, `add_comment`, `delete_issue`, `search_issues`, `get_issue`, `set_relationship` are ALL subprocess-floor. This has two consequences: (a) reviving HTTPError retry gives real resilience to exactly those four idempotent REST writes - retrying them needs NO dedup; (b) `create_issue` is NEVER retried by `_call_with_retry`, so a per-retry create dedup guard has no valid target - create's idempotency is provided by the write-ahead recovery (D1, cross-pass), the existing pre-create rebar-id JQL dedup (`dispatch_one.py:196`, in-pass), and C4's subprocess 429 loop (in-pass). Audit finding #2 is thus covered WITHOUT a new dedup guard.\n\n## What\n\nWire each mechanism into its intended call site, smallest-change-first (see Design decisions D1-D4, Sequencing, Findings triage).\n\n1. **Revive the retry layer WITHOUT a boundary translation.** Extend `_call_with_retry` (dispatch_one.py:100-144) to ALSO catch a retryable `urllib.error.HTTPError` in addition to `JiraAPIError`/`TimeoutError`, leaving acli_rest's raw-`HTTPError` raise UNCHANGED (the 8+ raw-HTTPError catchers rely on it). `HTTPError.code` 429 -> retry honoring `Retry-After` header when present, else ADR-0036 jittered backoff; 5xx -> jittered backoff; 4xx (incl. 404 on an absent entity property) -> re-raised raw immediately, mirroring the existing `400 <= status < 500` fast-fail branch (`dispatch_one.py:129`) so the absent-property 404 semantics are preserved. Backoff per ADR 0036: `2**(attempt+1) + rand[0,1)` s, capped 60s; max_retries=3. Because `_call_with_retry` is re-exported via `batch_dispatch` and imported by `apply_outbound.py`/`apply_inbound.py`/`apply_inbound_records.py`, this uniformly benefits every call site (intended - `apply_inbound_records.py:181`'s `set_entity_property` is one of the four REST beneficiaries); those modules need no edits and their existing tests must stay green.\n2. **Deterministic write-ahead recovery (D1).** Persist `bind_pending` BEFORE `create_issue`; on the returned key, `record_pending_key(local_id, jira_key)` and persist AGAIN BEFORE `add_label`. Hoist the `AcliClient` (built at run_differs.py:393) ABOVE the recovery call; pass it (not the applier module) to `recover_pending_bindings`. LOUD failures: `alert_store` bridge alert + a nonzero `recovery_failures` pass tally.\n3. **Comments single-attempt (D2).** Unwrap `add_comment` from `_call_with_retry` at `dispatch_one.py:341` (create path) and `:610` (update path) -> single-attempt bare call feeding the existing non-fatal `comment_errors` list.\n4. **Crashed-pass lease steal (D3).** In `__main__.py`'s held-lock path, attempt `steal()` instead of unconditional exit 3, behind kill-switch `REBAR_RECONCILER_LOCK_STEAL` (default ON).\n\n(No per-retry create dedup guard and no `acli.py` search-cache change - see the transport-map rationale above; create is not retried at this layer.)\n\n## Scope\n\nIn:\n- `dispatch_one.py`: `_call_with_retry` gains an `except urllib.error.HTTPError` clause (429 Retry-After/backoff, 5xx backoff, 4xx incl. 404 fast-fail; ADR-0036 formula); `bind_pending`+persist before create, `record_pending_key`+persist after create/before label; **unwrap `add_comment` from `_call_with_retry` at BOTH `:341` and `:610`** -> single-attempt bare call feeding `comment_errors` (D2).\n- `run_differs.py`: hoist the `AcliClient` above the recovery call; pass it to `recover_pending_bindings` with a `failure_sink` list; emit an `alert_store` alert per failure; set `ctx.recovery_failures = len(failure_sink)` (see D4 for the channel).\n- `binding_store.py`: add `record_pending_key(local_id, jira_key) -> None` (sets `jira_key` on an existing pending entry, keeps `state='pending'`, `save()`s); add a `BindingPersistError`; extend `recover_pending_bindings(client, *, failure_sink: list[dict] | None = None) -> int` (**return type stays `int`** - existing `test_binding_store.py` int assertions unaffected) with the deterministic branch (confirm a keyed-pending record with NO Jira search; keyless -> `search_issues` fallback; append `{local_id, reason}` to `failure_sink` on error); update the module docstring for the keyed-pending invariant.\n- `reconcile.py`: read `ctx.recovery_failures` into the pass `result` dict (beside `mutation_failures`) and the `sync_pass_end` log.\n- `__main__.py`: hoist `pass_id` generation ABOVE the `check_pass_lock` block (so it is the `steal()` holder); held-lock path calls `steal_pass_lock` and, on a steal-win, sets `acquired=True`, threads the new oid into `lock_oid`, starts the heartbeat, and SKIPS the unconditional `acquire_pass_lock`; add the `REBAR_RECONCILER_LOCK_STEAL` kill-switch.\n- `_advisory_lock.py`: thin `steal_pass_lock(holder, repo_root, *, sleep_fn=time.sleep) -> str | None` wrapping `_ref_lock.steal(...)`; on an unexpected exception from `steal()` (git transport/permission error), it is caught, logged, and treated as \"not stolen\" (fail-closed -> exit 3), never crashing the pass.\n- `docs/env-vars.md` + the env registry: register `REBAR_RECONCILER_LOCK_STEAL` (run the `gen_env_registry.py` generator) so the CI env-drift gate stays green.\n- Tests: `tests/unit/rebar_reconciler/` (retry/write-ahead/recovery/steal/comment) and `tests/scripts/bridge/`.\n\nRead-only (relied on, not changed): `acli_rest.py` (raw HTTPError raise UNCHANGED); `_ref_lock.py` (`steal()` already implemented); `apply_outbound.py`/`apply_inbound.py`/`apply_inbound_records.py` (inherit the `_call_with_retry` HTTPError behavior uniformly - existing tests must stay green).\n\nOut (justified): bulk-path 429 + `_call_with_backoff` (C4); inbound status mapping (audit-remediation epic). Deferred with rationale (Findings triage): unresolvable-pending TTL; live E2E run; `recovery_failures` as an exit gate.\n\n## Design decisions (resolved from code facts)\n\n- **D1 - create->label window closed DETERMINISTICALLY.** acli `create_issue` cannot carry the rebar-id label atomically (`--labels` is a destructive SET-REPLACE). Instead the pending binding records the `jira_key` the instant `create_issue` returns (persisted before `add_label`), so `recover_pending_bindings` confirms a keyed pending record with NO Jira search. Only a keyless pending record uses the label `search_issues` fallback. **Persist-failure is ITEM-SCOPED:** `bind_pending`/`record_pending_key` persist failure raises `BindingPersistError`, `create_issue` is then NOT called for that mutation, the mutation outcome gets an `error` key (which increments `mutation_failures` via the existing outcome accounting) and an `alert_store` alert is emitted; the pass CONTINUES with remaining mutations. **keyed-pending is a SUB-state, not a new ADR-0027 state:** the record stays `state='pending'` (the ADR-0027 enumerated state) with an additive `jira_key` field populated - it does NOT add a fourth state to `pending|confirmed|retired`, so ADR 0027's state machine is unchanged (the module docstring records the sub-state). **Rollback semantics (accurate):** rolling back to the pre-plan reconciler causes NO store corruption (a keyed-pending is a valid pending shape; old code ignores the extra `jira_key` field), BUT the old code FORFEITS the new deterministic protection for any record currently in the create->label window - it label-searches, misses (the label is not yet attached in that exact window), and unbinds -> the create is re-attempted next pass (the pre-existing duplicate risk this ticket removes). So rollback is safe but re-exposes the original window; it does not create a new failure mode.\n- **D2 - comments scoped OUT of the retry guard.** No cheap Jira-side idempotency key exists for a comment (posted verbatim through the `acli_subprocess` floor), and a duplicate comment is low-harm vs. a duplicate issue; a visible `[rebar-cid]` trailer would pollute every synced comment. So `add_comment` is unwrapped from `_call_with_retry` at `dispatch_one.py:341` AND `:610` and posted SINGLE-attempt; a failed post appends to `comment_errors` and is re-emitted by the comment differ next pass (eventually-consistent). The real failure `add_comment` raises is `AcliMutationError`/`RetryExhaustedError` (subprocess floor), NOT `HTTPError` - the test injects that real type and asserts exactly one call.\n- **D3 - lease expiry uses `steal()` itself.** `_ref_lock` treats `heartbeat_ns` as diagnostic-only and determines expiry behaviorally via `steal()` (read -> sleep one `lease_secs` -> re-check `(oid,fence)` progress). The held-lock path calls `advisory.steal_pass_lock(pass_id, repo_root)`, whose None-return discrimination protocol is documented ON the wrapper (co-located, not only in the caller):\n  - **new oid** -> stale lease STOLEN: set `acquired=True`, thread the new oid into `lock_oid`, START the heartbeat against it (mirroring `__main__.py:544-549`), SKIP the unconditional `acquire_pass_lock`, proceed.\n  - **None** -> re-read the ref: **still held** (live holder) -> **exit 3**; **freed** (holder released during our sleep) -> normal `acquire_pass_lock` (won -> proceed; lost to a racer -> exit 3).\n  - **`steal()` raises** (git transport/permission error) -> caught in the wrapper, logged, treated as not-stolen -> **exit 3** (fail-closed, never crashes the pass).\n  `pass_id` is generated BEFORE the lock check so it is the steal `holder`. Steal sleeps one `lock_lease_secs` (default 120s); a structured log is emitted at the START of the sleep and on a successful steal (prior holder + new oid, `lease_steal` event); `sleep_fn` is injected in tests. The whole branch is behind `REBAR_RECONCILER_LOCK_STEAL` (default ON) - OFF reverts to unconditional exit-3 (ops back-out, tested).\n- **D4 - `recovery_failures` threading via ctx (run_differs returns None).** `run_differs_mod.run_differs(ctx, ...)` is a procedure that populates `ctx` and returns `None`, so the count is threaded on the context object, NOT a return value: `recover_pending_bindings(client, *, failure_sink=None) -> int` KEEPS its `int` return (recovered count) and appends failures to the caller-supplied `failure_sink`; `run_differs` sets `ctx.recovery_failures = len(failure_sink)`; `reconcile.py` reads `ctx.recovery_failures` into the `result` dict (beside `mutation_failures`) and `sync_pass_end`. Observability-only, intentionally NOT wired into `__main__.py`'s `mutation_failures` exit gate (`:345`): recovery is best-effort/fail-open, so a transient Jira search hiccup must not fail an otherwise-clean pass.\n\n## Sequencing (one change, addresses decomposition finding)\n\nThe four fixes are the single \"revive the dead reconciler safety machinery\" workstream from the audit; each has its OWN independent unit test and none depends on another's runtime, but they share one small reconciler test surface and overlap in `dispatch_one.py` (retry + write-ahead + comment-unwrap). Landing them as one Gerrit change avoids four near-trivial stacked changes with repeated rebase/review overhead; each AC is independently verifiable. Fix 4 is additionally behind its own kill-switch, disable-able in production independent of the others.\n\n## Findings triage (deferrals justified)\n\n- **Unresolvable-pending TTL/retirement** (0.264): DEFERRED to a discovered-from follow-up; a pending record that cannot resolve stays pending and re-alerts each pass (24h-deduped).\n- **Live end-to-end AC** (0.0): DEFERRED - this ticket is code-only per the epic decomposition; live exercise is owned by sibling D1 (close-ferreous-cardinal) + the reconcile-bridge GHA.\n- **`recovery_failures` exit gate** (0.0): INTENTIONAL non-gate - see D4.\n- **Kill-switches for fixes 1-3** (0.0): fix 1 (HTTPError retry) only ADDS retries to previously-unretried idempotent REST writes (strictly safer, no behavior inversion); fix 2 (write-ahead) and fix 3 (comment-unwrap) change failure-path behavior only. A revert-by-commit is the back-out for these; only fix 4 (held-lock behavior inversion on a critical path) warrants a runtime kill-switch, which it has.\n\n## Acceptance Criteria\n\n- [ ] `_call_with_retry` retries a retryable `HTTPError`: `code` 429 honoring `Retry-After` when PRESENT, else jittered backoff (`2**(attempt+1)+rand[0,1)`, cap 60s); 5xx with the same backoff; non-retryable 4xx (incl. 404) re-raised raw - WITHOUT translating at `acli_rest.py`, a test asserts the raw `HTTPError` raise from `acli_rest` is unchanged so raw-`HTTPError` catchers (e.g. apply_handlers.py:151's 404) still see raw `HTTPError`. Both header-present and header-absent 429 paths, a 5xx, and a fast-failed 404 are tested. Proof: `tests/unit/rebar_reconciler/test_retry_httperror.py`.\n- [ ] Write-ahead is deterministic (D1): `bind_pending` persisted BEFORE `create_issue`; `record_pending_key` persisted BEFORE `add_label`. `recover_pending_bindings` confirms any keyed-pending record (retro-attaching the label idempotently) with NO Jira search -> crash between create and label yields NO duplicate; keyless pending falls back to `search_issues` (confirm if found, else unbind). Tests: (a) crash after create+key-persist, before label -> next pass confirms, no duplicate; (b) crash before create -> fallback unbind; (c) `bind_pending`/`record_pending_key` persist failure raises `BindingPersistError`, **`create_issue` is asserted NOT called**, the mutation is recorded failed (mutation_failures increments) + an `alert_store` alert fires, and the pass continues. Proof: `tests/unit/rebar_reconciler/test_write_ahead_recovery.py`.\n- [ ] `recover_pending_bindings` receives the hoisted `AcliClient` (exposing `search_issues`, not the applier module) and a `failure_sink` list (its `int` return unchanged); a recovery failure appends to `failure_sink`, emits an `alert_store` bridge alert, AND surfaces a nonzero `recovery_failures` (via `ctx.recovery_failures`) on the pass `result` + `sync_pass_end` log, instead of the silent swallow. Proof: `tests/unit/rebar_reconciler/test_recovery_loud_failures.py`.\n- [ ] Comments post single-attempt (D2): `add_comment` is unwrapped from `_call_with_retry` at BOTH `:341` and `:610`; a test injects `AcliMutationError`/`RetryExhaustedError` on `add_comment` and asserts it is called EXACTLY once and recorded to `comment_errors` (no duplicate post). Proof: `tests/unit/rebar_reconciler/test_comment_single_attempt.py`.\n- [ ] Held-lock path (D3, behind `REBAR_RECONCILER_LOCK_STEAL`) - FIVE test cases with injected `sleep_fn`: (1) steal returns new oid -> `acquired=True`, oid threaded into `lock_oid`, heartbeat started, acquire skipped, proceed; (2) None + still-held -> exit 3; (3a) None + freed + acquire wins -> proceed; (3b) None + freed + acquire lost -> exit 3; (4) kill-switch OFF -> unconditional exit 3 (no steal attempted). `steal()` raising is covered too (-> exit 3, no crash). Proof: `tests/unit/rebar_reconciler/test_lock_steal.py`.\n- [ ] `REBAR_RECONCILER_LOCK_STEAL` is registered in `docs/env-vars.md` via the env registry so the CI env-drift gate passes.\n- [ ] Both test locations green: `python -m pytest tests/scripts/bridge/ -q` AND `python -m pytest tests/unit/rebar_reconciler/ -q`.",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Wire the reconciler's dead safety machinery: bind_pending write-ahead, lease steal(), and retry-layer error translation"
       },
       "baseline_advanced_at": "2026-08-02T19:11:08Z",
@@ -80664,7 +79948,7 @@
         "assignee": null,
         "description": "## Context\nGerrit Verify currently runs thousands of repeated real Pandoc subprocess conversions over the complete DC wiki corpus. Run 31798375024 attributed at least 184.32 seconds of the macOS critical path to two visible corpus phases alone. The operator confirmed the architecture research and approved moving the complete real-Pandoc corpus replay to the External Integration Tests workflow. Current ADR 0095 explicitly requires every conversion assertion to use the real binary, so this testing-boundary change requires a narrow superseding ADR before implementation.\n\n## Research decision\nPopular maintained OSS precedent supports committed golden/static outputs plus compact live boundary probes: Pandoc uses literal writer outputs; nbconvert and pypandoc use small real-Pandoc probes; Kubernetes client-go commits golden request/response fixtures; Rust compiletest uses blessed output snapshots. The approved design keeps three representative live corpus bodies (code_arrow, table, prose) plus existing compact provenance probes in Gerrit Verify. It preserves every assertion class against committed outputs in Verify. It moves complete real-Pandoc replay to a dedicated weekly/manual Pandoc job inside .github/workflows/external-integration.yml.\n\nThe current External Integration workflow has four Ubuntu-only jobs and no macOS runner. The later implementation ticket must therefore add an explicit pandoc-corpus-replay job whose matrix is os: [ubuntu-latest, macos-latest]; this is planned future implementation scope, not a claim about current workflow state and not part of this documentation-only ADR change. The job will run the complete replay on both platforms. Version drift and platform-specific binary fingerprints fail fast. Deterministic regeneration remains available. The 184.32-second figure is a lower-bound estimate; implementation must obtain paired A/B evidence.\n\n## Plan\n- Add a numbered ADR in docs/adr that narrowly supersedes ADR 0095 only where it mandates a real Pandoc process for every conversion assertion.\n- Preserve the production segmenting renderer, pin/provenance, Linux/macOS platform boundary, fallback behavior, and every safety/fixed-point/richness assertion class.\n- Amend ADR 0095 with a clear Superseded-by notice scoped to the testing-assurance clause.\n- Update docs/architecture.md with the authoritative hot-path versus external-integration verification boundary.\n- Record that the later implementation adds a dedicated pandoc-corpus-replay matrix to the currently Ubuntu-only external-integration workflow.\n- Regenerate the ADR index and number markers using scripts/gen_adr_index.py.\n- Run ADR numbering/index guards, documentation/link checks, lint, and the repository commit-ticket verifier.\n- Submit this documentation-only decision through Gerrit. Do not begin implementation until this ADR is merged after HOLD approval.\n\n## Expected file impact\n- docs/adr/0095-dc-segmenting-wiki-renderer.md\n- docs/adr/0096-pandoc-corpus-verification-boundary.md\n- docs/adr/README.md\n- docs/adr/.numbers/0096\n- docs/architecture.md\n\n## Acceptance Criteria\n- [ ] The ADR cites the confirmed dependency research and named OSS precedents.\n- [ ] The ADR narrows supersession to the test execution boundary.\n- [ ] The ADR preserves every production renderer invariant.\n- [ ] Gerrit Verify retains three representative live corpus contracts plus the compact pin/provenance probes.\n- [ ] Every existing assertion class remains required against committed deterministic outputs in Gerrit Verify.\n- [ ] The ADR states that external-integration.yml is currently Ubuntu-only.\n- [ ] The ADR assigns future implementation of a dedicated pandoc-corpus-replay matrix with ubuntu-latest and macos-latest arms.\n- [ ] Complete real-Pandoc corpus replay is assigned to that weekly/manual external-integration job.\n- [ ] Installed Pandoc version drift fails fast.\n- [ ] Each supported platform binary fingerprint is verified.\n- [ ] Deterministic fixture regeneration remains documented.\n- [ ] The ADR states that 184.32 seconds is a one-run lower bound.\n- [ ] The ADR requires paired A/B implementation evidence.\n- [ ] ADR 0095 points to the superseding decision.\n- [ ] docs/architecture.md documents the verification boundary.\n- [ ] ADR number/index guards pass.\n- [ ] Documentation link guards pass.\n- [ ] No implementation code is included in this ADR change.\n- [ ] No test-routing change is included in this ADR change.\n- [ ] [operator-attested] The ADR reaches HOLD in Gerrit; evidence is the Gerrit change id and HOLD announcement recorded on this ticket.\n- [ ] [operator-attested] The ADR merges only after explicit approval; evidence is the approval identity and merge timestamp recorded on this ticket.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "ADR: move complete Pandoc corpus replay to external integration"
       },
       "created_at": "2026-08-14T14:43:18Z",
@@ -81489,9 +80773,17 @@
       "updated_at": "2026-06-25T23:10:53Z"
     },
     "a62f-8041-be72-4e0f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nADR 0096 is merged as Gerrit change 1775 and approves a two-cadence Pandoc verification boundary. Gerrit Verify currently still performs complete live-Pandoc corpus work. Run 31798375024 attributed a 184.32-second macOS lower bound to two visible corpus phases. The implementation must reduce per-change subprocess work without removing any behavioral assertion, contractual assertion, supported Python cell, supported operating system, or complete real-Pandoc replay.\n\n## Plan\n- Extend scripts/generate_dc_wiki_legacy_outputs.py so deterministic committed artifacts cover every Pandoc-bound input encountered by the complete corpus through all required settling passes. Split artifacts by corpus stratum when needed to remain below repository file-size limits. Preserve the frozen Pandoc 3.6.1 contract plus the Linux x86_64 and Darwin arm64 binary SHA-256 values.\n- Add a test-only static converter backed by those committed artifacts. Drive the production segmenting renderer through that converter for all corpus cardinality, scrubbing, protection, table, HTML-comment, settling, richness, alignment, byte-output, dispatch, fallback, and immutability assertions in Gerrit Verify.\n- Retain one deterministic live product-path body from each code_arrow, table, and prose stratum. Select bodies that exercise conversion, protected fallback, and fixed-point behavior. Retain the compact installed-version, platform-fingerprint, argv, stdin, timeout, and non-vacuous-dispatch probes.\n- Add an explicit full-replay mode that exercises every corpus unit and settling pass through the installed real Pandoc.\n- Add a dedicated pandoc-corpus-replay job to .github/workflows/external-integration.yml with ubuntu-latest and macos-latest matrix arms. Run full replay on the existing weekly schedule and workflow_dispatch path.\n- Keep deterministic regeneration documented in the generator help. Add a non-writing check path for validating committed fixture bytes.\n- Update docs/architecture.md after the route changes from transitional to active.\n- Measure paired focused before/after wall time on the same host. Record the first genuine Gerrit Verify timing after merge.\n- Back-out is a Gerrit revert of this implementation, restoring complete live replay in every Verify run.\n\n## Verification\n- Run generator unit tests.\n- Run corpus plus hardening suites in default static mode.\n- Run corpus plus hardening suites in full-replay mode.\n- Run workflow policy tests, lint, typecheck, and the full default test gate.\n- Require Gerrit LLM-Review +1.\n- Require Gerrit Verified +1.\n\n## Acceptance Criteria\n- [ ] Gerrit Verify broad corpus assertions use committed deterministic Pandoc outputs.\n- [ ] Every existing corpus assertion class remains present in Gerrit Verify.\n- [ ] Every supported Python matrix cell still runs the broad corpus assertions.\n- [ ] Every supported operating-system cell still runs the broad corpus assertions.\n- [ ] Gerrit Verify runs one real product-path body from code_arrow.\n- [ ] Gerrit Verify runs one real product-path body from table.\n- [ ] Gerrit Verify runs one real product-path body from prose.\n- [ ] The compact Pandoc version probe remains in Gerrit Verify.\n- [ ] The compact platform fingerprint probe remains in Gerrit Verify.\n- [ ] The committed artifacts identify Pandoc 3.6.1.\n- [ ] The committed artifacts identify the Linux x86_64 binary SHA-256.\n- [ ] The committed artifacts identify the Darwin arm64 binary SHA-256.\n- [ ] Fixture regeneration is deterministic.\n- [ ] Fixture validation has a non-writing command.\n- [ ] External Integration Tests contains a pandoc-corpus-replay job.\n- [ ] The replay job contains an ubuntu-latest matrix arm.\n- [ ] The replay job contains a macos-latest matrix arm.\n- [ ] The replay job executes every corpus unit through real Pandoc.\n- [ ] The replay job executes every required settling pass through real Pandoc.\n- [ ] The replay job runs from the weekly workflow schedule.\n- [ ] The replay job runs from workflow_dispatch.\n- [ ] A pin mismatch fails before committed outputs are trusted.\n- [ ] A platform fingerprint mismatch fails before committed outputs are trusted.\n- [ ] Paired same-host A/B evidence is recorded on this ticket.\n- [ ] A genuine Gerrit Verify timing is recorded on this ticket.\n- [ ] The implementation passes LLM-Review +1.\n- [ ] The implementation passes Verified +1.\n- [ ] The implementation merges before this ticket closes.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Implement ADR 0096 static Verify corpus and external full replay"
+      },
       "created_at": "2026-08-14T16:41:34Z",
       "jira_id": "4588731",
       "jira_key": "REB-2923",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T16:41:37Z"
     },
@@ -90843,10 +90135,24 @@
     },
     "bb80-80d0-5f6b-4d45": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\nStore-wide maintenance walks visit every ticket directory on every run: the fsck scan loops (`_ticket_dirs` iterations in src/rebar/_commands/fsck_scan.py) and the compact-all sweep (src/rebar/_commands/compact.py, whose per-ticket selection is `_scan_snapshot_state`'s own `os.scandir(tracker)` walk invoked by `compact_all_cli`) are O(all tickets ever created). As the store grows, archived tickets \u2014 cold, excluded from default `list` \u2014 dominate that walk and make routine health checks and sweeps slower for no operational value. `ticket list` already has the pattern to copy: default excludes archived (marker fast-path at reducer/_api.py with compiled-state confirmation) with an explicit `--include-archived` override.\n\n## Approach\nTwo coupled changes, ordered so the default flip is safe:\n1. **Operation-linked terminal fold.** Today `leaf.archive` (src/rebar/_commands/leaf.py) writes only the ARCHIVED event + `.archived` marker \u2014 it does NOT fold, so an archived ticket can carry unfolded tail events and the only thing that folds them is a later compact-all walk reaching it. Before scoping that walk to active tickets, make the fold part of the archive operation itself: `rebar archive` performs the ticket's final fold inline (reusing the existing single-ticket fold path compact_txn already exposes) right before writing the ARCHIVED event. This is operation-linked, so it is portable across environments with diverse or NO CI provider \u2014 no scheduled sweep is load-bearing. Any later `--include-archived` sweep becomes redundant belt-and-suspenders for tickets archived by pre-change builds, not the sole fold path.\n2. **Active-only default scoping.** Introduce one shared helper (in the module fsck_scan already imports `_ticket_dirs` from) that yields ACTIVE ticket dirs by default \u2014 skipping dirs whose net archival state is archived, using the `.archived` marker as the fast-path and the existing `_is_net_archived`-style event-name confirmation, the exact semantics `list` uses \u2014 with an `include_archived` flag to yield everything. Switch the fsck scan loops to it, and in compact.py replace `_scan_snapshot_state`'s `os.scandir(tracker)` walk with the shared iterator (matching its existing return contract so `_foldable_event_count` consumers are unchanged), with `compact_all_cli` threading `--include-archived` through to it. Add `--include-archived` to `rebar fsck` and `rebar compact-all` (usage lines + JSON passthrough). Default = active-only for both: with change 1 in place, an archived ticket really IS folded on its way out, and any deep audit reaches it with the flag.\nBack-out path: the default flip is a one-line revert per command (restore the full walk); change 1 is independently safe to keep since folding at archive time is strictly more converged than folding later. Positive rationale: this reuses the archive marker + net-archival semantics that default `list` has proven, rather than inventing a second notion of active.\n\n## Scope\n- src/rebar/_commands/leaf.py \u2014 archive performs the ticket's terminal fold inline before the ARCHIVED event.\n- src/rebar/_commands/fsck_scan.py \u2014 scan loops take the shared active-only iterator; `include_archived` threading.\n- src/rebar/_commands/fsck.py \u2014 CLI flag + usage + JSON passthrough.\n- src/rebar/_commands/compact.py \u2014 `_scan_snapshot_state` replaces its `os.scandir` walk with the shared iterator; `compact_all_cli` threads `--include-archived` through; default active-only.\n- tests/unit/test_scan_scoping.py (new) \u2014 visited-set coverage both ways + archive-fold sequence test.\n- docs/user-guide.md \u2014 document the default, the override, and the archive-time fold.\n\n## Testing\n- Happy path: fixture store with N archived (marker + ARCHIVED event) and M active tickets; default `rebar fsck` and `rebar compact-all --dry-run` visit exactly the M active dirs (assert on the visited set / reported counts); with `--include-archived` they visit N+M.\n- Archive-fold sequence: archive a ticket that has unfolded events, then run DEFAULT `rebar compact-all`; assert the archived ticket's SNAPSHOT covers those events (nothing stranded) even though the default sweep never visited it \u2014 the fold happened at archive time.\n- Edge: a ticket dir with a stale marker but NO net-archived state (reverted archive) is still visited by default (the confirmation step, not the marker alone, decides); an archived ticket with a corrupt event file IS reported when `--include-archived` is passed (deep audit still works); a ticket archived by a PRE-change build (unfolded, no inline fold) is folded by a `compact-all --include-archived` run (the belt-and-suspenders path works).\n- Empty store: both commands succeed with zero visits.\n\n## Acceptance Criteria\n- [ ] `rebar archive` folds the ticket inline (SNAPSHOT covers all its events) before writing ARCHIVED; a just-archived ticket followed by default `compact-all` carries no unfolded events; checked by the sequence test.\n- [ ] Default `rebar fsck` and `rebar compact-all` visit only non-archived tickets, and `--include-archived` restores the full walk (including folding legacy archived-but-unfolded tickets); checked by the visited-set and legacy-fold tests.\n- [ ] A reverted-archive ticket (stale marker) is never skipped by default; checked by the edge test.\n- [ ] Usage lines and docs/user-guide.md name the new flag on both commands and the archive-time fold; checked by --help output in the test and the doc diff.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nStore-wide maintenance walks visit every ticket directory on every run: the fsck scan loops (`_ticket_dirs` iterations in src/rebar/_commands/fsck_scan.py) and the compact-all sweep (src/rebar/_commands/compact.py, whose per-ticket selection is `_scan_snapshot_state`'s own `os.scandir(tracker)` walk invoked by `compact_all_cli`) are O(all tickets ever created). As the store grows, archived tickets \u2014 cold, excluded from default `list` \u2014 dominate that walk and make routine health checks and sweeps slower for no operational value. `ticket list` already has the pattern to copy: default excludes archived (marker fast-path at reducer/_api.py with compiled-state confirmation) with an explicit `--include-archived` override.\n\n## Approach\nTwo coupled changes, ordered so the default flip is safe:\n1. **Operation-linked terminal fold.** Today `leaf.archive` (src/rebar/_commands/leaf.py) writes only the ARCHIVED event + `.archived` marker \u2014 it does NOT fold, so an archived ticket can carry unfolded tail events and the only thing that folds them is a later compact-all walk reaching it. Before scoping that walk to active tickets, make the fold part of the archive operation itself: `rebar archive` performs the ticket's final fold inline right before writing the ARCHIVED event, reusing the existing single-ticket fold path compact_txn already exposes BUT as a TERMINAL fold that bypasses the incremental gates: it passes threshold=0 (fold even a small ticket) and a fold horizon of now (fold the within-horizon tail too), so a just-archived hot ticket \u2014 all of whose events are younger than the normal compaction horizon \u2014 still gets a complete SNAPSHOT covering every event. If the shared path cannot express that (horizon/threshold baked in), add an explicit terminal/force parameter to it rather than a parallel fold implementation; a ticket with nothing unfolded is a no-op (no empty SNAPSHOT write). This is operation-linked, so it is portable across environments with diverse or NO CI provider \u2014 no scheduled sweep is load-bearing. Any later `--include-archived` sweep becomes redundant belt-and-suspenders for tickets archived by pre-change builds, not the sole fold path.\n2. **Active-only default scoping.** Introduce one shared helper (in the module fsck_scan already imports `_ticket_dirs` from) that yields ACTIVE ticket dirs by default \u2014 skipping dirs whose net archival state is archived, using the `.archived` marker as the fast-path and the existing `_is_net_archived`-style event-name confirmation, the exact semantics `list` uses \u2014 with an `include_archived` flag to yield everything. Switch the fsck scan loops to it, and in compact.py replace `_scan_snapshot_state`'s `os.scandir(tracker)` walk with the shared iterator (matching its existing return contract so `_foldable_event_count` consumers are unchanged), with `compact_all_cli` threading `--include-archived` through to it. Add `--include-archived` to `rebar fsck` and `rebar compact-all` (flag parsing + JSON passthrough; the usage lines live in src/rebar/_cli/help/fsck.txt and compact-all.txt, not in fsck.py). Default = active-only for both: with change 1 in place, an archived ticket really IS folded on its way out, and any deep audit reaches it with the flag.\nBack-out path: the default flip is a one-line revert per command (restore the full walk); change 1 is independently safe to keep since folding at archive time is strictly more converged than folding later. Positive rationale: this reuses the archive marker + net-archival semantics that default `list` has proven, rather than inventing a second notion of active.\n\n## Scope\n- src/rebar/_commands/leaf.py \u2014 archive performs the ticket's terminal fold inline before the ARCHIVED event.\n- src/rebar/_commands/fsck_scan.py \u2014 scan loops take the shared active-only iterator; `include_archived` threading.\n- src/rebar/_commands/fsck.py \u2014 CLI flag + JSON passthrough.\n- src/rebar/_cli/help/fsck.txt and src/rebar/_cli/help/compact-all.txt \u2014 the usage/help text for both commands lives in these files (fsck.py has no usage string); add `--include-archived` there.\n- src/rebar/_commands/compact.py \u2014 `_scan_snapshot_state` replaces its `os.scandir` walk with the shared iterator; `compact_all_cli` threads `--include-archived` through; default active-only.\n- tests/unit/test_scan_scoping.py (new) \u2014 visited-set coverage both ways + archive-fold sequence test.\n- docs/user-guide.md \u2014 document the default, the override, and the archive-time fold.\n\n## Testing\n- Happy path: fixture store with N archived (marker + ARCHIVED event) and M active tickets; default `rebar fsck` and `rebar compact-all --dry-run` visit exactly the M active dirs (assert on the visited set / reported counts); with `--include-archived` they visit N+M.\n- Archive-fold sequence: archive a ticket that has unfolded events, then run DEFAULT `rebar compact-all`; assert the archived ticket's SNAPSHOT covers those events (nothing stranded) even though the default sweep never visited it \u2014 the fold happened at archive time.\n- Edge: a ticket dir with a stale marker but NO net-archived state (reverted archive) is still visited by default (the confirmation step, not the marker alone, decides); an archived ticket with a corrupt event file IS reported when `--include-archived` is passed (deep audit still works); a ticket archived by a PRE-change build (unfolded, no inline fold) is folded by a `compact-all --include-archived` run (the belt-and-suspenders path works).\n- Empty store: both commands succeed with zero visits.\n\n## Acceptance Criteria\n- [ ] `rebar archive` folds the ticket inline (SNAPSHOT covers all its events) before writing ARCHIVED; a just-archived ticket followed by default `compact-all` carries no unfolded events; checked by the sequence test.\n- [ ] Default `rebar fsck` and `rebar compact-all` visit only non-archived tickets, and `--include-archived` restores the full walk (including folding legacy archived-but-unfolded tickets); checked by the visited-set and legacy-fold tests.\n- [ ] A reverted-archive ticket (stale marker) is never skipped by default; checked by the edge test.\n- [ ] Usage lines and docs/user-guide.md name the new flag on both commands and the archive-time fold; checked by --help output in the test and the doc diff.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Active-only scan scoping: fsck and compact-all default to non-archived tickets with --include-archived override"
       },
       "created_at": "2026-08-14T04:07:44Z",
@@ -97377,9 +96683,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nWhen the store wedges (dirty tracker tree, stale locks, stranded merge state), today's tooling is partial: `rebar fsck` checks event integrity but does not report the dirty-tree class that caused the recent P0 wedges (tracked working-tree deletions of store artifacts, untracked regenerable compaction leftovers, orphaned lock files, orphaned `.tmp-event-*`); `rebar tracker-maintenance --clean` handles only a stranded index and foreign worktree paths (verified: its `_stranded_paths`/`_foreign_worktree_paths` scans reported 0 findings while the store sat wedged with 119 tracked `.archived` deletions); the documented recovery for the live wedges was ad-hoc raw git under the write lock, recorded by hand on tickets 6ccc-0577-198c-44fa / e72e-259d-5ee7-4e73. Operators (and agents) need one sanctioned, non-destructive door: fsck DETECTS the class, doctor --repair HEALS it.\n\n## Approach\nDetection: add a tracker-dirty check to the fsck surface (src/rebar/_commands/fsck_tracker_health.py, which already owns tracker-level health lines) that classifies `git status --porcelain` output into: (1) tracked deletions of store artifacts restorable from HEAD, (2) untracked regenerable compaction leftovers (`*-SNAPSHOT.json`, `*.retired` whose retired-source is already folded), (3) orphaned `.tmp-event-*` (never auto-touched \u2014 named for manual triage), plus lock-artifact staleness reported via the existing doctor_locks scan. Each class gets a distinct finding line, and the JSON contract is wired end-to-end: fsck's JSON is produced by `_transform_json` in src/rebar/_commands/fsck.py over a fixed `_STRUCTURED_KINDS` set, so the three new tracker-dirty kinds are registered there (each emitting a `KIND: detail` line whose detail carries count + paths) \u2014 fsck.py is an explicit edit target, not an implied one. Repair: extend `rebar doctor --repair` (src/rebar/_commands/doctor.py's existing scan/repair_finding registry pattern) with repair actions using TWO lock windows, because the store write lock (rebar._store.lock.write_lock) is non-reentrant \u2014 doctor's own `run_repair` deliberately holds NO outer lock (its regression test pins that an outer hold starves inner per-write acquisitions), and `sync.reconverge` acquires the write lock internally. So: (window 1) the raw file-mutating steps \u2014 restore class-1 paths via `git checkout --` (non-destructive; bytes exist at HEAD) and move class-2 paths into the quarantine directory established by change 1757 (`<git-common-dir>/reconverge-quarantine/<utc-ts>/` \u2014 move, never delete) \u2014 run under one short-lived scoped write_lock acquisition, through the store seam (gitutil.run_git), and that lock is RELEASED before convergence; (window 2) the existing reconverge entry (rebar._store.sync.reconverge) is then invoked and takes the write lock itself, converging the previously wedged store in the same command. Class-3 paths are left untouched and printed. Safety envelope: before the first mutating repair, record a backup ref (`refs/rebar-doctor/<utc-ts>` pointing at the tickets HEAD) mirroring the backup-ref + durable-audit envelope `tracker-maintenance` actually provides (tracker-maintenance holds no write lock; its envelope is the backup ref plus audited raw `_git` calls \u2014 that, not a lock, is the precedent adopted here), and every action is recorded in the doctor output. Positive rationale: doctor already owns scan-classify-repair with typed findings; extending its registry avoids inventing a second repair CLI.\n\n## Scope\n- src/rebar/_commands/fsck_tracker_health.py \u2014 tracker-dirty classification (text lines).\n- src/rebar/_commands/fsck.py \u2014 register the three tracker-dirty kinds in `_STRUCTURED_KINDS` / extend `_transform_json` so fsck --output json carries per-class counts and paths.\n- src/rebar/_commands/doctor.py \u2014 new finding types + repair actions (scoped write_lock window for file mutations; backup ref; post-release reconverge call).\n- tests/unit/test_doctor_dirty_tree.py (new) \u2014 seeded-wedge end-to-end coverage.\n- docs/user-guide.md \u2014 document the new fsck findings and doctor repairs.\n\n## Testing\n- Happy path: fixture tracker seeded with all three classes plus a diverged origin; `rebar fsck` names each class; `rebar doctor --repair` restores class 1, quarantines class 2 (bytes preserved), leaves class 3 in place, and the store converges (ahead/behind 0/0, `git status` clean except class 3).\n- Failure/edge: doctor --repair on a CLEAN store makes zero changes and zero commits (idempotent); the file-mutating window respects existing lock semantics (a held write lock makes it wait/fail per the lock contract rather than mutate unlocked); class-3 files are byte-identical after the run; the backup ref exists after a mutating repair and is absent after a no-op run.\n- Lock discipline: a test asserts the write lock is NOT held when reconverge is entered (mirroring doctor's existing test_run_repair_does_not_hold_a_lock_that_blocks_event_writes pattern), and IS held during the checkout/move steps.\n- JSON contract: fsck --output json carries the per-class counts and paths (via the registered kinds).\n\n## Acceptance Criteria\n- [ ] `rebar fsck` on a seeded dirty tracker reports each class with a distinct finding id in text AND in `--output json` (counts + paths); clean stores report none; checked by the new test.\n- [ ] `rebar doctor --repair` heals a seeded wedge end-to-end (tree clean apart from `.tmp-event-*`, merge converged, no event bytes lost \u2014 quarantine holds moved files, backup ref recorded); checked by the end-to-end test.\n- [ ] Each file-mutating repair step runs under its own scoped write-lock acquisition, the lock is released before reconverge (which self-locks), and no repair path deletes a file (moves or restores only); checked by lock-state assertions and quarantine contents in the test.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
+        "description": "## Context / Problem\nWhen the store wedges (dirty tracker tree, stale locks, stranded merge state), today's tooling is partial: `rebar fsck` checks event integrity but does not report the dirty-tree class that caused the recent P0 wedges (tracked working-tree deletions of store artifacts, untracked regenerable compaction leftovers, orphaned lock files, orphaned `.tmp-event-*`); `rebar tracker-maintenance --clean` handles only a stranded index and foreign worktree paths (verified: its `_stranded_paths`/`_foreign_worktree_paths` scans reported 0 findings while the store sat wedged with 119 tracked `.archived` deletions); the documented recovery for the live wedges was ad-hoc raw git under the write lock, recorded by hand on tickets 6ccc-0577-198c-44fa / e72e-259d-5ee7-4e73. Operators (and agents) need one sanctioned, non-destructive door: fsck DETECTS the class, doctor --repair HEALS it.\n\n## Approach\nDetection: add a tracker-dirty check to the fsck surface (src/rebar/_commands/fsck_tracker_health.py, which already owns tracker-level health lines) that classifies `git status --porcelain` output into: (1) tracked deletions of store artifacts restorable from HEAD, (2) untracked regenerable compaction leftovers (`*-SNAPSHOT.json`, `*.retired` whose retired-source is already folded), (3) orphaned `.tmp-event-*` (never auto-touched \u2014 named for manual triage), plus lock-artifact staleness reported via the existing doctor_locks scan. Each class gets a distinct finding line, and the JSON contract is wired end-to-end: fsck's JSON is produced by `_transform_json` in src/rebar/_commands/fsck.py over a fixed `_STRUCTURED_KINDS` set, so the three new tracker-dirty kinds are registered there (each emitting a `KIND: detail` line whose detail carries count + paths) \u2014 fsck.py is an explicit edit target, not an implied one. Repair: extend `rebar doctor --repair` (src/rebar/_commands/doctor.py's existing scan/repair_finding registry pattern) with repair actions using TWO lock windows, because the store write lock (rebar._store.lock.write_lock) is non-reentrant \u2014 doctor's own `run_repair` deliberately holds NO outer lock (its regression test pins that an outer hold starves inner per-write acquisitions), and `sync.reconverge` acquires the write lock internally. So: (window 1) the raw file-mutating steps \u2014 restore class-1 paths via `git checkout --` (non-destructive; bytes exist at HEAD) and move class-2 paths into the quarantine directory established by change 1757 (`<git-common-dir>/reconverge-quarantine/<utc-ts>/` \u2014 move, never delete) \u2014 run under one short-lived scoped write_lock acquisition, through the store seam (gitutil.run_git), and that lock is RELEASED before convergence; (window 2) the existing reconverge entry (rebar._store.sync.reconverge) is then invoked and takes the write lock itself, converging the previously wedged store in the same command. Class-3 paths are left untouched and printed. Safety envelope: before the first mutating repair, record a backup ref (`refs/rebar-doctor/<utc-ts>` pointing at the tickets HEAD) mirroring the backup-ref + durable-audit envelope `tracker-maintenance` actually provides (tracker-maintenance holds no write lock; its envelope is the backup ref plus audited raw `_git` calls \u2014 that, not a lock, is the precedent adopted here), and every action is recorded in the doctor output. Positive rationale: doctor already owns scan-classify-repair with typed findings; extending its registry avoids inventing a second repair CLI.\n\n## Scope\n- src/rebar/_commands/fsck_tracker_health.py \u2014 tracker-dirty classification (text lines).\n- src/rebar/_commands/fsck.py \u2014 register the three tracker-dirty kinds in `_STRUCTURED_KINDS` / extend `_transform_json` so fsck --output json carries per-class counts and paths.\n- src/rebar/_commands/doctor.py \u2014 new finding types + repair actions (scoped write_lock window for file mutations; backup ref; post-release reconverge call).\n- tests/unit/test_doctor_dirty_tree.py (new) \u2014 seeded-wedge end-to-end coverage.\n- docs/user-guide.md \u2014 document the new fsck findings and doctor repairs.\n\n## Testing\n- Happy path: fixture tracker seeded with all three classes plus a diverged origin; `rebar fsck` names each class; `rebar doctor --repair` restores class 1, quarantines class 2 (bytes preserved), leaves class 3 in place, and the store converges (ahead/behind 0/0, `git status` clean except class 3).\n- Failure/edge: doctor --repair on a CLEAN store makes zero changes and zero commits (idempotent); the file-mutating window respects existing lock semantics (a held write lock makes it wait/fail per the lock contract rather than mutate unlocked); class-3 files are byte-identical after the run; the backup ref exists after a mutating repair and is absent after a no-op run.\n- Lock discipline: a test asserts the write lock is NOT held when reconverge is entered (mirroring doctor's existing test_run_repair_does_not_hold_a_lock_that_blocks_event_writes pattern), and IS held during the checkout/move steps.\n- JSON contract: fsck --output json carries the per-class counts and paths (via the registered kinds).\n\n## Acceptance Criteria\n- [x] `rebar fsck` on a seeded dirty tracker reports each class with a distinct finding id in text AND in `--output json` (counts + paths); clean stores report none; checked by the new test.\n- [x] `rebar doctor --repair` heals a seeded wedge end-to-end (tree clean apart from `.tmp-event-*`, merge converged, no event bytes lost \u2014 quarantine holds moved files, backup ref recorded); checked by the end-to-end test.\n- [x] Each file-mutating repair step runs under its own scoped write-lock acquisition, the lock is released before reconverge (which self-locks), and no repair path deletes a file (moves or restores only); checked by lock-state assertions and quarantine contents in the test.\n- [x] [operator-attested] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "fsck detects the dirty-tree/stale-lock wedge class; doctor --repair heals it under the write lock"
       },
       "created_at": "2026-08-14T04:07:47Z",
@@ -103207,9 +102513,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. Both create transports take their project from a single construction-time value \u2014 Cloud `AcliClient.create_issue` uses `self.jira_project` (`adapters/jira/acli.py:274-330`); DC `_IssuesMixin.create_issue` uses `self.project` (`adapters/jira_datacenter/_issues.py:163-189`). And the applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:230-255`, `_cross_project_targets`, bug `626d`); its sole caller (`applier.py:593-610`) passes a single string `select_backend(load_config()).project`. With a mapping listing several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nThree changes: resolve the create target per ticket (covering BOTH transports), relax the guard to set membership, and change the guard's caller to supply the set.\n\n**Create targets the ticket's resolved project \u2014 resolved once, above both transports.** The resolution happens where the create mutation is BUILT, in `_compute_outbound_create_mutation` (`outbound_differ.py:502`), which already receives the full local `ticket` (so it can read `bridge_project`). It calls `resolve_project(ticket, mapping)` (`projects_store.py:97-110`) against the store mapping, loaded once via `projects_store.load_mapping(repo_root)` (the `Mapping` that `resolve_project` and the `mapping.projects` membership check both require) and threaded into `compute_outbound_mutations` as a new optional field on `OutboundDiffConfig`, populated by that function's sole caller `run_differs.py:466` (which already holds `repo_root`). Three outcomes:\n  * resolves to \"not synced\" (absent\u2192no legacy_default, or explicit `\"\"`) \u2192 NO create mutation;\n  * resolves to a key **NOT in `mapping.projects`** \u2192 NO create mutation (a stale/typo binding must\n    not create against an unsynced project \u2014 this closes the create-side gap the guard cannot, since\n    creates are guard-exempt: their key is a local-id placeholder, so `_JIRA_KEY_RE` never matches);\n  * resolves to a valid in-set key \u2192 stamped into the mutation's `fields` under the reserved key\n    `_bridge_target_project`.\n\nBecause the create mutation's `fields` reach whichever `TicketTransport` is active (`dispatch_one.create_one` copies `mutation[\"fields\"]` into the `ticket_data` it hands `client.create_issue`), resolving here covers Cloud AND Data Center from one site. Each transport reads `ticket_data.get(\"_bridge_target_project\")` and falls back to its construction-time value when the key is absent (legacy single-project behaviour preserved): Cloud `project = ticket_data.get(\"_bridge_target_project\") or self.jira_project`; DC `fields.setdefault(\"project\", {\"key\": ticket_data.get(\"_bridge_target_project\") or self.project})`. The transports handle the reserved key explicitly, because they treat unknown payload keys DIFFERENTLY. Cloud's `create_issue` EXTRACTS only the fields it names and ignores the rest, so the key never reaches ACLI. DC's `create_issue` splats the whole TRANSLATED dict into `self._client.create_issue(**fields)` \u2014 so the key must be DROPPED before the splat or it is sent as a bogus Jira field id (the `HTTP 400 \u2026 Field \u2026 cannot be set` class of bug 18a5). It is added to `_BRIDGE_ONLY_CREATE_FIELDS` (`_issues.py:29`) alongside the bridge-only names `title`/`ticket_type`, so `_translate_create_fields` reads it for the project then drops it \u2014 that drop is what keeps the reserved key off the tracker by construction, exactly as the bridge-only names already are.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as today. Only keys the store legitimately owns now pass.\n\n**The guard's caller supplies the set.** The sole caller (`applier.py:593-610`) currently computes a single `_project = select_backend(load_config()).project`. It instead loads the store's project set via `projects_store.read_projects(repo_root)`, whose keys ARE the project set, and passes that set. An empty/absent mapping falls back to the single configured project so single-project stores are unchanged.\n\n**Module size.** All touched files stay under the 800-line gate with headroom; each edit is small and local.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` \u2014 resolve + validate + stamp the target\n  project on the create mutation; new optional `OutboundDiffConfig` mapping field\n- `src/rebar/_engine/rebar_reconciler/run_differs.py` \u2014 populate the new config field from the loaded\n  mapping (the sole caller of `compute_outbound_mutations`)\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py` \u2014 Cloud create reads the payload target\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py` \u2014 DC create reads the\n  payload target AND drops the reserved key in `_translate_create_fields`\n- `src/rebar/_engine/rebar_reconciler/applier.py` \u2014 guard set-membership + caller supplies the set\n- Read-only dependency: `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 `load_mapping`/`Mapping`,\n  `resolve_project`, `read_projects` (the authoritative project set)\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test. Both transports are covered.\n\n- Happy path (both transports): a ticket resolving to project `B` in a store whose mapping lists `A`\n  and `B` produces a create call carrying `B`, not the repo default `A` \u2014 asserted against the Cloud\n  fake AND the Data Center fake.\n- DC leak guard: the DC fake's recorded create fields do NOT contain `_bridge_target_project`,\n  proving the reserved key is dropped and never sent as a Jira field.\n- Validation edge: a ticket whose `bridge_project` names `Z` (NOT in the `A`/`B` mapping) emits no\n  create mutation \u2014 proving a stale/typo binding cannot create against an unsynced project.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises `CrossProjectTargetError`.\n\n## Acceptance Criteria\n\n- [ ] An outbound create targets the ticket's resolved project rather than the client default on the\n      Cloud transport; checked by a Cloud fake asserting the project on the recorded create call.\n- [ ] An outbound create targets the ticket's resolved project on the Data Center transport; checked\n      by a DC fake asserting the project on the recorded create call.\n- [ ] The reserved `_bridge_target_project` key is dropped from the DC create field set; checked by\n      asserting it is absent from the DC fake's recorded create fields.\n- [ ] A ticket whose resolved project is absent from the mapping set emits no create mutation;\n      checked by asserting an empty mutation list for it.\n- [ ] An update inside the configured set proceeds while one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [ ] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [ ] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
+        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. Both create transports take their project from a single construction-time value \u2014 Cloud `AcliClient.create_issue` uses `self.jira_project` (`adapters/jira/acli.py:274-330`); DC `_IssuesMixin.create_issue` uses `self.project` (`adapters/jira_datacenter/_issues.py:163-189`). And the applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:230-255`, `_cross_project_targets`, bug `626d`); its sole caller (`applier.py:593-610`) passes a single string `select_backend(load_config()).project`. With a mapping listing several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nThree changes: resolve the create target per ticket (covering BOTH transports), relax the guard to set membership, and change the guard's caller to supply the set.\n\n**Create targets the ticket's resolved project \u2014 resolved once, above both transports.** The resolution happens where the create mutation is BUILT, in `_compute_outbound_create_mutation` (`outbound_differ.py:502`), which already receives the full local `ticket` (so it can read `bridge_project`). It calls `resolve_project(ticket, mapping)` (`projects_store.py:97-110`) against the store mapping, loaded once via `projects_store.load_mapping(repo_root)` (the `Mapping` that `resolve_project` and the `mapping.projects` membership check both require) and threaded into `compute_outbound_mutations` as a new optional field on `OutboundDiffConfig`, populated by that function's sole caller `run_differs.py:466` (which already holds `repo_root`). Three outcomes:\n  * resolves to \"not synced\" (absent\u2192no legacy_default, or explicit `\"\"`) \u2192 NO create mutation;\n  * resolves to a key **NOT in `mapping.projects`** \u2192 NO create mutation (a stale/typo binding must\n    not create against an unsynced project \u2014 this closes the create-side gap the guard cannot, since\n    creates are guard-exempt: their key is a local-id placeholder, so `_JIRA_KEY_RE` never matches);\n  * resolves to a valid in-set key \u2192 stamped into the mutation's `fields` under the reserved key\n    `_bridge_target_project`.\n\nBecause the create mutation's `fields` reach whichever `TicketTransport` is active (`dispatch_one.create_one` copies `mutation[\"fields\"]` into the `ticket_data` it hands `client.create_issue`), resolving here covers Cloud AND Data Center from one site. Each transport reads `ticket_data.get(\"_bridge_target_project\")` and falls back to its construction-time value when the key is absent (legacy single-project behaviour preserved): Cloud `project = ticket_data.get(\"_bridge_target_project\") or self.jira_project`; DC `fields.setdefault(\"project\", {\"key\": ticket_data.get(\"_bridge_target_project\") or self.project})`. The transports handle the reserved key explicitly, because they treat unknown payload keys DIFFERENTLY. Cloud's `create_issue` EXTRACTS only the fields it names and ignores the rest, so the key never reaches ACLI. DC's `create_issue` splats the whole TRANSLATED dict into `self._client.create_issue(**fields)` \u2014 so the key must be DROPPED before the splat or it is sent as a bogus Jira field id (the `HTTP 400 \u2026 Field \u2026 cannot be set` class of bug 18a5). It is added to `_BRIDGE_ONLY_CREATE_FIELDS` (`_issues.py:29`) alongside the bridge-only names `title`/`ticket_type`, so `_translate_create_fields` reads it for the project then drops it \u2014 that drop is what keeps the reserved key off the tracker by construction, exactly as the bridge-only names already are.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as today. Only keys the store legitimately owns now pass.\n\n**The guard's caller supplies the set.** The sole caller (`applier.py:593-610`) currently computes a single `_project = select_backend(load_config()).project`. It instead loads the store's project set via `projects_store.read_projects(repo_root)`, whose keys ARE the project set, and passes that set. An empty/absent mapping falls back to the single configured project so single-project stores are unchanged.\n\n**Module size.** All touched files stay under the 800-line gate with headroom; each edit is small and local.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` \u2014 resolve + validate + stamp the target\n  project on the create mutation; new optional `OutboundDiffConfig` mapping field\n- `src/rebar/_engine/rebar_reconciler/run_differs.py` \u2014 populate the new config field from the loaded\n  mapping (the sole caller of `compute_outbound_mutations`)\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py` \u2014 Cloud create reads the payload target\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py` \u2014 DC create reads the\n  payload target AND drops the reserved key in `_translate_create_fields`\n- `src/rebar/_engine/rebar_reconciler/applier.py` \u2014 guard set-membership + caller supplies the set\n- Read-only dependency: `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 `load_mapping`/`Mapping`,\n  `resolve_project`, `read_projects` (the authoritative project set)\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test. Both transports are covered.\n\n- Happy path (both transports): a ticket resolving to project `B` in a store whose mapping lists `A`\n  and `B` produces a create call carrying `B`, not the repo default `A` \u2014 asserted against the Cloud\n  fake AND the Data Center fake.\n- DC leak guard: the DC fake's recorded create fields do NOT contain `_bridge_target_project`,\n  proving the reserved key is dropped and never sent as a Jira field.\n- Validation edge: a ticket whose `bridge_project` names `Z` (NOT in the `A`/`B` mapping) emits no\n  create mutation \u2014 proving a stale/typo binding cannot create against an unsynced project.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises `CrossProjectTargetError`.\n\n## Acceptance Criteria\n\n- [x] An outbound create targets the ticket's resolved project rather than the client default on the\n      Cloud transport; checked by a Cloud fake asserting the project on the recorded create call.\n- [x] An outbound create targets the ticket's resolved project on the Data Center transport; checked\n      by a DC fake asserting the project on the recorded create call.\n- [x] The reserved `_bridge_target_project` key is dropped from the DC create field set; checked by\n      asserting it is absent from the DC fake's recorded create fields.\n- [x] A ticket whose resolved project is absent from the mapping set emits no create mutation;\n      checked by asserting an empty mutation list for it.\n- [x] An update inside the configured set proceeds while one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [x] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [x] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Multi-project outbound dispatch and cross-project guard relaxation to set membership"
       },
       "created_at": "2026-08-08T03:37:55Z",
@@ -127834,9 +127140,31 @@
       "updated_at": "2026-08-14T02:07:39Z"
     },
     "f96b-3498-8f04-40b0": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nRewritten after premise refutation (see comments): the observed fold-horizon race (bridge write + concurrent compact \u2192 union merge lands an event timestamped before the snapshot, absent from `source_event_uuids`) is the known RC2 class of ADR-0035, and the repair door EXISTS and works: `rebar fsck --repair-snapshots` / `fsck --repair` \u2192 `compact.rebuild_snapshot_from_full_log` (full HLC-ordered log incl. `.retired`, `.snapshot-rebuild.bak` sentinel, fail-closed guard) \u2014 it healed the live incident on e27c-5a20-cd13-43b2.\n\nThe REAL defect (verified in a RED run against current main): **the next natural fold LAUNDERS the orphan.** When a ticket with an un-cited pre-snapshot event crosses the compaction threshold, the fold's whole-dir enumeration RETIRES the orphan file and CITES its uuid in the new snapshot's `source_event_uuids` \u2014 but the replay's positional skip means its effect is NOT in the compiled state. fsck then reports clean (uuid cited, file retired): repairable damage silently becomes unrepairable-by-tooling loss at the first threshold crossing after the race. The existing repair door only works in the window BEFORE that fold. Secondary gap: (G4) `fsck --repair-snapshots` rebuilds on ANY orphan type, bypassing the `_AUTO_RECOVER` vs `_HUMAN_TRIAGE` routing that `fsck --repair` enforces (fsck_repair.py:38-41, applied at :202).\n\n## Proposed fix\n1. **Stop the laundering (G1, the bug):** the natural fold (compact_txn) must EXCLUDE un-cited pre-snapshot events from both retirement and `source_event_uuids` citation \u2014 an orphan stays an unretired, un-cited file, so the fsck ORPHAN_EVENT finding and the repair window survive indefinitely. The fold does NOT absorb orphans itself (that would bypass the type routing); it defers to the repair door. Ordering note: `rebuild_snapshot_from_full_log` replays the full log in HLC total order, so absorbed order-sensitive events are deterministic there \u2014 no new ordering semantics are introduced by this change.\n2. **Routing parity (G4):** `--repair-snapshots` applies the same `_AUTO_RECOVER`/`_HUMAN_TRIAGE` routing instead of rebuilding unconditionally, so the two fsck repair paths cannot disagree about order-sensitive orphans.\n\n## Scope\n- src/rebar/_commands/compact_txn.py \u2014 fold enumeration excludes un-cited pre-snapshot events from retirement + citation (defer guard).\n- src/rebar/_commands/fsck_repair.py \u2014 routing parity for --repair-snapshots (the `_AUTO_RECOVER_ORPHAN_TYPES`/`_HUMAN_TRIAGE_ORPHAN_TYPES` split already applied by `fsck --repair` at fsck_repair.py:202).\n- tests/unit/test_fold_orphan_laundering.py \u2014 new: RED reproduction of the laundering (orphan retired+cited+effect-lost today), exclusion behavior, repair-window survival across a threshold-crossing fold.\n\n## Acceptance criteria\n- [ ] A ticket with an un-cited pre-snapshot COMMENT that crosses the compaction threshold keeps the orphan unretired/un-cited and fsck still reports ORPHAN_EVENT after the fold; `fsck --repair-snapshots` afterward restores the comment to `show`; integration test.\n- [ ] `--repair-snapshots` no longer rebuilds past `_HUMAN_TRIAGE` types; guard test.\n- [ ] `make lint`/`make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\nWriter-path auto-detection after union merge (G3 \u2014 separate follow-up if wanted); doctor-side ORPHAN_EVENT routing (doctor.py has no snapshot/orphan scan \u2014 orphan detection and repair are fsck's domain via fsck_repair.py, and adding a duplicate scan to doctor would be a parallel implementation; users are directed to `fsck --repair`); bridge/Jira duplicate policy; crash-atomicity (mantis, landed); dirty-tree repair (dormouse, landed).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Natural fold launders ORPHAN_EVENTs (retires + cites without applying) \u2014 repairable race damage becomes silent loss; doctor lacks orphan routing"
+      },
       "created_at": "2026-08-14T16:41:41Z",
       "jira_id": "4588732",
       "jira_key": "REB-2924",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T16:41:45Z"
     },
@@ -133175,6 +132503,7 @@
     "REB-2922": "8a8e-71b5-4519-4426",
     "REB-2923": "a62f-8041-be72-4e0f",
     "REB-2924": "f96b-3498-8f04-40b0",
+    "REB-2925": "2aaf-90b9-4a31-43bf",
     "REB-293": "b94d-2777-28d8-4a6f",
     "REB-294": "bb4e-7aae-c5a3-40a6",
     "REB-295": "bbc0-1dbd-d9cb-4917",
