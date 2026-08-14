@@ -142,3 +142,15 @@ def test_workflow_has_acli_auth_step() -> None:
     joined = "\n".join(run_bodies)
     assert 'ln -sf "$HOME/.acli/acli" /usr/local/bin/acli' in joined
     assert "acli jira auth login" in joined
+
+
+def test_workflow_runs_complete_pandoc_replay_on_linux_and_macos() -> None:
+    wf = _load_workflow()
+    job = wf["jobs"]["pandoc-corpus-replay"]
+
+    assert job["runs-on"] == "${{ matrix.os }}"
+    assert job["strategy"]["fail-fast"] is False
+    assert job["strategy"]["matrix"]["os"] == ["ubuntu-latest", "macos-latest"]
+    commands = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "uv sync --locked --extra dev" in commands
+    assert "python scripts/generate_dc_wiki_legacy_outputs.py --check" in commands

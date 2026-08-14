@@ -278,3 +278,138 @@ def test_generator_prepares_the_exact_committed_order_without_running_pandoc(
     assert hashlib.sha256("".join(units).encode("utf-8")).hexdigest() == (
         "f7b2c4d4300df8f2ae60c345cb1c5a4e332c96ba6e453840015c6954467c623b"
     )
+
+
+def test_replay_fixture_captures_every_required_settling_conversion(
+    generator: ModuleType,
+) -> None:
+    outputs = {
+        "first": "FIRST",
+        "FIRST": "FIRST",
+        "second": "SECOND-1",
+        "SECOND-1": "SECOND-2",
+        "SECOND-2": "SECOND-2",
+    }
+
+    def fake_convert(markdown: str, _pandoc: str, _timeout: float | None = None) -> str:
+        return outputs[markdown]
+
+    recorder = generator.ReplayRecorder(fake_convert)
+
+    def render(markdown: str) -> str:
+        return recorder(markdown, "/pinned/pandoc", 30.0)
+
+    fixture = generator.build_replay_fixture(
+        "prose",
+        ["first", "second"],
+        render=render,
+        recorder=recorder,
+    )
+
+    assert fixture["schema_version"] == 1
+    assert fixture["stratum"] == "prose"
+    assert fixture["body_count"] == 2
+    assert fixture["pandoc"] == {
+        "version": generator.LEGACY_PANDOC_VERSION,
+        "supported_platform_binary_sha256": generator.SUPPORTED_PANDOC_BINARY_SHA256,
+    }
+    assert fixture["conversion_count"] == 5
+    assert fixture["conversion_trace"] == [
+        hashlib.sha256(value.encode("utf-8")).hexdigest()
+        for value in ["first", "FIRST", "second", "SECOND-1", "SECOND-2"]
+    ]
+    assert fixture["bodies"][0]["pass_output_sha256"] == [
+        hashlib.sha256(value.encode("utf-8")).hexdigest() for value in ["FIRST", "FIRST"]
+    ]
+    assert fixture["bodies"][1]["pass_output_sha256"] == [
+        hashlib.sha256(value.encode("utf-8")).hexdigest()
+        for value in ["SECOND-1", "SECOND-2", "SECOND-2"]
+    ]
+
+
+def test_replay_recorder_rejects_nondeterministic_output_for_the_same_input(
+    generator: ModuleType,
+) -> None:
+    outputs = iter(["first output", "different output"])
+
+    def inconsistent_convert(
+        _markdown: str,
+        _pandoc: str,
+        _timeout: float | None = None,
+    ) -> str:
+        return next(outputs)
+
+    recorder = generator.ReplayRecorder(inconsistent_convert)
+
+    assert recorder("same prepared input", "/pinned/pandoc", 30.0) == "first output"
+    with pytest.raises(
+        ValueError,
+        match="Pandoc produced different bytes for the same prepared input",
+    ):
+        recorder("same prepared input", "/pinned/pandoc", 30.0)
+
+
+def test_replay_fixture_rejects_a_body_that_does_not_settle_by_pass_three(
+    generator: ModuleType,
+) -> None:
+    outputs = {
+        "source": "pass one",
+        "pass one": "pass two",
+        "pass two": "pass three",
+    }
+
+    def fake_convert(markdown: str, _pandoc: str, _timeout: float | None = None) -> str:
+        return outputs[markdown]
+
+    recorder = generator.ReplayRecorder(fake_convert)
+
+    def render(markdown: str) -> str:
+        return recorder(markdown, "/pinned/pandoc", 30.0)
+
+    with pytest.raises(ValueError, match="did not settle by pass 3"):
+        generator.build_replay_fixture(
+            "prose",
+            ["source"],
+            render=render,
+            recorder=recorder,
+        )
+
+
+def test_static_replay_converter_returns_exact_bytes_and_rejects_unknown_input(
+    generator: ModuleType,
+) -> None:
+    input_sha = hashlib.sha256(b"source").hexdigest()
+    fixture = {
+        "conversions": {
+            input_sha: base64.b85encode(b"rendered").decode("ascii"),
+        }
+    }
+    converter = generator.StaticReplayConverter([fixture])
+
+    assert converter("source", "/not-executed/pandoc", 1.0) == "rendered"
+    assert converter.calls == [input_sha]
+    with pytest.raises(AssertionError, match="no committed Pandoc output"):
+        converter("unknown", "/not-executed/pandoc", 1.0)
+
+
+def test_non_writing_check_detects_drift_without_replacing_committed_bytes(
+    generator: ModuleType,
+    tmp_path: Path,
+) -> None:
+    fixture = {
+        "schema_version": 1,
+        "stratum": "prose",
+        "conversion_count": 0,
+        "conversions": {},
+        "bodies": [],
+    }
+    output = tmp_path / "replay"
+    generator.publish_replay_fixtures([fixture], output, check=False)
+    committed = (output / "prose.json").read_bytes()
+
+    generator.publish_replay_fixtures([fixture], output, check=True)
+    drifted = dict(fixture, conversion_count=1)
+    with pytest.raises(ValueError, match="committed replay fixture is stale"):
+        generator.publish_replay_fixtures([drifted], output, check=True)
+
+    assert (output / "prose.json").read_bytes() == committed

@@ -205,15 +205,15 @@ direction is one-way (`jira_family/` imports neither concrete backend) and is ma
 `tests/unit/rebar_reconciler/test_jira_family_boundary_heldout.py`. See
 [ADR 0055](adr/0055-jira-family-sub-seam.md).
 
-The Data Center Markdown-to-wiki renderer currently retains ADR 0095's complete live-Pandoc
-replay in Gerrit Verify. [ADR 0096](adr/0096-pandoc-corpus-verification-boundary.md) approves a
-two-cadence replacement: Verify will run the complete segmentation, protection, settling,
-richness, and exact-byte assertion classes against committed deterministic outputs, plus one
-real-Pandoc contract from each corpus stratum and the compact pin/provenance probes; the
-weekly/manual External Integration Tests workflow will own complete real-Pandoc replay on both
-Linux and macOS through a dedicated matrix job. Version and platform-binary fingerprint drift
-must fail fast, and deterministic fixture regeneration remains explicit. Until that separate
-implementation lands, the current every-assertion-live route remains authoritative.
+The Data Center Markdown-to-wiki renderer implements ADR 0096's two-cadence Pandoc boundary.
+Gerrit Verify runs the complete segmentation, protection, settling, richness, alignment, and
+exact-byte assertion classes against deterministic per-stratum outputs under
+`tests/fixtures/dc_wiki_replay/`, plus one real product-path body from each corpus stratum and
+the compact pin/provenance probes. The weekly/manual External Integration Tests workflow owns
+complete replay of every Pandoc-bound corpus unit and required settling pass on both Linux and
+macOS through its `pandoc-corpus-replay` matrix job. Version or platform-binary fingerprint
+drift fails before committed outputs are trusted. Regenerate deliberately with
+`python scripts/generate_dc_wiki_legacy_outputs.py`; validate without writing with `--check`.
 
 The `[jira-datacenter]` extra declares `jira>=3.8,<4` (pycontribs/jira) and is the reconciler's
 only third-party runtime dependency. It is imported **lazily**, inside the functions that need
