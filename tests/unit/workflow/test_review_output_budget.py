@@ -400,7 +400,7 @@ def test_completion_primary_cfg_carries_model_max(monkeypatch) -> None:
 
     captured: dict = {}
 
-    def _fake_produce(ticket_id, *, graph, repo_root, cfg, runner):
+    def _fake_produce(ticket_id, *, graph, repo_root, cfg, runner, verify_ref=None):
         captured["cfg"] = cfg
         return {"verdict": "PASS", "findings": []}
 

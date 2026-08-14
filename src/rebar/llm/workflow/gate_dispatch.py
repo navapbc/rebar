@@ -650,7 +650,7 @@ def _attach_completion_metrics(verdict: dict[str, Any], rec: Any, total_ms: floa
 
 
 def produce_completion_verdict(
-    ticket_id: str, *, graph: bool, repo_root=None, cfg, runner=None
+    ticket_id: str, *, graph: bool, repo_root=None, cfg, runner=None, verify_ref=None
 ) -> dict[str, Any]:
     """Produce a ``completion_verdict`` by running ``gates/completion-verification.yaml``.
 
@@ -698,6 +698,7 @@ def produce_completion_verdict(
         runner=runner_sel,
         repo_root=repo_root,
         config=cfg,
+        verify_ref=verify_ref,
     )
     recorder = MemoryRecorder()
     _t_total = time.monotonic()
