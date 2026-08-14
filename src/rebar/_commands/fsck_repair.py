@@ -57,6 +57,33 @@ _HUMAN_TRIAGE_ORPHAN_TYPES = frozenset(
 )
 
 
+def is_snapshot_orphan(
+    name: str,
+    etype: str,
+    event_uuid: str,
+    snapshot_filename: str,
+    source_uuids: set[str],
+) -> bool:
+    """fsck's ORPHAN_EVENT predicate, anchored to one snapshot — THE shared definition.
+
+    True when an ACTIVE event file is pre-snapshot loss: a KNOWN-type, non-SNAPSHOT
+    event whose filename sorts before ``snapshot_filename`` and whose uuid is absent
+    from that snapshot's ``source_event_uuids``. Non-KNOWN types are *correctly*
+    uncited (compaction never folds them), and snapshots are never orphan-classified.
+
+    Shared by fsck's scan (``_check_snapshot``) AND the compaction fold's exclusion
+    guard (``compact_txn``), so the two can never disagree about what an orphan is —
+    a fold that retired + cited an event fsck called ORPHAN_EVENT would launder the
+    loss into an undetectable, unrepairable state (bug f96b-3498-8f04-40b0).
+    """
+    return (
+        etype in KNOWN_EVENT_TYPES
+        and "-SNAPSHOT.json" not in name
+        and name < snapshot_filename
+        and event_uuid not in source_uuids
+    )
+
+
 # raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
     return run_git(tracker, *args, check=False)
@@ -584,6 +611,18 @@ def repair_or_plan(
         return _dry_run_plan(tracker, ticket_id, ticket_dir), findings
     if no_mutate:
         return [], findings
+
+    # Routing parity with `fsck --repair` (bug f96b): an order-sensitive orphan is
+    # HUMAN-TRIAGE, never auto-rebuilt — the rebuild is whole-ticket, so it would
+    # silently absorb the orphan in log order. Its presence blocks this ticket's
+    # rebuild; findings stay (the damage is real and still unrepaired).
+    triage = _repair_plan(ticket_dir, ticket_id)["triage_orphans"]
+    if triage:
+        return [
+            f"TRIAGE: {ticket_id}/{name} ({etype}) — order-sensitive orphan; "
+            "not auto-rebuilt (routing parity with fsck --repair)"
+            for name, etype in triage
+        ], findings
 
     rebuilt, restored = rebuild_with_restore(tracker, ticket_id, ticket_dir)
     if not rebuilt:

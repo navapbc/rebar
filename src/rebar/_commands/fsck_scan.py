@@ -33,6 +33,9 @@ from rebar._commands.fsck_repair import (
     _ticket_dirs,
 )
 from rebar._commands.fsck_repair import (
+    is_snapshot_orphan as _is_snapshot_orphan,
+)
+from rebar._commands.fsck_repair import (
     missing_sources_finding as _missing_sources_finding,
 )
 from rebar._commands.fsck_repair import (
@@ -40,7 +43,7 @@ from rebar._commands.fsck_repair import (
 )
 from rebar._commands.fsck_tracker_health import _tracker_health
 from rebar._store.gitutil import _reclaim_if_stale_index_lock
-from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
+from rebar.reducer import reduce_ticket
 from rebar.reducer._cache import is_active_event
 
 
@@ -371,17 +374,13 @@ def _check_snapshot(ticket_dir: str, ticket_id: str, snapshot_filename: str) -> 
                 f"{u} still exists as {event_files[u][0]}"
             )
     for file_uuid, (name, etype) in event_files.items():
-        # Compaction folds ONLY KNOWN_EVENT_TYPES into source_event_uuids (compact.py
-        # excludes any other type from deletion + the source list), so a pre-snapshot event
-        # of a non-KNOWN type (reducer-ignored REVIEW_RESULT, or a forward-compat type from a
-        # newer clone) is *correctly* absent — flagging it ORPHAN_EVENT is a false positive.
-        # Stay symmetric with compaction: only a genuinely orphaned KNOWN-type event is loss.
-        if etype not in KNOWN_EVENT_TYPES:
-            continue
-        if name < snapshot_filename and "-SNAPSHOT.json" not in name:
-            if file_uuid not in source_uuid_set:
-                out.append(
-                    f"ORPHAN_EVENT: {ticket_id}/{name} — pre-snapshot event not "
-                    "captured in source_event_uuids"
-                )
+        # The orphan definition lives in fsck_repair.is_snapshot_orphan — shared with the
+        # compaction fold's exclusion guard so scan and fold can never disagree (bug f96b).
+        # Non-KNOWN types are correctly uncited (compaction folds only KNOWN_EVENT_TYPES),
+        # so they are not orphans; snapshots are never orphan-classified.
+        if _is_snapshot_orphan(name, etype, file_uuid, snapshot_filename, source_uuid_set):
+            out.append(
+                f"ORPHAN_EVENT: {ticket_id}/{name} — pre-snapshot event not "
+                "captured in source_event_uuids"
+            )
     return out
