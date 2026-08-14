@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import sys
 
 from rebar import config
@@ -62,6 +63,44 @@ _STRUCTURED_KINDS = {
     "status_fork_resolved",
 }
 
+# The dirty-tracker wedge classes (fsck_tracker_health check 4.10). Their lines carry a
+# machine-parseable head — ``KIND: <n> path(s): <paths> — <detail>`` — so the JSON items
+# carry the per-class count and paths (ticket c925-7669-ded8-43a3).
+_TRACKER_DIRTY_KINDS = {
+    "tracker_dirty_deletion",
+    "tracker_dirty_leftover",
+    "tracker_dirty_tmp_event",
+}
+
+_DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.*)$")
+
+
+def _dirty_json_fields(item: dict, rest: str) -> bool:
+    """Parse a tracker-dirty line body into ``count`` + ``paths`` + ``detail``; False on
+    mismatch (the caller then falls back to the unstructured ``detail``-only shape).
+
+    Paths are ``shlex``-encoded by ``_dirty_tracker_lines`` so spaces survive the
+    round-trip, and the declared count disambiguates the path-list/blurb boundary: the
+    split lands on the first `` — `` where the head parses to exactly ``count`` paths,
+    so a blurb — or a quoted path — containing the sequence cannot derail it."""
+    m = _DIRTY_HEAD_RE.match(rest)
+    if m is None:
+        return False
+    count, tail = int(m.group(1)), m.group(2)
+    idx = tail.find(" — ")
+    while idx != -1:
+        try:
+            paths = shlex.split(tail[:idx])
+        except ValueError:
+            paths = []
+        if len(paths) == count:
+            item["count"] = count
+            item["paths"] = paths
+            item["detail"] = tail[idx + len(" — ") :]
+            return True
+        idx = tail.find(" — ", idx + 1)
+    return False
+
 
 def _transform_json(text: str, compat_error: dict | None = None) -> str:
     """Derive the ``--output json`` shape from the text output (kept identical so
@@ -82,6 +121,9 @@ def _transform_json(text: str, compat_error: dict | None = None) -> str:
             continue
         kind, rest = m.group(1).lower(), m.group(2)
         item = {"kind": kind}
+        if kind in _TRACKER_DIRTY_KINDS and _dirty_json_fields(item, rest):
+            issues.append(item)
+            continue
         head, sep, detail = rest.partition(" — ")
         if sep and kind in _STRUCTURED_KINDS:
             if "/" in head:
