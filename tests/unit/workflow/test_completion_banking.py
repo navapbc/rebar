@@ -47,24 +47,29 @@ def test_mint_criterion_id_format_and_normalization() -> None:
 
 
 # ── pool arithmetic as a function of c ──────────────────────────────────────────────
-def test_pool_arithmetic_pinned_f6fc_and_clamp_max() -> None:
+def test_pool_arithmetic_pinned_and_clamp_max() -> None:
     vc = _verify_cfg()
-    # f6fc: c=8 → floor 64, N 32, global 48, exhausted-primary (spent==N) successor 16.
-    f6fc = cb.plan_recovery_pool(8, 32, vc)
-    assert f6fc == {"floor": 64, "N": 32, "global_pool": 48, "successor_pool": 16}
-    # clamp-max: c≥60 → floor 480, N 240, global 360, successor 120.
-    clamp = cb.plan_recovery_pool(60, 240, vc)
-    assert clamp == {"floor": 480, "N": 240, "global_pool": 360, "successor_pool": 120}
+    # Recalibrated (ticket 8d74): c=8 → floor 24×8+16 = 208, N 104, global 156,
+    # exhausted-primary (spent==N) successor 52.
+    pinned = cb.plan_recovery_pool(8, 104, vc)
+    assert pinned == {"floor": 208, "N": 104, "global_pool": 156, "successor_pool": 52}
+    # clamp-max: c=60 → floor 960 (24×60+16 = 1456 clamped), N 480, global 720, successor 240.
+    clamp = cb.plan_recovery_pool(60, 480, vc)
+    assert clamp == {"floor": 960, "N": 480, "global_pool": 720, "successor_pool": 240}
     # a healthy (unspent) primary leaves the whole global pool.
-    assert cb.plan_recovery_pool(8, 0, vc)["successor_pool"] == 48
+    assert cb.plan_recovery_pool(8, 0, vc)["successor_pool"] == 156
+    # childful row: direct_children flows through the shared formula (16 steps/child).
+    childful = cb.plan_recovery_pool(8, 0, vc, direct_children=4)
+    assert childful == {"floor": 272, "N": 136, "global_pool": 204, "successor_pool": 204}
+    assert childful["floor"] > cb.plan_recovery_pool(8, 0, vc)["floor"]
 
 
 def test_pool_scales_linearly_and_clamps() -> None:
     vc = _verify_cfg()
-    # 8×c between the floor_min (48) and the 480 ceiling.
-    assert cb.plan_recovery_pool(20, 0, vc)["floor"] == 160
-    assert cb.plan_recovery_pool(2, 0, vc)["floor"] == 48  # clamped up to floor_min
-    assert cb.plan_recovery_pool(100, 0, vc)["floor"] == 480  # clamped down to max
+    # 24×c + 16 between the floor_min (160) and the 960 ceiling.
+    assert cb.plan_recovery_pool(20, 0, vc)["floor"] == 496
+    assert cb.plan_recovery_pool(2, 0, vc)["floor"] == 160  # clamped up to floor_min
+    assert cb.plan_recovery_pool(100, 0, vc)["floor"] == 960  # clamped down to max
 
 
 # ── batch caps by resolved slot ─────────────────────────────────────────────────────

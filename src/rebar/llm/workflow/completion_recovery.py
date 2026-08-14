@@ -36,7 +36,9 @@ from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
 
 from . import completion_banking as _bank
+from . import completion_verdict_cache as _cache
 from . import executor as _ex
+from .completion_banking import _banked_evidence_payload
 from .runs import RunnerAgentStep
 
 _CHECKBOX = re.compile(r"(?m)^\s*-\s*\[[ xX]\]\s*(?P<text>\S.*)$")
@@ -324,26 +326,6 @@ def _bounded_diagnostic(
     return diagnostic
 
 
-def _banked_evidence_payload(entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    """The finalizer's ``banked_evidence`` input rows, sorted by criterion id.
-
-    A bank entry carrying the framework-set ``evidence_sufficient=False`` marker surfaces it
-    to the finalizer (so an evidence GAP is presented as insufficiency, not a refutation);
-    bare entries omit the key entirely, keeping their prior shape byte-identical."""
-    rows: list[dict[str, Any]] = []
-    for cid, entry in sorted(entries.items()):
-        row: dict[str, Any] = {
-            "criterion_id": cid,
-            "met": bool(entry.get("met")),
-            "evidence": entry.get("evidence") or "",
-            "truncated": bool(entry.get("truncated")),
-        }
-        if entry.get("evidence_sufficient") is False:
-            row["evidence_sufficient"] = False
-        rows.append(row)
-    return rows
-
-
 def _validate_coverage(
     result: dict[str, Any], expected: list[str], id_by_text: dict[str, str]
 ) -> None:
@@ -472,17 +454,19 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         runner: Runner | None,
         repo_root: str | None,
         config: LLMConfig,
+        verify_ref: str | None = None,
     ) -> None:
         self._runner_override = runner
         self._repo_root = repo_root
         self._config = config
+        self._ref = verify_ref  # the gate handle's pinned verification sha (None → HEAD)
         self.failure_diagnostic: dict[str, Any] | None = None
 
     def run(self, ctx: _ex.StepContext) -> _ex.StepResult:
         ticket_id = str(ctx.inputs.get("ticket_id") or ctx.target_ticket or "")
         stamps = _bank.resolve_bank_stamps(ticket_id, ctx.repo_root)
         bank = _bank.CriterionBank.for_run(ctx.run_id, stamps, repo_root=ctx.repo_root)
-        primary_manifest, criterion_ids = self._primary_manifest_contract(ctx, ticket_id)
+        primary_manifest, criterion_ids = self._primary_manifest_contract(ctx, ticket_id, bank)
         record_tool = make_completion_record_tool(bank, criterion_ids)
         primary = RunnerAgentStep(
             runner=self._runner_override,
@@ -525,9 +509,13 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         return self._primary_manifest_contract(ctx, ticket_id)[0]
 
     def _primary_manifest_contract(
-        self, ctx: _ex.StepContext, ticket_id: str
+        self, ctx: _ex.StepContext, ticket_id: str, bank: _bank.CriterionBank | None = None
     ) -> tuple[str, tuple[str, ...]]:
-        """Return the primary's data-only manifest and its ordered criterion ids."""
+        """Return the primary's data-only manifest and its ordered criterion ids.
+
+        With a ``bank``, still-valid cross-run cached PASS verdicts are seeded into it first
+        (stamped ``seeded: true``, ticket 8d74); seeded ids are omitted from the manifest and
+        an "already credited — do not re-verify" directive is appended for them."""
         try:
             from rebar import _reads
 
@@ -536,10 +524,16 @@ class CompletionAgentStep(_ex.AgentStepRunner):
             if not expected:
                 return "", ()
             id_by_text = _bank.criterion_id_map(expected)
-            return (
-                _bank.primary_criteria_manifest(expected, id_by_text),
-                tuple(id_by_text[text] for text in expected),
+            seeded: frozenset[str] = frozenset()
+            if bank is not None:
+                seeded = _cache.seed_bank_from_cache(
+                    bank, ticket_id, ticket, expected, id_by_text, ctx.repo_root, ref=self._ref
+                )
+            manifest = _bank.primary_criteria_manifest(expected, id_by_text, seeded_ids=seeded)
+            manifest += _cache.seeded_context_block(
+                [text for text in expected if id_by_text[text] in seeded], id_by_text
             )
+            return manifest, tuple(id_by_text[text] for text in expected)
         except Exception:  # noqa: BLE001 -- the manifest is a best-effort enhancement; any read/parse failure falls back to the pre-banking primary (never a new failure mode)
             return "", ()
 
@@ -642,7 +636,12 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         """
         verify_cfg = _bank.load_verify_cfg(self._repo_root)
         primary_spent = int(getattr(primary_exc, "diagnostic", {}).get("requests") or 0)
-        pool = _bank.plan_recovery_pool(len(expected), primary_spent, verify_cfg)
+        pool = _bank.plan_recovery_pool(
+            len(expected),
+            primary_spent,
+            verify_cfg,
+            direct_children=_cache.direct_child_count(ticket_id, self._repo_root),
+        )
         pool_remaining = pool["successor_pool"]
         batch_cap = _bank.successor_batch_cap(self._config.model)
         system_prompt = _bank.successor_system_prompt(self._repo_root)
@@ -735,6 +734,9 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                     result, expected, entries, id_by_text=id_by_text
                 )
                 _validate_coverage(merged, expected, id_by_text)
+                _cache.persist_pass_verdicts(
+                    ticket_id, merged, entries, self._repo_root, ref=self._ref
+                )
                 return merged
             except (LLMError, ValueError):
                 continue

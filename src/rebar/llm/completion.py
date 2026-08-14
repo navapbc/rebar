@@ -90,36 +90,33 @@ INSUFFICIENT_EVIDENCE_REMEDIATION = (
 # non-default `[tool.rebar.llm].model` still wins (below). The literal lives in config.py
 # (VERIFIER_DEFAULT_MODEL) as the single source shared with the plan-review verifier.
 _VERIFIER_DEFAULT_MODEL = VERIFIER_DEFAULT_MODEL
-# Completion verification is inherently more tool-heavy than a single-dimension review: it
-# must check potentially many criteria, each against several files. The framework review
-# default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) is far too low and trips the recursion cap
-# mid-verification (→ a false fail-closed block at the gate). Historically a FLAT floor of 480
-# handled this, but a flat floor MANUFACTURED exhaustion for TYPICAL tickets (epic 10ae/story
-# 2948, lever 1): measured, an 8-criteria verify converges at ~32 requests yet spends the whole
-# 480-step (240-request) budget on ~77% read_file re-read waste until the runaway guard trips —
-# the exhaustion the recovery path then has to bank around. Lever 1 replaces the flat floor with
-# a CRITERIA-SCALED one: verify_step_floor(c) = clamp(steps_per_criterion × c, step_floor_min,
-# 480). It is AUTHORITATIVE over the framework default (it may LOWER a small ticket below the 250
-# default — that is the point), but an operator who explicitly sets a step budget still wins
-# (min-only against an explicit budget; the criteria-scaled value only ever RAISES an explicit
-# budget that is below it). 480 is retained ONLY as the clamp MAX so no ticket exceeds today's
-# ceiling. Per-run step usage is logged by the runner — `llm call [completion-verifier] …
-# steps=N/limit` — so a resize can be sized from observed headroom. The verifier also
-# short-circuits tickets with nothing to verify.
-_VERIFY_STEP_FLOOR_MAX = 480
+# Completion verification is inherently more tool-heavy than a single-dimension review; the
+# framework default (REBAR_LLM_MAX_STEPS=50 ≈ 25 tool calls) trips the recursion cap
+# mid-verification (a false fail-closed block). A FLAT 480 floor manufactured exhaustion
+# (epic 10ae/story 2948); the criteria-scaled floor replaced it, and ticket 8d74 RECALIBRATED
+# it after live false unmets: runaway is already separately guarded (tool_calls_limit, loop
+# detection), so the floor is generous and scales with the evidence surface rather than
+# limiting authorized validation — the clamp below is a runaway ceiling, not a validation cap.
+# The floor is AUTHORITATIVE over the framework default (it may LOWER a small ticket below the
+# 250 default) but min-only against an explicit operator budget. Per-run step usage is logged
+# by the runner (`… steps=N/limit`) so a resize can be sized from observed headroom.
+_VERIFY_STEP_FLOOR_MAX = 960
 
 
-def verify_step_floor(criteria_count: int, verify_cfg) -> int:
-    """The criteria-scaled PRIMARY completion-verifier step floor (epic 10ae/story 2948, lever 1).
-
-    ``clamp(steps_per_criterion × c, step_floor_min, 480)`` where ``c`` is the ticket's explicit
-    criteria count. Config-tunable via ``verify.completion_verify_steps_per_criterion`` (default
-    8) and ``verify.completion_verify_step_floor_min`` (default 48). ``c`` is floored at 1 so a
-    degenerate zero-criteria surface still receives at least ``step_floor_min``.
-    """
+def verify_step_floor(criteria_count: int, verify_cfg, direct_children: int = 0) -> int:
+    """The evidence-surface-scaled PRIMARY completion-verifier step floor:
+    ``clamp(steps_per_criterion × c + child_traversal × direct_children + fixed_overhead,
+    step_floor_min, 960)``. Runaway prevention ONLY (ticket 8d74) — for valid tool use it is
+    generous, scaling with the whole evidence surface: ``c`` explicit criteria (floored at 1),
+    a traversal term per DIRECT child (epic criteria read child tickets), and a fixed
+    show_ticket+parse overhead. Config keys (``verify.completion_verify_*``):
+    ``steps_per_criterion`` 24, ``step_floor_min`` 160, ``child_traversal_steps`` and
+    ``fixed_overhead_steps`` both 16."""
     per = verify_cfg.completion_verify_steps_per_criterion
     lo = verify_cfg.completion_verify_step_floor_min
-    scaled = per * max(int(criteria_count), 1)
+    child = verify_cfg.completion_verify_child_traversal_steps
+    overhead = verify_cfg.completion_verify_fixed_overhead_steps
+    scaled = per * max(int(criteria_count), 1) + child * max(int(direct_children), 0) + overhead
     return max(lo, min(scaled, _VERIFY_STEP_FLOOR_MAX))
 
 
@@ -707,6 +704,7 @@ def verify_completion(
                     config or LLMConfig.from_env(repo_root=repo_root), handle
                 ),
                 runner=runner,
+                verify_ref=handle.sha,
             ),
             handle,
         )
@@ -719,6 +717,7 @@ def _verify_completion_inner(
     repo_root,
     config: LLMConfig,
     runner: Runner | None,
+    verify_ref: str | None = None,
 ) -> dict:
     from rebar import _reads
 
@@ -777,7 +776,13 @@ def _verify_completion_inner(
         criteria_count = len(explicit_completion_criteria(root))
     except CompletionRecoveryError:
         criteria_count = 0
-    step_floor = verify_step_floor(criteria_count, verify_cfg)
+    # Evidence-surface child term (ticket 8d74): epic criteria traverse DIRECT children; the
+    # shared enumerator fails OPEN to the childless floor. Runtime import: no cycle at load.
+    from rebar.llm.workflow.completion_verdict_cache import direct_child_count
+
+    step_floor = verify_step_floor(
+        criteria_count, verify_cfg, direct_children=direct_child_count(ticket_id, repo_root)
+    )
     if cfg.max_iterations == DEFAULT_MAX_ITERATIONS or cfg.max_iterations < step_floor:
         cfg = replace(cfg, max_iterations=step_floor)
 
@@ -787,10 +792,9 @@ def _verify_completion_inner(
     # (The child-closure precheck is the workflow's `completion_precheck` op, which reuses
     # `child_closure_findings` / `deterministic_child_failure` from this module, so there is
     # exactly ONE child-closure implementation and no double check.) The close gate's signing
-    # wrapper (_commands.transition) is unchanged, so the signed attestation stays
-    # byte-compatible. cfg is already tuned (verifier model + step floor) above.
+    # wrapper (_commands.transition) is unchanged; cfg is already tuned (model + floor) above.
     from rebar.llm.workflow import gate_dispatch
 
     return gate_dispatch.produce_completion_verdict(
-        ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner
+        ticket_id, graph=graph, repo_root=repo_root, cfg=cfg, runner=runner, verify_ref=verify_ref
     )

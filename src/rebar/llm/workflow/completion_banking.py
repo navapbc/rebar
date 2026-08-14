@@ -190,7 +190,11 @@ def criterion_id_map(criteria: list[str]) -> dict[str, str]:
 _MANIFEST_TEXT_CAP = 200
 
 
-def primary_criteria_manifest(expected: list[str], id_by_text: dict[str, str]) -> str:
+def primary_criteria_manifest(
+    expected: list[str],
+    id_by_text: dict[str, str],
+    seeded_ids: frozenset[str] | None = None,
+) -> str:
     """The PRIMARY run's criterion-id manifest (story 2948 dogfood fix).
 
     The primary carries the ``record_criterion_verdict`` tool but — unlike a successor, which
@@ -199,11 +203,14 @@ def primary_criteria_manifest(expected: list[str], id_by_text: dict[str, str]) -
     bank and banks nothing. This appends a volatile DATA-ONLY id manifest (one line per
     criterion, in document order, each truncated) to the primary's untrusted ticket context;
     the authoritative banking instructions remain in the system prompt. Returns "" when
-    there are no criteria (nothing to bank)."""
-    if not expected:
+    there are no criteria (nothing to bank). ``seeded_ids`` — criteria already credited from
+    the cross-run PASS-verdict cache (ticket 8d74) — are OMITTED: the primary has no work to
+    bank for them."""
+    listed = [t for t in expected if not (seeded_ids and id_by_text[t] in seeded_ids)]
+    if not listed:
         return ""
     lines = ["", "## Criterion IDs"]
-    for text in expected:
+    for text in listed:
         one_line = re.sub(r"\s+", " ", text).strip()
         if len(one_line) > _MANIFEST_TEXT_CAP:
             one_line = one_line[:_MANIFEST_TEXT_CAP] + "…"
@@ -212,21 +219,27 @@ def primary_criteria_manifest(expected: list[str], id_by_text: dict[str, str]) -
 
 
 def plan_recovery_pool(
-    criteria_count: int, primary_requests_spent: int, verify_cfg: VerifyConfig
+    criteria_count: int,
+    primary_requests_spent: int,
+    verify_cfg: VerifyConfig,
+    direct_children: int = 0,
 ) -> dict:
     """The successor budget pool, denominated in MODEL REQUESTS (story 2948).
 
     ``N`` is the primary's per-run request budget as ``build_usage_limits`` computes it —
-    ``ceil(eff_max_iter / 2)`` — with ``eff_max_iter`` floored at the criteria-scaled
-    ``verify_step_floor(c)`` (lever 1). The global recovery pool is
-    ``completion_recovery_pool_multiplier × N`` (default 1.5); the successor pool is that
-    minus what the primary already spent (from the typed failure's usage diagnostic), so a
-    fully-exhausted primary (spend == N) leaves ``0.5 × N``.
+    ``ceil(eff_max_iter / 2)`` — with ``eff_max_iter`` floored at the evidence-surface-scaled
+    ``verify_step_floor(c, direct_children=k)`` (lever 1, recalibrated by ticket 8d74;
+    ``direct_children`` is a pass-through so both consumers share ONE formula). The global
+    recovery pool is ``completion_recovery_pool_multiplier × N`` (default 1.5); the successor
+    pool is that minus what the primary already spent (from the typed failure's usage
+    diagnostic), so a fully-exhausted primary (spend == N) leaves ``0.5 × N``.
 
-    Pinned as a function of ``c`` by the oracle: f6fc c=8 → floor 64, N 32, global 48,
-    exhausted-primary successor 16; clamp-max c≥60 → floor 480, N 240, global 360, successor 120.
+    Pinned as a function of ``(c, k)`` by the oracle: childless c=8 → floor 208 (24×8+16),
+    N 104, global 156, exhausted-primary successor 52; childful c=8, k=4 → floor 272
+    (24×8+16×4+16), N 136, global 204; clamp-max c=60 → floor 960, N 480, global 720,
+    exhausted-primary successor 240.
     """
-    floor = verify_step_floor(criteria_count, verify_cfg)
+    floor = verify_step_floor(criteria_count, verify_cfg, direct_children=direct_children)
     n = math.ceil(floor / 2)
     global_pool = round(verify_cfg.completion_recovery_pool_multiplier * n)
     successor_pool = max(0, global_pool - int(primary_requests_spent))
@@ -451,6 +464,7 @@ class CriterionBank:
         *,
         source: str = "tool",
         evidence_sufficient: bool | None = None,
+        seeded: bool = False,
     ) -> dict[str, Any]:
         """Idempotently record ``criterion_id``'s provisional verdict, overwriting any prior
         entry. Evidence is capped at :data:`EVIDENCE_CAP_CHARS`; a capped entry carries an
@@ -475,6 +489,10 @@ class CriterionBank:
         }
         if evidence_sufficient is False:
             entry["evidence_sufficient"] = False
+        if seeded:
+            # A cross-run cached PASS (ticket 8d74): the merge path credits it verbatim and
+            # the finalizer cannot downgrade it. Absent on every same-run entry.
+            entry["seeded"] = True
         try:
             self._path(criterion_id).write_text(
                 json.dumps(entry, ensure_ascii=False, sort_keys=True), encoding="utf-8"
@@ -587,6 +605,26 @@ class CriterionBank:
             return f"recorded {criterion_id}: met={bool(met)}{flag}"
 
         return record_criterion_verdict
+
+
+def _banked_evidence_payload(entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """The finalizer's ``banked_evidence`` input rows, sorted by criterion id.
+
+    A bank entry carrying the framework-set ``evidence_sufficient=False`` marker surfaces it
+    to the finalizer (so an evidence GAP is presented as insufficiency, not a refutation);
+    bare entries omit the key entirely, keeping their prior shape byte-identical."""
+    rows: list[dict[str, Any]] = []
+    for cid, entry in sorted(entries.items()):
+        row: dict[str, Any] = {
+            "criterion_id": cid,
+            "met": bool(entry.get("met")),
+            "evidence": entry.get("evidence") or "",
+            "truncated": bool(entry.get("truncated")),
+        }
+        if entry.get("evidence_sufficient") is False:
+            row["evidence_sufficient"] = False
+        rows.append(row)
+    return rows
 
 
 def harvest_structured_into_bank(
