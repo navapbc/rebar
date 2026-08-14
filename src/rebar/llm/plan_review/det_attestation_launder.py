@@ -1,0 +1,150 @@
+"""Deterministic attestation-laundering detector (bug 2f56-313f-6175-41b1; ADR-0043 x ADR-0016).
+
+THE ANTI-PATTERN. ``[operator-attested]`` (ADR-0043) exempts an acceptance criterion from
+repository verification because its done-evidence legitimately lives OUTSIDE the snapshot —
+a deploy, a vote, console output. The completion verifier classifies SOLELY from the author
+tag (by design; see ``completion_verifier.md``), so tagging a criterion whose proof is
+repo-resident LAUNDERS it past verification: the verifier accepts a ticket comment where an
+exact path/symbol check was possible. The live instance this module answers is epic
+``fb8a-7363-e406-4e36`` AC-19: retagged after a verifier step-budget failure although its
+proof was ``tests/unit/test_scan_scoping.py`` — the review-side evidence-kind criterion (an
+LLM judgment) missed it, and the provenance lint surfaced only as ADVISORY P6 coaching.
+
+THE DETECTOR. A tagged AC item fires when its own text — the checkbox line plus its indented
+continuation lines, up to the next checkbox item or the end of the AC section — cites exact
+repository path/symbol evidence AS EVIDENCE. Matching is precision-first, because a false
+positive here would block ADR-0043's legitimate escape hatch:
+
+* test artifacts always fire (``tests/…`` paths, ``test_*`` path segments and symbols,
+  pytest ``::node`` ids) — a test is inherently completion proof, never orientation;
+* other repo citations (repo-root-anchored paths ``src/…``/``docs/…``/``scripts/…``, slash
+  paths with a code-shaped extension) fire only when an evidence-introducing word (proxy,
+  proof, evidence, verified, covered, documented, …) precedes them on their line — a path
+  in plain prose is ORIENTATION ("the fix shipped in src/… is deployed") and a
+  legitimately-external AC may mention one freely (7f69/5796 false-positive class).
+
+URLs are scrubbed first (a link is external evidence; its path segments must not read as
+repo paths). Bare commit hashes and Gerrit change numbers deliberately do NOT fire: they are
+the attestation-EVENT provenance ADR-0043's contract itself demands. Dotted config keys
+(``compact.trigger``) carry no slash and do not fire.
+
+Consumed by the deterministic pre-LLM close guard
+(:func:`rebar._commands.txn.ensure_attested_items_valid`). Pure stdlib (``re`` only) — no
+network, no shell, mirroring its siblings ``det_operator_attested`` (the opposite-direction
+lint: external evidence left UNtagged) and ``det_measurement_provenance`` (the
+``provenance:`` continuation-line shape).
+"""
+
+from __future__ import annotations
+
+import re
+
+from .det_measurement_provenance import _CHECKBOX_RE, _ac_section_bounds
+from .det_operator_attested import _OPERATOR_ATTESTED_TAG_RE
+
+# Links are external evidence: scrub them before any repo-shaped matching.
+_URL_RE = re.compile(r"https?://\S+")
+
+# A path anchored at a well-known repo root directory — fires with or without an extension
+# (``src/rebar/_commands`` is as repo-resident as ``tests/unit/test_x.py``).
+_REPO_ROOT_PATH_RE = re.compile(r"\b(?:src|tests|docs|scripts)/[\w.\-]+(?:/[\w.\-]+)*")
+
+# A slash path whose final segment carries a code-shaped extension, optionally followed by a
+# pytest ``::node`` id chain. The extension list is closed on purpose (precision-first).
+_CODE_FILE_PATH_RE = re.compile(
+    r"(?:\b[\w.\-]+/)+[\w.\-]+"
+    r"\.(?:py|pyi|md|rst|json|toml|yaml|yml|sh|txt|cfg|ini)\b"
+    r"(?:::\w+)*"
+)
+
+# A bare pytest symbol. Three-plus tail characters so prose fragments do not fire.
+_TEST_SYMBOL_RE = re.compile(r"\btest_[A-Za-z0-9_]{3,}\b")
+
+_CITATION_RES: tuple[re.Pattern[str], ...] = (
+    _REPO_ROOT_PATH_RE,
+    _CODE_FILE_PATH_RE,
+    _TEST_SYMBOL_RE,
+)
+
+# Test artifacts are inherently completion EVIDENCE, never orientation: a tests/-anchored
+# path, a path segment starting ``test_``/``conftest``, a pytest ``::node`` id, or a bare
+# ``test_*`` symbol always counts as a citation.
+_TEST_SHAPED_RE = re.compile(r"(?:^|/)tests?/|/(?:test_|conftest\.)|^test_[A-Za-z0-9_]{3,}$|::")
+
+# A NON-test repo path counts as a citation only when the line PRESENTS it as the proof —
+# an evidence-introducing word appears before it. A path in plain prose is orientation
+# ("the fix shipped in src/… is deployed") and must not block a legitimately-external AC
+# (false-positive class observed on tickets 7f69/5796).
+_EVIDENCE_MARKER_RE = re.compile(
+    r"\b(?:proxy|proof|evidence|verif\w*|cover\w*|tested|asserted|documented|recorded|see|per)\b",
+    re.IGNORECASE,
+)
+
+
+def _citation_spans(scrubbed: str) -> list[tuple[int, int, str]]:
+    """Containment-filtered citation spans over already-URL-scrubbed text, position-ordered.
+    A hit fully contained in a longer hit is dropped (the ``test_x`` inside
+    ``tests/unit/test_x.py`` is one citation, not two)."""
+    spans: list[tuple[int, int, str]] = []
+    for rx in _CITATION_RES:
+        spans.extend((m.start(), m.end(), m.group(0)) for m in rx.finditer(scrubbed))
+    kept: list[tuple[int, int, str]] = []
+    for start, end, hit in sorted(spans, key=lambda s: (s[0] - s[1], s[0])):  # longest first
+        if any(start >= k_start and end <= k_end for k_start, k_end, _ in kept):
+            continue
+        kept.append((start, end, hit))
+    return sorted(kept)
+
+
+def repo_evidence_citations(text: str) -> list[str]:
+    """Exact repo path/symbol citations in ``text``, deduplicated and position-ordered.
+    Context-free extraction — the evidence-vs-orientation judgment lives in
+    :func:`laundering_gaps`."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for _, _, hit in _citation_spans(_URL_RE.sub(" ", text)):
+        if hit not in seen:
+            seen.add(hit)
+            ordered.append(hit)
+    return ordered
+
+
+def _line_evidence_citations(line: str) -> list[str]:
+    """Citations on one line that read as completion EVIDENCE: test-shaped hits always,
+    other repo hits only when an evidence-introducing word precedes them on the line."""
+    scrubbed = _URL_RE.sub(" ", line)
+    return [
+        hit
+        for start, _end, hit in _citation_spans(scrubbed)
+        if _TEST_SHAPED_RE.search(hit) or _EVIDENCE_MARKER_RE.search(scrubbed[:start])
+    ]
+
+
+def laundering_gaps(plan_text: str) -> list[tuple[str, list[str]]]:
+    """One ``(ac_line, citations)`` per ``[operator-attested]`` AC item whose own block —
+    checkbox line plus continuation lines, bounded by the next checkbox item or the end of
+    the ``## Acceptance Criteria`` section — cites exact repo path/symbol evidence."""
+    lines = plan_text.split("\n")
+    bounds = _ac_section_bounds(lines)
+    if bounds is None:
+        return []
+    section_start, section_end = bounds
+    checkbox_indices = [
+        i for i in range(section_start, section_end) if _CHECKBOX_RE.match(lines[i])
+    ]
+    gaps: list[tuple[str, list[str]]] = []
+    for pos, i in enumerate(checkbox_indices):
+        line = lines[i]
+        if not _OPERATOR_ATTESTED_TAG_RE.match(line):
+            continue
+        next_boundary = (
+            checkbox_indices[pos + 1] if pos + 1 < len(checkbox_indices) else section_end
+        )
+        citations: list[str] = []
+        for block_line in lines[i:next_boundary]:
+            for hit in _line_evidence_citations(block_line):
+                if hit not in citations:
+                    citations.append(hit)
+        if citations:
+            gaps.append((line, citations))
+    return gaps

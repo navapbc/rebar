@@ -91,6 +91,8 @@ def test_unchecked_operator_attested_item_is_exempt(rebar_repo: Path, monkeypatc
         "Body.\n\n## Acceptance Criteria\n"
         "- [x] code merged\n"
         "- [ ] [operator-attested] prod deploy verified by operator\n"
+        "      provenance: environment=production; principal=release-operator; "
+        "privilege_posture=production-equivalent; instrument=live-call — console shows green\n"
     )
     tid = _make(rebar_repo, desc)
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
