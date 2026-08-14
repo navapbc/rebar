@@ -42453,9 +42453,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nParity sibling of the reconverge merge-abort recoveries (loris/1757 variant (a), wolverine/1767 variant (b)): the push non-fast-forward recovery path has the SAME untracked-overwrite wedge. `rebar._store.push_recovery._recover_dirty_merge` sets a dirty tree aside with a stash COMMIT OBJECT (`_stash_create`, never refs/stash), clears TRACKED changes via `git reset --hard` (untracked files are deliberately left alone, matching `stash push` semantics), then merges the remote ref. When an UNTRACKED local file collides with a file the merge wants to create \u2014 exactly the compaction-leftover class (`*-SNAPSHOT.json`, `*.retired`) that wedged reconverge \u2014 the merge aborts (\"untracked working tree files would be overwritten by merge\"), and today's code gives up: `merge --abort`, restore stash, warn/strict-raise. Every push retry then re-fails the same way: the push path cannot self-heal the store class we already heal in reconverge.\n\n## Approach\nExtend `_recover_dirty_merge` (and its `_merge_remote_under_lock` sibling seam if the abort surfaces there) with the SAME recovery shape sync.py's reconverge uses: on merge failure, parse the paths git names with the parser in `rebar._store.sync` \u2014 today `_untracked_overwrite_paths` (sync.py:226), being generalized by prerequisite Gerrit change 1767 (ticket dozing-trophied-wolverine) into a shared `_merge_abort_named_paths`; use whichever name is on main at implementation time \u2014 move the named UNTRACKED colliding paths into the shared quarantine directory (`<git-common-dir>/reconverge-quarantine/<utc-ts>/`, the dir `_quarantine_untracked`/sync.py:248 established \u2014 move, never delete), retry the merge ONCE; any other failure keeps today's behavior exactly (abort, restore stash, warn or strict-raise). Reuse boundary, respecting each module's git seam: the pure PARSER is imported from sync (no subprocess in it), but the MOVER is not \u2014 sync's `_quarantine_untracked` shells through sync's module-level `_git`, whereas every push_recovery function deliberately late-binds `core._git` so push's ~25-site test monkeypatch keeps working (push_recovery.py:10-27). So implement the quarantine move locally in push_recovery through `core._git`/os.rename against the same quarantine directory path (share the dir-path helper if 1767 exposes one), rather than calling sync's mover across the seam. The stash restore ordering is preserved: quarantine + retry happen between the failed merge and any `_restore_stash`, so the stash commit object is restored exactly once on every exit path.\n\nSequencing: depends on change 1767 (wolverine) being merged \u2014 it lands the shared parser/quarantine helpers this reuses.\n\n## Scope\n- src/rebar/_store/push_recovery.py \u2014 untracked-overwrite recovery (quarantine + single retry) in the dirty-merge and locked-merge recovery paths; reuse sync's shared helpers.\n- tests/unit/test_push_recovery_untracked.py (new; or extend the existing push_recovery test module if one covers `_recover_dirty_merge`) \u2014 RED-first coverage.\n\n## Testing\n- RED first: fixture store where the worktree holds an untracked file that the remote ref's merge wants to create; assert today's `_recover_dirty_merge` fails (merge aborted, stash restored, no merge commit).\n- GREEN: same fixture after the fix \u2014 the colliding untracked file is moved into the quarantine dir (bytes preserved, byte-for-byte), the retried merge completes with both parents, and the stash-recorded tracked edits are restored.\n- Guard: a genuine content conflict still aborts, restores the stash, and warns/strict-raises (unchanged behavior); paths git does not name are untouched; the quarantine dir is only created when something is moved.\n- Stash-safety: the stash commit object is restored exactly once on both the retry-success and retry-failure paths (no lost tracked edits).\n- Mutation check: skipping the quarantine move or the retry returns the RED assertion; retrying more than once is killed by a call-count assertion.\n\n## Acceptance Criteria\n- [ ] A push recovery whose merge aborts ONLY on untracked-overwrite collisions completes after quarantining the named paths and retrying once, with no event bytes lost (quarantine holds the moved files); checked by the RED-to-GREEN test.\n- [ ] Tracked edits set aside in the stash are restored on every exit path (success, retry-failure, non-recoverable abort); checked by the stash-safety tests.\n- [ ] Genuine conflicts and unnamed paths keep today's behavior exactly; checked by the guard test.\n- [ ] The recovery reuses the shared sync parser/quarantine helpers (no duplicated recovery mechanism); checked by review of the diff.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
+        "description": "## Context / Problem\nParity sibling of the reconverge merge-abort recoveries (loris/1757 variant (a), wolverine/1767 variant (b)): the push non-fast-forward recovery path has the SAME untracked-overwrite wedge. `rebar._store.push_recovery._recover_dirty_merge` sets a dirty tree aside with a stash COMMIT OBJECT (`_stash_create`, never refs/stash), clears TRACKED changes via `git reset --hard` (untracked files are deliberately left alone, matching `stash push` semantics), then merges the remote ref. When an UNTRACKED local file collides with a file the merge wants to create \u2014 exactly the compaction-leftover class (`*-SNAPSHOT.json`, `*.retired`) that wedged reconverge \u2014 the merge aborts (\"untracked working tree files would be overwritten by merge\"), and today's code gives up: `merge --abort`, restore stash, warn/strict-raise. Every push retry then re-fails the same way: the push path cannot self-heal the store class we already heal in reconverge.\n\n## Approach\nExtend `_recover_dirty_merge` (and its `_merge_remote_under_lock` sibling seam if the abort surfaces there) with the SAME recovery shape sync.py's reconverge uses: on merge failure, parse the paths git names with the parser in `rebar._store.sync` \u2014 today `_untracked_overwrite_paths` (sync.py:226), being generalized by prerequisite Gerrit change 1767 (ticket dozing-trophied-wolverine) into a shared `_merge_abort_named_paths`; use whichever name is on main at implementation time \u2014 move the named UNTRACKED colliding paths into the shared quarantine directory (`<git-common-dir>/reconverge-quarantine/<utc-ts>/`, the dir `_quarantine_untracked`/sync.py:248 established \u2014 move, never delete), retry the merge ONCE; any other failure keeps today's behavior exactly (abort, restore stash, warn or strict-raise). Reuse boundary, respecting each module's git seam: the pure PARSER is imported from sync (no subprocess in it), but the MOVER is not \u2014 sync's `_quarantine_untracked` shells through sync's module-level `_git`, whereas every push_recovery function deliberately late-binds `core._git` so push's ~25-site test monkeypatch keeps working (push_recovery.py:10-27). So implement the quarantine move locally in push_recovery through `core._git`/os.rename against the same quarantine directory path (share the dir-path helper if 1767 exposes one), rather than calling sync's mover across the seam. The stash restore ordering is preserved: quarantine + retry happen between the failed merge and any `_restore_stash`, so the stash commit object is restored exactly once on every exit path.\n\nSequencing: depends on change 1767 (wolverine) being merged \u2014 it lands the shared parser/quarantine helpers this reuses.\n\n## Scope\n- src/rebar/_store/push_recovery.py \u2014 untracked-overwrite recovery (quarantine + single retry) in the dirty-merge and locked-merge recovery paths; reuse sync's shared helpers.\n- tests/unit/test_push_recovery_untracked.py (new; or extend the existing push_recovery test module if one covers `_recover_dirty_merge`) \u2014 RED-first coverage.\n\n## Testing\n- RED first: fixture store where the worktree holds an untracked file that the remote ref's merge wants to create; assert today's `_recover_dirty_merge` fails (merge aborted, stash restored, no merge commit).\n- GREEN: same fixture after the fix \u2014 the colliding untracked file is moved into the quarantine dir (bytes preserved, byte-for-byte), the retried merge completes with both parents, and the stash-recorded tracked edits are restored.\n- Guard: a genuine content conflict still aborts, restores the stash, and warns/strict-raises (unchanged behavior); paths git does not name are untouched; the quarantine dir is only created when something is moved.\n- Stash-safety: the stash commit object is restored exactly once on both the retry-success and retry-failure paths (no lost tracked edits).\n- Mutation check: skipping the quarantine move or the retry returns the RED assertion; retrying more than once is killed by a call-count assertion.\n\n## Acceptance Criteria\n- [x] A push recovery whose merge aborts ONLY on untracked-overwrite collisions completes after quarantining the named paths and retrying once, with no event bytes lost (quarantine holds the moved files); checked by the RED-to-GREEN test.\n- [x] Tracked edits set aside in the stash are restored on every exit path (success, retry-failure, non-recoverable abort); checked by the stash-safety tests.\n- [x] Genuine conflicts and unnamed paths keep today's behavior exactly; checked by the guard test.\n- [x] The recovery reuses the shared sync parser/quarantine helpers (no duplicated recovery mechanism); checked by review of the diff.\n- [x] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Parity sibling: push non-fast-forward recovery (_store/push_recovery.py) has the same untracked-overwrite wedge as reconverge \u2014 resets tracked-only, leaves colliding untracked leftovers"
       },
       "created_at": "2026-08-14T03:16:12Z",
@@ -52111,208 +52111,15 @@
     "681b-1f4b-6e07-44fa": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Intent-source fidelity (ISF) is the approved criterion that catches silent descoping of an EXTERNALLY-expressed",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "requirement (the gate's plan-internal blind spot). It has distinct mechanics, so it gets its own child.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Build ISF: a single-turn / 2-STEP, FRONTIER-model criterion, FED the linked session log + the pre-resolved",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  ticket graph (NOT agent/tool-using); fires ONLY when the ticket is linked to a session log.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Size handling: if the linked log exceeds the escalated context window, run ISF against a SUMMARY of the log,",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  RECORD that a summary was used, and carry REDUCED CONFIDENCE (supporting context only \u2014 never the plan).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Validate against the eval suite: recall (catches a seeded silently-dropped requirement), false-fire",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  (no finding when the plan honors the intent or a requirement was descoped WITH a stated rationale).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- The criterion + its session-log feeding/summary-fallback; validation via the eval suite (`7284`). THIS child",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  OWNS the ISF criterion build (criterion + prompt + session-log gating); `7284` owns the eval suite/harness and",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  adds ISF's eval cases \u2014 no duplication (see the `relates_to` link).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] ISF implemented per its descriptor (single-turn/2-STEP, fed session log + ticket graph, NOT agent); fires only when a session log is linked.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Oversized-log fallback: documented SUMMARY + reduced confidence (never summarizes the plan).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Validated on labeled cases: catches a silently-descoped requirement (recall); no false-fire on honored/justified-descope plans.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\nIntent-source fidelity (ISF) is the approved criterion that catches silent descoping of an EXTERNALLY-expressed\nrequirement (the gate's plan-internal blind spot). It has distinct mechanics, so it gets its own child.\n\n## What\n- Build ISF: a single-turn / 2-STEP, FRONTIER-model criterion, FED the linked session log + the pre-resolved\n  ticket graph (NOT agent/tool-using); fires ONLY when the ticket is linked to a session log.\n- Size handling: if the linked log exceeds the escalated context window, run ISF against a SUMMARY of the log,\n  RECORD that a summary was used, and carry REDUCED CONFIDENCE (supporting context only \u2014 never the plan).\n- Validate against the eval suite: recall (catches a seeded silently-dropped requirement), false-fire\n  (no finding when the plan honors the intent or a requirement was descoped WITH a stated rationale).\n\n## Scope\n- The criterion + its session-log feeding/summary-fallback; validation via the eval suite (`7284`). THIS child\n  OWNS the ISF criterion build (criterion + prompt + session-log gating); `7284` owns the eval suite/harness and\n  adds ISF's eval cases \u2014 no duplication (see the `relates_to` link).\n\n## Acceptance Criteria\n- [ ] ISF implemented per its descriptor (single-turn/2-STEP, fed session log + ticket graph, NOT agent); fires only when a session log is linked.\n- [ ] Oversized-log fallback: documented SUMMARY + reduced confidence (never summarizes the plan).\n- [ ] Validated on labeled cases: catches a silently-descoped requirement (recall); no false-fire on honored/justified-descope plans.",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Intent-source-fidelity (ISF) criterion: build + validate"
       },
       "baseline_advanced_at": "2026-07-17T05:45:05Z",
       "created_at": "2026-06-25T23:01:25Z",
       "jira_key": "REB-170",
+      "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:01:25Z"
     },
@@ -55492,7 +55299,7 @@
         },
         "description": "## Context / Problem\n\nThe multi-project model changes things a reader currently learns from the docs as single-project facts: `docs/jira-sync-setup.md:74` presents `project` as one config line and has no section on multiple projects, `docs/config.md:216-260` documents the `[jira]` block as a single scalar project, and `docs/migrations.md` describes the ensure registry without the two units this epic adds. A user upgrading a client store also needs to know what the new `required_capabilities` entry means for older binaries in their fleet. None of that is documented by the implementation stories, which own code and tests only.\n\n## Approach\n\nDocument the shipped behaviour and record the architectural decision. The ADR is warranted rather than decorative because two decisions here are load-bearing, non-obvious, and expensive to reverse: that the project set is a property of the **store** rather than of a repo, and that the legacy migration writes **no ticket events**. Both were chosen against plausible alternatives \u2014 per-repo project lists and an EDIT-per-ticket backfill \u2014 and a future reader who does not know why will be tempted back toward them.\n\nThe ADR is `docs/adr/0097-*` \u2014 the next free number after `0096-pandoc-corpus-verification-boundary.md` (the current maximum; the earlier `0062` slot is already taken by `0062-pagination-stall-aborts-past-fail-open.md`). It records the shared-`prev_snapshot` reasoning for store ownership, the short-lock-budget reasoning for the event-free migration, and the conditional-stamp reasoning for compatibility. It also notes the relationship to ADR 0060, whose churn constraint the mapping satisfies by construction.\n\nDocumentation updates cover the mapping and its `bridge projects` verb, the tri-state project field, the repos field, the two ensure units, and the upgrade note for fleets running mixed binary versions.\n\n## Scope\n\n- `docs/adr/0097-many-to-many-tracker-projects.md` (new)\n- `docs/jira-sync-setup.md`\n- `docs/config.md`\n- `docs/migrations.md`\n- `docs/user-guide.md`\n- `docs/ticket-model.md`\n\n## Testing\n\nNo `## Testing` section beyond this note: this story adds no testable behaviour \u2014 it is documentation and an ADR, which `rebar explain plan` names as a legitimately test-free change class. Verification is by the repository's existing documentation gates rather than by new tests, and the acceptance criteria below name the command that checks each claim.\n\n## Acceptance Criteria\n\n- [x] `docs/adr/0097-many-to-many-tracker-projects.md` exists and records the store-ownership,\n      event-free-migration, and conditional-stamp decisions with their rejected alternatives; checked\n      by reading the file and confirming each of the three decisions names what it was chosen over.\n- [x] The Jira sync and config docs describe the project mapping and no longer present a single\n      scalar project as the only option; checked by confirming no remaining passage states the\n      single-project constraint as current behaviour.\n- [x] `docs/migrations.md` lists both new ensure units alongside the existing built-ins; checked by\n      confirming each registered id appears in the doc.\n- [x] The docs state what the `multi-project-bridge` capability means for an older binary and what an\n      operator does about it; checked by confirming the upgrade note names both the fail-closed\n      behaviour and the remedy.\n- [x] The generated CLI reference includes `bridge projects`; checked by running the repository's\n      documentation generation and confirming the verb appears without a manual edit.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Document the multi-project model and record ADR 0062"
       },
       "created_at": "2026-08-08T03:44:53Z",
@@ -59324,10 +59131,24 @@
     },
     "7b9a-f855-b2e4-49f9": {
       "baseline": {
-        "assignee": null,
-        "description": "Follow-up from d19d LLM-Review (Gerrit change 1776, advisory comments \u2014 d19d landed with LLM-Review +1).\n\nFour advisory findings to harden the many-to-many outbound path:\n\n1. (correctness) Case-sensitivity mismatch: the create-path membership check in outbound_differ._compute_outbound_create_mutation uses `target not in mapping.projects` (case-SENSITIVE), while the applier's cross-project guard normalizes both sides to uppercase. A bridge_project differing in case from the mapping key (e.g. 'b' vs 'B') would suppress the create but pass the guard. Jira project keys are canonically uppercase and the mapping is seeded from them, so this does not trigger in practice, but the two paths should agree. Make the create-path check case-insensitive (or normalize both consistently).\n\n2. (tests) The applier's new many-to-many guard branch (list(read_projects(repo_root).keys()) or _project fed to _cross_project_targets) is only unit-tested at the pure helper level with a literal set; the store-loading wiring in the caller is not exercised end-to-end. Add an integration test that seeds projects.json and drives the guard through the caller.\n\n3. (tests) run_differs newly threads load_mapping(repo_root) into the outbound diff; the comment asserts a malformed projects.json fails closed (ValueError aborts the pass) but there is no test at the run_differs seam proving it. Add one.\n\n4. (correctness) The projects mapping is read twice from disk per pass \u2014 load_mapping in run_differs (create resolution) and read_projects in applier (guard set). A mid-pass projects.json change could make them disagree. Consider threading one read through, or accept + document (single-pass window; projects.json changes are rare CLI writes). Low priority.\n\nNone are regressions; the create-path resolution is new behavior gated on a seeded mapping (not live until a store seeds projects.json).",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "Follow-up from d19d LLM-Review (Gerrit change 1776, advisory comments \u2014 d19d landed with LLM-Review +1). Hardens the many-to-many outbound path for the four advisory findings below. None are live-behaviour regressions (the create-path resolution is gated on a seeded mapping), so this is defensive alignment + test depth.\n\n## Problem\n\n1. **(correctness) Case-sensitivity mismatch on the create path.** `outbound_differ._compute_outbound_create_mutation` suppresses a create with `target not in mapping.projects` \u2014 a **case-SENSITIVE** membership test (`src/rebar/_engine/rebar_reconciler/outbound_differ.py:585`). The applier's cross-project guard normalizes both sides to uppercase (`apply_inbound_records`/`applier._cross_project_targets`, `applier.py:247-262` `.upper()`). A `bridge_project` differing only in case from the mapping key (`\"b\"` vs `\"B\"`) is suppressed on the create path yet passes the applier guard \u2014 the two paths disagree. Jira keys are canonically uppercase so it does not fire in practice, but the paths must agree.\n2. **(tests) Applier guard store-loading wiring is not exercised end-to-end.** The many-to-many guard branch `list(read_projects(repo_root).keys()) or _project` (`applier.py:618`) is only unit-tested at the pure-helper level (`_cross_project_targets` with a literal set). The store-loading path through the caller (`apply()` reading a seeded `projects.json`) has no test.\n3. **(tests) The `run_differs` load_mapping seam has no fail-closed test.** `_run_differs_outbound` threads `projects_store.load_mapping(repo_root)` into the outbound diff (`run_differs.py:471`); the contract is that a MALFORMED `projects.json` fails closed (ValueError aborts the pass). `load_mapping`'s ValueError is unit-tested in isolation, but nothing proves `run_differs` lets it propagate through the seam.\n4. **(low priority, accept + document) The mapping is read twice per pass** \u2014 `load_mapping` in the outbound seam (create resolution) and `read_projects` in the applier guard. A mid-pass `projects.json` change could make them disagree. Accepted: `projects.json` writes are rare operator CLI actions and a pass is a short single window; document the assumption rather than thread one read through.\n\n## Approach\n\n**Finding 1 (fix, `outbound_differ.py`).** Make the create-path membership test case-insensitive and align it with the applier's normalization. Resolve the ticket's target, then match it against the mapping keys case-insensitively; when it matches, stamp the **canonical mapping key** (not the raw `bridge_project` case) so the transport routes to the real project key. When it does not match (stale/typo binding) or the ticket is not synced, emit no create \u2014 the existing suppression contract. Replace:\n\n```python\ntarget = projects_store.resolve_project(ticket, mapping)\nif not target or target not in mapping.projects:\n    return\ncreate_fields[_BRIDGE_TARGET_PROJECT_KEY] = target\n```\n\nwith a case-insensitive canonical-key lookup (`next((k for k in mapping.projects if k.upper() == target.upper()), None)`), stamping the canonical key.\n\n**Finding 2 (test, `test_applier_cross_project_guard.py`).** Add an integration test that writes a seeded `projects.json` (two projects) under `tmp_path`'s `.tickets-tracker/.bridge_state/` and drives `applier.apply()` (repo_root=tmp_path) with an update whose key is foreign to the seeded set \u2014 asserting the guard refuses before any write \u2014 and a companion asserting a key IN the seeded set is allowed. This exercises the real `read_projects(repo_root)` store-loading wiring through the caller, not the pure helper.\n\n**Finding 3 (test, `test_outbound_multi_project.py`).** Add a `run_differs`-seam test: write a MALFORMED `projects.json` under `tmp_path`, build a minimal ctx (scoped pass so binding recovery is skipped, empty `local_tickets`), call `run_differs._run_differs_outbound(ctx, [], backend)`, and assert it raises `ValueError` \u2014 proving the seam threads `load_mapping(repo_root)` and fails closed rather than degrading silently.\n\n**Finding 4 (document).** Add a short code comment at the outbound seam noting the two-read single-pass-window assumption is accepted (rare CLI writes); no behaviour change.\n\n## Acceptance criteria\n\n- [x] The create-path membership check in `outbound_differ.py` is case-insensitive; a ticket whose `bridge_project` matches a mapping key case-insensitively (e.g. `\"b\"` vs key `\"B\"`) emits a create stamped with the canonical mapping key, and a genuinely-absent project still suppresses the create. Proven by a held-out RED test in `test_outbound_multi_project.py`.\n- [x] An integration test in `test_applier_cross_project_guard.py` seeds `projects.json` and drives `apply()` through the store-loading guard wiring (foreign key refused, member key allowed).\n- [x] A `run_differs`-seam test proves a malformed `projects.json` aborts the outbound phase with `ValueError` (fail-closed).\n- [x] Finding 4 is documented as accepted at the outbound seam (comment); no behaviour change.\n- [x] `make lint`, `make typecheck`, and the touched reconciler test modules pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "M2M outbound: case-insensitive project membership + guard-wiring test depth"
       },
       "created_at": "2026-08-14T15:42:29Z",
@@ -69990,7 +69811,7 @@
         },
         "description": "## Context / Problem\nThe live Jira DC harness cell `tests/external/live_jira_dc/test_store_copy_isolation.py::test_the_store_copy_is_complete_and_scrubbed` FAILS on current origin/main:\n\n    AssertionError: binding/snapshot artifacts survived the scrub: ['.bridge_state']\n\nObserved in the 'jira DC harness smoke' job of Live External Integration run 31807853902 (job 94790999602), 2026-08-14, against origin/main. The J11 store-copy fixture scrubs `.bridge_state*` from the copied store, but the artifact survives into the copy the isolation cell asserts is fully scrubbed, muddying the live DC signal for unrelated work.\n\n## Root cause (regression origin)\nThe `dc_store_copy_repo` fixture (`tests/external/live_jira_dc/_dc_fixtures.py`) scrubs `.bridge_state*`, commits, and THEN calls `run_ensures()` to converge the `git archive` copy into a writable store. Commit 72731d3745 (2026-08-13, ticket 462d / epic 0303) added the `projects-seed` ensure unit (`rebar._store.project_ensures.seed_projects_mapping_unit`), which unconditionally re-creates and COMMITS `.bridge_state/projects.json` whenever its tree-check (`git show tickets:.bridge_state/projects.json`) misses \u2014 which is exactly the state the scrub leaves. That seed unit post-dates the J11 scrub (2026-08-07), so converging the copy silently resurrects the cache the scrub had removed. Before epic 0303, `run_ensures` created nothing under `.bridge_state`, so the scrub held.\n\n## Approach\nExtract the scrub into a small module-level helper `scrub_bridge_state(tracker, *, commit=False)` in `_dc_fixtures.py` (glob-matched, as before). Call it in the original position, and AGAIN after `run_ensures` converges the store \u2014 this second pass commits the removal so the `projects-seed` unit's resurrected `.bridge_state/projects.json` is removed from both the worktree and the tickets tree. This is a principled fix (re-scrub the whole `.bridge_state*` glob after convergence) rather than special-casing one filename, and it keeps the `.env-id` store marker that `run_ensures` creates intact.\n\n## Scope\n- `tests/external/live_jira_dc/_dc_fixtures.py` \u2014 add `scrub_bridge_state` helper; re-scrub after `run_ensures`.\n- `tests/unit/test_dc_store_copy_fetch_diagnostics.py` \u2014 add a fast repo-tier regression test: the `projects-seed` unit resurrects `.bridge_state/projects.json`, and the committing re-scrub removes it (worktree + tickets tree).\n\n## Testing\n- Fast unit test (`TestBridgeStateScrub`) drives the real `seed_projects_mapping_unit` to reproduce the resurrection (negative control) and asserts the post-converge scrub leaves no `.bridge_state*` and a clean git tree \u2014 no live harness needed.\n- The live cell `test_the_store_copy_is_complete_and_scrubbed` is the ultimate check; it runs in the operator-dispatched DC-harness job (~1h), not a per-commit gate.\n\n## Acceptance Criteria\n- [x] The store-copy scrub removes `.bridge_state` (and any equivalent binding/snapshot cache) so `test_the_store_copy_is_complete_and_scrubbed` passes in the live DC-harness job \u2014 verified by the re-scrub after `run_ensures` and the fast unit regression test in `tests/unit/test_dc_store_copy_fetch_diagnostics.py` (Gerrit change 1783 / commit 716454cbe5, merged). [operator-attested] live DC-harness confirmation is deferred to the operator's next dispatched run.\n- [x] A root-cause note explains why `.bridge_state` began surviving the scrub (regression origin) \u2014 recorded in this description (## Root cause) and as a ticket comment.\n\n## Notes\nIndependent of the rich-text epic (vigilant-erasable-pony); does NOT touch `test_dc_rich_text_live.py` (owned concurrently by graywolf-land).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Live DC store-copy scrub leaves .bridge_state behind (test_store_copy_isolation regression)"
       },
       "created_at": "2026-08-14T15:42:34Z",
@@ -74964,271 +74785,15 @@
     "9d7c-081b-28ab-48d3": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Summary",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "MCP reconcile tool runs Jira-MUTATING bootstrap modes with zero gating, even under REBAR_MCP_READONLY=1. Verified LIVE (incident, remediated): a reconcile call with mode=bootstrap-strict from a sandboxed temp store, readonly server, executed against real Jira and created 19 real issues (DIG-5615..DIG-5633; all deleted, deletion verified by JQL).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Reproduction Steps",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(verified on installed 0.4.0 == HEAD)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. Export REBAR_MCP_READONLY=1 and build the MCP server (build_server()).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. Call tool reconcile with {\"mode\": \"bootstrap-strict\"} (acli installed + credentialed).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. Observe the pass runs and applies real Jira mutations (OK: applied 10 of 993).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Expected vs Actual",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Expected: any Jira-mutating mode requires REBAR_MCP_ALLOW_RECONCILE_LIVE=1; a readonly server exposes at most reconcile-check/dry-run.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Actual: bootstrap-strict/bootstrap-throttle mutate real Jira ungated under readonly; only mode==\"live\" is checked.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Source",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- src/rebar/mcp_server.py:271-276 \u2014 gate checks only the literal string \"live\".",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- src/rebar/_engine/rebar_reconciler/mode.py:106-112 \u2014 MODE_CAPS: BOOTSTRAP_STRICT=10, BOOTSTRAP_THROTTLE=100 APPLIED mutations/pass; only RECONCILE_CHECK/DRY_RUN are cap-0.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Note dry-run is not a pure read either: it writes bridge_state/ and the invariants path files local bug tickets.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Fix direction",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Gate by capability, not string: parse the mode via the Mode enum and require the env var for any mode whose MODE_CAPS != 0; under _readonly(), restrict reconcile to cap-0 modes (or hide it). Correct docstrings + CLAUDE.md (\"'live' mutates Jira\" is dangerously incomplete \u2014 also __init__.py:404-409, tracked with bug frog-oryx-strut).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Suggested RED test",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Parametrize all five modes x {readonly, non-readonly} x {with, without REBAR_MCP_ALLOW_RECONCILE_LIVE} with a fake acli on PATH that fails loudly if executed; assert only cap-0 modes pass without the env var and that readonly blocks mutating modes before any acli invocation. Never real credentials in tests.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] bootstrap-strict/bootstrap-throttle (and live) require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 over MCP",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Under REBAR_MCP_READONLY=1 no Jira-mutating reconcile mode is callable",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Invalid mode strings produce a clean tool error (not a crash)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] RED test matrix above lands first and goes GREEN with the fix",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Docstrings/CLAUDE.md updated to name all mutating modes",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/highest_new.svg",
-          "id": "1",
-          "name": "Highest",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/1"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Summary\nMCP reconcile tool runs Jira-MUTATING bootstrap modes with zero gating, even under REBAR_MCP_READONLY=1. Verified LIVE (incident, remediated): a reconcile call with mode=bootstrap-strict from a sandboxed temp store, readonly server, executed against real Jira and created 19 real issues (DIG-5615..DIG-5633; all deleted, deletion verified by JQL).\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD)\n1. Export REBAR_MCP_READONLY=1 and build the MCP server (build_server()).\n2. Call tool reconcile with {\"mode\": \"bootstrap-strict\"} (acli installed + credentialed).\n3. Observe the pass runs and applies real Jira mutations (OK: applied 10 of 993).\n\n## Expected vs Actual\n- Expected: any Jira-mutating mode requires REBAR_MCP_ALLOW_RECONCILE_LIVE=1; a readonly server exposes at most reconcile-check/dry-run.\n- Actual: bootstrap-strict/bootstrap-throttle mutate real Jira ungated under readonly; only mode==\"live\" is checked.\n\n## Source\n- src/rebar/mcp_server.py:271-276 \u2014 gate checks only the literal string \"live\".\n- src/rebar/_engine/rebar_reconciler/mode.py:106-112 \u2014 MODE_CAPS: BOOTSTRAP_STRICT=10, BOOTSTRAP_THROTTLE=100 APPLIED mutations/pass; only RECONCILE_CHECK/DRY_RUN are cap-0.\n- Note dry-run is not a pure read either: it writes bridge_state/ and the invariants path files local bug tickets.\n\n## Fix direction\nGate by capability, not string: parse the mode via the Mode enum and require the env var for any mode whose MODE_CAPS != 0; under _readonly(), restrict reconcile to cap-0 modes (or hide it). Correct docstrings + CLAUDE.md (\"'live' mutates Jira\" is dangerously incomplete \u2014 also __init__.py:404-409, tracked with bug frog-oryx-strut).\n\n## Suggested RED test\nParametrize all five modes x {readonly, non-readonly} x {with, without REBAR_MCP_ALLOW_RECONCILE_LIVE} with a fake acli on PATH that fails loudly if executed; assert only cap-0 modes pass without the env var and that readonly blocks mutating modes before any acli invocation. Never real credentials in tests.\n\n## Acceptance Criteria\n- [ ] bootstrap-strict/bootstrap-throttle (and live) require REBAR_MCP_ALLOW_RECONCILE_LIVE=1 over MCP\n- [ ] Under REBAR_MCP_READONLY=1 no Jira-mutating reconcile mode is callable\n- [ ] Invalid mode strings produce a clean tool error (not a crash)\n- [ ] RED test matrix above lands first and goes GREEN with the fix\n- [ ] Docstrings/CLAUDE.md updated to name all mutating modes",
+        "priority": "Highest",
+        "status": "Done",
         "summary": "MCP reconcile: bootstrap modes mutate real Jira ungated, even under REBAR_MCP_READONLY=1"
       },
       "baseline_advanced_at": "2026-07-19T00:09:33Z",
       "created_at": "2026-06-25T23:09:29Z",
       "jira_key": "REB-250",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:09:29Z"
     },
@@ -126836,9 +126401,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nRewritten after premise refutation (see comments): the observed fold-horizon race (bridge write + concurrent compact \u2192 union merge lands an event timestamped before the snapshot, absent from `source_event_uuids`) is the known RC2 class of ADR-0035, and the repair door EXISTS and works: `rebar fsck --repair-snapshots` / `fsck --repair` \u2192 `compact.rebuild_snapshot_from_full_log` (full HLC-ordered log incl. `.retired`, `.snapshot-rebuild.bak` sentinel, fail-closed guard) \u2014 it healed the live incident on e27c-5a20-cd13-43b2.\n\nThe REAL defect (verified in a RED run against current main): **the next natural fold LAUNDERS the orphan.** When a ticket with an un-cited pre-snapshot event crosses the compaction threshold, the fold's whole-dir enumeration RETIRES the orphan file and CITES its uuid in the new snapshot's `source_event_uuids` \u2014 but the replay's positional skip means its effect is NOT in the compiled state. fsck then reports clean (uuid cited, file retired): repairable damage silently becomes unrepairable-by-tooling loss at the first threshold crossing after the race. The existing repair door only works in the window BEFORE that fold. Secondary gap: (G4) `fsck --repair-snapshots` rebuilds on ANY orphan type, bypassing the `_AUTO_RECOVER` vs `_HUMAN_TRIAGE` routing that `fsck --repair` enforces (fsck_repair.py:38-41, applied at :202).\n\n## Proposed fix\n1. **Stop the laundering (G1, the bug):** the natural fold (compact_txn) must EXCLUDE orphans from both retirement and `source_event_uuids` citation. The exclusion predicate is exactly fsck's orphan definition (fsck_scan.py:373-386), anchored to a PRIOR snapshot already present in the fold set: an active event whose filename sorts before an existing folded-in SNAPSHOT's filename AND whose uuid is absent from THAT snapshot's `source_event_uuids`. Extract/reuse that predicate as a shared helper so fold and fsck cannot disagree. On a first fold (no prior SNAPSHOT in the dir) the predicate matches nothing and every event folds normally \u2014 the new snapshot's own citation list (which the fold is building) plays no role in the predicate. An excluded orphan stays an unretired, un-cited file, so the fsck ORPHAN_EVENT finding and the repair window survive indefinitely. The fold does NOT absorb orphans itself (that would bypass the type routing); it defers to the repair door. Ordering note: `rebuild_snapshot_from_full_log` replays the full log in HLC total order, so absorbed order-sensitive events are deterministic there \u2014 no new ordering semantics are introduced by this change.\n2. **Routing parity (G4):** `--repair-snapshots` applies the same `_AUTO_RECOVER`/`_HUMAN_TRIAGE` routing instead of rebuilding unconditionally, so the two fsck repair paths cannot disagree about order-sensitive orphans.\n\n## Scope\n- src/rebar/_commands/compact_txn.py \u2014 fold enumeration excludes un-cited pre-snapshot events from retirement + citation (defer guard).\n- src/rebar/_commands/fsck_repair.py \u2014 routing parity for --repair-snapshots (the `_AUTO_RECOVER_ORPHAN_TYPES`/`_HUMAN_TRIAGE_ORPHAN_TYPES` split already applied by `fsck --repair` at fsck_repair.py:202).\n- tests/unit/test_fold_orphan_laundering.py \u2014 new: RED reproduction of the laundering (orphan retired+cited+effect-lost today), exclusion behavior, repair-window survival across a threshold-crossing fold.\n\n## Acceptance criteria\n- [ ] A ticket with an un-cited pre-snapshot COMMENT that crosses the compaction threshold keeps the orphan unretired/un-cited and fsck still reports ORPHAN_EVENT after the fold; `fsck --repair-snapshots` afterward restores the comment to `show`; integration test.\n- [ ] A first fold of a ticket with NO prior snapshot folds every event normally (nothing excluded); a re-fold of a healthy ticket whose prior snapshot cites all pre-snapshot events likewise excludes nothing; guard tests.\n- [ ] `--repair-snapshots` no longer rebuilds past `_HUMAN_TRIAGE` types; guard test.\n- [ ] `make lint`/`make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\n**Already-laundered snapshots (historical damage):** folds that happened BEFORE this fix retired+cited orphans without applying their effect; fsck reports those tickets clean. The data is still recoverable \u2014 retired files are preserved and `rebuild_snapshot_from_full_log` replays the full log including `.retired` \u2014 but DETECTION requires an expensive full-log-vs-snapshot state comparison, filed as follow-up `trainsick-fleeting-avocet` (2aaf-90b9-4a31-43bf, linked discovered_from). Known live incidents: one (e27c, healed before any fold crossed it). Writer-path auto-detection after union merge (G3 \u2014 separate follow-up if wanted); doctor-side ORPHAN_EVENT routing (doctor.py has no snapshot/orphan scan \u2014 orphan detection and repair are fsck's domain via fsck_repair.py, and adding a duplicate scan to doctor would be a parallel implementation; users are directed to `fsck --repair`); bridge/Jira duplicate policy; crash-atomicity (mantis, landed); dirty-tree repair (dormouse, landed).",
+        "description": "## Context / Problem\nRewritten after premise refutation (see comments): the observed fold-horizon race (bridge write + concurrent compact \u2192 union merge lands an event timestamped before the snapshot, absent from `source_event_uuids`) is the known RC2 class of ADR-0035, and the repair door EXISTS and works: `rebar fsck --repair-snapshots` / `fsck --repair` \u2192 `compact.rebuild_snapshot_from_full_log` (full HLC-ordered log incl. `.retired`, `.snapshot-rebuild.bak` sentinel, fail-closed guard) \u2014 it healed the live incident on e27c-5a20-cd13-43b2.\n\nThe REAL defect (verified in a RED run against current main): **the next natural fold LAUNDERS the orphan.** When a ticket with an un-cited pre-snapshot event crosses the compaction threshold, the fold's whole-dir enumeration RETIRES the orphan file and CITES its uuid in the new snapshot's `source_event_uuids` \u2014 but the replay's positional skip means its effect is NOT in the compiled state. fsck then reports clean (uuid cited, file retired): repairable damage silently becomes unrepairable-by-tooling loss at the first threshold crossing after the race. The existing repair door only works in the window BEFORE that fold. Secondary gap: (G4) `fsck --repair-snapshots` rebuilds on ANY orphan type, bypassing the `_AUTO_RECOVER` vs `_HUMAN_TRIAGE` routing that `fsck --repair` enforces (fsck_repair.py:38-41, applied at :202).\n\n## Proposed fix\n1. **Stop the laundering (G1, the bug):** the natural fold (compact_txn) must EXCLUDE orphans from both retirement and `source_event_uuids` citation. The exclusion predicate is exactly fsck's orphan definition (fsck_scan.py:373-386), anchored to a PRIOR snapshot already present in the fold set: an active event whose filename sorts before an existing folded-in SNAPSHOT's filename AND whose uuid is absent from THAT snapshot's `source_event_uuids`. Extract/reuse that predicate as a shared helper so fold and fsck cannot disagree. On a first fold (no prior SNAPSHOT in the dir) the predicate matches nothing and every event folds normally \u2014 the new snapshot's own citation list (which the fold is building) plays no role in the predicate. An excluded orphan stays an unretired, un-cited file, so the fsck ORPHAN_EVENT finding and the repair window survive indefinitely. The fold does NOT absorb orphans itself (that would bypass the type routing); it defers to the repair door. Ordering note: `rebuild_snapshot_from_full_log` replays the full log in HLC total order, so absorbed order-sensitive events are deterministic there \u2014 no new ordering semantics are introduced by this change.\n2. **Routing parity (G4):** `--repair-snapshots` applies the same `_AUTO_RECOVER`/`_HUMAN_TRIAGE` routing instead of rebuilding unconditionally, so the two fsck repair paths cannot disagree about order-sensitive orphans.\n\n## Scope\n- src/rebar/_commands/compact_txn.py \u2014 fold enumeration excludes un-cited pre-snapshot events from retirement + citation (defer guard).\n- src/rebar/_commands/fsck_repair.py \u2014 routing parity for --repair-snapshots (the `_AUTO_RECOVER_ORPHAN_TYPES`/`_HUMAN_TRIAGE_ORPHAN_TYPES` split already applied by `fsck --repair` at fsck_repair.py:202).\n- tests/unit/test_fold_orphan_laundering.py \u2014 new: RED reproduction of the laundering (orphan retired+cited+effect-lost today), exclusion behavior, repair-window survival across a threshold-crossing fold.\n\n## Acceptance criteria\n- [x] A ticket with an un-cited pre-snapshot COMMENT that crosses the compaction threshold keeps the orphan unretired/un-cited and fsck still reports ORPHAN_EVENT after the fold; `fsck --repair-snapshots` afterward restores the comment to `show`; integration test.\n- [x] A first fold of a ticket with NO prior snapshot folds every event normally (nothing excluded); a re-fold of a healthy ticket whose prior snapshot cites all pre-snapshot events likewise excludes nothing; guard tests.\n- [x] `--repair-snapshots` no longer rebuilds past `_HUMAN_TRIAGE` types; guard test.\n- [x] `make lint`/`make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\n**Already-laundered snapshots (historical damage):** folds that happened BEFORE this fix retired+cited orphans without applying their effect; fsck reports those tickets clean. The data is still recoverable \u2014 retired files are preserved and `rebuild_snapshot_from_full_log` replays the full log including `.retired` \u2014 but DETECTION requires an expensive full-log-vs-snapshot state comparison, filed as follow-up `trainsick-fleeting-avocet` (2aaf-90b9-4a31-43bf, linked discovered_from). Known live incidents: one (e27c, healed before any fold crossed it). Writer-path auto-detection after union merge (G3 \u2014 separate follow-up if wanted); doctor-side ORPHAN_EVENT routing (doctor.py has no snapshot/orphan scan \u2014 orphan detection and repair are fsck's domain via fsck_repair.py, and adding a duplicate scan to doctor would be a parallel implementation; users are directed to `fsck --repair`); bridge/Jira duplicate policy; crash-atomicity (mantis, landed); dirty-tree repair (dormouse, landed).",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Natural fold launders ORPHAN_EVENTs (retires + cites without applying) \u2014 repairable race damage becomes silent loss; doctor lacks orphan routing"
       },
       "created_at": "2026-08-14T16:41:41Z",
@@ -127839,9 +127404,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nThe shared git-backed tickets store has chronically wedged under parallel multi-session writes. Proven chain (RCA on 6ccc-0577-198c-44fa, live recurrence on e72e-259d-5ee7-4e73): the operation-linked compaction sweep (rebar._commands.compact_trigger.maybe_compact -> detached worker -> compact_txn._compact_locked) mutates the worktree (SNAPSHOT write, *.retired renames, .archived deletions) BEFORE its git commit, with no rollback on worker death. The leftover dirty tree then makes rebar._store.sync._union_merge's `git merge origin/tickets` abort in two variants: (a) untracked files origin wants to create (recovered by Gerrit change 1757, ticket small-delicious-loris), and (b) tracked-file deletions/modifications (\"Your local changes ... would be overwritten\") \u2014 unhandled. The abort strands local ticket commits off origin (P0 data-loss risk) and the dirty tree breaks every plan-review/close attestation (strict `git status --porcelain` head check). Root residue: 119 `*/.archived` and 126 `*/.write.lock` runtime markers are TRACKED in HEAD (committed before their gitignore patterns existed; gitignore never un-tracks), so routine marker churn shows as tracked dirt forever. Interim mitigation active: user-config compact.trigger=off (recorded on e72e-259d-5ee7-4e73).\n\nThis epic makes the store wedge-PROOF (the dirty state is never produced), SELF-HEALING (sync and push recover the known abort classes in place), OPERATOR-REPAIRABLE (fsck detects the class, doctor repairs it under the write lock), and SCALABLE (store-wide scans default to active tickets, with an override flag reaching archived ones).\n\n## Child decomposition (responsibilities, dependency-ordered)\n- **Untrack per-ticket runtime markers** (`*/.archived`, `*/.write.lock`) from the tickets branch via an idempotent ensure unit, and make the reader self-heal a missing marker cache \u2014 removes the tracked-dirt class at its source; first because every later recovery then only faces untracked artifacts.\n- **Crash-atomic compaction fold** (bug compulsory-pernickety-mantis): the fold commits as one unit with rollback on failure, plus a sweep-start crash-recovery preamble that reverts an abandoned partial fold under the write lock \u2014 the dirty tree is never produced. Discrimination of the two half-fold states is by an INTENT JOURNAL (a commit-pending sentinel): before its first worktree mutation the fold writes an intent record (ticket id, snapshot path, folded source list) OUTSIDE the worktree (under the tracker's git dir, so the sentinel itself can never be tree dirt), and removes it on every completed outcome \u2014 after the fold's commit succeeds, AND on the `_retire_folded_sources` failure paths (both the clean-rollback return and the intentionally-retained SNAPSHOT_INCONSISTENT state it keeps for `fsck --repair-snapshots`). The recovery preamble therefore reverts ONLY when it finds a live journal whose recorded snapshot is still uncommitted (rename `*.retired` sources back, unlink the uncommitted snapshot, unstage the ticket dir); a journal whose snapshot is already in HEAD means the crash hit between commit and journal removal, so recovery just discards the journal; and the retained SNAPSHOT_INCONSISTENT state has NO journal by construction, so the preamble never touches it \u2014 `fsck --repair-snapshots` remains its sole owner.\n- **Reconverge tracked-artifact recovery** (variant b): `_union_merge` also recovers the \"local changes would be overwritten\" abort for store-artifact paths (restore worktree-deleted tracked files from HEAD, quarantine modified ones), retry once \u2014 depends on change 1757's untracked-path quarantine landing (ticket small-delicious-loris).\n- **Push-recovery parity** (bug sulfuryl-suicidal-osprey): the non-fast-forward push recovery path gets the same untracked-collision + tracked-deletion recovery as reconverge.\n- **fsck detection + doctor repair**: `rebar fsck` reports the dirty-tree/stale-lock class (tracked deletions, untracked regenerable leftovers, orphaned locks, orphaned .tmp-event-*); `rebar doctor --repair` heals what is safe under the write lock (restore, quarantine, reclaim), never touching `.tmp-event-*` content.\n- **Active-only scan scoping**: store-wide walks (fsck scan, compact-all sweep) default to non-archived tickets and accept `--include-archived` to reach the full store, so scan cost tracks the ACTIVE working set as the store grows.\n\n## Acceptance Criteria\n- [ ] A compaction fold interrupted at any point between its first worktree mutation and its commit leaves the tracker tree clean after the next sweep or doctor run; proxy: kill-mid-fold unit test asserts `git status --porcelain` is empty post-recovery.\n- [ ] A reconverge facing EITHER abort variant on regenerable store artifacts completes the union merge keeping both parents, with no local commit orphaned; proxy: RED->GREEN tests for both variants in tests/unit.\n- [ ] `git ls-files '*/.archived' '*/.write.lock'` in the tracker returns empty after the ensure unit runs, and marker add/remove churn no longer appears in `git status`; proxy: ensure-unit test on a fixture store seeded with tracked markers.\n- [ ] `rebar fsck` names each dirty-tree/stale-lock finding class and `rebar doctor --repair` heals a seeded wedge end-to-end; proxy: integration test seeds all classes and asserts clean status + converged merge afterward.\n- [ ] `rebar fsck` and `rebar compact-all` default to active tickets and reach archived ones only with `--include-archived`; proxy: test on a fixture with archived+active tickets counts visited dirs both ways.\n- [ ] The interim user-config `compact.trigger=off` mitigation is removed once the crash-atomicity child closes; proxy: closing comment on e72e-259d-5ee7-4e73 records the removal.",
+        "description": "## Context / Problem\nThe shared git-backed tickets store has chronically wedged under parallel multi-session writes. Proven chain (RCA on 6ccc-0577-198c-44fa, live recurrence on e72e-259d-5ee7-4e73): the operation-linked compaction sweep (rebar._commands.compact_trigger.maybe_compact -> detached worker -> compact_txn._compact_locked) mutates the worktree (SNAPSHOT write, *.retired renames, .archived deletions) BEFORE its git commit, with no rollback on worker death. The leftover dirty tree then makes rebar._store.sync._union_merge's `git merge origin/tickets` abort in two variants: (a) untracked files origin wants to create (recovered by Gerrit change 1757, ticket small-delicious-loris), and (b) tracked-file deletions/modifications (\"Your local changes ... would be overwritten\") \u2014 unhandled. The abort strands local ticket commits off origin (P0 data-loss risk) and the dirty tree breaks every plan-review/close attestation (strict `git status --porcelain` head check). Root residue: 119 `*/.archived` and 126 `*/.write.lock` runtime markers are TRACKED in HEAD (committed before their gitignore patterns existed; gitignore never un-tracks), so routine marker churn shows as tracked dirt forever. Interim mitigation active: user-config compact.trigger=off (recorded on e72e-259d-5ee7-4e73).\n\nThis epic makes the store wedge-PROOF (the dirty state is never produced), SELF-HEALING (sync and push recover the known abort classes in place), OPERATOR-REPAIRABLE (fsck detects the class, doctor repairs it under the write lock), and SCALABLE (store-wide scans default to active tickets, with an override flag reaching archived ones).\n\n## Child decomposition (responsibilities, dependency-ordered)\n- **Untrack per-ticket runtime markers** (`*/.archived`, `*/.write.lock`) from the tickets branch via an idempotent ensure unit, and make the reader self-heal a missing marker cache \u2014 removes the tracked-dirt class at its source; first because every later recovery then only faces untracked artifacts.\n- **Crash-atomic compaction fold** (bug compulsory-pernickety-mantis): the fold commits as one unit with rollback on failure, plus a sweep-start crash-recovery preamble that reverts an abandoned partial fold under the write lock \u2014 the dirty tree is never produced. Discrimination of the two half-fold states is by an INTENT JOURNAL (a commit-pending sentinel): before its first worktree mutation the fold writes an intent record (ticket id, snapshot path, folded source list) OUTSIDE the worktree (under the tracker's git dir, so the sentinel itself can never be tree dirt), and removes it on every completed outcome \u2014 after the fold's commit succeeds, AND on the `_retire_folded_sources` failure paths (both the clean-rollback return and the intentionally-retained SNAPSHOT_INCONSISTENT state it keeps for `fsck --repair-snapshots`). The recovery preamble therefore reverts ONLY when it finds a live journal whose recorded snapshot is still uncommitted (rename `*.retired` sources back, unlink the uncommitted snapshot, unstage the ticket dir); a journal whose snapshot is already in HEAD means the crash hit between commit and journal removal, so recovery just discards the journal; and the retained SNAPSHOT_INCONSISTENT state has NO journal by construction, so the preamble never touches it \u2014 `fsck --repair-snapshots` remains its sole owner.\n- **Reconverge tracked-artifact recovery** (variant b): `_union_merge` also recovers the \"local changes would be overwritten\" abort for store-artifact paths (restore worktree-deleted tracked files from HEAD, quarantine modified ones), retry once \u2014 depends on change 1757's untracked-path quarantine landing (ticket small-delicious-loris).\n- **Push-recovery parity** (bug sulfuryl-suicidal-osprey): the non-fast-forward push recovery path gets the same untracked-collision + tracked-deletion recovery as reconverge.\n- **fsck detection + doctor repair**: `rebar fsck` reports the dirty-tree/stale-lock class (tracked deletions, untracked regenerable leftovers, orphaned locks, orphaned .tmp-event-*); `rebar doctor --repair` heals what is safe under the write lock (restore, quarantine, reclaim), never touching `.tmp-event-*` content.\n- **Active-only scan scoping**: store-wide walks (fsck scan, compact-all sweep) default to non-archived tickets and accept `--include-archived` to reach the full store, so scan cost tracks the ACTIVE working set as the store grows.\n\n## Acceptance Criteria\n- [x] A compaction fold interrupted at any point between its first worktree mutation and its commit leaves the tracker tree clean after the next sweep or doctor run; proxy: kill-mid-fold unit test asserts `git status --porcelain` is empty post-recovery.\n- [x] A reconverge facing EITHER abort variant on regenerable store artifacts completes the union merge keeping both parents, with no local commit orphaned; proxy: RED->GREEN tests for both variants in tests/unit.\n- [x] `git ls-files '*/.archived' '*/.write.lock'` in the tracker returns empty after the ensure unit runs, and marker add/remove churn no longer appears in `git status`; proxy: ensure-unit test on a fixture store seeded with tracked markers.\n- [x] `rebar fsck` names each dirty-tree/stale-lock finding class and `rebar doctor --repair` heals a seeded wedge end-to-end; proxy: integration test seeds all classes and asserts clean status + converged merge afterward.\n- [x] [operator-attested] `rebar fsck` and `rebar compact-all` default to active tickets and reach archived ones only with `--include-archived`; proxy: tests/unit/test_scan_scoping.py (merged 39de64871c) \u2014 test_fsck_default_skips_archived_and_flag_restores, test_ticket_dirs_defaults_to_active_only, and the compact-all sweep tests count visited dirs both ways on an archived+active fixture.\n- [x] [operator-attested] The interim user-config `compact.trigger=off` mitigation is removed once the crash-atomicity child closes; proxy: comment recorded on e72e-259d-5ee7-4e73 (AC-20 proxy record) \u2014 no compact.trigger key remains in any config and compact-sweep.stamp shows sweeps at defaults.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Wedge-proof tickets store: crash-atomic compaction, self-healing sync recovery, marker untracking, fsck/doctor repair, active-only scan scoping"
       },
       "created_at": "2026-08-14T04:07:51Z",
