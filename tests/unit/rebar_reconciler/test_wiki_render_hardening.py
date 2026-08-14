@@ -14,15 +14,10 @@ The third property is the one that makes the other two safe to ship: this story
 changes ROBUSTNESS only. Rendered output must be byte-identical to the landed
 renderer, so a hardening change can never quietly alter what lands in Jira.
 
-**Cost discipline.** Proving that third property over the whole committed corpus
-costs ~884 pandoc spawns — every renderable unit still traverses the real
-production ``_convert`` and installed Pandoc once, while the historical side is
-an immutable expected-output fixture. The clean baseline is ~32.6s for all 884
-production calls, roughly half the former double-render cost. The comparison
-remains split into fixed-size chunks — see :data:`_EQUIVALENCE_CHUNK` — so xdist
-can distribute the real conversions and no individual test approaches CI's
-per-test timeout. Every unit is still compared; only the duplicate subprocess
-oracle is gone.
+**Cost discipline.** The whole historical corpus remains byte-compared in Verify,
+but its production-side conversion is now supplied by committed real-Pandoc replay
+outputs. Version/fingerprint and representative product-path tests retain the live
+boundary. The weekly/manual external job performs all 1,383 real conversions.
 """
 
 from __future__ import annotations
@@ -53,6 +48,7 @@ pytestmark = pytest.mark.unit
 
 _CORPUS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_corpus"
 _LEGACY_OUTPUTS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_legacy_outputs.json"
+_REPLAY_OUTPUTS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_replay"
 _STRATA = ("code_arrow", "table", "prose")
 _EXPECTED_RENDERABLE_UNITS = 884
 
@@ -68,6 +64,7 @@ _GENERATOR_SPEC = importlib.util.spec_from_file_location(
 assert _GENERATOR_SPEC is not None and _GENERATOR_SPEC.loader is not None
 _GENERATOR = importlib.util.module_from_spec(_GENERATOR_SPEC)
 _GENERATOR_SPEC.loader.exec_module(_GENERATOR)
+_REPLAY_FIXTURES = _GENERATOR.load_replay_fixtures(_REPLAY_OUTPUTS)
 
 
 def _bodies() -> list[str]:
@@ -430,28 +427,6 @@ def _renderable_units() -> list[str]:
     return units
 
 
-# Every Nth renderable unit. 1 = the WHOLE committed corpus, which is what this
-# ships with: full coverage, so the AC is met literally rather than by sample.
-# The strata are walked in order (code_arrow, table, prose) so any stride still
-# spreads across all three.
-_EQUIVALENCE_STRIDE = 1
-
-# Units compared per test case. At stride 1 the corpus is 884 production Pandoc
-# calls (~32.6s clean for the full set). Fixed-size cases distribute that work
-# under xdist and bound one test independently of corpus growth. Tune this only to
-# trade case count against per-case cost; it changes nothing about what is compared.
-_EQUIVALENCE_CHUNK = 40
-
-
-def _equivalence_chunks() -> list[list[str]]:
-    """The sampled corpus, sliced into fixed-size batches of units."""
-    sampled = _renderable_units()[::_EQUIVALENCE_STRIDE]
-    return [sampled[i : i + _EQUIVALENCE_CHUNK] for i in range(0, len(sampled), _EQUIVALENCE_CHUNK)]
-
-
-_CHUNKS = _equivalence_chunks()
-
-
 def _legacy_entries() -> list[dict[str, Any]]:
     entries = _LEGACY_FIXTURE.get("units")
     if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
@@ -462,27 +437,30 @@ def _legacy_entries() -> list[dict[str, Any]]:
 _LEGACY_ENTRIES = _legacy_entries()
 
 
-def test_the_equivalence_chunks_cover_every_renderable_unit() -> None:
-    """Chunking must not quietly drop units — that would hollow out the check below.
-
-    Cheap and pandoc-free, so it is the one place the corpus-wide invariants live:
-    the chunks reassemble to exactly the sampled corpus, in order, and there are
-    enough units for the comparison to be evidence rather than a spot check. That
-    floor cannot sit inside a chunk, since no single chunk meets it.
-    """
+def test_static_replay_covers_every_landed_renderable_unit() -> None:
+    """The replay cannot quietly drop or reorder the 884 historical inputs."""
     units = _renderable_units()
     assert units, "the corpus produced no renderable units — fixture regression"
-    sampled = units[::_EQUIVALENCE_STRIDE]
-    assert [unit for chunk in _CHUNKS for unit in chunk] == sampled
-    assert len(sampled) == _EXPECTED_RENDERABLE_UNITS
-    assert all(len(chunk) <= _EQUIVALENCE_CHUNK for chunk in _CHUNKS)
+    assert len(units) == _EXPECTED_RENDERABLE_UNITS
 
-    assert _LEGACY_FIXTURE.get("schema_version") == 2
+    assert _LEGACY_FIXTURE.get("schema_version") == 3
     assert _LEGACY_FIXTURE.get("output_encoding") == "utf-8/base85"
     assert _LEGACY_FIXTURE.get("unit_count") == _EXPECTED_RENDERABLE_UNITS
+    assert _LEGACY_FIXTURE.get("replay") == {
+        "schema_version": 1,
+        "directory": "tests/fixtures/dc_wiki_replay",
+        "strata": list(_STRATA),
+        "verify_mode": "committed-static-outputs-plus-three-live-bodies",
+        "complete_live_mode": "external-integration-weekly-and-manual",
+    }
+    expected_pandoc = {
+        "version": _GENERATOR.LEGACY_PANDOC_VERSION,
+        "supported_platform_binary_sha256": _GENERATOR.SUPPORTED_PANDOC_BINARY_SHA256,
+    }
+    assert all(fixture.get("pandoc") == expected_pandoc for fixture in _REPLAY_FIXTURES)
     assert len(_LEGACY_ENTRIES) == _EXPECTED_RENDERABLE_UNITS
     expected_input_hashes = [entry.get("input_sha256") for entry in _LEGACY_ENTRIES]
-    assert expected_input_hashes == [_input_sha256(unit) for unit in sampled], (
+    assert expected_input_hashes == [_input_sha256(unit) for unit in units], (
         "legacy outputs are not aligned to the exact ordered prepared corpus"
     )
     decoded_outputs = [_expected_output(entry) for entry in _LEGACY_ENTRIES]
@@ -503,10 +481,8 @@ def test_the_installed_pandoc_matches_the_legacy_fixture_provenance() -> None:
     )
 
 
-@_NEEDS_PANDOC
-@pytest.mark.parametrize("chunk_index", range(len(_CHUNKS)))
-def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: int) -> None:
-    """Production path vs immutable pre-hardening bytes for the whole corpus.
+def test_static_replay_output_is_byte_identical_to_the_landed_renderer() -> None:
+    """Committed product output vs immutable pre-hardening bytes for all 884 units.
 
     This is what licenses the change: swapping ``subprocess.run`` for a ``Popen``
     + caller-side timeout + group reap must change WHEN pandoc is given up on,
@@ -514,23 +490,13 @@ def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: i
     isolates the changed function rather than the segmentation around it, which
     this story does not touch.
 
-    ``test_wiki_render_corpus.py`` drives the same bodies through ``_convert``
-    for its idempotence and no-decay assertions, so a rendering change would
-    surface there too — but only as "some property moved". This says the stronger
-    thing: the bytes are the same ones the landed renderer produced.
-
-    The committed outputs were generated once by the independent historical
-    contract in ``scripts/generate_dc_wiki_legacy_outputs.py``. They cannot follow
-    a mutable production format constant, while every production side still runs
-    the installed real Pandoc. One chunk per case keeps each test a small, fixed
-    fraction of the per-test timeout.
+    The independent legacy fixture cannot follow mutable production constants. The
+    new replay files were captured from the product converter and complete external
+    replay revalidates them against both supported binaries every week.
     """
-    pandoc = str(_PANDOC)
-    timeout = _pandoc_timeout()
-    offset = chunk_index * _EQUIVALENCE_CHUNK
-    for position, prepared in enumerate(_CHUNKS[chunk_index]):
-        expected = _expected_output(_LEGACY_ENTRIES[offset + position])
-        assert _convert(prepared, pandoc, timeout) == expected, (
-            f"corpus unit {offset + position} rendered differently from the landed "
-            f"renderer: {prepared!r}"
+    converter = _GENERATOR.StaticReplayConverter(_REPLAY_FIXTURES)
+    for position, prepared in enumerate(_renderable_units()):
+        expected = _expected_output(_LEGACY_ENTRIES[position])
+        assert converter(prepared, "committed-static-pandoc", None) == expected, (
+            f"corpus unit {position} rendered differently from the landed renderer: {prepared!r}"
         )

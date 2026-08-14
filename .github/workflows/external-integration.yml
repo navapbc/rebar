@@ -14,6 +14,8 @@ name: Live External Integration
 #                       (docker-compose.langfuse.yml, headless-init) and asserts a
 #                       review run emits a trace fetchable via the Langfuse API.
 #   * jira-dc-harness — the Jira Data Center harness smoke lane.
+#   * pandoc-corpus-replay — complete real-Pandoc corpus + settling replay on
+#                            Linux and macOS; routine Verify uses static outputs.
 #
 # THE LLM LANE IS A PROVIDER MATRIX, NOT AN AMBIENT DEFAULT (story f124). It previously
 # ran on whichever provider happened to hold a key, which in practice meant Anthropic
@@ -621,3 +623,24 @@ jobs:
       - name: Tear down the Jira DC harness
         if: always()
         run: cd tests/external/live_jira_dc && docker compose down -v
+
+  pandoc-corpus-replay:
+    name: Pandoc corpus replay (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: .github/python-version.txt
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install the pinned Pandoc test environment
+        run: uv sync --locked --extra dev
+      - name: Replay every Pandoc-bound corpus unit and settling pass
+        run: >-
+          uv run python scripts/generate_dc_wiki_legacy_outputs.py --check
