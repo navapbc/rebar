@@ -29,8 +29,10 @@ NOTHING from ``push``.
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -44,6 +46,14 @@ from rebar._store.push_classify import (
     _raise_if_strict,
     _transport_backoff,
 )
+
+# The untracked-overwrite recovery is PARITY with sync.py's reconverge (variant (a),
+# loris/1757, generalized by wolverine/1767): the PARSER and the quarantine PATH
+# arithmetic are pure (no subprocess), so they are shared from sync; the MOVER is
+# deliberately NOT — sync's `_quarantine_untracked` shells through sync's module-level
+# `_git`, which would bypass the late-bound `core._git` seam every function here keeps
+# for the ~25 `push._git` monkeypatch sites (see the module docstring).
+from rebar._store.sync import _quarantine_dir_under, _untracked_overwrite_paths
 
 # Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
 # reconverge). A timeout means another writer holds the lock, so we skip the merge and
@@ -172,6 +182,11 @@ def _recover_dirty_merge(
         f"Merge {remote_ref} (auto-reconcile, post-stash)",
     )
     if merge.returncode != 0:
+        # Untracked-overwrite collisions are the one recoverable abort class here
+        # (the reset above cleared TRACKED changes only): quarantine what git names,
+        # retry ONCE. Any other failure falls through to today's abort net unchanged.
+        merge = _retry_untracked_overwrite(core, base_path, merge_target, remote_ref, merge)
+    if merge.returncode != 0:
         core._git(base_path, "merge", "--abort")
         _restore_stash(core, base_path, stash_sha)
         _raise_if_strict(
@@ -186,6 +201,62 @@ def _recover_dirty_merge(
         )
         return False
     _restore_stash(core, base_path, stash_sha)
+    return True
+
+
+def _retry_untracked_overwrite(
+    core: ModuleType,
+    base_path: str,
+    merge_target: str,
+    remote_ref: str,
+    merge: subprocess.CompletedProcess,
+) -> subprocess.CompletedProcess:
+    """Self-heal the untracked-overwrite merge abort (parity with reconverge): when
+    the merge failed ONLY because it wants to create paths that exist locally as
+    untracked files (regenerable compaction leftovers), quarantine-move exactly what
+    git names and retry the merge ONCE, returning the retry. Any other failure class
+    — or a quarantine refusal — returns ``merge`` unchanged, so the caller keeps
+    today's abort net exactly."""
+    leftovers = _untracked_overwrite_paths(merge)
+    if not leftovers:
+        return merge
+    core._git(base_path, "merge", "--abort")
+    if not _quarantine_untracked_paths(core, base_path, leftovers):
+        return merge
+    return core._git(
+        base_path,
+        "merge",
+        merge_target,
+        "--no-edit",
+        "-m",
+        f"Merge {remote_ref} (auto-reconcile, post-stash)",
+    )
+
+
+def _quarantine_untracked_paths(core: ModuleType, base_path: str, paths: list[str]) -> bool:
+    """Move (never delete) the named paths into the shared reconverge-quarantine dir.
+
+    Local twin of sync's ``_quarantine_untracked``: the DIR PATH arithmetic is the
+    shared ``sync._quarantine_dir_under``, but every git call runs through the
+    late-bound ``core._git`` seam. The fence is checked for ALL paths before any
+    move: a named path that is not genuinely UNTRACKED (``??``) refuses the whole
+    recovery — a mis-parse must never relocate tracked data."""
+    common = core._git(base_path, "rev-parse", "--git-common-dir").stdout.strip()
+    if not common:
+        return False
+    for rel in paths:
+        status = core._git(base_path, "status", "--porcelain", "-uall", "--", rel).stdout
+        if not status.startswith("??"):
+            return False
+    quarantine = _quarantine_dir_under(common, base_path)
+    tracker_root = Path(base_path)
+    for rel in paths:
+        src = tracker_root / rel
+        if not src.exists():
+            return False
+        dest = quarantine / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
     return True
 
 
