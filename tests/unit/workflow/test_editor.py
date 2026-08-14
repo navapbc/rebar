@@ -5,7 +5,6 @@ itself is human-validated). The visual format is NEVER written to git.
 
 from __future__ import annotations
 
-import http.server
 import json
 import socket
 import socketserver
@@ -172,7 +171,7 @@ def _instrument_editor_server_setup(
     timed_call: Callable[..., Any],
 ) -> Iterator[None]:
     """Time the constructor's nested bind and reverse-DNS operations independently."""
-    constructor = http.server.ThreadingHTTPServer
+    constructor = editor._LoopbackThreadingHTTPServer
     server_bind = socketserver.TCPServer.server_bind
     getfqdn = socket.getfqdn
 
@@ -192,7 +191,7 @@ def _instrument_editor_server_setup(
         return timed_call("_server", "socket.getfqdn", getfqdn, host)
 
     with monkeypatch.context() as timing_patch:
-        timing_patch.setattr(http.server, "ThreadingHTTPServer", timed_constructor)
+        timing_patch.setattr(editor, "_LoopbackThreadingHTTPServer", timed_constructor)
         timing_patch.setattr(socketserver.TCPServer, "server_bind", timed_server_bind)
         timing_patch.setattr(socket, "getfqdn", timed_getfqdn)
         yield
@@ -215,6 +214,29 @@ def test_server_binds_loopback_only(_server):
     assert base.startswith("http://127.0.0.1:")  # never a public interface (it can write)
 
 
+@pytest.mark.allow_network  # loopback only; name resolution is deliberately forbidden
+def test_server_starts_and_serves_without_reverse_dns(tmp_path, monkeypatch):
+    path = _wf_file(tmp_path)
+    reverse_dns_calls: list[str] = []
+
+    def reject_reverse_dns(host: str = "") -> str:
+        reverse_dns_calls.append(host)
+        raise AssertionError(f"loopback editor attempted reverse DNS for {host!r}")
+
+    monkeypatch.setattr(socket, "getfqdn", reject_reverse_dns)
+    server, host, port, _token = editor.edit_workflow(
+        path, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    try:
+        assert reverse_dns_calls == []
+        assert (host, port) == server.server_address[:2]
+        xml = urllib.request.urlopen(f"http://{host}:{port}/workflow.bpmn").read().decode("utf-8")
+        assert "bpmn:process" in xml and "rebar:" in xml
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatch):
     constructor_result = object()
     bind_result = object()
@@ -232,7 +254,7 @@ def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatc
         seen_calls.append(("getfqdn-target", (host,), {}))
         return "localhost"
 
-    monkeypatch.setattr(http.server, "ThreadingHTTPServer", constructor)
+    monkeypatch.setattr(editor, "_LoopbackThreadingHTTPServer", constructor)
     monkeypatch.setattr(socketserver.TCPServer, "server_bind", server_bind)
     monkeypatch.setattr(socket, "getfqdn", getfqdn)
 
@@ -241,7 +263,7 @@ def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatc
         return call(*args, **kwargs)
 
     with _instrument_editor_server_setup(monkeypatch, timed_call):
-        assert http.server.ThreadingHTTPServer(("127.0.0.1", 0), object) is constructor_result
+        assert editor._LoopbackThreadingHTTPServer(("127.0.0.1", 0), object) is constructor_result
         server = object()
         assert socketserver.TCPServer.server_bind(server) is bind_result
         assert socket.getfqdn("127.0.0.1") == "localhost"
@@ -251,7 +273,7 @@ def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatc
         "tcp_server_bind",
         "socket.getfqdn",
     ]
-    assert http.server.ThreadingHTTPServer is constructor
+    assert editor._LoopbackThreadingHTTPServer is constructor
     assert socketserver.TCPServer.server_bind is server_bind
     assert socket.getfqdn is getfqdn
 

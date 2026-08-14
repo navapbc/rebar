@@ -45,7 +45,13 @@ from .editor_contracts import step_contract_view as step_contract_view
 # The asset-serving + route constants are defined there and RE-EXPORTED here (the `as` form)
 # so `editor.assets_available` / `editor.read_asset` / `editor._POST_WRITE_PATHS` /
 # `editor._PREVIEW_PATHS` remain the stable surface tests and the launcher use.
-from .editor_server import _ASSETS_DIR, EditorSession, _Handler, assets_available
+from .editor_server import (
+    _ASSETS_DIR,
+    EditorSession,
+    _Handler,
+    _LoopbackThreadingHTTPServer,
+    assets_available,
+)
 from .editor_server import _POST_WRITE_PATHS as _POST_WRITE_PATHS
 from .editor_server import _PREVIEW_PATHS as _PREVIEW_PATHS
 from .editor_server import read_asset as read_asset
@@ -459,7 +465,6 @@ def edit_workflow(
     (Ctrl-C, clean shutdown). Set ``serve_forever=False`` to start it on a background
     thread and return the handle (used by tests)."""
     import functools
-    import http.server
     import secrets
     import threading
     import webbrowser
@@ -508,7 +513,7 @@ def edit_workflow(
     )
 
     handler = functools.partial(_Handler, session=session)
-    server = http.server.ThreadingHTTPServer((host, port), handler)
+    server = _LoopbackThreadingHTTPServer((host, port), handler)
     # server_address is typed as a broad union (str | bytes | tuple | …); for an AF_INET
     # HTTP server it is always (host: str, port: int), so narrow with a cast.
     bound_host = cast(str, server.server_address[0])
