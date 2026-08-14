@@ -265,7 +265,7 @@ def test_dc_conversion_failure_returns_exact_unit(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A failed conversion degrades that unit to its source, and never raises."""
-    monkeypatch.setattr(wiki_render, "_convert", lambda markdown, pandoc: None)
+    monkeypatch.setattr(wiki_render, "_convert", lambda markdown, pandoc, timeout=None: None)
 
     with caplog.at_level(logging.DEBUG, logger=wiki_render.logger.name):
         assert render_markdown_to_wiki("# Heading\n") == "# Heading\n"
@@ -275,7 +275,11 @@ def test_dc_preservation_failure_returns_exact_unit(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     """A conversion that drops a code fragment is rejected, not shipped."""
-    monkeypatch.setattr(wiki_render, "_convert", lambda markdown, pandoc: "the code vanished")
+    monkeypatch.setattr(
+        wiki_render,
+        "_convert",
+        lambda markdown, pandoc, timeout=None: "the code vanished",
+    )
     body = "text with `fragment` inline\n"
 
     with caplog.at_level(logging.DEBUG, logger=wiki_render.logger.name):

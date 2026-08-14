@@ -136,6 +136,36 @@ def test_the_timeout_is_reachable_from_the_environment(
     assert _pandoc_timeout() == 4.0
 
 
+@_NEEDS_PANDOC
+def test_each_render_pass_resolves_the_timeout_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Configuration is sampled per pass, never once per Pandoc-bound unit."""
+    (tmp_path / ".git").mkdir(parents=True)
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    body = "first **bold**\n\nanother **strong** sentence\n\nthird [link](https://example.test)\n"
+    renderable = [
+        text for kind, text in wiki_render._lock_and_split(body) if kind == wiki_render._RENDER
+    ]
+    assert len(renderable) == 3
+
+    real_timeout = wiki_render._pandoc_timeout
+    resolutions = 0
+
+    def _counting_timeout() -> float:
+        nonlocal resolutions
+        resolutions += 1
+        return real_timeout()
+
+    monkeypatch.setattr(wiki_render, "_pandoc_timeout", _counting_timeout)
+
+    first = render_markdown_to_wiki(body)
+    assert resolutions == 1
+    second = render_markdown_to_wiki(body)
+    assert resolutions == 2
+    assert second == first
+
+
 @pytest.mark.parametrize("bad", ["0", "-1"])
 def test_a_non_positive_timeout_falls_back_rather_than_disabling_rendering(
     bad: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -496,10 +526,11 @@ def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: i
     fraction of the per-test timeout.
     """
     pandoc = str(_PANDOC)
+    timeout = _pandoc_timeout()
     offset = chunk_index * _EQUIVALENCE_CHUNK
     for position, prepared in enumerate(_CHUNKS[chunk_index]):
         expected = _expected_output(_LEGACY_ENTRIES[offset + position])
-        assert _convert(prepared, pandoc) == expected, (
+        assert _convert(prepared, pandoc, timeout) == expected, (
             f"corpus unit {offset + position} rendered differently from the landed "
             f"renderer: {prepared!r}"
         )

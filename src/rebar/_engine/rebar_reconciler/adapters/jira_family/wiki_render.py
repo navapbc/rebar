@@ -330,12 +330,13 @@ _PANDOC_TIMEOUT_DEFAULT: float = 10.0  # mirrors ReconcilerConfig.dc_pandoc_time
 def _pandoc_timeout() -> float:
     """The per-invocation wall-clock ceiling, from ``reconciler.dc_pandoc_timeout_s``.
 
-    Read at CALL time so an operator can widen it without a redeploy, and
-    fail-SAFE rather than fail-open: an unreadable config, a ``rebar`` package
-    that is not importable (the engine ships as stdlib-only subprocess package
-    data), or a non-positive value all fall back to the built-in default. A
-    timeout of zero would mean "kill pandoc immediately", degrading every unit
-    to raw Markdown — a config fault must not silently disable rendering.
+    Read at render-pass time (or standalone conversion-call time) so an operator
+    can widen it without a redeploy, and fail-SAFE rather than fail-open: an
+    unreadable config, a ``rebar`` package that is not importable (the engine
+    ships as stdlib-only subprocess package data), or a non-positive value all
+    fall back to the built-in default. A timeout of zero would mean "kill pandoc
+    immediately", degrading every unit to raw Markdown — a config fault must not
+    silently disable rendering.
 
     ``AttributeError`` is in that set for a reason rather than by reflex: the
     reconciler engine is loaded as package data and can run against a rebar whose
@@ -354,8 +355,11 @@ def _pandoc_timeout() -> float:
     return value if value > 0 else _PANDOC_TIMEOUT_DEFAULT
 
 
-def _convert(markdown: str, pandoc: str) -> str | None:
+def _convert(markdown: str, pandoc: str, timeout: float | None = None) -> str | None:
     """Run pandoc over one unit; ``None`` on any failure (never raises).
+
+    ``timeout`` is normally resolved once by the render pass. Direct callers may
+    omit it and retain the safe call-time configuration lookup.
 
     Spawns pandoc DIRECTLY rather than through pypandoc's ``convert_text``: the
     high-level API hands back no process handle, and it sets no timeout, so a
@@ -390,7 +394,10 @@ def _convert(markdown: str, pandoc: str) -> str | None:
         logger.debug(_FALLBACK_EVENT, extra={"reason": "conversion_failure"})
         return None
     try:
-        stdout, _stderr = proc.communicate(input=markdown, timeout=_pandoc_timeout())
+        stdout, _stderr = proc.communicate(
+            input=markdown,
+            timeout=_pandoc_timeout() if timeout is None else timeout,
+        )
     except subprocess.TimeoutExpired:
         _reap_pandoc(proc)
         logger.debug(_FALLBACK_EVENT, extra={"reason": "timeout"})
@@ -451,20 +458,21 @@ def render_markdown_to_wiki(markdown: str) -> str:
         logger.warning(_FALLBACK_EVENT, extra={"reason": "pandoc_absent"})
         return markdown
 
+    timeout = _pandoc_timeout()
     rendered: list[str] = []
     for kind, text in _lock_and_split(markdown):
         if kind == _TABLE:
             rendered.append("{noformat}\n" + text + "\n{noformat}")
         elif kind == _RENDER:
-            rendered.append(_render_unit(text, pandoc))
+            rendered.append(_render_unit(text, pandoc, timeout))
         else:  # _EXACT and _BLANK both pass through untouched
             rendered.append(text)
     return "\n".join(rendered)
 
 
-def _render_unit(text: str, pandoc: str) -> str:
-    """Convert one renderable unit, falling back to its source on any doubt."""
-    converted = _convert(substitute_arrows(text), pandoc)
+def _render_unit(text: str, pandoc: str, timeout: float | None = None) -> str:
+    """Convert one unit with a pass timeout, falling back to source on any doubt."""
+    converted = _convert(substitute_arrows(text), pandoc, timeout)
     if converted is None:
         return text
     expected = code_fragments(text)
