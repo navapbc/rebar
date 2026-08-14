@@ -603,6 +603,12 @@ jobs:
         # documented maximum. --durations=25 is added with it: no lane here has ever printed
         # per-test durations, so the tail behind that mean is unmeasured and a future
         # re-calibration would otherwise be guesswork.
+        #
+        # This directory glob is the ONLY wiring the rich-text live module
+        # (test_dc_rich_text_live.py, story 3289) needs: it runs in THIS existing amd64 Docker
+        # DC-harness job — rendered-HTML fidelity (?expand=renderedFields), state-based
+        # echo-safety, and the both-sides settled-conflict alert — not a new job. Keep new
+        # tests/external/live_jira_dc/ modules under this glob rather than enumerating modules.
         run: >-
           pytest -m external tests/external/live_jira_dc -q -rA --durations=25
           --timeout=900 --timeout-method=thread
