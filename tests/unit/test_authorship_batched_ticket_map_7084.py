@@ -16,6 +16,7 @@ first-parent chain, where default history simplification would answer differentl
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -39,22 +40,75 @@ class _GitFailed(subprocess.CalledProcessError):
     content conflict, a failing hook, AND an unresolvable argument alike. Subclassing keeps the
     exception TYPE (existing ``except subprocess.CalledProcessError`` clauses still catch it)
     and changes only what is rendered.
+
+    ``forensics`` (bug innovative-dandruffy-deer) additionally carries an object-store
+    snapshot taken the moment the command failed — see ``_forensics``.
     """
+
+    forensics: str = ""
 
     def __str__(self) -> str:
         return (
             f"{super().__str__()}\n"
             f"argv:   {self.cmd}\n"
             f"stdout:\n{self.output}\n"
-            f"stderr:\n{self.stderr}"
+            f"stderr:\n{self.stderr}\n"
+            f"object-store forensics:\n{self.forensics}"
         )
+
+
+def _forensics(repo: Path) -> str:
+    """Snapshot the object store at the moment a git command fails.
+
+    Bug innovative-dandruffy-deer: the fixture merge failed twice on CI with ``invalid
+    object ... git write-tree failed to write a tree`` — a loose blob committed two
+    subprocess calls earlier was GONE (injection proved only file ABSENCE reproduces the
+    signature; corruption does not). git's stderr names the missing object but cannot say
+    why it is missing, so capture what the next occurrence needs: ``fsck`` (every missing
+    object), ``count-objects -v`` (loose/packed census), the ``.git/objects`` listing with
+    sizes and mtimes (what survived, and when it was written), and the ``GIT_*``
+    environment (rules object-store redirection in or out). Best-effort by design — a
+    forensics failure must never mask the original error.
+    """
+
+    def run(*args: str) -> str:
+        proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        return f"{proc.stdout}{proc.stderr}".strip()
+
+    def listing(objects: Path) -> str:
+        lines = []
+        for path in sorted(objects.rglob("*")):
+            try:
+                if path.is_file():
+                    stat = path.stat()
+                    lines.append(
+                        f"{path.relative_to(objects)}  size={stat.st_size}"
+                        f"  mtime={stat.st_mtime:.6f}"
+                    )
+            except OSError as exc:  # raced away mid-listing: itself evidence, record it
+                lines.append(f"{path.relative_to(objects)}  <stat failed: {exc}>")
+        return "\n".join(lines) or "(empty)"
+
+    try:
+        objects = repo / ".git" / "objects"
+        env = "\n".join(f"{k}={v}" for k, v in sorted(os.environ.items()) if k.startswith("GIT_"))
+        return (
+            f"fsck --full:\n{run('fsck', '--full')}\n"
+            f"count-objects -v:\n{run('count-objects', '-v')}\n"
+            f".git/objects listing:\n{listing(objects) if objects.is_dir() else '(absent)'}\n"
+            f"GIT_* environment:\n{env or '(none)'}"
+        )
+    except Exception as exc:  # noqa: BLE001 - never mask the original git failure
+        return f"<forensics capture failed: {exc!r}>"
 
 
 def _git(repo: Path, *args: str) -> str:
     argv = ["git", "-C", str(repo), *args]
     proc = subprocess.run(argv, capture_output=True, text=True)
     if proc.returncode != 0:
-        raise _GitFailed(proc.returncode, argv, output=proc.stdout, stderr=proc.stderr)
+        failure = _GitFailed(proc.returncode, argv, output=proc.stdout, stderr=proc.stderr)
+        failure.forensics = _forensics(repo)
+        raise failure
     return proc.stdout.strip()
 
 
@@ -300,3 +354,55 @@ def test_git_failure_surfaces_git_own_diagnostics(tmp_path: Path) -> None:
     assert "merge" in rendered, "the failing argv must be named"
     assert "no-such-branch" in rendered, "the failing argv must be named in full"
     assert "1" in rendered, "the exit code must be named"
+
+
+def test_a_git_failure_captures_object_store_forensics(tmp_path: Path) -> None:
+    """A failing ``_git`` snapshots the OBJECT STORE, not just git's message.
+
+    Bug innovative-dandruffy-deer: on CI (twice, months apart, xdist worker gw1) the
+    fixture's merge failed with ``invalid object ... git write-tree failed to write a
+    tree`` — a freshly committed loose blob GONE from ``.git/objects`` two subprocess
+    calls after ``git commit`` wrote it. Injection experiments proved the class (only
+    ENOENT on the loose object file reproduces that exact signature; a corrupt-but-present
+    object does not), but git's own stderr cannot say WHY the file is absent. So the
+    moment a git command fails, the exception must carry the evidence the next occurrence
+    needs: ``git fsck`` (names every missing object), ``git count-objects -v``, a
+    recursive listing of ``.git/objects`` with sizes and mtimes (shows what survived and
+    when it was written), and the ``GIT_*`` environment (rules redirection in or out).
+
+    The reproduction below is that proven mechanism: build the fixture's merge topology,
+    delete the mainline blob's loose object file, merge.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "tickets")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "T")
+    (repo / "a.json").write_text("a")
+    _git(repo, "add", "a.json")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "checkout", "-q", "-b", "side")
+    (repo / "s.json").write_text("s")
+    _git(repo, "add", "s.json")
+    _git(repo, "commit", "-q", "-m", "side")
+    _git(repo, "checkout", "-q", "tickets")
+    (repo / "b.json").write_text("b")
+    _git(repo, "add", "b.json")
+    _git(repo, "commit", "-q", "-m", "mainline")
+    blob = _git(repo, "rev-parse", "HEAD:b.json")
+    head = _git(repo, "rev-parse", "HEAD")
+    (repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+
+    with pytest.raises(subprocess.CalledProcessError) as excinfo:
+        _git(repo, "merge", "-q", "--no-edit", "side")
+
+    rendered = str(excinfo.value)
+    # The CI signature itself is preserved...
+    assert f"invalid object 100644 {blob}" in rendered
+    # ...and the forensics answer the questions the CI log could not:
+    assert f"missing blob {blob}" in rendered, "fsck must name the missing object"
+    assert "count:" in rendered, "count-objects -v output must be captured"
+    assert f"{head[:2]}/{head[2:]}" in rendered, (
+        "the .git/objects listing must show the objects that DID survive"
+    )
+    assert "GIT_* environment:" in rendered, "the GIT_* env snapshot must be present"
