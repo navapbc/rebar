@@ -507,6 +507,94 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
   A natural home for the live variants is a **scheduled** workflow (e.g. weekly
   `cron`) against a throwaway project, kept separate from the per-PR lane.
 
+## Multi-project rehearsal against live REB + DIG (isolated S3 store copy)
+
+The many-to-many bridge (one store → many Jira projects) has a dedicated **opt-in,
+live-only** canary: `tests/external/live_multi_project/`. It rehearses **two real Jira
+Cloud projects — REB and DIG — against an ISOLATED S3 copy of the tickets store** and
+asserts the one invariant that matters for a multi-project mapping: **work routes to
+exactly its intended project and never contaminates another.** It is the cross-project
+analogue of the round-trip tests above — hermetic tests can prove routing against a
+fake, but only a live run proves it against real Jira project permissions, real label
+indexing, and real cross-project REST behaviour. An operator runs it by hand (or on a
+schedule); it never runs in the default or per-PR lane.
+
+**What it exercises** (nine scenarios, each *preview-gated* — it computes the plan with
+`bridge_preview`, asserts the planned project set is a subset of the intended project
+and disjoint from every other configured project, then applies with `bridge_sync` and
+verifies live):
+
+- inbound and outbound to **both** projects;
+- a ticket with an **explicit empty** project (not synced) and one with the project
+  field **absent** (resolves to the legacy default only);
+- **repo-config variety** — single-repo (REB), two-repo (DIG), and zero-repo
+  (configured-but-empty) projects, both directions;
+- the **contamination guard**: an outbound update whose target falls outside the
+  configured scope is surfaced in the preview plan and refused by `bridge_sync`
+  (`CrossProjectTargetError`), writing nothing;
+- **promote-only** binding (promoting an unbound ticket creates the issue; re-homing a
+  bound ticket is refused);
+- the **capability stamp** (`multi-project-bridge` on `.store-compat.json` once two
+  projects are mapped, and fail-closed refusal of an unknown-capability record);
+- a **failure-path cleanup proof** — a mid-scenario failure still triggers per-issue
+  cleanup, leaving zero issues behind.
+
+### Prerequisites
+
+- The `acli` binary on `PATH` and live Jira Cloud credentials
+  (`JIRA_URL` / `JIRA_USER` / `JIRA_API_TOKEN`) for an account that can create and delete
+  issues in **both** REB and DIG.
+- An **encrypted S3 remote holding a COPY of the `tickets` branch — never production.**
+  The harness clones the current `tickets` branch into a throwaway store, scrubs every
+  binding, converges it, and pushes only to this S3 copy. Before any mutation it
+  *asserts* the store's configured `sync.remote` resolves to an `s3://` (or `s3+zip://`)
+  URL and — when you supply the production remote for comparison — that it is **not**
+  production; a mis-wired remote aborts the run before a single write. (The
+  `git-remote-s3` helper must be installed, per `push._require_s3_helper_if_s3_url`.)
+
+### Environment variables the harness reads
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `REBAR_RUN_EXTERNAL=1` | yes | opt into the external tier (else every test is inert) |
+| `JIRA_URL` / `JIRA_USER` / `JIRA_API_TOKEN` | yes | live Jira Cloud credentials |
+| `REBAR_REHEARSAL_S3_REMOTE` | yes | URL of the **isolated S3 copy** of the tickets store; wired as `sync.remote` |
+| `REBAR_REHEARSAL_PRODUCTION_REMOTE` | optional | the production remote URL; when set, the precondition additionally asserts the S3 remote is not equal to it |
+
+Without `REBAR_REHEARSAL_S3_REMOTE` (or without the Jira creds / `acli`) the whole suite
+**skips cleanly** — it never falls back to a non-isolated store.
+
+### Running it
+
+```bash
+REBAR_RUN_EXTERNAL=1 \
+JIRA_URL=… JIRA_USER=… JIRA_API_TOKEN=… \
+REBAR_REHEARSAL_S3_REMOTE="s3://my-bucket/rebar-tickets-rehearsal" \
+REBAR_REHEARSAL_PRODUCTION_REMOTE="s3://my-bucket/rebar-tickets" \
+  pytest -m "external and jira_live" tests/external/live_multi_project/
+```
+
+### Cleanup — run-scoped label + always-run sweep
+
+Every issue the run creates carries a unique run-scoped label
+(`rebar-rehearsal-<random>`). Outbound issues get it because their rebar tickets are
+tagged with it and the bridge maps tags → labels; inbound-seed probe issues (created
+directly through `acli`, which cannot set a label) are tracked by explicit key
+registration instead. A **session-teardown backstop** always runs — even when a scenario
+aborts mid-flight — sweeping both REB and DIG for `labels = "<run-label>"` (and the
+registered keys), deleting every hit, and asserting a fresh query returns **zero** in
+each project. Individual scenarios also delete their own issues in `try/finally`.
+
+If a run is killed hard (e.g. `SIGKILL`) before teardown, verify and clean up leftovers
+manually by searching both projects for the run's label:
+
+```
+labels = "rebar-rehearsal-<random>"
+```
+
+in each of REB and DIG, and delete any matches. The label is printed in the run's
+fixture setup, so grep the pytest output for `rebar-rehearsal-` to recover it.
+
 ## Optional hardening
 
 DSO also ships a **weekly bridge audit**. rebar exposes the same check as
