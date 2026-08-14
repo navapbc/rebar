@@ -14018,7 +14018,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nFollow-up (fix b) to creatable-foldable-arthropods (fix a, merged a0fc8d43556 / Gerrit 1761). A second, independent defect remains in the verifier's evidence-banking path: at SEARCH EXHAUSTION, `BOUNDED_FALLBACK_EVIDENCE` banks `met=false` \u2014 i.e. \"the criterion is unmet\" \u2014 when what the run actually established is only \"the search budget ran out before sufficient evidence was found\". This misattributes absence-of-evidence as evidence-of-absence, producing false FAIL verdicts on tickets whose evidence exists but was not reached within the window.\n\n## Proposed fix\nMake the banked evidence TRI-STATE: `met=true`, `met=false` (a positive refutation was actually found), and `insufficient_evidence` (search exhausted without a determination). The tri-state must originate in the banking WRITE path, whose chokepoints are all bool-typed today and must each change:\n- `CompletionEvidencePolicy.fallback_record` (completion_tool_policy.py:100-101) currently passes a literal `False` through the record tool \u2014 at exhaustion it must bank the `insufficient_evidence` sentinel instead, via an internal write path (not the model-facing tool).\n- `CriterionBank.upsert` (completion_banking.py:441-461, `\"met\": bool(met)` at :454) \u2014 widen to persist the tri-state (`met: bool | None` + explicit `state`; the \"writes remain bool-only\" docstring contract updates with it).\n- `record_criterion_verdict`'s model-facing tool signature (:539) stays BOOL \u2014 `insufficient_evidence` is exclusively the policy-side exhaustion outcome, never a model-tool input.\n- `harvest_structured_into_bank` (:583) hard-gates `isinstance(met, bool)` and would silently drop tri-state entries on re-harvest \u2014 widen so they survive round-trips.\nAt search exhaustion, `BOUNDED_FALLBACK_EVIDENCE` must bank `insufficient_evidence`, never `met=false`.\n\n**Full consumer graph (all bool-coercing/validating sites change together):**\n- **Schema (`src/rebar/schemas/completion_verdict.schema.json`)**: `criteria[].met` (:31, strict bool) becomes `boolean|null` + optional sibling `state` enum (`met`/`unmet`/`insufficient_evidence`; absent state + bool met stays valid for existing records); top-level `verdict` (:10-12) gains `INDETERMINATE`, emitted when no criterion is `unmet` but \u22651 is `insufficient_evidence` (any `unmet` dominates \u2192 FAIL). Both rendering seams validate against this schema (completion_recovery.py:674, :774) \u2014 prerequisite, not follow-up.\n- **`_validate_coverage` (completion_recovery.py:364-368, run at :717)**: hard-raises on non-bool `met` \u2014 accept the tri-state while still rejecting untyped records; the :370 cross-check becomes state-aware (PASS = all met; INDETERMINATE = no unmet).\n- **`_run_finalizer` (completion_recovery.py:741)**: `bool(entry.get('met'))` collapses the sentinel to false before the LLM finalizer sees it \u2014 render `insufficient_evidence` faithfully in the prompt payload.\n- **Unbanked/exhausted placeholder branches** (`assemble_deterministic_verdict` :646-660, `merge_finalizer_with_bank` :715+): a never-banked criterion at exhaustion IS absence-of-evidence \u2014 placeholders bank/render `insufficient_evidence` (keeping the `exhausted` marker) instead of `met:false` + FAIL finding.\n- **`reconcile_verdict` (src/rebar/llm/completion.py:495-522)**: `:522` coerces any non-PASS to FAIL, on every path (completion.py:601, gate_ops.py:297, completion_sidecar.py:323) \u2014 pass INDETERMINATE through with its own remediation text; unknown tokens still coerce to FAIL.\n- **Close-gate refusal (close_precheck.py:571-589)**: gates on non-PASS and asserts \"FAILED \u2026 unmet criteria\" \u2014 on INDETERMINATE it still refuses (fail-closed) but reports insufficient evidence + remediation, not unmet criteria.\n- **Completion sidecar (`src/rebar/llm/completion_sidecar.py:335`)**: persists `criteria` as-is \u2014 verified pass-through; a round-trip test pins it, no code change expected. Both verdict-rendering seams \u2014 `assemble_deterministic_verdict` (completion_banking.py:619-640) and `merge_finalizer_with_bank` (:705-714) \u2014 must render `insufficient_evidence` as INDETERMINATE, not FAIL. **Close-gate behavior (fail-closed):** an `insufficient_evidence` criterion still BLOCKS the close \u2014 the gate does not pass on missing evidence \u2014 but the refusal carries the INDETERMINATE remediation messaging (re-run verification, widen the search scope, or operator-attest the criterion) instead of asserting the criterion affirmatively FAILED. The behavioral change is honesty of the message and the recorded verdict class, not gate leniency.\n\n## Scope\n- The banking WRITE path: `fallback_record` wiring in src/rebar/llm/completion_tool_policy.py (exhaustion site), and in src/rebar/llm/workflow/completion_banking.py: `CriterionBank.upsert` (schema widening), `record_criterion_verdict` (unchanged bool tool signature \u2014 guard only), `harvest_structured_into_bank` (gate widening so tri-state entries survive re-harvest), and BOTH unbanked/exhausted placeholder branches (assemble_deterministic_verdict :646-660, merge_finalizer_with_bank :715+).\n- src/rebar/schemas/completion_verdict.schema.json \u2014 criteria[].met boolean|null + state enum + INDETERMINATE verdict token (backward compatible).\n- src/rebar/llm/workflow/completion_recovery.py \u2014 `_validate_coverage` tri-state acceptance + state-aware PASS/INDETERMINATE cross-check; `_run_finalizer` banked-evidence payload renders the sentinel faithfully (:741).\n- src/rebar/llm/completion.py \u2014 `reconcile_verdict` passes INDETERMINATE through with its own remediation instead of coercing to FAIL.\n- src/rebar/_commands/close_precheck.py \u2014 refusal message distinguishes INDETERMINATE (insufficient evidence + remediation) from FAIL (unmet criteria); still refuses both.\n- src/rebar/llm/completion_sidecar.py \u2014 verified pass-through (round-trip test only; no code change expected).\n- The evidence schema + BOTH consumer seams that render per-criterion verdicts from banked evidence: `assemble_deterministic_verdict` and `merge_finalizer_with_bank` in src/rebar/llm/workflow/completion_banking.py.\n- Tests: a search-exhaustion run banks insufficient_evidence (not met=false); a genuine refutation still banks met=false; verdict rendering distinguishes the two.\n\n## Acceptance criteria\n- [ ] At search exhaustion, banked fallback evidence is `insufficient_evidence`, not `met=false`; checked by a new unit test.\n- [ ] An `insufficient_evidence` bank entry survives `harvest_structured_into_bank` round-trips (not silently dropped) and the model-facing `record_criterion_verdict` tool signature remains bool-only; unit tests.\n- [ ] A genuine positive refutation still banks `met=false` and still yields FAIL; checked by a guard test.\n- [ ] BOTH rendering seams \u2014 `assemble_deterministic_verdict` and `merge_finalizer_with_bank` \u2014 render `insufficient_evidence` as indeterminate-with-remediation, not FAIL, INCLUDING their unbanked/exhausted placeholder branches; checked per-seam and per-branch by rendering tests.\n- [ ] The widened completion_verdict schema validates tri-state records and still validates existing all-bool records; `_validate_coverage` accepts the tri-state and still rejects untyped records; `_run_finalizer`'s banked-evidence payload carries the sentinel unconverted; sidecar round-trip preserves the state field; unit tests each.\n- [ ] The close gate still BLOCKS on an `insufficient_evidence` criterion (fail-closed) and its refusal (close_precheck.py) carries the INDETERMINATE remediation guidance, not a FAIL/unmet-criteria assertion; `reconcile_verdict` passes INDETERMINATE through unconverted; gate-behavior + reconcile tests.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\nGuard/memo interaction (fix a, landed); verifier prompt changes; retry policy.",
+        "description": "## Context / Problem\nFollow-up (fix b) to creatable-foldable-arthropods (fix a, Gerrit 1761). At SEARCH EXHAUSTION, `BOUNDED_FALLBACK_EVIDENCE` banks `met=false` (\"criterion unmet\") when the run only established \"budget ran out before sufficient evidence was found\" \u2014 misattributing absence-of-evidence as evidence-of-absence, producing false FAIL verdicts on tickets whose evidence exists but was not reached within the window.\n\n## Proposed fix\nDistinguish THREE evidence outcomes: met, refuted, insufficient (search exhausted without a determination) \u2014 the third carried as a framework-set `evidence_sufficient:false` marker riding alongside `met:false`, per the verdict_obtainable precedent, so every fail-closed consumer stays unchanged. Marker origin \u2014 the banking WRITE path:\n- `CompletionEvidencePolicy.fallback_record` (completion_tool_policy.py:100-101) passes a literal `False` through the bool-only record tool. Widen the STRUCTURAL contract: the `fallback_record` Callable (:78) gains the marker; completion_banking's wiring supplies a marker-aware bank write. Not the model-facing tool; keeps the no-completion_banking-import independence (:93-96).\n- `CriterionBank.upsert` (:441-461) \u2014 persists the optional marker alongside bool `met` (docstring updates).\n- `record_criterion_verdict` (:539) stays BOOL; its :544 instruction changes semantics: today it banks `met=false` at the bounded-COMMIT boundary for \"not demonstrated\" \u2014 absence-of-evidence banked as refutation. New rule: `met=false` ONLY on positive refutation; not-found records nothing \u2014 the bounded fallback (completion_tool_policy.py:187) fires at the boundary and banks the marker. ALL absence-of-evidence flows through the framework's marker path; the marker is never a model-tool input.\n- `harvest_structured_into_bank` (:563-591) keeps its bool gate; the model never emits the marker, so harvest sources it by PRESERVATION: overwrite retains the prior entry's marker \u2014 only the widened fallback contract sets it; a genuine refutation (bare met=false) replaces it.\n\n**Full consumer graph (changes together):**\n- **Schema (completion_verdict.schema.json)**: per the `verdict_obtainable` precedent (schema :14-18, completion.py:516) \u2014 a marker alongside {PASS, FAIL}, not a third token. Two OPTIONAL framework-set markers: `criteria[].evidence_sufficient:false` (exhaustion, not refutation) and top-level `evidence_sufficient:false` (derived: no criterion genuinely unmet, \u22651 insufficient). verdict/met vocabularies unchanged; only message renderers read the marker. Both rendering seams validate against this schema (completion_recovery.py:674, :774).\n- **`_validate_coverage` (completion_recovery.py:364-368, :717)**: met stays bool \u2192 gates unchanged; markers survive validation.\n- **`_run_finalizer` (completion_recovery.py:741)**: banked-evidence payload carries the marker so the finalizer sees exhaustion, not refutation.\n- **Unbanked/exhausted placeholders** (`assemble_deterministic_verdict` :646-660, `merge_finalizer_with_bank` :715+): a never-banked criterion at exhaustion IS absence-of-evidence \u2014 placeholders carry the marker (keeping `exhausted`), not a bare high-severity FAIL.\n- **`reconcile_verdict` (completion.py:495-564)**: `:522` normalization UNTOUCHED. As the single chokepoint both verdict kinds pass through (:561) it DERIVES the top-level marker (set iff no criterion genuinely unmet and \u22651 carries the per-criterion marker); the `:564` remediation branch becomes marker-aware (insufficient-evidence remediation, not unmet-criteria guidance). The `:526` fault path is unaffected.\n- **Close-gate refusal (close_precheck.py:571-589)**: still gates on non-PASS (fail-closed) \u2014 with the marker present it reports \"insufficient evidence\" + remediation instead of \"N unmet criteria\".\n- **Standalone verb renderer** `_render_verdict_text` (src/rebar/_cli/_llm_commands.py:660-693): hard-codes \"N unmet criteria\" (:672-673) \u2014 same marker-aware wording split; exit codes unchanged.\n- **Finalizer prompt (completion_verifier_finalizer.md:23-28)**: currently collapses missing/truncated evidence into `met:false` + high-severity FAIL finding. New rule: banked insufficient entries echo as `met:false` with insufficient findings text; `merge_finalizer_with_bank` re-stamps the marker from the bank (stamp = enforcement, prompt = text alignment).\n- **Completion sidecar**: the FAIL payload (:355-369) whitelist omits `criteria`; top-level markers ride only via explicit lines (verdict_obtainable :374-375). Add the explicit `evidence_sufficient` line + per-criterion markers to the FAIL payload; round-trip test.\n- **Banked-entry rendering** (`assemble_deterministic_verdict` :619-640, `merge_finalizer_with_bank` :705-714): marker-carrying entries emit `met:false + evidence_sufficient:false` with an insufficient-evidence finding, not a bare unmet-criterion FAIL. `merge_finalizer_with_bank` is the authoritative per-criterion RE-STAMP site: the bank (not model output) is the marker's source of truth. Its existing-record branch (:700-704) never consults `bank_entries` \u2014 add a bank lookup so the merge overwrites the finalizer's echo (the :705+ fallback already reads the bank). Honesty of message and recorded class, never gate leniency.\n\n## Scope\n- Banking WRITE path: `fallback_record` contract + wiring (completion_tool_policy.py); completion_banking.py: `upsert` (persists marker), `record_criterion_verdict` (bool signature unchanged), `harvest_structured_into_bank` (preserve-on-overwrite above), both placeholder branches, `merge_finalizer_with_bank` re-stamp (both branches).\n- src/rebar/schemas/completion_verdict.schema.json \u2014 optional markers (top-level + per-criterion), verdict_obtainable pattern.\n- src/rebar/llm/workflow/completion_recovery.py \u2014 `_validate_coverage` markers survive validation; `_run_finalizer` payload carries the marker (:741).\n- src/rebar/llm/completion.py \u2014 `reconcile_verdict` derives the top-level marker + :564 remediation branch marker-aware.\n- src/rebar/_commands/close_precheck.py \u2014 refusal message keys on the marker (insufficient evidence vs unmet criteria); still refuses both.\n- src/rebar/_cli/_llm_commands.py \u2014 `_render_verdict_text` marker-aware wording (:672-673); exit codes unchanged.\n- completion_verifier_finalizer.md \u2014 sufficiency rule (:23-28).\n- src/rebar/llm/completion_sidecar.py \u2014 explicit marker lines + criteria in the FAIL payload; round-trip test.\n\n## Acceptance criteria\n- [ ] At exhaustion, banked fallback evidence carries `evidence_sufficient:false`, never bare `met=false`; unit test.\n- [ ] A fallback-banked insufficient entry keeps its marker after a marker-less successor re-harvest (preserve-on-overwrite); genuine refutation (bare met=false) replaces it; model-facing tool stays bool-only; unit tests.\n- [ ] Genuine refutation still banks bare `met=false` \u2192 FAIL; under the new :544 rule not-found records nothing and the bounded fallback banks the marker; guard tests.\n- [ ] Both rendering seams emit `met:false + evidence_sufficient:false` for insufficient entries, INCLUDING their unbanked/exhausted placeholder branches; per-seam and per-branch tests.\n- [ ] Schema validates marker-carrying AND all-bool records; `_validate_coverage` passes markers, rejects untyped; `_run_finalizer` payload carries the marker; `merge_finalizer_with_bank` re-stamps from the bank over model echoes; FAIL sidecar round-trips both marker levels; unit tests each.\n- [ ] Close gate still BLOCKS on insufficient evidence (verdict stays FAIL) but the refusal \u2014 and `_render_verdict_text`'s standalone output \u2014 reports insufficient evidence + remediation, not unmet criteria; `reconcile_verdict` derives the top-level marker and swaps remediation; gate + reconcile + renderer tests.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.\n\n## Out of scope\nGuard/memo interaction (fix a, landed); retry policy; prompt changes OTHER than the finalizer's evidence-sufficiency rule above.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Completion verifier banks met=false at search exhaustion \u2014 should bank insufficient_evidence (tri-state)"
@@ -21141,7 +21141,7 @@
         "assignee": null,
         "description": "## Context\nFollow-up to winning-endurant-xenops. Before the fold defer-guard lands, any fold that crossed an un-cited pre-snapshot orphan LAUNDERED it: the event file was retired and its uuid cited in source_event_uuids without its effect entering the compiled state. fsck reports clean on such tickets. The data is NOT lost \u2014 retired files are preserved and rebuild_snapshot_from_full_log replays the full log including .retired \u2014 but there is no DETECTION: finding historical laundering requires comparing each ticket's snapshot-compiled state against a full-log replay (expensive, so an opt-in deep check, e.g. fsck --deep or --verify-snapshots).\n## Proposed direction\nOpt-in fsck deep verification: for each ticket with a snapshot, replay full log (incl .retired) and diff against snapshot-compiled state; mismatch => LAUNDERED_SNAPSHOT finding routed to the existing rebuild door. Known live incidents: one (e27c orphan, healed pre-fold) \u2014 historical damage believed bounded.\n## Out of scope\nThe forward-path defer guard (xenops).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "fsck deep check: detect historically laundered snapshots (cited-but-effect-missing)"
       },
       "created_at": "2026-08-14T17:43:21Z",
@@ -39874,244 +39874,15 @@
     "4f50-5b13-6918-4031": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Summary",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "edit --title=\"\" silently clobbers the title; the identical clobber class was already fixed for --description (bug e78f-9f79) and --parent, but not --title.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Reproduction Steps",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(verified on installed 0.4.0 == HEAD, temp store)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. T=$(rebar create task \"real title\" | tail -1)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. rebar edit $T --title=\"\" -> exit 0",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. rebar show $T | jq .title -> \"\"",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "4. Contrast: rebar create task \"\" -> Error: title must be non-empty (exit 1); rebar edit $T --description=\"\" -> Error (citing e78f-9f79).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Expected vs Actual",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Expected: empty --title rejected like empty --description (and like create's title validation).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Actual: empty title accepted, producing \"\" titles that break list/search ergonomics.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Source",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "src/rebar/_engine/ticket-edit.sh \u2014 description guard :122-127 (the model), parent guard :156; no equivalent in the --title arm.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Fix direction",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Mirror the e78f-9f79 guard for --title (validated diff in the implementation-notes comment).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Suggested RED test",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "edit --title=\"\" -> exit 1, title unchanged; edit --title=\"new\" still works.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Empty --title rejected with a clear error naming the rule (RED test first)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Non-empty title edits unchanged",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Sweep ticket-edit.sh for any other empty-value clobber arms (tags? assignee has legit clear semantics \u2014 document which empties are intentional)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/low_new.svg",
-          "id": "4",
-          "name": "Low",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/4"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Summary\nedit --title=\"\" silently clobbers the title; the identical clobber class was already fixed for --description (bug e78f-9f79) and --parent, but not --title.\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD, temp store)\n1. T=$(rebar create task \"real title\" | tail -1)\n2. rebar edit $T --title=\"\" -> exit 0\n3. rebar show $T | jq .title -> \"\"\n4. Contrast: rebar create task \"\" -> Error: title must be non-empty (exit 1); rebar edit $T --description=\"\" -> Error (citing e78f-9f79).\n\n## Expected vs Actual\n- Expected: empty --title rejected like empty --description (and like create's title validation).\n- Actual: empty title accepted, producing \"\" titles that break list/search ergonomics.\n\n## Source\nsrc/rebar/_engine/ticket-edit.sh \u2014 description guard :122-127 (the model), parent guard :156; no equivalent in the --title arm.\n\n## Fix direction\nMirror the e78f-9f79 guard for --title (validated diff in the implementation-notes comment).\n\n## Suggested RED test\nedit --title=\"\" -> exit 1, title unchanged; edit --title=\"new\" still works.\n\n## Acceptance Criteria\n- [ ] Empty --title rejected with a clear error naming the rule (RED test first)\n- [ ] Non-empty title edits unchanged\n- [ ] Sweep ticket-edit.sh for any other empty-value clobber arms (tags? assignee has legit clear semantics \u2014 document which empties are intentional)",
+        "priority": "Low",
+        "status": "Done",
         "summary": "edit --title=\"\" silently clobbers the title (same clobber class fixed for --description in e78f-9f79)"
       },
       "baseline_advanced_at": "2026-07-16T21:19:49Z",
       "created_at": "2026-06-25T22:59:36Z",
       "jira_key": "REB-130",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:36Z"
     },
@@ -51752,142 +51523,15 @@
     "6623-726e-980e-4ace": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "A senior-SDET-quality review of the test suite, run as an iterative loop, is the closing quality gate for the post-migration hardening.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Run an opus subagent primed as an SDET to review the project's testing (coverage adequacy, assertion quality, isolation, flakiness, fixture design, seam organization, contract coverage across the 3 interfaces, CI wiring).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Remediate every important/critical finding.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Repeat the review\u2192remediate loop until a review returns NO important/critical findings.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] At least one opus SDET-primed review performed and its findings recorded",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] All important/critical findings remediated (with tests/changes referenced)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Review loop repeated until a clean pass (no important/critical findings)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Suite green locally + CI after remediation",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\nA senior-SDET-quality review of the test suite, run as an iterative loop, is the closing quality gate for the post-migration hardening.\n\n## What\n- Run an opus subagent primed as an SDET to review the project's testing (coverage adequacy, assertion quality, isolation, flakiness, fixture design, seam organization, contract coverage across the 3 interfaces, CI wiring).\n- Remediate every important/critical finding.\n- Repeat the review\u2192remediate loop until a review returns NO important/critical findings.\n\n## Acceptance Criteria\n- [ ] At least one opus SDET-primed review performed and its findings recorded\n- [ ] All important/critical findings remediated (with tests/changes referenced)\n- [ ] Review loop repeated until a clean pass (no important/critical findings)\n- [ ] Suite green locally + CI after remediation",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Opus SDET review loop: review tests, remediate important/critical findings, repeat until clean"
       },
       "baseline_advanced_at": "2026-07-17T05:26:15Z",
       "created_at": "2026-06-25T23:01:15Z",
       "jira_key": "REB-168",
+      "peer_parent": "REB-172",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:01:15Z"
     },
@@ -55831,10 +55475,24 @@
     },
     "7032-d9f3-ed89-4f7b": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\nThe multi-project model changes things a reader currently learns from the docs as single-project facts: `docs/jira-sync-setup.md:74` presents `project` as one config line and has no section on multiple projects, `docs/config.md:216-260` documents the `[jira]` block as a single scalar project, and `docs/migrations.md` describes the ensure registry without the two units this epic adds. A user upgrading a client store also needs to know what the new `required_capabilities` entry means for older binaries in their fleet. None of that is documented by the implementation stories, which own code and tests only.\n\n## Approach\n\nDocument the shipped behaviour and record the architectural decision. The ADR is warranted rather than decorative because two decisions here are load-bearing, non-obvious, and expensive to reverse: that the project set is a property of the **store** rather than of a repo, and that the legacy migration writes **no ticket events**. Both were chosen against plausible alternatives \u2014 per-repo project lists and an EDIT-per-ticket backfill \u2014 and a future reader who does not know why will be tempted back toward them.\n\nThe ADR is `docs/adr/0062-*` \u2014 the next number after `0061-measurement-provenance-in-attested-evidence.md`. It records the shared-`prev_snapshot` reasoning for store ownership, the short-lock-budget reasoning for the event-free migration, and the conditional-stamp reasoning for compatibility. It also notes the relationship to ADR 0060, whose churn constraint the mapping satisfies by construction.\n\nDocumentation updates cover the mapping and its `bridge projects` verb, the tri-state project field, the repos field, the two ensure units, and the upgrade note for fleets running mixed binary versions.\n\n## Scope\n\n- `docs/adr/0062-many-to-many-tracker-projects.md` (new)\n- `docs/jira-sync-setup.md`\n- `docs/config.md`\n- `docs/migrations.md`\n- `docs/user-guide.md`\n- `docs/ticket-model.md`\n\n## Testing\n\nNo `## Testing` section beyond this note: this story adds no testable behaviour \u2014 it is documentation and an ADR, which `rebar explain plan` names as a legitimately test-free change class. Verification is by the repository's existing documentation gates rather than by new tests, and the acceptance criteria below name the command that checks each claim.\n\n## Acceptance Criteria\n\n- [ ] `docs/adr/0062-many-to-many-tracker-projects.md` exists and records the store-ownership,\n      event-free-migration, and conditional-stamp decisions with their rejected alternatives; checked\n      by reading the file and confirming each of the three decisions names what it was chosen over.\n- [ ] The Jira sync and config docs describe the project mapping and no longer present a single\n      scalar project as the only option; checked by confirming no remaining passage states the\n      single-project constraint as current behaviour.\n- [ ] `docs/migrations.md` lists both new ensure units alongside the existing built-ins; checked by\n      confirming each registered id appears in the doc.\n- [ ] The docs state what the `multi-project-bridge` capability means for an older binary and what an\n      operator does about it; checked by confirming the upgrade note names both the fail-closed\n      behaviour and the remedy.\n- [ ] The generated CLI reference includes `bridge projects`; checked by running the repository's\n      documentation generation and confirming the verb appears without a manual edit.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nThe multi-project model changes things a reader currently learns from the docs as single-project facts: `docs/jira-sync-setup.md:74` presents `project` as one config line and has no section on multiple projects, `docs/config.md:216-260` documents the `[jira]` block as a single scalar project, and `docs/migrations.md` describes the ensure registry without the two units this epic adds. A user upgrading a client store also needs to know what the new `required_capabilities` entry means for older binaries in their fleet. None of that is documented by the implementation stories, which own code and tests only.\n\n## Approach\n\nDocument the shipped behaviour and record the architectural decision. The ADR is warranted rather than decorative because two decisions here are load-bearing, non-obvious, and expensive to reverse: that the project set is a property of the **store** rather than of a repo, and that the legacy migration writes **no ticket events**. Both were chosen against plausible alternatives \u2014 per-repo project lists and an EDIT-per-ticket backfill \u2014 and a future reader who does not know why will be tempted back toward them.\n\nThe ADR is `docs/adr/0097-*` \u2014 the next free number after `0096-pandoc-corpus-verification-boundary.md` (the current maximum; the earlier `0062` slot is already taken by `0062-pagination-stall-aborts-past-fail-open.md`). It records the shared-`prev_snapshot` reasoning for store ownership, the short-lock-budget reasoning for the event-free migration, and the conditional-stamp reasoning for compatibility. It also notes the relationship to ADR 0060, whose churn constraint the mapping satisfies by construction.\n\nDocumentation updates cover the mapping and its `bridge projects` verb, the tri-state project field, the repos field, the two ensure units, and the upgrade note for fleets running mixed binary versions.\n\n## Scope\n\n- `docs/adr/0097-many-to-many-tracker-projects.md` (new)\n- `docs/jira-sync-setup.md`\n- `docs/config.md`\n- `docs/migrations.md`\n- `docs/user-guide.md`\n- `docs/ticket-model.md`\n\n## Testing\n\nNo `## Testing` section beyond this note: this story adds no testable behaviour \u2014 it is documentation and an ADR, which `rebar explain plan` names as a legitimately test-free change class. Verification is by the repository's existing documentation gates rather than by new tests, and the acceptance criteria below name the command that checks each claim.\n\n## Acceptance Criteria\n\n- [x] `docs/adr/0097-many-to-many-tracker-projects.md` exists and records the store-ownership,\n      event-free-migration, and conditional-stamp decisions with their rejected alternatives; checked\n      by reading the file and confirming each of the three decisions names what it was chosen over.\n- [x] The Jira sync and config docs describe the project mapping and no longer present a single\n      scalar project as the only option; checked by confirming no remaining passage states the\n      single-project constraint as current behaviour.\n- [x] `docs/migrations.md` lists both new ensure units alongside the existing built-ins; checked by\n      confirming each registered id appears in the doc.\n- [x] The docs state what the `multi-project-bridge` capability means for an older binary and what an\n      operator does about it; checked by confirming the upgrade note names both the fail-closed\n      behaviour and the remedy.\n- [x] The generated CLI reference includes `bridge projects`; checked by running the repository's\n      documentation generation and confirming the verb appears without a manual edit.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Document the multi-project model and record ADR 0062"
       },
       "created_at": "2026-08-08T03:44:53Z",
@@ -70330,7 +69988,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nThe live Jira DC harness cell `tests/external/live_jira_dc/test_store_copy_isolation.py::test_the_store_copy_is_complete_and_scrubbed` FAILS on current origin/main:\n\n    AssertionError: binding/snapshot artifacts survived the scrub: ['.bridge_state']\n\nObserved in the 'jira DC harness smoke' job of Live External Integration run 31807853902 (job 94790999602), 2026-08-14, against origin/main. The J11 store-copy fixture scrubs `.bridge_state*` from the copied store, but the artifact survives into the copy the isolation cell asserts is fully scrubbed, muddying the live DC signal for unrelated work.\n\n## Root cause (regression origin)\nThe `dc_store_copy_repo` fixture (`tests/external/live_jira_dc/_dc_fixtures.py`) scrubs `.bridge_state*`, commits, and THEN calls `run_ensures()` to converge the `git archive` copy into a writable store. Commit 72731d3745 (2026-08-13, ticket 462d / epic 0303) added the `projects-seed` ensure unit (`rebar._store.project_ensures.seed_projects_mapping_unit`), which unconditionally re-creates and COMMITS `.bridge_state/projects.json` whenever its tree-check (`git show tickets:.bridge_state/projects.json`) misses \u2014 which is exactly the state the scrub leaves. That seed unit post-dates the J11 scrub (2026-08-07), so converging the copy silently resurrects the cache the scrub had removed. Before epic 0303, `run_ensures` created nothing under `.bridge_state`, so the scrub held.\n\n## Approach\nExtract the scrub into a small module-level helper `scrub_bridge_state(tracker, *, commit=False)` in `_dc_fixtures.py` (glob-matched, as before). Call it in the original position, and AGAIN after `run_ensures` converges the store \u2014 this second pass commits the removal so the `projects-seed` unit's resurrected `.bridge_state/projects.json` is removed from both the worktree and the tickets tree. This is a principled fix (re-scrub the whole `.bridge_state*` glob after convergence) rather than special-casing one filename, and it keeps the `.env-id` store marker that `run_ensures` creates intact.\n\n## Scope\n- `tests/external/live_jira_dc/_dc_fixtures.py` \u2014 add `scrub_bridge_state` helper; re-scrub after `run_ensures`.\n- `tests/unit/test_dc_store_copy_fetch_diagnostics.py` \u2014 add a fast repo-tier regression test: the `projects-seed` unit resurrects `.bridge_state/projects.json`, and the committing re-scrub removes it (worktree + tickets tree).\n\n## Testing\n- Fast unit test (`TestBridgeStateScrub`) drives the real `seed_projects_mapping_unit` to reproduce the resurrection (negative control) and asserts the post-converge scrub leaves no `.bridge_state*` and a clean git tree \u2014 no live harness needed.\n- The live cell `test_the_store_copy_is_complete_and_scrubbed` is the ultimate check; it runs in the operator-dispatched DC-harness job (~1h), not a per-commit gate.\n\n## Acceptance Criteria\n- [ ] The store-copy scrub removes `.bridge_state` (and any equivalent binding/snapshot cache) so `test_the_store_copy_is_complete_and_scrubbed` passes in the live DC-harness job \u2014 verified by the re-scrub after `run_ensures` and the fast unit regression test in `tests/unit/test_dc_store_copy_fetch_diagnostics.py`.\n- [ ] A root-cause note explains why `.bridge_state` began surviving the scrub (regression origin) \u2014 recorded in this description and as a ticket comment.\n\n## Notes\nIndependent of the rich-text epic (vigilant-erasable-pony); does NOT touch `test_dc_rich_text_live.py` (owned concurrently by graywolf-land).",
+        "description": "## Context / Problem\nThe live Jira DC harness cell `tests/external/live_jira_dc/test_store_copy_isolation.py::test_the_store_copy_is_complete_and_scrubbed` FAILS on current origin/main:\n\n    AssertionError: binding/snapshot artifacts survived the scrub: ['.bridge_state']\n\nObserved in the 'jira DC harness smoke' job of Live External Integration run 31807853902 (job 94790999602), 2026-08-14, against origin/main. The J11 store-copy fixture scrubs `.bridge_state*` from the copied store, but the artifact survives into the copy the isolation cell asserts is fully scrubbed, muddying the live DC signal for unrelated work.\n\n## Root cause (regression origin)\nThe `dc_store_copy_repo` fixture (`tests/external/live_jira_dc/_dc_fixtures.py`) scrubs `.bridge_state*`, commits, and THEN calls `run_ensures()` to converge the `git archive` copy into a writable store. Commit 72731d3745 (2026-08-13, ticket 462d / epic 0303) added the `projects-seed` ensure unit (`rebar._store.project_ensures.seed_projects_mapping_unit`), which unconditionally re-creates and COMMITS `.bridge_state/projects.json` whenever its tree-check (`git show tickets:.bridge_state/projects.json`) misses \u2014 which is exactly the state the scrub leaves. That seed unit post-dates the J11 scrub (2026-08-07), so converging the copy silently resurrects the cache the scrub had removed. Before epic 0303, `run_ensures` created nothing under `.bridge_state`, so the scrub held.\n\n## Approach\nExtract the scrub into a small module-level helper `scrub_bridge_state(tracker, *, commit=False)` in `_dc_fixtures.py` (glob-matched, as before). Call it in the original position, and AGAIN after `run_ensures` converges the store \u2014 this second pass commits the removal so the `projects-seed` unit's resurrected `.bridge_state/projects.json` is removed from both the worktree and the tickets tree. This is a principled fix (re-scrub the whole `.bridge_state*` glob after convergence) rather than special-casing one filename, and it keeps the `.env-id` store marker that `run_ensures` creates intact.\n\n## Scope\n- `tests/external/live_jira_dc/_dc_fixtures.py` \u2014 add `scrub_bridge_state` helper; re-scrub after `run_ensures`.\n- `tests/unit/test_dc_store_copy_fetch_diagnostics.py` \u2014 add a fast repo-tier regression test: the `projects-seed` unit resurrects `.bridge_state/projects.json`, and the committing re-scrub removes it (worktree + tickets tree).\n\n## Testing\n- Fast unit test (`TestBridgeStateScrub`) drives the real `seed_projects_mapping_unit` to reproduce the resurrection (negative control) and asserts the post-converge scrub leaves no `.bridge_state*` and a clean git tree \u2014 no live harness needed.\n- The live cell `test_the_store_copy_is_complete_and_scrubbed` is the ultimate check; it runs in the operator-dispatched DC-harness job (~1h), not a per-commit gate.\n\n## Acceptance Criteria\n- [x] The store-copy scrub removes `.bridge_state` (and any equivalent binding/snapshot cache) so `test_the_store_copy_is_complete_and_scrubbed` passes in the live DC-harness job \u2014 verified by the re-scrub after `run_ensures` and the fast unit regression test in `tests/unit/test_dc_store_copy_fetch_diagnostics.py` (Gerrit change 1783 / commit 716454cbe5, merged). [operator-attested] live DC-harness confirmation is deferred to the operator's next dispatched run.\n- [x] A root-cause note explains why `.bridge_state` began surviving the scrub (regression origin) \u2014 recorded in this description (## Root cause) and as a ticket comment.\n\n## Notes\nIndependent of the rich-text epic (vigilant-erasable-pony); does NOT touch `test_dc_rich_text_live.py` (owned concurrently by graywolf-land).",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Live DC store-copy scrub leaves .bridge_state behind (test_store_copy_isolation regression)"
@@ -90172,9 +89830,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nStore-wide maintenance walks visit every ticket directory on every run: the fsck scan loops (`_ticket_dirs` iterations in src/rebar/_commands/fsck_scan.py) and the compact-all sweep (src/rebar/_commands/compact.py, whose per-ticket selection is `_scan_snapshot_state`'s own `os.scandir(tracker)` walk invoked by `compact_all_cli`) are O(all tickets ever created). As the store grows, archived tickets \u2014 cold, excluded from default `list` \u2014 dominate that walk and make routine health checks and sweeps slower for no operational value. `ticket list` already has the pattern to copy: default excludes archived (marker fast-path at reducer/_api.py with compiled-state confirmation) with an explicit `--include-archived` override.\n\n## Approach\nTwo coupled changes, ordered so the default flip is safe:\n1. **Operation-linked terminal fold.** Today `leaf.archive` (src/rebar/_commands/leaf.py) writes only the ARCHIVED event + `.archived` marker \u2014 it does NOT fold, so an archived ticket can carry unfolded tail events and the only thing that folds them is a later compact-all walk reaching it. Before scoping that walk to active tickets, make the fold part of the archive operation itself: `rebar archive` performs the ticket's final fold inline right before writing the ARCHIVED event, reusing the existing single-ticket fold path compact_txn already exposes BUT as a TERMINAL fold that bypasses the incremental gates: it passes threshold=0 (fold even a small ticket) and a fold horizon of now (fold the within-horizon tail too), so a just-archived hot ticket \u2014 all of whose events are younger than the normal compaction horizon \u2014 still gets a complete SNAPSHOT covering every event. If the shared path cannot express that (horizon/threshold baked in), add an explicit terminal/force parameter to it rather than a parallel fold implementation; a ticket with nothing unfolded is a no-op (no empty SNAPSHOT write). This is operation-linked, so it is portable across environments with diverse or NO CI provider \u2014 no scheduled sweep is load-bearing. Any later `--include-archived` sweep becomes redundant belt-and-suspenders for tickets archived by pre-change builds, not the sole fold path.\n2. **Active-only default scoping.** Introduce one shared helper (in the module fsck_scan already imports `_ticket_dirs` from) that yields ACTIVE ticket dirs by default \u2014 skipping dirs whose net archival state is archived, using the `.archived` marker as the fast-path and the existing `_is_net_archived`-style event-name confirmation, the exact semantics `list` uses \u2014 with an `include_archived` flag to yield everything. Switch the fsck scan loops to it, and in compact.py replace `_scan_snapshot_state`'s `os.scandir(tracker)` walk with the shared iterator (matching its existing return contract so `_foldable_event_count` consumers are unchanged), with `compact_all_cli` threading `--include-archived` through to it. Add `--include-archived` to `rebar fsck` and `rebar compact-all` (flag parsing + JSON passthrough; the usage lines live in src/rebar/_cli/help/fsck.txt and compact-all.txt, not in fsck.py). Default = active-only for both: with change 1 in place, an archived ticket really IS folded on its way out, and any deep audit reaches it with the flag.\nBack-out path: the default flip is a one-line revert per command (restore the full walk); change 1 is independently safe to keep since folding at archive time is strictly more converged than folding later. Positive rationale: this reuses the archive marker + net-archival semantics that default `list` has proven, rather than inventing a second notion of active.\n\n## Scope\n- src/rebar/_commands/leaf.py \u2014 archive performs the ticket's terminal fold inline before the ARCHIVED event.\n- src/rebar/_commands/fsck_scan.py \u2014 scan loops take the shared active-only iterator; `include_archived` threading.\n- src/rebar/_commands/fsck.py \u2014 CLI flag + JSON passthrough.\n- src/rebar/_cli/help/fsck.txt and src/rebar/_cli/help/compact-all.txt \u2014 the usage/help text for both commands lives in these files (fsck.py has no usage string); add `--include-archived` there.\n- src/rebar/_commands/compact.py \u2014 `_scan_snapshot_state` replaces its `os.scandir` walk with the shared iterator; `compact_all_cli` threads `--include-archived` through; default active-only.\n- tests/unit/test_scan_scoping.py (new) \u2014 visited-set coverage both ways + archive-fold sequence test.\n- docs/user-guide.md \u2014 document the default, the override, and the archive-time fold.\n\n## Testing\n- Happy path: fixture store with N archived (marker + ARCHIVED event) and M active tickets; default `rebar fsck` and `rebar compact-all --dry-run` visit exactly the M active dirs (assert on the visited set / reported counts); with `--include-archived` they visit N+M.\n- Archive-fold sequence: archive a ticket that has unfolded events, then run DEFAULT `rebar compact-all`; assert the archived ticket's SNAPSHOT covers those events (nothing stranded) even though the default sweep never visited it \u2014 the fold happened at archive time.\n- Edge: a ticket dir with a stale marker but NO net-archived state (reverted archive) is still visited by default (the confirmation step, not the marker alone, decides); an archived ticket with a corrupt event file IS reported when `--include-archived` is passed (deep audit still works); a ticket archived by a PRE-change build (unfolded, no inline fold) is folded by a `compact-all --include-archived` run (the belt-and-suspenders path works).\n- Empty store: both commands succeed with zero visits.\n\n## Acceptance Criteria\n- [ ] `rebar archive` folds the ticket inline (SNAPSHOT covers all its events) before writing ARCHIVED; a just-archived ticket followed by default `compact-all` carries no unfolded events; checked by the sequence test.\n- [ ] Default `rebar fsck` and `rebar compact-all` visit only non-archived tickets, and `--include-archived` restores the full walk (including folding legacy archived-but-unfolded tickets); checked by the visited-set and legacy-fold tests.\n- [ ] A reverted-archive ticket (stale marker) is never skipped by default; checked by the edge test.\n- [ ] Usage lines and docs/user-guide.md name the new flag on both commands and the archive-time fold; checked by --help output in the test and the doc diff.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
+        "description": "## Context / Problem\nStore-wide maintenance walks visit every ticket directory on every run: the fsck scan loops (`_ticket_dirs` iterations in src/rebar/_commands/fsck_scan.py) and the compact-all sweep (src/rebar/_commands/compact.py, whose per-ticket selection is `_scan_snapshot_state`'s own `os.scandir(tracker)` walk invoked by `compact_all_cli`) are O(all tickets ever created). As the store grows, archived tickets \u2014 cold, excluded from default `list` \u2014 dominate that walk and make routine health checks and sweeps slower for no operational value. `ticket list` already has the pattern to copy: default excludes archived (marker fast-path at reducer/_api.py with compiled-state confirmation) with an explicit `--include-archived` override.\n\n## Approach\nTwo coupled changes, ordered so the default flip is safe:\n1. **Operation-linked terminal fold.** Today `leaf.archive` (src/rebar/_commands/leaf.py) writes only the ARCHIVED event + `.archived` marker \u2014 it does NOT fold, so an archived ticket can carry unfolded tail events and the only thing that folds them is a later compact-all walk reaching it. Before scoping that walk to active tickets, make the fold part of the archive operation itself: `rebar archive` performs the ticket's final fold inline right before writing the ARCHIVED event, reusing the existing single-ticket fold path compact_txn already exposes BUT as a TERMINAL fold that bypasses the incremental gates: it passes threshold=0 (fold even a small ticket) and a fold horizon of now (fold the within-horizon tail too), so a just-archived hot ticket \u2014 all of whose events are younger than the normal compaction horizon \u2014 still gets a complete SNAPSHOT covering every event. If the shared path cannot express that (horizon/threshold baked in), add an explicit terminal/force parameter to it rather than a parallel fold implementation; a ticket with nothing unfolded is a no-op (no empty SNAPSHOT write). This is operation-linked, so it is portable across environments with diverse or NO CI provider \u2014 no scheduled sweep is load-bearing. Any later `--include-archived` sweep becomes redundant belt-and-suspenders for tickets archived by pre-change builds, not the sole fold path.\n2. **Active-only default scoping.** Introduce one shared helper (in the module fsck_scan already imports `_ticket_dirs` from) that yields ACTIVE ticket dirs by default \u2014 skipping dirs whose net archival state is archived, using the `.archived` marker as the fast-path and the existing `_is_net_archived`-style event-name confirmation, the exact semantics `list` uses \u2014 with an `include_archived` flag to yield everything. Switch the fsck scan loops to it, and in compact.py replace `_scan_snapshot_state`'s `os.scandir(tracker)` walk with the shared iterator (matching its existing return contract so `_foldable_event_count` consumers are unchanged), with `compact_all_cli` threading `--include-archived` through to it. Add `--include-archived` to `rebar fsck` and `rebar compact-all` (flag parsing + JSON passthrough; the usage lines live in src/rebar/_cli/help/fsck.txt and compact-all.txt, not in fsck.py). Default = active-only for both: with change 1 in place, an archived ticket really IS folded on its way out, and any deep audit reaches it with the flag.\nBack-out path: the default flip is a one-line revert per command (restore the full walk); change 1 is independently safe to keep since folding at archive time is strictly more converged than folding later. Positive rationale: this reuses the archive marker + net-archival semantics that default `list` has proven, rather than inventing a second notion of active.\n\n## Scope\n- src/rebar/_commands/leaf.py \u2014 archive performs the ticket's terminal fold inline before the ARCHIVED event.\n- src/rebar/_commands/fsck_scan.py \u2014 scan loops take the shared active-only iterator; `include_archived` threading.\n- src/rebar/_commands/fsck.py \u2014 CLI flag + JSON passthrough.\n- src/rebar/_cli/help/fsck.txt and src/rebar/_cli/help/compact-all.txt \u2014 the usage/help text for both commands lives in these files (fsck.py has no usage string); add `--include-archived` there.\n- src/rebar/_commands/compact.py \u2014 `_scan_snapshot_state` replaces its `os.scandir` walk with the shared iterator; `compact_all_cli` threads `--include-archived` through; default active-only.\n- tests/unit/test_scan_scoping.py (new) \u2014 visited-set coverage both ways + archive-fold sequence test.\n- docs/user-guide.md \u2014 document the default, the override, and the archive-time fold.\n\n## Testing\n- Happy path: fixture store with N archived (marker + ARCHIVED event) and M active tickets; default `rebar fsck` and `rebar compact-all --dry-run` visit exactly the M active dirs (assert on the visited set / reported counts); with `--include-archived` they visit N+M.\n- Archive-fold sequence: archive a ticket that has unfolded events, then run DEFAULT `rebar compact-all`; assert the archived ticket's SNAPSHOT covers those events (nothing stranded) even though the default sweep never visited it \u2014 the fold happened at archive time.\n- Edge: a ticket dir with a stale marker but NO net-archived state (reverted archive) is still visited by default (the confirmation step, not the marker alone, decides); an archived ticket with a corrupt event file IS reported when `--include-archived` is passed (deep audit still works); a ticket archived by a PRE-change build (unfolded, no inline fold) is folded by a `compact-all --include-archived` run (the belt-and-suspenders path works).\n- Empty store: both commands succeed with zero visits.\n\n## Acceptance Criteria\n- [x] `rebar archive` folds the ticket inline (SNAPSHOT covers all its events) before writing ARCHIVED; a just-archived ticket followed by default `compact-all` carries no unfolded events; checked by the sequence test.\n- [x] Default `rebar fsck` and `rebar compact-all` visit only non-archived tickets, and `--include-archived` restores the full walk (including folding legacy archived-but-unfolded tickets); checked by the visited-set and legacy-fold tests.\n- [x] A reverted-archive ticket (stale marker) is never skipped by default; checked by the edge test.\n- [x] Usage lines and docs/user-guide.md name the new flag on both commands and the archive-time fold; checked by --help output in the test and the doc diff.\n- [x] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close. [operator-attested]",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Active-only scan scoping: fsck and compact-all default to non-archived tickets with --include-archived override"
       },
       "created_at": "2026-08-14T04:07:44Z",
