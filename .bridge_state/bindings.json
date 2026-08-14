@@ -15089,9 +15089,17 @@
       "updated_at": "2026-07-09T20:30:43Z"
     },
     "1ec4-d7e9-b1f1-40c3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe Gerrit Verify matrix runs the same default-tier marker selection on Ubuntu Python 3.11, 3.12, and 3.13. Every cell currently enables pytest-cov and independently enforces the same repository-wide fail-under floor. All three cells remain necessary for supported-Python behavioral and contractual compatibility, but tracing identical source on three cells adds runner occupancy without a distinct verdict. Production code has no sys.version_info or sys.version branches. The closed ropeable-hydrated-siskin ticket established the accepted precedent of retaining platform tests while collecting coverage only on a primary cell. Ubuntu Python 3.13 is the primary cell because it is the newest stable supported interpreter already paired with the sole macOS compatibility cell; retaining the gate there keeps the coverage verdict on the primary runtime while 3.11 and 3.12 remain behavioral-compatibility legs.\n\n## Plan\n- Measure instrumentation cost on the same checkout and host with identical tests/unit selection and worker count: one untimed warm-up, then A-B-B-A-A-B where A includes the production coverage flags and B omits only those flags. Report local_delta = median(A elapsed) - median(B elapsed).\n- Record this change own pre-merge Verify run id, the Python 3.11 and 3.12 default-suite step durations, and the post-merge comparison formula on this ticket before close. The umbrella inedible-subsimious-brahmancow owns the same-session post-merge observation because GitHub resolves the reusable workflow from main during pre-merge workflow_dispatch. The umbrella remains open until it records the first post-merge run, each changed-cell delta = pre-merge step duration - post-merge step duration, and the sum of only Python 3.11 and 3.12 deltas as runner-seconds freed. Python 3.13 and macOS are unchanged controls. The report must label a one-run comparison as noisy and must not call summed parallel time critical-path wall time.\n- Survey Django, NumPy, and SciPy current workflows and record each topology and any documented rationale as found. Consensus passes only if at least two selectively collect coverage on a primary or dedicated configuration while broader compatibility jobs run uninstrumented and none documents rejecting that practice for coverage or reliability. If the threshold fails, stop before Phase 2 and summarize the contrary evidence for the operator.\n- Extend tests/unit/test_ci_workflow_parity.py with a workflow contract that expands the declared matrix. Prove all four cells retain both default and integration pytest tiers. Prove exactly Ubuntu Python 3.13 receives both coverage flags and the other three cells receive neither.\n- Encode the condition with the non-empty coverage flag string in the truthy and-slot and the empty string only in the final or-slot. This explicitly avoids the GitHub Actions empty-string-falsy trap recorded on ropeable-hydrated-siskin. Defect-seed the prior all-Ubuntu condition and a zero-coverage condition; each must make the held-out contract RED before restoring GREEN.\n- Update the coverage rationale comment in .github/workflows/_build-and-test.yml and the canonical topology in docs/coverage.md so both state that Ubuntu Python 3.13 alone collects branch coverage and enforces fail-under.\n- Run focused workflow tests, lint, and typecheck; land through Gerrit. Back-out is a Gerrit revert restoring the prior all-Ubuntu coverage condition and three-cell documentation.\n\n## Acceptance Criteria\n- [ ] The A-B-B-A-A-B experiment reports raw elapsed samples.\n- [ ] The experiment reports local_delta using the stated median formula.\n- [ ] Ubuntu Python 3.11 retains the default-tier pytest step.\n- [ ] Ubuntu Python 3.11 retains the integration-tier pytest step.\n- [ ] Ubuntu Python 3.12 retains the default-tier pytest step.\n- [ ] Ubuntu Python 3.12 retains the integration-tier pytest step.\n- [ ] Ubuntu Python 3.13 retains the default-tier pytest step.\n- [ ] Ubuntu Python 3.13 retains the integration-tier pytest step.\n- [ ] macOS Python 3.13 retains the default-tier pytest step.\n- [ ] macOS Python 3.13 retains the integration-tier pytest step.\n- [ ] Ubuntu Python 3.13 collects branch coverage.\n- [ ] Ubuntu Python 3.13 enforces the unchanged fail-under threshold.\n- [ ] No other matrix cell receives a coverage flag.\n- [ ] The workflow contract is observed RED with the prior all-Ubuntu coverage condition.\n- [ ] The workflow contract is observed RED when no cell receives coverage.\n- [ ] The survey records a current workflow URL and topology for each named project.\n- [ ] The survey records any documented rejection found.\n- [ ] The consensus decision applies the stated threshold to the recorded findings.\n- [ ] Tracker history cites ropeable-hydrated-siskin and any prior rejection found.\n- [ ] The workflow rationale comment describes the one-cell coverage topology.\n- [ ] docs/coverage.md describes the one-cell coverage topology.\n- [ ] Focused tests pass.\n- [ ] Lint passes.\n- [ ] Typecheck passes.\n- [ ] Gerrit LLM-Review is +1 with zero unresolved comments.\n- [ ] Gerrit Verified is +1 before merge.\n- [ ] The pre-merge baseline run id and raw 3.11/3.12 default-suite step durations are recorded before close.\n- [ ] The post-merge observation is explicitly tracked on inedible-subsimious-brahmancow.\n- [ ] Back-out is documented as a Gerrit revert restoring the prior condition and topology text.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Collect coverage once on the primary Ubuntu CI cell"
+      },
       "created_at": "2026-08-14T10:45:32Z",
       "jira_id": "4588692",
       "jira_key": "REB-2902",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T10:45:35Z"
     },
@@ -16902,9 +16910,9 @@
     "2364-663e-859d-4b58": {
       "baseline": {
         "assignee": null,
-        "description": "## Context\nA runtime Popen trace of the 884-unit wiki hardening oracle on origin/main 72731d3745 observed 1,770 process launches during the production conversion half. One cold conversion launched Pandoc once plus git rev-parse --show-toplevel three times; after warmup the loop averaged one extra git root-discovery subprocess per unit. The changeable seam is _convert calling _pandoc_timeout for every unit, which calls load_config and repeatedly rediscovers the repository root. This is independent of the duplicate legacy Pandoc oracle tracked by absolute-diplomatic-snowyowl.\n\n## Plan\n- Confirm exact warm and cold subprocess attribution and wall time under representative contention.\n- Compare maintained OSS practice for loop-invariant configuration lookup in hot paths and search prior rebar tickets for rejected caching or pass-level configuration injection.\n- Preserve timeout configurability and all timeout, fallback, and process-group reap behavioral coverage while moving repository/config discovery out of the per-unit loop.\n- Use held-out RED to GREEN and defect-seeded mutation before Gerrit submission.\n\n## Acceptance Criteria\n- [ ] One render pass does not launch git root-discovery subprocesses once per Pandoc-bound unit.\n- [ ] Runtime timeout configuration remains observable at the documented render-pass boundary.\n- [ ] Timeout, fallback, and process-group reap contract tests retain equivalent behavioral coverage.\n- [ ] Before and after timing quantifies runner-seconds saved without reducing corpus or contractual coverage.\n- [ ] OSS comparison and prior-ticket disposition are recorded.\n- [ ] Gerrit LLM-Review +1 and Verified +1 pass before merge.",
+        "description": "## Context\nThe 884-unit hardening oracle invokes production `_convert` once per unit. `_convert` currently resolves `reconciler.dc_pandoc_timeout_s` on every invocation. A runtime trace on current origin/main d05bf2bc1be observed 100 Pandoc plus 102 `git rev-parse --show-toplevel` subprocesses for 100 conversions; resolving once at the render-pass boundary preserved identical outputs and reduced the trace to 100 Pandoc plus 3 one-time root probes. The prior 884-unit trace observed 1,770 total Popen calls (884 Pandoc + 886 root discovery). This is separate from the copied legacy oracle removed by absolute-diplomatic-snowyowl.\n\n## Contract and prior disposition\n- Preserve all real Pandoc calls, corpus units, byte expectations, timeout configurability, per-unit fallback, timeout, and process-group reap behavior.\n- absolute-diplomatic-snowyowl approved immutable outputs only for the copied legacy side and retained all 884 real production conversions. harmless-wavy-osprey approved session-scoped sharing that reduced duplicate work, while coercive-paediatric-bug rejected parallelism that does not reduce aggregate runner usage. No tracker ticket rejects render-pass configuration injection.\n- Full replacement of product Pandoc calls remains out of scope because ADR 0095 requires the real pinned boundary in every conversion assertion.\n\n## OSS consensus research (2026-08-14)\nAll three surveyed projects are active, unarchived, and popular: Django (88,426 stars; pushed 2026-08-13) lazily resolves each setting and caches it in `LazySettings.__dict__`; Black (41,804 stars; pushed 2026-08-10) reads pyproject configuration at CLI setup and passes resolved `mode` into multi-file workers; pytest (14,416 stars; pushed 2026-08-12) exposes its resolved Config as a session-scoped `pytestconfig` fixture. Consensus is 3/3 for resolving loop/session invariants once and passing them to repeated work.\n\n## Plan\n1. Add a held-out behavioral oracle with three proven renderable units and assert exactly one `_pandoc_timeout()` resolution for the whole render pass.\n2. Resolve timeout once in `render_markdown_to_wiki`; pass it through `_render_unit` and `_convert` using optional parameters so direct two-argument callers retain safe default behavior. The direct `_render_unit` caller at test_wiki_render_corpus.py:325 remains valid.\n3. Update the two `_convert` monkeypatch stand-ins at test_wiki_render.py:268/278 to accept the optional argument supplied by the public render path.\n4. In the 884-unit direct hardening loop, resolve timeout once outside the loop and pass it to `_convert`; keep exact expected bytes and all 884 real Pandoc invocations.\n5. Run held-out RED -> fixer -> GREEN, defect-seeded RED, focused hardening/corpus tests, lint, typecheck, and paired subprocess/timing measurement. The fresh-process measurement must observe 884 Pandoc launches, exactly one timeout resolution, and at most 3 one-time Git-root probes.\n6. Push through Gerrit; merge only after LLM-Review +1, Verified +1, no unresolved comments, then record CI and runner savings. Back-out is a Gerrit revert restoring per-call timeout resolution.\n\n## Acceptance Criteria\n- [ ] A render pass with three renderable units calls `_pandoc_timeout()` exactly once.\n- [ ] The hardening oracle launches all 884 real production Pandoc conversions.\n- [ ] A fresh 884-unit trace launches at most 3 `git rev-parse --show-toplevel` probes.\n- [ ] Non-default timeout configuration remains observable between separate render passes.\n- [ ] Per-unit timeout fallback behavior remains covered.\n- [ ] Pandoc stdin and argv behavior remains covered.\n- [ ] Byte-equivalence to all 884 immutable expected outputs remains covered.\n- [ ] Whole-process-group reap behavior remains covered.\n- [ ] Held-out RED/GREEN and exact defect-seeded RED are recorded.\n- [ ] Before/after subprocess counts and wall time quantify savings without claiming more than the evidence.\n- [ ] Focused tests, lint, and typecheck pass.\n- [ ] LLM-Review +1 and Verified +1 pass before merge.\n- [ ] Final report cites OSS sources and prior-ticket dispositions.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Eliminate per-unit git root discovery from Pandoc conversion"
       },
       "created_at": "2026-08-14T05:54:14Z",
@@ -49592,124 +49600,15 @@
     "60ce-29c1-58be-4648": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "rebar has ~40 distinct env vars across ~150 read sites; only ~half are REBAR_-prefixed. Standardizing on REBAR_<KEY> is a BREAKING rename of established public vars (PROJECT_ROOT, JIRA_URL/USER/API_TOKEN, TICKETS_TRACKER_DIR, ...), each needing an alias/deprecation window \u2014 larger than a docs change.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Catalog every env var + read site; decide per var keep/rename/remove (informed by the interactive env-var review in session); implement REBAR_ prefixing with back-compat aliases; route reads through the typed Config.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Full inventory of env vars + read sites with a keep/rename/remove decision each",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] REBAR_<KEY> standardization with alias windows for renamed public vars",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Reads routed through the typed Config (single source of truth)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Docs + tests; full suite green",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/low_new.svg",
-          "id": "4",
-          "name": "Low",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/4"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\nrebar has ~40 distinct env vars across ~150 read sites; only ~half are REBAR_-prefixed. Standardizing on REBAR_<KEY> is a BREAKING rename of established public vars (PROJECT_ROOT, JIRA_URL/USER/API_TOKEN, TICKETS_TRACKER_DIR, ...), each needing an alias/deprecation window \u2014 larger than a docs change.\n\n## What\nCatalog every env var + read site; decide per var keep/rename/remove (informed by the interactive env-var review in session); implement REBAR_ prefixing with back-compat aliases; route reads through the typed Config.\n\n## Acceptance Criteria\n- [ ] Full inventory of env vars + read sites with a keep/rename/remove decision each\n- [ ] REBAR_<KEY> standardization with alias windows for renamed public vars\n- [ ] Reads routed through the typed Config (single source of truth)\n- [ ] Docs + tests; full suite green",
+        "priority": "Low",
+        "status": "Done",
         "summary": "Env-var standardization audit (REBAR_<KEY> prefix + alias windows)"
       },
       "baseline_advanced_at": "2026-07-16T19:51:30Z",
       "created_at": "2026-06-25T23:00:15Z",
       "jira_key": "REB-159",
+      "peer_parent": "REB-262",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:00:15Z"
     },
@@ -62497,7 +62396,7 @@
         "assignee": null,
         "description": "## Context\nThe OS/Python-invariant complexity-baseline lock currently runs inside every test-matrix cell in `.github/workflows/_build-and-test.yml`: Ubuntu costs 52/54/55s and macOS costs 45s. The same commit has already been checked out in the single Ubuntu lint job. Running the policy there once preserves the gate while eliminating four duplicate invocations and their fetch/merge-base work, estimated at about 154 net runner-seconds per Verified run. CPython and Django use dedicated single lint jobs; Rust and Kubernetes use dedicated tidy/verify surfaces. No rejection was found; `humble-cinnamoned-mussel` fixed lock correctness but did not require matrix duplication.\n\n## Plan\n- Strengthen workflow policy tests to require exactly one complexity-lock invocation, in the single lint job, and to prohibit it in the OS/Python test matrix.\n- Move the existing unchanged script invocation and definition-vs-tree guard from `jobs.test` to `jobs.lint`.\n- Run held-out RED\u2192GREEN, a duplicate-invocation mutation, workflow/config tests, repository gates, and compare CI job timing after Gerrit upload. Back-out is a Gerrit revert.\n\n## Acceptance Criteria\n- [ ] `python scripts/check_complexity_baseline.py --lock` executes exactly once for a Verified change.\n- [ ] The invocation is a blocking step in the single lint job and is absent from the test matrix.\n- [ ] The existing fail-closed and definition-vs-tree-skew behavior is unchanged.\n- [ ] A workflow unit oracle fails on the current four-matrix-invocation placement and on any future duplicate placement.\n- [ ] Reintroducing the matrix invocation returns the held-out oracle to RED.\n- [ ] CI evidence quantifies runner-seconds saved without adding jobs, runners, or reducing policy coverage.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Run complexity baseline lock once per Verified change"
       },
       "created_at": "2026-08-14T02:07:08Z",
@@ -129493,7 +129392,7 @@
         "assignee": null,
         "description": "## Context\nThe session-scoped `run_request_sites` fixture in `tests/unit/test_subcall_class_selection.py` costs 46.95-49.02s setup in each Ubuntu CI cell. The earlier `analogical-dashing-fennecfox` ticket cached parsing, but runtime profiling still records about 9.54 million `ast.walk` iterations and 130.9 million calls. `_verdict` repeatedly rebuilds parent maps and rescans every source tree to rediscover callers. Focused local setup is 3.37s. Session-scoped/indexed invariants match pytest, Django, and Pylint/Astroid practice; no prior rejection was found.\n\n## Plan\n- Freeze the current exact ordered set of 24 `(key, config expression, verdict)` results and all existing provenance guards.\n- Add a deterministic work-budget oracle around a representative provenance run that fails when callers/parents are rediscovered by whole-tree walks.\n- Build immutable per-process parent/enclosing-function and call-site indices from the already cached parsed trees, then make `_verdict` query those indices.\n- Run held-out RED\u2192GREEN, defect-seeded removal of the index, the full subcall-class suite, repository gates, and paired cold-process timing. Back-out is a Gerrit revert.\n\n## Acceptance Criteria\n- [ ] The exact current 24 provenance tuples and every existing guard verdict remain unchanged.\n- [ ] Each parsed source tree contributes to caller and parent indexing once per pytest process.\n- [ ] A deterministic oracle fails when whole-tree caller/parent rediscovery is reintroduced.\n- [ ] Removing the indices returns the held-out oracle to RED.\n- [ ] Paired cold-process timing quantifies setup and Ubuntu runner-time savings.\n- [ ] No production file or public API changes.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Index AST provenance callers and parents once"
       },
       "created_at": "2026-08-14T02:07:36Z",
