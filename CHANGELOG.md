@@ -41,6 +41,12 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **Documentation-only Gerrit changes use a focused Verify lane.** Changes limited to the
+  documentation allowlist retain generated-reference drift, link, index, quickstart, policy,
+  hygiene, and documentation-contract checks without occupying the full OS/Python, mutation,
+  packaging, and integration runner graph. Any code, configuration, workflow, dependency, test,
+  unknown, or malformed path still fails closed to the complete Verify suite.
+
 - **Portable scheduled bridge runner:** GitHub Actions, Jenkins, and GitLab now delegate profile
   routing, pause handling, strict ticket delivery, and canonical provider exits to one
   installed `rebar bridge run` command backed by the public `rebar.bridge_run` API. The pip
