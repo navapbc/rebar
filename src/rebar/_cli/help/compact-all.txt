@@ -1,1 +1,5 @@
-Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]
+Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit] [--include-archived]
+
+  --include-archived   Also select archived tickets (skipped by default; archive
+                       folds terminally, so this is the migration door for tickets
+                       archived before that fold existed).

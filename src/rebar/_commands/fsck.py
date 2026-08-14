@@ -147,6 +147,7 @@ def _run_live_repair(
     limit: int | None,
     repo_root,
     only: str | None,
+    include_archived: bool = False,
 ) -> tuple[list[str], list[str]]:
     """Run both mutating fsck repair phases under one durable pause."""
     with owned_repair_pause("fsck", repo_root, in_flight_probe=_reconciler_in_flight):
@@ -156,6 +157,7 @@ def _run_live_repair(
             limit=limit,
             repo_root=repo_root,
             only=only,
+            include_archived=include_archived,
             _pause_owned=True,
         )
         ensure_lines: list[str] = []
@@ -186,6 +188,7 @@ def _repair_cli(
     only: str | None,
     no_mutate: bool,
     fmt: str,
+    include_archived: bool = False,
 ) -> int:
     """Drive the repair surface and render its preserved report contract."""
     if no_mutate and not dry_run:
@@ -194,12 +197,21 @@ def _repair_cli(
     ensure_lines: list[str] = []
     if dry_run:
         repair_lines, _unresolved = _repair_run(
-            tracker, dry_run=True, limit=limit, repo_root=repo_root, only=only
+            tracker,
+            dry_run=True,
+            limit=limit,
+            repo_root=repo_root,
+            only=only,
+            include_archived=include_archived,
         )
     else:
         try:
             repair_lines, ensure_lines = _run_live_repair(
-                tracker, limit=limit, repo_root=repo_root, only=only
+                tracker,
+                limit=limit,
+                repo_root=repo_root,
+                only=only,
+                include_archived=include_archived,
             )
         except RepairPauseError as exc:
             if exc.legacy_report_line is not None:
@@ -212,7 +224,9 @@ def _repair_cli(
             else:
                 sys.stderr.write(f"{exc.message}\n")
             return exc.returncode
-    scan_lines, issue_count = _scan(tracker, no_mutate or dry_run, repo_root)
+    scan_lines, issue_count = _scan(
+        tracker, no_mutate or dry_run, repo_root, include_archived=include_archived
+    )
     summary = (
         "fsck complete: no issues found"
         if issue_count == 0
@@ -253,6 +267,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
     # it before output parsing; it is honored only when mutation is allowed.
     repair_snapshots = "--repair-snapshots" in argv
+    include_archived = "--include-archived" in argv
     do_repair = "--repair" in argv
     dry_run = "--dry-run" in argv
     only_args = [a for a in argv if a == "--only" or a.startswith("--only=")]
@@ -283,7 +298,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     argv = [
         a
         for a in argv
-        if a not in ("--repair-snapshots", "--repair", "--dry-run")
+        if a not in ("--repair-snapshots", "--repair", "--dry-run", "--include-archived")
         and not a.startswith("--limit=")
         and a not in only_args
     ]
@@ -308,6 +323,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
             only=only,
             no_mutate=no_mutate,
             fmt=fmt,
+            include_archived=include_archived,
         )
 
     # ``no_mutate`` is passed by the caller (the library's read-only fsck surface),
@@ -320,6 +336,7 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
         repo_root,
         repair_snapshots=repair_snapshots,
         dry_run=dry_run,
+        include_archived=include_archived,
     )
     summary = (
         "fsck complete: no issues found"

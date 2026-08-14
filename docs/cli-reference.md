@@ -136,7 +136,11 @@ Usage: rebar compact <ticket_id> [--threshold=<n>]
 ### `compact-all`
 
 ```
-Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit]
+Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit] [--include-archived]
+
+  --include-archived   Also select archived tickets (skipped by default; archive
+                       folds terminally, so this is the migration door for tickets
+                       archived before that fold existed).
 ```
 
 ### `create`
@@ -239,11 +243,16 @@ Usage: rebar format <ticket_id> [mode]
 ### `fsck`
 
 ```
-Usage: rebar fsck [--output json] [--repair [--only=stale-channel] [--dry-run] [--limit=N]]
+Usage: rebar fsck [--output json] [--include-archived] [--repair [--only=stale-channel] [--dry-run] [--limit=N]]
 
 Store integrity validator. Checks JSON validity, CREATE presence, stale
-index.lock, and SNAPSHOT source_event_uuids consistency.
+index.lock, and SNAPSHOT source_event_uuids consistency. Per-ticket checks
+walk ACTIVE tickets only by default; archived tickets are terminally folded
+at archive time, so re-scanning them is history cost, not activity cost.
 
+  --include-archived   Scan archived ticket dirs too (the full historical walk).
+                       A stale .archived marker never hides a ticket: a dir is
+                       skipped only when its event log confirms net archival.
   --repair             Drive the store to fsck-zero (A3 remediation): retire
                        still-present folded sources (SNAPSHOT_INCONSISTENT) and
                        rebuild snapshots that dropped an AUTO-RECOVER orphan.
