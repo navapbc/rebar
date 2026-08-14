@@ -30,8 +30,11 @@ from __future__ import annotations
 import ast
 import functools
 import pathlib
+from collections import Counter
+from collections.abc import Mapping
 from dataclasses import replace
-from typing import Any
+from types import MappingProxyType
+from typing import Any, NamedTuple
 
 import pytest
 
@@ -361,26 +364,68 @@ def _parsed(path: pathlib.Path) -> ast.Module:
     return ast.parse(path.read_text())
 
 
-def _functions() -> dict[str, list[tuple[pathlib.Path, ast.FunctionDef | ast.AsyncFunctionDef]]]:
+_Function = ast.FunctionDef | ast.AsyncFunctionDef
+_FunctionSite = tuple[pathlib.Path, _Function]
+
+
+class _CallSite(NamedTuple):
+    path: pathlib.Path
+    tree: ast.Module
+    node: ast.Call
+
+
+class _AstIndex(NamedTuple):
+    """Immutable relationships derived once from the process's cached source trees."""
+
+    parents_by_tree: Mapping[ast.AST, Mapping[ast.AST, ast.AST]]
+    functions_by_name: Mapping[str, tuple[_FunctionSite, ...]]
+    calls_by_name: Mapping[str, tuple[_CallSite, ...]]
+
+
+@functools.cache
+def _ast_index() -> _AstIndex:
+    """Index each parsed source tree once for parent, function, and caller queries."""
+    parents_by_tree: dict[ast.AST, Mapping[ast.AST, ast.AST]] = {}
+    functions_by_name: dict[str, list[_FunctionSite]] = {}
+    calls_by_name: dict[str, list[_CallSite]] = {}
+
+    for path in sorted(_SRC.rglob("*.py")):
+        tree = _parsed(path)
+        parents: dict[ast.AST, ast.AST] = {}
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                functions_by_name.setdefault(node.name, []).append((path, node))
+            if isinstance(node, ast.Call):
+                called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if called is not None:
+                    calls_by_name.setdefault(called, []).append(_CallSite(path, tree, node))
+        parents_by_tree[tree] = MappingProxyType(parents)
+
+    return _AstIndex(
+        parents_by_tree=MappingProxyType(parents_by_tree),
+        functions_by_name=MappingProxyType(
+            {name: tuple(sites) for name, sites in functions_by_name.items()}
+        ),
+        calls_by_name=MappingProxyType(
+            {name: tuple(sites) for name, sites in calls_by_name.items()}
+        ),
+    )
+
+
+def _functions() -> dict[str, list[_FunctionSite]]:
     """Every function/method in ``src/rebar``, indexed by its bare name (the granularity a call
     site gives us: ``passes.pass2_completion(...)`` and ``pass2_completion(...)`` both resolve by
     ``pass2_completion``)."""
-    out: dict[str, list[tuple[pathlib.Path, Any]]] = {}
-    for path in sorted(_SRC.rglob("*.py")):
-        tree = _parsed(path)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                out.setdefault(node.name, []).append((path, node))
-    return out
+    return {name: list(sites) for name, sites in _ast_index().functions_by_name.items()}
 
 
-def _enclosing(tree: ast.AST, target: ast.AST) -> list[Any]:
+def _enclosing(tree: ast.AST, target: ast.AST) -> list[_Function]:
     """The chain of function definitions containing ``target``, innermost first."""
-    parents: dict[ast.AST, ast.AST] = {}
-    for node in ast.walk(tree):
-        for child in ast.iter_child_nodes(node):
-            parents[child] = node
-    chain, cur = [], target
+    parents = _ast_index().parents_by_tree[tree]
+    chain: list[_Function] = []
+    cur = target
     while cur in parents:
         cur = parents[cur]
         if isinstance(cur, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -461,41 +506,97 @@ def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
     if owner is None:
         return "unresolved"
     seen: set[str] = set()
-    for caller_path in sorted(_SRC.rglob("*.py")):
-        caller_tree = _parsed(caller_path)
-        for node in ast.walk(caller_tree):
-            if not isinstance(node, ast.Call):
-                continue
-            called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if called != owner.name:
-                continue
-            passed = _arg_for_param(node, owner, expr)
-            if passed is None:
-                continue
-            if _enclosing(caller_tree, node):
-                seen.add(_verdict(caller_tree, node, passed, depth + 1))
-            else:
-                seen.add("unresolved")
+    for caller in _ast_index().calls_by_name.get(owner.name, ()):
+        passed = _arg_for_param(caller.node, owner, expr)
+        if passed is None:
+            continue
+        if _enclosing(caller.tree, caller.node):
+            seen.add(_verdict(caller.tree, caller.node, passed, depth + 1))
+        else:
+            seen.add("unresolved")
     return _combine(seen) if seen else "unresolved"
 
 
 def _run_request_sites() -> list[tuple[str, str, str]]:
     """``(key, config_expr, verdict)`` for every ``RunRequest(...)`` construction in src/rebar."""
     sites = []
-    for path in sorted(_SRC.rglob("*.py")):
-        if "RunRequest(" not in path.read_text():
+    for call_site in _ast_index().calls_by_name.get("RunRequest", ()):
+        node = call_site.node
+        if getattr(node.func, "id", None) != "RunRequest":
             continue
-        tree = _parsed(path)
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "RunRequest"):
-                continue
-            cfg_kw = next((k.value for k in node.keywords if k.arg == "config"), None)
-            expr = ast.unparse(cfg_kw) if cfg_kw is not None else ""
-            chain = _enclosing(tree, node)
-            outer = chain[-1].name if chain else "<module>"
-            key = f"{path.relative_to(_SRC).as_posix()}::{outer}"
-            sites.append((key, expr, _verdict(tree, node, expr, 0)))
+        cfg_kw = next((k.value for k in node.keywords if k.arg == "config"), None)
+        expr = ast.unparse(cfg_kw) if cfg_kw is not None else ""
+        chain = _enclosing(call_site.tree, node)
+        outer = chain[-1].name if chain else "<module>"
+        key = f"{call_site.path.relative_to(_SRC).as_posix()}::{outer}"
+        sites.append((key, expr, _verdict(call_site.tree, node, expr, 0)))
     return sites
+
+
+_EXPECTED_RUN_REQUEST_SITES = [
+    ("llm/code_review/workflow_ops.py::score_code_novelty", "verify.max_output_cfg(cfg)", "bound"),
+    ("llm/enrich.py::enrich", "cfg", "bound"),
+    ("llm/epic_bug_screen.py::_screen_one", "cfg", "bound"),
+    ("llm/evals/eval_solver.py::_run_code_review_case", "cfg", "unresolved"),
+    ("llm/evals/eval_solver.py::_run_novelty_case", "cfg", "unresolved"),
+    ("llm/operations.py::_review_ticket_impl", "max_output_cfg(cfg)", "raw"),
+    ("llm/overlap/judge.py::judge_one", "cfg", "bound"),
+    ("llm/overlap/judge.py::judge_batch", "cfg", "bound"),
+    ("llm/plan_review/__init__.py::_score_floor_novelty", "vcfg", "bound"),
+    (
+        "llm/plan_review/completion_subcall.py::pass2_completion",
+        "_max_output_cfg(cfg)",
+        "bound",
+    ),
+    ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
+    ("llm/plan_review/fidelity_spot_eval.py::_relocation_requests", "cfg", "unresolved"),
+    ("llm/plan_review/passes.py::pass1_chunk", "_max_output_cfg(cfg)", "unresolved"),
+    ("llm/plan_review/passes.py::pass1_container", "_max_output_cfg(cfg)", "bound"),
+    ("llm/plan_review/passes.py::pass1_isf", "_max_output_cfg(cfg)", "bound"),
+    ("llm/plan_review/passes.py::summarize_for_isf", "_max_output_cfg(cfg)", "bound"),
+    ("llm/plan_review/passes.py::pass4_coach", "_max_output_cfg(cfg)", "unresolved"),
+    ("llm/plan_review/prerequisites.py::run_focused_finder", "call_cfg", "unresolved"),
+    ("llm/plan_review/xcheck.py::_assess_contradictions", "vcfg", "bound"),
+    ("llm/plan_review/xcheck.py::_assess_comment_trail", "vcfg", "bound"),
+    ("llm/spec_scan.py::_scan_epics_inner", "cfg", "raw"),
+    (
+        "llm/workflow/completion_recovery.py::_run_one_successor",
+        "self._config",
+        "unresolved",
+    ),
+    ("llm/workflow/completion_recovery.py::_run_finalizer", "self._config", "unresolved"),
+    ("llm/workflow/runs.py::build_agent_request", "cfg", "bound"),
+]
+
+
+def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Freeze semantic coverage and the deterministic work budget, not elapsed time."""
+    original_walk = ast.walk
+    module_walks: Counter[int] = Counter()
+
+    def counted_walk(node: ast.AST):
+        if isinstance(node, ast.Module):
+            module_walks[id(node)] += 1
+        return original_walk(node)
+
+    monkeypatch.setattr(ast, "walk", counted_walk)
+    _ast_index.cache_clear()
+    _parsed.cache_clear()
+
+    sites = _run_request_sites()
+
+    assert len(_EXPECTED_RUN_REQUEST_SITES) == 24
+    assert all(expr for _, expr, _ in _EXPECTED_RUN_REQUEST_SITES)
+    assert sites == _EXPECTED_RUN_REQUEST_SITES
+    assert len(module_walks) >= 400, "the oracle did not exercise the real source corpus"
+    repeated = [count for count in module_walks.values() if count > 3]
+    assert not repeated, (
+        "each parsed module may be walked for function discovery, site discovery, and one "
+        f"shared relationship index; {len(repeated)} modules exceeded that budget "
+        f"(maximum {max(repeated, default=0)})"
+    )
 
 
 @pytest.fixture(scope="session")
