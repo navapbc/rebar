@@ -48,6 +48,7 @@ from rebar._commands.compact_txn import (  # noqa: F401 — re-exported public p
 from rebar._engine_support.resolver import resolve_ticket_id
 from rebar._store import hlc
 from rebar._store import lock as _lock
+from rebar._store import lock_owner as _lock_owner
 
 logger = logging.getLogger(__name__)
 
@@ -453,19 +454,24 @@ def _run_sweep(tracker: str, needs: list[str], repo_root) -> tuple[int, int, set
     skipped = 0
     folded_ids: set[str] = set()
     error_ids: list[str] = []
-    for tid in needs:
-        if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
-            break
-        outcome = _sweep_one_ticket(tracker, tid, repo_root, position_commits)
-        if outcome == "E":
-            error_ids.append(tid)
-        elif outcome == ".":
-            compacted += 1
-            folded_ids.add(tid)
-        else:
-            skipped += 1
-        sys.stdout.write(outcome)
-        sys.stdout.flush()
+    # Tag every store-lock acquisition this loop drives (via _sweep_one_ticket ->
+    # _compact_locked) as `op=compact-sweep`, so a writer blocked by the sweep sees a named,
+    # safe-to-interrupt holder rather than a bare pid (camerashy-erectable-frog). Ambient, so
+    # it also covers a direct `rebar compact-all` invocation, not only the detached trigger.
+    with _lock_owner.operation_label("compact-sweep"):
+        for tid in needs:
+            if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
+                break
+            outcome = _sweep_one_ticket(tracker, tid, repo_root, position_commits)
+            if outcome == "E":
+                error_ids.append(tid)
+            elif outcome == ".":
+                compacted += 1
+                folded_ids.add(tid)
+            else:
+                skipped += 1
+            sys.stdout.write(outcome)
+            sys.stdout.flush()
     return compacted, skipped, folded_ids, error_ids
 
 
