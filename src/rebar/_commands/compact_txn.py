@@ -12,7 +12,9 @@ This module imports NEITHER of them, which is why the SHARED snapshot primitives
 (``_git``, ``_git_author``, ``_snapshot_strip_keys``, ``_build_authorship_ledger``)
 live here rather than in ``compact_rebuild``: both the normal fold and the rebuild
 path need them, and hosting them in the repair module would make the dependency
-circular.
+circular. It DOES import ``fsck_repair.is_snapshot_orphan`` (a leaf predicate;
+``fsck_repair`` imports no compact module, so this stays acyclic) — the fold's
+orphan-exclusion guard and fsck's scan must share ONE orphan definition (bug f96b).
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from pathlib import Path
 
 from rebar._commands import _seam, compact_recovery
 from rebar._commands._compact_policy import is_foldable
+from rebar._commands.fsck_repair import is_snapshot_orphan
 from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
@@ -218,6 +221,77 @@ def _parse_candidate_events(ticket_dir: str) -> list[tuple[str, str, int | None]
             continue
         parsed.append((fp, euuid, ets))
     return parsed
+
+
+def _is_snapshot_path(fp: str) -> bool:
+    """True when *fp* names a SNAPSHOT event file (live or ``.retired``)."""
+    return os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
+
+
+def _defer_presnapshot_foldables(
+    old: list[tuple[str, str, int | None]],
+    young: list[tuple[str, str, int | None]],
+) -> list[tuple[str, str, int | None]]:
+    """Drop foldables governed by a SNAPSHOT that is NOT folding this pass.
+
+    A fold-horizon race can leave a pre-snapshot event live (see
+    ``fsck_repair.is_snapshot_orphan``). If its governing snapshot is still young
+    (inside the horizon) when the event ages out, folding the event WITHOUT the
+    snapshot would place the new SNAPSHOT's timestamp before the governing one —
+    positionally buried on replay, i.e. the same silent loss this fix exists to
+    prevent. Defer such events until the governing snapshot folds with them.
+    """
+    snaps = [os.path.basename(fp) for (fp, _u, _ts) in young if _is_snapshot_path(fp)]
+    if not snaps:
+        return old
+    governing = max(snaps)
+    return [(fp, u, ts) for (fp, u, ts) in old if os.path.basename(fp) >= governing]
+
+
+def _exclude_snapshot_orphans(
+    old: list[tuple[str, str, int | None]],
+) -> list[tuple[str, str, int | None]]:
+    """Exclude fsck-orphans from the fold set so the fold cannot LAUNDER them.
+
+    Anchor: the latest prior SNAPSHOT present in the fold set. An active event that
+    sorts before that snapshot and is absent from its ``source_event_uuids`` was
+    never applied to its compiled_state (the fold-horizon race — the union merge
+    landed it after the fold enumerated its inputs). Retiring + citing it here
+    would erase the ORPHAN_EVENT finding while its effect stays lost — turning
+    repairable damage into silent, permanent loss (bug f96b). Instead the orphan
+    stays a live, un-cited file: the finding and the ``fsck --repair-snapshots``
+    window survive indefinitely; the fold does NOT absorb (repair owns that, with
+    its auto-recover/human-triage type routing). The predicate is fsck's own
+    (``fsck_repair.is_snapshot_orphan``), so fold and scan cannot disagree.
+
+    A first fold (no prior snapshot in the set) excludes nothing. An unreadable
+    anchor snapshot excludes nothing — fsck cannot classify orphans against it
+    either (``_check_snapshot`` returns no findings for it).
+    """
+    snaps = [fp for (fp, _u, _ts) in old if _is_snapshot_path(fp)]
+    if not snaps:
+        return old
+    anchor = max(snaps, key=os.path.basename)
+    try:
+        with open(anchor, encoding="utf-8") as f:
+            sources = set(json.load(f).get("data", {}).get("source_event_uuids", []))
+    except (json.JSONDecodeError, OSError):
+        return old
+    anchor_name = os.path.basename(anchor)
+    kept: list[tuple[str, str, int | None]] = []
+    for fp, u, ts in old:
+        name = os.path.basename(fp)
+        etype = name.removesuffix(".json").rsplit("-", 1)[-1]
+        if is_snapshot_orphan(name, etype, u, anchor_name, sources):
+            logger.warning(
+                "compact: excluding pre-snapshot orphan %s from the fold — not captured by "
+                "%s; left live for fsck --repair-snapshots",
+                name,
+                anchor_name,
+            )
+            continue
+        kept.append((fp, u, ts))
+    return kept
 
 
 def _build_snapshot_event(
@@ -494,6 +568,14 @@ def _compact_locked(
         if not old:
             sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
             return 0
+
+        old = _defer_presnapshot_foldables(old, young)
+        if not old:
+            sys.stdout.write(
+                "pre-snapshot foldables deferred until their governing SNAPSHOT folds\n"
+            )
+            return 0
+        old = _exclude_snapshot_orphans(old)
 
         fold_files = [fp for (fp, _u, _ts) in old]
 
