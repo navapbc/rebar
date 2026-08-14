@@ -131,3 +131,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0062 — A stalled pager must abort PAST fail-open handlers](0062-pagination-stall-aborts-past-fail-open.md)
 - [0093 — S3 ticket-store backend via `git-remote-s3` (optional, below the git layer)](0093-s3-ticket-store-backend.md)
 - [0095 — Data Center Markdown-to-wiki rendering is a segmenting, verify-then-fall-back renderer](0095-dc-segmenting-wiki-renderer.md)
+- [0097 — Many-to-many tracker projects](0097-many-to-many-tracker-projects.md)

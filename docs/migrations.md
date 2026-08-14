@@ -58,11 +58,14 @@ Two further units migrate a legacy store to the many-to-many projects model (tic
 **without writing any per-ticket events** — they only stamp committed tickets-branch files:
 
 - **`projects-seed`** — the migration trigger. Tree-checks `tickets:.bridge_state/projects.json`
-  first; if absent it writes a one-project mapping whose `legacy_default` is the store's
+  first; if absent it writes a mapping whose `legacy_default` is the store's
   configured backend project (`jira.project`, or the ACLI create-time default `DIG` when unset)
-  and whose `projects` set is `{<proj>: {"repos": []}}`, then commits it. A store that already
-  has the mapping is `ok` (zero commits). Every absent-`bridge_project` ticket then resolves to
-  that project (see `rebar._engine.rebar_reconciler.projects_store`).
+  and whose `projects` set is **empty**, then commits it. A store that already
+  has the mapping is `ok` (zero commits). The project set stays owned by the `bridge projects`
+  command (story c927), so `bridge projects list` on a freshly seeded store is empty until an
+  operator `set`s a key; every absent-`bridge_project` ticket then resolves to the
+  `legacy_default` (see
+  `rebar._engine.rebar_reconciler.projects_store`).
 - **`projects-compat-stamp`** — a level-triggered **backstop**, not the trigger. It reads the
   mapping's project count and, ONLY when the mapping holds **more than one** project and the
   token is not already present, appends the `multi-project-bridge` capability to
@@ -79,6 +82,10 @@ not list `multi-project-bridge` in `compat.KNOWN_CAPABILITIES` **fails closed** 
 projects model it cannot honor. This binary already registers the token in `KNOWN_CAPABILITIES`
 (the expand half of the expand/contract rollout), so it recognises — and passes on — such a
 store.
+
+The reasoning behind these two units — why the project set is owned by the store, why the
+migration writes no ticket events, and why the capability is stamped conditionally — is recorded
+in [ADR 0097](adr/0097-many-to-many-tracker-projects.md).
 
 One unit repairs stores whose per-ticket runtime markers predate the `.gitignore` coverage
 (epic becoming-berserk-grunion S1): **`untrack-runtime-markers`** removes tracked
