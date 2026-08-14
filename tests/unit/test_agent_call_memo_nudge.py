@@ -3,9 +3,11 @@
 Held-out oracle for the f6fc acceptance criteria. A duplicate ALLOWLISTED read-only
 tool call returns the cached result WITHOUT re-executing the wrapped tool, plus a
 graduated static nudge (level-1 on the first repeat, level-2 thereafter, byte-stable
-for prompt caching). The runaway guard stays OUTERMOST and still observes every
-duplicate signature — so a synthetic loop still trips the actuator with the memo
-active. Error results (the "Error:"-prefixed strings the read-only tools return; they
+for prompt caching). The runaway guard stays OUTERMOST, but its executed-work ratio no
+longer counts memo-served repeats as loop evidence (bug 3211) — a pure cache-served
+loop is bounded by the served-streak backstop instead, while free re-reads interleaved
+with novel work never abort the run. Error results (the "Error:"-prefixed strings the
+read-only tools return; they
 never raise into the agent loop) are NOT memoized and re-execute on retry; the
 deterministic sentinel-empty results ("(no matches)") ARE memoized — the core waste
 case. Only the four read-only tools are wrapped; write/non-deterministic tools always
@@ -255,22 +257,93 @@ def test_error_then_success_reexecutes_then_caches(monkeypatch):
     )
 
 
-def test_runaway_guard_still_observes_memoized_duplicates_and_trips(monkeypatch):
-    """Guard OUTERMOST: even when the memo would cache a successful repeat, the guard's
-    window sees every duplicate signature and still aborts the synthetic loop — and the
-    wrapped tool executed only ONCE, proving the memo was active during the trip."""
+def test_runaway_guard_still_bounds_a_pure_cache_served_loop(monkeypatch):
+    """A loop of memo-served repeats costs no tool executions but still burns request
+    budget: the guard's served-streak backstop must abort it — and the wrapped tool
+    executed only ONCE, proving every duplicate was served from cache (the abort is the
+    backstop, not the executed-work ratio)."""
     calls = {"n": 0}
     _install_single_tool(monkeypatch, _counting_read_file("cached-body", calls))
     cfg = _cfg(max_iterations=200)
 
-    with pytest.raises(RunawayToolLoopError):
+    with pytest.raises(RunawayToolLoopError) as excinfo:
         PydanticAIRunner(
             cfg, model_override=_driver(n_tool_calls=10_000, args={"path": "src/x.py"})
         ).run(_req(cfg))
 
     assert calls["n"] == 1, (
         f"the memo must serve every duplicate from cache (ran {calls['n']}x), yet the guard "
-        "still trips on the repeated signatures"
+        "still bounds the loop via the served-streak backstop"
+    )
+    assert "without executing" in str(excinfo.value), (
+        "a cache-served loop must be reported as chatter, not as re-executed work"
+    )
+
+
+def test_error_looping_allowlisted_tool_trips_the_ratio_arm(monkeypatch):
+    """An allowlisted tool whose result is an 'Error:' string is never cached, so every
+    repeat is EXECUTED work — the ratio arm must trip and say so (pins the exact-sig memo
+    miss path's executed-work report; search_files here, the non-read_file branch)."""
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _counting_search_files("Error: boom", calls))
+    cfg = _cfg(max_iterations=200)
+
+    with pytest.raises(RunawayToolLoopError) as excinfo:
+        PydanticAIRunner(
+            cfg, model_override=_driver(n_tool_calls=10_000, args={"query": "needle"})
+        ).run(_req(cfg))
+
+    assert calls["n"] > 1, "an Error: result must re-execute on every repeat"
+    assert "executed tool calls" in str(excinfo.value), (
+        "a re-executed loop must trip the executed-work ratio arm, not the streak backstop"
+    )
+
+
+def test_non_allowlisted_looping_tool_still_trips_the_ratio_arm(monkeypatch):
+    """Non-allowlisted tools bypass the cache entirely, so every repeat is EXECUTED work
+    — the ratio arm must still abort that loop (pins the memo passthrough's executed-work
+    report; without it the guard would be blind to non-memoized loops)."""
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _counting_named("record_criterion_verdict", "ok", calls))
+    cfg = _cfg(max_iterations=200)
+
+    with pytest.raises(RunawayToolLoopError) as excinfo:
+        PydanticAIRunner(
+            cfg, model_override=_driver(n_tool_calls=10_000, args={"path": "src/x.py"})
+        ).run(_req(cfg))
+
+    assert calls["n"] >= 1, "a non-allowlisted tool must actually execute"
+    assert "executed tool calls" in str(excinfo.value), (
+        "a re-executed loop must trip the executed-work ratio arm, not the streak backstop"
+    )
+
+
+def test_memo_served_repeats_are_not_loop_evidence_for_the_ratio_arm(monkeypatch):
+    """The bug-3211 defect: the guard counted memo-served re-reads as loop evidence, so
+    lever 2's free cache hits tripped the abort mid-progress. A run that interleaves
+    heavy re-reads of ONE cached file with genuinely novel work must land — the free
+    repeats fill neither the executed-ratio window nor a served streak."""
+    calls = {"n": 0}
+    _install_single_tool(monkeypatch, _counting_read_file("cached-body", calls))
+    cfg = _cfg(max_iterations=400)
+    state = {"i": 0}
+
+    def model(messages, info: AgentInfo):
+        state["i"] += 1
+        if state["i"] > 120:
+            return ModelResponse(parts=[TextPart("landed")])
+        # Two cached re-reads per novel call — the exact shape the old guard aborted
+        # (trailing window ~9 distinct / 24 = 0.375 <= 0.50, most of it memo-served).
+        if state["i"] % 3 == 0:
+            args = {"path": f"src/novel-{state['i']}.py"}
+        else:
+            args = {"path": "src/x.py"}
+        return ModelResponse(parts=[ToolCallPart(tool_name=info.function_tools[0].name, args=args)])
+
+    result = PydanticAIRunner(cfg, model_override=FunctionModel(model)).run(_req(cfg))
+
+    assert result["text"] == "landed", (
+        "free memo-served repeats interleaved with novel work must never abort the run"
     )
 
 
