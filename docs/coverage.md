@@ -9,7 +9,7 @@ is conservative and not intended to gate routine work.
 
 ```
 pytest -m "not integration and not external" \
-  --cov=rebar --cov-branch --cov-report=term-missing:skip-covered -q
+  --cov=rebar --cov-report=term-missing:skip-covered -q
 ```
 
 This is the same test selection CI's coverage step uses.
@@ -47,21 +47,23 @@ pytest -m "not integration and not external" -n 4 --dist worksteal \
   --cov=rebar --cov-report=term-missing:skip-covered -q
 ```
 
-### CI collects coverage on the **ubuntu** cells only
+### CI collects coverage on the primary **ubuntu / Python 3.13** cell only
 
-The `test` matrix in `.github/workflows/_build-and-test.yml` passes `--cov` on the
-three ubuntu cells and **omits it on macOS**. The macOS cell runs the byte-identical
-`-m "not integration and not external"` selection — the same tests, no coverage loss —
-but is not traced, because nothing consumes a macOS coverage number: `fail_under` is
-enforced three times over on ubuntu against the same selection.
+The `test` matrix in `.github/workflows/_build-and-test.yml` keeps all four supported
+cells (ubuntu on Python 3.11, 3.12, and 3.13; macOS on Python 3.13), and every cell
+runs both the default and integration tiers. Only the primary ubuntu / Python 3.13
+cell passes `--cov`; the other cells run the same selections without coverage tracing.
+The primary report still measures line + branch coverage and enforces the centralized
+`fail_under = 70` floor, so test, assertion, platform, and interpreter coverage are
+unchanged.
 
-The reason to skip it there specifically is cost. The macOS default-suite step is the
-longest job in the Gerrit Verified gate (15.4m of an 18.6m job on run #1823, against
-~5-6m for the same tests on ubuntu), so it sets the gate's critical path. It also holds
-one of a small number of concurrently-available macOS runners — peak 4 concurrent macOS
-jobs were observed across 25 sampled jobs, with changes dispatched later in a burst
-queueing 6.7-8.4m for a slot. Shortening that job therefore helps twice: once on its own
-run, and again for every other change waiting behind it.
+Tracing the same default-tier selection on all three ubuntu interpreters duplicated
+work without adding a distinct coverage contract: production has no Python-version
+branches, and all three reports enforced the same floor. In a same-host A-B-B-A-A-B
+experiment with identical 10,293-passed / 42-skipped selections, the median was
+511.16s with coverage and 477.16s without it, a 34.00s overhead per duplicate cell.
+Collecting once therefore saves about 68 aggregate ubuntu runner-seconds per Verify
+run and releases the 3.11 and 3.12 runners about 34 seconds sooner under contention.
 
 ## Measured baseline
 

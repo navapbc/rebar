@@ -718,15 +718,14 @@ jobs:
         # over-subscribes on larger local hosts). Coverage combines correctly only
         # because `parallel = true` is set in [tool.coverage.run] (pyproject.toml).
         #
-        # COVERAGE IS COLLECTED ON THE UBUNTU CELLS ONLY. The macOS cell exists for
-        # platform-compat coverage (flock/mkdir lock, gtimeout), not for a coverage
-        # number: `fail_under` is enforced identically by the three ubuntu cells over
-        # the byte-identical `-m` selection, so tracing the macOS run too was pure
-        # duplicate work. It was also the EXPENSIVE duplicate — the macOS default-suite
-        # step is the single longest job in the Verified gate (15.4m of an 18.6m job on
-        # run #1823) AND it holds one of the scarce macOS runner slots (peak 4 observed
-        # concurrent; changes deep in a burst queued 6.7-8.4m behind it). The SAME 7856
-        # tests still run here; only the tracing is dropped. Ticket f3d4.
+        # COVERAGE IS COLLECTED ON THE PRIMARY UBUNTU 3.13 CELL ONLY. All four matrix
+        # cells still run this same default tier and the integration tier below; only
+        # duplicate coverage tracing is omitted. The three ubuntu interpreters execute
+        # the same selection, production has no Python-version branches, and the one
+        # primary report still enforces centralized branch coverage and `fail_under`.
+        # A same-host A-B-B-A-A-B experiment measured 34.00s median tracing overhead,
+        # so omitting it from ubuntu 3.11 and 3.12 saves about 68 runner-seconds per run
+        # and releases those contended runners sooner without deleting any test or cell.
         #
         # REBAR_REQUIRE_EXTRAS=1 (bug 599e): this lane installs every test-bearing extra,
         # so an `importorskip` that WOULD skip means the install step lost an extra.
@@ -748,7 +747,7 @@ jobs:
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
           -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp"
-          ${{ !startsWith(matrix.os, 'macos') && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
+          ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI

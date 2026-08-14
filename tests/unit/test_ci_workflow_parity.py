@@ -75,6 +75,54 @@ _SHARED_GATE_SIGNATURES = {
     "integration tier": "pytest -m integration",
 }
 
+_COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered"
+
+
+def _expanded_test_matrix(workflow: dict[str, Any]) -> list[tuple[str, str]]:
+    matrix = workflow["jobs"]["test"]["strategy"]["matrix"]
+    excluded = {(item["os"], item["python-version"]) for item in matrix.get("exclude", [])}
+    return [
+        (os_name, python_version)
+        for os_name in matrix["os"]
+        for python_version in matrix["python-version"]
+        if (os_name, python_version) not in excluded
+    ]
+
+
+def _coverage_flags_by_cell(run: str, cells: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+    expression = re.search(
+        r"\$\{\{\s*(?P<condition>[^}]*?)\s*&&\s*'(?P<truthy>--cov=rebar "
+        r"--cov-report=term-missing:skip-covered)'\s*\|\|\s*'(?P<falsy>[^']*)'\s*\}\}",
+        run,
+    )
+    assert expression is not None, (
+        "the default-suite coverage expression must keep the non-empty flags in the truthy "
+        "`&&` slot and the empty string in the final `||` slot"
+    )
+    assert expression.group("truthy") == _COVERAGE_FLAGS
+    assert expression.group("falsy") == ""
+
+    predicates = [part.strip() for part in expression.group("condition").split("&&")]
+
+    def enabled(os_name: str, python_version: str) -> bool:
+        values: list[bool] = []
+        for predicate in predicates:
+            if predicate == "!startsWith(matrix.os, 'macos')":
+                values.append(not os_name.startswith("macos"))
+            elif predicate == "matrix.python-version == '3.13'":
+                values.append(python_version == "3.13")
+            elif predicate == "false":
+                values.append(False)
+            else:
+                raise AssertionError(f"unsupported coverage predicate: {predicate!r}")
+        return all(values)
+
+    return {
+        cell: expression.group("truthy") if enabled(*cell) else expression.group("falsy")
+        for cell in cells
+    }
+
+
 # Scripts referenced by a gate in the branch-CI lane that are DELIBERATELY not run in the
 # Verified lane. Empty by design: a derive-and-diff drift gate (scripts/gen_*.py / check_*.py)
 # that gates `main` must also gate pre-merge, or a broken artifact lands green. Add an entry
@@ -109,6 +157,42 @@ def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
         f"gerrit-verify.yaml no longer delegates to the shared gate workflow ({_REUSABLE_BAT}) — "
         "the Verified gate would drift from branch CI. Call the reusable, don't inline the gates."
     )
+
+
+def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
+    """Compatibility cells run every test; only the primary Ubuntu cell traces coverage."""
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    cells = _expanded_test_matrix(workflow)
+    assert cells == [
+        ("ubuntu-latest", "3.11"),
+        ("ubuntu-latest", "3.12"),
+        ("ubuntu-latest", "3.13"),
+        ("macos-latest", "3.13"),
+    ]
+
+    steps = workflow["jobs"]["test"]["steps"]
+    default_steps = [
+        step
+        for step in steps
+        if 'pytest -m "not integration and not external"' in step.get("run", "")
+    ]
+    integration_steps = [step for step in steps if "pytest -m integration" in step.get("run", "")]
+    assert len(default_steps) == 1
+    assert len(integration_steps) == 1
+
+    tiers_by_cell = {cell: {"default", "integration"} for cell in cells}
+    assert all(tiers == {"default", "integration"} for tiers in tiers_by_cell.values())
+
+    flags_by_cell = _coverage_flags_by_cell(default_steps[0]["run"], cells)
+    assert flags_by_cell == {
+        ("ubuntu-latest", "3.11"): "",
+        ("ubuntu-latest", "3.12"): "",
+        ("ubuntu-latest", "3.13"): _COVERAGE_FLAGS,
+        ("macos-latest", "3.13"): "",
+    }
+    assert _COVERAGE_FLAGS not in integration_steps[0]["run"]
 
 
 def test_mutation_gate_uses_one_reusable_in_both_lanes_and_votes() -> None:
