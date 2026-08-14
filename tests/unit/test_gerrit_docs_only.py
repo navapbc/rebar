@@ -183,13 +183,17 @@ def test_patchsets_predating_the_local_action_get_a_trusted_main_fallback() -> N
         assert restore < action
 
 
-def test_full_jobs_fallback_on_classifier_failure_and_docs_job_does_not() -> None:
+def test_full_jobs_cancel_on_supersession_and_fallback_on_classifier_failure() -> None:
     jobs = _load(GERRIT)["jobs"]
+    cancellation_guard = "!cancelled()"
     fallback = "needs.classify.result!='success'||needs.classify.outputs.route=='full'"
     for name in FULL_JOBS:
         job = jobs[name]
+        condition = _normalized(job["if"])
         assert "classify" in job["needs"]
-        assert fallback in _normalized(job["if"]), name
+        assert cancellation_guard in condition, name
+        assert "always()" not in condition, name
+        assert fallback in condition, name
 
     docs = jobs["docs-only"]
     condition = _normalized(docs["if"])

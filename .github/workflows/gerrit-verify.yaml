@@ -219,7 +219,7 @@ jobs:
     # lint/mypy/config-check/pre-commit out of the 4× matrix means they now run once, not per cell.
     name: build-and-test (gate + suite on the patchset)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_build-and-test.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -231,7 +231,7 @@ jobs:
     # spending the bounded runner on a patchset that cannot land.
     name: mutation (changed behavioral shards on the patchset)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_mutation.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -248,7 +248,7 @@ jobs:
     # On a full route it runs in parallel with the other full jobs after classification.
     name: optionality (lean-runtime + packaging on the patchset)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_optionality.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -264,7 +264,7 @@ jobs:
     # (jira-reb-1163: this job gated main but was absent from vote.needs → green-verify/red-main).
     name: artifact-probe (wheel/sdist provenance on the patchset)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_artifact-probe.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -278,7 +278,7 @@ jobs:
     # needs it (jira-reb-1163: this job gated main but was absent from vote.needs).
     name: eval-discipline (offline eval gate on the patchset)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_eval-discipline.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -292,7 +292,7 @@ jobs:
   golden-path:
     name: golden-path (clean install)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
@@ -347,7 +347,7 @@ jobs:
     # — so a future re-flip's own Verified vote is the proof that the whole store verifies.
     name: verify-identity (whole-store authorship gate)
     needs: [clear-vote, require-ticket, classify]
-    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
+    if: ${{ !cancelled() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
