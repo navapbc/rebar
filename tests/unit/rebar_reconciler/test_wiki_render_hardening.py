@@ -15,19 +15,21 @@ changes ROBUSTNESS only. Rendered output must be byte-identical to the landed
 renderer, so a hardening change can never quietly alter what lands in Jira.
 
 **Cost discipline.** Proving that third property over the whole committed corpus
-costs ~1768 pandoc spawns — 884 renderable units, each rendered twice (the new
-path and the oracle). As ONE test function that measured 91.6s idle but 504.8s
-under CPU saturation — past CI's ``--timeout=300``. Because CI passes
-``--timeout-method=thread``, pytest-timeout ``os._exit(1)``s the whole xdist
-worker rather than failing the test, so the run reported
-``worker 'gwN' crashed`` with no traceback (bug 0078-fa3e-05d1-4e12). The
-comparison is therefore split into fixed-size chunks — see
-:data:`_EQUIVALENCE_CHUNK`. Every unit is still compared; only the per-test
-wall clock changes.
+costs ~884 pandoc spawns — every renderable unit still traverses the real
+production ``_convert`` and installed Pandoc once, while the historical side is
+an immutable expected-output fixture. The clean baseline is ~32.6s for all 884
+production calls, roughly half the former double-render cost. The comparison
+remains split into fixed-size chunks — see :data:`_EQUIVALENCE_CHUNK` — so xdist
+can distribute the real conversions and no individual test approaches CI's
+per-test timeout. Every unit is still compared; only the duplicate subprocess
+oracle is gone.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import importlib.util
 import json
 import os
 import signal
@@ -35,6 +37,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -49,10 +52,22 @@ from rebar_reconciler.adapters.jira_family.wiki_render import (
 pytestmark = pytest.mark.unit
 
 _CORPUS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_corpus"
+_LEGACY_OUTPUTS = Path(__file__).resolve().parents[2] / "fixtures" / "dc_wiki_legacy_outputs.json"
 _STRATA = ("code_arrow", "table", "prose")
+_EXPECTED_RENDERABLE_UNITS = 884
 
 _PANDOC = _pandoc_path()
 _NEEDS_PANDOC = pytest.mark.skipif(_PANDOC is None, reason="the `wiki` extra is not installed")
+
+_GENERATOR_SCRIPT = (
+    Path(__file__).resolve().parents[3] / "scripts" / "generate_dc_wiki_legacy_outputs.py"
+)
+_GENERATOR_SPEC = importlib.util.spec_from_file_location(
+    "generate_dc_wiki_legacy_outputs", _GENERATOR_SCRIPT
+)
+assert _GENERATOR_SPEC is not None and _GENERATOR_SPEC.loader is not None
+_GENERATOR = importlib.util.module_from_spec(_GENERATOR_SPEC)
+_GENERATOR_SPEC.loader.exec_module(_GENERATOR)
 
 
 def _bodies() -> list[str]:
@@ -62,36 +77,35 @@ def _bodies() -> list[str]:
     return out
 
 
-def _legacy_convert(markdown: str, pandoc: str) -> str | None:
-    """The renderer's PRE-hardening body, reproduced verbatim as the oracle.
+def _load_legacy_fixture() -> dict[str, Any]:
+    payload = json.loads(_LEGACY_OUTPUTS.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise AssertionError("legacy output fixture must be a JSON object")
+    return payload
 
-    Kept here rather than imported because the point is to compare against what
-    the landed code did, which no longer exists in the module. If this drifts from
-    the real conversion contract the equivalence test below stops meaning
-    anything, so it is deliberately a literal transcription: same argv, same
-    stdin, same post-processing.
-    """
-    try:
-        completed = subprocess.run(
-            [
-                pandoc,
-                "-f",
-                wiki_render._PANDOC_FROM,
-                "-t",
-                wiki_render._PANDOC_TO,
-                *wiki_render._PANDOC_ARGS,
-            ],
-            input=markdown,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
+
+_LEGACY_FIXTURE = _load_legacy_fixture()
+
+
+def _input_sha256(prepared: str) -> str:
+    return hashlib.sha256(prepared.encode("utf-8")).hexdigest()
+
+
+def _binary_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _expected_output(entry: dict[str, Any]) -> str | None:
+    encoded = entry.get("output_b85")
+    if encoded is None:
         return None
-    if completed.returncode != 0:
-        return None
-    return wiki_render._ANCHOR_RE.sub("", completed.stdout).rstrip("\n")
+    if not isinstance(encoded, str):
+        raise AssertionError("legacy fixture output_b85 must be a string or null")
+    return base64.b85decode(encoded.encode("ascii")).decode("utf-8")
 
 
 # --- 1. the timeout is real, configurable, and fails SAFE -----------------------
@@ -343,7 +357,7 @@ def test_the_unit_is_delivered_on_stdin_with_the_landed_argv() -> None:
     seen: dict[str, object] = {}
     real_popen = subprocess.Popen
 
-    def _spy(argv, **kwargs):  # type: ignore[no-untyped-def]
+    def _spy(argv: list[str], **kwargs: Any) -> subprocess.Popen[str]:
         seen["argv"] = list(argv)
         seen["stdin"] = kwargs.get("stdin")
         return real_popen(argv, **kwargs)
@@ -355,7 +369,7 @@ def test_the_unit_is_delivered_on_stdin_with_the_landed_argv() -> None:
 
     assert seen["stdin"] == subprocess.PIPE
     assert seen["stdin"] != subprocess.DEVNULL
-    argv = seen["argv"]
+    argv = cast(list[str], seen["argv"])
     assert argv[0] == str(_PANDOC)
     assert argv[1:5] == ["-f", wiki_render._PANDOC_FROM, "-t", wiki_render._PANDOC_TO]
     assert argv[5:] == list(wiki_render._PANDOC_ARGS)
@@ -392,14 +406,10 @@ def _renderable_units() -> list[str]:
 # spreads across all three.
 _EQUIVALENCE_STRIDE = 1
 
-# Units compared per test case. This bounds the per-test wall clock, which is the
-# whole point: at stride 1 the corpus is ~884 units and a single test function
-# comparing all of them measured 91.6s idle and 504.8s under CPU saturation — past
-# CI's 300s per-test guard, which kills the xdist worker outright (see the module
-# docstring). Because the chunk size is FIXED, growing the corpus adds CASES and
-# never lengthens one, so the guard cannot be re-crossed by fixture growth. Tune
-# this only to trade case count against per-case cost; it changes nothing about
-# what is compared.
+# Units compared per test case. At stride 1 the corpus is 884 production Pandoc
+# calls (~32.6s clean for the full set). Fixed-size cases distribute that work
+# under xdist and bound one test independently of corpus growth. Tune this only to
+# trade case count against per-case cost; it changes nothing about what is compared.
 _EQUIVALENCE_CHUNK = 40
 
 
@@ -410,6 +420,16 @@ def _equivalence_chunks() -> list[list[str]]:
 
 
 _CHUNKS = _equivalence_chunks()
+
+
+def _legacy_entries() -> list[dict[str, Any]]:
+    entries = _LEGACY_FIXTURE.get("units")
+    if not isinstance(entries, list) or not all(isinstance(entry, dict) for entry in entries):
+        raise AssertionError("legacy output fixture units must be a JSON list of objects")
+    return entries
+
+
+_LEGACY_ENTRIES = _legacy_entries()
 
 
 def test_the_equivalence_chunks_cover_every_renderable_unit() -> None:
@@ -424,14 +444,39 @@ def test_the_equivalence_chunks_cover_every_renderable_unit() -> None:
     assert units, "the corpus produced no renderable units — fixture regression"
     sampled = units[::_EQUIVALENCE_STRIDE]
     assert [unit for chunk in _CHUNKS for unit in chunk] == sampled
-    assert len(sampled) >= 100, f"stride too coarse to be evidence: {len(sampled)} units"
+    assert len(sampled) == _EXPECTED_RENDERABLE_UNITS
     assert all(len(chunk) <= _EQUIVALENCE_CHUNK for chunk in _CHUNKS)
+
+    assert _LEGACY_FIXTURE.get("schema_version") == 2
+    assert _LEGACY_FIXTURE.get("output_encoding") == "utf-8/base85"
+    assert _LEGACY_FIXTURE.get("unit_count") == _EXPECTED_RENDERABLE_UNITS
+    assert len(_LEGACY_ENTRIES) == _EXPECTED_RENDERABLE_UNITS
+    expected_input_hashes = [entry.get("input_sha256") for entry in _LEGACY_ENTRIES]
+    assert expected_input_hashes == [_input_sha256(unit) for unit in sampled], (
+        "legacy outputs are not aligned to the exact ordered prepared corpus"
+    )
+    decoded_outputs = [_expected_output(entry) for entry in _LEGACY_ENTRIES]
+    assert all(output is None or isinstance(output, str) for output in decoded_outputs)
+
+
+@_NEEDS_PANDOC
+def test_the_installed_pandoc_matches_the_legacy_fixture_provenance() -> None:
+    """Each gating platform must match its exact pinned Pandoc binary."""
+    import pypandoc
+
+    expected = _LEGACY_FIXTURE.get("pandoc")
+    _GENERATOR.validate_pandoc_provenance(
+        expected,
+        platform_key=_GENERATOR.current_platform_key(),
+        version=str(pypandoc.get_pandoc_version()),
+        binary_sha256=_binary_sha256(Path(str(_PANDOC))),
+    )
 
 
 @_NEEDS_PANDOC
 @pytest.mark.parametrize("chunk_index", range(len(_CHUNKS)))
 def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: int) -> None:
-    """New path vs the pre-hardening oracle, over every unit of the committed corpus.
+    """Production path vs immutable pre-hardening bytes for the whole corpus.
 
     This is what licenses the change: swapping ``subprocess.run`` for a ``Popen``
     + caller-side timeout + group reap must change WHEN pandoc is given up on,
@@ -444,14 +489,17 @@ def test_rendered_output_is_byte_identical_to_the_landed_renderer(chunk_index: i
     surface there too — but only as "some property moved". This says the stronger
     thing: the bytes are the same ones the landed renderer produced.
 
-    One chunk per case: the corpus is covered by the parametrization as a whole
-    (pinned by the coverage test above), while each case stays a small, fixed
-    fraction of the per-test timeout no matter how contended the runner is.
+    The committed outputs were generated once by the independent historical
+    contract in ``scripts/generate_dc_wiki_legacy_outputs.py``. They cannot follow
+    a mutable production format constant, while every production side still runs
+    the installed real Pandoc. One chunk per case keeps each test a small, fixed
+    fraction of the per-test timeout.
     """
     pandoc = str(_PANDOC)
     offset = chunk_index * _EQUIVALENCE_CHUNK
     for position, prepared in enumerate(_CHUNKS[chunk_index]):
-        assert _convert(prepared, pandoc) == _legacy_convert(prepared, pandoc), (
+        expected = _expected_output(_LEGACY_ENTRIES[offset + position])
+        assert _convert(prepared, pandoc) == expected, (
             f"corpus unit {offset + position} rendered differently from the landed "
             f"renderer: {prepared!r}"
         )
