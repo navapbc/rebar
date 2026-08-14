@@ -285,6 +285,15 @@ def _quarantine_dir(tracker: str) -> Path | None:
     common = _git(tracker, "rev-parse", "--git-common-dir").stdout.strip()
     if not common:
         return None
+    return _quarantine_dir_under(common, tracker)
+
+
+def _quarantine_dir_under(common: str, tracker: str) -> Path:
+    """Pure path computation for the shared quarantine dir (no subprocess): resolve a
+    ``--git-common-dir`` answer (relative ones resolve against the tracker root) to a
+    fresh ``<common>/reconverge-quarantine/<utc-ts>/``. Shared with push_recovery,
+    whose git calls must stay on its own late-bound ``core._git`` seam — it obtains
+    ``common`` itself and only borrows the path arithmetic."""
     common_dir = Path(common)
     if not common_dir.is_absolute():
         common_dir = Path(tracker) / common_dir
