@@ -113,6 +113,100 @@ jobs:
           export REBAR_TRACKER_DIR="$PWD/.tickets-tracker"
           rebar verify-commit-ticket --rev HEAD
 
+  classify:
+    # Security boundary: the exact patchset is checked out only as diff data. The
+    # executable classifier and its complete allowlist are sparse-checked out from
+    # trusted main with credentials disabled, so a patchset cannot classify itself.
+    name: classify Verify route from trusted main
+    needs: [clear-vote, require-ticket]
+    runs-on: ubuntu-latest
+    outputs:
+      route: ${{ steps.route.outputs.route }}
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      - name: Deepen until the exact patchset parent is diffable
+        shell: bash
+        run: |
+          set -uo pipefail
+          for depth in 1 8 32; do
+            git rev-parse --verify -q 'HEAD^' >/dev/null 2>&1 && break
+            git fetch --deepen="$depth" || true
+          done
+      - name: Fetch the trusted route classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: main
+          path: .trusted-verify-router
+          persist-credentials: false
+          sparse-checkout: scripts/classify_gerrit_verify_change.py
+          sparse-checkout-cone-mode: false
+      - name: Classify the exact HEAD^..HEAD path set
+        id: route
+        shell: bash
+        run: |
+          set -euo pipefail
+          route="$(python3 .trusted-verify-router/scripts/classify_gerrit_verify_change.py \
+            --repository "$GITHUB_WORKSPACE")"
+          case "$route" in
+            docs-only|full) ;;
+            *) echo "::error::trusted classifier emitted invalid route '$route'"; exit 1 ;;
+          esac
+          echo "route=$route" >> "$GITHUB_OUTPUT"
+
+  docs-only:
+    # One Ubuntu lane retains every documentation gate while avoiding the full matrix
+    # and unrelated packaging/mutation/integration jobs for a proven prose-only diff.
+    name: documentation gates (docs-only route)
+    needs: classify
+    if: ${{ always() && needs.classify.result == 'success' && needs.classify.outputs.route == 'docs-only' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
+        uses: lfreleng-actions/checkout-gerrit-change-action@f87b90a3370e62dad310797fedc7fd3700c75832  # v1.0.2
+        with:
+          gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
+          gerrit-project: ${{ inputs.GERRIT_PROJECT }}
+          gerrit-url: https://${{ vars.GERRIT_SERVER }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+      - name: Install documentation-gate dependencies from the committed lock
+        shell: bash
+        run: |
+          uv sync --locked --extra dev --extra reviewbot --extra ui --python '3.12'
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+      - name: Restore documentation action for a patchset that predates it
+        shell: bash
+        run: |
+          if [ -f .github/actions/docs-gates/action.yml ]; then
+            exit 0
+          fi
+          if ! git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main-docs-action'; then
+            echo "::error::could not fetch trusted main documentation action"
+            exit 1
+          fi
+          mkdir -p .github/actions/docs-gates
+          git show refs/remotes/gh-main-docs-action:.github/actions/docs-gates/action.yml \
+            > .github/actions/docs-gates/action.yml
+      - name: Run the shared documentation gates
+        uses: ./.github/actions/docs-gates
+        with:
+          run-contract-tests: "true"
+
   build-and-test:
     # The gate+suite (lint + pip-audit + the os×py test matrix) now lives in the reusable
     # _build-and-test.yml, shared verbatim with test.yml (post-merge branch CI) so the two
@@ -124,7 +218,8 @@ jobs:
     # (the same mechanism already used for `optionality`). Splitting the former inline
     # lint/mypy/config-check/pre-commit out of the 4× matrix means they now run once, not per cell.
     name: build-and-test (gate + suite on the patchset)
-    needs: [clear-vote, require-ticket]
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_build-and-test.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -135,7 +230,8 @@ jobs:
     # Targeted mutation evidence is part of Verified. Waiting for the ticket check avoids
     # spending the bounded runner on a patchset that cannot land.
     name: mutation (changed behavioral shards on the patchset)
-    needs: [clear-vote, require-ticket]
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_mutation.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -149,9 +245,10 @@ jobs:
     # Reuses the SAME jobs the push/PR lane runs (no drift). Passes the Gerrit coordinates as
     # non-secret inputs → the reusable workflow checks out the exact patchset via
     # checkout-gerrit-change-action; it inherits NO secrets (the vote key stays in this file).
-    # Independent of clear-vote/require-ticket so it runs fully parallel with build-and-test; its
-    # conclusion reaches the vote below because `vote` needs it (see the run-conclusion note).
+    # On a full route it runs in parallel with the other full jobs after classification.
     name: optionality (lean-runtime + packaging on the patchset)
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_optionality.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -166,6 +263,8 @@ jobs:
     # inherits NO secrets. Its conclusion reaches the vote because `vote` needs it
     # (jira-reb-1163: this job gated main but was absent from vote.needs → green-verify/red-main).
     name: artifact-probe (wheel/sdist provenance on the patchset)
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_artifact-probe.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -178,6 +277,8 @@ jobs:
     # job the push/PR lane runs (no drift). Its conclusion reaches the vote because `vote`
     # needs it (jira-reb-1163: this job gated main but was absent from vote.needs).
     name: eval-discipline (offline eval gate on the patchset)
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     uses: ./.github/workflows/_eval-discipline.yml
     with:
       gerrit-refspec: ${{ inputs.GERRIT_REFSPEC }}
@@ -190,7 +291,8 @@ jobs:
   # build-and-test cannot catch BLOCK Verified pre-merge.
   golden-path:
     name: golden-path (clean install)
-    needs: [clear-vote, require-ticket]
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
@@ -244,7 +346,8 @@ jobs:
     # change's rebar.toml): advisory (exit 0, report-only) while off, blocking once flipped on
     # — so a future re-flip's own Verified vote is the proof that the whole store verifies.
     name: verify-identity (whole-store authorship gate)
-    needs: clear-vote
+    needs: [clear-vote, require-ticket, classify]
+    if: ${{ always() && needs.clear-vote.result == 'success' && needs.require-ticket.result == 'success' && (needs.classify.result != 'success' || needs.classify.outputs.route == 'full') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the Gerrit change (mirror first, Gerrit fallback)
@@ -326,7 +429,7 @@ jobs:
     # snapshots this run's jobs — that snapshot (im-open/workflow-conclusion, a REST list-jobs read
     # enabled by `permissions: actions: read`) folds the reusable workflow's job conclusions into
     # WORKFLOW_CONCLUSION, so a clean-wheel/packaging failure casts Verified-1.
-    needs: [clear-vote, require-ticket, build-and-test, mutation, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
+    needs: [clear-vote, require-ticket, classify, docs-only, build-and-test, mutation, optionality, artifact-probe, eval-discipline, golden-path, verify-identity]
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate the run conclusion
@@ -357,7 +460,37 @@ jobs:
         id: normalize
         shell: bash
         env:
-          CONCLUSION: ${{ env.WORKFLOW_CONCLUSION }}
+          # A skipped job is neutral only when it belongs to the route that did not run.
+          # Require exactly one complete route before trusting the aggregate conclusion;
+          # missing jobs, classifier failure, or mixed routes are forced to failure.
+          CONCLUSION: >-
+            ${{ (
+              needs.classify.result == 'success' &&
+              (
+                (
+                  needs.classify.outputs.route == 'docs-only' &&
+                  needs.docs-only.result == 'success' &&
+                  needs.build-and-test.result == 'skipped' &&
+                  needs.mutation.result == 'skipped' &&
+                  needs.optionality.result == 'skipped' &&
+                  needs.artifact-probe.result == 'skipped' &&
+                  needs.eval-discipline.result == 'skipped' &&
+                  needs.golden-path.result == 'skipped' &&
+                  needs.verify-identity.result == 'skipped'
+                ) ||
+                (
+                  needs.classify.outputs.route == 'full' &&
+                  needs.docs-only.result == 'skipped' &&
+                  needs.build-and-test.result == 'success' &&
+                  needs.mutation.result == 'success' &&
+                  needs.optionality.result == 'success' &&
+                  needs.artifact-probe.result == 'success' &&
+                  needs.eval-discipline.result == 'success' &&
+                  needs.golden-path.result == 'success' &&
+                  needs.verify-identity.result == 'success'
+                )
+              )
+            ) && env.WORKFLOW_CONCLUSION || 'failure' }}
           FAILURE_OBSERVED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           set -euo pipefail

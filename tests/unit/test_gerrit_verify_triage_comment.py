@@ -26,6 +26,8 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 EXPECTED_VOTE_NEEDS = {
     "clear-vote",
     "require-ticket",
+    "classify",
+    "docs-only",
     "build-and-test",
     "mutation",
     "optionality",
@@ -63,7 +65,7 @@ def test_cast_step_still_votes_the_normalized_conclusion(steps: list[dict[str, A
     assert cast["with"]["vote-type"] == "${{ steps.normalize.outputs.vote-type }}"
 
 
-def test_vote_needs_are_unchanged(vote_job: dict[str, Any]) -> None:
+def test_vote_needs_cover_every_verify_route(vote_job: dict[str, Any]) -> None:
     assert set(vote_job["needs"]) == EXPECTED_VOTE_NEEDS
 
 
