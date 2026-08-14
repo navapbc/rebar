@@ -16878,9 +16878,17 @@
       "updated_at": "2026-07-12T00:19:48Z"
     },
     "2364-663e-859d-4b58": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nA runtime Popen trace of the 884-unit wiki hardening oracle on origin/main 72731d3745 observed 1,770 process launches during the production conversion half. One cold conversion launched Pandoc once plus git rev-parse --show-toplevel three times; after warmup the loop averaged one extra git root-discovery subprocess per unit. The changeable seam is _convert calling _pandoc_timeout for every unit, which calls load_config and repeatedly rediscovers the repository root. This is independent of the duplicate legacy Pandoc oracle tracked by absolute-diplomatic-snowyowl.\n\n## Plan\n- Confirm exact warm and cold subprocess attribution and wall time under representative contention.\n- Compare maintained OSS practice for loop-invariant configuration lookup in hot paths and search prior rebar tickets for rejected caching or pass-level configuration injection.\n- Preserve timeout configurability and all timeout, fallback, and process-group reap behavioral coverage while moving repository/config discovery out of the per-unit loop.\n- Use held-out RED to GREEN and defect-seeded mutation before Gerrit submission.\n\n## Acceptance Criteria\n- [ ] One render pass does not launch git root-discovery subprocesses once per Pandoc-bound unit.\n- [ ] Runtime timeout configuration remains observable at the documented render-pass boundary.\n- [ ] Timeout, fallback, and process-group reap contract tests retain equivalent behavioral coverage.\n- [ ] Before and after timing quantifies runner-seconds saved without reducing corpus or contractual coverage.\n- [ ] OSS comparison and prior-ticket disposition are recorded.\n- [ ] Gerrit LLM-Review +1 and Verified +1 pass before merge.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Eliminate per-unit git root discovery from Pandoc conversion"
+      },
       "created_at": "2026-08-14T05:54:14Z",
       "jira_id": "4588689",
       "jira_key": "REB-2899",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T05:54:17Z"
     },
@@ -23005,7 +23013,7 @@
         },
         "description": "## Context\nRemediation epic for the comprehensive quality audit recorded on ae1b-b2a0-a080-4b4e. Scope is deliberately narrowed to three buckets the audit flagged: (1) the CI default-suite reliability flake, (2) the assignee/user-facing documentation bug, and (3) the LOW-RISK, NON-OVERLAPPING slice of the file-size, complexity, and typing findings.\n\n## Architectural principle (avoid recurrence, not just the instance)\nThe near-cap modules and high-CCN functions in scope share one root cause: **flat units that mix responsibilities/layers, plus duplicated infrastructure that every new call-site re-hand-rolls**. The shrink-only ratchets prevent *regression* but not *creep toward the cap*. So each child fixes the cause structurally rather than cutting lines to a number:\n- Decompose by **responsibility/layer with a one-way dependency direction**, so future code has an obvious small home instead of re-inflating a god-file: run-mechanism vs. diagnostics vs. failure-interpretation (structured_run); CLI-facade vs. transaction vs. snapshot-rebuild (compact); public-API vs. recovery vs. git-primitives (event_append).\n- **Centralize duplicated infrastructure WITHOUT changing node-set semantics**: the graph child promotes the 15-line _loader.py shim into a real loader+traversal layer (a `load_indexed_states` applied only where the reduce/index policy is provably identical \u2014 _blockers & _compute_dep_graph \u2014 plus a pure shared `bfs` skeleton the raw-reduce BFS functions reuse while keeping their exact traversal), removing the duplicated loop that drives the CCN without altering any function's result set.\n- **Preserve public import paths** (re-export moved public symbols) so every extraction stays behavior-identical and touches only non-contended files.\n\nSplits follow existing call-graph seams (AGENTS.md module-size policy); new modules are >=100 LOC; complexity baselines move downward only.\n\n## Scope selection (why these and not others)\nNon-overlap computed against the file_impact of all 212 in-progress tickets (audit ticket excluded); every NEW child touches only zero-contention files. Deliberately EXCLUDED:\n- High-risk complexity orchestrators next_batch.compute (CCN 42) and import_ndjson.import_tickets (CCN 45) \u2014 core scheduling/import logic, not low-risk.\n- The typing ratchet FLIP in pyproject.toml (contended x9) and the near-cap files runner.py/_config_schema.py/signing.py/_ref_lock.py/init.py (all contended).\n- Already-tracked, out-of-requested-scope findings: mutmut lane (521b-04c3-572f-4514), repo-wide package DAG (44ea-43c6-b351-4d81), test-env hardening (def1-9c3c-6802-48bd).\n\n## Recommended systemic follow-up (out of scope here)\nThe ratchets fire only AT the 800 cap / at the recorded CCN. A genuine recurrence guard is an EARLY-WARNING margin (advisory surfaced in the metrics lane at, e.g., ~650 LOC / CCN ~15) so creep is visible before it reaches the cap. That changes enforcement policy and touches the (contended) gate/CI config, so it belongs in its own proposal, not these non-overlapping stories.\n\n## Children\n- Adopted existing open tickets: fade-ea90-7564-4715 (CI flake bug) and 879f-5549-91e3-4d6f (user-facing doc drift incl. the assignee example).\n- New non-overlapping tasks: split near-cap modules structured_run.py / compact.py / event_append.py; centralize graph loader/traversal to cut blocker-subsystem complexity; annotate the attest package to be typing-ratchet-ready.\n\n## Acceptance Criteria\n- [x] CI flake fade-ea90 resolved (or root-caused with a durable fix) so the Python 3.11 xdist worker no longer dies in test_opcert_service_app.\n- [x] User-facing assignee example teaches a Jira-resolvable identity consistent with docs/config.md.\n- [operator-attested] [x] The three named near-cap modules are split by responsibility along existing call-graph seams with public import paths preserved, and each ends with real headroom under the 800 cap: structured_run.py and compact.py reach the \u2264500 target, and event_append.py drops to \u2264640 (its git-primitive leaf extracted; recovery kept with the API to preserve the monkeypatch/test seam that couples their shared `_git_add` patch point).\n- [operator-attested] [x] The graph loader/traversal duplication is centralized and the four flagged functions drop to their target CCN with graph outputs unchanged.\n- [operator-attested] [x] The attest package is clean under mypy src/rebar/attest --disallow-untyped-defs (ratchet flip deferred to when pyproject.toml contention clears).\n- [operator-attested] [x] Every new child edited only non-in-progress-contended files.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Remediation (audit ae1b): CI-flake, assignee doc bug, and low-risk non-overlapping size/complexity/typing debt"
       },
       "created_at": "2026-08-08T20:19:08Z",
@@ -25019,9 +25027,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Problem / authority\n\nThe completion-verification close gate still fails to close **legitimately complete** tickets, pushing authors to `--force`, because the verifier agent loops on repeated file reads. This is the exact user-visible symptom that bug `brusque-tippable-sunbittern` (46a2-9c1a-d855-4706) named as its goal to eliminate: \"a legitimately complete ticket cannot be closed through the gate ... an infrastructure loop silently pushes authors toward bypassing a safety gate.\"\n\nWhat shipped for that bug (consolidated into epic `9b71-55b3-1bd1-4a97`, live on main @9bdb22f5887) is a runaway-loop **breaker/detector** only \u2014 `agent_call.py:144-197` `_runaway_guard_toolsets` computes a windowed distinct-ratio and raises `RunawayToolLoopError` before the repeated call executes, and stops advising `REBAR_LLM_MAX_STEPS` raises. Detection landed; **elimination of the loop did not.** `completion.py:83` still documents the underlying \"~77% read_file re-read waste.\" So the guard now converts a slow budget-burn into a fast abort, but the ticket still cannot close through the gate \u2014 the author-facing outcome is unchanged. This bug tracks that residual (incomplete fix / regression of sunbittern's stated goal); there is currently no open ticket for it.\n\n## Reproduction (2026-08-13, closing story `cinderlike-lucky-akitainu` 5e53-234f-5c65-477d)\n\nStory with 8 ACs, mostly codebase-verifiable, all provably met in-tree at origin/main `065af7c1639b954b045de95974654ba522ff4717` (independently verified: file LOC counts, `.github/workflows/_build-and-test.yml:448-467`, `docs/architecture.md:327-332` + `:351`, Gerrit 1751/1752/1753 merged commits reachable from HEAD). Two close attempts:\n\n- Run 1 (default budget): `completion-verifier ... hit step budget (request_limit=32\n  max_iterations=64)` in 105s, requests=32 tool_calls=43 \u2014 3 unmet criteria, all\n  false-negatives (evidence present but not reached).\n- Run 2 (`REBAR_LLM_MAX_STEPS=128`, model `bedrock:us.anthropic.claude-sonnet-4-6`):\n  `aborted a runaway tool-call loop in 149.0s requests=47 tool_calls=57 distinct=45\n  max_consecutive_repeat=12 distinct_ratio_window=0.5\n  top_repeats=[{'signature': 'read_file:a0cce810', 'count': 13}]` \u2014 2 unmet criteria; the\n  runaway guard tripped while re-reading one file (signature `read_file:a0cce810`, almost\n  certainly the 445-line `docs/architecture.md`) 13 times.\n\nDiagnostic (matches sunbittern's): raising the budget did NOT help \u2014 run 2 died on the runaway guard at 47 requests, not on budget. The close ultimately required `rebar transition ... --force=<evidence>`, discarding the completion attestation \u2014 the exact anti-pattern sunbittern set out to prevent.\n\n## Impact\n\nAny ticket whose codebase-verifiable ACs force the verifier to consult a large file (e.g. `docs/architecture.md`) cannot close through the gate; the author must `--force`. This erodes the completion gate as a safety mechanism across the project, not just for this one ticket.\n\n## Suspected mechanism (NOT verified end-to-end; for the owner to confirm)\n\nThe verifier agent re-issues byte-identical `read_file` calls on large files (paginated/ truncated reads it never fully consumes), wasting its budget until either the budget or the runaway guard ends the run before all criteria are banked. The loop breaker prevents the budget-burn but leaves the criteria unverified, so the verdict fail-closes.\n\n## Proposed directions (do NOT implement here \u2014 record only)\n\n- De-duplicate / cache file reads so an identical `read_file` returns cached content instead\n  of re-invoking the tool; and/or ensure large-file reads are consumed in full (or chunked\n  deterministically) so the agent does not re-request the same range.\n- Let the verifier bank partial per-criterion verdicts and treat a guard-abort as \"verify the\n  remainder on re-run\" rather than a whole-run fail-closed, so a complete ticket converges\n  across runs.\n- Consider capping per-file evidence reads or feeding large codebase evidence to the verifier\n  pre-summarized.\n\n## Acceptance criteria\n\n- [ ] A ticket whose codebase-verifiable ACs require reading a large repo file (reproduce with\n      an akitainu-shaped fixture referencing `docs/architecture.md`) closes through the\n      completion gate WITHOUT `--force`, with no runaway-guard abort and no budget exhaustion.\n- [ ] The verifier no longer re-issues byte-identical `read_file`/`search_files` calls on the\n      same target within a run (assert distinct-call ratio stays healthy on the fixture trace).\n- [ ] Regression guard added so a future change that reintroduces the re-read loop fails a test\n      (not merely the runtime guard).",
+        "description": "## Context / Problem\nThe completion-verification close gate still fails to close legitimately complete tickets: the verifier agent trips the runaway-tool-loop guard (RunawayToolLoopError) while re-reading evidence files, the gate aborts, and authors are pushed toward `--force` \u2014 the exact symptom bug 46a2-9c1a-d855-4706 set out to eliminate.\n\nPrior art (this plan builds ON it, not around it): epic 9b71 shipped the windowed distinct-ratio runaway guard (breaker/detector). Epic 10ae/story 2948 then shipped three levers in src/rebar/llm/agent_call.py: (1) completion-policy evidence banking, (2) a path-normalized read_file memo (`_memo_toolsets`) that reads a whole file once and serves subsequent range requests by slicing the cache, (3) large-file summarize/cap handling. The loop persisted DESPITE the memo layer.\n\nRoot cause (confirmed by reading the live composition in agent_call.py): the guard sits OUTERMOST (layer-order pinned Guard\u2192Memo\u2192Steering), so it observes every call BEFORE the memo layer answers it. A memo-SERVED repeat \u2014 free, harmless, exactly what lever 2 was built to produce \u2014 is therefore still counted as loop evidence by the guard's distinct-ratio window. Lever 2 made repeats cheap; the guard still punishes them: the two shipped fixes fight each other. Secondary defect in the same composition: reads past the cached window fall back to uncached exact-range reads, so long files degrade the ratio further.\n\n## Approach\nRecompose guard and memo via a SHARED ledger instead of reordering layers (the completion policy sits between them and must keep seeing calls). New module src/rebar/llm/runaway_guard.py: `ToolCallLedger` tracks observed vs EXECUTED calls plus a served-streak; the memo layer calls `record_executed` at each site that performs real work (non-allowlisted passthrough, exact-signature miss, read_file first-read, truncated-window fallback). The guard becomes two arms: (arm 1) the distinct-ratio computed over the EXECUTED stream only \u2014 memo-served repeats are no longer loop evidence; (arm 2) a served-streak backstop that still bounds a pure cache-served loop after a FULL window of consecutive zero-execution calls (checked at call entry, before increment). Guard stays outermost; layer order unchanged; completion policy unaffected. Governance-notice loops (policy answers without delegating) stay bounded by arm 2 since policy responses never reset the streak.\n\nOut of scope, filed as follow-up when this lands: tri-state evidence banking (BOUNDED_FALLBACK_EVIDENCE banks met=false at search exhaustion \u2014 should bank insufficient_evidence), to be linked discovered_from this bug.\n\n## Scope\n- src/rebar/llm/runaway_guard.py (new) \u2014 ToolCallLedger + two-arm guard.\n- src/rebar/llm/agent_call.py \u2014 memo layer records executed work into the ledger (4 sites); build_agent_kwargs creates one ledger per call and passes it to both layers; old in-file guard removed.\n- tests/unit/test_agent_call_memo_nudge.py \u2014 recomposition coverage.\n\n## Testing\n- Regression (withheld oracle, proven to FAIL on the old guard): a verifier pattern of 2 cached re-reads per novel call (i%3) must NOT trip the guard \u2014 memo-served repeats are not loop evidence for the ratio arm.\n- Backstop: a pure cache-served loop (zero execution for a full window) still trips, with the served-streak message text distinguishing the arm.\n- Non-allowlisted looping tool still trips the ratio arm (passthrough calls are executed work).\n- Error-looping allowlisted tool (responses never cached) still trips the ratio arm.\n- Layer-order test keeps pinning Guard\u2192Memo\u2192Steering.\n- Manual mutation pass over the new module and the 4 record_executed sites; every mutant killed (mutation testing already surfaced and filled 2 gaps: non-allowlisted loop, error-looping exact-sig path).\n\n## Acceptance Criteria\n- [ ] A verifier run that re-reads memoized evidence files completes without RunawayToolLoopError; checked by test_memo_served_repeats_are_not_loop_evidence_for_the_ratio_arm (fails on pre-fix code).\n- [ ] A genuine loop \u2014 non-allowlisted repeat, error-looping tool, or pure cache-served spin \u2014 is still bounded; checked by the three trip tests (both arms).\n- [ ] Layer order and completion-policy visibility unchanged; checked by the existing layer-order test staying green.\n- [ ] `make lint`, `make typecheck`, and the LLM-area test suite green; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Completion verifier still loops on repeated file reads, blocking legitimate closes despite the runaway-guard fix (incomplete fix of brusque-tippable-sunbittern)"
       },
       "created_at": "2026-08-14T05:03:25Z",
@@ -25468,10 +25476,24 @@
     },
     "3289-7fe4-2fea-4c35": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "# Live DC harness (rendered HTML) + cross-repo contract test\n\n## Context / Problem\nThe DC codec is validated offline against pandoc's jira reader as a proxy, but the real Jira DC wiki renderer and Jira's own storage canonicalization differ from pandoc and cannot be modeled offline \u2014 that gap is the residual risk this story closes. The repo already runs live DC testing with a Dockerized Jira 8.17.1 instance in GitHub Actions (`tests/external/live_jira_dc/`), so this extends that harness rather than building a new one. Separately, the sibling repo `agentic-dev-platform` imports the `InboundMapper.normalize_rich_text` seam from this package, so changing its behavior must be guarded by a contract test.\n\nThis story is the LIVE proof of the state-based echo-safety and settled-conflict behavior that `5c0e` (DC render robustness) and `3388` (cutover + echo suppression + local-wins conflict) deliver; it depends on both.\n\n## Approach\nExtend the existing Docker DC harness with a rich-text test that:\n- renders a representative body and pushes it via the real API\n  (`rebar.edit_ticket(local_id, repo_root=repo, description=value)`, the pattern\n  already used by `_out_description` in\n  `tests/external/live_jira_dc/test_dc_mutations.py`), and asserts **rendered HTML**\n  through `?expand=renderedFields` \u2014 not just the wiki source via `?fields=description`\n  \u2014 so we verify what Jira actually interprets (`*foo*`\u2192bold, `h1.`\u2192heading,\n  `{code}`\u2192macro). No `renderedFields`/`expand=` assertion exists in the harness\n  today, so this is a genuinely new fidelity check.\n- runs a second reconcile pass to assert **state-based echo-safety end-to-end** (the\n  landed rich body decodes to a value the differ recognizes as unchanged \u2192 no\n  re-push), exercising `3388`'s once-only-upgrade-then-converge path against the real\n  renderer.\n- performs a **both-sides concurrent edit** to assert `3388`'s settled conflict\n  behavior with the precondition that policy actually requires. The\n  `outbound-field-conflict` alert fires ONLY on a both-sides divergence\n  (`local != baseline` AND `remote != baseline`, `outbound_field_diff.py:354-362`); a\n  bare Jira-side edit with local unchanged is instead suppressed by the\n  directionality guard (`_suppressed_by_inbound`) and mirrored inbound (Jira-wins)\n  with NO conflict alert. So the live scenario is: (1) push a body and let a pass\n  converge so a baseline is recorded; (2) make a **rebar-side** edit to the\n  description AND a **Jira-side** edit to the same field before the next pass;\n  (3) assert the next pass emits rebar's body (**local-wins**) and records the\n  deduped `outbound-field-conflict:<key>:description` bridge alert \u2014 the remote value\n  is recorded, never silently destroyed (NOT a novel LWW clock; this is the a713 +\n  `3388` policy proven live, mirroring `3388`'s `test_concurrent_conflict_alerts`\n  precondition).\n\nGate it with the harness's existing skip markers (absent-harness / absent-extra) and the session-scoped PAT the harness already provisions. Add a contract test that pins the public shape/behavior of `normalize_rich_text` (`src/rebar/_engine/rebar_reconciler/inbound_fields.py:134`, exposed as `InboundMapper.normalize_rich_text`) so a change that would break the `agentic-dev-platform` import fails here first.\n\n## Scope\n- `tests/external/live_jira_dc/` \u2014 new rich-text live test module (render+push,\n  `?expand=renderedFields` HTML assertions, 2nd-pass echo, both-sides-concurrent-edit\n  local-wins + conflict-alert assertion), reusing the existing conftest\n  fixtures/skip markers.\n- CI workflow for the DC harness job \u2014 ensure the new test runs in the existing\n  amd64 Docker job (no new job).\n- `tests/` \u2014 cross-repo `normalize_rich_text` contract test.\n\n## Testing\n- Live render fidelity: a pushed rich body's `renderedFields` HTML contains the\n  expected bold/heading/code-macro markup (skipped when the harness/extra is absent).\n- Live echo-safety: a second reconcile pass against the live instance pushes no\n  description change (upgrade-then-converge holds against the real renderer).\n- Live conflict: with a converged baseline, a **both-sides** edit (rebar-side AND\n  Jira-side to the description) before the next pass keeps rebar's body and raises the\n  deduped `outbound-field-conflict:<key>:description` alert (remote value recorded,\n  not clobbered); a bare Jira-only edit is NOT asserted as a conflict (it is\n  Jira-wins inbound).\n- Contract: `normalize_rich_text` accepts the documented inputs and returns the\n  documented type/shape; a signature/behavior change fails\n  `test_normalize_rich_text_contract`.\n\n## Acceptance Criteria\n- [ ] The Docker DC harness has a rich-text test asserting rendered HTML via\n  `?expand=renderedFields` (not just wiki source), covering bold/heading/code-macro;\n  verified by the test running in the existing DC-harness CI job.\n- [ ] The live test asserts state-based echo-safety across a second pass (no re-push)\n  AND `3388`'s settled local-wins + `outbound-field-conflict` bridge alert under the\n  required **both-sides** precondition (converged baseline, then a rebar-side AND a\n  Jira-side edit to the description \u2192 local-wins emit + deduped\n  `outbound-field-conflict:<key>:description`, remote value recorded, not silently\n  destroyed); verified by the same live test.\n- [ ] A cross-repo contract test pins `normalize_rich_text`\n  (`InboundMapper.normalize_rich_text`) back-compat so a breaking change fails here\n  first; verified by `test_normalize_rich_text_contract`.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Live DC harness (rendered HTML) + cross-repo contract test"
       },
       "created_at": "2026-08-03T23:40:34Z",
@@ -56299,10 +56321,24 @@
     },
     "6be3-a702-78e4-466c": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n119 `*/.archived` and 126 `*/.write.lock` files are tracked in the tickets branch HEAD \u2014 committed before `.gitignore` gained the `*/.archived` and `*/.write.lock` patterns (both present in the tracker's .gitignore today; verified by `git check-ignore`). gitignore never un-tracks already-tracked files, so routine marker churn (archive/unarchive, compaction retiring markers) surfaces as tracked working-tree deletions: it dirties `git status`, breaks the strict head check in rebar/llm/plan_review/relation_snapshot.py::tracker_head_sha (every plan-review/close attestation fails with store-read-failure), and feeds reconverge merge-abort variant (b) (see parent epic and bug e72e-259d-5ee7-4e73). Both markers are derived local caches: archival's source of truth is ARCHIVED events (reducer/_api.py already filters archived tickets out of compiled state at the end of its list path, and clears stale markers), and `.write.lock` is a transient fcntl handle target (reducer/marker.py).\n\n## Approach\nAdd one new ensure unit to the idempotent ensure-registry (rebar._store.ensures.REGISTRY_IDS + implementation in rebar._commands.init, the established pattern for store-config convergence \u2014 the registry runs all units under the store write lock and a converged store makes zero commits). Unit `untrack-runtime-markers`: check = `git ls-files -- '*/.archived' '*/.write.lock'` empty (cheap, one git call); act = `git rm --cached --quiet` those paths in batches + one commit through the store seam. Worktree copies are untouched, so local cache behavior is unchanged on the machine that runs it. Peers merging the untrack commit have git delete their worktree marker copies (tracked-unmodified files follow the tree deletion) \u2014 that is safe for correctness because listing excludes archived tickets from compiled state, and the marker is only a fast-path; to restore the fast-path, make the reader self-heal: in reducer/_api.py's list path, when a reduced ticket's compiled state says archived but the `.archived` marker file is absent, re-materialize it via reducer.marker.write_marker (mirror of the existing stale-marker clearing in the same function). Riskiest assumption tested first: that `git rm --cached` + commit on the tickets branch merges cleanly into a peer whose worktree still has the files \u2014 covered by the first unit test (fixture with two clones) before wiring the ensure unit into the registry.\n\n## Scope\n- src/rebar/_store/ensures.py \u2014 add `untrack-runtime-markers` to REGISTRY_IDS and the registry map.\n- src/rebar/_commands/init.py \u2014 the unit implementation (check-then-act, batched `git rm --cached`, one commit).\n- src/rebar/reducer/_api.py \u2014 re-materialize a missing `.archived` marker when compiled state is archived (self-healing cache; mirrors the existing stale-marker clear).\n- tests/unit/test_ensures_untrack_markers.py (new) \u2014 unit + two-clone merge test.\n- docs/migrations.md \u2014 one paragraph documenting the unit.\n\n## Testing\n- Happy path: fixture tracker with tracked `*/.archived` + `*/.write.lock`; run the ensure; assert `git ls-files` empty, worktree files still present, exactly one commit made, second run makes zero commits (idempotent).\n- Peer path: second clone merges the untrack commit; assert its worktree markers are deleted by the merge, `git status` clean, and a subsequent list re-materializes `.archived` for net-archived tickets while excluding them from default output.\n- Edge: store with nothing tracked (fresh init) \u2014 unit reports ok, zero commits; a ticket dir with marker but no ARCHIVED event \u2014 marker cleared (existing behavior preserved).\n\n## Acceptance Criteria\n- [ ] After `run_ensures` on a store seeded with tracked markers, `git ls-files -- '*/.archived' '*/.write.lock'` is empty and re-running makes zero commits; checked by the new unit test.\n- [ ] Deleting or creating a marker in the worktree no longer appears in `git status --porcelain`; checked in the same test after the unit runs.\n- [ ] A net-archived ticket with a missing marker is excluded from default `list` output AND its marker is re-created by that list call; checked by the peer-path test.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Untrack per-ticket runtime markers (*/.archived, */.write.lock) from the tickets branch via an ensure unit; reader self-heals the marker cache"
       },
       "created_at": "2026-08-14T04:07:36Z",
@@ -60323,7 +60359,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "# Comment sync (append-only) with persistent Jira-comment-ID map\n\n## Context / Problem\nComment sync identifies comments by **body equality** (normalized-text key in `_diff_comments`), so same-text comments collide and an edited body looks new. Semantics are **append-only**: mirror comment *creation* both ways, never edits or deletes. This story also **owns the DC comment-diff dedup-key migration `3388` deferred here**: `3388` moved `WikiTextCodec.normalize_outbound` to the rendering form for descriptions but left the comment-diff path on the identity normalizer (a32a `_resolve_codec` seam, default `_IdentityCodec`). Flipping that path to the real codec, and keeping comment-diff convergent when it renders rich, is this story's job.\n\n## Approach\n**1. Identity = local comment key + returned Jira ID, not body.** Local key = the COMMENT event's **HLC `timestamp`** (unique, monotonic; already on the compiled entry at `reducer/_processors.py:349`). Persist a **`local_comment_key (HLC) \u2192 Jira comment ID`** map in binding state: outbound, an unmapped key is created in Jira and its returned ID recorded; inbound, mirror Jira comments whose IDs are not map values (entries carry `jira_comment_id`, bug 85a1). **Append-only**: no rebar edit/delete pushed to Jira, no Jira edit/delete applied to rebar; a mapped key/ID is never re-synced. The map is change-gated, one fixed-shape entry per comment.\n\n**1a. Capture the returned ID at both enactment sites**, discarded today. It rides only on `SupportsComments.add_comment`'s returned `{\"id\": \u2026}` dict (protocol `_backend.py:540`; Cloud `backend.py:275`, DC `jira_datacenter/backend.py:462` delegate to the transport; Cloud transport `acli_cli_ops.add_comment` returns `json.loads(result.stdout)` at `:515`). So (i) the local key rides ON the mutation entry as `\"local_comment_key\": <HLC>`; (ii) `binding_store` reaches both loops: `create_one` has it, and a new optional `binding_store` param on `update_one` \u2192 `_update_one_dispatch_comments` is fed by `handle_update`/`_apply_outbound_update` (the latter via `_apply_typed`'s var-kw). Failures stay non-fatal (`comment_errors` unchanged). **Crash-durability**: `record_comment_id` `save()`s immediately on the `add_comment` return (write-ahead).\n\n**1b. Two identity stores, one authoritative per DIRECTION, never crossed.** `jira_comment_id` (bug 85a1) is authoritative for INBOUND-origin comments, the map for OUTBOUND-origin. **Outbound**: skip when EITHER the HLC key is mapped OR the comment carries a `jira_comment_id`; the normalized-body test is DEMOTED, not removed, to a secondary skip against a lost map write. ID identity is the PRIMARY outbound guard; the `RECONCILER_MARKER` exclusion stands. **Inbound**: `_diff_comments_inbound` (`inbound_differ.py:280`) is UNCHANGED, never receives the map; its loop-breakers stand (`RECONCILER_MARKER` bodies, ids matching a local `jira_comment_id`).\n\n**2. Render bodies through the codec; migrate the dedup key.** Outbound bodies render through the `RichTextCodec.to_wire` seam descriptions use (`AdfCodec.to_wire` Cloud, `WikiTextCodec.to_wire` DC after `3388`). The Cloud comment path lacks an encode step: `acli_cli_ops.add_comment` (`:492`) sends `--body <str>` (`:510-511`) unencoded.\n\n**`--body` accepts ADF, and fit BEFORE encode (Cloud, load-bearing).** `acli jira workitem comment create --help` documents `-b, --body string   Comment body in plain text or Atlassian Document Format (ADF)` (probed read-only on installed acli, exit 0, no Jira mutation), so `--body json.dumps(to_wire(body))` is supported like `--description`. Today `add_comment` runs the plaintext guard `_sanitize_comment(body)` (`:502`); it must NOT run on serialized ADF (far longer than its text, so truncation mismeasures length and can slice JSON mid-structure \u2192 a payload ACLI rejects). Correct order, mirroring `AdfCodec.fit_outbound`: **fit the TEXT first** (`AdfCodec(rich=...).fit_outbound(body)` \u2192 `fit_markdown_to_adf_limit`, bounding `len(json.dumps(markdown_to_adf(...)))`), **then** `json.dumps(to_wire(fitted))`. The plaintext truncation applies only on the plain branch (DC / rich `off`). DC `to_wire` returns `str`, so DC `--body` stays plain wiki. Codec built as `backend.py:52,64` do \u2014 `AdfCodec(rich=\"cloud\" in cutover_clients())`, so `rich_text_cutover` (`3388`, ships `off`) governs rendering. Then **flip the a32a injection** (`_diff_comments`'s `_resolve_codec`) from `_IdentityCodec` to the real codec so the local dedup key (via `normalize_outbound`) matches the landed wire.\n\nDepends on `e59d`/`271c`/`3388` shipping first.\n\n## Scope\nEngine paths under `src/rebar/_engine/rebar_reconciler/`:\n- `binding_store.py` \u2014 the map + `record_comment_id(...)` write-ahead writer.\n- `outbound_comments.py` \u2014 skip logic (1b); append `\"local_comment_key\"`; flip\n  `_resolve_codec` to the real codec.\n- `outbound_differ.py` \u2014 `compute_outbound_mutations` threads `binding_store` +\n  `RichTextCodec` into `_diff_comments`.\n- `dispatch_one.py` \u2014 `create_one` records the id; `update_one` gains optional `binding_store`.\n- `dispatch_apply_phases.py` \u2014 `_update_one_dispatch_comments` records the id.\n- `apply_handlers.py` / `apply_outbound.py` \u2014 thread `ctx.binding_store` through\n  `handle_update` / `_apply_outbound_update` (from `_apply_typed`'s var-kw).\n- `adapters/jira/acli_cli_ops.py` `add_comment` (`:492`) \u2014 Cloud ADF encode\n  (fit-then-encode per Approach 2), guarded by `AdfCodec(rich=\"cloud\" in cutover_clients())`.\n- `reducer/_processors.py` \u2014 HLC key (`:349`); `jira_comment_id` (`:354-356`) unchanged.\n- `inbound_differ._diff_comments_inbound` (`:280`) \u2014 **UNCHANGED, not in the edit set**.\n\n## Acceptance Criteria\n- [ ] Identity is the persistent COMMENT-HLC \u2192 Jira-comment-ID map, not the normalized-body\n  key; verified by `test_comment_duplicate_bodies_distinct_ids`.\n- [ ] The returned `add_comment` `{\"id\": \u2026}` is captured at both enactment sites\n  (`create_one`; `update_one`\u2192`_update_one_dispatch_comments` via `handle_update` /\n  `_apply_outbound_update`) and persisted against the entry's `local_comment_key` via\n  `record_comment_id` on Cloud (acli) and DC; verified by\n  `test_comment_id_captured_and_persisted`.\n- [ ] Inbound-origin `jira_comment_id` (bug 85a1) and the outbound map are each\n  authoritative for their own direction and never compete: the inbound differ is unchanged\n  (ONLY `RECONCILER_MARKER` / `jira_comment_id`); the outbound differ skips when EITHER the\n  key is mapped OR a `jira_comment_id` is present; verified by\n  `test_comment_bidirectional_identity_no_double_sync`.\n- [ ] Comment sync is append-only both directions \u2014 new comments mirror once, edits/deletes skipped; verified by `test_comment_append_only`.\n- [ ] Outbound bodies render through `RichTextCodec.to_wire`: the Cloud ADF encode on the\n  real create surface (`--body json.dumps(to_wire(fitted))`; `--body` confirmed by\n  `acli jira workitem comment create --help` to accept ADF), fit-then-encode ordering (rich\n  fit measures the wire BEFORE `json.dumps`; the plaintext `_sanitize_comment` guard never\n  truncates serialized JSON), and the a32a `_resolve_codec` injection\n  migrated to the real codec; verified by `test_comment_rendered_through_codec`,\n  `test_comment_dedup_key_uses_real_codec`, `test_comment_adf_encode_fits_before_serialize`.\n- [ ] After migration, DC comment-diff converges with zero duplicate re-post; verified by\n  `test_dc_comment_diff_converges_after_migration`.\n- [ ] A repeat reconcile pass creates no duplicate comments; verified by `test_comment_sync_idempotent`.\n- [ ] Crash-durability: `record_comment_id` `save()`s immediately on the successful\n  `add_comment` return and the demoted body-equality test stays a secondary skip, so a lost\n  map write does not re-post; verified by\n  `test_comment_crash_between_add_and_map_save_no_duplicate`.\n- [ ] The comment-ID map is change-gated, no per-pass churn; verified by `test_comment_map_no_churn_on_no_new_comment_pass`.",
+        "description": "# Comment sync (append-only) with persistent Jira-comment-ID map\n\n## Context / Problem\nComment sync identifies comments by **body equality** (normalized-text key in `_diff_comments`), so same-text comments collide and an edited body looks new. Semantics are **append-only**: mirror comment *creation* both ways, never edits or deletes. This story also **owns the DC comment-diff dedup-key migration `3388` deferred here**: `3388` moved `WikiTextCodec.normalize_outbound` to the rendering form for descriptions but left the comment-diff path on the identity normalizer (a32a `_resolve_codec` seam, default `_IdentityCodec`). Flipping that path to the real codec, and keeping comment-diff convergent when it renders rich, is this story's job.\n\n## Approach\n**1. Identity = local comment key + returned Jira ID, not body.** Local key = the COMMENT event's **HLC `timestamp`** (unique, monotonic; already on the compiled entry at `reducer/_processors.py:349`). Persist a **`local_comment_key (HLC) \u2192 Jira comment ID`** map in binding state: outbound, an unmapped key is created in Jira and its returned ID recorded; inbound, mirror Jira comments whose IDs are not map values (entries carry `jira_comment_id`, bug 85a1). **Append-only**: no rebar edit/delete pushed to Jira, no Jira edit/delete applied to rebar; a mapped key/ID is never re-synced. The map is change-gated, one fixed-shape entry per comment.\n\n**1a. Capture the returned ID at both enactment sites**, discarded today. It rides only on `SupportsComments.add_comment`'s returned `{\"id\": \u2026}` dict (protocol `_backend.py:540`; Cloud `backend.py:275`, DC `jira_datacenter/backend.py:462` delegate to the transport; Cloud transport `acli_cli_ops.add_comment` returns `json.loads(result.stdout)` at `:515`). So (i) the local key rides ON the mutation entry as `\"local_comment_key\": <HLC>`; (ii) `binding_store` reaches both loops: `create_one` has it, and a new optional `binding_store` param on `update_one` \u2192 `_update_one_dispatch_comments` is fed by `handle_update`/`_apply_outbound_update` (the latter via `_apply_typed`'s var-kw). Failures stay non-fatal (`comment_errors` unchanged). **Crash-durability**: `record_comment_id` `save()`s immediately on the `add_comment` return (write-ahead).\n\n**1b. Two identity stores, one authoritative per DIRECTION, never crossed.** `jira_comment_id` (bug 85a1) is authoritative for INBOUND-origin comments, the map for OUTBOUND-origin. **Outbound**: skip when EITHER the HLC key is mapped OR the comment carries a `jira_comment_id`; the normalized-body test is DEMOTED, not removed, to a secondary skip against a lost map write. ID identity is the PRIMARY outbound guard; the `RECONCILER_MARKER` exclusion stands. **Inbound**: `_diff_comments_inbound` (`inbound_differ.py:280`) is UNCHANGED, never receives the map; its loop-breakers stand (`RECONCILER_MARKER` bodies, ids matching a local `jira_comment_id`).\n\n**2. Render bodies through the codec; migrate the dedup key.** Outbound bodies render through the `RichTextCodec.to_wire` seam descriptions use (`AdfCodec.to_wire` Cloud, `WikiTextCodec.to_wire` DC after `3388`). The Cloud comment path lacks an encode step: `acli_cli_ops.add_comment` (`:492`) sends `--body <str>` (`:510-511`) unencoded.\n\n**`--body` accepts ADF, and fit BEFORE encode (Cloud, load-bearing).** `acli jira workitem comment create --help` documents `-b, --body string   Comment body in plain text or Atlassian Document Format (ADF)` (probed read-only on installed acli, exit 0, no Jira mutation), so `--body json.dumps(to_wire(body))` is supported like `--description`. Today `add_comment` runs the plaintext guard `_sanitize_comment(body)` (`:502`); it must NOT run on serialized ADF (far longer than its text, so truncation mismeasures length and can slice JSON mid-structure \u2192 a payload ACLI rejects). Correct order, mirroring `AdfCodec.fit_outbound`: **fit the TEXT first** (`AdfCodec(rich=...).fit_outbound(body)` \u2192 `fit_markdown_to_adf_limit`, bounding `len(json.dumps(markdown_to_adf(...)))`), **then** `json.dumps(to_wire(fitted))`. The plaintext truncation applies only on the plain branch (DC / rich `off`). DC `to_wire` returns `str`, so DC `--body` stays plain wiki. Codec built as `backend.py:52,64` do \u2014 `AdfCodec(rich=\"cloud\" in cutover_clients())`, so `rich_text_cutover` (`3388`, ships `off`) governs rendering. Then **flip the a32a injection** (`_diff_comments`'s `_resolve_codec`) from `_IdentityCodec` to the real codec so the local dedup key (via `normalize_outbound`) matches the landed wire.\n\nDepends on `e59d`/`271c`/`3388` shipping first.\n\n## Scope\nEngine paths under `src/rebar/_engine/rebar_reconciler/`:\n- `binding_store.py` \u2014 the map + `record_comment_id(...)` write-ahead writer.\n- `outbound_comments.py` \u2014 skip logic (1b); append `\"local_comment_key\"`; flip\n  `_resolve_codec` to the real codec.\n- `outbound_differ.py` \u2014 `compute_outbound_mutations` threads `binding_store` +\n  `RichTextCodec` into `_diff_comments`.\n- `dispatch_one.py` \u2014 `create_one` records the id; `update_one` gains optional `binding_store`.\n- `dispatch_apply_phases.py` \u2014 `_update_one_dispatch_comments` records the id.\n- `apply_handlers.py` / `apply_outbound.py` \u2014 thread `ctx.binding_store` through\n  `handle_update` / `_apply_outbound_update` (from `_apply_typed`'s var-kw).\n- `adapters/jira/acli_cli_ops.py` `add_comment` (`:492`) \u2014 Cloud ADF encode\n  (fit-then-encode per Approach 2), guarded by `AdfCodec(rich=\"cloud\" in cutover_clients())`.\n- `reducer/_processors.py` \u2014 HLC key (`:349`); `jira_comment_id` (`:354-356`) unchanged.\n- `inbound_differ._diff_comments_inbound` (`:280`) \u2014 **UNCHANGED, not in the edit set**.\n\n## Acceptance Criteria\n- [x] Identity is the persistent COMMENT-HLC \u2192 Jira-comment-ID map, not the normalized-body\n  key; verified by `test_comment_duplicate_bodies_distinct_ids`.\n- [x] The returned `add_comment` `{\"id\": \u2026}` is captured at both enactment sites\n  (`create_one`; `update_one`\u2192`_update_one_dispatch_comments` via `handle_update` /\n  `_apply_outbound_update`) and persisted against the entry's `local_comment_key` via\n  `record_comment_id` on Cloud (acli) and DC; verified by\n  `test_comment_id_captured_and_persisted`.\n- [x] Inbound-origin `jira_comment_id` (bug 85a1) and the outbound map are each\n  authoritative for their own direction and never compete: the inbound differ is unchanged\n  (ONLY `RECONCILER_MARKER` / `jira_comment_id`); the outbound differ skips when EITHER the\n  key is mapped OR a `jira_comment_id` is present; verified by\n  `test_comment_bidirectional_identity_no_double_sync`.\n- [x] Comment sync is append-only both directions \u2014 new comments mirror once, edits/deletes skipped; verified by `test_comment_append_only`.\n- [x] Outbound bodies render through `RichTextCodec.to_wire`: the Cloud ADF encode on the\n  real create surface (`--body json.dumps(to_wire(fitted))`; `--body` confirmed by\n  `acli jira workitem comment create --help` to accept ADF), fit-then-encode ordering (rich\n  fit measures the wire BEFORE `json.dumps`; the plaintext `_sanitize_comment` guard never\n  truncates serialized JSON), and the a32a `_resolve_codec` injection\n  migrated to the real codec; verified by `test_comment_rendered_through_codec`,\n  `test_comment_dedup_key_uses_real_codec`, `test_comment_adf_encode_fits_before_serialize`.\n- [x] After migration, DC comment-diff converges with zero duplicate re-post; verified by\n  `test_dc_comment_diff_converges_after_migration`.\n- [x] A repeat reconcile pass creates no duplicate comments; verified by `test_comment_sync_idempotent`.\n- [x] Crash-durability: `record_comment_id` `save()`s immediately on the successful\n  `add_comment` return and the demoted body-equality test stays a secondary skip, so a lost\n  map write does not re-post; verified by\n  `test_comment_crash_between_add_and_map_save_no_duplicate`.\n- [x] The comment-ID map is change-gated, no per-pass churn; verified by `test_comment_map_no_churn_on_no_new_comment_pass`.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Comment sync (append-only) with persistent Jira-comment-ID map"
@@ -83310,10 +83346,24 @@
     },
     "a560-85a8-1247-44cd": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nGerrit change 1757 (merged as 065af7c163, ticket small-delicious-loris) taught rebar._store.sync._union_merge to recover ONE merge-abort class: untracked files origin wants to create (\"untracked working tree files would be overwritten by merge\") \u2014 quarantine the named paths, retry once. The second proven abort class, variant (b), remains unhandled: tracked files with local working-tree changes \u2014 in practice deletions of tracked per-ticket artifacts left by an interrupted compaction fold \u2014 make `git merge origin/tickets` abort with \"Your local changes to the following files would be overwritten by merge\". The abort leaves reconverge unable to advance and strands local ticket commits off origin (live recurrence recorded on e72e-259d-5ee7-4e73: 119 tracked `.archived` deletions wedged the store). Sibling story untrack-runtime-markers removes the marker sub-class at its source, but an interrupted fold can still leave tracked EVENT-file deletions (compact_txn renames sources to `*.retired` \u2014 a rename of a tracked file is a tracked deletion + an untracked creation), so reconverge must self-heal this class regardless.\n\n## Approach\nExtend the recovery seam 1757 added in src/rebar/_store/sync.py: on merge failure, additionally detect the \"Your local changes to the following files would be overwritten by merge\" signature and parse the paths git names (same parsing pattern as the merged `_untracked_overwrite_paths`). For each named path, act by its status: a working-tree DELETION of a tracked file (`git status --porcelain` reports ` D`) is restored non-destructively via `git checkout -- <path>` (content already at HEAD \u2014 nothing can be lost); a working-tree MODIFICATION is first copied into the same quarantine directory 1757 established (`<git-common-dir>/reconverge-quarantine/<utc-ts>/`) and then restored via `git checkout -- <path>` (the local bytes are preserved in quarantine, the HEAD bytes unblock the merge). Then retry the merge once. Any other failure \u2014 including a genuine index/content conflict \u2014 keeps today's behavior exactly: `git merge --abort`, keep local, hint `rebar fsck-recover`. Positive rationale: this reuses the exact recovery shape already reviewed and merged for variant (a) (parse-what-git-names, move-never-delete, single retry, fall back to abort), extending one proven seam rather than adding a second recovery mechanism.\n\n## Scope\n- src/rebar/_store/sync.py \u2014 detect + parse the local-changes abort; restore/quarantine the named paths; single retry.\n- tests/unit/test_store_sync_reconverge.py \u2014 extend the 1757 test module with RED-first coverage for variant (b): tracked-deletion fixture and tracked-modification fixture.\n\n## Testing\n- RED first: fixture tracker where HEAD tracks a file, the worktree deletes it, and origin/tickets modifies it; assert the union merge currently aborts and HEAD is un-merged, for the local-changes reason specifically.\n- GREEN: same fixture after the fix \u2014 merge completes with both parents, the local-only commit stays reachable, the deleted file is back at its merged content.\n- Modification path: worktree-modified tracked file named by the abort \u2014 quarantine copy exists with the local bytes, merge completes.\n- Guard: a genuine content conflict (both sides commit different content) still aborts and keeps local (unchanged behavior); `.tmp-event-*` and paths git does not name are untouched.\n- Mutation check: skipping the restore step returns the RED assertion.\n\n## Acceptance Criteria\n- [ ] A reconverge whose union merge aborts only on local changes to tracked store-artifact paths now completes keeping both parents, with no local commit orphaned; checked by the new RED-to-GREEN tests.\n- [ ] A worktree modification named by the abort is preserved byte-for-byte in the quarantine directory before restore; checked by test comparing quarantined bytes.\n- [ ] A genuine merge conflict still aborts, keeps local, and hints fsck-recover; checked by the guard test.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Reconverge variant (b): recover the local-changes merge abort on tracked store artifacts (restore deletions, quarantine modifications, retry once)"
       },
       "created_at": "2026-08-14T04:07:40Z",
@@ -100359,445 +100409,15 @@
     "ca03-5f3e-df5d-45c2": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The declarative descriptors + the generic chunker/router are the engine of the gate; production prompts live",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "in the workflow-engine prompt library (not the experiment JSON).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- criteria_v8 descriptors -> production prompt library (resolve_prompt / prompts-as-files).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Generic orchestrator: applies_at level/type routing; facet chunker (base_chunk x size_factor); exec-tier",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  dispatch (single-turn / 2-step / agent); overlay routing (deterministic + LLM-router).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- After Pass-3 the orchestrator dispatches the Pass-4 affirmative coach `75a9` (crusty-herb-stand) \u2014 a single-turn structured-output call (NO tooling) over the surviving findings; its declarative, project-extensible MOVE REGISTRY is a sibling of the criteria registry (same descriptor pattern). The orchestrator also MINTS the stable per-finding `id` (the content fingerprint) when it assembles the single returned result post-Pass-3 \u2014 the SOLE owner of the id; the `REVIEW_RESULT` sidecar (`db7b`) and the coach (`75a9`) CONSUME it (no circular alignment).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- NO TRUNCATION BY DESIGN, and NEVER CHUNK TICKET CONTENT. The reviewed plan/ticket is ALWAYS whole \u2014 a cap",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  or a content-split reviews a plan that is not the one in rebar. The lever to fit context is the RUBRIC side,",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  the MODEL, and (for container criteria) the per-child pairing \u2014 never the content.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- SIZE-HANDLING ORDER (content always whole): (1) run criteria in BATCHES per config; (2) if that hits \u2014 or is",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  calculated to exceed \u2014 the context limit, fall back to ONE CRITERION PER CALL (full content, minimal rubric);",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  (3) if still over, ESCALATE to a higher-context model; (4) if the ticket is STILL too big for the largest",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  window, that is itself a FAILURE FINDING \u2014 the ticket is too large to review in full and the agent must",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  reduce/decompose it (the extreme of P4 oversize / G5 decomposition). No content chunking; no silent",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  INDETERMINATE-for-size.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- CONTAINER COVERAGE (G3 child-coverage, G4 child-consistency) \u2014 parent + children, ONE CHILD AT A TIME:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  evaluate (parent + a single child, both WHOLE) per call and accumulate deterministically (G3: union of the",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  parent ACs each child covers \u2192 the uncovered set; G4: the interaction modes per pair/cluster). If any",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  (parent + child) pairing is too big even for the escalated window, that is a FAILURE FINDING \u2014 the",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  ticket(s) are too large, reduce them. Never truncate a child.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- MISSING-INFO / ABSENCE false-positives: because content is NEVER chunked, a finder applying batched (or",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  single) criteria always sees the WHOLE plan \u2014 so no partial-view FP from rubric-batching. The only sliced",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  view is G3/G4 one-child-at-a-time; there, an absence / 'missing X' finding is a CANDIDATE \u2014 Pass-2 confirms",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  X is absent from the COMPLETE set (parent + ALL children, via retrieval) before it stands (absence findings:",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  higher bar; the verifier must have whole-artifact access).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- ISF (intent-source fidelity) SUPPORTING context: the primary plan is never reduced, but the linked SESSION",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  LOG is supporting context \u2014 if it exceeds the escalated window, SUMMARIZE it and run ISF against the summary,",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  RECORDING that the check used a summary (not the full log); the finding then carries REDUCED CONFIDENCE. A",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  reduced-confidence intent check beats none. (This summarization is for the supporting log ONLY, never the plan.)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Coverage (model/window used, batch\u2192single fallback, summary-based ISF, any too-big failure finding) is",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "  RECORDED on the attestation so the review's completeness is visible.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Built ON the workflow engine \u2014 NOW SHIPPED (epic `e6d9`, CLOSED): `src/rebar/llm/workflow/` (declarative IR + interpreter/executor, `run_workflow` CLI+MCP, PydanticAI runner + structured-output stack). Reuse the SHIPPED rebar.llm extension points: the da27 contract-bearing prompt model + derived prompt index + `.rebar/prompts/` override (`src/rebar/llm/prompts.py`), so a criterion ships as a front-matter prompt declaring its exec tier. The remaining open question \u2014 the exact SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) + LLM-functionality unification \u2014 is the `6f2d` (soupy-spool-revel) remediation brainstorm this epic depends_on (still OPEN).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Registry loads from the prompt library; the coverage guard passes.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Orchestrator filters via applies_at, packs by facet, dispatches by exec tier.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] No criterion greps the codebase except the code-grounding set (E4/G1G2/A1/G6).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The orchestrator reviews the FULL plan + children \u2014 NO TRUNCATION and NO CONTENT-CHUNKING by design. Size order: batch criteria \u2192 ONE criterion/call \u2192 escalate to a higher-context model \u2192 (still too big) a FAILURE FINDING that the ticket must be reduced. Coverage recorded.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Container criteria (G3/G4) evaluate parent + ONE child at a time (both whole) and aggregate; a too-big (parent+child) pairing is a failure finding (reduce the ticket(s)); absence findings from the per-child view are verified against the COMPLETE set before they stand.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Context-window escalation: estimate tokens / catch context-limit errors \u2192 escalate up a configured model-by-window ladder (after dropping to one criterion per call, before declaring the ticket too big). ISF on a too-large session log falls back to a documented SUMMARY with reduced confidence.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria (added \u2014 T8 DET execution path)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] The exec-dispatch covers the DETERMINISTIC tier: `exec=DET` criteria (the P1\u2013P8 floor) run via a CODE executor alongside the 1-TURN / 2-STEP / AGENT (LLM) tiers \u2014 the DET tier has an explicit execution path (invoking the DET floor 012e), not just the LLM tiers.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\nThe declarative descriptors + the generic chunker/router are the engine of the gate; production prompts live\nin the workflow-engine prompt library (not the experiment JSON).\n\n## What\n- criteria_v8 descriptors -> production prompt library (resolve_prompt / prompts-as-files).\n- Generic orchestrator: applies_at level/type routing; facet chunker (base_chunk x size_factor); exec-tier\n  dispatch (single-turn / 2-step / agent); overlay routing (deterministic + LLM-router).\n\n- After Pass-3 the orchestrator dispatches the Pass-4 affirmative coach `75a9` (crusty-herb-stand) \u2014 a single-turn structured-output call (NO tooling) over the surviving findings; its declarative, project-extensible MOVE REGISTRY is a sibling of the criteria registry (same descriptor pattern). The orchestrator also MINTS the stable per-finding `id` (the content fingerprint) when it assembles the single returned result post-Pass-3 \u2014 the SOLE owner of the id; the `REVIEW_RESULT` sidecar (`db7b`) and the coach (`75a9`) CONSUME it (no circular alignment).\n## Scope\n- NO TRUNCATION BY DESIGN, and NEVER CHUNK TICKET CONTENT. The reviewed plan/ticket is ALWAYS whole \u2014 a cap\n  or a content-split reviews a plan that is not the one in rebar. The lever to fit context is the RUBRIC side,\n  the MODEL, and (for container criteria) the per-child pairing \u2014 never the content.\n- SIZE-HANDLING ORDER (content always whole): (1) run criteria in BATCHES per config; (2) if that hits \u2014 or is\n  calculated to exceed \u2014 the context limit, fall back to ONE CRITERION PER CALL (full content, minimal rubric);\n  (3) if still over, ESCALATE to a higher-context model; (4) if the ticket is STILL too big for the largest\n  window, that is itself a FAILURE FINDING \u2014 the ticket is too large to review in full and the agent must\n  reduce/decompose it (the extreme of P4 oversize / G5 decomposition). No content chunking; no silent\n  INDETERMINATE-for-size.\n- CONTAINER COVERAGE (G3 child-coverage, G4 child-consistency) \u2014 parent + children, ONE CHILD AT A TIME:\n  evaluate (parent + a single child, both WHOLE) per call and accumulate deterministically (G3: union of the\n  parent ACs each child covers \u2192 the uncovered set; G4: the interaction modes per pair/cluster). If any\n  (parent + child) pairing is too big even for the escalated window, that is a FAILURE FINDING \u2014 the\n  ticket(s) are too large, reduce them. Never truncate a child.\n- MISSING-INFO / ABSENCE false-positives: because content is NEVER chunked, a finder applying batched (or\n  single) criteria always sees the WHOLE plan \u2014 so no partial-view FP from rubric-batching. The only sliced\n  view is G3/G4 one-child-at-a-time; there, an absence / 'missing X' finding is a CANDIDATE \u2014 Pass-2 confirms\n  X is absent from the COMPLETE set (parent + ALL children, via retrieval) before it stands (absence findings:\n  higher bar; the verifier must have whole-artifact access).\n- ISF (intent-source fidelity) SUPPORTING context: the primary plan is never reduced, but the linked SESSION\n  LOG is supporting context \u2014 if it exceeds the escalated window, SUMMARIZE it and run ISF against the summary,\n  RECORDING that the check used a summary (not the full log); the finding then carries REDUCED CONFIDENCE. A\n  reduced-confidence intent check beats none. (This summarization is for the supporting log ONLY, never the plan.)\n- Coverage (model/window used, batch\u2192single fallback, summary-based ISF, any too-big failure finding) is\n  RECORDED on the attestation so the review's completeness is visible.\n- Built ON the workflow engine \u2014 NOW SHIPPED (epic `e6d9`, CLOSED): `src/rebar/llm/workflow/` (declarative IR + interpreter/executor, `run_workflow` CLI+MCP, PydanticAI runner + structured-output stack). Reuse the SHIPPED rebar.llm extension points: the da27 contract-bearing prompt model + derived prompt index + `.rebar/prompts/` override (`src/rebar/llm/prompts.py`), so a criterion ships as a front-matter prompt declaring its exec tier. The remaining open question \u2014 the exact SHAPE (gate-as-workflow vs bespoke; dynamic fan-out handling) + LLM-functionality unification \u2014 is the `6f2d` (soupy-spool-revel) remediation brainstorm this epic depends_on (still OPEN).\n\n## Acceptance Criteria\n- [ ] Registry loads from the prompt library; the coverage guard passes.\n- [ ] Orchestrator filters via applies_at, packs by facet, dispatches by exec tier.\n- [ ] No criterion greps the codebase except the code-grounding set (E4/G1G2/A1/G6).\n- [ ] The orchestrator reviews the FULL plan + children \u2014 NO TRUNCATION and NO CONTENT-CHUNKING by design. Size order: batch criteria \u2192 ONE criterion/call \u2192 escalate to a higher-context model \u2192 (still too big) a FAILURE FINDING that the ticket must be reduced. Coverage recorded.\n- [ ] Container criteria (G3/G4) evaluate parent + ONE child at a time (both whole) and aggregate; a too-big (parent+child) pairing is a failure finding (reduce the ticket(s)); absence findings from the per-child view are verified against the COMPLETE set before they stand.\n- [ ] Context-window escalation: estimate tokens / catch context-limit errors \u2192 escalate up a configured model-by-window ladder (after dropping to one criterion per call, before declaring the ticket too big). ISF on a too-large session log falls back to a documented SUMMARY with reduced confidence.\n\n## Acceptance Criteria (added \u2014 T8 DET execution path)\n- [ ] The exec-dispatch covers the DETERMINISTIC tier: `exec=DET` criteria (the P1\u2013P8 floor) run via a CODE executor alongside the 1-TURN / 2-STEP / AGENT (LLM) tiers \u2014 the DET tier has an explicit execution path (invoking the DET floor 012e), not just the LLM tiers.",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Criteria registry + orchestrator on the workflow engine"
       },
       "baseline_advanced_at": "2026-07-19T18:42:27Z",
       "created_at": "2026-06-25T23:15:25Z",
       "jira_key": "REB-312",
+      "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:15:25Z"
     },
@@ -117668,7 +117288,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "PROPOSED ROOT CAUSE (not yet implemented \u2014 needs plan-review before any code)\n\nThe operation-linked compaction sweep is not crash-atomic. rebar._commands. compact_trigger.maybe_compact() fires on the tail of every ticket CLOSE and spawns a DETACHED sweep worker (run_sweep -> compact.compact_all_cli -> compact_txn). The fold performs snapshot-write -> retire (delete <id>/.archived) -> git commit as SEPARATE steps with no rollback. If the detached worker dies, is killed, or races a concurrent writer between the retire/delete and the commit, the SHARED tracker working tree is left DIRTY with uncommitted changes: deletions of tracked <id>/.archived files and/or untracked *-SNAPSHOT.json files.\n\nA dirty tree then wedges the next reconverge. rebar._store.sync._union_merge runs `git merge origin/tickets`, which git ABORTS. TWO abort variants:\n (a) untracked SNAPSHOT would be overwritten -> \"untracked working tree files would be\n     overwritten by merge\" \u2014 recovered by Gerrit change 1757 / bug small-delicious-loris\n     (6ccc-0577-198c-44fa).\n (b) tracked .archived deletions conflict -> \"Your local changes to the following files\n     would be overwritten by merge\" \u2014 NOT handled by 1757.\nThe abort leaves auto-push unable to advance, so local ticket commits strand off origin -> the P0 \"changes not reaching origin / lost changes\" symptom.\n\nPROPOSED FIX (defense-in-depth):\n 1. Make the fold crash-atomic so it never leaves a dirty tree: stage all snapshot writes +\n    .archived retirements and commit them as ONE unit, with a try/finally cleanup that\n    reverts a partial fold (git checkout -- . of tracked deletions + unlink of uncommitted\n    SNAPSHOT temps) whenever the commit did not complete; or fold against a scratch\n    index/worktree and swap in only on success.\n 2. Add a crash-recovery preamble that, under the store write_lock at sweep start, detects\n    and reverts a previously-abandoned partial fold before doing anything else.\n 3. Pair with widening the reconverge recovery (loris/1757) to ALSO handle abort variant (b)\n    (tracked-deletion), so both layers cover both variants.\n\nINTERIM MITIGATION (operational, no code): set project config `compact.trigger = off` to disable the operation-linked sweep (removes the dirty-tree seed); housekeeping then falls to the scheduled compact-sweep workflow. NOTE: compact.trigger has NO env-var mapping \u2014 it is project/user config only.",
+        "description": "## Context / Problem\nThe operation-linked compaction sweep is not crash-atomic, and this is the root wedge-generator for the store (parent epic becoming-berserk-grunion; live wedges recorded on e72e-259d-5ee7-4e73 and 6ccc-0577-198c-44fa). rebar._commands.compact_trigger.maybe_compact() fires on the tail of every ticket CLOSE and spawns a DETACHED sweep worker (run_sweep \u2192 compact.compact_all_cli \u2192 compact_txn). The fold performs snapshot-write \u2192 retire-rename (tracked source \u2192 `*.retired`) \u2192 git commit as SEPARATE steps with no rollback. If the detached worker dies, is killed, or races a concurrent writer between the rename and the commit, the SHARED tracker working tree is left DIRTY: tracked deletions plus untracked `*-SNAPSHOT.json` / `*.retired` files. A dirty tree then aborts the next reconverge union merge (\"local changes / untracked files would be overwritten\"), stranding local ticket commits \u2014 the chronic wedge. Interim mitigation `[compact] trigger=\"off\"` is active on the affected host and must be removable once this lands.\n\n## Approach\nMake the fold crash-atomic with an intent journal + rollback + startup recovery (the classic write-ahead-intent pattern):\n1. **Intent journal**: before mutating anything, `_apply_fold` writes a journal record (ticket dir, snapshot path, sources to retire) to a store-local journal location; if the journal cannot be written, the fold REFUSES (logs, stderr Error, exit 1) without mutating the store.\n2. **Ordered mutation + rollback**: perform snapshot-write, then renames, then ONE commit; on any failure after mutation begins, `_rollback_fold` reverse-renames and removes the uncommitted snapshot. If a reverse-rename itself fails (incomplete rollback), RETAIN the uncommitted snapshot rather than delete it \u2014 dropping it would lose folded events; the retained state is exactly what fsck reports as SNAPSHOT_INCONSISTENT and doctor can repair.\n3. **Recovery**: compact_recovery.recover_abandoned_folds scans for journals with no matching commit at startup/next sweep entry, discriminating: journal + uncommitted artifacts present \u2192 revert (restore sources, remove snapshot, clear journal); journal whose snapshot already reached HEAD \u2192 clear journal (fold landed); journal whose snapshot is gone from disk (superseded or fsck-repaired) \u2192 clear journal without touching ticket files.\n4. Transient-fault discipline: git probes used for discrimination must distinguish \"object absent\" from transient failures (index.lock contention, timeout) so recovery never mis-classifies a transient fault as \"snapshot absent\" and reverts a landed fold.\nThe journal lives with the store and is cleaned in the same locked scope as the fold; the sweep remains operation-linked (portable \u2014 no CI dependence).\n\n## Scope\n- src/rebar/_commands/compact_txn.py \u2014 intent journal write, ordered fold, `_rollback_fold` with the retain-on-incomplete-rollback guard.\n- src/rebar/_commands/compact_recovery.py \u2014 abandoned-fold discrimination + recovery.\n- src/rebar/_commands/compact.py \u2014 recovery invocation at sweep entry.\n- tests/unit/test_compact_crash_atomicity.py (new) \u2014 kill-at-each-step coverage.\n- tests/unit/test_lock_holder_labelling.py \u2014 lock label update.\n\n## Testing\n- Crash injection at each step boundary (after journal, after snapshot-write, after renames, before commit): the next sweep entry recovers to a clean tree (`git status --porcelain` empty) with no ticket events lost.\n- Refusal path: journal write failure \u2192 exit 1, store untouched (zero mutations, zero commits).\n- Incomplete rollback: a failing reverse-rename retains the uncommitted snapshot; assert the snapshot bytes survive and fsck reports the state.\n- Recovery discrimination: landed-fold journal is cleared without reverting; superseded/fsck-repaired journal (snapshot gone from disk) is cleared without touching ticket files; transient git failure during the probe does NOT trigger a revert.\n- Idempotence: recovery on a clean store makes zero changes; double recovery is safe.\n- Manual mutation pass over journal/rollback/recovery branches; every mutant killed.\n\n## Acceptance Criteria\n- [ ] A fold killed at ANY step boundary leaves a store that the next sweep entry converges to clean (no dirty tracked deletions, no stray snapshots, no lost events); checked by the crash-injection tests.\n- [ ] A fold that cannot journal refuses without mutating the store; checked by the refusal test.\n- [ ] Recovery never deletes folded-event bytes: incomplete rollback retains the snapshot, and landed/superseded journals are cleared without reverting ticket files; checked by the discrimination tests.\n- [ ] Transient git faults during recovery probes are not treated as \"snapshot absent\"; checked by the fault-injection test.\n- [ ] `make lint` and `make typecheck` clean; lands via Gerrit (LLM-Review +1 AND Verified +1) before close; after merge the `[compact] trigger=\"off\"` mitigation is removed on the affected host.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Defense-in-depth: make compaction crash-atomic \u2014 detached sweep that dies after write/retire but before commit leaves the tracker tree dirty (source of the untracked leftovers that wedge reconverge)"
@@ -122438,6 +122058,13 @@
       "peer_parent": "REB-296",
       "state": "confirmed",
       "updated_at": "2026-07-09T03:45:40Z"
+    },
+    "ee68-5ff4-fa75-4788": {
+      "created_at": "2026-08-14T06:53:59Z",
+      "jira_id": "4588690",
+      "jira_key": "REB-2900",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T06:54:02Z"
     },
     "ee82-6c0f-a0ed-404d": {
       "baseline": {
@@ -136005,6 +135632,7 @@
     "REB-2899": "2364-663e-859d-4b58",
     "REB-29": "1368-1a38-8d06-4227",
     "REB-290": "b7af-9623-b1fa-4c47",
+    "REB-2900": "ee68-5ff4-fa75-4788",
     "REB-291": "b7e6-d8b8-29e7-40ad",
     "REB-292": "b80d-ba60-afe7-42a4",
     "REB-293": "b94d-2777-28d8-4a6f",
