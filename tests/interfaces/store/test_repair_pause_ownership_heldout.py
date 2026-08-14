@@ -78,7 +78,7 @@ def _fsck_run(
             return _result(args, stdout=f"{'a' * 40}\n")
         return _result(args)
 
-    monkeypatch.setattr(fsck_repair, "_ticket_dirs", lambda _tracker: ["ticket"])
+    monkeypatch.setattr(fsck_repair, "_ticket_dirs", lambda _tracker, **_kw: ["ticket"])
     monkeypatch.setattr(fsck_repair, "_repair_plan", plan)
     monkeypatch.setattr(fsck_repair, "_repair_ticket", repair_ticket)
     monkeypatch.setattr(fsck_repair, "_git", git)

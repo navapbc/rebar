@@ -413,6 +413,29 @@ byte-identical; inspect and remove them by hand only when you know the append th
 them is dead. On a clean tracker `doctor --repair` makes zero changes and records no
 backup ref.
 
+## Archived tickets: maintenance scopes to the active store
+
+`rebar archive` folds the ticket's entire live log into a SNAPSHOT **inline, right before
+writing the ARCHIVED event** — a terminal fold that bypasses the incremental compaction
+gates (threshold 0, fold horizon of now), so an archived ticket never carries an unfolded
+tail. Archiving an already fully-folded ticket writes no new SNAPSHOT, and a failed fold
+aborts the archive. This fold is operation-linked: it runs wherever `archive` runs, with no
+CI or scheduler dependency.
+
+Because archived tickets are settled and folded, the store-walking maintenance commands
+skip them by default, so their cost tracks store *activity*, not store *history*:
+
+- `rebar fsck`'s per-ticket checks walk **active** tickets only; pass `--include-archived`
+  to restore the full historical walk (works with `--output json` too).
+- `rebar compact-all` selects among active tickets only; `--include-archived` also sweeps
+  archived ones — the migration door that folds tickets archived before the archive-time
+  fold existed.
+
+A directory is skipped only when its `.archived` marker exists **and** the event log
+confirms net archival (an ARCHIVED event with no REVERT targeting it). The marker alone
+never decides, so a stale marker — e.g. left behind by a reverted archive — cannot hide a
+ticket from `fsck` or the compaction sweep.
+
 ## Jira
 
 If your project syncs to Jira, use `rebar bridge preview` to show proposed Jira

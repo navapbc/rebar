@@ -216,7 +216,7 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
 
 
 def _scan_snapshot_state(
-    tracker: str, threshold: int = 0, horizon: int = 0
+    tracker: str, threshold: int = 0, horizon: int = 0, *, include_archived: bool = False
 ) -> tuple[list[str], int]:
     """Return (ticket ids worth compacting, count of the rest), sorted by name.
 
@@ -244,36 +244,44 @@ def _scan_snapshot_state(
     leaves it alone.
 
     ``threshold=0`` / ``horizon=0`` keep the historical call shape working — every live event
-    is foldable at horizon 0, so any ticket with events is selected."""
+    is foldable at horizon 0, so any ticket with events is selected.
+
+    Walks ACTIVE tickets only by default, via the shared iterator
+    (:func:`rebar._commands.fsck_repair._ticket_dirs`): an archived ticket was terminally
+    folded at archive time, so re-scanning it is pure history cost. ``include_archived``
+    restores the full walk (the migration door for tickets archived before the fold existed)."""
+    from rebar._commands.fsck_repair import _ticket_dirs
+
     needs: list[str] = []
     rest = 0
     now = hlc.physical_now()
     try:
-        entries = sorted(os.scandir(tracker), key=lambda e: e.name)
+        names = _ticket_dirs(tracker, include_archived=include_archived)
     except OSError:
         return [], 0
-    for entry in entries:
-        if not entry.is_dir() or entry.name.startswith("."):
-            continue
-        foldable = _foldable_event_count(entry.path, now, horizon)
+    for name in names:
+        path = os.path.join(tracker, name)
+        foldable = _foldable_event_count(path, now, horizon)
         try:
-            has_snapshot = any(n.endswith("-SNAPSHOT.json") for n in os.listdir(entry.path))
+            has_snapshot = any(n.endswith("-SNAPSHOT.json") for n in os.listdir(path))
         except OSError:
             has_snapshot = True  # unreadable: never select it, the fold would fail anyway
         if foldable > threshold or (foldable > 0 and not has_snapshot):
-            needs.append(entry.name)
+            needs.append(name)
         else:
             rest += 1
     return needs, rest
 
 
-def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
-    """Parse ``compact-all`` flags. Returns ``(dry_run, limit, no_commit, early_rc)``
-    where ``early_rc`` is non-None when the caller should return it immediately
+def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, bool, int | None]:
+    """Parse ``compact-all`` flags. Returns ``(dry_run, limit, no_commit, include_archived,
+    early_rc)`` where ``early_rc`` is non-None when the caller should return it immediately
     (``--help`` => 0, an unknown option => 1)."""
     dry_run = False
     limit = 0
     no_commit = False
+    include_archived = False
+    usage = "Usage: ticket compact-all [--dry-run] [--limit=N] [--no-commit] [--include-archived]\n"
     for a in argv:
         if a == "--dry-run":
             dry_run = True
@@ -281,13 +289,15 @@ def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
             limit = int(a[len("--limit=") :])
         elif a == "--no-commit":
             no_commit = True
+        elif a == "--include-archived":
+            include_archived = True
         elif a in ("--help", "-h"):
-            sys.stdout.write("Usage: ticket compact-all [--dry-run] [--limit=N] [--no-commit]\n")
-            return dry_run, limit, no_commit, 0
+            sys.stdout.write(usage)
+            return dry_run, limit, no_commit, include_archived, 0
         else:
             sys.stderr.write(f"Error: unknown option '{a}'\n")
-            return dry_run, limit, no_commit, 1
-    return dry_run, limit, no_commit, None
+            return dry_run, limit, no_commit, include_archived, 1
+    return dry_run, limit, no_commit, include_archived, None
 
 
 # raw-git-ok: store-maintenance command, seam-internal
@@ -506,7 +516,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     only standing trigger, and it is meant to run OUT OF BAND — in a disposable clone, on a
     schedule — so it never contends for an interactive session's store lock."""
 
-    dry_run, limit, no_commit, early_rc = _compact_all_parse(argv)
+    dry_run, limit, no_commit, include_archived, early_rc = _compact_all_parse(argv)
     if early_rc is not None:
         return early_rc
 
@@ -531,7 +541,9 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
 
         compact_recovery.recover_abandoned_folds_locked(tracker)
 
-    needs, already = _scan_snapshot_state(tracker, threshold, horizon)
+    needs, already = _scan_snapshot_state(
+        tracker, threshold, horizon, include_archived=include_archived
+    )
     total_needs = len(needs)
     sys.stdout.write(f"Tickets needing no compaction : {already}\n")
     sys.stdout.write(f"Tickets needing compaction    : {total_needs}\n")
