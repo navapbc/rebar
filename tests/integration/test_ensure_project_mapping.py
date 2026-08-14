@@ -46,6 +46,12 @@ _ORIGINAL_UNIT_IDS = {
     "store-compat",
 }
 
+# The two units THIS migration registered (their ids are stable and persisted in
+# `.ensure-applied`, so naming them is not a private-name dependency). Asserted by
+# MEMBERSHIP, not by an exact registry-delta count, so an unrelated later ensure
+# unit (e.g. `untrack-runtime-markers`) does not break this suite.
+_MIGRATION_UNIT_IDS = {"projects-seed", "projects-compat-stamp"}
+
 # The effective backend project this suite pins via rebar.toml; distinct from the
 # ACLI create-time default ("DIG") so a seeded legacy_default proves the unit read
 # the store's configured project rather than the fallback.
@@ -177,9 +183,8 @@ def test_second_sweep_is_idempotent(store: Path) -> None:
 
     assert _tickets_head(tracker) == before, "converged sweep must not create commits"
     by_id = {o.id: o for o in outcomes}
-    new_ids = set(ensures.REGISTRY_IDS) - _ORIGINAL_UNIT_IDS
-    assert len(new_ids) == 2, "the migration must register exactly two new ensure units"
-    for uid in new_ids:
+    assert _MIGRATION_UNIT_IDS <= set(ensures.REGISTRY_IDS)
+    for uid in _MIGRATION_UNIT_IDS:
         assert by_id[uid].status == "ok", (uid, outcomes)
 
 
@@ -241,9 +246,9 @@ def test_multi_project_stamped_store_still_passes_compat_gate(store: Path) -> No
 def test_new_units_are_registered(store: Path) -> None:
     """The two new units are registered on the frozen id set AND the callable map,
     so the sweep actually runs them (a rename/typo would strand one forever-pending)."""
-    new_ids = set(ensures.REGISTRY_IDS) - _ORIGINAL_UNIT_IDS
-    assert len(new_ids) == 2
-    assert new_ids <= set(ensures._registry().keys())
+    assert _MIGRATION_UNIT_IDS <= set(ensures.REGISTRY_IDS)
+    assert _MIGRATION_UNIT_IDS.isdisjoint(_ORIGINAL_UNIT_IDS)
+    assert _MIGRATION_UNIT_IDS <= set(ensures._registry().keys())
     assert ensures.registry_ids() == frozenset(ensures.REGISTRY_IDS)
 
 
@@ -253,9 +258,8 @@ def test_raising_migration_unit_is_recorded_failed(
     """A migration unit that raises is caught (recorded ``failed``) and does not
     abort the sweep or its caller — the other units still run."""
     tracker = _tracker(store)
-    new_ids = sorted(set(ensures.REGISTRY_IDS) - _ORIGINAL_UNIT_IDS)
-    assert len(new_ids) == 2
-    target = new_ids[0]
+    assert _MIGRATION_UNIT_IDS <= set(ensures.REGISTRY_IDS)
+    target = sorted(_MIGRATION_UNIT_IDS)[0]
 
     real = ensures._registry()
 

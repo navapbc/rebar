@@ -31,7 +31,12 @@ DRIFTABLE_UNITS = {"env-id", "gc-config", "merge-ours", "gitattributes", "gitign
 # (story 21dd), projects-seed and projects-compat-stamp (story 462d) are stamped/ok +
 # converged at init and are never drifted by this matrix, so they are asserted
 # `ok`/applied (via ALL_UNITS) but are not among the driftable scenarios.
-ALL_UNITS = DRIFTABLE_UNITS | {"store-compat", "projects-seed", "projects-compat-stamp"}
+ALL_UNITS = DRIFTABLE_UNITS | {
+    "store-compat",
+    "projects-seed",
+    "projects-compat-stamp",
+    "untrack-runtime-markers",
+}
 
 
 @pytest.fixture
@@ -182,7 +187,7 @@ def test_fsck_repair_converges_fully_legacy_store(repo: Path, capsys) -> None:
 
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     out = capsys.readouterr().out
-    assert "ensures: swept 8 unit(s)" in out
+    assert "ensures: swept 9 unit(s)" in out
     assert "5 changed" in out  # all five driftable units were behind (store-compat stays ok)
     _assert_converged(tracker)
     assert ensures.applied_ids(tracker) == ALL_UNITS
@@ -204,10 +209,10 @@ def test_pre_feature_store_reports_pending(repo: Path) -> None:
     ensures._reset_pending_cache()
 
     out = rebar.fsck(repo_root=str(repo))
-    assert "ensures: 0/8 applied" in out
+    assert "ensures: 0/9 applied" in out
     assert "run `rebar fsck --repair` to converge" in out
 
     # After the operator repairs, the same read-only line reports fully applied.
     fsck_mod.fsck_cli(["--repair"], repo_root=str(repo))
     ensures._reset_pending_cache()
-    assert "ensures: 8/8 applied" in rebar.fsck(repo_root=str(repo))
+    assert "ensures: 9/9 applied" in rebar.fsck(repo_root=str(repo))

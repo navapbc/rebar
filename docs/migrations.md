@@ -80,6 +80,17 @@ projects model it cannot honor. This binary already registers the token in `KNOW
 (the expand half of the expand/contract rollout), so it recognises — and passes on — such a
 store.
 
+One unit repairs stores whose per-ticket runtime markers predate the `.gitignore` coverage
+(epic becoming-berserk-grunion S1): **`untrack-runtime-markers`** removes tracked
+`*/.archived` and `*/.write.lock` files from the tickets-branch **index** (gitignore never
+un-tracks already-tracked files, so their churn dirtied `git status`, broke the strict
+tracker-head check, and fed reconverge merge aborts). Check = one `git ls-files` call (empty →
+`ok`, zero commits); act = batched `git rm --cached` over the ls-files output + **one** commit.
+Worktree copies are untouched on the machine that runs it; a peer merging the commit has git
+delete its worktree marker copies — safe, because archival's source of truth is the ARCHIVED
+events, and the reader self-heals the fast-path cache: `reduce_all_tickets` re-materializes a
+missing `.archived` marker for a net-archived ticket on the next default list.
+
 ## Where `run_ensures` runs
 
 - **`init` / re-init** and the **symlink worktree attach** (`init.py`) — the sweep replaces the

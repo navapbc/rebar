@@ -72,6 +72,7 @@ REGISTRY_IDS: tuple[str, ...] = (
     "store-compat",
     "projects-seed",
     "projects-compat-stamp",
+    "untrack-runtime-markers",
 )
 
 
@@ -99,6 +100,7 @@ def _registry() -> dict[str, object]:
         "store-compat": init._store_compat_unit,
         "projects-seed": project_ensures.seed_projects_mapping_unit,
         "projects-compat-stamp": project_ensures.converge_multi_project_stamp_unit,
+        "untrack-runtime-markers": init._untrack_runtime_markers_unit,
     }
 
 

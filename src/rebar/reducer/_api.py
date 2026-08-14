@@ -15,7 +15,7 @@ import os
 from ._cache import is_active_event, prepare_event_files, write_cache
 from ._replay import replay_events
 from ._state import make_error_dict, make_initial_state
-from .marker import remove_marker
+from .marker import check_marker, remove_marker, write_marker
 
 # The NON-GRAPH ARTIFACT ticket types — verbose/bulk bodies (session_log, code_review) kept OUT
 # of the dependency-graph / store-health hot paths and default `list` (searchable via search/show).
@@ -45,6 +45,17 @@ def _is_net_archived(ticket_dir: str) -> bool:
             if target:
                 reverted_uuids.add(target)
     return bool(archived_uuids - reverted_uuids)
+
+
+def _heal_missing_marker(ticket_dir: str, state: dict) -> None:
+    """Re-materialize a missing ``.archived`` fast-path marker for a net-archived
+    ticket (self-healing cache; mirror of the stale-marker clearing in
+    :func:`reduce_all_tickets`). A peer merging the untrack-runtime-markers ensure
+    commit has git delete its worktree marker copies — safe, because archival's
+    source of truth is the ARCHIVED events already reflected in compiled state —
+    so the next list restores the fast path here."""
+    if state.get("archived") and not check_marker(ticket_dir):
+        write_marker(ticket_dir)
 
 
 def _compute_preconditions_summary(ticket_dir: str) -> dict:
@@ -265,6 +276,8 @@ def reduce_all_tickets(
         if state is None:
             results.append(make_error_dict(entry, "error", "reducer_failed"))
         else:
+            if exclude_archived:
+                _heal_missing_marker(entry_path, state)
             results.append(state)
 
     if exclude_archived:

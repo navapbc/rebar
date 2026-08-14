@@ -63,6 +63,7 @@ def test_registry_id_set_is_frozen() -> None:
         "store-compat",
         "projects-seed",
         "projects-compat-stamp",
+        "untrack-runtime-markers",
     }
     assert set(ensures.REGISTRY_IDS) == expected
     assert set(ensures._registry().keys()) == expected
