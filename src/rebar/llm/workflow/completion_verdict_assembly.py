@@ -157,7 +157,11 @@ def merge_finalizer_with_bank(
     the bank (or as a met=false unverified placeholder), guaranteeing full coverage while
     preserving the finalizer's own judgments (including a cross-criterion downgrade of a
     banked met=true). The bank is the source of truth for the ``evidence_sufficient`` marker:
-    every record — echoed or backfilled — is re-stamped from its bank entry.
+    every record — echoed or backfilled — is re-stamped from its bank entry. EXCEPTION
+    (ticket 8d74): a ``seeded: true`` bank entry is a PRIOR validated PASS credited from the
+    cross-run cache — it bypasses finalizer judgment entirely (an echo, including a met=false
+    downgrade, is replaced by the bank record; an omission is appended). Same-run downgrade
+    preservation keys STRICTLY on the seeded flag and is unchanged.
     """
     ids = _ids_for(criteria, id_by_text)
     by_text: dict[str, dict[str, Any]] = {}
@@ -165,9 +169,23 @@ def merge_finalizer_with_bank(
         if isinstance(record, dict) and record.get("criterion"):
             by_text[str(record["criterion"]).strip()] = record
     records: list[dict[str, Any]] = []
+    seeded_override = False
     for text in criteria:
         existing = by_text.get(text.strip())
         entry = bank_entries.get(ids[text])
+        if entry is not None and entry.get("seeded") and entry.get("met") is True:
+            if not (isinstance(existing, dict) and existing.get("met") is True):
+                seeded_override = True  # a downgrade/omission the credit overrides
+            records.append(
+                {
+                    "criterion": text,
+                    "met": True,
+                    "criterion_id": ids[text],
+                    "evidence": entry.get("evidence") or "",
+                    "seeded": True,
+                }
+            )
+            continue
         if isinstance(existing, dict) and isinstance(existing.get("met"), bool):
             records.append(
                 _restamp_marker({**existing, "criterion": text, "criterion_id": ids[text]}, entry)
@@ -197,7 +215,14 @@ def merge_finalizer_with_bank(
     any_unmet = any(not r["met"] for r in records)
     merged = dict(result)
     merged["criteria"] = records
-    merged["verdict"] = "FAIL" if any_unmet else str(result.get("verdict") or "PASS").upper()
+    if any_unmet:
+        merged["verdict"] = "FAIL"
+    elif seeded_override:
+        # The finalizer's global verdict judged a seeded criterion we credited over it;
+        # with every record met, the credited verdict is PASS.
+        merged["verdict"] = "PASS"
+    else:
+        merged["verdict"] = str(result.get("verdict") or "PASS").upper()
     merged.setdefault("target", {"kind": "ticket", "ticket_ids": [ticket_id_of(result)]})
     merged.setdefault("reviewers", ["completion-verifier"])
     # A real LLM finalizer ran and reconciled the full-coverage verdict — it is certifiable.
