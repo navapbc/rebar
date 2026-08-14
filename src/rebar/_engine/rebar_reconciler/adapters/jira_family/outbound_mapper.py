@@ -38,6 +38,15 @@ class OutboundFieldMapper:
     def __init__(self, codec: RichTextCodec) -> None:
         self._codec = codec
 
+    @property
+    def codec(self) -> RichTextCodec:
+        """The deployment's ``RichTextCodec`` (emersed-specific-mutt).
+
+        Exposed so the comment-diff path can normalize its LOCAL dedup key with the
+        SAME codec this mapper renders descriptions through — one codec instance per
+        backend, never a second one built at the diff site."""
+        return self._codec
+
     def map_fields_to_remote(
         self,
         changed: dict[str, Any],

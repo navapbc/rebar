@@ -63,6 +63,13 @@ class _JiraOutbound:
         # difference is a constructor parameter, not a duplicated method.
         self._mapper = OutboundFieldMapper(AdfCodec(rich="cloud" in cutover_clients()))
 
+    @property
+    def comment_codec(self) -> Any:
+        """Cloud's ``AdfCodec`` (emersed-specific-mutt) — the codec the comment-diff
+        path normalizes its LOCAL dedup key through, the same instance this outbound
+        mapper renders descriptions with, so the key matches the landed ADF wire."""
+        return self._mapper.codec
+
     def map_local_to_remote(
         self,
         ticket: dict[str, Any],

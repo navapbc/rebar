@@ -676,8 +676,18 @@ def _compute_outbound_update_mutation(
         dropped_field_sink=dropped_field_sink,
     )
     # Comments use the resolved snapshot (the bounded-GET overlay) — NO second call (C3).
+    # emersed-specific-mutt: thread the binding_store so _diff_comments' PRIMARY skip can
+    # consult the persistent comment_ids map, and the backend's comment codec so the LOCAL
+    # dedup key is normalized through the SAME RichTextCodec the send path renders with
+    # (injected via the Backend port — the shared layer never imports a concrete codec).
     comment_mutations = _diff_comments(
-        ticket, jira_key, comment_snapshot, client=client, inbound_mapper=inbound_mapper
+        ticket,
+        jira_key,
+        comment_snapshot,
+        client=client,
+        inbound_mapper=inbound_mapper,
+        binding_store=binding_store,
+        codec=getattr(outbound_mapper, "comment_codec", None),
     )
     # bug a06c: intent-gated REMOVE. When local_label_intent is
     # provided but lacks an entry for this local_id, fall back to
