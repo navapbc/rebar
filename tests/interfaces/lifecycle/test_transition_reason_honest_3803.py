@@ -9,9 +9,15 @@ rationale was recorded — it was not.
 The fix makes the flag honest without adding persistence (ed13 deliberately replaced
 free-text close rationale with the bounded ``--class`` vocabulary — see the ticket):
 
-- AC1: ``close_reason`` is removed from ``transition_core``'s signature.
+- AC1 (as amended by ticket fc20): ``transition_core`` originally LOST the discarded
+  ``close_reason`` slot outright. fc20's administrative dispositions deliberately
+  re-added it — but the honesty rule this ticket established still holds: the parameter
+  is keyword-only with an empty default, and the value PERSISTS only on a close whose
+  class requires a reason (``obsolete``/``wontfix``); every other call discards nothing
+  silently because nothing is accepted-and-dropped — the guards below pin that.
 - AC3: passing ``--reason`` on a plain (non-force) transition is REFUSED, not silently
-  accepted and dropped.
+  accepted and dropped — except (fc20) on a close whose ``--class`` is obsolete/wontfix,
+  where the reason is REQUIRED and recorded as ``close_reason``.
 - AC5: ``--force`` / ``--force=<reason>`` behaviour is unchanged — ``--reason`` still
   serves as the audit-note fallback under ``--force``.
 
@@ -75,10 +81,72 @@ def test_plain_transition_without_reason_unaffected(rebar_repo: Path) -> None:
     assert _status(tid, rebar_repo) == "blocked"
 
 
-def test_transition_core_has_no_close_reason_param() -> None:
-    """AC1: the discarded ``close_reason`` slot is gone from the signature, so no caller
-    can pass a value that the body never reads."""
+def test_transition_core_close_reason_contract() -> None:
+    """AC1, amended by ticket fc20: the slot exists again for administrative dispositions,
+    but on the honest terms this ticket established — keyword-only, empty default, so no
+    positional caller can smuggle a value in by accident."""
     from rebar._commands import txn
 
-    params = inspect.signature(txn.transition_core).parameters
-    assert "close_reason" not in params
+    param = inspect.signature(txn.transition_core).parameters["close_reason"]
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+    assert param.default == ""
+
+
+def _close_via_core(tid: str, repo: Path, **kwargs) -> dict:
+    from rebar import config
+    from rebar._commands import txn
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    rebar.claim(tid, assignee="me", repo_root=str(repo))
+    tracker = str(config.tracker_dir(str(repo)))
+    resolved = resolve_ticket_id(tid, tracker)
+    assert resolved is not None
+    txn.transition_core(
+        tracker,
+        resolved,
+        "in_progress",
+        "closed",
+        env_id="test-env",
+        author="test",
+        repo_root=str(repo),
+        **kwargs,
+    )
+    return rebar.show_ticket(resolved, repo_root=str(repo))
+
+
+def test_close_without_a_reason_persists_no_close_reason(rebar_repo: Path) -> None:
+    """The pre-fc20 shape: an ordinary close writes NO close_reason key (present-only),
+    so its STATUS event stays byte-identical to the pre-feature event."""
+    tid = rebar.create_ticket("task", "plain close", repo_root=str(rebar_repo))
+
+    state = _close_via_core(tid, rebar_repo)
+
+    assert state["status"] == "closed"
+    assert "close_reason" not in state
+
+
+def test_close_reason_with_a_non_reason_class_is_not_persisted(rebar_repo: Path) -> None:
+    """The 3803 honesty rule, enforced write-side: a caller passing ``close_reason``
+    alongside a class that does not take one gets the value DISCARDED at the write, not
+    smuggled past the bounded ``--class`` vocabulary."""
+    tid = rebar.create_ticket("bug", "smuggling probe", repo_root=str(rebar_repo))
+
+    state = _close_via_core(
+        tid, rebar_repo, close_class="regression", close_reason="smuggled rationale"
+    )
+
+    assert state["close_class"] == "regression"
+    assert "close_reason" not in state
+
+
+def test_close_reason_with_a_reason_required_class_is_persisted(rebar_repo: Path) -> None:
+    """Positive control (ticket fc20): the ONE admitted shape — a reason-required
+    administrative class — records the justification as ``close_reason``."""
+    tid = rebar.create_ticket("task", "obsolete premise", repo_root=str(rebar_repo))
+
+    state = _close_via_core(
+        tid, rebar_repo, close_class="obsolete", close_reason="premise no longer holds"
+    )
+
+    assert state["close_class"] == "obsolete"
+    assert state["close_reason"] == "premise no longer holds"

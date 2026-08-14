@@ -26,14 +26,19 @@ def test_the_disposition_classes_match_the_close_gates_own_set():
     assert close_disposition.DISPOSITION_CLASSES == close_precheck._NON_COMPLETION_BUG_CLASSES
 
 
-@pytest.mark.parametrize("close_class", sorted(close_disposition.DISPOSITION_CLASSES))
-def test_every_exempt_class_can_produce_a_verdict(close_class, monkeypatch):
-    """All three exempt classes, not just `duplicate`.
+@pytest.mark.parametrize(
+    "close_class",
+    sorted(close_disposition.DISPOSITION_CLASSES - close_disposition.REASON_REQUIRED_CLASSES),
+)
+def test_every_replacement_bearing_class_can_produce_a_verdict(close_class, monkeypatch):
+    """All replacement-bearing exempt classes, not just `duplicate`.
 
     Measured when 738a was filed, only `duplicate` had closes carrying a live replacement link;
     `not_a_bug` had none and `escalated` had no closed bugs at all. So the other two were LATENT
     siblings of the same defect — identical code path, gap appearing the moment one is linked.
-    Parametrizing means the fix covers them before that happens rather than after.
+    Parametrizing means the fix covers them before that happens rather than after. The
+    REASON-ONLY administrative classes (obsolete/wontfix, ticket fc20) mint from their
+    ``close_reason`` instead — asserted separately below — so they are excluded here.
     """
     monkeypatch.setattr(
         close_disposition, "find_replacement", lambda *a, **k: "dead-beef-cafe-0001"
@@ -45,6 +50,25 @@ def test_every_exempt_class_can_produce_a_verdict(close_class, monkeypatch):
     assert result["disposition"] == close_class
     assert result["replacement"] == "dead-beef-cafe-0001"
     assert result["verdict"] == "PASS"
+
+
+@pytest.mark.parametrize("close_class", sorted(close_disposition.REASON_REQUIRED_CLASSES))
+def test_every_reason_only_class_can_produce_a_verdict(close_class):
+    """The reason-only administrative classes (ticket fc20) mint from their justification.
+
+    They carry no replacement link, so the same fail-closed property holds in the other
+    direction: a reason yields a signed disposition, no reason yields no signature.
+    """
+    result = close_disposition.verdict(
+        "tkt-0001", close_class, "/nonexistent/tracker", close_reason="stated justification"
+    )
+
+    assert result is not None
+    assert result["disposition"] == close_class
+    assert result["close_reason"] == "stated justification"
+    assert result["verdict"] == "PASS"
+
+    assert close_disposition.verdict("tkt-0001", close_class, "/nonexistent/tracker") is None
 
 
 def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeypatch, tmp_path):

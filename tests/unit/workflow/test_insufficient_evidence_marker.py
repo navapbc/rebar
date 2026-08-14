@@ -400,7 +400,7 @@ def test_close_refusal_message_reports_insufficient_evidence() -> None:
     result = {"evidence_sufficient": False, "remediation": "do the thing"}
     items = [{"criterion": "Ship the fix", "detail": "insufficient evidence"}]
     lines = ["  - Ship the fix: insufficient evidence"]
-    message = _verification_fail_message("T-1", result, items, lines)
+    message = _verification_fail_message("T-1", "task", result, items, lines)
     assert "insufficient evidence" in message.casefold()
     assert "unmet" not in message.split("\n")[0].casefold()
     assert "not closing" in message
@@ -413,7 +413,7 @@ def test_close_refusal_message_genuine_fail_unchanged() -> None:
     result = {"remediation": "guidance"}
     items = [{"criterion": "A", "detail": "d"}, {"criterion": "B", "detail": "e"}]
     lines = ["  - A: d", "  - B: e"]
-    message = _verification_fail_message("T-1", result, items, lines)
+    message = _verification_fail_message("T-1", "task", result, items, lines)
     assert "2 unmet criteria; not closing." in message
     assert "guidance" in message
 

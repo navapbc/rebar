@@ -319,6 +319,32 @@ def _trigger_compaction(
     compact_trigger.maybe_compact(tracker, ticket_id, repo_root=repo_root_str)
 
 
+def _hint_disposition_alternative(close_class: str) -> None:
+    """On a force close shaped like an administrative disposition, point at the truthful exit.
+
+    Store mining behind ticket fc20 found the single largest FORCE_CLOSE class to be
+    administrative closes (duplicate/obsolete/superseded/wontfix) forced only because the
+    completion verifier can never PASS them — a sanctioned, attested path now exists, so the
+    force path SAYS SO. "Administrative-shaped" = the close carries an administrative
+    ``--class`` already (the force was likely unnecessary) or no class at all (the operator may
+    not know the vocabulary). A bug-only class (e.g. ``regression``) earns no hint — that force
+    is about the verifier's verdict, not a missing disposition path. Best-effort stderr,
+    never affecting the close; a side-effecting guard function so ``close_ticket`` stays at its
+    shrink-only complexity ceiling."""
+    from rebar._commands import close_disposition
+
+    if close_class and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
+        return
+    import sys
+
+    sys.stderr.write(
+        "Hint: if this close is administrative (duplicate / obsolete / superseded / wontfix "
+        "rather than completed work), --class <value> closes it through the attested "
+        "disposition path — obsolete/wontfix with --reason=<text>, duplicate/superseded with "
+        "a live replacement link — no --force needed.\n"
+    )
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -328,6 +354,7 @@ def close_ticket(
     repo_root,
     *,
     reason: str,
+    close_reason: str = "",
     force_close: str,
     close_class: str = "",
     caused_by: str = "",
@@ -449,6 +476,7 @@ def close_ticket(
         env_id=env_id,
         author=author,
         close_class=close_class,
+        close_reason=close_reason,
         force_close_reason=force_close,
         repo_root=repo_root,
         pre_status_check=plan_review_recheck,
@@ -484,6 +512,7 @@ def close_ticket(
         # A deliberate bypass, not a failure — but still closed-without-signature, so it gets
         # its own cause rather than being reported as if a signature had been attempted.
         completion_signature = {"signed": False, "cause": "force_bypassed", "error": ""}
+        _hint_disposition_alternative(close_class)
         session = _resolve_session(tracker)
         body = (
             "FORCE_CLOSE: close gate(s) bypassed by user approval — no completion/signature "
