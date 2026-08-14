@@ -37,11 +37,24 @@ from __future__ import annotations
 
 import os
 
-#: Bug close classes that are DISPOSITIONS — a statement about where the work lives, not a claim
-#: that this ticket's acceptance criteria were implemented. Mirrors
-#: ``close_precheck._NON_COMPLETION_BUG_CLASSES``; the two are asserted equal by
+#: Close classes that are DISPOSITIONS — a statement about where the work lives (or why it
+#: will not happen), not a claim that this ticket's acceptance criteria were implemented.
+#: Mirrors ``close_precheck._NON_COMPLETION_BUG_CLASSES``; the two are asserted equal by
 #: ``tests/unit/test_close_disposition_attestation_738a.py`` so they cannot drift apart.
-DISPOSITION_CLASSES = frozenset({"duplicate", "not_a_bug", "escalated"})
+DISPOSITION_CLASSES = frozenset(
+    {"duplicate", "not_a_bug", "escalated", "obsolete", "superseded", "wontfix"}
+)
+
+#: The ADMINISTRATIVE subset (ticket fc20): the only ``--class`` values a NON-BUG close may
+#: carry. ``not_a_bug`` / ``escalated`` stay bug-only vocabulary — a task/story/epic never
+#: "behaves as intended" or "escalates a defect". Enforced write-side in
+#: :func:`rebar._commands.txn.close_class_refusal`, gate-independent.
+ADMINISTRATIVE_CLASSES = frozenset({"duplicate", "obsolete", "superseded", "wontfix"})
+
+#: Administrative classes that carry no replacement link, so the close's justification IS the
+#: operator's ``--reason`` text: it is REQUIRED at write time, persists as ``close_reason`` on
+#: the close STATUS event, and is what the disposition attestation signs.
+REASON_REQUIRED_CLASSES = frozenset({"obsolete", "wontfix"})
 
 
 def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | None:
@@ -89,7 +102,9 @@ def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | No
     return None
 
 
-def verdict(ticket_id: str, close_class: str, tracker: str) -> dict | None:
+def verdict(
+    ticket_id: str, close_class: str, tracker: str, *, close_reason: str = ""
+) -> dict | None:
     """The sign signal for a disposition close, or ``None`` if it does not qualify.
 
     Shaped like the completion verifier's PASS ``result`` so the existing signing path
@@ -97,7 +112,23 @@ def verdict(ticket_id: str, close_class: str, tracker: str) -> dict | None:
     with no special-casing at the call site. ``model``/``runner`` are recorded as the deterministic
     producer rather than left as ``n/a``, so an auditor reading the manifest can tell at a glance
     that no model was consulted — which is the honest description of what happened.
+
+    Two mints (ticket fc20): a REASON-ONLY administrative class (:data:`REASON_REQUIRED_CLASSES`)
+    is attested from ``(class, close_reason)`` — it names no replacement, so an empty reason
+    yields ``None`` (fail-closed: an unjustified disposition must not sign). Every other
+    disposition class keeps the replacement-bearing mint from :func:`find_replacement`.
     """
+    if close_class in REASON_REQUIRED_CLASSES:
+        if not close_reason:
+            return None
+        return {
+            "verdict": "PASS",
+            "disposition": close_class,
+            "close_reason": close_reason,
+            "model": "none (deterministic disposition)",
+            "runner": "close_disposition",
+            "findings": [],
+        }
     replacement = find_replacement(ticket_id, close_class, tracker)
     if replacement is None:
         return None
@@ -142,4 +173,10 @@ def decorate_manifest(manifest: list[str], result: dict) -> list[str]:
         # Inserted right after the first line so the manifest reads as a sentence, and BEFORE the
         # material/sha steps so their positions stay at the end where readers expect them.
         decorated.insert(1, f"replacement: {replacement}")
+    close_reason = result.get("close_reason")
+    if close_reason:
+        # The reason-only mint (ticket fc20): the signed bytes carry the operator's stated
+        # justification, because for obsolete/wontfix that reason IS the whole disposition —
+        # there is no replacement ticket to name.
+        decorated.insert(1, f"disposition: {disposition} reason: {close_reason}")
     return decorated

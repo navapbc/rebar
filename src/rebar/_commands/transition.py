@@ -39,15 +39,20 @@ _USAGE = (
     "       ticket transition <ticket_id> <target_status> [--class=<value>] [--reason=<text>] "
     "[--force[=<reason>]]  (auto-detects current status)\n"
     "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
-    "  --reason=<text>          Meaningful only with --force: supplies the gate-bypass "
-    "audit note when no --force=<reason> is given. On a plain (non-force) transition it is "
-    "refused. To record rationale on a ticket, use `rebar comment <id>`.\n"
+    "  --reason=<text>          With --force: supplies the gate-bypass audit note when no "
+    "--force=<reason> is given. Without --force it is admitted only on a close whose --class "
+    "is obsolete or wontfix (REQUIRED there) — the reason is recorded as close_reason on the "
+    "close event and signed into the disposition attestation. Refused on any other plain "
+    "transition. To record rationale on a ticket, use `rebar comment <id>`.\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
     "  and the error names the parent. close/reopen/blocked never cascade.\n"
     "  --class=<value>          Required when closing bug tickets. One of: regression, "
     "plan_defect, env_integration, flaky, preexisting, not_a_bug, duplicate, escalated, "
-    "undetermined.\n"
+    "obsolete, superseded, wontfix, undetermined. On non-bug tickets, optional and limited to "
+    "the administrative dispositions: duplicate, obsolete, superseded, wontfix "
+    "(obsolete/wontfix require --reason=<text>; duplicate/superseded require a live "
+    "replacement link).\n"
     "  --force[=<reason>]       Bypass whichever gate this transition would hit "
     "(spelled exactly as `claim --force[=<reason>]`). Starting work (open->in_progress): "
     "bypasses any enabled start-work gate — the plan-review gate today, and any gate added "
@@ -224,6 +229,7 @@ def transition_compute(
     target_status: str,
     *,
     reason: str = "",
+    close_reason: str = "",
     force: bool = False,
     force_reason: str = "",
     force_close: str = "",
@@ -252,7 +258,11 @@ def transition_compute(
     ``force_reason`` carries the explicit ``--force=<reason>`` text for that bypass's audit
     note (it takes precedence over ``reason``), and ``force_close`` carries the reason for
     the close-gate bypass. The CLI derives all three from the single flag; library callers
-    may still set them independently."""
+    may still set them independently. ``close_reason`` (ticket fc20) is the NON-force
+    justification for a reason-only administrative close (``--class obsolete``/``wontfix``):
+    it persists as the ``close_reason`` key on the close STATUS event and is signed into the
+    disposition attestation — distinct from ``force_close``/``force_close_reason``, which
+    record a gate bypass."""
     tracker = str(config.tracker_dir(repo_root))
     repo_root_str = os.path.dirname(tracker)
 
@@ -357,6 +367,7 @@ def transition_compute(
         repo_root_str,
         repo_root,
         reason=reason,
+        close_reason=close_reason,
         force_close=force_close,
         close_class=close_class,
         caused_by=caused_by,
@@ -498,6 +509,24 @@ def _resolve_id_or_report(raw_id: str, tracker: str, fmt: str) -> str | None:
     return ticket_id
 
 
+def _plain_reason_refused(reason: str, force: bool, target_status: str, close_class: str) -> bool:
+    """Whether a ``--reason`` given WITHOUT ``--force`` must be refused.
+
+    ``--reason`` is admitted in exactly two shapes (tickets 24f7 + fc20): with ``--force`` it
+    supplies the gate-bypass audit note; without it, only on a close carrying a reason-only
+    administrative class (``obsolete``/``wontfix``), where it records the disposition's
+    ``close_reason`` (and is in fact REQUIRED — ``txn.close_class_refusal``). Any other plain
+    transition silently discarding the text would be worse than refusing it. A guard function
+    so ``transition_cli`` stays under its shrink-only complexity ceiling."""
+    if not reason or force:
+        return False
+    from rebar._commands import close_disposition
+
+    return not (
+        target_status == "closed" and close_class in close_disposition.REASON_REQUIRED_CLASSES
+    )
+
+
 def transition_cli(argv: list[str], *, repo_root=None) -> int:
     """``rebar transition`` entry: parse ``--output``, autodetect/validate, run the
     un-archive seam or :func:`transition_compute`, print, return the exit code."""
@@ -546,10 +575,12 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         # arms the close-gate bypass, defaulting a bare `--force` to the same placeholder
         # `claim --force` uses so the two commands behave identically.
         force = force_reason is not None
-        if reason and not force:
+        if _plain_reason_refused(reason, force, target_status, close_class):
             raise CommandError(
-                "Error: --reason is only meaningful with --force. A plain transition "
-                'discards it. Use --force="<reason>" to record a gate-bypass audit note, '
+                "Error: --reason is only meaningful with --force, or on a close whose "
+                "--class is obsolete or wontfix (where it records the disposition's "
+                "close_reason). A plain transition discards it. Use "
+                '--force="<reason>" to record a gate-bypass audit note, '
                 "or `rebar comment <id>` to record rationale on the ticket.",
                 returncode=1,
             )
@@ -558,6 +589,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
             current_status,
             target_status,
             reason=reason,
+            close_reason=("" if force else reason),
             force=force,
             force_reason=force_reason or "",
             force_close=(force_reason or "(no reason given)") if force else "",

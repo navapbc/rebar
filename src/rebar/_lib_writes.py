@@ -272,10 +272,19 @@ def transition(
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
     # {ticket_id, from, to, newly_unblocked[]} is the single source of truth.
+    from rebar._commands import close_disposition
     from rebar._commands import transition as _transition
     from rebar._commands._seam import CommandError
     from rebar._commands.txn import ConcurrencyMismatch
     from rebar._engine_support.resolver import resolve_ticket_id
+
+    # Mirror the CLI's admission rule (tickets 3803 + fc20): the free-text ``reason`` is
+    # persisted as ``close_reason`` ONLY on a non-force close whose class requires one
+    # (obsolete/wontfix). Any other combination discards it here exactly as the CLI
+    # refuses it, so the library and CLI paths cannot drift.
+    admits_close_reason = not (force or force_close) and (
+        close_class in close_disposition.REASON_REQUIRED_CLASSES
+    )
 
     tracker = str(config.tracker_dir(repo_root))
     resolved = resolve_ticket_id(ticket_id, tracker)
@@ -292,6 +301,7 @@ def transition(
             target_status,
             force=force,
             reason=reason,
+            close_reason=(reason if admits_close_reason else ""),
             force_close=force_close or "",
             close_class=close_class,
             caused_by=caused_by,

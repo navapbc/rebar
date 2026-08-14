@@ -195,7 +195,11 @@
     },
     "close_class": {
       "$ref": "common.schema.json#/$defs/close_class",
-      "description": "The bounded classification recorded when a `bug` ticket is closed (the required `--class` enum on `transition <bug> ... closed`). Folded onto the `*->closed` edge into reduced state so `rebar show <bug>` surfaces WHY the bug closed. Present only on closed bugs."
+      "description": "The bounded classification recorded when a ticket is closed with `--class <value>` — REQUIRED on a `bug` close, and accepted on non-bug closes only for the administrative dispositions (`duplicate`/`obsolete`/`superseded`/`wontfix`). Folded onto the `*->closed` edge into reduced state so `rebar show <id>` surfaces WHY the ticket closed. Present only on closed tickets that recorded a class."
+    },
+    "close_reason": {
+      "type": "string",
+      "description": "The operator's stated justification for a reason-only administrative close (`--class obsolete` or `--class wontfix`, which REQUIRE `--reason=<text>`). Written onto the `*->closed` STATUS event in the same locked write as the close, folded here, and signed into the disposition attestation's manifest. Distinct from `force_close_reason`: this records why a truthful disposition closed, that one records why a gate was bypassed. Present only when a non-force close carried a reason."
     },
     "force_close_reason": {
       "type": "string",

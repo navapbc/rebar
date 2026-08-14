@@ -160,11 +160,12 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
         pass
 
 
-# The closed bug-close classification vocabulary (ticket ed13): a bug close records a
-# REQUIRED, bounded ``--class <value>`` (replacing the old free-text ``--reason``), folded
-# into reduced state as ``close_class``. Single-sourced here so the CLI parser, the close
-# guard, and the completion-gate pre-check all validate against the SAME list — kept in the
-# same order as common.schema.json#/$defs/close_class.
+# The closed-ticket close classification vocabulary (ticket ed13; widened by ticket fc20): a
+# bug close records a REQUIRED, bounded ``--class <value>`` (replacing the old free-text
+# ``--reason``), and a non-bug close MAY record one from the ADMINISTRATIVE subset — both
+# folded into reduced state as ``close_class``. Single-sourced here so the CLI parser, the
+# close guard, and the completion-gate pre-check all validate against the SAME list — kept in
+# the same order as common.schema.json#/$defs/close_class.
 CLOSE_CLASSES: tuple[str, ...] = (
     "regression",
     "plan_defect",
@@ -174,6 +175,9 @@ CLOSE_CLASSES: tuple[str, ...] = (
     "not_a_bug",
     "duplicate",
     "escalated",
+    "obsolete",
+    "superseded",
+    "wontfix",
     "undetermined",
 )
 
@@ -183,6 +187,53 @@ def bug_close_class_ok(close_class: str) -> bool:
     (:data:`CLOSE_CLASSES`). Shared by :func:`transition_core`'s close guard and the
     completion gate's pre-check so the two cannot drift. Empty / unknown → False."""
     return close_class in CLOSE_CLASSES
+
+
+def close_class_refusal(
+    ticket_type: str,
+    close_class: str,
+    *,
+    close_reason: str = "",
+    force_close_reason: str = "",
+    target_status: str = "closed",
+    from_idea: bool = False,
+) -> str | None:
+    """The refusal message for an invalid close-class combination, or ``None`` when valid.
+
+    Shared by :func:`transition_core` (the authoritative, gate-independent write-side guard —
+    neither ``--force`` nor a disabled completion gate skips it) and the completion gate's
+    cheap pre-LLM check in ``close_precheck`` so the two cannot drift. Three rules (tickets
+    ed13 + fc20): a bug close REQUIRES a class from the full vocabulary; a non-bug close MAY
+    carry one only from ``close_disposition.ADMINISTRATIVE_CLASSES`` (``not_a_bug`` /
+    ``escalated`` stay bug-only); and a reason-only class (``obsolete`` / ``wontfix``)
+    REQUIRES a reason — the CLI ``--reason`` text (persisted as ``close_reason``), or the
+    ``--force=<reason>`` bypass note when the close is forced. ``idea -> closed`` is a
+    reject/drop, not a completion, and bypasses all three."""
+    if target_status != "closed" or from_idea:
+        return None
+    from rebar._commands import close_disposition
+
+    if ticket_type == "bug":
+        if not bug_close_class_ok(close_class):
+            allowed = ", ".join(CLOSE_CLASSES)
+            return f"closing a bug ticket requires --class <value> — one of: {allowed}"
+    elif close_class and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
+        allowed = ", ".join(
+            c for c in CLOSE_CLASSES if c in close_disposition.ADMINISTRATIVE_CLASSES
+        )
+        return (
+            f"closing a {ticket_type} accepts --class only for an administrative "
+            f"disposition — one of: {allowed} ('{close_class}' is bug-only or unknown)"
+        )
+    if close_class in close_disposition.REASON_REQUIRED_CLASSES and not (
+        close_reason or force_close_reason
+    ):
+        return (
+            f"--class {close_class} requires --reason=<text> stating why: the reason is "
+            "recorded as close_reason on the close event and signed into the disposition "
+            "attestation"
+        )
+    return None
 
 
 # raw-git-ok: locked store seam internal
@@ -195,6 +246,7 @@ def transition_core(
     env_id: str,
     author: str,
     close_class: str = "",
+    close_reason: str = "",
     force_close_reason: str = "",
     repo_root=None,
     pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
@@ -250,20 +302,24 @@ def transition_core(
         # The open-children structural guard is enforced elsewhere and is NOT relaxed for idea.
         from_idea = current_status == "idea"
 
-        # Bug-close CLASS guard (ticket ed13): a bug closing from a non-idea status now
-        # REQUIRES a bounded ``--class <value>`` from the closed vocabulary — REPLACING the
-        # old free-text ``--reason`` (which was validated then discarded). A missing OR
-        # out-of-vocabulary value is refused with a message that NAMES the allowed values.
-        # The predicate (:func:`bug_close_class_ok`) is shared with the completion gate's
-        # pre-check so the two cannot drift. On success ``close_class`` is folded onto the
-        # ``*->closed`` STATUS edge below (present-only, mirroring ``_stamp_session``).
-        if target_status == "closed" and ticket_type == "bug" and not from_idea:
-            if not bug_close_class_ok(close_class):
-                allowed = ", ".join(CLOSE_CLASSES)
-                raise CommandError(
-                    f"Error: closing a bug ticket requires --class <value> — one of: {allowed}",
-                    returncode=1,
-                )
+        # Close-class guard (tickets ed13 + fc20): a bug closing from a non-idea status
+        # REQUIRES a bounded ``--class <value>``; a non-bug close MAY carry one only from the
+        # ADMINISTRATIVE subset; obsolete/wontfix REQUIRE a reason. The shared rule
+        # (:func:`close_class_refusal`) is also run by the completion gate's pre-check so the
+        # two cannot drift, but THIS is the authoritative, gate-independent enforcement point:
+        # it runs on every close, forced or not, gate on or off. On success ``close_class``
+        # (and ``close_reason``) are folded onto the ``*->closed`` STATUS edge below
+        # (present-only, mirroring ``_stamp_session``).
+        refusal = close_class_refusal(
+            ticket_type,
+            close_class,
+            close_reason=close_reason,
+            force_close_reason=force_close_reason,
+            target_status=target_status,
+            from_idea=from_idea,
+        )
+        if refusal:
+            raise CommandError(f"Error: {refusal}", returncode=1)
 
         ticket_dir_path = os.path.join(tracker_dir, ticket_id)
         parent_status_uuid = _parent_status_uuid(ticket_dir_path)
@@ -286,6 +342,21 @@ def transition_core(
         # to the pre-feature close event for the (non-bug / no-class) paths.
         if target_status == "closed" and close_class:
             status_data["close_class"] = close_class
+        # The operator's justification for a reason-only administrative close (ticket fc20):
+        # the CLI ``--reason`` on a NON-force administrative close. Same present-only
+        # discipline as ``close_class``, and DISTINCT from ``force_close_reason`` below —
+        # this key records why a truthful disposition closed, that one records why a gate
+        # was bypassed. Persisted ONLY for a reason-required class: any other close
+        # discards the value rather than smuggling a free-text rationale past the bounded
+        # vocabulary (ticket 3803's honesty rule, now enforced write-side).
+        from rebar._commands import close_disposition
+
+        if (
+            target_status == "closed"
+            and close_reason
+            and close_class in close_disposition.REASON_REQUIRED_CLASSES
+        ):
+            status_data["close_reason"] = close_reason
         # The operator's `--force=<reason>` for bypassing the close gates. Same present-only
         # discipline as `close_class` above, so an ordinary close omits the key and stays
         # byte-identical to the pre-feature event. This parameter was previously accepted and
