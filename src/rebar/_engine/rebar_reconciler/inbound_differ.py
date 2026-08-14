@@ -40,6 +40,7 @@ from rebar_reconciler.inbound_fields import (  # noqa: F401
     _JIRA_TO_LOCAL_TYPE,
     _REBAR_STATUS_LABEL_TO_LOCAL,
     _assignee_matches,
+    _description_forms,
     _extract_jira_field_value,
     _load_adf,
     _normalize_jira_body,
@@ -48,7 +49,7 @@ from rebar_reconciler.inbound_fields import (  # noqa: F401
 )
 
 if TYPE_CHECKING:
-    from rebar_reconciler._backend import InboundMapper
+    from rebar_reconciler._backend import InboundMapper, OutboundMapper
 
 # Reconciler loop-breaker marker (Gap 1). Outbound comments embed this
 # token; inbound passes filter any Jira comment whose body contains it
@@ -115,6 +116,7 @@ def _diff_jira_vs_local(
     binding_store: Any = None,
     *,
     inbound_mapper: InboundMapper | None = None,
+    outbound_mapper: OutboundMapper | None = None,
 ) -> dict[str, Any]:
     """Compare Jira fields to local ticket. Return fields where Jira differs.
 
@@ -206,10 +208,12 @@ def _diff_jira_vs_local(
         # decoded — hence normalized — ADF body, so this is a no-op there.
         jira_emit = jira_val
         if local_field == "description" and isinstance(local_val, str):
-            adf = _load_adf()
-            local_val = adf.normalize_description(adf.fit_text_to_adf_limit(local_val))
-            if isinstance(jira_val, str):
-                jira_val = adf.normalize_description(jira_val)
+            forms = _description_forms(
+                local_val, jira_val, jira_emit, local_ticket, outbound_mapper
+            )
+            if forms is None:
+                continue
+            local_val, jira_val = forms
         # Bug (plateau): trailing-whitespace round-trip stability.
         # Mirror of the outbound_differ fix — Jira's ADF normalization
         # strips trailing whitespace, so a local description ending in
@@ -617,6 +621,23 @@ def _build_outbound_context(
     return ctx
 
 
+def _resolve_backend_mappers(
+    inbound_mapper: InboundMapper | None,
+    outbound_mapper: OutboundMapper | None,
+) -> tuple[InboundMapper, OutboundMapper]:
+    """Resolve the injected Backend-port field mappers, falling back to the configured
+    backend via the neutral registry seam (ticket 4af8 / 3289). The orchestrator injects
+    both; a direct caller (unit test) may omit either. Resolving the backend once here keeps
+    the differ free of any vendor mapper reference and yields a consistent pair."""
+    if inbound_mapper is not None and outbound_mapper is not None:
+        return inbound_mapper, outbound_mapper
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    backend = select_backend(load_config())
+    return (inbound_mapper or backend.inbound), (outbound_mapper or backend.outbound)
+
+
 def compute_inbound_mutations(
     jira_snapshot: dict[str, dict[str, Any]],
     binding_store: BindingStoreProtocol,
@@ -624,6 +645,7 @@ def compute_inbound_mutations(
     outbound_mutations: list[Any] | None = None,
     *,
     inbound_mapper: InboundMapper | None = None,
+    outbound_mapper: OutboundMapper | None = None,
 ) -> tuple[list[InboundMutation], int]:
     """Detect Jira-side changes for bound tickets.
 
@@ -665,16 +687,11 @@ def compute_inbound_mutations(
             None or empty. Used by reconcile telemetry to emit the
             ``RECON: bidir_suppressed`` line without a second pass.
     """
-    # Ticket 4af8: the remote->local field mapper is injected via the Backend port.
-    # The orchestrator (run_differs) passes ``inbound_mapper=backend.inbound``. When a
-    # direct caller (e.g. an inbound-differ unit test) omits it, resolve the configured
-    # backend's mapper through the neutral registry seam — this names no vendor mapper
-    # in the differ itself and yields the same mapping the vendor delegate performs.
-    if inbound_mapper is None:
-        from rebar.config import load_config
-        from rebar_reconciler._backend_registry import select_backend
-
-        inbound_mapper = select_backend(load_config()).inbound
+    # Ticket 4af8 / 3289: the remote->local and local->remote field mappers are injected
+    # via the Backend port (run_differs passes ``backend.inbound`` / ``backend.outbound``);
+    # a direct caller (unit test) that omits either resolves it through the neutral registry
+    # seam, so this differ names no vendor mapper.
+    inbound_mapper, outbound_mapper = _resolve_backend_mappers(inbound_mapper, outbound_mapper)
 
     mutations: list[InboundMutation] = []
     outbound_ctx = _build_outbound_context(outbound_mutations)
@@ -696,6 +713,7 @@ def compute_inbound_mutations(
             local_ticket,
             binding_store=binding_store,
             inbound_mapper=inbound_mapper,
+            outbound_mapper=outbound_mapper,
         )
         label_mutations = _diff_labels_inbound(jira_fields, local_ticket)
         comment_mutations = _diff_comments_inbound(jira_fields, local_ticket)
