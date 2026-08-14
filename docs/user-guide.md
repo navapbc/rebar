@@ -382,6 +382,37 @@ rebar is meant to be used by many people/clones at once. Status-changing operati
 get a clean "someone else changed it" signal (exit 10) rather than a silent clobber —
 re-read and pick up from the current state. See [concurrency.md](concurrency.md).
 
+## A dirty tickets tracker: `fsck` names it, `doctor --repair` heals it
+
+A crash mid-compaction or an interrupted sync can leave the tickets tracker's working
+tree dirty, which wedges auto-commit. `rebar fsck` classifies that state into three
+finding classes (each carried in `--output json` with a per-class count and path list):
+
+- `TRACKER_DIRTY_DELETION` — a tracked store artifact deleted from the working tree or
+  index but restorable from the tracker's HEAD. Counted as an issue.
+- `TRACKER_DIRTY_LEFTOVER` — an untracked, regenerable compaction leftover: a
+  `*-SNAPSHOT.json`, or a `*.retired` whose retired-source is already folded (the source
+  exists at HEAD, or the `.retired` file itself is preserved on the sync remote). Counted
+  as an issue. A `.retired` that is preserved nowhere else is deliberately **not**
+  classified — it may be the only copy of an event.
+- `TRACKER_DIRTY_TMP_EVENT` — an orphaned `.tmp-event-*` temp file. Report-only and never
+  counted or auto-touched: a live one belongs to an in-flight append.
+
+`rebar doctor --repair` heals the first two classes and then reconverges the store:
+
+1. Before the first mutation it records a backup ref `refs/rebar-doctor/<utc-ts>` at the
+   tracker's HEAD (the same envelope pattern as `tracker-maintenance`).
+2. Under one short write-lock window it restores deletions via `git checkout HEAD --` and
+   **moves** (never deletes) leftovers into
+   `<git-common-dir>/reconverge-quarantine/<utc-ts>/`.
+3. After releasing the lock it runs the store's reconverge (which takes the write lock
+   itself), so local and remote history union-merge back together.
+
+Orphaned `.tmp-event-*` files are printed with a `manual` repair status and left
+byte-identical; inspect and remove them by hand only when you know the append that wrote
+them is dead. On a clean tracker `doctor --repair` makes zero changes and records no
+backup ref.
+
 ## Jira
 
 If your project syncs to Jira, use `rebar bridge preview` to show proposed Jira

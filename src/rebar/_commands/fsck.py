@@ -62,6 +62,28 @@ _STRUCTURED_KINDS = {
     "status_fork_resolved",
 }
 
+# The dirty-tracker wedge classes (fsck_tracker_health check 4.10). Their lines carry a
+# machine-parseable head — ``KIND: <n> path(s): <paths> — <detail>`` — so the JSON items
+# carry the per-class count and paths (ticket c925-7669-ded8-43a3).
+_TRACKER_DIRTY_KINDS = {
+    "tracker_dirty_deletion",
+    "tracker_dirty_leftover",
+    "tracker_dirty_tmp_event",
+}
+
+_DIRTY_HEAD_RE = re.compile(r"^(\d+) path\(s\): (.+)$")
+
+
+def _dirty_json_fields(item: dict, head: str) -> bool:
+    """Parse a tracker-dirty line head into ``count`` + ``paths``; False on mismatch
+    (the caller then falls back to the unstructured ``detail``-only shape)."""
+    m = _DIRTY_HEAD_RE.match(head)
+    if m is None:
+        return False
+    item["count"] = int(m.group(1))
+    item["paths"] = m.group(2).split()
+    return True
+
 
 def _transform_json(text: str, compat_error: dict | None = None) -> str:
     """Derive the ``--output json`` shape from the text output (kept identical so
@@ -83,7 +105,9 @@ def _transform_json(text: str, compat_error: dict | None = None) -> str:
         kind, rest = m.group(1).lower(), m.group(2)
         item = {"kind": kind}
         head, sep, detail = rest.partition(" — ")
-        if sep and kind in _STRUCTURED_KINDS:
+        if sep and kind in _TRACKER_DIRTY_KINDS and _dirty_json_fields(item, head):
+            item["detail"] = detail
+        elif sep and kind in _STRUCTURED_KINDS:
             if "/" in head:
                 tid, _, fn = head.partition("/")
                 item["ticket_id"], item["filename"] = tid, fn

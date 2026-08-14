@@ -25,6 +25,17 @@ lives in :mod:`rebar._commands.doctor_locks` and is strictly read-only: a stale 
 reported and advised on, never reclaimed. Only link findings are repairable, so lock
 results never enter the repair loop below.
 
+It also scans for the DIRTY-TRACKER wedge class fsck check 4.10 detects (ticket
+c925-7669-ded8-43a3): tracked deletions of store artifacts restorable from HEAD,
+untracked regenerable compaction leftovers, and orphaned ``.tmp-event-*`` staging
+files. ``--repair`` heals the first two in TWO lock windows — the store write lock is
+NON-reentrant, so the file mutations (restore via ``git checkout``; quarantine MOVE,
+never delete) run under one short scoped ``write_lock`` window that is RELEASED before
+``sync.reconverge`` (which takes the lock itself) converges the previously wedged
+store. Before the first mutation a backup ref ``refs/rebar-doctor/<utc-ts>`` records
+the tickets HEAD, mirroring tracker-maintenance's backup-ref envelope. Class 3 is
+printed and never touched — a live ``.tmp-event-*`` belongs to an in-flight append.
+
 Repair writes the replacement BEFORE removing the stale edge: unlink-first would,
 on any failure in between, destroy a dependency with nothing left to reconstruct
 it from, whereas link-first fails toward a transient superset that the next scan
@@ -36,12 +47,14 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 from typing import Any
 
 from rebar._commands import doctor_locks
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
+from rebar._store import lock as _store_lock
 from rebar._store.gitutil import run_git
 from rebar.graph._hierarchy import resolve_hierarchy_link
 from rebar.graph._links import CyclicDependencyError, add_dependency
@@ -58,6 +71,18 @@ PRE_REPAIR_TAG = "pre-doctor-repair"
 _KIND_ANCESTOR = "ancestor-blocking"
 _KIND_MIS_ESCALATED = "mis-escalated"
 _KIND_UNREADABLE = "unreadable"
+
+_KIND_DIRTY_DELETION = "tracker-dirty-deletion"
+_KIND_DIRTY_LEFTOVER = "tracker-dirty-leftover"
+_KIND_DIRTY_TMP_EVENT = "tracker-dirty-tmp-event"
+_DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER, _KIND_DIRTY_TMP_EVENT}
+_MUTATING_DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER}
+
+# The rollback point for the dirty-tracker repairs: recorded at the tickets HEAD BEFORE
+# the first mutation, mirroring tracker-maintenance's refs/rebar-maintenance/<utc>
+# envelope (backup ref + audited actions; tracker-maintenance holds no write lock — its
+# envelope, not a lock, is the precedent adopted here).
+DOCTOR_BACKUP_REF_PREFIX = "refs/rebar-doctor/"
 
 # add_dependency raises CyclicDependencyError, the unlink path raises CommandError,
 # and the guard/validation paths raise ValueError. CyclicDependencyError and
@@ -148,6 +173,126 @@ def scan(tracker: str) -> list[dict[str, Any]]:
         if finding is not None:
             findings.append(finding)
     return findings
+
+
+# (classes key, finding kind, detail). Keys match fsck's dirty_tracker_classes — THE
+# single classifier — so doctor repairs exactly the set fsck reports (the same one-rule
+# discipline tracker-maintenance applies to foreign_store_path_list).
+_DIRTY_FINDING_SPECS: tuple[tuple[str, str, str], ...] = (
+    (
+        "deletions",
+        _KIND_DIRTY_DELETION,
+        "tracked store file(s) deleted in the working tree; bytes intact at HEAD",
+    ),
+    (
+        "leftovers",
+        _KIND_DIRTY_LEFTOVER,
+        "untracked regenerable compaction leftover(s)",
+    ),
+    (
+        "tmp_events",
+        _KIND_DIRTY_TMP_EVENT,
+        "orphaned .tmp-event-* staging file(s) — never auto-touched; triage manually",
+    ),
+)
+
+
+def scan_dirty(tracker: str) -> list[dict[str, Any]]:
+    """The dirty-tracker wedge findings (read-only), one per non-empty class."""
+    from rebar._commands.fsck_tracker_health import dirty_tracker_classes
+
+    classes = dirty_tracker_classes(tracker)
+    return [
+        {"kind": kind, "paths": classes[key], "detail": detail}
+        for key, kind, detail in _DIRTY_FINDING_SPECS
+        if classes[key]
+    ]
+
+
+def _dirty_backup_ref(tracker: str) -> str | None:
+    """Record ``refs/rebar-doctor/<utc-ts>`` at the tickets HEAD; None on failure.
+
+    Must precede every dirty-tracker mutation — it is the whole-run rollback point
+    (``git reset --hard <ref>`` restores the pre-repair commit; the quarantine holds
+    any moved working-tree bytes)."""
+    head = run_git(tracker, "rev-parse", "HEAD", check=False).stdout.strip()
+    if not head:
+        return None
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    ref = f"{DOCTOR_BACKUP_REF_PREFIX}{stamp}"
+    if run_git(tracker, "update-ref", ref, head, check=False).returncode != 0:
+        return None
+    return ref
+
+
+def _quarantine_leftovers(tracker: str, paths: list[str]) -> bool:
+    """Move (never delete) the paths into ``<git-common-dir>/reconverge-quarantine/
+    <utc-ts>/`` — the same durable quarantine sync's merge recovery uses, via the same
+    implementation so the two doors cannot drift. True only if every path moved."""
+    from rebar._store.sync import _quarantine_untracked
+
+    return _quarantine_untracked(tracker, paths)
+
+
+def _reconverge(tracker: str) -> None:
+    """Window 2 of the dirty repair: converge the previously wedged store. Takes the
+    write lock ITSELF, which is why the caller must have released window 1 first."""
+    from rebar._store import sync
+
+    sync.reconverge(tracker)
+
+
+def _apply_dirty_mutation(finding: dict[str, Any], tracker: str) -> None:
+    """One file-mutating dirty repair, annotating ``repair_status`` in place.
+
+    LOCK HELD BY THE CALLER (window 1). Restores are ``git checkout HEAD --`` (bytes
+    exist at HEAD — non-destructive); leftovers are MOVED into quarantine, never
+    deleted, so no repair path can lose event bytes."""
+    if finding["kind"] == _KIND_DIRTY_DELETION:
+        cp = run_git(tracker, "checkout", "HEAD", "--", *finding["paths"], check=False)
+        ok = cp.returncode == 0
+        reason = (cp.stderr or "").strip() or "git checkout failed"
+    else:
+        ok = _quarantine_leftovers(tracker, finding["paths"])
+        reason = "quarantine move failed (missing path or unresolvable git common dir)"
+    finding["repair_status"] = "repaired" if ok else "unrepairable"
+    if not ok:
+        finding["repair_reason"] = reason
+
+
+def _repair_dirty(findings: list[dict[str, Any]], tracker: str) -> None:
+    """Heal the dirty-tracker findings in TWO lock windows.
+
+    The store write lock is NON-reentrant and ``sync.reconverge`` acquires it
+    internally, so one outer hold across everything would deadlock window 2 exactly the
+    way an outer hold starved the link repairs (see ``run_repair``). Window 1 takes ONE
+    short scoped ``write_lock`` for all file mutations, then RELEASES it; window 2 lets
+    reconverge self-lock. Before the first mutation the backup ref is recorded —
+    no backup ref, no mutation.
+
+    Class 3 (``.tmp-event-*``) is marked ``manual`` and never touched: a live staging
+    file belongs to an in-flight append, and a dead one is named for human triage."""
+    for finding in findings:
+        if finding["kind"] == _KIND_DIRTY_TMP_EVENT:
+            finding["repair_status"] = "manual"
+            finding["repair_reason"] = "orphaned .tmp-event-* files are never auto-touched"
+    mutating = [f for f in findings if f["kind"] in _MUTATING_DIRTY_KINDS]
+    if not mutating:
+        return
+    backup_ref = _dirty_backup_ref(tracker)
+    if backup_ref is None:
+        for finding in mutating:
+            finding["repair_status"] = "unrepairable"
+            finding["repair_reason"] = "could not record the backup ref — refusing to mutate"
+        return
+    for finding in mutating:
+        finding["backup_ref"] = backup_ref
+    with _store_lock.write_lock(tracker):
+        for finding in mutating:
+            _apply_dirty_mutation(finding, tracker)
+    # Lock RELEASED: reconverge takes it itself (non-reentrant), converging the
+    # previously wedged store in the same command.
+    _reconverge(tracker)
 
 
 def _unlink_edge(source: str, target: str, tracker: str, *, repo_root=None) -> None:
@@ -241,10 +386,23 @@ def run_repair(
         # cross-item atomicity — per-write locking is both correct and the only thing
         # that works.
         pre_oid = _pre_tag(tracker)
+        # Dirty-tracker findings first: a wedged tree blocks the event writes the link
+        # repairs below depend on. They manage their own two lock windows.
+        dirty = [f for f in findings if f.get("kind") in _DIRTY_KINDS]
+        if dirty:
+            _repair_dirty(dirty, tracker)
         for finding in findings:
+            if finding.get("kind") in _DIRTY_KINDS:
+                continue
             repair_finding(finding, tracker, repo_root=repo_root)
 
     return findings, pre_oid
+
+
+def _outstanding(findings: list[dict[str, Any]]) -> int:
+    """Findings still needing action. ``manual`` (the class-3 triage notice) is a
+    deliberate non-action, not a failed repair, so it does not fail the run."""
+    return sum(1 for f in findings if f.get("repair_status") not in ("repaired", "manual"))
 
 
 def _print_text(
@@ -257,11 +415,18 @@ def _print_text(
 ) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
+    for ref in sorted({f["backup_ref"] for f in findings if f.get("backup_ref")}):
+        print(f"doctor: backup ref {ref} (rollback: git reset --hard {ref})")
     for f in findings:
         status = f.get("repair_status")
         suffix = f" [{status}: {f.get('repair_reason', '')}]" if status else ""
+        if "paths" in f:
+            print(f"{f['kind']}: {len(f['paths'])} path(s) — {f['detail']}{suffix}")
+            for path in f["paths"]:
+                print(f"  {path}")
+            continue
         print(f"{f['kind']}: {f['source']} {f['relation']} {f['target']} — {f['detail']}{suffix}")
-    outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
+    outstanding = _outstanding(findings)
     verb = "outstanding" if repaired else "finding(s)"
     print(f"doctor: {len(findings)} finding(s), {outstanding} {verb}")
     # The lock section keeps its own count: lock findings are never repairable, so folding
@@ -291,7 +456,9 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
         return 2
 
     tracker = str(tracker_dir(repo_root))
-    findings = scan(tracker)
+    # Dirty-tracker findings first: a wedged tree blocks event writes, so its repair
+    # must precede the link repairs (run_repair preserves this ordering rule itself).
+    findings = scan_dirty(tracker) + scan(tracker)
     # Read-only, and deliberately outside the repair path below: `run_repair` iterates
     # `findings`, so keeping lock results in their own list is what guarantees --repair
     # can never act on a lock (ticket metaphoric-fleeting-nutcracker). Sampled BEFORE any
@@ -329,7 +496,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
             lock_faults=lock_faults,
         )
 
-    outstanding = sum(1 for f in findings if f.get("repair_status") != "repaired")
+    outstanding = _outstanding(findings)
     # A stale lock is outstanding by the same rule as an unrepaired link finding: no live
     # process claims it. A HELD lock with a live holder is information, not a finding, so
     # it never fails a CI gate keyed on this exit code.
