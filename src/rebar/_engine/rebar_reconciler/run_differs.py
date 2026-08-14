@@ -463,6 +463,12 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     # deduped bridge alerts from them below — behavior is otherwise unchanged.
     conflict_sink: list[tuple[str, str]] = []
     dropped_field_sink: list[tuple[str, str]] = []
+    # Story d19d: hand the differ the store's projects mapping so the create path
+    # can resolve each ticket's target project. An ABSENT projects.json loads as an
+    # empty Mapping (legacy single-project behaviour); a MALFORMED one fails closed.
+    from rebar_reconciler import projects_store as _projects_store_mod
+
+    _projects_mapping = _projects_store_mod.load_mapping(repo_root)
     outbound_raw, absent_alive_fields = outbound_differ_mod.compute_outbound_mutations(
         local_tickets,
         curr_snapshot,
@@ -475,6 +481,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
             prev_snapshot=prev_snapshot,
             conflict_sink=conflict_sink,
             dropped_field_sink=dropped_field_sink,
+            projects_mapping=_projects_mapping,
         ),
         outbound_mapper=backend.outbound,
         inbound_mapper=backend.inbound,

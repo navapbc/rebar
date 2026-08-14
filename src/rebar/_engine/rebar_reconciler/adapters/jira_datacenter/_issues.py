@@ -26,7 +26,9 @@ from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec, cutov
 #: Bridge-schema keys the create payload carries for Cloud's ``AcliClient`` and that
 #: Jira has no field for — forwarded as field ids they 400 the WHOLE create. Their
 #: content is not lost: it is translated into ``summary``/``issuetype`` below.
-_BRIDGE_ONLY_CREATE_FIELDS: frozenset[str] = frozenset({"title", "ticket_type"})
+_BRIDGE_ONLY_CREATE_FIELDS: frozenset[str] = frozenset(
+    {"title", "ticket_type", "_bridge_target_project"}
+)
 
 #: Fields Jira refuses to SET at create time regardless of spelling. ``status`` is
 #: not a rejected name — a status is reached by a workflow transition, never by a
@@ -184,7 +186,10 @@ class _IssuesMixin(_TransportBase):
         Jira's shapes, and leaves every other genuinely Jira-valid field alone.
         """
         fields = _translate_create_fields(ticket_data)
-        fields.setdefault("project", {"key": self.project})
+        fields.setdefault(
+            "project",
+            {"key": ticket_data.get("_bridge_target_project") or self.project},
+        )
         issue = _with_connection_retry(lambda: self._client.create_issue(**fields))
         return _unwrap(issue)
 

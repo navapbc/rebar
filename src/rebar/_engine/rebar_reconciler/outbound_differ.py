@@ -266,6 +266,21 @@ class OutboundDiffConfig:
     # orchestrator (run_differs) emits deduped bridge alerts from them post-pass.
     conflict_sink: list[tuple[str, str]] | None = None
     dropped_field_sink: list[tuple[str, str]] | None = None
+    # Story d19d (many-to-many outbound). The store's projects ``Mapping``. When set
+    # AND non-empty, the create path resolves each ticket's target project and stamps
+    # it into the create mutation's fields under ``_BRIDGE_TARGET_PROJECT_KEY``; a
+    # ticket resolving to a project OUTSIDE the mapping, or to "not synced", emits no
+    # create (creates are guard-exempt, so this is the only place that gap closes).
+    # None / an empty mapping preserves the legacy single-project behaviour.
+    projects_mapping: Any = None
+
+
+# The reserved create-payload key carrying the resolved target project from the
+# differ to whichever transport runs (story d19d). It is NOT a Jira field name:
+# Cloud's ``create_issue`` extracts only the fields it names, and the Data Center
+# transport DROPS it in ``_translate_create_fields`` before splatting the field
+# dict, so it never reaches the tracker.
+_BRIDGE_TARGET_PROJECT_KEY = "_bridge_target_project"
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +436,7 @@ def compute_outbound_mutations(
                 local_ticket_types,
                 outbound_mapper,
                 dropped_field_sink=dropped_field_sink,
+                mapping=config.projects_mapping,
             )
         else:
             _compute_outbound_update_mutation(
@@ -509,6 +525,7 @@ def _compute_outbound_create_mutation(
     outbound_mapper,
     *,
     dropped_field_sink: list[tuple[str, str]] | None = None,
+    mapping: Any = None,
 ) -> None:
     """Phase: append the outbound CREATE mutation for an unbound local ticket.
 
@@ -553,6 +570,21 @@ def _compute_outbound_create_mutation(
     )
     if suppressed_parents and dropped_field_sink is not None:
         dropped_field_sink.append((local_id, "parent"))
+    # Story d19d: resolve the target project per ticket and stamp it, so BOTH
+    # transports write to the ticket's project rather than one construction-time
+    # default. Gated on a non-empty mapping so an unseeded (single-project) store
+    # keeps its legacy behaviour (create, no stamp — the transport's own project
+    # applies). A ticket that resolves to "not synced" (None), or names a project
+    # NOT in the mapping (a stale/typo binding), emits NO create: creates are
+    # exempt from the applier's cross-project guard, so this is the only gate that
+    # can stop a create against an unsynced project.
+    if mapping is not None and getattr(mapping, "projects", None):
+        from rebar_reconciler import projects_store
+
+        target = projects_store.resolve_project(ticket, mapping)
+        if not target or target not in mapping.projects:
+            return
+        create_fields[_BRIDGE_TARGET_PROJECT_KEY] = target
     mutations.append(
         OutboundMutation(
             local_id=local_id,

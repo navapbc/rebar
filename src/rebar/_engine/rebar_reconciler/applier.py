@@ -27,6 +27,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from ._backend import TicketTransport
 
 import importlib.util
@@ -227,17 +229,25 @@ class CrossProjectTargetError(Exception):
 _JIRA_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9_]*)-\d+$")
 
 
-def _cross_project_targets(mutations: list[dict], configured_project: str) -> list[tuple[str, str]]:
+def _cross_project_targets(
+    mutations: list[dict], allowed: str | Iterable[str]
+) -> list[tuple[str, str]]:
     """Return ``(key, project)`` for outbound update/delete mutations whose target
-    Jira key belongs to a project other than ``configured_project``.
+    Jira key belongs to a project OUTSIDE the allowed set.
 
-    Creates are excluded — their ``key`` is a local-id placeholder and they target
-    the configured project via the client's ``jira_project``. Inbound mutations are
-    excluded. An empty/unset ``configured_project`` disables the check (returns ``[]``)
-    so it never fires on shims that don't configure a project.
+    ``allowed`` is either a single configured project (a bare string — the legacy
+    single-project case) or the store's project SET (story d19d, many-to-many): a
+    mutation targeting any project in the set passes. Creates are excluded — their
+    ``key`` is a local-id placeholder and their project is resolved on the create
+    path, not here. Inbound mutations are excluded. An empty/unset ``allowed``
+    disables the check (returns ``[]``) so it never fires on shims that don't
+    configure a project.
     """
-    cp = (configured_project or "").upper()
-    if not cp:
+    if isinstance(allowed, str):
+        allowed_set = {allowed.upper()} if allowed else set()
+    else:
+        allowed_set = {str(p).upper() for p in allowed if p}
+    if not allowed_set:
         return []
     offenders: list[tuple[str, str]] = []
     for m in mutations:
@@ -250,7 +260,7 @@ def _cross_project_targets(mutations: list[dict], configured_project: str) -> li
         if not match:
             continue
         proj = match.group(1).upper()
-        if proj != cp:
+        if proj not in allowed_set:
             offenders.append((key, match.group(1)))
     return offenders
 
@@ -597,24 +607,33 @@ def _apply_batch(
     # attribute still works. Resolved HERE (past the empty-mutations fast path)
     # so a zero-mutation pass builds no extra backend.
     from rebar.config import load_config
+    from rebar_reconciler import projects_store
     from rebar_reconciler._backend_registry import select_backend
 
     _project = select_backend(load_config()).project
+    # Story d19d: with a seeded many-to-many mapping, the allowed write scope is the
+    # store's whole project SET, not the single construction-time default. An unseeded
+    # store (no projects.json) yields no keys, so fall back to the single ``_project``
+    # string — preserving the bug-626d single-project guard exactly.
+    _allowed: str | list[str] = list(projects_store.read_projects(repo_root).keys()) or _project
+    _scope_display = (
+        ", ".join(repr(p) for p in _allowed) if isinstance(_allowed, list) else repr(_allowed)
+    )
 
     # Cross-project safety guard (bug 626d): refuse — BEFORE issuing any Jira
-    # write — to push outbound updates/deletes at issues outside the configured
-    # jira.project. Stale bindings/labels from a prior sync to another project
+    # write — to push outbound updates/deletes at issues outside the allowed
+    # project scope. Stale bindings/labels from a prior sync to another project
     # would otherwise silently mutate the wrong project's issues. Fail-closed:
     # abort the whole pass (no partial writes) so a misconfiguration cannot leak.
-    offenders = _cross_project_targets(mutations, _project)
+    offenders = _cross_project_targets(mutations, _allowed)
     if offenders:
         sample = ", ".join(f"{k}(→{p})" for k, p in offenders[:5])
         more = " …" if len(offenders) > 5 else ""
         raise CrossProjectTargetError(
             f"refusing to apply {len(offenders)} outbound mutation(s) targeting a "
-            f"Jira project other than configured {_project!r}: {sample}{more}. "
-            f"The store carries bindings/labels for another project; re-target it to "
-            f"{_project!r} (clear stale bindings + strip foreign id labels) before "
+            f"Jira project outside the configured scope {_scope_display}: {sample}{more}. "
+            f"The store carries bindings/labels for another project; re-target it "
+            f"(clear stale bindings + strip foreign id labels) before "
             f"syncing — see docs/jira-sync-setup.md."
         )
 

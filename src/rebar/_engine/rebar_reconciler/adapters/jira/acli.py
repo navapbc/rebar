@@ -274,11 +274,13 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
     def create_issue(self, ticket_data: dict[str, Any]) -> dict[str, Any]:
         """Create a Jira issue from a ticket data dict.
 
-        Uses self.jira_project as the project key. Extracts ticket_type,
-        title, description, priority, and assignee from ticket_data
-        (matching the CREATE event data schema).
+        Uses self.jira_project as the project key, unless the create payload carries
+        the reserved ``_bridge_target_project`` key (story d19d) — then the ticket's
+        resolved project wins, so one client can create into any of the store's
+        projects. Extracts ticket_type, title, description, priority, and assignee
+        from ticket_data (matching the CREATE event data schema).
         """
-        project = self.jira_project
+        project = ticket_data.get("_bridge_target_project") or self.jira_project
         issue_type = ticket_data.get("ticket_type", "Task").capitalize()
         raw_summary = (ticket_data.get("title") or "").strip()
         if not raw_summary:
