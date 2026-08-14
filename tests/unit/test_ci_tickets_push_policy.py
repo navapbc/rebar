@@ -165,7 +165,9 @@ def _bridge_schedule() -> list[str]:
     return [entry["cron"] for entry in _on(_WORKFLOWS / "reconcile-bridge.yml")["schedule"]]
 
 
-def test_bridge_backstop_fires_on_a_uniform_hourly_cadence() -> None:
+def test_bridge_backstop_fires_on_a_uniform_hourly_cadence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Derive the fire times rather than echoing the literal.
 
     A literal pin cannot tell a uniform cadence from a lumpy one — ``*/40`` looks like a
@@ -173,6 +175,18 @@ def test_bridge_backstop_fires_on_a_uniform_hourly_cadence() -> None:
     (RECONCILE_CONTINUOUS is off, so this schedule is the only thing that fires it), and
     the same derivation guards the hourly form against the same class of edit.
     """
+    schedule_parses = 0
+    original_on = _on
+
+    def counted_on(path: Path) -> dict[str, Any]:
+        nonlocal schedule_parses
+        if path == _WORKFLOWS / "reconcile-bridge.yml":
+            schedule_parses += 1
+        return original_on(path)
+
+    monkeypatch.setitem(globals(), "_on", counted_on)
+
+    schedule = _bridge_schedule()
     fires = sorted(
         hour * 60 + minute
         for hour in range(24)
@@ -180,7 +194,7 @@ def test_bridge_backstop_fires_on_a_uniform_hourly_cadence() -> None:
         if any(
             _cron_field_matches(cron.split()[0], minute, 0, 59)
             and _cron_field_matches(cron.split()[1], hour, 0, 23)
-            for cron in _bridge_schedule()
+            for cron in schedule
         )
     )
 
@@ -188,6 +202,7 @@ def test_bridge_backstop_fires_on_a_uniform_hourly_cadence() -> None:
     gaps = {b - a for a, b in itertools.pairwise(fires)}
     gaps.add(fires[0] + 1440 - fires[-1])  # wrap past midnight
     assert gaps == {60}, f"bridge backstop gaps are not uniformly 60 minutes: {sorted(gaps)}"
+    assert schedule_parses == 1, "the invariant workflow schedule must be parsed once per proof"
 
 
 def test_bridge_backstop_is_a_single_entry() -> None:
