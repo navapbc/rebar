@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 from rebar.llm import usage_log
 from rebar.llm.config import infer_provider
+from rebar.llm.runaway_guard import ToolCallLedger, runaway_guard_toolsets
 
 if TYPE_CHECKING:
     from rebar.llm.config import LLMConfig
@@ -120,10 +121,15 @@ def _steering_toolsets(tools: list, toolsets: list, limit: int) -> list:
     return [_SteeringToolset(wrapped=ts, limit=limit) for ts in all_toolsets]
 
 
-def _memo_toolsets(tools: list, toolsets: list) -> list:
+def _memo_toolsets(tools: list, toolsets: list, *, ledger: ToolCallLedger) -> list:
     """Wrap every toolset with a memoizing layer that caches results for the four
     allowlisted read-only tools and appends a graduated nudge on duplicate calls.
     Non-allowlisted tools always pass through with no caching.
+
+    Every path that actually reaches a wrapped tool reports the ORIGINAL call's
+    signature to ``ledger.record_executed`` — the runaway guard's loop predicate runs
+    over executed work only, so a repeat the cache absorbs is never loop evidence
+    (see :class:`~rebar.llm.runaway_guard.ToolCallLedger`).
 
     The cache, per-signature repeat counts, and per-signature locks live in this
     ENCLOSING scope, not on the toolset instance — pydantic-ai copies a toolset per run
@@ -171,6 +177,7 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
     class _MemoNudgeToolset(WrapperToolset):
         async def call_tool(self, name, tool_args, ctx, tool):
             if name not in MEMO_ALLOWLIST:
+                ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool)
             if name == "read_file":
                 return await self._read_file_call(name, tool_args, ctx, tool)
@@ -180,6 +187,7 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
                     counts[sig] = counts[sig] + 1
                     nudge = _MEMO_NUDGE_L1 if counts[sig] == 1 else _MEMO_NUDGE_L2
                     return cache[sig] + nudge
+                ledger.record_executed(sig)
                 result = await self.wrapped.call_tool(name, tool_args, ctx, tool)
                 # Errors (the read-only tools return an "Error:"-prefixed STRING; they never
                 # raise into the agent loop) are transient — never cache them, so the retry
@@ -200,6 +208,7 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
             back to the exact-range read so a truncated cache never fabricates "(empty range)"."""
             path, ls, le = _read_file_args(tool_args)
             if path is None:
+                ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool)
             cap = _read_window_cap()
 
@@ -211,6 +220,7 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
             async with _lock_for(f"read_file::{path}"):
                 entry = read_cache.get(path)
                 if entry is None:
+                    ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                     whole = await self.wrapped.call_tool(
                         name,
                         {"path": tool_args.get("path"), "line_start": 1, "line_end": 0},
@@ -236,66 +246,11 @@ def _memo_toolsets(tools: list, toolsets: list) -> list:
                 nudge = _MEMO_NUDGE_L1 if read_counts[path] == 1 else _MEMO_NUDGE_L2
                 if _servable(entry):
                     return _slice_cached_read(entry["lines"], entry["max"], ls, le, cap) + nudge
+                ledger.record_executed(usage_log.tool_call_signature(name, tool_args))
                 return await self.wrapped.call_tool(name, tool_args, ctx, tool) + nudge
 
     all_toolsets = [FunctionToolset(tools), *toolsets] if tools else list(toolsets)
     return [_MemoNudgeToolset(wrapped=ts) for ts in all_toolsets]
-
-
-def _runaway_guard_toolsets(tools: list, toolsets: list) -> list:
-    """Wrap every toolset (function tools moved into one first, unless the steering
-    boundary already moved them) with the runaway loop breaker (bug c827): ONE shared
-    signature sequence + per-step memo observes every tool call across ALL toolsets, and
-    when the trailing window's distinct ratio falls to ``usage_log.REPETITION_TRIP_RATIO``
-    the run is aborted with :class:`~rebar.llm.errors.RunawayToolLoopError` BEFORE the
-    repeated call executes — so bounded recovery can land a verdict instead of the
-    UsageLimits budget killing the run with none. Wrapping only: tool DEFINITIONS stay
-    advertised for the whole run (the provider-protocol requirement above — an empty tool
-    surface over a toolUse history is a Bedrock/Anthropic 400)."""
-    from dataclasses import dataclass
-
-    from pydantic_ai.toolsets import FunctionToolset, WrapperToolset
-
-    from rebar.llm.errors import RunawayToolLoopError
-
-    signatures: list[str] = []
-    checked_steps: set[int] = set()
-
-    @dataclass
-    class _RunawayGuardToolset(WrapperToolset):
-        async def call_tool(self, name, tool_args, ctx, tool):
-            signatures.append(usage_log.tool_call_signature(name, tool_args))
-            # At most ONE window computation per run_step (the pinned cost contract): a
-            # parallel batch shares one step number, so only its first-observed call pays
-            # the O(window) ratio; every other call in the batch is a plain append. The
-            # signature list keys detection on TOOL CALLS, not steps — at 3 calls/request
-            # the window fills in 8 requests, not 24.
-            step = ctx.run_step
-            if step not in checked_steps:
-                checked_steps.add(step)
-                ratio = usage_log.window_distinct_ratio(signatures)
-                if ratio is not None and ratio <= usage_log.REPETITION_TRIP_RATIO:
-                    diagnostic = {
-                        **usage_log._repetition_summary(signatures),
-                        "tool_calls": len(signatures),
-                    }
-                    top = diagnostic["top_repeated_tool_calls"]
-                    raise RunawayToolLoopError(
-                        "runaway tool-call loop detected: "
-                        f"{len(set(signatures[-usage_log.REPETITION_WINDOW :]))} distinct "
-                        f"tool-call signature(s) in the last {usage_log.REPETITION_WINDOW} "
-                        f"tool calls (distinct ratio {ratio} <= trip threshold "
-                        f"{usage_log.REPETITION_TRIP_RATIO}; most repeated: {top[:1]}). "
-                        "The agent is repeating the same tool calls, so the run was "
-                        "aborted before executing the repeated call — bounded recovery "
-                        "can now land a verdict instead of the step budget burning out "
-                        "on the loop.",
-                        diagnostic=diagnostic,
-                    )
-            return await self.wrapped.call_tool(name, tool_args, ctx, tool)
-
-    all_toolsets = [FunctionToolset(tools), *toolsets] if tools else list(toolsets)
-    return [_RunawayGuardToolset(wrapped=ts) for ts in all_toolsets]
 
 
 def build_agent_kwargs(
@@ -333,6 +288,7 @@ def build_agent_kwargs(
         from rebar.llm.completion_tool_policy import completion_evidence_policy_from_tools
 
         completion_policy = completion_evidence_policy_from_tools(tools)
+    ledger = ToolCallLedger()  # one per Agent call, shared by memo + runaway guard
     if req.tool_step_limit is not None and tools:
         # Steering convergence boundary — keeps tool DEFINITIONS advertised (a
         # provider-protocol requirement: an empty tool surface over a toolUse history is a
@@ -344,8 +300,10 @@ def build_agent_kwargs(
         tools = []
     if tools or toolsets:
         # Memo layer (f6fc): caches read-only tool calls and appends a nudge on repeats.
-        # Sits BETWEEN steering (innermost) and the runaway guard (outermost).
-        toolsets = _memo_toolsets(tools, toolsets)
+        # Sits BETWEEN steering (innermost) and the runaway guard (outermost). The shared
+        # ledger tells the guard which calls actually executed (bug 3211): the guard's
+        # loop predicate must observe executed work, not repeats the memo made free.
+        toolsets = _memo_toolsets(tools, toolsets, ledger=ledger)
         tools = []
     if completion_policy is not None and toolsets:
         # Completion-only finite evidence boundary.  It sits OUTSIDE memoization so cached
@@ -359,7 +317,7 @@ def build_agent_kwargs(
         # — not only step-limited ones — and put OUTERMOST so it also observes steered
         # calls. Wrapping only; tool definitions stay advertised. An empty surface
         # (single_turn) stays byte-identical: no wrapper, no guard.
-        toolsets = _runaway_guard_toolsets(tools, toolsets)
+        toolsets = runaway_guard_toolsets(tools, toolsets, ledger=ledger)
         tools = []
 
     kwargs: dict[str, Any] = {
