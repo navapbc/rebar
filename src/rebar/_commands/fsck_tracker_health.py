@@ -1,21 +1,26 @@
 """Tracker-LEVEL fsck checks — the store as a whole, not ticket by ticket.
 
 Checks 4.5–4.7 and 4.9, extracted from ``fsck.py`` (which fused four concerns and sat at the
-800-LOC hard cap). They belong together because they share a shape the per-ticket validators in
-``fsck_scan`` do not: each inspects the tracker as a whole through git/config, each yields at
-most one line, and each decides for itself whether that line is a counted integrity issue or
-informational. ``_tracker_health`` is the single entry point; ``fsck_scan._scan`` is its only
-caller.
+800-LOC hard cap), plus check 4.10 (the dirty-tracker wedge class). They belong together
+because they share a shape the per-ticket validators in ``fsck_scan`` do not: each inspects
+the tracker as a whole through git/config, and each decides for itself whether its lines are
+counted integrity issues or informational. ``_tracker_health`` is the single entry point;
+``fsck_scan._scan`` is its only caller.
 
 * 4.5 tracker-vs-origin sync status — PUSH_PENDING informational, DIVERGED a counted issue;
 * 4.6 configured-vs-mounted ``tracker.branch`` — informational;
 * 4.7 FOREIGN_STORE_PATH — source paths polluting the tracker (bug 2fa6), a counted issue;
-* 4.9 ENV_ID_MISMATCH — environment-identity divergence, a counted issue.
+* 4.9 ENV_ID_MISMATCH — environment-identity divergence, a counted issue;
+* 4.10 TRACKER_DIRTY_* — the dirty working-tree wedge class (ticket c925-7669-ded8-43a3):
+  tracked deletions restorable from HEAD and untracked regenerable compaction leftovers are
+  counted issues (``rebar doctor --repair`` heals them); orphaned ``.tmp-event-*`` staging
+  files are informational (report-only, never auto-touched).
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 
 from rebar import config
@@ -44,7 +49,9 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
       ``origin/tickets`` holds no source tree, so any such path means something wrote to
       the store outside the event-append path;
     * 4.9 environment-identity divergence (bug gold-distinct-lacewing): a counted issue —
-      a re-clone that dropped ``.env-id`` silently orphaned its own attestations.
+      a re-clone that dropped ``.env-id`` silently orphaned its own attestations;
+    * 4.10 the dirty-tracker wedge class (ticket c925-7669-ded8-43a3): up to three lines,
+      one per class — see :func:`_dirty_tracker_lines`.
     """
     lines: list[str] = []
     issues = 0
@@ -55,6 +62,7 @@ def _tracker_health(tracker: str, repo_root=None, authorship=None) -> tuple[list
         (_branch_mismatch(tracker, repo_root), False),
         (_foreign_store_paths(tracker), True),
         (env_identity.divergence_report(env_identity.read_env_id(tracker), pairs), True),
+        *_dirty_tracker_lines(tracker),
     ):
         if not line:
             continue
@@ -233,3 +241,152 @@ def _tracker_sync_status(tracker: str) -> tuple[str | None, bool]:
         return None, False
     # Common ancestor, but neither side is an ancestor of the other → true divergence.
     return diverged, True
+
+
+# ── check 4.10: the dirty-tracker wedge class (ticket c925-7669-ded8-43a3) ──────────────
+
+_TMP_EVENT_PREFIX = ".tmp-event-"
+
+# (classes key, finding kind, blurb, counted-issue?). Classes 1 and 2 are counted:
+# each wedges reconverge until healed (`rebar doctor --repair`). Class 3 is
+# informational — an in-flight append legitimately holds a live ``.tmp-event-*`` for a
+# moment, so counting it would make fsck flake against concurrent writers; it is
+# reported for MANUAL triage and never auto-touched.
+_DIRTY_LINE_SPECS: tuple[tuple[str, str, str, bool], ...] = (
+    (
+        "deletions",
+        "TRACKER_DIRTY_DELETION",
+        "tracked store file(s) deleted in the working tree; bytes intact at HEAD "
+        "(heal: rebar doctor --repair restores them)",
+        True,
+    ),
+    (
+        "leftovers",
+        "TRACKER_DIRTY_LEFTOVER",
+        "untracked regenerable compaction leftover(s) "
+        "(heal: rebar doctor --repair quarantines them — moved, never deleted)",
+        True,
+    ),
+    (
+        "tmp_events",
+        "TRACKER_DIRTY_TMP_EVENT",
+        "orphaned event staging file(s) — never auto-touched; triage manually",
+        False,
+    ),
+)
+
+
+def dirty_tracker_classes(tracker: str) -> dict[str, list[str]]:
+    """Classify the tracker's ``git status --porcelain`` into the dirty-tree wedge classes.
+
+    THE single classifier — fsck renders it (:func:`_dirty_tracker_lines`) and
+    ``doctor --repair`` acts on it (same one-rule discipline as
+    :func:`foreign_store_path_list`). Returns ``{"deletions", "leftovers", "tmp_events"}``,
+    each a sorted list of tracker-relative paths:
+
+    * ``deletions`` — tracked files deleted in the worktree (`` D``) or index (``D ``).
+      The tickets branch holds nothing but store data, so every such path is a store
+      artifact whose bytes are intact at HEAD (the P0 wedge: 119 tracked deletions left
+      by an interrupted compaction fold).
+    * ``leftovers`` — untracked (``??``) regenerable compaction leftovers: any
+      ``*-SNAPSHOT.json`` (a snapshot is derived state by definition), and a ``*.retired``
+      only when its retired-source is already folded (:func:`_retired_source_folded`) —
+      otherwise the stray could be the only copy of an event and stays unclassified.
+    * ``tmp_events`` — orphaned ``.tmp-event-*`` staging files (``_store/staging``'s
+      mkstemp prefix). Report-only: a live one belongs to an in-flight append.
+
+    ``--untracked-files=all`` is load-bearing: without it git collapses an untracked
+    directory to one ``dir/`` entry and the leftover files inside are never named.
+    ``-z`` is too: porcelain v1 C-quotes paths containing spaces/quotes/non-ASCII, but
+    the NUL-terminated form carries every path verbatim (renames/copies append the
+    ORIGINAL path as an extra NUL record, skipped below).
+    Best-effort: a failed/hung ``git status`` classifies nothing.
+    """
+    empty: dict[str, list[str]] = {"deletions": [], "leftovers": [], "tmp_events": []}
+    try:
+        cp = run_git(
+            tracker,
+            "status",
+            "--porcelain",
+            "-z",
+            "--untracked-files=all",
+            check=False,
+            timeout=_FSCK_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return empty  # watchdog (9305): a hung fs yields the best-effort no-report path
+    if cp.returncode != 0:
+        return empty
+    classes = empty
+    entries = iter(cp.stdout.split("\0"))
+    for entry in entries:
+        if len(entry) < 4:
+            continue
+        state, rel = entry[:2], entry[3:]
+        if state[0] in "RC":
+            next(entries, None)  # the rename/copy source path — a separate NUL record
+        name = os.path.basename(rel)
+        if state in (" D", "D "):
+            classes["deletions"].append(rel)
+        elif state == "??" and name.startswith(_TMP_EVENT_PREFIX):
+            classes["tmp_events"].append(rel)
+        elif state == "??" and name.endswith("-SNAPSHOT.json"):
+            classes["leftovers"].append(rel)
+        elif (
+            state == "??" and name.endswith(RETIRED_SUFFIX) and _retired_source_folded(tracker, rel)
+        ):
+            classes["leftovers"].append(rel)
+    return {key: sorted(paths) for key, paths in classes.items()}
+
+
+def _retired_source_folded(tracker: str, rel: str) -> bool:
+    """Is the untracked ``*.retired`` at *rel* a regenerable leftover — i.e. are its
+    retired-source's bytes already preserved in a COMMIT?
+
+    True when the source path (``rel`` minus ``.retired``) still exists at HEAD (a
+    crashed local fold: the rename's deletion side is restorable, so the stray adds
+    nothing), or when the configured remote branch already carries this same ``.retired``
+    path (a peer's fold committed it; the local stray is a duplicate that blocks the
+    union merge). Anything else could be the only copy of an event, so it is NOT
+    classified — quarantining it might orphan event bytes."""
+    source = rel[: -len(RETIRED_SUFFIX)]
+    if _exists_in_ref(tracker, "HEAD", source):
+        return True
+    remote_ref = _configured_remote_ref(tracker)
+    return remote_ref is not None and _exists_in_ref(tracker, remote_ref, rel)
+
+
+def _exists_in_ref(tracker: str, ref: str, rel: str) -> bool:
+    try:
+        cp = run_git(
+            tracker, "cat-file", "-e", f"{ref}:{rel}", check=False, timeout=_FSCK_GIT_TIMEOUT
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return cp.returncode == 0
+
+
+def _configured_remote_ref(tracker: str) -> str | None:
+    """``<remote>/<branch>`` resolved from the MAIN repo config (the tracker's parent),
+    or None on a malformed config — matching :func:`_tracker_sync_status`."""
+    base = os.path.dirname(os.path.realpath(tracker))
+    try:
+        return f"{config.tickets_remote(base)}/{config.tickets_branch(base)}"
+    except config.ConfigError:
+        return None
+
+
+def _dirty_tracker_lines(tracker: str) -> list[tuple[str, bool]]:
+    """The dirty-tracker findings as fsck ``(line, is_issue)`` pairs, one per non-empty
+    class. The line shape ``KIND: <n> path(s): <paths> — <detail>`` is a contract:
+    ``fsck._transform_json`` parses the count and paths back out of it so text and JSON
+    can never drift. Paths are ``shlex.quote``d (identity for ordinary store paths) so
+    a path containing spaces survives the round-trip."""
+    classes = dirty_tracker_classes(tracker)
+    lines: list[tuple[str, bool]] = []
+    for key, kind, blurb, is_issue in _DIRTY_LINE_SPECS:
+        paths = classes[key]
+        if paths:
+            joined = " ".join(shlex.quote(p) for p in paths)
+            lines.append((f"{kind}: {len(paths)} path(s): {joined} — {blurb}", is_issue))
+    return lines
