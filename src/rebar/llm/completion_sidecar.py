@@ -357,6 +357,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         "verdict": v.get("verdict"),
         "ticket_id": v.get("ticket_id"),
         "findings": v.get("findings", []) or [],
+        # Per-criterion records now ride on the FAIL record too (they carry the per-criterion
+        # `evidence_sufficient` markers), so an insufficiency FAIL stays diagnosable from the
+        # durable record alone.
+        "criteria": v.get("criteria", []) or [],
         "remediation": v.get("remediation"),
         "certifiable": v.get("certifiable"),
         "runner": v.get("runner"),
@@ -373,6 +377,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     # FAIL record keeps its exact prior shape.
     if v.get("verdict_obtainable") is False:
         payload["verdict_obtainable"] = False
+    # Carry the insufficient-evidence marker (ticket 1d71) the same way: only written when
+    # set, so every existing FAIL record keeps its exact prior shape.
+    if v.get("evidence_sufficient") is False:
+        payload["evidence_sufficient"] = False
     if metrics is not None:
         payload["metrics"] = dict(metrics)
     return payload

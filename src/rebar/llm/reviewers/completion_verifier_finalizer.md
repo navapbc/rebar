@@ -23,6 +23,10 @@ Return one `completion_verdict`:
 - Set `met: true` only when the corresponding evidence demonstrates the whole
   criterion. Missing, incomplete, contradictory, or truncated evidence is not
   enough and must be `met: false`.
+- A banked_evidence entry carrying `evidence_sufficient: false` is INSUFFICIENT
+  EVIDENCE, not a refutation: echo it as `met: false` and word its finding as an
+  evidence gap (the bounded evidence search was exhausted without demonstrating
+  the criterion), never as a demonstrated failure of the work.
 - Include one high-severity finding for every criterion with `met: false`.
 - Return `PASS` only when every expected criterion is demonstrably met;
   otherwise return `FAIL`.

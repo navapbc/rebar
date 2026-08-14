@@ -66,6 +66,21 @@ COMPLETION_REMEDIATION_GUIDANCE = (
     "the store, reads as missing even though it exists; re-verify after the write lands "
     "rather than re-recording evidence you already wrote."
 )
+
+# Remediation carried instead of the generic guidance when a FAIL is INSUFFICIENT EVIDENCE
+# only — every unmet criterion carries the framework-set `evidence_sufficient: false` marker
+# (the bounded evidence search was exhausted), so nothing was positively refuted. The honest
+# next move is surfacing evidence, not "completing unfinished work".
+INSUFFICIENT_EVIDENCE_REMEDIATION = (
+    "How to resolve the insufficient-evidence criteria: the bounded evidence search was "
+    "exhausted before evidence demonstrating these criteria was found — nothing positively "
+    "refuted them. Make the evidence easier to find: point at the concrete proof in the "
+    "repository (file paths, tests, docs), or — for evidence that inherently lives outside "
+    "the repository — mark the criterion with the exact `[operator-attested]` tag and add a "
+    "ticket comment documenting the concrete artifacts that meet it. The completion verifier "
+    "reads this ticket's comments, so recorded evidence is taken into account on the next "
+    "verification. Then re-verify."
+)
 # Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
 # blowing the step budget even on a 2-criterion ticket (it tripped recursion_limit=300 / 385s
@@ -492,6 +507,18 @@ def _findings_from_criteria(criteria) -> list[dict]:
     return out
 
 
+def _insufficiency_only(result: dict) -> bool:
+    """True when a FAIL's unmet criteria are ALL insufficiency records.
+
+    Reads the per-criterion ``evidence_sufficient: false`` markers (framework-set by the
+    banking/assembly seams — a model cannot mint them there): at least one unmet record must
+    carry the marker and none may be a genuine refutation (met=false without it)."""
+    records = [
+        r for r in (result.get("criteria") or []) if isinstance(r, dict) and r.get("met") is False
+    ]
+    return bool(records) and all(r.get("evidence_sufficient") is False for r in records)
+
+
 def reconcile_verdict(result: dict) -> None:
     """Normalize the verdict and enforce the FAIL⇔findings invariant IN PLACE.
 
@@ -561,9 +588,19 @@ def reconcile_verdict(result: dict) -> None:
     # the agentic verdict and the deterministic child-closure verdict pass through — so every FAIL
     # carries it uniformly. A PASS has nothing to remediate, so it never carries the field (and a
     # verdict flipped PASS->... stays consistent: only FAIL gets guidance).
+    # The top-level `evidence_sufficient` marker is DERIVED here, never trusted from model
+    # output: set iff the FAIL has no genuinely-unmet criterion (met=false WITHOUT the
+    # per-criterion marker) and at least one marker-carrying record — pure insufficiency.
+    # Such a FAIL carries the insufficient-evidence remediation instead of the generic one.
     if verdict == "FAIL":
-        result["remediation"] = COMPLETION_REMEDIATION_GUIDANCE
+        if _insufficiency_only(result):
+            result["evidence_sufficient"] = False
+            result["remediation"] = INSUFFICIENT_EVIDENCE_REMEDIATION
+        else:
+            result.pop("evidence_sufficient", None)
+            result["remediation"] = COMPLETION_REMEDIATION_GUIDANCE
     else:
+        result.pop("evidence_sufficient", None)
         result.pop("remediation", None)
 
 

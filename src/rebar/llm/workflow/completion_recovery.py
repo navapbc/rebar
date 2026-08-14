@@ -324,6 +324,26 @@ def _bounded_diagnostic(
     return diagnostic
 
 
+def _banked_evidence_payload(entries: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """The finalizer's ``banked_evidence`` input rows, sorted by criterion id.
+
+    A bank entry carrying the framework-set ``evidence_sufficient=False`` marker surfaces it
+    to the finalizer (so an evidence GAP is presented as insufficiency, not a refutation);
+    bare entries omit the key entirely, keeping their prior shape byte-identical."""
+    rows: list[dict[str, Any]] = []
+    for cid, entry in sorted(entries.items()):
+        row: dict[str, Any] = {
+            "criterion_id": cid,
+            "met": bool(entry.get("met")),
+            "evidence": entry.get("evidence") or "",
+            "truncated": bool(entry.get("truncated")),
+        }
+        if entry.get("evidence_sufficient") is False:
+            row["evidence_sufficient"] = False
+        rows.append(row)
+    return rows
+
+
 def _validate_coverage(
     result: dict[str, Any], expected: list[str], id_by_text: dict[str, str]
 ) -> None:
@@ -735,15 +755,7 @@ class CompletionAgentStep(_ex.AgentStepRunner):
         entries: dict[str, dict[str, Any]],
     ) -> dict[str, Any]:
         finalizer = prompts.get_prompt("completion-verifier-finalizer", repo_root=self._repo_root)
-        banked_evidence = [
-            {
-                "criterion_id": cid,
-                "met": bool(entry.get("met")),
-                "evidence": entry.get("evidence") or "",
-                "truncated": bool(entry.get("truncated")),
-            }
-            for cid, entry in sorted(entries.items())
-        ]
+        banked_evidence = _banked_evidence_payload(entries)
         finalizer_instructions = json.dumps(
             {
                 "ticket_id": ticket_id,

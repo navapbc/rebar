@@ -16,6 +16,11 @@
       "description": "OPTIONAL framework-set marker (never model-supplied). Present and `false` ONLY when the verifier returned a non-PASS result naming no criterion and none could be recovered from `criteria` — i.e. no verdict was obtainable at all. That is a VERIFIER FAULT, not a judgement that a criterion is unmet, and callers map it to a retryable exit (11) with a distinct message rather than reporting fabricated unmet criteria. It rides ALONGSIDE the PASS/FAIL vocabulary rather than adding a third verdict token, so `verdict` stays `FAIL` and every existing consumer still blocks fail-closed. Absent on every other verdict.",
       "const": false
     },
+    "evidence_sufficient": {
+      "type": "boolean",
+      "description": "OPTIONAL framework-derived marker (never trusted from model output; `reconcile_verdict` re-derives it from the per-criterion markers). Present and `false` ONLY on a FAIL whose every unmet criterion carries the per-criterion `evidence_sufficient: false` marker — i.e. the bounded evidence search was exhausted without finding evidence and NOTHING was positively refuted. Insufficiency, not refutation: like `verdict_obtainable` it rides ALONGSIDE the PASS/FAIL vocabulary, so `verdict` stays `FAIL`, every fail-closed consumer still blocks, and only message rendering and the recorded evidence class change. Absent on every other verdict.",
+      "const": false
+    },
     "findings": {
       "type": "array",
       "description": "One finding per FAILING criterion (empty on PASS). Reuses the canonical `finding` shape; the failing requirement rides on `finding.criterion` (an additional property). A finding may also carry an optional `remediation` string — a per-finding next move (for an operator-attested criterion judged NOT MET: record proof as a ticket comment/artifact naming the reference, observed outcome, and when) — distinct from the top-level generic `remediation`.",
@@ -29,6 +34,11 @@
         "properties": {
           "criterion": { "type": "string", "description": "The evaluated criterion (verbatim or clearly identifying)." },
           "met": { "type": "boolean", "description": "Whether this criterion is demonstrably met." },
+          "evidence_sufficient": {
+            "type": "boolean",
+            "description": "OPTIONAL framework-set marker (never model-supplied; the banking/merge seams own it). Present and `false` ONLY when this record is the bounded fallback's insufficiency record: the finite evidence search was exhausted without demonstrating the criterion, so `met: false` here is an evidence GAP, not a positive refutation. Absent on every other record.",
+            "const": false
+          },
           "citation": {
             "description": "Evidence for the evaluation (nullable): file+line / url / freeform source.",
             "oneOf": [
