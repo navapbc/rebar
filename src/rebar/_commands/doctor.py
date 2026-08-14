@@ -36,6 +36,15 @@ store. Before the first mutation a backup ref ``refs/rebar-doctor/<utc-ts>`` rec
 the tickets HEAD, mirroring tracker-maintenance's backup-ref envelope. Class 3 is
 printed and never touched — a live ``.tmp-event-*`` belongs to an in-flight append.
 
+It also scans for the FOLD-HORIZON RACE residue (ticket f96b-3498-8f04-40b0): a live
+pre-snapshot event the governing SNAPSHOT does not cite in ``source_event_uuids`` —
+fsck's ORPHAN_EVENT. Replay positionally skips it, so its effect is invisible until a
+fold absorbs it; plain ``rebar compact`` refuses when a SNAPSHOT exists, so there was
+no repair door. ``--repair`` routes each damaged ticket to
+``compact --absorb-orphans --threshold=0 --horizon=0`` (an absorbing re-fold that
+cites the orphans into the next snapshot), after the dirty repairs and behind the same
+backup-ref rule: no ``refs/rebar-doctor/<utc-ts>`` ref, no mutation.
+
 Repair writes the replacement BEFORE removing the stale edge: unlink-first would,
 on any failure in between, destroy a dependency with nothing left to reconstruct
 it from, whereas link-first fails toward a transient superset that the next scan
@@ -77,6 +86,13 @@ _KIND_DIRTY_LEFTOVER = "tracker-dirty-leftover"
 _KIND_DIRTY_TMP_EVENT = "tracker-dirty-tmp-event"
 _DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER, _KIND_DIRTY_TMP_EVENT}
 _MUTATING_DIRTY_KINDS = {_KIND_DIRTY_DELETION, _KIND_DIRTY_LEFTOVER}
+
+# The fold-horizon race residue (bug f96b): a pre-snapshot KNOWN-type event absent from
+# its governing snapshot's source_event_uuids. Named exactly as fsck names it — the two
+# doors report the same damage class. Repaired store-level (an absorbing re-fold), never
+# via the per-edge link loop.
+_KIND_ORPHAN_EVENT = "ORPHAN_EVENT"
+_STORE_LEVEL_KINDS = _DIRTY_KINDS | {_KIND_ORPHAN_EVENT}
 
 # The rollback point for the dirty-tracker repairs: recorded at the tickets HEAD BEFORE
 # the first mutation, mirroring tracker-maintenance's refs/rebar-maintenance/<utc>
@@ -224,6 +240,79 @@ def _dirty_backup_ref(tracker: str) -> str | None:
     if run_git(tracker, "update-ref", ref, head, check=False).returncode != 0:
         return None
     return ref
+
+
+def _scan_ticket_orphans(tracker: str, tid: str) -> list[str]:
+    """The ORPHAN_EVENT paths (``<tid>/<event-file>``) fsck would report for one
+    ticket dir, extracted from fsck's own snapshot check so the two doors cannot
+    drift."""
+    import os
+
+    from rebar._commands.fsck_scan import _check_snapshot
+
+    tdir = os.path.join(tracker, tid)
+    return [
+        f.split(": ", 1)[1].split(" — ", 1)[0]
+        for snap in sorted(os.listdir(tdir))
+        if snap.endswith("-SNAPSHOT.json") and not snap.startswith(".")
+        for f in _check_snapshot(tdir, tid, snap)
+        if f.startswith("ORPHAN_EVENT: ")
+    ]
+
+
+def scan_orphans(tracker: str) -> list[dict[str, Any]]:
+    """The fold-horizon race findings (read-only), one per damaged ticket.
+
+    An orphan is a live pre-snapshot event the governing snapshot does not cite
+    (bug f96b: a union merge landed it AFTER a fold enumerated its inputs). Replay
+    positionally skips it, so its effect is INVISIBLE until an absorbing re-fold
+    cites it — which is exactly what ``--repair`` routes it to."""
+    import os
+
+    findings: list[dict[str, Any]] = []
+    for tid in sorted(os.listdir(tracker)):
+        if tid.startswith(".") or not os.path.isdir(os.path.join(tracker, tid)):
+            continue
+        paths = _scan_ticket_orphans(tracker, tid)
+        if paths:
+            findings.append(
+                {
+                    "kind": _KIND_ORPHAN_EVENT,
+                    "ticket_id": tid,
+                    "paths": sorted(set(paths)),
+                    "detail": "pre-snapshot event(s) not cited by the governing "
+                    "SNAPSHOT — invisible to replay until absorbed by a re-fold",
+                }
+            )
+    return findings
+
+
+def _repair_orphans(findings: list[dict[str, Any]], tracker: str, *, repo_root=None) -> None:
+    """Absorb each damaged ticket's orphans via ``compact --absorb-orphans``.
+
+    The backup ref precedes the first mutation — no backup ref, no mutation (the
+    dirty-repair rule). NO lock is held here: compact takes the store write lock
+    itself, and that lock is non-reentrant (see ``run_repair``). ``--horizon=0``
+    folds the governing snapshot together with its orphans, which is the only fold
+    shape that absorbs them (a pre-snapshot fold without the snapshot is deferred
+    by the transaction's f96b guard)."""
+    backup_ref = _dirty_backup_ref(tracker)
+    if backup_ref is None:
+        for finding in findings:
+            finding["repair_status"] = "unrepairable"
+            finding["repair_reason"] = "could not record the backup ref — refusing to mutate"
+        return
+    from rebar._commands.compact import compact_cli
+
+    for finding in findings:
+        finding["backup_ref"] = backup_ref
+        rc = compact_cli(
+            [finding["ticket_id"], "--threshold=0", "--horizon=0", "--absorb-orphans"],
+            repo_root=repo_root,
+        )
+        finding["repair_status"] = "repaired" if rc == 0 else "unrepairable"
+        if rc != 0:
+            finding["repair_reason"] = f"absorbing re-fold exited {rc}"
 
 
 def _quarantine_leftovers(tracker: str, paths: list[str]) -> bool:
@@ -374,6 +463,18 @@ def _reconciler_in_flight(repo_root=None) -> bool:
     return _probe(repo_root)
 
 
+def _repair_store_level(findings: list[dict[str, Any]], tracker: str, *, repo_root=None) -> None:
+    """The store-level repairs, in dependency order: dirty-tracker findings first (a
+    wedged tree blocks every event write, including the re-fold's commit), then the
+    orphan absorption. Each manages its own locking."""
+    dirty = [f for f in findings if f.get("kind") in _DIRTY_KINDS]
+    if dirty:
+        _repair_dirty(dirty, tracker)
+    orphans = [f for f in findings if f.get("kind") == _KIND_ORPHAN_EVENT]
+    if orphans:
+        _repair_orphans(orphans, tracker, repo_root=repo_root)
+
+
 def run_repair(
     findings: list[dict[str, Any]], tracker: str, *, repo_root=None
 ) -> tuple[list[dict[str, Any]], str]:
@@ -388,13 +489,9 @@ def run_repair(
         # cross-item atomicity — per-write locking is both correct and the only thing
         # that works.
         pre_oid = _pre_tag(tracker)
-        # Dirty-tracker findings first: a wedged tree blocks the event writes the link
-        # repairs below depend on. They manage their own two lock windows.
-        dirty = [f for f in findings if f.get("kind") in _DIRTY_KINDS]
-        if dirty:
-            _repair_dirty(dirty, tracker)
+        _repair_store_level(findings, tracker, repo_root=repo_root)
         for finding in findings:
-            if finding.get("kind") in _DIRTY_KINDS:
+            if finding.get("kind") in _STORE_LEVEL_KINDS:
                 continue
             repair_finding(finding, tracker, repo_root=repo_root)
 
@@ -460,7 +557,8 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     tracker = str(tracker_dir(repo_root))
     # Dirty-tracker findings first: a wedged tree blocks event writes, so its repair
     # must precede the link repairs (run_repair preserves this ordering rule itself).
-    findings = scan_dirty(tracker) + scan(tracker)
+    # Orphan findings (fold-horizon race residue) repair store-level too, after dirty.
+    findings = scan_dirty(tracker) + scan_orphans(tracker) + scan(tracker)
     # Read-only, and deliberately outside the repair path below: `run_repair` iterates
     # `findings`, so keeping lock results in their own list is what guarantees --repair
     # can never act on a lock (ticket metaphoric-fleeting-nutcracker). Sampled BEFORE any

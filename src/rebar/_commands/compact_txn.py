@@ -220,6 +220,70 @@ def _parse_candidate_events(ticket_dir: str) -> list[tuple[str, str, int | None]
     return parsed
 
 
+def _is_snapshot_path(fp: str) -> bool:
+    return os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
+
+
+def _defer_presnapshot_foldables(
+    old: list[tuple[str, str, int | None]],
+    young: list[tuple[str, str, int | None]],
+) -> list[tuple[str, str, int | None]]:
+    """Fold-horizon race guard (bug f96b): pre-snapshot candidates NEVER fold without
+    their governing snapshot.
+
+    A late arrival (an event the union merge landed AFTER a fold enumerated its inputs)
+    sits before the live snapshot in filename order. Folding it while that snapshot is
+    still inside the horizon would write a NEW pre-snapshot SNAPSHOT that the governing
+    one positionally buries — retiring the event's file AND hiding its effect, silently
+    and permanently. Defer instead: once the governing snapshot ages out of the horizon
+    it joins the fold and the late arrival is absorbed (see ``_ordered_fold_input``)."""
+    young_snaps = [os.path.basename(fp) for (fp, _u, _ts) in young if _is_snapshot_path(fp)]
+    if not young_snaps:
+        return old
+    governing = max(young_snaps)
+    return [(fp, u, ts) for (fp, u, ts) in old if os.path.basename(fp) > governing]
+
+
+def _ordered_fold_input(old: list[tuple[str, str, int | None]]) -> list[str]:
+    """The reducer input for an absorbing fold (bug f96b), in PINNED order: snapshots
+    first (filename order — replay seeds from the latest), then every other candidate
+    by timestamp.
+
+    Plain filename order would sort a pre-snapshot late arrival BEFORE the snapshot,
+    where replay's positional skip buries it; snapshot-first replays it ON TOP instead,
+    so the next snapshot absorbs it. The pinned semantics: snapshot state, then orphans
+    by timestamp, then post-snapshot events. An event the snapshot already cites in
+    ``source_event_uuids`` is uuid-skipped by replay — re-cited at most, never
+    re-applied. Timestamp-less (unparseable) files sort last; replay logs and skips
+    them."""
+    snaps = sorted(fp for (fp, _u, _ts) in old if _is_snapshot_path(fp))
+    rest = sorted(
+        ((fp, ts) for (fp, _u, ts) in old if not _is_snapshot_path(fp)),
+        key=lambda item: (item[1] is None, item[1] or 0, os.path.basename(item[0])),
+    )
+    return snaps + [fp for (fp, _ts) in rest]
+
+
+def _select_fold_set(
+    parsed: list[tuple[str, str, int | None]], now: int, horizon: int
+) -> tuple[list[tuple[str, str, int | None]], list[tuple[str, str, int | None]]] | None:
+    """Partition candidates into (foldable, young) under the horizon policy and the
+    f96b pre-snapshot guard. Prints the skip reason and returns None when nothing may
+    fold this pass."""
+    old = [t for t in parsed if is_foldable(t[2], now, horizon)]
+    young = [t for t in parsed if not is_foldable(t[2], now, horizon)]
+    guarded = _defer_presnapshot_foldables(old, young)
+    if not guarded:
+        if old:
+            sys.stdout.write(
+                "governing SNAPSHOT within the compaction horizon — deferring pre-snapshot fold\n"
+            )
+        else:
+            sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
+        return None
+    return guarded, young
+
+
 def _build_snapshot_event(
     tracker: str,
     ticket_dir: str,
@@ -485,15 +549,16 @@ def _compact_locked(
         # youngest live one — sort AFTER the snapshot and replay on top. So a
         # concurrent sub-horizon append that merges in later is NOT silently dropped by
         # the snapshot's positional skip. horizon<=0 folds everything (the pre-RC2b
-        # behavior; the offline test suite defaults to 0).
+        # behavior; the offline test suite defaults to 0). A pre-snapshot late arrival
+        # that DID slip under an existing snapshot (the fold-horizon race, bug f96b) is
+        # absorbed by the next fold that includes the snapshot — and never folded
+        # without it (_select_fold_set defers that).
         now = hlc.physical_now()
 
-        old = [(fp, u, ts) for (fp, u, ts) in parsed if is_foldable(ts, now, horizon)]
-        young = [(fp, u, ts) for (fp, u, ts) in parsed if not is_foldable(ts, now, horizon)]
-
-        if not old:
-            sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
+        selected = _select_fold_set(parsed, now, horizon)
+        if selected is None:
             return 0
+        old, young = selected
 
         fold_files = [fp for (fp, _u, _ts) in old]
 
@@ -510,10 +575,12 @@ def _compact_locked(
                 # this pass rather than risk a mis-sorted snapshot.
                 sys.stdout.write("no safe horizon gap for a SNAPSHOT timestamp — deferring\n")
                 return 0
-            compiled_state = reduce_ticket(ticket_dir, event_files_override=fold_files)
         else:
             snapshot_ts = hlc.next_tick(tracker, ticket_id)
-            compiled_state = reduce_ticket(ticket_dir)
+        # Always reduce over the PINNED absorbing order (snapshots first, then the rest
+        # by timestamp): a whole-directory replay would positionally bury a pre-snapshot
+        # late arrival instead of folding it into this snapshot (bug f96b).
+        compiled_state = reduce_ticket(ticket_dir, event_files_override=_ordered_fold_input(old))
 
         if compiled_state is None:
             sys.stderr.write(
@@ -548,11 +615,7 @@ def _compact_locked(
         # moment it does. `parsed` admits SNAPSHOT because it is a KNOWN_EVENT_TYPE, which
         # is how it ended up in this list. The REBUILD path in compact_rebuild already
         # skips snapshots when building its source list; this makes the two agree.
-        source_uuids = [
-            u
-            for (fp, u, _ts) in old
-            if not os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
-        ]
+        source_uuids = [u for (fp, u, _ts) in old if not _is_snapshot_path(fp)]
 
         snapshot_event, final_path = _build_snapshot_event(
             tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts

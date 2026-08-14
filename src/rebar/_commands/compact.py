@@ -62,12 +62,39 @@ __all__ = [
 
 def _usage() -> int:
     sys.stderr.write(
-        "Usage: ticket-compact.sh <ticket_id> [--threshold=N] [--horizon=NS]\n"
+        "Usage: rebar compact <ticket_id> [--threshold=N] [--horizon=NS]\n"
+        "                     [--skip-sync] [--no-commit] [--absorb-orphans]\n"
         "  Default threshold: REBAR_COMPACT_THRESHOLD env / compact.threshold config or 10\n"
         "  Default horizon:   REBAR_COMPACTION_HORIZON_NS env / compact.COMPACTION_HORIZON_NS\n"
         "                     config or 1800s in ns (events younger than this stay live)\n"
+        "  --absorb-orphans:  re-fold past an existing SNAPSHOT so a pre-snapshot event\n"
+        "                     it does not cite (fsck ORPHAN_EVENT) folds into the next one\n"
     )
     return 1
+
+
+def _parse_compact_flags(
+    args: list[str], threshold: int, horizon: int
+) -> tuple[int, int, bool, bool, bool] | None:
+    """Parse the optional compact flags; None (usage printed by the caller) on an
+    unknown argument. Returns (threshold, horizon, skip_sync, no_commit,
+    absorb_orphans)."""
+    skip_sync = no_commit = absorb_orphans = False
+    for a in args:
+        if a.startswith("--threshold="):
+            threshold = int(a[len("--threshold=") :])
+        elif a.startswith("--horizon="):
+            horizon = int(a[len("--horizon=") :])
+        elif a == "--skip-sync":
+            skip_sync = True
+        elif a == "--no-commit":
+            no_commit = True
+        elif a == "--absorb-orphans":
+            absorb_orphans = True
+        else:
+            sys.stderr.write(f"Error: unknown argument '{a}'\n")
+            return None
+    return threshold, horizon, skip_sync, no_commit, absorb_orphans
 
 
 def compact_cli(
@@ -98,20 +125,10 @@ def compact_cli(
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
-    skip_sync = False
-    no_commit = False
-    for a in argv[1:]:
-        if a.startswith("--threshold="):
-            threshold = int(a[len("--threshold=") :])
-        elif a.startswith("--horizon="):
-            horizon = int(a[len("--horizon=") :])
-        elif a == "--skip-sync":
-            skip_sync = True
-        elif a == "--no-commit":
-            no_commit = True
-        else:
-            sys.stderr.write(f"Error: unknown argument '{a}'\n")
-            return _usage()
+    parsed_flags = _parse_compact_flags(argv[1:], threshold, horizon)
+    if parsed_flags is None:
+        return _usage()
+    threshold, horizon, skip_sync, no_commit, absorb_orphans = parsed_flags
 
     if not (
         os.path.isdir(tracker)
@@ -129,7 +146,10 @@ def compact_cli(
 
     if not skip_sync:
         _sync_before_compact(tracker)
-        if any(
+        # --absorb-orphans opens ONLY this door: the sync above still runs, and the
+        # fold semantics are unchanged — a fold that includes the snapshot absorbs any
+        # pre-snapshot late arrival it does not cite (fold-horizon race, bug f96b).
+        if not absorb_orphans and any(
             f.endswith("-SNAPSHOT.json") and not f.startswith(".") for f in os.listdir(ticket_dir)
         ):
             sys.stdout.write(f"skipping compaction for {ticket_id} — remote SNAPSHOT exists\n")
