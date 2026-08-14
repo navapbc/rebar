@@ -54,6 +54,32 @@ and treated as a whole-sweep no-op, so init / boot never abort on ensure trouble
 The six built-in units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`,
 `store-compat`.
 
+Two further units migrate a legacy store to the many-to-many projects model (ticket 462d)
+**without writing any per-ticket events** — they only stamp committed tickets-branch files:
+
+- **`projects-seed`** — the migration trigger. Tree-checks `tickets:.bridge_state/projects.json`
+  first; if absent it writes a one-project mapping whose `legacy_default` is the store's
+  configured backend project (`jira.project`, or the ACLI create-time default `DIG` when unset)
+  and whose `projects` set is `{<proj>: {"repos": []}}`, then commits it. A store that already
+  has the mapping is `ok` (zero commits). Every absent-`bridge_project` ticket then resolves to
+  that project (see `rebar._engine.rebar_reconciler.projects_store`).
+- **`projects-compat-stamp`** — a level-triggered **backstop**, not the trigger. It reads the
+  mapping's project count and, ONLY when the mapping holds **more than one** project and the
+  token is not already present, appends the `multi-project-bridge` capability to
+  `.store-compat.json`'s `required_capabilities` (preserving every other key — it does *not*
+  call `compat.write_compat_record`, which would reset the list) and re-commits. A zero- or
+  one-project mapping is never stamped (`ok`). It is keyed on the mapping's state, so it is
+  decoupled from *how* the store became multi-project: the sweep that first sees a second
+  project stamps it.
+
+The `multi-project-bridge` capability token gates store compatibility. Once a store becomes
+multi-project and the token is stamped into `required_capabilities`, an older binary that does
+not list `multi-project-bridge` in `compat.KNOWN_CAPABILITIES` **fails closed** on that store
+(the fail-closed capability gate in `rebar._store.compat`) rather than syncing it with a
+projects model it cannot honor. This binary already registers the token in `KNOWN_CAPABILITIES`
+(the expand half of the expand/contract rollout), so it recognises — and passes on — such a
+store.
+
 ## Where `run_ensures` runs
 
 - **`init` / re-init** and the **symlink worktree attach** (`init.py`) — the sweep replaces the
