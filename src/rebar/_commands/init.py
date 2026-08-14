@@ -590,6 +590,43 @@ def _gitattributes_unit(tracker: str) -> EnsureOutcome:
     return EnsureOutcome("gitattributes", "ok", ".gitattributes converged")
 
 
+# Per-call path budget for the batched ``git rm --cached`` below (keeps each argv
+# far below ARG_MAX on a store with hundreds of tracked markers).
+_UNTRACK_BATCH = 200
+
+
+# raw-git-ok: store-maintenance command, seam-internal
+def _untrack_runtime_markers_unit(tracker: str) -> EnsureOutcome:
+    """Untrack per-ticket runtime markers (``*/.archived``, ``*/.write.lock``) that
+    were COMMITTED before ``.gitignore`` covered them (ensure-registry unit; epic
+    becoming-berserk-grunion S1). gitignore never un-tracks tracked files, so their
+    churn surfaced as tracked working-tree deletions — dirtying ``git status`` and
+    breaking the strict tracker-head check. Check = one ``git ls-files`` call (empty
+    on a converged store → ``ok``, zero commits); act = batched ``git rm --cached``
+    (index only — worktree copies untouched, so local cache behavior is unchanged)
+    + ONE commit. Enumerates ls-files output rather than raw pathspecs so a store
+    tracking only one marker kind never fails on an unmatched pathspec. Peers
+    merging the commit have git delete their worktree marker copies; that is safe
+    (archival's source of truth is ARCHIVED events) and the reader self-heals the
+    fast-path marker (see ``reduce_all_tickets``)."""
+    uid = "untrack-runtime-markers"
+    ls = _git(tracker, "ls-files", "--", f"*/{ARCHIVE_MARKER_NAME}", f"*/{MARKER_LOCK_NAME}")
+    tracked = [ln for ln in ls.stdout.splitlines() if ln]
+    if not tracked:
+        return EnsureOutcome(uid, "ok", "no tracked runtime markers")
+    for i in range(0, len(tracked), _UNTRACK_BATCH):
+        _git(tracker, "rm", "--cached", "--quiet", "--", *tracked[i : i + _UNTRACK_BATCH])
+    _git(
+        tracker,
+        "commit",
+        "-q",
+        "--no-verify",
+        "-m",
+        "chore: untrack per-ticket runtime markers (.archived, .write.lock)",
+    )
+    return EnsureOutcome(uid, "changed", f"untracked {len(tracked)} runtime marker file(s)")
+
+
 # raw-git-ok: store-maintenance command, seam-internal
 def _commit_precommit(tracker: str) -> None:
     if _git(tracker, "show", "tickets:.pre-commit-config.yaml").returncode != 0:
