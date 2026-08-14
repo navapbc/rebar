@@ -44,7 +44,9 @@ from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
 from rebar.reducer._cache import is_active_event
 
 
-def _check_json_validity(tracker: str, env_authorship: EnvAuthorshipTally) -> tuple[list[str], int]:
+def _check_json_validity(
+    tracker: str, env_authorship: EnvAuthorshipTally, *, include_archived: bool = False
+) -> tuple[list[str], int]:
     """Check 1 — every event file parses as JSON.
 
     Doubles as the single read pass that feeds the per-env authorship tally (bug ed5c), so the
@@ -52,7 +54,7 @@ def _check_json_validity(tracker: str, env_authorship: EnvAuthorshipTally) -> tu
     """
     lines: list[str] = []
     issues = 0
-    for ticket_id in _ticket_dirs(tracker):
+    for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
         ticket_dir = os.path.join(tracker, ticket_id)
         for filename in sorted(os.listdir(ticket_dir)):
             if not filename.endswith(".json") or filename.startswith("."):
@@ -66,7 +68,9 @@ def _check_json_validity(tracker: str, env_authorship: EnvAuthorshipTally) -> tu
     return lines, issues
 
 
-def _check_create_events(tracker: str) -> tuple[list[str], int, int, int]:
+def _check_create_events(
+    tracker: str, *, include_archived: bool = False
+) -> tuple[list[str], int, int, int]:
     """Check 2 — every ticket reduces to a state with a usable CREATE.
 
     Returns ``(lines, issues, signed_total, unsigned_total)``: the store-wide authorship
@@ -83,7 +87,7 @@ def _check_create_events(tracker: str) -> tuple[list[str], int, int, int]:
     issues = 0
     signed_total = 0
     unsigned_total = 0
-    for ticket_id in _ticket_dirs(tracker):
+    for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
         ticket_dir = os.path.join(tracker, ticket_id)
         with contextlib.redirect_stderr(io.StringIO()):
             state = reduce_ticket(ticket_dir)
@@ -157,6 +161,7 @@ def _check_ticket_snapshots(
     no_mutate: bool,
     repair_snapshots: bool,
     dry_run: bool,
+    include_archived: bool = False,
 ) -> tuple[list[str], int]:
     """Check 4 — SNAPSHOT ``source_event_uuids`` consistency, per ticket.
 
@@ -167,7 +172,7 @@ def _check_ticket_snapshots(
     """
     lines: list[str] = []
     issues = 0
-    for ticket_id in _ticket_dirs(tracker):
+    for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
         ticket_dir = os.path.join(tracker, ticket_id)
 
         def _snap_findings(_dir: str = ticket_dir, _tid: str = ticket_id) -> list[str]:
@@ -198,7 +203,7 @@ def _check_ticket_snapshots(
     return lines, issues
 
 
-def _check_forward_compat(tracker: str) -> list[str]:
+def _check_forward_compat(tracker: str, *, include_archived: bool = False) -> list[str]:
     """Check 5 — event types newer than this binary (P2.3).
 
     Informational WARN (never counted, like push-pending): an unknown event_type is
@@ -210,7 +215,7 @@ def _check_forward_compat(tracker: str) -> list[str]:
     from rebar.reducer._version import is_unknown_newer_type
 
     unknown_types: set[str] = set()
-    for ticket_id in _ticket_dirs(tracker):
+    for ticket_id in _ticket_dirs(tracker, include_archived=include_archived):
         ticket_dir = os.path.join(tracker, ticket_id)
         for filename in os.listdir(ticket_dir):
             if not filename.endswith(".json") or filename.startswith("."):
@@ -257,6 +262,7 @@ def _scan(
     *,
     repair_snapshots: bool = False,
     dry_run: bool = False,
+    include_archived: bool = False,
 ) -> tuple[list[str], int]:
     """Walk the store and run every check, in report order.
 
@@ -273,13 +279,18 @@ def _scan(
     # the store-wide authorship line it complements.
     env_authorship = EnvAuthorshipTally()
 
-    json_lines, json_issues = _check_json_validity(tracker, env_authorship)
-    create_lines, create_issues, signed_total, unsigned_total = _check_create_events(tracker)
+    json_lines, json_issues = _check_json_validity(
+        tracker, env_authorship, include_archived=include_archived
+    )
+    create_lines, create_issues, signed_total, unsigned_total = _check_create_events(
+        tracker, include_archived=include_archived
+    )
     snapshot_lines, snapshot_issues = _check_ticket_snapshots(
         tracker,
         no_mutate=no_mutate,
         repair_snapshots=repair_snapshots,
         dry_run=dry_run,
+        include_archived=include_archived,
     )
     # Checks 4.5–4.7 + 4.9 are tracker-level, not per-ticket: they live in fsck_tracker_health.
     tracker_lines, tracker_issues = _tracker_health(tracker, repo_root, env_authorship)
@@ -289,7 +300,7 @@ def _scan(
     lines += _check_index_lock(tracker, no_mutate)
     lines += snapshot_lines
     lines += tracker_lines
-    lines += _check_forward_compat(tracker)
+    lines += _check_forward_compat(tracker, include_archived=include_archived)
     lines += _advisory_lines(tracker, signed_total, unsigned_total)
     issue_count += json_issues + create_issues + snapshot_issues + tracker_issues
 

@@ -98,14 +98,35 @@ def _resolve_tracker_git_dir(tracker: str) -> str:
     return ""
 
 
-def _ticket_dirs(tracker: str) -> list[str]:
-    # Skip hidden dirs (.git, .bridge_state, …): the bash `"$TRACKER_DIR"/*/` glob
-    # never matches dot-dirs, and ticket ids never start with '.'.
-    return sorted(
+def _dir_is_archived(ticket_path: str) -> bool:
+    """True only when the ``.archived`` marker exists AND the event log net-confirms archival.
+
+    The marker is a fast-path cache, never the decision: a stale marker (reverted archive, or
+    a marker written without an ARCHIVED event) must not hide the ticket from store walks, so
+    the log check (:func:`rebar.reducer._api._is_net_archived` — ARCHIVED uuids minus
+    REVERT-targeted uuids) always confirms before a dir is skipped."""
+    if not os.path.exists(os.path.join(ticket_path, ".archived")):
+        return False
+    from rebar.reducer._api import _is_net_archived
+
+    return _is_net_archived(ticket_path)
+
+
+def _ticket_dirs(tracker: str, *, include_archived: bool = False) -> list[str]:
+    """The shared store-walk iterator: sorted ticket dirs, ACTIVE-only by default.
+
+    Skips hidden dirs (.git, .bridge_state, …): the bash `"$TRACKER_DIR"/*/` glob never
+    matched dot-dirs, and ticket ids never start with '.'. Archived tickets are excluded
+    unless ``include_archived`` — an archive is terminal (the fold at archive time leaves no
+    unfolded tail), so maintenance walks cost store ACTIVITY, not store history."""
+    dirs = sorted(
         d
         for d in os.listdir(tracker)
         if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
     )
+    if include_archived:
+        return dirs
+    return [d for d in dirs if not _dir_is_archived(os.path.join(tracker, d))]
 
 
 def _active_snapshots(ticket_dir: str) -> list[str]:

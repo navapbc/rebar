@@ -139,13 +139,45 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     )
 
 
+def _terminal_fold(resolved: str, ticket_dir, repo_root) -> None:
+    """Fold the ticket's entire live log into a SNAPSHOT before it is archived.
+
+    Reuses the single-ticket fold path with the incremental gates bypassed —
+    ``--threshold=0`` (any unfolded event qualifies) and ``--horizon=0`` (a fold horizon of
+    *now*: nothing is too young) — because an archive is TERMINAL: the maintenance walks skip
+    archived tickets by default, so whatever the fold leaves live would never be folded again.
+    ``--skip-sync`` defers the push to the ARCHIVED event's own write_and_push.
+
+    No-op when nothing is unfolded (no empty or duplicate SNAPSHOT — the guard asks the
+    fold's own selection question via :func:`compact._foldable_event_count`, at horizon 0).
+    A failed fold aborts the archive so an archived ticket NEVER carries an unfolded tail."""
+    import contextlib
+    import io
+
+    from rebar._commands import compact
+    from rebar._store import hlc
+
+    if compact._foldable_event_count(str(ticket_dir), hlc.physical_now(), 0) == 0:
+        return
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = compact.compact_cli(
+            [resolved, "--threshold=0", "--horizon=0", "--skip-sync"], repo_root=repo_root
+        )
+    if rc != 0:
+        raise CommandError(
+            f"Error: terminal fold failed for ticket '{resolved}' (rc {rc}); not archived"
+        )
+
+
 def archive(ticket_id: str, *, repo_root=None) -> None:
     """Archive an open ticket (mirrors ``ticket_archive``).
 
     Idempotent: an existing ``.archived`` marker or ARCHIVED event short-circuits
     to a silent no-op (writing the marker if only the event was present, e.g. after
-    a clone). Status-gated: only ``open`` tickets may be archived. On success writes
-    an ARCHIVED event, the ``.archived`` marker, and prints the confirmation line.
+    a clone). Status-gated: only ``open`` tickets may be archived. On success folds
+    the live log terminally (see :func:`_terminal_fold`), then writes an ARCHIVED
+    event, the ``.archived`` marker, and prints the confirmation line.
     """
     from rebar.reducer import reduce_ticket
     from rebar.reducer.marker import write_marker
@@ -170,6 +202,7 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
             f"Error: ticket '{resolved}' has status '{status}'; archive only works on open tickets"
         )
 
+    _terminal_fold(resolved, ticket_dir, repo_root)
     append_event(resolved, "ARCHIVED", {}, tracker, repo_root=repo_root)
     write_marker(str(ticket_dir))
     print(f"Archived ticket '{resolved}'")
