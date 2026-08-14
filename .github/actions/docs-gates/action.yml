@@ -1,0 +1,164 @@
+name: Documentation gates
+description: Shared generated-document, index, link, and quickstart validation
+
+inputs:
+  run-contract-tests:
+    description: Run documentation-only guards already covered elsewhere by full Verify
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # ADR number markers and cross-references are one integrity contract.
+    - name: ADR-number bijection gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/check_adr_numbers.py ]; then
+          echo "scripts/check_adr_numbers.py not in checked-out tree" \
+               "(change predates the gate) — skipping"
+          exit 0
+        fi
+        python scripts/check_adr_numbers.py
+
+    - name: ADR-index drift gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/gen_adr_index.py ]; then
+          echo "scripts/gen_adr_index.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/gen_adr_index.py --check
+
+    - name: Env-var registry drift gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/gen_env_registry.py ]; then
+          echo "scripts/gen_env_registry.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/gen_env_registry.py
+        if ! git diff --exit-code -- docs/env-vars.md; then
+          echo "::error::docs/env-vars.md is stale — regenerate it with"
+          echo "  python scripts/gen_env_registry.py"
+          echo "and commit the result (it is derived from env-var reads under src/rebar)."
+          exit 1
+        fi
+        echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
+
+    - name: Docs-index completeness gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/check_docs_index.py ]; then
+          echo "scripts/check_docs_index.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/check_docs_index.py --check
+        echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
+
+    - name: README quickstart golden-path gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/check_readme_quickstart.py ]; then
+          echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/check_readme_quickstart.py
+
+    # Full Verify gets these two guards from `make lint`. The reduced lane opts in here
+    # so contributor documentation and the plan-review vocabulary keep identical coverage
+    # without repeating the complete lint/type-check job.
+    - name: Contributor-document DCO identity gate
+      if: ${{ inputs.run-contract-tests == 'true' }}
+      shell: bash
+      run: |
+        if [ ! -f scripts/check_dco_identity.py ]; then
+          echo "scripts/check_dco_identity.py not in checked-out tree (change predates the gate) — skipping"
+          exit 0
+        fi
+        python scripts/check_dco_identity.py
+
+    - name: Documentation criteria-vocabulary gate
+      if: ${{ inputs.run-contract-tests == 'true' }}
+      shell: bash
+      run: |
+        if [ ! -f scripts/check_criteria_vocabulary.py ]; then
+          echo "scripts/check_criteria_vocabulary.py not in checked-out tree (change predates the gate) — skipping"
+          exit 0
+        fi
+        python scripts/check_criteria_vocabulary.py
+
+    - name: Documentation conflict-marker and file-size gates
+      if: ${{ inputs.run-contract-tests == 'true' }}
+      shell: bash
+      run: |
+        if [ ! -f .pre-commit-config.yaml ]; then
+          echo ".pre-commit-config.yaml not in checked-out tree (change predates the gate) — skipping"
+          exit 0
+        fi
+        pre-commit run check-merge-conflict --all-files
+        pre-commit run check-added-large-files --all-files
+
+    - name: CLI-reference drift gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/gen_cli_reference.py ]; then
+          echo "scripts/gen_cli_reference.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/gen_cli_reference.py
+        if ! git diff --exit-code -- docs/cli-reference.md; then
+          echo "::error::docs/cli-reference.md is stale — regenerate it with"
+          echo "  python scripts/gen_cli_reference.py"
+          exit 1
+        fi
+        echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
+
+    - name: MCP-reference drift gate
+      shell: bash
+      run: |
+        if [ ! -f scripts/gen_mcp_reference.py ]; then
+          echo "scripts/gen_mcp_reference.py not in checked-out tree (change predates the gate) — skipping;" \
+               "the gate re-enforces on rebase and on every post-merge change"
+          exit 0
+        fi
+        python scripts/gen_mcp_reference.py
+        if ! git diff --exit-code -- docs/mcp-reference.md; then
+          echo "::error::docs/mcp-reference.md is stale — regenerate it with"
+          echo "  python scripts/gen_mcp_reference.py"
+          exit 1
+        fi
+        echo "MCP-reference drift gate: OK (docs/mcp-reference.md is up to date)."
+
+    # Select conservatively: any test module that names a documentation path or root
+    # documentation file remains eligible for the reduced lane. Directory names do not
+    # define pytest tiers, so the marker expression below is the sole integration/external
+    # filter. False positives cost a little time; false negatives would weaken a prose-only
+    # change's contractual coverage.
+    - name: Documentation contract tests
+      if: ${{ inputs.run-contract-tests == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        doc_tests=()
+        while IFS= read -r path; do
+          case "$path" in
+            tests/external/*|*/conftest.py) continue ;;
+            */test_*.py) doc_tests+=("$path") ;;
+          esac
+        done < <(
+          git grep -Il -E \
+            "docs/|[\"']docs[\"']|README\\.md|CONTRIBUTING\\.md|CHANGELOG\\.md|SECURITY\\.md|SUPPORT\\.md|GOVERNANCE\\.md|MAINTAINERS\\.md|CODE_OF_CONDUCT\\.md" \
+            -- "tests/**/*.py"
+        )
+        if [ "${#doc_tests[@]}" -eq 0 ]; then
+          echo "::error::documentation contract selector found no tests"
+          exit 1
+        fi
+        python -m pytest -n 4 -p no:cacheprovider \
+          -m "not integration and not external" "${doc_tests[@]}"
