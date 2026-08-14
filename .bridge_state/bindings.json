@@ -10892,7 +10892,7 @@
     "1734-7c6d-5a6a-48fd": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nThe inbound fetcher can only see one tracker project. `jqls_for(project)` builds exactly one pair of queries \u2014 active and recent-done \u2014 from a single key (`src/rebar/_engine/rebar_reconciler/fetcher.py:78-90`), and `_validate_project_key` refuses an empty or malformed key outright rather than searching unscoped (`fetcher.py:63-75`, bug `626d`). A store that lists several projects in its mapping still ingests only one of them.\n\n## Approach\n\nFan out: call the existing `jqls_for` once per project in the store mapping and union the results into the snapshot, rather than building a single `project IN (A,B)` query. Two concrete reasons. First, the per-query truncation ceiling (`_ACLI_CEILING = 1200` at `fetcher.py:91`, raising `SilentTruncationError`) stays scoped per project instead of becoming a shared budget that a single busy project could exhaust on behalf of the others. Second, it reuses `jqls_for` and `_validate_project_key` unchanged, so the JQL-injection guard that bug `626d` added keeps applying to every key with no new interpolation site.\n\nInbound-created tickets record their source project in `bridge_project` and get their `repos` defaulted from that project's mapping entry. The existing local-id derivation already encodes the project (`_jira_key_to_local_id`, `inbound_translate.py:120-124`, `DIG-123` \u2192 `jira-dig-123`), so ids stay unique across projects with no change; this story makes the association explicit on the ticket rather than only implicit in the id.\n\nThe CREATE event for an inbound ticket is written directly rather than through `create_core` (`apply_inbound_records.py:150-222`, which stamps `creation_channel` at `:221`), so the two new fields are stamped at that same site.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/fetcher.py`\n- `src/rebar/_engine/rebar_reconciler/apply_inbound_records.py`\n- `src/rebar/_engine/rebar_reconciler/inbound_translate.py`\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful verified fake fed production-shaped Jira fixtures. The fake must record the queries issued, because \"one JQL pair per project\" is itself the contract under test and is invisible to a result-only assertion.\n\n- Happy path: a mapping with two projects issues exactly two query pairs \u2014 one per key \u2014 and the\n  resulting snapshot contains issues from both.\n- Postcondition: each ticket created from the fetch records the project its issue came from, and its\n  `repos` equal that project's mapping entry.\n- Edge: a project listed in the mapping that returns zero issues contributes nothing and does not\n  fail the pass.\n- Failure path: one project exceeding the per-query ceiling raises `SilentTruncationError` naming\n  that project, and the ceiling is evaluated per project \u2014 a second project under the limit is not\n  penalised by the first. This is the contrast case that proves the budget is not shared.\n- Collateral invariant: a store whose mapping holds exactly one project issues the same query pair as\n  before this change, so single-project behaviour is untouched.\n\n## Acceptance Criteria\n\n- [ ] A mapping with two projects issues one JQL pair per project in a single pass; checked by a fake\n      transport recording the issued queries and asserting the exact pair count and contents.\n- [ ] Each inbound-created ticket records its source project and the repos from that project's\n      mapping entry; checked by asserting both fields on tickets created from a two-project fixture.\n- [ ] The truncation ceiling applies per project, not as a shared budget; checked by a test where one\n      project exceeds it and a second under-limit project still ingests successfully.\n- [ ] A single-project mapping issues an identical query pair to the pre-change behaviour; checked by\n      a regression test comparing the recorded queries.\n- [ ] A configured project returning zero issues does not fail the pass; checked by an empty-result\n      fixture.",
+        "description": "## Context / Problem\n\nThe inbound fetcher can only see one tracker project. `_build_snapshot` resolves a single `query_project` and builds one JQL pair \u2014 active and recent-done \u2014 from it (`fetcher.py:313-406`), then runs its three enrichment passes \u2014 parent, comment, issuelink maps \u2014 against that one project key (`fetcher.py:408-560`). A store that lists several projects in its mapping still ingests only one of them, and single-project enrichment would silently drop parent/comment/issuelink data for every project but one. Inbound-created tickets also never record which project they came from, so the `bridge_project`/`repos` fields added by cef7 stay unset on inbound tickets.\n\n## Approach\n\n**Fan out per project (fetcher.py).** Replace the single `query_project` with the store's project SET: `projects_store.read_projects(repo_root).keys()`. For EACH project, issue the existing `jqls_for(project)` pair AND run all three enrichment passes (`get_parent_map` / `get_comment_map` / `get_issuelinks_map`) scoped to that project key, merging every result into the ONE shared `snapshot` dict (deduped by the existing `seen_keys`). This reuses `jqls_for` and `_validate_project_key` unchanged, so bug 626d's JQL-injection guard keeps applying to every key with no new interpolation site, and the per-query truncation ceiling (`_ACLI_CEILING`, raising `SilentTruncationError`) stays scoped per project \u2014 a busy project cannot exhaust a shared budget on behalf of the others. When the mapping is unseeded (empty), fall back to the single `[query_project]` list so the exact pre-change query pair and single enrichment pass are issued \u2014 single-project behaviour is byte-for-byte untouched.\n\n**Failure semantics across the fan-out.** Base-query exceptions (transport/network, malformed response, `SilentTruncationError`) propagate and fail the whole pass, exactly as today \u2014 fanning out multiplies failure points but each is fail-closed, so no partial snapshot is written. The three enrichment passes keep their existing per-pass fail-open degradation (log + continue), applied independently per project; a `BackendPaginationStallError` still re-raises past the handlers (a stalled pager is a truncated read).\n\n**Record source project + default repos (apply_inbound_records.py).** Provenance needs NO new channel through the snapshot: the snapshot is keyed by jira key, `_apply_inbound_create` derives `jira_key = mutation.target`, and the CREATE writer `_inbound_create_write_create_event` ALREADY receives `jira_key` and `repo_root`. The source project IS `jira_key`'s prefix (`DIG-123` \u2192 `DIG`, the same `rsplit(\"-\", 1)[0]` idiom the fetcher's parent-key derivation uses). A new leaf helper `projects_store.resolve_inbound_bridge_fields(jira_key, repo_root) -> dict` returns `{\"bridge_project\": <prefix>, \"repos\": mapping.projects.get(prefix, {}).get(\"repos\", [])}`; the create site stamps both fields in ONE line \u2014 `create_data.update(...)` \u2014 beside the existing `creation_channel` stamp (`apply_inbound_records.py:221`). No signature change and no `apply_inbound.py` edit are required, and the net addition to `apply_inbound_records.py` (already 797 LOC, near the 800 cap) is the import + the update call \u2014 two lines, staying under the cap.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/fetcher.py` \u2014 fan out the base JQL pair AND all three\n  enrichment passes once per configured project into the shared snapshot; per-project ceiling;\n  unseeded-mapping fallback to the single configured project.\n- `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 new `resolve_inbound_bridge_fields`\n  leaf helper (derive source project from the jira key, default repos from that project's mapping\n  entry).\n- `src/rebar/_engine/rebar_reconciler/apply_inbound_records.py` \u2014 stamp `bridge_project` + `repos`\n  at the CREATE write site via the helper (net +2 lines; module is near the size cap).\n- tests under `tests/`.\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful verified fake fed production-shaped Jira fixtures. The fake must RECORD the queries and enrichment calls it issues, because \"one JQL pair AND one enrichment pass per project\" is itself the contract under test and is invisible to a result-only assertion.\n\n- Happy path: a mapping with two projects issues exactly two JQL pairs and one enrichment pass per\n  project (parent/comment/issuelink), and the merged snapshot carries issues AND enrichment data\n  from BOTH projects.\n- Postcondition: each inbound-created ticket records its source project in `bridge_project` and its\n  `repos` equal that project's mapping entry; checked on tickets created from a two-project\n  fixture.\n- Ceiling is per project: one project exceeding `_ACLI_CEILING` raises `SilentTruncationError`\n  naming it, while a second under-limit project still ingests \u2014 proving the budget is not shared.\n- Empty result: a listed project returning zero issues contributes nothing and does not fail the\n  pass.\n- Single-project regression: an unseeded mapping issues the identical query pair and single\n  enrichment pass as before this change; checked by comparing recorded queries/calls.\n\n## Acceptance Criteria\n\n- [ ] A two-project mapping issues one JQL pair AND one enrichment pass (parent/comment/issuelink\n      maps) per project in a single pass, with both projects' issues and enrichment data present in\n      the merged snapshot; checked by a fake transport recording issued queries and enrichment\n      calls and asserting the exact per-project counts and contents.\n- [ ] Each inbound-created ticket records its source project in `bridge_project` and the repos from\n      that project's mapping entry in `repos`; checked by asserting both fields on tickets created\n      from a two-project fixture.\n- [ ] The truncation ceiling applies per project, not as a shared budget; checked by a test where\n      one project exceeds it (raising `SilentTruncationError`) and a second under-limit project\n      still ingests successfully.\n- [ ] A single-project (unseeded) mapping issues an identical query pair and single enrichment pass\n      to the pre-change behaviour; checked by a regression test comparing the recorded\n      queries/calls.\n- [ ] A configured project returning zero issues does not fail the pass; checked by an\n      empty-result fixture.",
         "priority": "High",
         "status": "To Do",
         "summary": "Multi-project inbound fetch: per-project JQL fan-out and source-project recording"
@@ -39453,244 +39453,15 @@
     "4df6-80ae-5bc0-4023": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Why",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The 744b editor renders structural topology with a naive layout \u2014 a broken viewer, not a legible",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "view. This story makes the canvas LEGIBLE (layout/edges/nesting). NOTE (post plan-review reconciliation):",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "the PROPERTIES PANEL is owned by S8 (a83a-fadf-d7f2-43da), and BRANCH/CONNECTION UX is deferred (epic S9) \u2014",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "both REMOVED from this story to eliminate the overlap the review flagged.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## What",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. **Real layered layout.** `_emit_di` sets y from nesting-lane only, so top-level siblings share y=80",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "   and overlap. Generate a proper layered layout (rank=x, sibling order=y) \u2014 own Python layout, NOT",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "   bpmn-auto-layout (it stacks our event-free nested IR in one column; see the 744b session log).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. **Edge waypoints.** We emit 2 waypoints at shape CENTERS; arrows cross node text. Emit cropped/docked",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "   waypoints so arrows dock to node edges on open.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. **Inline nesting.** Child shapes land on the root plane with no `isExpanded`/containment, so loop/map/",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "   branch bodies open in a separate drill-down and overlap. Emit EXPANDED sub-processes (isExpanded=true +",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "   child bounds inside parent) so nesting shows on one canvas (or make drill-down deliberate + documented).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Scope",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Editor host (`editor.py build_host_html`) + DI generation (`bpmn.py _emit_di`/`_emit_step`). OUT: properties",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "panel (S8), branch/connection UX (deferred S9), IR semantics. Uses the already-vendored bpmn-js bundle.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] No two nodes overlap on open; the top frame reads left-to-right with parallel siblings on distinct rows.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Arrows dock to node edges on open (no center-through-text routing).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] loop/map/branch bodies are visible without leaving the canvas (expanded sub-processes), or drill-down is intentional + documented.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] roundtrip-demo.yaml opens legibly and demonstrates layout + edges + nesting (properties/branch UX are out of scope, owned by S8 / deferred).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Why\nThe 744b editor renders structural topology with a naive layout \u2014 a broken viewer, not a legible\nview. This story makes the canvas LEGIBLE (layout/edges/nesting). NOTE (post plan-review reconciliation):\nthe PROPERTIES PANEL is owned by S8 (a83a-fadf-d7f2-43da), and BRANCH/CONNECTION UX is deferred (epic S9) \u2014\nboth REMOVED from this story to eliminate the overlap the review flagged.\n\n## What\n1. **Real layered layout.** `_emit_di` sets y from nesting-lane only, so top-level siblings share y=80\n   and overlap. Generate a proper layered layout (rank=x, sibling order=y) \u2014 own Python layout, NOT\n   bpmn-auto-layout (it stacks our event-free nested IR in one column; see the 744b session log).\n2. **Edge waypoints.** We emit 2 waypoints at shape CENTERS; arrows cross node text. Emit cropped/docked\n   waypoints so arrows dock to node edges on open.\n3. **Inline nesting.** Child shapes land on the root plane with no `isExpanded`/containment, so loop/map/\n   branch bodies open in a separate drill-down and overlap. Emit EXPANDED sub-processes (isExpanded=true +\n   child bounds inside parent) so nesting shows on one canvas (or make drill-down deliberate + documented).\n\n## Scope\nEditor host (`editor.py build_host_html`) + DI generation (`bpmn.py _emit_di`/`_emit_step`). OUT: properties\npanel (S8), branch/connection UX (deferred S9), IR semantics. Uses the already-vendored bpmn-js bundle.\n\n## Acceptance Criteria\n- [ ] No two nodes overlap on open; the top frame reads left-to-right with parallel siblings on distinct rows.\n- [ ] Arrows dock to node edges on open (no center-through-text routing).\n- [ ] loop/map/branch bodies are visible without leaving the canvas (expanded sub-processes), or drill-down is intentional + documented.\n- [ ] roundtrip-demo.yaml opens legibly and demonstrates layout + edges + nesting (properties/branch UX are out of scope, owned by S8 / deferred).",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "bpmn-js editor: legible canvas (layout, edge waypoints, expanded nesting)"
       },
       "baseline_advanced_at": "2026-07-16T20:26:50Z",
       "created_at": "2026-06-25T22:59:35Z",
       "jira_key": "REB-128",
+      "peer_parent": "REB-338",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:59:35Z"
     },
@@ -60077,9 +59848,17 @@
       "updated_at": "2026-06-25T23:04:38Z"
     },
     "7b9a-f855-b2e4-49f9": {
+      "baseline": {
+        "assignee": null,
+        "description": "Follow-up from d19d LLM-Review (Gerrit change 1776, advisory comments \u2014 d19d landed with LLM-Review +1).\n\nFour advisory findings to harden the many-to-many outbound path:\n\n1. (correctness) Case-sensitivity mismatch: the create-path membership check in outbound_differ._compute_outbound_create_mutation uses `target not in mapping.projects` (case-SENSITIVE), while the applier's cross-project guard normalizes both sides to uppercase. A bridge_project differing in case from the mapping key (e.g. 'b' vs 'B') would suppress the create but pass the guard. Jira project keys are canonically uppercase and the mapping is seeded from them, so this does not trigger in practice, but the two paths should agree. Make the create-path check case-insensitive (or normalize both consistently).\n\n2. (tests) The applier's new many-to-many guard branch (list(read_projects(repo_root).keys()) or _project fed to _cross_project_targets) is only unit-tested at the pure helper level with a literal set; the store-loading wiring in the caller is not exercised end-to-end. Add an integration test that seeds projects.json and drives the guard through the caller.\n\n3. (tests) run_differs newly threads load_mapping(repo_root) into the outbound diff; the comment asserts a malformed projects.json fails closed (ValueError aborts the pass) but there is no test at the run_differs seam proving it. Add one.\n\n4. (correctness) The projects mapping is read twice from disk per pass \u2014 load_mapping in run_differs (create resolution) and read_projects in applier (guard set). A mid-pass projects.json change could make them disagree. Consider threading one read through, or accept + document (single-pass window; projects.json changes are rare CLI writes). Low priority.\n\nNone are regressions; the create-path resolution is new behavior gated on a seeded mapping (not live until a store seeds projects.json).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "M2M outbound: case-insensitive project membership + guard-wiring test depth"
+      },
       "created_at": "2026-08-14T15:42:29Z",
       "jira_id": "4588719",
       "jira_key": "REB-2912",
+      "peer_parent": "REB-2658",
       "state": "confirmed",
       "updated_at": "2026-08-14T15:42:33Z"
     },
@@ -67916,6 +67695,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-06T19:06:46Z"
     },
+    "8a8e-71b5-4519-4426": {
+      "created_at": "2026-08-14T16:41:25Z",
+      "jira_id": "4588730",
+      "jira_key": "REB-2922",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T16:41:29Z"
+    },
     "8aed-e264-7112-4c2f": {
       "baseline": {
         "assignee": {
@@ -70703,9 +70489,17 @@
       "updated_at": "2026-06-28T22:31:02Z"
     },
     "91aa-167f-1061-4f17": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\nThe live Jira DC harness test tests/external/live_jira_dc/test_store_copy_isolation.py::test_the_store_copy_is_complete_and_scrubbed FAILS on current main:\n\n  AssertionError: binding/snapshot artifacts survived the scrub: ['.bridge_state']\n  assert ['.bridge_state'] == []\n\nObserved in the 'jira DC harness smoke' job of Live External Integration run 31807853902 (job 94790999602), 2026-08-14, against origin/main. The store-copy scrub step (from J11 / nonmystic-topiary-toadfish, epic e369) does not remove the .bridge_state directory, so a binding/snapshot artifact survives into the copied store the test asserts is fully scrubbed. Likely related to recent .bridge_state cache work (epic 0303).\n\n## Impact\nIndependent of the rich-text epic (vigilant-erasable-pony) \u2014 surfaced while running that epic's live DC-harness job. It makes the DC-harness job red on an unrelated cell, muddying the live signal for other work.\n\n## Acceptance Criteria\n- [ ] The store-copy scrub removes .bridge_state (and any equivalent binding/snapshot cache) so test_the_store_copy_is_complete_and_scrubbed passes in the live DC-harness job.\n- [ ] A root-cause note explains why .bridge_state began surviving the scrub (regression origin).\n\n## Notes\nDiscovered during orchestration of vigilant-erasable-pony's operator-dispatched live run; NOT a blocker for graywolf (whose own rich-text test is tracked separately).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Live DC store-copy scrub leaves .bridge_state behind (test_store_copy_isolation regression)"
+      },
       "created_at": "2026-08-14T15:42:34Z",
       "jira_id": "4588720",
       "jira_key": "REB-2913",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T15:42:37Z"
     },
@@ -80870,7 +80664,7 @@
         "assignee": null,
         "description": "## Context\nGerrit Verify currently runs thousands of repeated real Pandoc subprocess conversions over the complete DC wiki corpus. Run 31798375024 attributed at least 184.32 seconds of the macOS critical path to two visible corpus phases alone. The operator confirmed the architecture research and approved moving the complete real-Pandoc corpus replay to the External Integration Tests workflow. Current ADR 0095 explicitly requires every conversion assertion to use the real binary, so this testing-boundary change requires a narrow superseding ADR before implementation.\n\n## Research decision\nPopular maintained OSS precedent supports committed golden/static outputs plus compact live boundary probes: Pandoc uses literal writer outputs; nbconvert and pypandoc use small real-Pandoc probes; Kubernetes client-go commits golden request/response fixtures; Rust compiletest uses blessed output snapshots. The approved design keeps three representative live corpus bodies (code_arrow, table, prose) plus existing compact provenance probes in Gerrit Verify. It preserves every assertion class against committed outputs in Verify. It moves complete real-Pandoc replay to a dedicated weekly/manual Pandoc job inside .github/workflows/external-integration.yml.\n\nThe current External Integration workflow has four Ubuntu-only jobs and no macOS runner. The later implementation ticket must therefore add an explicit pandoc-corpus-replay job whose matrix is os: [ubuntu-latest, macos-latest]; this is planned future implementation scope, not a claim about current workflow state and not part of this documentation-only ADR change. The job will run the complete replay on both platforms. Version drift and platform-specific binary fingerprints fail fast. Deterministic regeneration remains available. The 184.32-second figure is a lower-bound estimate; implementation must obtain paired A/B evidence.\n\n## Plan\n- Add a numbered ADR in docs/adr that narrowly supersedes ADR 0095 only where it mandates a real Pandoc process for every conversion assertion.\n- Preserve the production segmenting renderer, pin/provenance, Linux/macOS platform boundary, fallback behavior, and every safety/fixed-point/richness assertion class.\n- Amend ADR 0095 with a clear Superseded-by notice scoped to the testing-assurance clause.\n- Update docs/architecture.md with the authoritative hot-path versus external-integration verification boundary.\n- Record that the later implementation adds a dedicated pandoc-corpus-replay matrix to the currently Ubuntu-only external-integration workflow.\n- Regenerate the ADR index and number markers using scripts/gen_adr_index.py.\n- Run ADR numbering/index guards, documentation/link checks, lint, and the repository commit-ticket verifier.\n- Submit this documentation-only decision through Gerrit. Do not begin implementation until this ADR is merged after HOLD approval.\n\n## Expected file impact\n- docs/adr/0095-dc-segmenting-wiki-renderer.md\n- docs/adr/0096-pandoc-corpus-verification-boundary.md\n- docs/adr/README.md\n- docs/adr/.numbers/0096\n- docs/architecture.md\n\n## Acceptance Criteria\n- [ ] The ADR cites the confirmed dependency research and named OSS precedents.\n- [ ] The ADR narrows supersession to the test execution boundary.\n- [ ] The ADR preserves every production renderer invariant.\n- [ ] Gerrit Verify retains three representative live corpus contracts plus the compact pin/provenance probes.\n- [ ] Every existing assertion class remains required against committed deterministic outputs in Gerrit Verify.\n- [ ] The ADR states that external-integration.yml is currently Ubuntu-only.\n- [ ] The ADR assigns future implementation of a dedicated pandoc-corpus-replay matrix with ubuntu-latest and macos-latest arms.\n- [ ] Complete real-Pandoc corpus replay is assigned to that weekly/manual external-integration job.\n- [ ] Installed Pandoc version drift fails fast.\n- [ ] Each supported platform binary fingerprint is verified.\n- [ ] Deterministic fixture regeneration remains documented.\n- [ ] The ADR states that 184.32 seconds is a one-run lower bound.\n- [ ] The ADR requires paired A/B implementation evidence.\n- [ ] ADR 0095 points to the superseding decision.\n- [ ] docs/architecture.md documents the verification boundary.\n- [ ] ADR number/index guards pass.\n- [ ] Documentation link guards pass.\n- [ ] No implementation code is included in this ADR change.\n- [ ] No test-routing change is included in this ADR change.\n- [ ] [operator-attested] The ADR reaches HOLD in Gerrit; evidence is the Gerrit change id and HOLD announcement recorded on this ticket.\n- [ ] [operator-attested] The ADR merges only after explicit approval; evidence is the approval identity and merge timestamp recorded on this ticket.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "ADR: move complete Pandoc corpus replay to external integration"
       },
       "created_at": "2026-08-14T14:43:18Z",
@@ -81693,6 +81487,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:10:53Z"
+    },
+    "a62f-8041-be72-4e0f": {
+      "created_at": "2026-08-14T16:41:34Z",
+      "jira_id": "4588731",
+      "jira_key": "REB-2923",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T16:41:37Z"
     },
     "a643-1c30-0bb0-46ee": {
       "baseline": {
@@ -103391,10 +103192,24 @@
     },
     "d19d-7f60-0137-475a": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. Both create transports take their project from a single value set once at construction \u2014 Cloud `AcliClient.create_issue` uses `self.jira_project` (`src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py:274-330`) and the Data Center adapter `_IssuesMixin.create_issue` uses `self.project` (`src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py:163-189`, `fields.setdefault(\"project\", {\"key\": self.project})`). The applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:230-255`, `_cross_project_targets`, added by bug `626d`), and its sole caller (`applier.py:593-610`) feeds it a single string `select_backend(load_config()).project`. With a mapping that lists several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nThree changes: resolve the create target per ticket (covering BOTH transports), relax the guard to set membership, and change the guard's caller to supply the set.\n\n**Create targets the ticket's resolved project \u2014 resolved once, above both transports.** The resolution happens where the create mutation is BUILT, in `_compute_outbound_create_mutation` (`outbound_differ.py:502`), which already receives the full local `ticket` (so it can read `bridge_project`). It calls `resolve_project(ticket, mapping)` (`projects_store.py:97-110`) against the store mapping (loaded once via `projects_store.read_projects(repo_root)` and threaded into `compute_outbound_mutations`). Three outcomes:\n  * resolves to \"not synced\" (absent\u2192no legacy_default, or explicit `\"\"`) \u2192 NO create mutation;\n  * resolves to a key **NOT in `mapping.projects`** \u2192 NO create mutation (a stale/typo binding must\n    not create against an unsynced project \u2014 this closes the create-side gap the guard cannot,\n    since creates are guard-exempt: their key is a local-id placeholder, so `_JIRA_KEY_RE` never\n    matches);\n  * resolves to a valid in-set key \u2192 stamped into the mutation's fields under the reserved key\n    `_bridge_target_project`.\nBecause the mutation is consumed by whichever `TicketTransport` is active (`dispatch_one.create_one` splats `mutation[\"fields\"]` into `client.create_issue(ticket_data)` unchanged), resolving here covers Cloud AND Data Center from one site. Each transport reads `ticket_data.get(\"_bridge_target_project\")` and falls back to its construction-time value when the key is absent (legacy single-project behaviour preserved): Cloud `project = ticket_data.get(\"_bridge_target_project\") or self.jira_project`; DC `fields.setdefault(\"project\", {\"key\": ticket_data.get(\"_bridge_target_project\") or self.project})`. The reserved key is not a Jira field name, so it is ignored by field translation and never sent to the tracker.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is deliberately the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as it is today. Only keys the store legitimately owns now pass.\n\n**The guard's caller supplies the set.** The sole caller (`applier.py:593-610`) currently computes a single `_project = select_backend(load_config()).project`. It instead loads the store's project set via `projects_store.read_projects(repo_root)` (keys of `mapping.projects`) and passes that set. An empty/absent mapping falls back to the single configured project so single-project stores behave exactly as before.\n\n**Module size.** All touched files sit under the 800-line hard gate with headroom: `applier.py` 762, `outbound_differ.py` 737, `acli.py` 747, `dispatch_one.py` 679, DC `_issues.py` 321. The prior dispatch_one size-relief prerequisite is retired \u2014 its motivating story (273a) is closed obsolete because 744a already graduated dispatch_one.py off the gate (now 679). Each edit here is small and local; no split is required or warranted.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` \u2014 resolve + validate + stamp the target\n  project when building the create mutation; thread the mapping into `compute_outbound_mutations`\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py` \u2014 Cloud create reads the payload target\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py` \u2014 DC create reads the\n  payload target (the second transport; both must honour the per-ticket project)\n- `src/rebar/_engine/rebar_reconciler/applier.py` \u2014 guard set-membership + caller supplies the set\n- Read-only dependency: `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 `resolve_project`\n  and `read_projects` / `mapping.projects` (the authoritative project set)\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test. Both transports are covered.\n\n- Happy path (both transports): a ticket resolving to project `B` in a store whose mapping lists `A`\n  and `B` produces a create call carrying `B`, not the repo default `A` \u2014 asserted against the Cloud\n  fake AND the Data Center fake.\n- Validation edge: a ticket whose `bridge_project` names `Z` (NOT in the `A`/`B` mapping) emits no\n  create mutation \u2014 proving a stale/typo binding cannot create against an unsynced project.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises\n  `CrossProjectTargetError`. The negative half proves the relaxation did not disable the guard.\n- Precondition assertion: the guard runs pre-flight \u2014 the fake records zero writes when the\n  out-of-set mutation raises, proving no partial leak.\n- Edge: a ticket resolving to \"not synced\" produces no outbound mutation of any kind.\n- Collateral invariant: with a single-project mapping the guard behaves exactly as before \u2014 an\n  out-of-project key raises, an in-project key passes.\n\n## Acceptance Criteria\n\n- [ ] An outbound create targets the ticket's resolved project rather than the client default, on the\n      Cloud transport; checked by a Cloud fake asserting the project on the recorded create call.\n- [ ] An outbound create targets the ticket's resolved project on the Data Center transport; checked\n      by a DC fake asserting the project on the recorded create call.\n- [ ] A ticket whose resolved project is absent from the mapping set emits no create mutation;\n      checked by asserting an empty mutation list for it.\n- [ ] An update inside the configured set proceeds while one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [ ] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [ ] A ticket resolving to not-synced emits no outbound mutation; checked by asserting an empty\n      mutation list for it while a synced sibling produces one.\n- [ ] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. Both create transports take their project from a single construction-time value \u2014 Cloud `AcliClient.create_issue` uses `self.jira_project` (`adapters/jira/acli.py:274-330`); DC `_IssuesMixin.create_issue` uses `self.project` (`adapters/jira_datacenter/_issues.py:163-189`). And the applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:230-255`, `_cross_project_targets`, bug `626d`); its sole caller (`applier.py:593-610`) passes a single string `select_backend(load_config()).project`. With a mapping listing several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nThree changes: resolve the create target per ticket (covering BOTH transports), relax the guard to set membership, and change the guard's caller to supply the set.\n\n**Create targets the ticket's resolved project \u2014 resolved once, above both transports.** The resolution happens where the create mutation is BUILT, in `_compute_outbound_create_mutation` (`outbound_differ.py:502`), which already receives the full local `ticket` (so it can read `bridge_project`). It calls `resolve_project(ticket, mapping)` (`projects_store.py:97-110`) against the store mapping, loaded once via `projects_store.load_mapping(repo_root)` (the `Mapping` that `resolve_project` and the `mapping.projects` membership check both require) and threaded into `compute_outbound_mutations` as a new optional field on `OutboundDiffConfig`, populated by that function's sole caller `run_differs.py:466` (which already holds `repo_root`). Three outcomes:\n  * resolves to \"not synced\" (absent\u2192no legacy_default, or explicit `\"\"`) \u2192 NO create mutation;\n  * resolves to a key **NOT in `mapping.projects`** \u2192 NO create mutation (a stale/typo binding must\n    not create against an unsynced project \u2014 this closes the create-side gap the guard cannot, since\n    creates are guard-exempt: their key is a local-id placeholder, so `_JIRA_KEY_RE` never matches);\n  * resolves to a valid in-set key \u2192 stamped into the mutation's `fields` under the reserved key\n    `_bridge_target_project`.\n\nBecause the create mutation's `fields` reach whichever `TicketTransport` is active (`dispatch_one.create_one` copies `mutation[\"fields\"]` into the `ticket_data` it hands `client.create_issue`), resolving here covers Cloud AND Data Center from one site. Each transport reads `ticket_data.get(\"_bridge_target_project\")` and falls back to its construction-time value when the key is absent (legacy single-project behaviour preserved): Cloud `project = ticket_data.get(\"_bridge_target_project\") or self.jira_project`; DC `fields.setdefault(\"project\", {\"key\": ticket_data.get(\"_bridge_target_project\") or self.project})`. The transports handle the reserved key explicitly, because they treat unknown payload keys DIFFERENTLY. Cloud's `create_issue` EXTRACTS only the fields it names and ignores the rest, so the key never reaches ACLI. DC's `create_issue` splats the whole TRANSLATED dict into `self._client.create_issue(**fields)` \u2014 so the key must be DROPPED before the splat or it is sent as a bogus Jira field id (the `HTTP 400 \u2026 Field \u2026 cannot be set` class of bug 18a5). It is added to `_BRIDGE_ONLY_CREATE_FIELDS` (`_issues.py:29`) alongside the bridge-only names `title`/`ticket_type`, so `_translate_create_fields` reads it for the project then drops it \u2014 that drop is what keeps the reserved key off the tracker by construction, exactly as the bridge-only names already are.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as today. Only keys the store legitimately owns now pass.\n\n**The guard's caller supplies the set.** The sole caller (`applier.py:593-610`) currently computes a single `_project = select_backend(load_config()).project`. It instead loads the store's project set via `projects_store.read_projects(repo_root)`, whose keys ARE the project set, and passes that set. An empty/absent mapping falls back to the single configured project so single-project stores are unchanged.\n\n**Module size.** All touched files stay under the 800-line gate with headroom; each edit is small and local.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` \u2014 resolve + validate + stamp the target\n  project on the create mutation; new optional `OutboundDiffConfig` mapping field\n- `src/rebar/_engine/rebar_reconciler/run_differs.py` \u2014 populate the new config field from the loaded\n  mapping (the sole caller of `compute_outbound_mutations`)\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py` \u2014 Cloud create reads the payload target\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py` \u2014 DC create reads the\n  payload target AND drops the reserved key in `_translate_create_fields`\n- `src/rebar/_engine/rebar_reconciler/applier.py` \u2014 guard set-membership + caller supplies the set\n- Read-only dependency: `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 `load_mapping`/`Mapping`,\n  `resolve_project`, `read_projects` (the authoritative project set)\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test. Both transports are covered.\n\n- Happy path (both transports): a ticket resolving to project `B` in a store whose mapping lists `A`\n  and `B` produces a create call carrying `B`, not the repo default `A` \u2014 asserted against the Cloud\n  fake AND the Data Center fake.\n- DC leak guard: the DC fake's recorded create fields do NOT contain `_bridge_target_project`,\n  proving the reserved key is dropped and never sent as a Jira field.\n- Validation edge: a ticket whose `bridge_project` names `Z` (NOT in the `A`/`B` mapping) emits no\n  create mutation \u2014 proving a stale/typo binding cannot create against an unsynced project.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises `CrossProjectTargetError`.\n\n## Acceptance Criteria\n\n- [ ] An outbound create targets the ticket's resolved project rather than the client default on the\n      Cloud transport; checked by a Cloud fake asserting the project on the recorded create call.\n- [ ] An outbound create targets the ticket's resolved project on the Data Center transport; checked\n      by a DC fake asserting the project on the recorded create call.\n- [ ] The reserved `_bridge_target_project` key is dropped from the DC create field set; checked by\n      asserting it is absent from the DC fake's recorded create fields.\n- [ ] A ticket whose resolved project is absent from the mapping set emits no create mutation;\n      checked by asserting an empty mutation list for it.\n- [ ] An update inside the configured set proceeds while one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [ ] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [ ] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Multi-project outbound dispatch and cross-project guard relaxation to set membership"
       },
       "created_at": "2026-08-08T03:37:55Z",
@@ -128018,6 +127833,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:39Z"
     },
+    "f96b-3498-8f04-40b0": {
+      "created_at": "2026-08-14T16:41:41Z",
+      "jira_id": "4588732",
+      "jira_key": "REB-2924",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T16:41:45Z"
+    },
     "f978-847d-f874-4f2d": {
       "baseline": {
         "assignee": null,
@@ -133350,6 +133172,9 @@
     "REB-2912": "7b9a-f855-b2e4-49f9",
     "REB-2913": "91aa-167f-1061-4f17",
     "REB-292": "b80d-ba60-afe7-42a4",
+    "REB-2922": "8a8e-71b5-4519-4426",
+    "REB-2923": "a62f-8041-be72-4e0f",
+    "REB-2924": "f96b-3498-8f04-40b0",
     "REB-293": "b94d-2777-28d8-4a6f",
     "REB-294": "bb4e-7aae-c5a3-40a6",
     "REB-295": "bbc0-1dbd-d9cb-4917",
