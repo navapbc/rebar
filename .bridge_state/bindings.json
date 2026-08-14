@@ -15088,6 +15088,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-09T20:30:43Z"
     },
+    "1ec4-d7e9-b1f1-40c3": {
+      "created_at": "2026-08-14T10:45:32Z",
+      "jira_id": "4588692",
+      "jira_key": "REB-2902",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T10:45:35Z"
+    },
     "1ecf-fe38-9247-421b": {
       "baseline": {
         "assignee": null,
@@ -72542,274 +72549,15 @@
     "944c-374d-c3aa-47c2": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Summary",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "The reducer's strategy layer is dead code: reduce_ticket accepts/defaults LastTimestampWinsStrategy but never calls strategy.resolve, and replay performs NO UUID dedup \u2014 duplicate-UUID event files double-apply.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Reproduction Steps",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(verified on installed 0.4.0 == HEAD, temp store)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. Create a ticket; rebar comment <id> \"only-once\".",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. Copy the COMMENT event file to a new filename (same uuid in payload, ts+1s).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. rebar show <id> -> comments == [\"only-once\",\"only-once\"].",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Expected vs Actual",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Expected (documented at ticket_reducer/_api.py:31-44): \"dedup by UUID (first occurrence wins), sort by timestamp\".",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Actual: _processors.py:347-416 replays raw files in FILENAME order, no UUID dedup (only snapshot-source-uuids skipped), sorted by filename timestamp not event timestamp. MostStatusEventsWinsStrategy equally unreachable. Verified: no .resolve( call site in ticket_reducer/.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Impact",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Merge-as-union convergence leans on UUID-level determinism; duplicate-UUID files (recovery cherry-picks, manual copies, fsck-recover paths) silently double-apply comments/edits/links.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Source",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- src/rebar/_engine/ticket_reducer/_api.py:197-244 (unused strategy param/default)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- src/rebar/_engine/ticket_reducer/_processors.py:347-416 (replay loop)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Fix direction",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Decide: (a) wire the strategy into replay (load -> strategy.resolve -> process), or (b) delete the dead strategy classes/param and add a minimal seen-UUID skip in replay_events, documenting filename-order replay. See validation notes comment for measured blast radius of each (incl. test_ticket_reducer_conflict.py interactions) before choosing.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Suggested RED test",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Duplicate-UUID event under a second filename -> applied exactly once; existing conflict-resolution tests stay green.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Duplicate-UUID events apply once (RED test first)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Decision recorded: wire-strategy vs minimal-dedup + dead-code deletion",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] tests/scripts/test_ticket_reducer_conflict.py and reducer suites green",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] _api.py docstring matches the actual replay semantics afterward",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Summary\nThe reducer's strategy layer is dead code: reduce_ticket accepts/defaults LastTimestampWinsStrategy but never calls strategy.resolve, and replay performs NO UUID dedup \u2014 duplicate-UUID event files double-apply.\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD, temp store)\n1. Create a ticket; rebar comment <id> \"only-once\".\n2. Copy the COMMENT event file to a new filename (same uuid in payload, ts+1s).\n3. rebar show <id> -> comments == [\"only-once\",\"only-once\"].\n\n## Expected vs Actual\n- Expected (documented at ticket_reducer/_api.py:31-44): \"dedup by UUID (first occurrence wins), sort by timestamp\".\n- Actual: _processors.py:347-416 replays raw files in FILENAME order, no UUID dedup (only snapshot-source-uuids skipped), sorted by filename timestamp not event timestamp. MostStatusEventsWinsStrategy equally unreachable. Verified: no .resolve( call site in ticket_reducer/.\n\n## Impact\nMerge-as-union convergence leans on UUID-level determinism; duplicate-UUID files (recovery cherry-picks, manual copies, fsck-recover paths) silently double-apply comments/edits/links.\n\n## Source\n- src/rebar/_engine/ticket_reducer/_api.py:197-244 (unused strategy param/default)\n- src/rebar/_engine/ticket_reducer/_processors.py:347-416 (replay loop)\n\n## Fix direction\nDecide: (a) wire the strategy into replay (load -> strategy.resolve -> process), or (b) delete the dead strategy classes/param and add a minimal seen-UUID skip in replay_events, documenting filename-order replay. See validation notes comment for measured blast radius of each (incl. test_ticket_reducer_conflict.py interactions) before choosing.\n\n## Suggested RED test\nDuplicate-UUID event under a second filename -> applied exactly once; existing conflict-resolution tests stay green.\n\n## Acceptance Criteria\n- [ ] Duplicate-UUID events apply once (RED test first)\n- [ ] Decision recorded: wire-strategy vs minimal-dedup + dead-code deletion\n- [ ] tests/scripts/test_ticket_reducer_conflict.py and reducer suites green\n- [ ] _api.py docstring matches the actual replay semantics afterward",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Reducer strategy is dead code: no UUID dedup on replay (duplicate-UUID events double-apply)"
       },
       "baseline_advanced_at": "2026-07-18T23:46:23Z",
       "created_at": "2026-06-25T23:08:19Z",
       "jira_key": "REB-238",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:08:19Z"
     },
@@ -99746,229 +99494,15 @@
     "c9be-211c-7c4e-4528": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Context",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Post-mortem of epic a88f (LLM Workflow Engine) via two validation subagents: a",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "coverage audit (behavioral+contractual \u00d7 hermetic+external) and a prior-art",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "comparison (GHA / Argo / Inspect / dotprompt / tarfile CVE). Several verified",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "defects + coverage gaps to address.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #1 bare `if:` (no `${{ }}`) no longer silently always-true (lint rejects)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #4 duplicate YAML keys rejected by the loader",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #19 tarfile data_filter guarded on Python < 3.11.4",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #20/#21 snapshot proc.wait after kill; sweep restores write bits; file-count cap",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #24 JUnit wrapped in `<testsuites>` with quoteattr + failure body",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #25 eval grader snapshot cross-checked against model id",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #30/#31 prompt front-matter survives CRLF/BOM",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #32 declared-optional prompt vars default to empty (match schema)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #33 variant overlay unions required/variables (no base-var drop)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] #14/#15/#16 runner doc-vs-impl drift removed (include_raw/parsing_error/pairing)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] run_eval raises NotImplementedError (not EvalError) when harness unwired",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] external: live workflow-run test under tests/external (marked external)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] contract: CLI run/status/result `--output json` validates vs workflow_run schema",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] golden: workflow.v1.schema.json + code_review.yaml frozen",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] all new/changed paths covered by hermetic tests; full suite green",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/medium_new.svg",
-          "id": "3",
-          "name": "Medium",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/3"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Context\nPost-mortem of epic a88f (LLM Workflow Engine) via two validation subagents: a\ncoverage audit (behavioral+contractual \u00d7 hermetic+external) and a prior-art\ncomparison (GHA / Argo / Inspect / dotprompt / tarfile CVE). Several verified\ndefects + coverage gaps to address.\n\n## Acceptance Criteria\n- [ ] #1 bare `if:` (no `${{ }}`) no longer silently always-true (lint rejects)\n- [ ] #4 duplicate YAML keys rejected by the loader\n- [ ] #19 tarfile data_filter guarded on Python < 3.11.4\n- [ ] #20/#21 snapshot proc.wait after kill; sweep restores write bits; file-count cap\n- [ ] #24 JUnit wrapped in `<testsuites>` with quoteattr + failure body\n- [ ] #25 eval grader snapshot cross-checked against model id\n- [ ] #30/#31 prompt front-matter survives CRLF/BOM\n- [ ] #32 declared-optional prompt vars default to empty (match schema)\n- [ ] #33 variant overlay unions required/variables (no base-var drop)\n- [ ] #14/#15/#16 runner doc-vs-impl drift removed (include_raw/parsing_error/pairing)\n- [ ] run_eval raises NotImplementedError (not EvalError) when harness unwired\n- [ ] external: live workflow-run test under tests/external (marked external)\n- [ ] contract: CLI run/status/result `--output json` validates vs workflow_run schema\n- [ ] golden: workflow.v1.schema.json + code_review.yaml frozen\n- [ ] all new/changed paths covered by hermetic tests; full suite green",
+        "priority": "Medium",
+        "status": "Done",
         "summary": "Post-epic hardening: workflow engine prior-art gotchas + coverage gaps"
       },
       "baseline_advanced_at": "2026-07-25T19:27:07Z",
       "created_at": "2026-06-25T23:15:19Z",
       "jira_key": "REB-311",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-06-25T23:15:19Z"
     },
@@ -135295,6 +134829,7 @@
     "REB-290": "b7af-9623-b1fa-4c47",
     "REB-2900": "ee68-5ff4-fa75-4788",
     "REB-2901": "1d71-a76c-04f6-4642",
+    "REB-2902": "1ec4-d7e9-b1f1-40c3",
     "REB-291": "b7e6-d8b8-29e7-40ad",
     "REB-292": "b80d-ba60-afe7-42a4",
     "REB-293": "b94d-2777-28d8-4a6f",
