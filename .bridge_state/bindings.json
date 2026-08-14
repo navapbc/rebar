@@ -29456,9 +29456,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nAGENTS.md's \"Module-size policy (when editing rebar itself)\" section prominently documents the 800-LOC module-size gate (`.github/module-size-limit.txt`) but says NOTHING about its sibling CI gate: the shrink-only C901 cyclomatic-complexity ratchet (`.github/complexity-baseline.json`, McCabe max-complexity 15, enforced by `scripts/check_complexity_baseline.py --check` as part of `make lint`).\n\nThe ratchet fails the build whenever a function gains NEW debt or grows PAST its recorded per-symbol ceiling. This is exactly the failure mode of routine work like adding a CLI flag or a guard clause (added branches -> increased complexity), so an agent that adds a couple of flags to an existing command (e.g. create_cli/edit_cli) hits it predictably. Because it is a structural gate the behavioral test oracle cannot see, an implementer/orchestrator only discovers it at pre-flight, forcing an unplanned behavior-preserving extraction pass.\n\nDiscovered while implementing story cef7 (bridge_project/repos create+edit flags): the flag/guard additions pushed create_core (23>21), create_cli (26>22), edit_core (24>21) past ceiling and made edit_cli (16) new, failing `make lint` although the change was under the 800 LOC cap and lint/typecheck were otherwise clean.\n\n## Approach\n\nAdd a short paragraph to AGENTS.md's Module-size policy section (or an adjacent \"Structural gates\" note) surfacing the complexity ratchet next to the LOC cap: what it is, that it is part of `make lint`, that it is shrink-only (fails on new/increased debt, ceilings in `.github/complexity-baseline.json`, threshold 15 in pyproject `[tool.ruff.lint.mccabe]`), that the fix is behavior-preserving extraction (never bumping the baseline), and how to inspect it (`ruff check --select C901 <file>` / `python scripts/check_complexity_baseline.py --check`). Cross-reference from the rebar-implement skill's 'ship the constraints the oracle cannot see' step so implementer briefs quote it alongside the module-size limit.\n\n## Acceptance Criteria\n\n- [ ] AGENTS.md surfaces the C901 shrink-only complexity ratchet in/next to the Module-size policy section, naming the gate command, the baseline file, the threshold source, and the extraction-not-baseline-bump remedy.\n- [ ] The note explains it runs under `make lint` and blocks CI like the module-size gate.\n- [ ] A one-line pointer is added so a reader knows how to census offenders (`ruff check --select C901`).",
+        "description": "## Context / Problem\n\nAGENTS.md's \"Module-size policy (when editing rebar itself)\" section prominently documents the 800-LOC module-size gate (`.github/module-size-limit.txt`) but says NOTHING about its sibling CI gate: the shrink-only C901 cyclomatic-complexity ratchet (`.github/complexity-baseline.json`, McCabe max-complexity 15, enforced by `scripts/check_complexity_baseline.py --check` as part of `make lint`).\n\nThe ratchet fails the build whenever a function gains NEW debt or grows PAST its recorded per-symbol ceiling. This is exactly the failure mode of routine work like adding a CLI flag or a guard clause (added branches -> increased complexity), so an agent that adds a couple of flags to an existing command (e.g. create_cli/edit_cli) hits it predictably. Because it is a structural gate the behavioral test oracle cannot see, an implementer/orchestrator only discovers it at pre-flight, forcing an unplanned behavior-preserving extraction pass.\n\nDiscovered while implementing story cef7 (bridge_project/repos create+edit flags): the flag/guard additions pushed create_core (23>21), create_cli (26>22), edit_core (24>21) past ceiling and made edit_cli (16) new, failing `make lint` although the change was under the 800 LOC cap and lint/typecheck were otherwise clean.\n\n## Approach\n\nAdd a short paragraph to AGENTS.md's Module-size policy section (or an adjacent \"Structural gates\" note) surfacing the complexity ratchet next to the LOC cap: what it is, that it is part of `make lint`, that it is shrink-only (fails on new/increased debt, ceilings in `.github/complexity-baseline.json`, threshold 15 in pyproject `[tool.ruff.lint.mccabe]`), that the fix is behavior-preserving extraction (never bumping the baseline), and how to inspect it (`ruff check --select C901 <file>` / `python scripts/check_complexity_baseline.py --check`). Cross-reference from the rebar-implement skill's 'ship the constraints the oracle cannot see' step so implementer briefs quote it alongside the module-size limit.\n\n## Acceptance Criteria\n\n- [x] AGENTS.md surfaces the C901 shrink-only complexity ratchet in/next to the Module-size policy section, naming the gate command, the baseline file, the threshold source, and the extraction-not-baseline-bump remedy.\n- [x] The note explains it runs under `make lint` and blocks CI like the module-size gate.\n- [x] A one-line pointer is added so a reader knows how to census offenders (`ruff check --select C901`).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Surface the shrink-only C901 complexity ratchet in AGENTS.md alongside the module-size cap"
       },
       "created_at": "2026-08-14T00:45:54Z",
@@ -41658,10 +41658,24 @@
     },
     "4f50-b1f2-78af-4326": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\nThe completed Gerrit Verified latency RCA optimized the macOS completion path, but Ubuntu jobs still occupy scarce org-wide runners for 11-14 minutes and contribute to queue contention. Follow-up questions identify three candidate levers: replace repeated Pandoc corpus rendering with static expected results plus a smaller boundary test, remove redundant work from the exhaustive 1,440-minute bridge cadence proof, and move genuinely live Jira DC coverage out of the per-change hot path while retaining fast unit coverage. This work must preserve behavioral coverage and must not use extra parallel jobs or unchanged aggregate runner usage.\n\n## Plan\n- Build a dated Ubuntu runner-time dossier from final post-remediation run 31752047186, pytest duration logs, workflow routing, and focused local runtime experiments.\n- For Pandoc and render_unit, map every current assertion to the code boundary it exercises; compare static golden fixtures, a bounded real-Pandoc contract sample, and full-corpus external execution using defect-seeded experiments to detect any coverage loss.\n- For the bridge cadence test, discriminate between the cost of the 1,440 arithmetic checks and invariant workflow YAML I/O; prefer hoisting invariant I/O if it preserves the exhaustive proof.\n- Inventory expensive Jira DC/default-tier tests, identify which require a real Jira or external binary, and map them to faster existing or new unit contracts before proposing any lane move.\n- Compare each candidate with current practice in popular actively maintained OSS projects and search tracker history for prior acceptance or rejection.\n- Record a confirmed RCA and measured runner-time/wall-time savings. Create linked implementation tickets only for remediations that preserve coverage; under the operator standing approval, implement those matching OSS consensus through Gerrit.\n\n## Acceptance Criteria\n- [ ] Every Ubuntu operation or test phase over 30 seconds in the final sample is attributed to a specific mechanism and measured with a focused baseline.\n- [ ] Pandoc corpus, render_unit, bridge cadence, and Jira DC lane-move proposals each have an assertion-level coverage map and an A/B runtime estimate.\n- [ ] Each proposal cites tracker history and practices from popular actively maintained OSS projects.\n- [ ] No accepted remediation removes an assertion, behavioral equivalence class, OS/Python cell, or external boundary; moved coverage has an explicit destination and schedule.\n- [ ] Runner-minute and expected queue-pressure savings are quantified without counting parallel matrix time as critical-path wall time.\n- [ ] Every consensus-backed remediation is implemented on a linked ticket, passes repository gates and Gerrit LLM-Review +1 plus Verified +1, and merges before this task closes.\n- [ ] Non-consensus or coverage-risking proposals are summarized with evidence and left for operator disposition.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nThe completed Gerrit Verified latency RCA optimized the macOS completion path, but Ubuntu jobs still occupy scarce org-wide runners for 11-14 minutes and contribute to queue contention. Follow-up questions identify three candidate levers: replace repeated Pandoc corpus rendering with static expected results plus a smaller boundary test, remove redundant work from the exhaustive 1,440-minute bridge cadence proof, and determine whether expensive Jira DC-oriented default-tier tests can move out of the per-change hot path while retaining fast unit coverage. The genuinely live tests/external/live_jira_dc suite is already excluded from Gerrit Verified by the `not external` selector and runs in its dedicated harness; moving that suite again would save zero. This work must preserve behavioral coverage and must not use extra parallel jobs or unchanged aggregate runner usage.\n\n## Plan\n- Build a dated Ubuntu runner-time dossier from final post-remediation run 31752047186, pytest duration logs, workflow routing, and focused local runtime experiments.\n- For Pandoc and render_unit, map every current assertion to the code boundary it exercises. Include both full-corpus consumers: test_wiki_render_corpus.py (~884 pass-1 subprocesses plus additional passes) and test_wiki_render_hardening.py (~1,768 subprocesses for byte-equivalence). Compare static golden fixtures, a bounded real-Pandoc contract sample, and full-corpus external execution using defect-seeded experiments to detect any coverage loss. Treat the pinned Pandoc-version-to-output coupling as an explicit external boundary. Any accepted golden fixture must identify its Pandoc version and binary fingerprint, provide a documented regeneration command, and include a fast drift assertion that fails when the installed Pandoc version differs. The full real-Pandoc corpus must remain in the scheduled external-integration workflow as the revalidation destination, including after pin changes.\n- For the bridge cadence test, discriminate between the cost of the 1,440 arithmetic checks and invariant workflow YAML I/O; prefer hoisting invariant I/O if it preserves the exhaustive proof.\n- Confirm the live Jira DC suite routing, then inventory the Jira DC-oriented harness-free tests that actually execute in the default tier. Identify which, if any, exercise a genuine external boundary rather than our code, and map any proposed lane move to faster existing or new unit contracts before implementation.\n- Compare each candidate with current practice in at least three named, popular, actively maintained OSS projects. Consensus means at least two-thirds of the surveyed projects, rounded up, use the practice and no surveyed project documents rejecting it for coverage or reliability; otherwise route the proposal to operator disposition.\n- Search tracker history for prior acceptance or rejection of every proposal.\n- Measure deterministic savings with paired before/after runs under the same environment. Report per-cell elapsed-time delta, sum the deltas across the three Ubuntu Python cells as runner-minutes freed per Verified run, and report the baseline-normalized Ubuntu occupancy reduction as `sum(cell deltas) / sum(baseline cell durations)`. This occupancy metric is the queue-pressure capacity effect; do not infer queue-wait reduction from one run. If GitHub job records expose queued/start timestamps for a multi-run sample, report the observed wait distribution separately with sample size and confidence, without attributing causality.\n- Record a confirmed RCA and measured runner-time/wall-time savings. Create linked implementation tickets only for remediations that preserve coverage; under the operator standing approval, implement those meeting the defined OSS-consensus bar through Gerrit. Back-out for any merged CI behavior change is a Gerrit revert restoring the prior full per-change execution; the scheduled full-corpus lane remains available as the coverage oracle during diagnosis.\n\n## Acceptance Criteria\n- [ ] Every Ubuntu operation or test phase over 30 seconds in the final sample is attributed to a specific mechanism and measured with a focused baseline.\n- [ ] The Pandoc corpus proposal covers both full-corpus consumers and has an assertion-level coverage map plus A/B runtime estimate.\n- [ ] The render_unit proposal has an assertion-level coverage map and A/B runtime estimate.\n- [ ] The bridge-cadence proposal has an assertion-level coverage map and A/B runtime estimate.\n- [ ] [operator-attested] The live Jira DC routing is recorded with workflow citations.\n- [ ] The default-tier Jira DC-oriented proposal has an assertion-level coverage map and A/B runtime estimate.\n- [ ] Each proposal cites tracker history.\n- [ ] Each proposal cites at least three named popular actively maintained OSS projects and applies the defined consensus rule.\n- [ ] No accepted remediation removes an assertion, behavioral equivalence class, OS/Python cell, or external boundary.\n- [ ] Every moved coverage boundary has an explicit destination and schedule.\n- [ ] Every accepted golden fixture identifies the exact Pandoc version and binary fingerprint that produced it.\n- [ ] Every accepted golden fixture includes a documented runnable regeneration command.\n- [ ] Every accepted golden fixture has a fast automated version-drift assertion and a scheduled full real-Pandoc revalidation lane.\n- [ ] Runner-minute savings are quantified without counting parallel matrix time as critical-path wall time.\n- [ ] Queue-pressure capacity savings are reported as runner-minutes freed per run and baseline-normalized Ubuntu occupancy reduction; any observed queue-wait distribution is reported separately and not presented as causal.\n- [ ] Every consensus-backed remediation is implemented on a linked ticket.\n- [ ] Every implemented remediation passes repository gates and Gerrit LLM-Review +1 plus Verified +1 before merge.\n- [ ] Every implemented remediation merges before this task closes.\n- [ ] Non-consensus or coverage-risking proposals are summarized with evidence and left for operator disposition.\n- [ ] The back-out path for each merged remediation is recorded as a Gerrit revert restoring full per-change execution.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Reduce Ubuntu CI runner occupancy without losing test coverage"
       },
       "created_at": "2026-08-14T00:45:55Z",
@@ -44192,6 +44206,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-20T00:52:15Z"
     },
+    "573a-c8c2-ce2b-4b7f": {
+      "created_at": "2026-08-14T03:16:12Z",
+      "jira_id": "4588671",
+      "jira_key": "REB-2888",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T03:16:15Z"
+    },
     "5766-fe6f-83d0-4252": {
       "baseline": {
         "assignee": null,
@@ -44235,6 +44256,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-06T19:04:12Z"
+    },
+    "57b6-90b7-87bb-45e7": {
+      "created_at": "2026-08-14T03:16:15Z",
+      "jira_id": "4588672",
+      "jira_key": "REB-2889",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T03:16:18Z"
     },
     "57d6-9fdf-d67c-4e6c": {
       "baseline": {
@@ -56655,6 +56683,13 @@
       "state": "confirmed",
       "updated_at": "2026-07-12T14:33:57Z"
     },
+    "6ccc-0577-198c-44fa": {
+      "created_at": "2026-08-14T03:16:22Z",
+      "jira_id": "4588673",
+      "jira_key": "REB-2890",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T03:16:25Z"
+    },
     "6d0d-7580-e18f-48c3": {
       "baseline": {
         "assignee": null,
@@ -60153,6 +60188,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-28T22:30:54Z"
     },
+    "788b-a5dd-c41c-4165": {
+      "created_at": "2026-08-14T03:16:27Z",
+      "jira_id": "4588674",
+      "jira_key": "REB-2891",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T03:16:30Z"
+    },
     "789c-1251-fc21-4cf6": {
       "baseline": {
         "assignee": null,
@@ -62658,9 +62700,17 @@
       "updated_at": "2026-06-25T23:04:58Z"
     },
     "7d21-e600-9076-40d5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe OS/Python-invariant complexity-baseline lock currently runs inside every test-matrix cell in `.github/workflows/_build-and-test.yml`: Ubuntu costs 52/54/55s and macOS costs 45s. The same commit has already been checked out in the single Ubuntu lint job. Running the policy there once preserves the gate while eliminating four duplicate invocations and their fetch/merge-base work, estimated at about 154 net runner-seconds per Verified run. CPython and Django use dedicated single lint jobs; Rust and Kubernetes use dedicated tidy/verify surfaces. No rejection was found; `humble-cinnamoned-mussel` fixed lock correctness but did not require matrix duplication.\n\n## Plan\n- Strengthen workflow policy tests to require exactly one complexity-lock invocation, in the single lint job, and to prohibit it in the OS/Python test matrix.\n- Move the existing unchanged script invocation and definition-vs-tree guard from `jobs.test` to `jobs.lint`.\n- Run held-out RED\u2192GREEN, a duplicate-invocation mutation, workflow/config tests, repository gates, and compare CI job timing after Gerrit upload. Back-out is a Gerrit revert.\n\n## Acceptance Criteria\n- [ ] `python scripts/check_complexity_baseline.py --lock` executes exactly once for a Verified change.\n- [ ] The invocation is a blocking step in the single lint job and is absent from the test matrix.\n- [ ] The existing fail-closed and definition-vs-tree-skew behavior is unchanged.\n- [ ] A workflow unit oracle fails on the current four-matrix-invocation placement and on any future duplicate placement.\n- [ ] Reintroducing the matrix invocation returns the held-out oracle to RED.\n- [ ] CI evidence quantifies runner-seconds saved without adding jobs, runners, or reducing policy coverage.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Run complexity baseline lock once per Verified change"
+      },
       "created_at": "2026-08-14T02:07:08Z",
       "jira_id": "4588665",
       "jira_key": "REB-2883",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:11Z"
     },
@@ -100937,9 +100987,17 @@
       "updated_at": "2026-07-31T06:39:27Z"
     },
     "cc7f-4a24-bc7a-4511": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe hardening byte-equivalence test executes both production `_convert` and a copied `_legacy_convert` for all 884 prepared corpus units. The copied oracle shares conversion constants with production; changing `_PANDOC_TO` to `plain` made both sides agree, demonstrating coupling. Combined corpus+hardening invokes Pandoc 3,421 times under xdist; the legacy half adds 884 subprocesses. Immutable expected outputs detect 799/884 of that mutation while production `_convert` still invokes the real pinned Pandoc for every unit. This preserves ADR 0095 because every conversion assertion continues to cross the real production binary. Golden fixtures match Pandoc, Kubernetes, and Rust practice. No prior rejection was found; `dimmed-supersweet-xenarthra` defers production spawn redesign, not independent test oracles.\n\n## Plan\n- Inventory the 884 prepared corpus inputs and pin their ordering/cardinality.\n- Produce an immutable legacy-output fixture containing generator Pandoc version and SHA-256 binary fingerprint. Add a deterministic regeneration command/script and a fast installed-version drift assertion.\n- Replace only the copied `_legacy_convert` subprocess call with lookup of the immutable output. Continue to invoke production `_convert` with real Pandoc for every prepared unit on every per-change run.\n- Strengthen the oracle so a production format mutation fails against the independent expected output; preserve timeout/group-reap tests unchanged.\n- Run held-out RED\u2192GREEN, the `_PANDOC_TO=plain` defect-seeded mutation, full focused corpus/hardening suites, gates, and paired timing. Back-out is a Gerrit revert restoring live legacy subprocess comparisons.\n\n## Acceptance Criteria\n- [ ] All 884 prepared corpus units still pass through production `_convert` and real Pandoc in per-change CI.\n- [ ] The copied legacy Pandoc subprocess implementation is removed from the byte-equivalence oracle and replaced by immutable expected output.\n- [ ] Fixture metadata records the exact generating Pandoc version and SHA-256 fingerprint of the generating binary.\n- [ ] A documented runnable generator reproduces the fixture deterministically.\n- [ ] A fast assertion fails when the installed Pandoc version differs from fixture metadata.\n- [ ] Mutating production output format to `plain` makes the independent byte-equivalence oracle RED.\n- [ ] Corpus cardinality/order and all timeout/group-reap hardening tests remain covered.\n- [ ] Paired timing quantifies eliminated subprocesses and runner time.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Replace duplicate legacy Pandoc executions with golden outputs"
+      },
       "created_at": "2026-08-14T02:07:15Z",
       "jira_id": "4588666",
       "jira_key": "REB-2884",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:18Z"
     },
@@ -109103,9 +109161,17 @@
       "updated_at": "2026-07-11T04:19:02Z"
     },
     "d792-5507-9df0-4a5f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n`test_dc_corpus_has_eligible_units_that_actually_change` invokes Pandoc for 232 eligible prose units but its only contract is existential: at least one eligible unit exists and at least one changes. Current local runtime is 7.887s/232 subprocesses; an exact short-circuit reaches both witnesses in 0.035s/1 subprocess. Forced identity-renderer and no-eligible mutations fail under both forms. This is exact existential evaluation, not corpus sampling, and matches `any(...)` practice in pytest, Django, and CPython. No tracker rejection was found.\n\n## Plan\n- Freeze the existing two existential postconditions and inventory the full-corpus property tests that independently retain corpus-wide conversion coverage.\n- Strengthen the existing test oracle to prove iteration stops after both witnesses exist while still failing when no eligible or no changed unit exists.\n- Implement exact short-circuit evaluation without changing `_render_unit` or product behavior.\n- Run held-out RED\u2192GREEN, defect-seeded mutation, focused corpus tests, repository gates, and paired timing. Back-out is a Gerrit revert.\n\n## Acceptance Criteria\n- [ ] The test still fails if the stratum has no eligible units.\n- [ ] The test still fails if every eligible unit renders identically.\n- [ ] The test stops rendering immediately once both existential witnesses have been observed.\n- [ ] Full-corpus idempotence, no-decay, richness, and hardening coverage remain unchanged in their existing tests.\n- [ ] A defect-seeded non-short-circuit mutation returns the held-out oracle to RED.\n- [ ] Paired timing quantifies saved subprocesses and runner time.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Short-circuit existential Pandoc corpus witness"
+      },
       "created_at": "2026-08-14T02:07:22Z",
       "jira_id": "4588667",
       "jira_key": "REB-2885",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:25Z"
     },
@@ -117400,6 +117466,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-07-16T19:48:20Z"
+    },
+    "e72e-259d-5ee7-4e73": {
+      "created_at": "2026-08-14T03:16:34Z",
+      "jira_id": "4588675",
+      "jira_key": "REB-2892",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T03:16:37Z"
     },
     "e73b-71d5-e6d5-4d28": {
       "baseline": {
@@ -129984,9 +130057,31 @@
       "updated_at": "2026-06-25T23:25:04Z"
     },
     "f936-a0b9-e5f8-4def": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nGerrit Verified run 31752047186 spent 100.66-130.59s per Ubuntu cell in `test_bridge_backstop_fires_on_a_uniform_hourly_cadence`. Runtime tracing proves `_bridge_schedule()` reparses the same workflow YAML inside the 1,440-minute comprehension. Local current=7.925s, invariant reuse=0.00106s. The exhaustive cadence proof is valuable; repeated YAML parsing is not. This remediation matches invariant-sharing practice in pytest, Django, and Pylint/Astroid. No prior rejection was found; `coercive-paediatric-bug` rejects added parallelism without aggregate savings, which this does not use.\n\n## Plan\n- Strengthen the existing unit test with a behavioral oracle that counts schedule acquisition and requires one acquisition per cadence proof while preserving all 1,440 minute evaluations and exact gap assertion.\n- Hoist the immutable schedule value once before the comprehension.\n- Run the held-out RED\u2192GREEN and defect-seeded mutation check, the focused policy suite, lint/typecheck, and paired timing runs.\n- Land through Gerrit and record observed Ubuntu runner-time savings; back-out is a Gerrit revert restoring the prior comprehension.\n\n## Acceptance Criteria\n- [ ] The cadence test still evaluates every one of the 1,440 minutes and asserts uniform 60-minute circular gaps.\n- [ ] A unit oracle proves workflow schedule acquisition occurs once, fails on the current 1,440-read implementation, and passes after the change.\n- [ ] Reintroducing schedule acquisition inside the minute loop returns the oracle to RED.\n- [ ] Paired local timing demonstrates the repeated YAML parsing cost is eliminated without new jobs or reduced coverage.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Hoist bridge schedule parsing out of minute scan"
+      },
       "created_at": "2026-08-14T02:07:29Z",
       "jira_id": "4588668",
       "jira_key": "REB-2886",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:32Z"
     },
@@ -130366,9 +130461,17 @@
       "updated_at": "2026-07-05T03:33:18Z"
     },
     "f94a-7cbc-72f2-4e6b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe session-scoped `run_request_sites` fixture in `tests/unit/test_subcall_class_selection.py` costs 46.95-49.02s setup in each Ubuntu CI cell. The earlier `analogical-dashing-fennecfox` ticket cached parsing, but runtime profiling still records about 9.54 million `ast.walk` iterations and 130.9 million calls. `_verdict` repeatedly rebuilds parent maps and rescans every source tree to rediscover callers. Focused local setup is 3.37s. Session-scoped/indexed invariants match pytest, Django, and Pylint/Astroid practice; no prior rejection was found.\n\n## Plan\n- Freeze the current exact ordered set of 24 `(key, config expression, verdict)` results and all existing provenance guards.\n- Add a deterministic work-budget oracle around a representative provenance run that fails when callers/parents are rediscovered by whole-tree walks.\n- Build immutable per-process parent/enclosing-function and call-site indices from the already cached parsed trees, then make `_verdict` query those indices.\n- Run held-out RED\u2192GREEN, defect-seeded removal of the index, the full subcall-class suite, repository gates, and paired cold-process timing. Back-out is a Gerrit revert.\n\n## Acceptance Criteria\n- [ ] The exact current 24 provenance tuples and every existing guard verdict remain unchanged.\n- [ ] Each parsed source tree contributes to caller and parent indexing once per pytest process.\n- [ ] A deterministic oracle fails when whole-tree caller/parent rediscovery is reintroduced.\n- [ ] Removing the indices returns the held-out oracle to RED.\n- [ ] Paired cold-process timing quantifies setup and Ubuntu runner-time savings.\n- [ ] No production file or public API changes.\n- [ ] Focused tests, lint, typecheck, Gerrit LLM-Review +1, and Gerrit Verified +1 pass before merge.\n- [ ] The final ticket comment records RED/GREEN/mutation evidence and measured savings.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Index AST provenance callers and parents once"
+      },
       "created_at": "2026-08-14T02:07:36Z",
       "jira_id": "4588669",
       "jira_key": "REB-2887",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T02:07:39Z"
     },
@@ -135652,7 +135755,12 @@
     "REB-2885": "d792-5507-9df0-4a5f",
     "REB-2886": "f936-a0b9-e5f8-4def",
     "REB-2887": "f94a-7cbc-72f2-4e6b",
+    "REB-2888": "573a-c8c2-ce2b-4b7f",
+    "REB-2889": "57b6-90b7-87bb-45e7",
     "REB-289": "b744-4fb9-2d05-4b49",
+    "REB-2890": "6ccc-0577-198c-44fa",
+    "REB-2891": "788b-a5dd-c41c-4165",
+    "REB-2892": "e72e-259d-5ee7-4e73",
     "REB-29": "1368-1a38-8d06-4227",
     "REB-290": "b7af-9623-b1fa-4c47",
     "REB-291": "b7e6-d8b8-29e7-40ad",
