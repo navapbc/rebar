@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
+from rebar_reconciler import projects_store
 from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
     _BRIDGE_INTERNAL_TAG_PREFIXES,
@@ -219,6 +220,7 @@ def _inbound_create_write_create_event(
     from rebar.reducer._version import validate_creation_channel
 
     create_data["creation_channel"] = validate_creation_channel("jira")
+    create_data.update(projects_store.resolve_inbound_bridge_fields(jira_key, repo_root))
     create_path = _write_event_file(tracker_dir, local_id, "CREATE", create_data)
     return tracker_dir, raw_labels, create_path
 
