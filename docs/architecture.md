@@ -348,6 +348,21 @@ every name (with its identical signature and `__all__`), so `import rebar` /
 `_lib_writes` (no cycle). This brought `__init__.py` back under the soft cap (dropped
 from the allowlist), and every new module sits comfortably within the 100–800-LOC band.
 
+`src/rebar/llm/plan_review/pass1.py` and `src/rebar/_store/push.py` were each **split**
+along an existing call-graph seam (ticket 5e53, the `broke-boarish-hagfish` recurrence
+epic) to clear the hard cap. `pass1.py`'s container (G3/G4) pairing stage — `_run_container`
+and its single-caller helpers — moved to `llm/plan_review/container_stage.py`, with the
+shared `_submit_ctx` relocated to `generation.py` so the dependency stays one-way
+(`pass1 → container_stage → generation`); `orchestrator.py` / `provider_parity.py` keep
+importing the moved names via re-export. `push.py`'s stash/dirty-tree and
+non-fast-forward recovery cluster moved to `_store/push_recovery.py`: because `push._git`
+is monkeypatched across ~25 test sites, each moved function takes the calling module as a
+`core` parameter and resolves `core._git`/`core.logger` at call time (the
+`_ref_lock_push.py` late-binding pattern), and `push.py` retains old-signature delegating
+shims plus re-exports so `push.<symbol>` attribute access (and
+`_resolve_conflicted_apply.__doc__`) survives the move. Both new modules sit within the
+100–550-LOC band.
+
 `src/rebar/llm/runner.py` was **decomposed** in WS-A (epic a88f): the
 filesystem/repo cluster (`_safe_path`, `_git_tracked`, `_discovery_filter`,
 `_within_root`, the per-call caps + noise sets) moved to
