@@ -55,7 +55,10 @@ VOTE_JOB = "vote"
 # counterpart), so they never need to appear in a source lane.
 #   clear-vote     — resets Verified->0 at run start (GerriScary-safe).
 #   require-ticket — fail-fast rebar-ticket trailer gate on the patchset.
-GERRIT_ONLY_JOBS = frozenset({"clear-vote", "require-ticket"})
+#   classify       — trusted-main path classifier for docs-only vs full Verify.
+#   docs-only      — the reduced lane that runs the shared documentation gates.
+GERRIT_ONLY_JOBS = frozenset({"clear-vote", "require-ticket", "classify", "docs-only"})
+REQUIRED_GERRIT_VOTE_JOBS = frozenset({"classify", "docs-only"})
 
 # Jobs in the mirror lanes that DELIBERATELY do not gate the Verified vote because they
 # never run on the push/PR critical path (manual workflow_dispatch / weekly schedule
@@ -113,13 +116,23 @@ def missing_gating_jobs(
     return required - vote_needs(gerrit_workflow)
 
 
+def missing_required_gerrit_jobs(
+    gerrit_workflow: dict,
+    required: frozenset[str] | set[str] = REQUIRED_GERRIT_VOTE_JOBS,
+) -> set[str]:
+    """Gerrit route jobs whose result is absent from Verified aggregation."""
+    return set(required) - vote_needs(gerrit_workflow)
+
+
 def evaluate(
     gerrit_workflow: dict,
     source_workflows: list[dict],
     excluded: frozenset[str] | set[str],
+    required_gerrit_jobs: frozenset[str] | set[str] = REQUIRED_GERRIT_VOTE_JOBS,
 ) -> int:
     """Return 0 on parity, 1 on drift (printing a GitHub-annotated diagnosis)."""
     missing = missing_gating_jobs(gerrit_workflow, source_workflows, excluded)
+    missing |= missing_required_gerrit_jobs(gerrit_workflow, required_gerrit_jobs)
     if missing:
         print(
             "::error::gerrit-verify.yaml vote.needs is NOT a superset of the jobs that "
@@ -128,7 +141,9 @@ def evaluate(
         print(f"  MISSING from vote.needs (gate main but not the Verified vote): {sorted(missing)}")
         print("  Add each to the `vote` job's `needs` in gerrit-verify.yaml AND ensure the")
         print("  job actually runs in that lane (call the shared reusable with the Gerrit")
-        print("  patchset inputs, as build-and-test/optionality do). If a job must NOT gate")
+        print("  patchset inputs, as build-and-test/optionality do). The classifier and")
+        print("  docs-only route are Gerrit-only but still mandatory in vote.needs.")
+        print("  If a job must NOT gate")
         print("  Verified, add it to EXCLUDED_JOBS in this script with a justification.")
         return 1
     covered = vote_needs(gerrit_workflow) - GERRIT_ONLY_JOBS

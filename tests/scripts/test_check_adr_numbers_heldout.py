@@ -21,7 +21,7 @@ pytestmark = pytest.mark.scripts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts" / "check_adr_numbers.py"
-_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
+_DOCS_ACTION = REPO_ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
 _REAL_ADR = REPO_ROOT / "docs" / "adr"
 _REAL_DOCS = REPO_ROOT / "docs"
 
@@ -147,8 +147,8 @@ def test_main_returns_one_on_violation(gate: ModuleType, tmp_path: Path) -> None
 
 # ---- CI wiring ---------------------------------------------------------------
 def test_ci_wires_the_gate() -> None:
-    text = _WORKFLOW.read_text(encoding="utf-8")
-    assert "check_adr_numbers.py" in text, "CI must invoke the ADR-number gate"
+    text = _DOCS_ACTION.read_text(encoding="utf-8")
+    assert "check_adr_numbers.py" in text, "shared CI action must invoke the ADR-number gate"
 
 
 # ---- real-tree cleanliness at landing ----------------------------------------

@@ -71,7 +71,9 @@ def test_guard_main_exit_nonzero_on_drift(monkeypatch, capsys):
 
 def test_guard_passes_on_parity_complete_pair():
     """When vote.needs covers every gating job, there is no drift."""
-    gerrit = _gerrit(["build-and-test", "artifact-probe", "eval-discipline"])
+    gerrit = _gerrit(
+        ["build-and-test", "artifact-probe", "eval-discipline", "classify", "docs-only"]
+    )
     sources = [_source("build-and-test", "artifact-probe"), _source("eval-discipline")]
     assert chk.missing_gating_jobs(gerrit, sources, excluded=set()) == set()
     assert chk.evaluate(gerrit, sources, excluded=set()) == 0
@@ -90,6 +92,13 @@ def test_vote_needs_accepts_scalar():
     assert chk.vote_needs({"jobs": {"vote": {"needs": "build-and-test"}}}) == {"build-and-test"}
 
 
+def test_guard_requires_gerrit_route_jobs_in_vote_needs():
+    """A docs gate or classifier failure cannot disappear outside vote aggregation."""
+    gerrit = _gerrit(["build-and-test"])
+    assert chk.missing_required_gerrit_jobs(gerrit) == {"classify", "docs-only"}
+    assert chk.evaluate(gerrit, [_source("build-and-test")], excluded=set()) != 0
+
+
 # ─────────────────────────── REAL repo parity ─────────────────────────────────
 
 
@@ -104,6 +113,7 @@ def test_real_repo_verify_gate_is_in_parity():
     assert missing == set(), (
         f"vote.needs is missing gating jobs (would green-verify but red-main): {sorted(missing)}"
     )
+    assert chk.missing_required_gerrit_jobs(gerrit) == set()
 
 
 def test_real_repo_check_main_returns_zero():

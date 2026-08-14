@@ -482,35 +482,30 @@ jobs:
             echo "Near-cap check: OK (no src/rebar file is within 10% of the ${LIMIT}-LOC cap)."
           fi
 
-      # ADR-number bijection gate (story 0743): every docs/adr/NNNN-slug.md is paired with
-      # a per-number marker docs/adr/.numbers/NNNN, and every ADR cross-reference resolves.
-      # The check is the CI backstop that asserts, on the merged tree, that ADR numbers are
-      # unique and collision-proof. Definition-vs-tree skew guard: skip with a log line when
-      # the script is absent from the checked-out tree.
-      - name: ADR-number bijection gate
+      # The target-branch workflow can run against an older Gerrit patchset whose tree
+      # predates the extracted local action. Materialize trusted main's action only in that
+      # compatibility case; otherwise exercise the action from the checked-out change.
+      - name: Restore documentation action for a patchset that predates it
+        if: inputs.gerrit-refspec != ''
         shell: bash
         run: |
-          if [ ! -f scripts/check_adr_numbers.py ]; then
-            echo "scripts/check_adr_numbers.py not in checked-out tree" \
-                 "(change predates the gate) — skipping"
+          if [ -f .github/actions/docs-gates/action.yml ]; then
             exit 0
           fi
-          python scripts/check_adr_numbers.py
+          if ! git fetch --depth=1 "https://github.com/${{ github.repository }}" \
+               '+refs/heads/main:refs/remotes/gh-main-docs-action'; then
+            echo "::error::could not fetch trusted main documentation action"
+            exit 1
+          fi
+          mkdir -p .github/actions/docs-gates
+          git show refs/remotes/gh-main-docs-action:.github/actions/docs-gates/action.yml \
+            > .github/actions/docs-gates/action.yml
 
-      # ADR-index drift gate (story 0743): docs/adr/README.md and the docs/adr/.numbers/
-      # markers are DERIVED from the ADR files by scripts/gen_adr_index.py and committed.
-      # Regenerate and fail if the working tree now differs — a stale index/markers set means
-      # an ADR was added/renamed without regenerating. Style mirrors the drift gates below.
-      # If-present guard per ticket ee2a: skip when the script predates the gate.
-      - name: ADR-index drift gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/gen_adr_index.py ]; then
-            echo "scripts/gen_adr_index.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/gen_adr_index.py --check
+      # All documentation gates are single-sourced in the local composite action. The
+      # Gerrit docs-only lane invokes this same action after its own checkout/setup, while
+      # the full lane keeps it inside the existing matrix (no additional full-route job).
+      - name: Documentation gates (shared with Gerrit docs-only route)
+        uses: ./.github/actions/docs-gates
 
       # Prompt-index drift gate (story afe6): reviewers/index.json is DERIVED from the
       # prompt front-matter and committed. Regenerate it and fail if the working tree
@@ -531,99 +526,6 @@ jobs:
             exit 1
           fi
           echo "Prompt-index drift gate: OK (index.json is up to date)."
-
-      # Env-var registry drift gate (story 0f21): docs/env-vars.md is DERIVED by scanning
-      # env-var reads under src/rebar and committed. Regenerate and fail if the working tree
-      # now differs — a stale registry means a new REBAR_* read shipped without regenerating.
-      # Style mirrors the Prompt-index drift gate above.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: Env-var registry drift gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/gen_env_registry.py ]; then
-            echo "scripts/gen_env_registry.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/gen_env_registry.py
-          if ! git diff --exit-code -- docs/env-vars.md; then
-            echo "::error::docs/env-vars.md is stale — regenerate it with"
-            echo "  python scripts/gen_env_registry.py"
-            echo "and commit the result (it is derived from env-var reads under src/rebar)."
-            exit 1
-          fi
-          echo "Env-var registry drift gate: OK (docs/env-vars.md is up to date)."
-
-      # Docs-index completeness / dead-link gate (ticket f088): every living top-level
-      # docs/*.md must be linked from docs/README.md (allowlist: *.local.md), and every
-      # relative markdown link that resolves inside docs/ must point at an existing file.
-      # Fails the build on an unindexed living doc or a broken docs-internal link.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: Docs-index completeness gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/check_docs_index.py ]; then
-            echo "scripts/check_docs_index.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/check_docs_index.py --check
-          echo "Docs-index completeness gate: OK (index complete, no broken docs links)."
-
-      # README golden-path gate (ticket 0435): extract the bash block under the README
-      # '## Quickstart' heading and RUN those exact lines end-to-end in a throwaway git
-      # repo. A wrong command *printed* in the README (e.g. a bad subcommand or a stale
-      # hard-coded id) then fails the build — command TEXT rot, not just executability.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: README quickstart golden-path gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/check_readme_quickstart.py ]; then
-            echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/check_readme_quickstart.py
-
-      # CLI-reference drift gate (ticket e866): docs/cli-reference.md is DERIVED from the
-      # CLI's own help data (known_subcommands() + the curated intercept table). Regenerate
-      # and fail on any diff, so a new/renamed command cannot ship undocumented.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: CLI-reference drift gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/gen_cli_reference.py ]; then
-            echo "scripts/gen_cli_reference.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/gen_cli_reference.py
-          if ! git diff --exit-code -- docs/cli-reference.md; then
-            echo "::error::docs/cli-reference.md is stale — regenerate it with"
-            echo "  python scripts/gen_cli_reference.py"
-            exit 1
-          fi
-          echo "CLI-reference drift gate: OK (docs/cli-reference.md is up to date)."
-
-      # MCP-reference drift gate (ticket 235a): docs/mcp-reference.md is DERIVED from the
-      # MCP server's own registrars (read/llm/write), classified by gate tier. Regenerate
-      # and fail on any diff, so a newly-registered MCP tool cannot ship undocumented.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: MCP-reference drift gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/gen_mcp_reference.py ]; then
-            echo "scripts/gen_mcp_reference.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/gen_mcp_reference.py
-          if ! git diff --exit-code -- docs/mcp-reference.md; then
-            echo "::error::docs/mcp-reference.md is stale — regenerate it with"
-            echo "  python scripts/gen_mcp_reference.py"
-            exit 1
-          fi
-          echo "MCP-reference drift gate: OK (docs/mcp-reference.md is up to date)."
 
       # Security-rules freshness gate (epic b744 / WS5; ADR 0012). The vendored security rule
       # subset is pinned for reproducibility; this WARNS (never fails) when the recorded
