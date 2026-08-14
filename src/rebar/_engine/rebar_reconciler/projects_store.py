@@ -94,6 +94,21 @@ def load_mapping(repo_root: str | os.PathLike[str]) -> Mapping:
     return Mapping(legacy_default=legacy_default or None, projects=projects)
 
 
+def resolve_inbound_bridge_fields(
+    jira_key: str, repo_root: str | os.PathLike[str]
+) -> dict[str, Any]:
+    """Bridge fields to stamp on an inbound-created ticket (story 1734).
+
+    The source project is the Jira key's prefix (``DIG-123`` → ``DIG``); ``repos``
+    are that project's mapped repos (empty when the project is not in the mapping).
+    Returns ``{"bridge_project": <prefix>, "repos": [...]}`` — both keys the
+    reducer's CREATE processor projects (story cef7).
+    """
+    source_project = jira_key.rsplit("-", 1)[0]
+    repos = load_mapping(repo_root).projects.get(source_project, {}).get("repos", [])
+    return {"bridge_project": source_project, "repos": list(repos)}
+
+
 def resolve_project(ticket: dict[str, Any], mapping: Mapping) -> str | None:
     """Tri-state resolution of a ticket's optional ``bridge_project`` field.
 

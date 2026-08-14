@@ -20,7 +20,15 @@ import sys
 import time
 import urllib.error
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    # Port type for `client` params (gate cc77): imported RELATIVELY so mypy can
+    # resolve it (a `rebar_reconciler.`-qualified import widens to Any under
+    # ignore_missing_imports). TYPE_CHECKING-only, so the standalone
+    # importlib-by-path load — where a relative runtime import has no package —
+    # is unaffected.
+    from ._backend import TicketTransport
 
 # Ticket 18a4: named ABSOLUTELY (the established pattern here — cf.
 # ``outbound_differ``'s ``from rebar_reconciler._loader import lazy_load``) because
@@ -310,6 +318,164 @@ def merge_issuelinks_map(
     return snapshot
 
 
+def _enrich_parents(client: TicketTransport, project_key: str, snapshot: dict, log) -> None:
+    """Parent enrichment for ONE project (story 1734 fan-out helper). Fail-open;
+    BackendPaginationStallError re-raises out. Mutates ``snapshot`` in place."""
+    try:
+        if project_key and hasattr(client, "get_parent_map"):
+            # The merge lives in ``merge_parent_map`` (ticket 88d9) so the three-state
+            # queried/absent/unobserved contract it establishes is directly testable.
+            merge_parent_map(snapshot, client.get_parent_map(project_key))
+    except urllib.error.HTTPError as exc:
+        # API retirements (HTTP 410 GONE) must be loud — a transient WARNING
+        # would let a permanent endpoint removal hide in the noise. Transient
+        # HTTP faults stay at WARNING (ticket 8b25). get_parent_map already
+        # swallows 410 internally; this catch is the defense-in-depth net for
+        # any 410 that surfaces from a future enrichment path.
+        if exc.code == 410:
+            log.error(
+                "fetch_snapshot: parent enrichment hit HTTP 410 GONE — the Jira "
+                "search endpoint has been RETIRED; snapshot written without parent "
+                "data (degraded). API retirement, not a transient fault: %r",
+                exc,
+            )
+        else:
+            log.warning(
+                "fetch_snapshot: parent enrichment failed (HTTP %s: %r); "
+                "snapshot written without parent data (degraded)",
+                exc.code,
+                exc,
+            )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project map the differ would treat
+        # as authoritative (every missing parent reads as parentless). Loud beats
+        # fail-open here.
+        raise
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
+        log.warning(
+            "fetch_snapshot: parent enrichment failed (%r); "
+            "snapshot written without parent data (degraded)",
+            exc,
+        )
+
+
+def _enrich_comments(client: TicketTransport, project_key: str, snapshot: dict, log) -> None:
+    """Comment-state enrichment for ONE project (story 1734 fan-out helper).
+    Fail-open; BackendPaginationStallError re-raises. Mutates ``snapshot``."""
+    # Comment-state enrichment (Action viability): the per-commented-ticket
+    # ``acli comment list`` calls the differ would otherwise issue every pass
+    # (~1-2s each, fleet-wide) are amortised into ONE paged REST search via
+    # client.get_comment_map(). We merge the returned ``comment`` field into
+    # each snapshot entry so outbound_differ._diff_comments takes the
+    # snapshot-carried path (no client.get_comments round-trip).
+    #
+    # Invariant: only entries the search actually returned a comment field for
+    # are enriched; entries the search omits keep NO ``comment`` key, so the
+    # differ falls back to the per-ticket get_comments path for them (the
+    # never-emit-blind safety invariant stays intact). On any search failure
+    # the enrichment is skipped entirely and every ticket falls back — the
+    # reconciler pass still completes.
+    try:
+        if project_key and hasattr(client, "get_comment_map"):
+            comment_map = client.get_comment_map(project_key)
+            for snap_key, comment_field in comment_map.items():
+                if snap_key in snapshot and isinstance(comment_field, dict):
+                    snapshot[snap_key]["comment"] = comment_field
+    except urllib.error.HTTPError as exc:
+        if exc.code == 410:
+            log.error(
+                "fetch_snapshot: comment enrichment hit HTTP 410 GONE — the Jira "
+                "search endpoint has been RETIRED; snapshot written without "
+                "comment data (per-ticket fallback applies). API retirement, not "
+                "a transient fault: %r",
+                exc,
+            )
+        else:
+            log.warning(
+                "fetch_snapshot: comment enrichment failed (HTTP %s: %r); "
+                "snapshot written without comment data (per-ticket fallback)",
+                exc.code,
+                exc,
+            )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project comment map. Loud beats
+        # fail-open here — see _paged_search / _iter_cursor_pages.
+        raise
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
+        log.warning(
+            "fetch_snapshot: comment enrichment failed (%r); "
+            "snapshot written without comment data (per-ticket fallback)",
+            exc,
+        )
+
+
+def _enrich_issuelinks(client: TicketTransport, project_key: str, snapshot: dict, log) -> None:
+    """Issuelink enrichment for ONE project (story 1734 fan-out helper). Fail-open;
+    BackendPaginationStallError re-raises. Mutates ``snapshot`` in place."""
+    # Issuelink enrichment (bug 3f04): the base search omits issuelinks, so the
+    # inbound link differ (_diff_links_inbound) and the outbound dedup
+    # (_existing_jira_links) both saw zero Jira links — inbound link sync was
+    # dead and outbound re-emitted every link each pass. Amortise into ONE paged
+    # REST search via client.get_issuelinks_map() and merge the issuelinks array
+    # into each snapshot entry. Only entries the search returned a list for are
+    # enriched; on any failure the enrichment is skipped (differs degrade to
+    # "no Jira links" — additive ADD-only sync stays safe) and the pass completes.
+    try:
+        if project_key and hasattr(client, "get_issuelinks_map"):
+            # The merge lives in ``merge_issuelinks_map`` (ticket 6c0a) so the
+            # key-present/key-absent observed contract it establishes is directly
+            # testable (2b16's G1 guard drives it instead of hand-mirroring it).
+            merge_issuelinks_map(snapshot, client.get_issuelinks_map(project_key))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 410:
+            log.error(
+                "fetch_snapshot: issuelink enrichment hit HTTP 410 GONE — the Jira "
+                "search endpoint has been RETIRED; snapshot written without "
+                "issuelink data (degraded). API retirement, not a transient fault: %r",
+                exc,
+            )
+        else:
+            log.warning(
+                "fetch_snapshot: issuelink enrichment failed (HTTP %s: %r); "
+                "snapshot written without issuelink data (degraded)",
+                exc.code,
+                exc,
+            )
+    except BackendPaginationStallError:
+        # A stalled pager means a truncated whole-project link map, which the differs
+        # would read as an authoritative "no Jira links" (removals undetectable).
+        # Loud beats fail-open here.
+        raise
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip issuelink enrichment, write degraded snapshot
+        log.warning(
+            "fetch_snapshot: issuelink enrichment failed (%r); "
+            "snapshot written without issuelink data (degraded)",
+            exc,
+        )
+
+
+def _enrich_project(client: TicketTransport, project_key: str, snapshot: dict, log) -> dict:
+    """Run the three fail-open enrichment passes (parent / comment / issuelink)
+    for ONE project against the shared ``snapshot`` (story 1734 fan-out).
+
+    Called once per mapped project by ``_build_snapshot``. Each pass fails open
+    independently (logs + degrades) while a ``BackendPaginationStallError``
+    re-raises out of all three (a stalled pager is a truncated whole-project
+    read — fail loud). ``project_key`` is the project to enrich; the
+    snapshot-derived fallback is preserved for the single-project path where the
+    configured key is absent. Mutates + returns ``snapshot``.
+    """
+    if not project_key and snapshot:
+        first_key = next(iter(snapshot))
+        project_key = first_key.rsplit("-", 1)[0] if "-" in first_key else ""
+    if not project_key:
+        return snapshot
+    _enrich_parents(client, project_key, snapshot, log)
+    _enrich_comments(client, project_key, snapshot, log)
+    _enrich_issuelinks(client, project_key, snapshot, log)
+    return snapshot
+
+
 def _build_snapshot(
     pass_id: str,
     repo_root: Path | None = None,
@@ -363,22 +529,33 @@ def _build_snapshot(
 
     _query_project = select_backend(load_config()).query_project
 
+    # Multi-project fan-out (story 1734): the store's projects.json mapping is the
+    # authoritative sync list — fetch EVERY mapped project, not just the single
+    # configured jira.project. An UNSEEDED store (empty mapping) falls back to
+    # ``[_query_project]``, reproducing the exact pre-1734 single-project queries +
+    # enrichment (regression parity). A malformed mapping fails closed in
+    # read_projects() rather than silently degrading to one project.
+    from rebar_reconciler import projects_store
+
+    project_list = list(projects_store.read_projects(repo_root).keys()) or [_query_project]
+
     # Lazy load to avoid a circular at module-load time (alert_store is leaf).
     alert_store = _load_alert_store()
 
     seen_keys: set[str] = set()
     snapshot: dict[str, dict] = {}
 
-    # Per-query caps: active is uncapped (the ACLI ceiling is its only
-    # bound); Done is intentionally capped to the most-recently-updated
-    # _DONE_RECENT_CAP issues. Stored as a tuple of (jql, cap) so the
-    # iteration is straightforward and observable. Both queries are scoped to
-    # the configured jira.project (bug 626d) — an absent/invalid project key
+    # Per-query caps: active is uncapped (the ACLI ceiling is its only bound);
+    # Done is intentionally capped to the most-recently-updated _DONE_RECENT_CAP
+    # issues. Stored as (jql, cap) tuples so the iteration is observable. One
+    # active + done pair PER project in the fan-out; an absent/invalid project key
     # raises in jql_active(), failing the pass closed rather than searching all
-    # projects.
-    queries: tuple[tuple[str, int | None], ...] = (
-        (jql_active(_query_project), None),
-        (jql_done_recent(_query_project), _DONE_RECENT_CAP),
+    # projects (bug 626d). The _ACLI_CEILING is enforced PER query inside
+    # _iter_pages, so it is inherently a per-project bound, never a shared budget.
+    queries: tuple[tuple[str, int | None], ...] = tuple(
+        pair
+        for proj in project_list
+        for pair in ((jql_active(proj), None), (jql_done_recent(proj), _DONE_RECENT_CAP))
     )
 
     for jql, cap in queries:
@@ -405,148 +582,15 @@ def _build_snapshot(
                     fields = {}
                 snapshot[key] = {k: fields[k] for k in sorted(fields.keys())}
 
-    # Parent enrichment (ticket 8b25-ae7a-efc3-47f6):
-    # ACLI's -f field selector silently rejects the ``parent`` field, so
-    # the snapshot entries built from search_issues() above never carry a
-    # parent key.  We perform ONE extra paged REST search via
-    # client.get_parent_map() to retrieve {key → parent_key|None} for the
-    # full project scope, then merge the parent field into each snapshot entry.
-    #
-    # Degradation contract: get_parent_map logs a warning and returns {} on
-    # any REST failure; the snapshot is still written without parent data so
-    # the reconciler pass completes rather than blocking on a transient error.
     import logging as _log_mod
 
     _fetcher_log = _log_mod.getLogger(__name__)
-    try:
-        # Project key: the configured jira.project (config file, overridden by the
-        # JIRA_PROJECT env), else derived from the first snapshot key ("DIG-123" → "DIG").
-        project_key = _query_project
-        if not project_key and snapshot:
-            first_key = next(iter(snapshot))
-            project_key = first_key.rsplit("-", 1)[0] if "-" in first_key else ""
-        if project_key and hasattr(client, "get_parent_map"):
-            # The merge lives in ``merge_parent_map`` (ticket 88d9) so the three-state
-            # queried/absent/unobserved contract it establishes is directly testable.
-            merge_parent_map(snapshot, client.get_parent_map(project_key))
-    except urllib.error.HTTPError as exc:
-        # API retirements (HTTP 410 GONE) must be loud — a transient WARNING
-        # would let a permanent endpoint removal hide in the noise. Transient
-        # HTTP faults stay at WARNING (ticket 8b25). get_parent_map already
-        # swallows 410 internally; this catch is the defense-in-depth net for
-        # any 410 that surfaces from a future enrichment path.
-        if exc.code == 410:
-            _fetcher_log.error(
-                "fetch_snapshot: parent enrichment hit HTTP 410 GONE — the Jira "
-                "search endpoint has been RETIRED; snapshot written without parent "
-                "data (degraded). API retirement, not a transient fault: %r",
-                exc,
-            )
-        else:
-            _fetcher_log.warning(
-                "fetch_snapshot: parent enrichment failed (HTTP %s: %r); "
-                "snapshot written without parent data (degraded)",
-                exc.code,
-                exc,
-            )
-    except BackendPaginationStallError:
-        # A stalled pager means a truncated whole-project map the differ would treat
-        # as authoritative (every missing parent reads as parentless). Loud beats
-        # fail-open here.
-        raise
-    except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
-        _fetcher_log.warning(
-            "fetch_snapshot: parent enrichment failed (%r); "
-            "snapshot written without parent data (degraded)",
-            exc,
-        )
-
-    # Comment-state enrichment (Action viability): the per-commented-ticket
-    # ``acli comment list`` calls the differ would otherwise issue every pass
-    # (~1-2s each, fleet-wide) are amortised into ONE paged REST search via
-    # client.get_comment_map(). We merge the returned ``comment`` field into
-    # each snapshot entry so outbound_differ._diff_comments takes the
-    # snapshot-carried path (no client.get_comments round-trip).
-    #
-    # Invariant: only entries the search actually returned a comment field for
-    # are enriched; entries the search omits keep NO ``comment`` key, so the
-    # differ falls back to the per-ticket get_comments path for them (the
-    # never-emit-blind safety invariant stays intact). On any search failure
-    # the enrichment is skipped entirely and every ticket falls back — the
-    # reconciler pass still completes.
-    try:
-        if project_key and hasattr(client, "get_comment_map"):
-            comment_map = client.get_comment_map(project_key)
-            for snap_key, comment_field in comment_map.items():
-                if snap_key in snapshot and isinstance(comment_field, dict):
-                    snapshot[snap_key]["comment"] = comment_field
-    except urllib.error.HTTPError as exc:
-        if exc.code == 410:
-            _fetcher_log.error(
-                "fetch_snapshot: comment enrichment hit HTTP 410 GONE — the Jira "
-                "search endpoint has been RETIRED; snapshot written without "
-                "comment data (per-ticket fallback applies). API retirement, not "
-                "a transient fault: %r",
-                exc,
-            )
-        else:
-            _fetcher_log.warning(
-                "fetch_snapshot: comment enrichment failed (HTTP %s: %r); "
-                "snapshot written without comment data (per-ticket fallback)",
-                exc.code,
-                exc,
-            )
-    except BackendPaginationStallError:
-        # A stalled pager means a truncated whole-project comment map. Loud beats
-        # fail-open here — see _paged_search / _iter_cursor_pages.
-        raise
-    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
-        _fetcher_log.warning(
-            "fetch_snapshot: comment enrichment failed (%r); "
-            "snapshot written without comment data (per-ticket fallback)",
-            exc,
-        )
-
-    # Issuelink enrichment (bug 3f04): the base search omits issuelinks, so the
-    # inbound link differ (_diff_links_inbound) and the outbound dedup
-    # (_existing_jira_links) both saw zero Jira links — inbound link sync was
-    # dead and outbound re-emitted every link each pass. Amortise into ONE paged
-    # REST search via client.get_issuelinks_map() and merge the issuelinks array
-    # into each snapshot entry. Only entries the search returned a list for are
-    # enriched; on any failure the enrichment is skipped (differs degrade to
-    # "no Jira links" — additive ADD-only sync stays safe) and the pass completes.
-    try:
-        if project_key and hasattr(client, "get_issuelinks_map"):
-            # The merge lives in ``merge_issuelinks_map`` (ticket 6c0a) so the
-            # key-present/key-absent observed contract it establishes is directly
-            # testable (2b16's G1 guard drives it instead of hand-mirroring it).
-            merge_issuelinks_map(snapshot, client.get_issuelinks_map(project_key))
-    except urllib.error.HTTPError as exc:
-        if exc.code == 410:
-            _fetcher_log.error(
-                "fetch_snapshot: issuelink enrichment hit HTTP 410 GONE — the Jira "
-                "search endpoint has been RETIRED; snapshot written without "
-                "issuelink data (degraded). API retirement, not a transient fault: %r",
-                exc,
-            )
-        else:
-            _fetcher_log.warning(
-                "fetch_snapshot: issuelink enrichment failed (HTTP %s: %r); "
-                "snapshot written without issuelink data (degraded)",
-                exc.code,
-                exc,
-            )
-    except BackendPaginationStallError:
-        # A stalled pager means a truncated whole-project link map, which the differs
-        # would read as an authoritative "no Jira links" (removals undetectable).
-        # Loud beats fail-open here.
-        raise
-    except Exception as exc:  # noqa: BLE001 — fail-open: skip issuelink enrichment, write degraded snapshot
-        _fetcher_log.warning(
-            "fetch_snapshot: issuelink enrichment failed (%r); "
-            "snapshot written without issuelink data (degraded)",
-            exc,
-        )
+    # Enrichment fan-out (story 1734): one parent/comment/issuelink pass PER
+    # mapped project, each pass failing open independently so a per-project fault
+    # degrades only that project. A BackendPaginationStallError still re-raises
+    # out of the helper (a stalled pager is a truncated whole-project read).
+    for _proj in project_list:
+        _enrich_project(client, _proj, snapshot, _fetcher_log)
 
     # Proactive unmapped-status detection (defense-in-depth): surface a Jira
     # workflow status the reconciler has no mapping for at snapshot-build time, so a
