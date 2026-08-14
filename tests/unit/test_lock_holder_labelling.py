@@ -150,7 +150,7 @@ def test_compact_run_sweep_sets_the_ambient_label(monkeypatch):
     monkeypatch.setattr(compact._lock, "write_lock_is_busy", lambda t: False)
     seen: dict[str, str | None] = {}
 
-    def fake_one(tracker, tid, repo_root, position_commits):
+    def fake_one(tracker, tid, repo_root, position_commits, *, no_commit=False):
         seen["label"] = _owner._operation_label.get()
         return "-"
 

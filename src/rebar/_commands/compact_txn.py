@@ -26,7 +26,7 @@ import time
 import uuid
 from pathlib import Path
 
-from rebar._commands import _seam
+from rebar._commands import _seam, compact_recovery
 from rebar._commands._compact_policy import is_foldable
 from rebar._store import compat, event_append, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
@@ -341,6 +341,108 @@ def _commit_compaction(tracker: str, ticket_id: str) -> int:
     return 0
 
 
+def _rollback_fold(tracker: str, ticket_id: str, final_path: str, fold_files: list[str]) -> None:
+    """Best-effort WHOLE-fold rollback to the pre-fold state (bug
+    compulsory-pernickety-mantis): rename every ``*.retired`` source back, remove the
+    uncommitted SNAPSHOT, and unstage the ticket dir (a death between ``git add`` and
+    ``git commit`` leaves a dirty INDEX that aborts the union merge just like dirty files).
+
+    Mirrors ``_retire_folded_sources``' data-loss guard: the SNAPSHOT is removed ONLY when
+    every reverse-rename succeeded. A source stuck as ``*.retired`` has its folded effect
+    living ONLY in the SNAPSHOT, so removing it then would silently drop that event —
+    instead the SNAPSHOT is retained as the documented SNAPSHOT_INCONSISTENT state that
+    ``fsck --repair-snapshots`` owns (the caller discards the intent journal, so the
+    recovery preamble never touches that retained state)."""
+    rollback_clean = True
+    for fp in fold_files:
+        retired = fp + RETIRED_SUFFIX
+        if os.path.exists(retired) and not os.path.exists(fp):
+            try:
+                os.rename(retired, fp)
+            except OSError:
+                rollback_clean = False
+                logger.warning("compact: could not restore %s during rollback", fp, exc_info=True)
+    if rollback_clean:
+        try:
+            os.remove(final_path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
+    else:
+        logger.warning(
+            "compact: rollback incomplete for %s — SNAPSHOT %s retained; run "
+            "`rebar fsck --repair-snapshots`",
+            ticket_id,
+            final_path,
+        )
+    _git(tracker, "reset", "-q", "--", f"{ticket_id}/")
+
+
+def _abort_fold(
+    tracker: str, ticket_id: str, final_path: str, fold_files: list[str], journal: str | None
+) -> None:
+    """The fold's single crash-exit seam: whole-fold rollback, then journal discard. One
+    function so a test can emulate SIGKILL (where NO cleanup code runs) by disabling
+    exactly this and nothing else."""
+    _rollback_fold(tracker, ticket_id, final_path, fold_files)
+    compact_recovery.discard(journal)
+
+
+def _apply_fold(
+    tracker: str,
+    ticket_id: str,
+    ticket_dir: str,
+    snapshot_event: dict,
+    final_path: str,
+    fold_files: list[str],
+    no_commit: bool,
+) -> int:
+    """Execute the fold's worktree mutation + commit as ONE crash-guarded unit.
+
+    The intent journal (commit-pending sentinel — see :mod:`compact_recovery`) is written
+    BEFORE the first worktree mutation and discarded on every completed outcome, so a
+    worker that dies anywhere inside this function leaves a journal the next recovery
+    preamble converges. In-process failures do not even need the journal: any exception or
+    a failed commit triggers :func:`_abort_fold`, restoring the exact pre-fold tree.
+
+    ``no_commit`` (an explicit operator request for an uncommitted fold) skips the journal
+    on purpose: journaling it would make the next recovery preamble revert state the
+    operator asked for."""
+    journal: str | None = None
+    if not no_commit:
+        try:
+            journal = compact_recovery.write_intent(tracker, ticket_id, final_path, fold_files)
+        except OSError:
+            logger.warning("compact: cannot write the intent journal; refusing to fold")
+            sys.stderr.write(
+                "Error: cannot journal the compaction fold — refusing to mutate the "
+                "store without its crash sentinel\n"
+            )
+            return 1
+    try:
+        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
+        if _retire_folded_sources(fold_files, ticket_id, final_path) != 0:
+            # Its per-step rollback already ran — a clean revert, or the intentionally
+            # retained SNAPSHOT_INCONSISTENT state that fsck --repair-snapshots owns.
+            # Either way the fold is OVER, so the sentinel must not outlive it (a live
+            # journal would make the recovery preamble revert fsck's territory).
+            compact_recovery.discard(journal)
+            return 1
+        try:
+            os.remove(os.path.join(ticket_dir, ".cache.json"))
+        except OSError:
+            pass
+        if not no_commit and _commit_compaction(tracker, ticket_id) != 0:
+            _abort_fold(tracker, ticket_id, final_path, fold_files, journal)
+            return 1
+    except BaseException:
+        _abort_fold(tracker, ticket_id, final_path, fold_files, journal)
+        raise
+    compact_recovery.discard(journal)
+    return 0
+
+
 # raw-git-ok: store-maintenance command, seam-internal
 def _compact_locked(
     tracker: str,
@@ -364,6 +466,11 @@ def _compact_locked(
         sys.stderr.write(str(exc) + "\n")
         return exc.returncode
     try:
+        # Crash-recovery preamble (bug compulsory-pernickety-mantis): converge any
+        # abandoned partial fold BEFORE reading the event list, so this fold plans
+        # against the pre-crash truth rather than half-retired residue. Cheap when no
+        # journal is pending (one listdir); we already hold the store write lock.
+        compact_recovery.recover_abandoned_folds(tracker)
         parsed = _parse_candidate_events(ticket_dir)
         event_count = len(parsed)
 
@@ -449,16 +556,12 @@ def _compact_locked(
         snapshot_event, final_path = _build_snapshot_event(
             tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
         )
-        fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
-
-        if _retire_folded_sources(fold_files, ticket_id, final_path) != 0:
-            return 1
-        try:
-            os.remove(os.path.join(ticket_dir, ".cache.json"))
-        except OSError:
-            pass
-
-        if not no_commit and _commit_compaction(tracker, ticket_id) != 0:
+        if (
+            _apply_fold(
+                tracker, ticket_id, ticket_dir, snapshot_event, final_path, fold_files, no_commit
+            )
+            != 0
+        ):
             return 1
 
         sys.stdout.write(f"EVENT_COUNT={event_count}\n")
