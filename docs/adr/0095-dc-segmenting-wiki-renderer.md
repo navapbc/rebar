@@ -1,5 +1,11 @@
 # 0095 — Data Center Markdown-to-wiki rendering is a segmenting, verify-then-fall-back renderer
 
+> **Testing-assurance clause partially superseded by
+> [ADR 0096](0096-pandoc-corpus-verification-boundary.md) (2026-08-14).** The
+> requirement below that every conversion assertion execute the real binary no
+> longer governs test routing. This ADR's production renderer, pin, platform,
+> safety, degradation, immutability, and cutover decisions remain authoritative.
+
 Status: Accepted
 Date: 2026-08-12
 Ticket: `271c-e88f-3220-4c9b` (epic `708d-0767-1a51-4928`)

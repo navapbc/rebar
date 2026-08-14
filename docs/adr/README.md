@@ -60,6 +60,7 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0087 — Transport-layer retry for LLM gate calls (SDK max_retries=0)](0087-transport-retry.md)
 - [0092 — Bridge-primary vocabulary with explicit reconcile compatibility adapters](0092-bridge-primary-vocabulary-compatibility-adapters.md)
 - [0094 — Reconciler last-pass two-witness status](0094-reconciler-last-pass-two-witness-status.md)
+- [0096 — Complete Pandoc corpus replay belongs in external integration](0096-pandoc-corpus-verification-boundary.md)
 
 ## LLM framework
 
