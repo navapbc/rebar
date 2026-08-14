@@ -44,7 +44,10 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
 
 from rebar._store import compat
 from rebar._store import lock as _lock
@@ -188,12 +191,82 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
         "-m",
         f"Merge {remote} (auto-reconcile during sync)",
     )
-    if merge.returncode != 0:
+    if merge.returncode == 0:
+        return
+
+    # RECOVERABLE class only: the merge aborted solely because origin introduces
+    # paths that already exist locally as UNTRACKED files (regenerable compaction
+    # leftovers — *-SNAPSHOT.json / *.retired). git names them in its error; move
+    # (never delete) exactly those aside so origin's committed versions can land,
+    # then retry the merge ONCE. Any other failure keeps today's abort-only path.
+    leftovers = _untracked_overwrite_paths(merge)
+    if leftovers:
         _git(tracker, "merge", "--abort")
-        logger.warning(
-            "tickets sync could not auto-merge %s — local state kept; run: rebar fsck-recover",
-            remote,
-        )
+        if _quarantine_untracked(tracker, leftovers):
+            retry = _git(
+                tracker,
+                "merge",
+                *extra,
+                merge_target,
+                "--no-edit",
+                "-m",
+                f"Merge {remote} (auto-reconcile during sync)",
+            )
+            if retry.returncode == 0:
+                return
+            merge = retry  # fall through to the abort-only net below
+
+    _git(tracker, "merge", "--abort")
+    logger.warning(
+        "tickets sync could not auto-merge %s — local state kept; run: rebar fsck-recover",
+        remote,
+    )
+
+
+def _untracked_overwrite_paths(merge: subprocess.CompletedProcess) -> list[str]:
+    """Parse the untracked paths git names in the "would be overwritten by merge"
+    abort. Returns them (repo-relative, one per indented line between the error line
+    and the "Please move or remove"/"Aborting" trailer) — or [] if this is any other
+    failure class, which fences recovery to exactly the recoverable case."""
+    combined = f"{merge.stdout or ''}\n{merge.stderr or ''}"
+    lines = combined.splitlines()
+    marker = "untracked working tree files would be overwritten by merge"
+    start = next((i for i, line in enumerate(lines) if marker in line), None)
+    if start is None:
+        return []
+    paths: list[str] = []
+    for line in lines[start + 1 :]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Please move or remove") or stripped == "Aborting":
+            break
+        paths.append(stripped)
+    return paths
+
+
+def _quarantine_untracked(tracker: str, paths: list[str]) -> bool:
+    """Relocate (move, never delete) each named untracked path into a quarantine dir
+    OUTSIDE any working tree — under the git common dir — so it cannot re-collide on
+    retry. Returns True only if every path was moved (a mis-identified file must stay
+    recoverable). The quarantine is the durable safety copy; it is never pruned."""
+    common = _git(tracker, "rev-parse", "--git-common-dir").stdout.strip()
+    if not common:
+        return False
+    common_dir = Path(common)
+    if not common_dir.is_absolute():
+        common_dir = Path(tracker) / common_dir
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    quarantine = common_dir.resolve() / "reconverge-quarantine" / stamp
+    tracker_root = Path(tracker)
+    for rel in paths:
+        src = tracker_root / rel
+        if not src.exists():
+            return False
+        dest = quarantine / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+    return True
 
 
 def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIMEOUT) -> None:
