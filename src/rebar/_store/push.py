@@ -19,34 +19,22 @@ import os
 import subprocess
 import sys
 from collections.abc import Callable
-from typing import Any
 
 from rebar._optional import OptionalDependencyError
-from rebar._store import compat, push_state
-from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch, run_git
+from rebar._store import push_recovery, push_state
+from rebar._store.gitutil import run_git
 from rebar._store.push_classify import (
-    _DIRTY_WD,
     _MAX_RETRIES,
-    _MAX_TRANSPORT_ATTEMPTS,
     PushDeliveryError,
-    _cas_backoff,
     _heal_multi_bundle_or_stop,
     _is_multi_bundle,
     _is_non_fast_forward,
-    _is_transport_retriable,
     _raise_if_strict,
     _retry_transport_or_stop,
-    _transport_backoff,
 )
 from rebar._store.push_state import unpushed_summary as _unpushed_summary
 
 logger = logging.getLogger(__name__)
-
-
-# Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
-# reconverge). A timeout means another writer holds the lock, so we skip the merge and
-# leave the push pending rather than racing.
-_PUSH_MERGE_LOCK_TIMEOUT = 15
 
 
 def _push_mode(root: str | None = None) -> str:
@@ -85,257 +73,31 @@ def _git(base: str, *args: str, env: dict | None = None) -> subprocess.Completed
         )
 
 
-# raw-git-ok: locked store seam internal
-def _stash_create(base_path: str) -> str | None:
-    """Record the dirty working tree as a stash COMMIT OBJECT, off the shared stack.
-
-    ``git stash create`` writes the stash commit and prints its sha WITHOUT touching
-    ``refs/stash``. That is the whole point (bug 2fa6): the stash stack is REPO-GLOBAL,
-    shared by every worktree, so a ``stash push``/``pop`` pair here could — and did — pop an
-    entry created on a source branch, dropping ``src/…`` into the store and stranding the
-    index. A commit addressed by sha is unreachable from another worktree's pop. Unlike
-    ``stash push``, ``create`` does NOT clean the working tree; the caller resets. Returns
-    the sha, ``""`` when the tree was already clean, or ``None`` on git failure."""
-    cp = _git(base_path, "stash", "create", "push_tickets_branch:auto-stash")
-    if cp.returncode != 0:
-        return None
-    return cp.stdout.strip()
-
-
-# raw-git-ok: locked store seam internal
-def _restore_stash(base_path: str, stash_sha: str) -> None:
-    """Re-apply the stash commit built by :func:`_stash_create`, repairing a conflict.
-
-    ``git stash apply <sha>`` names the commit explicitly, so it can only ever restore
-    OUR OWN recorded tree — there is no stack to consult and nothing to ``drop``
-    afterwards."""
-    if not stash_sha:
-        return  # nothing was stashed (clean tree)
-    applied = _git(base_path, "stash", "apply", "--quiet", stash_sha)
-    _resolve_conflicted_apply(base_path, applied)
-
-
-# raw-git-ok: locked store seam internal
-def _resolve_conflicted_apply(base: str, applied: subprocess.CompletedProcess) -> None:
-    """Repair a ``git stash apply`` that applied-with-conflict (bug 6818).
-
-    When the post-merge HEAD brings the upstream copy of a file in cleanly but the
-    stashed edit touches the same region, the apply writes conflict markers and leaves an
-    unmerged (UU) index entry — wedging the tracker (reconcile fail-closes on the markers;
-    every ``git commit`` refuses the unmerged path). A clean apply never reaches here.
-
-    The old code ASSUMED every conflicted path was reconciler-regenerable
-    (``.bridge_state/prev_snapshot.json``, ``bindings.json``, ``get_rotation.json`` — rebuilt
-    on the reconciler's next pass) and blind-restored it from HEAD. Bug 2fa6 disproved that,
-    so the assumption is ENFORCED: each path is classified against what the branch tracks and
-    the buckets diverge in :func:`~rebar._store.gitutil.discard_unmerged_paths` — a
-    tracked path is restored from HEAD (the reconciler rebuilds it), while a path the
-    branch does not track CANNOT be ticket data and is removed. Foreign paths are logged
-    rather than vanishing silently: their presence means source files reached the tracker."""
-    if applied.returncode == 0 and not _git(base, "ls-files", "-u").stdout.strip():
-        return  # genuinely clean apply — nothing to repair
-    unmerged = sorted(set(_git(base, "diff", "--name-only", "--diff-filter=U").stdout.split()))
-    if not unmerged:
-        return
-    foreign = [p for p in unmerged if path_is_foreign_to_branch(base, p)]
-    regenerable = [p for p in unmerged if p not in set(foreign)]
-    if foreign:
-        logger.warning(
-            "tickets tracker held conflicted paths the branch does not track — removing: %s",
-            ", ".join(foreign),
-        )
-    discard_unmerged_paths(base, regenerable, foreign)
+# ── Push-recovery (stash/dirty-tree + non-fast-forward) now lives in push_recovery.py ──
+# That cluster is monkeypatch-sensitive: ~25 tests patch ``push._git``, and 8 of the 9 moved
+# functions shell out through it. The moved code resolves ``core._git`` / ``core.logger`` from
+# the module handed in as ``core`` at CALL time, so these two shims pass THIS module and thereby
+# preserve the historical ``push._recover_*`` call signatures — push_tickets_branch's call and
+# test_push_shared_stash_2fa6's direct ``_recover_dirty_merge`` call both keep working against
+# the patched ``push._git``. The remaining members are re-exported so ``push.<symbol>`` attribute
+# access (and ``_resolve_conflicted_apply.__doc__``) survives the move.
+from rebar._store.push_recovery import (  # noqa: E402, F401 — re-exported for push.<symbol>
+    _PUSH_MERGE_LOCK_TIMEOUT,
+    _fetch_for_recovery,
+    _merge_remote_under_lock,
+    _merge_with_transport_retry,
+    _resolve_conflicted_apply,
+    _restore_stash,
+    _stash_create,
+)
 
 
 def _recover_dirty_merge(
     base_path: str, remote_ref: str, attempt: int, strict: bool
 ) -> bool | None:
-    """Set the dirty tree aside, merge, and restore the working-tree edits.
-
-    Uses a stash COMMIT OBJECT (never ``refs/stash``) so nothing here can interact with
-    the repo-global stash stack another worktree shares — see :func:`_stash_create`."""
-    stash_sha = _stash_create(base_path)
-    if stash_sha is None:
-        _raise_if_strict(
-            strict,
-            "merge-recovery-blocked",
-            "stash failed during push recovery",
-            base_path,
-            remote_ref,
-        )
-        logger.warning("tickets branch push failed: stash failed (attempt %s)", attempt)
-        return False
-    if stash_sha:
-        # ``stash create`` leaves the tree dirty; clear it so the merge can proceed.
-        # Tracked files only — like ``stash push``, untracked files are left alone.
-        # Restores the tree to HEAD AFTER ``stash create`` recorded it, so the recorded
-        # state is never lost by this — the marker must sit on the call's own line.
-        reset = _git(  # raw-git-ok: locked store seam internal
-            base_path, "reset", "--hard", "-q"
-        )
-        if reset.returncode != 0:
-            _raise_if_strict(
-                strict,
-                "merge-recovery-blocked",
-                "could not clear the working tree during push recovery",
-                base_path,
-                remote_ref,
-            )
-            logger.warning("tickets branch push failed: reset failed (attempt %s)", attempt)
-            return False
-    merge_target, problem = compat.store_epoch_merge_target(base_path, remote_ref)
-    if merge_target is None or problem is not None:
-        _restore_stash(base_path, stash_sha)
-        _raise_if_strict(
-            strict,
-            "store-epoch-during-recovery",
-            problem or "tickets store epoch guard could not pin remote ref",
-            base_path,
-            remote_ref,
-        )
-        logger.warning("%s", problem or "tickets store epoch guard could not pin remote ref")
-        return None
-    merge = _git(
-        base_path,
-        "merge",
-        merge_target,
-        "--no-edit",
-        "-m",
-        f"Merge {remote_ref} (auto-reconcile, post-stash)",
+    return push_recovery._recover_dirty_merge(
+        sys.modules[__name__], base_path, remote_ref, attempt, strict
     )
-    if merge.returncode != 0:
-        _git(base_path, "merge", "--abort")
-        _restore_stash(base_path, stash_sha)
-        _raise_if_strict(
-            strict,
-            "merge-recovery-blocked",
-            merge.stderr or "merge failed after stash recovery",
-            base_path,
-            remote_ref,
-        )
-        logger.warning("tickets branch merge failed after stash recovery (attempt %s)", attempt)
-        return False
-    _restore_stash(base_path, stash_sha)
-    return True
-
-
-def _merge_with_transport_retry(
-    base_path: str,
-    remote_ref: str,
-    merge_target: str,
-    sleep_fn: Callable[[float], None] | None,
-) -> subprocess.CompletedProcess:
-    """Run the recovery merge, riding out a transport fault raised from INSIDE the merge.
-
-    Bug f61c: the checkout is a ``blob:none`` partial clone, so ``git merge`` itself does
-    on-demand promisor fetches. Run 31420498173 died as
-    ``merge-recovery-blocked: ... server certificate verification failed`` together with
-    ``could not fetch ... from promisor remote`` — a TRANSPORT fault wearing the merge
-    reason. Retry only when the transport classifier matches; a genuine merge conflict is
-    never transport-retriable and stays terminal on the first failure.
-    """
-    for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
-        merge = _git(
-            base_path,
-            "merge",
-            merge_target,
-            "--no-edit",
-            "-m",
-            f"Merge {remote_ref} (auto-reconcile during push retry)",
-        )
-        if merge.returncode == 0 or transport_attempt == _MAX_TRANSPORT_ATTEMPTS:
-            return merge
-        if not _is_transport_retriable(merge.stderr or ""):
-            return merge
-        logger.warning(
-            "push-recovery merge hit a transient transport fault "
-            "(transport attempt %s/%s), retrying: %s",
-            transport_attempt,
-            _MAX_TRANSPORT_ATTEMPTS,
-            (merge.stderr or "").strip()[:200],
-        )
-        _git(base_path, "merge", "--abort")
-        _transport_backoff(transport_attempt, sleep_fn)
-    return merge
-
-
-def _merge_remote_under_lock(
-    base_path: str,
-    remote_ref: str,
-    attempt: int,
-    strict: bool,
-    lock: Any,
-    sleep_fn: Callable[[float], None] | None = None,
-) -> bool | None:
-    """Merge the fetched remote ref while the store write lock is held."""
-    try:
-        lock.check_no_rebase_in_progress(base_path)
-    except lock.RebaseGuard:
-        _raise_if_strict(
-            strict,
-            "merge-recovery-blocked",
-            "tracker is in rebase or merge recovery state",
-            base_path,
-            remote_ref,
-        )
-        logger.warning(
-            "cannot reconcile push — tracker is in rebase/merge recovery state. "
-            "Run ticket-fsck-recover.sh."
-        )
-        return None
-    merge_target, problem = compat.store_epoch_merge_target(base_path, remote_ref)
-    if merge_target is None or problem is not None:
-        _raise_if_strict(
-            strict,
-            "store-epoch-pre-merge",
-            problem or "tickets store epoch guard could not pin remote ref",
-            base_path,
-            remote_ref,
-        )
-        logger.warning("%s", problem or "tickets store epoch guard could not pin remote ref")
-        return None
-    merge = _merge_with_transport_retry(base_path, remote_ref, merge_target, sleep_fn)
-    if merge.returncode == 0:
-        return True
-    if _DIRTY_WD.search(merge.stderr or ""):
-        return _recover_dirty_merge(base_path, remote_ref, attempt, strict)
-    _git(base_path, "merge", "--abort")
-    _raise_if_strict(
-        strict,
-        "merge-recovery-blocked",
-        merge.stderr or "merge conflict during push recovery",
-        base_path,
-        remote_ref,
-    )
-    logger.warning("tickets branch push failed (merge conflict, attempt %s)", attempt)
-    return False
-
-
-def _fetch_for_recovery(
-    base_path: str, remote: str, branch: str, sleep_fn: Callable[[float], None] | None
-) -> subprocess.CompletedProcess:
-    """Fetch the remote branch for merge recovery, riding out transient transport faults.
-
-    Bug f61c: run 31420498173 lost recovery to `merge-recovery-blocked: ... server
-    certificate verification failed`, so the fetch leg needs the same bounded transport
-    retry as the push leg — a blob:none partial clone also fetches on demand here.
-    """
-    refspec = f"+refs/heads/{branch}:refs/remotes/{remote}/{branch}"
-    for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
-        fetch = _git(base_path, "fetch", remote, refspec)
-        if fetch.returncode == 0 or transport_attempt == _MAX_TRANSPORT_ATTEMPTS:
-            return fetch
-        if not _is_transport_retriable(fetch.stderr or ""):
-            return fetch
-        logger.warning(
-            "push-recovery fetch hit a transient transport fault "
-            "(transport attempt %s/%s), retrying: %s",
-            transport_attempt,
-            _MAX_TRANSPORT_ATTEMPTS,
-            (fetch.stderr or "").strip()[:200],
-        )
-        _transport_backoff(transport_attempt, sleep_fn)
-    return fetch
 
 
 def _recover_non_fast_forward(
@@ -347,46 +109,9 @@ def _recover_non_fast_forward(
     strict: bool,
     sleep_fn: Callable[[float], None] | None = None,
 ) -> bool | None:
-    """Fetch and merge a genuine non-fast-forward rejection.
-
-    ``True`` means a clean merge, ``False`` means a retryable local recovery
-    failure, and ``None`` preserves the default path's terminal best-effort stop.
-    """
-    fetch = _fetch_for_recovery(base_path, remote, branch, sleep_fn)
-    if fetch.returncode != 0:
-        _raise_if_strict(
-            strict,
-            "push-transport-failed",
-            fetch.stderr or "git fetch failed during push recovery",
-            base_path,
-            remote_ref,
-        )
-    from rebar._store import lock as _lock
-
-    try:
-        with _lock.write_lock(
-            base_path, timeout=_PUSH_MERGE_LOCK_TIMEOUT, attempts=1, dual_window=True
-        ):
-            recovered = _merge_remote_under_lock(
-                base_path, remote_ref, attempt, strict, _lock, sleep_fn
-            )
-        if recovered:
-            # Bug ebee: back off before the caller re-pushes, so a lost CAS race gets a
-            # window to converge instead of re-colliding with the same concurrent writer.
-            _cas_backoff(attempt, sleep_fn)
-        return recovered
-    except _lock.LockTimeout:
-        _raise_if_strict(
-            strict,
-            "lock-timeout",
-            "write lock stayed busy during push recovery",
-            base_path,
-            remote_ref,
-        )
-        logger.warning(
-            "tickets branch push-retry merge skipped: write lock busy; push stays pending"
-        )
-        return None
+    return push_recovery._recover_non_fast_forward(
+        sys.modules[__name__], base_path, remote, branch, remote_ref, attempt, strict, sleep_fn
+    )
 
 
 def _require_s3_helper_if_s3_url(remote_url: str) -> None:
