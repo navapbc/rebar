@@ -690,6 +690,48 @@ def jira_dc_project(track_issue: Callable[[str], None]) -> Iterator[str]:
     _poll_until_404(f"/rest/api/2/project/{key}", what=f"project {key}")
 
 
+@pytest.fixture
+def scratch_projects(track_issue: Callable[[str], None]) -> Iterator[dict[str, str]]:
+    """FOUR distinct scratch Jira projects for the multi-project bridge rehearsal.
+
+    The four-project analogue of :func:`jira_dc_project`, for the same reason: the
+    many-to-many rehearsal (``test_multi_project_rehearsal.py``) drives the M2M bridge
+    against several REAL DC projects at once.
+    Reuses the in-conftest provisioning helpers IN PLACE — ``_random_project_key``,
+    ``_create_scratch_project``, ``_assert_project_capabilities`` and ``_poll_until_404``
+    — and deliberately does NOT relocate or re-implement any of them. Those helpers plus
+    ``_request`` are pinned to conftest by ticket ccf6 and
+    ``tests/unit/test_live_jira_dc_conftest.py`` (unit tests
+    ``monkeypatch.setattr(harness, "_request", …)`` in conftest's namespace, which only
+    reaches callers defined here); this fixture merely ADDS a new consumer of them.
+
+    The four keys are guaranteed DISTINCT, each is capability-checked BEFORE the yield
+    exactly like ``jira_dc_project``, and ALL four are torn down on EVERY exit path (the
+    DELETE asserts 204/200/404, then ``_poll_until_404`` confirms absence, ADR 0037 §3;
+    deleting a project cascades to its issues). Yields a role→key mapping.
+    """
+    mapping: dict[str, str] = {}
+    keys: list[str] = []
+    try:
+        for role in ("one", "two", "zero", "legacy"):
+            key = _random_project_key()
+            while key in keys:
+                key = _random_project_key()
+            status, created = _create_scratch_project(key)
+            assert status == 201, f"scratch project creation failed: {status} {created}"
+            _assert_project_capabilities(key)
+            keys.append(key)
+            mapping[role] = key
+        yield mapping
+    finally:
+        for key in keys:
+            status, body = _request(f"/rest/api/2/project/{key}", method="DELETE")
+            assert status in (204, 200, 404), (
+                f"deleting scratch project {key} failed: {status} {body}"
+            )
+            _poll_until_404(f"/rest/api/2/project/{key}", what=f"project {key}")
+
+
 @pytest.fixture(scope="session")
 def jira_dc_pat() -> str:
     """A Personal Access Token minted programmatically for the Bearer-auth test.
