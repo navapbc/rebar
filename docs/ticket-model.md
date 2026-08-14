@@ -218,6 +218,31 @@ repository file changes, so they use **paths**, not **none**. Use
 changes at all. See [event-schema.md](event-schema.md) for the event fields and replacement
 semantics.
 
+## The project fields (`bridge_project` and `repos`)
+
+A ticket carries two fields that place it in the store's many-to-many tracker-projects model
+(see [ADR 0097](adr/0097-many-to-many-tracker-projects.md) and the
+[user guide](user-guide.md#jira)):
+
+- **`bridge_project`** is **tri-state**, and the three states are kept distinguishable across
+  event replay by a *present-only* projection (a key-presence check, not a truthiness one):
+  - **absent** (the seeded `None`) — the deliberate "legacy / not stated" sentinel; the ticket
+    resolves to the mapping's `legacy_default`. A pre-mapping ticket, or any ticket created
+    without a project flag, is in this state.
+  - **`""`** (present, empty string) — an explicit **never-sync**: the ticket resolves to no
+    project regardless of the default.
+  - **a non-empty key** (e.g. `"DIG"`) — that project verbatim, the ticket's outbound sync
+    target. It is a routing target, not validated against the mapping's key set, so an
+    unknown key routes rather than erroring.
+- **`repos`** is the list of repositories the ticket's project owns; it defaults to `[]` and,
+  for an inbound-created ticket, is populated from the source project's `repos` entry in the
+  mapping.
+
+The mapping itself (which projects the store syncs, each project's `repos`, and the
+`legacy_default`) is a committed store-level file managed with `rebar bridge projects
+{list,set,remove}` — it is not a per-ticket concern; see the
+[user guide](user-guide.md#jira) and [config.md](config.md).
+
 ## See also
 
 - [event-schema.md](event-schema.md) — the append-only event bodies behind every concept
