@@ -397,6 +397,44 @@ def test_completion_fail_renders_failure_findings_fallback(store: Path) -> None:
     assert "must handle empty input" in body  # the failure finding is surfaced
 
 
+def test_completion_fail_with_criteria_still_renders_as_fail(store: Path) -> None:
+    """A FAIL sidecar record carrying per-criterion ``criteria`` (the shape emitted since
+    ticket 1d71, whose records carry the ``evidence_sufficient`` markers) must still render
+    the FAIL panel with its findings — the PASS/FAIL split keys on the record's verdict,
+    not on the presence of ``criteria``."""
+    from rebar.llm import completion_sidecar
+
+    r = str(store)
+    tid = _new_ticket(r)
+    assert completion_sidecar.emit(
+        {
+            "verdict": "FAIL",
+            "ticket_id": tid,
+            "findings": [
+                {
+                    "criterion": "must handle empty input",
+                    "detail": "insufficient evidence: the bounded evidence search was exhausted",
+                    "severity": "high",
+                }
+            ],
+            "criteria": [
+                {
+                    "criterion": "must handle empty input",
+                    "met": False,
+                    "evidence_sufficient": False,
+                }
+            ],
+            "evidence_sufficient": False,
+            "runner": "fake",
+        },
+        repo_root=r,
+    )
+    body = _get(r, f"/ticket/{tid}").text
+    low = body.lower()
+    assert "fail" in low
+    assert "must handle empty input" in body  # the failure finding is surfaced
+
+
 # ── AC9: empty/partial state — plan-only ticket ──────────────────────────────
 def test_plan_only_ticket_shows_not_run_panels(store: Path) -> None:
     r = str(store)

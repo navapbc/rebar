@@ -3,7 +3,6 @@
   "ceilings": {
     "src/rebar/_cli/__init__.py::_main_dispatch": 35,
     "src/rebar/_cli/_llm_commands.py::_render_plan_review_text": 16,
-    "src/rebar/_commands/close_precheck.py::_completion_precheck": 16,
     "src/rebar/_commands/composer.py::create_cli": 22,
     "src/rebar/_commands/composer.py::create_core": 21,
     "src/rebar/_commands/composer.py::edit_core": 20,

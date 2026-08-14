@@ -54,11 +54,12 @@ ALL_CRITERIA_BANKED_NOTICE = (
 )
 BOUNDED_FALLBACK_EVIDENCE = (
     "Bounded repository search reached three unique evidence responses without demonstrating "
-    "that this criterion is met; recorded met=false at the finite-search boundary."
+    "that this criterion is met; recorded insufficient evidence (an evidence gap, not a "
+    "refutation) at the finite-search boundary."
 )
 BOUNDED_FALLBACK_NOTICE = (
-    "Completion evidence policy: recorded met=false for the current criterion at the "
-    "three-response finite-search boundary. Continue with the next unbanked criterion."
+    "Completion evidence policy: recorded insufficient evidence for the current criterion at "
+    "the three-response finite-search boundary. Continue with the next unbanked criterion."
 )
 
 
@@ -68,7 +69,8 @@ class CompletionEvidencePolicy:
 
     ``criterion_ids`` is ordered exactly like the manifest presented to the model.  Both
     callbacks are live views over the run's criterion bank: ``banked_ids`` chooses the next
-    first-unbanked id, while ``fallback_record`` persists the bounded ``met=false`` verdict.
+    first-unbanked id, while ``fallback_record`` banks the bounded insufficiency record
+    (``met=false`` carrying the framework-set ``evidence_sufficient=False`` marker).
     """
 
     criterion_ids: tuple[str, ...]
@@ -90,15 +92,17 @@ def attach_completion_evidence_policy(
 def make_completion_record_tool(bank: Any, criterion_ids: tuple[str, ...]):
     """Bind the bank's record tool and opt a non-empty manifest into completion policy.
 
-    ``bank`` is deliberately structural here: the policy layer needs only ``make_record_tool``
-    and the live ``banked_ids`` view.  The bounded fallback calls the same bound record tool as
-    the model, preserving its evidence cap, source vocabulary, and return semantics.  Avoiding
-    an import of ``workflow.completion_banking`` keeps this module independent of orchestration.
+    ``bank`` is deliberately structural here: the policy layer needs only ``make_record_tool``,
+    ``record_insufficient`` and the live ``banked_ids`` view.  The bounded fallback banks an
+    INSUFFICIENCY record — ``met=false`` plus the framework-set ``evidence_sufficient=False``
+    marker — rather than a bare refutation, so exhaustion of the finite evidence search stays
+    distinguishable from a positive refutation.  Avoiding an import of
+    ``workflow.completion_banking`` keeps this module independent of orchestration.
     """
     record_tool = bank.make_record_tool()
 
     def fallback_record(criterion_id: str, evidence: str) -> Any:
-        return record_tool(criterion_id, False, evidence)
+        return bank.record_insufficient(criterion_id, evidence)
 
     return attach_completion_evidence_policy(
         record_tool,

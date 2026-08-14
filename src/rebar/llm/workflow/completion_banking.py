@@ -38,6 +38,14 @@ from typing import TYPE_CHECKING, Any
 from rebar.llm.completion import verify_step_floor
 from rebar.llm.errors import CompletionRecoveryError
 
+# Verdict assembly lives in its own module (extracted along the rendering-seam call-graph
+# cluster); re-exported here so existing callers and the public `__all__` are unchanged.
+from rebar.llm.workflow.completion_verdict_assembly import (
+    assemble_deterministic_verdict,
+    merge_finalizer_with_bank,
+    ticket_id_of,
+)
+
 if TYPE_CHECKING:
     from rebar._config_schema import VerifyConfig
 
@@ -55,9 +63,6 @@ BANK_SCHEMA_VERSION = 1
 # unrecognized model falls back to the standard cap.
 _BATCH_CAP_BY_SLOT: dict[str, int] = {"frontier": 12, "standard": 8, "trivial": 8}
 _DEFAULT_BATCH_CAP = 8
-
-_FALLBACK_FINALIZER = "deterministic_fallback"
-
 
 _SUCCESSOR_BANKING_ADDENDUM = """
 
@@ -439,11 +444,20 @@ class CriterionBank:
         return self._dir / f"{safe}.json"
 
     def upsert(
-        self, criterion_id: str, met: bool, evidence: str, *, source: str = "tool"
+        self,
+        criterion_id: str,
+        met: bool,
+        evidence: str,
+        *,
+        source: str = "tool",
+        evidence_sufficient: bool | None = None,
     ) -> dict[str, Any]:
         """Idempotently record ``criterion_id``'s provisional verdict, overwriting any prior
         entry. Evidence is capped at :data:`EVIDENCE_CAP_CHARS`; a capped entry carries an
-        explicit ``truncated=True`` flag. Fail-loud on any write error."""
+        explicit ``truncated=True`` flag. ``evidence_sufficient=False`` marks the entry as
+        the bounded fallback's insufficiency record (an evidence gap, not a refutation); the
+        default leaves the key absent, so a bare overwrite CLEARS a prior marker. Fail-loud
+        on any write error."""
         text = str(evidence or "")
         truncated = len(text) > EVIDENCE_CAP_CHARS
         if truncated:
@@ -459,6 +473,8 @@ class CriterionBank:
             "material_fingerprint": self._stamps.material_fingerprint,
             "tree_sha": self._stamps.tree_sha,
         }
+        if evidence_sufficient is False:
+            entry["evidence_sufficient"] = False
         try:
             self._path(criterion_id).write_text(
                 json.dumps(entry, ensure_ascii=False, sort_keys=True), encoding="utf-8"
@@ -469,6 +485,18 @@ class CriterionBank:
                 diagnostic={"criterion_banked": False},
             ) from exc
         return entry
+
+    def record_insufficient(self, criterion_id: str, evidence: str) -> dict[str, Any]:
+        """Bank the bounded fallback's INSUFFICIENCY record for ``criterion_id``.
+
+        ``met=false`` plus the framework-set ``evidence_sufficient=False`` sibling marker —
+        the finite evidence search was exhausted without demonstrating the criterion, which
+        is an evidence gap, not a refutation. Framework-only: the model-facing record tool
+        never writes this marker, and a later genuine tool refutation (a bare upsert)
+        replaces it."""
+        return self.upsert(
+            criterion_id, False, evidence, source="fallback", evidence_sufficient=False
+        )
 
     def get(self, criterion_id: str) -> dict[str, Any] | None:
         path = self._path(criterion_id)
@@ -539,14 +567,15 @@ class CriterionBank:
         def record_criterion_verdict(criterion_id: str, met: bool, evidence: str) -> str:
             """Use this tool for the current criterion id as the response's single COMMIT action.
 
-            Enter COMMIT when existing evidence demonstrates the verdict. The bounded transition
-            enters COMMIT in the next response after the third repository evidence call. At that
-            boundary, record `met=false` when evidence has not demonstrated MET. A successful
-            confirmation selects the next id.
+            Enter COMMIT when existing evidence demonstrates the verdict. Record `met=false`
+            ONLY when evidence positively refutes the criterion; when evidence was simply
+            not found, record nothing — at the bounded transition the framework itself
+            records the evidence gap in the next response after the third repository evidence call.
+            A successful confirmation selects the next id.
 
             Args:
                 criterion_id: the criterion's stable id from the manifest or remainder listing.
-                met: whether the criterion is demonstrably met (true) or not (false).
+                met: whether the criterion is demonstrably met (true) or refuted (false).
                 evidence: concrete evidence (file paths + line numbers) for the judgment;
                     capped at 3000 characters.
 
@@ -568,7 +597,10 @@ def harvest_structured_into_bank(
     Tool-banked and output-harvested entries converge; re-harvest is a no-op overwrite.
     Returns the count of entries written (used by the zero-progress breaker together with
     tool-banking). A record may key by ``criterion_id`` directly or by verbatim ``criterion``
-    text mapped through ``id_by_text``.
+    text mapped through ``id_by_text``. The ``evidence_sufficient`` marker is framework-owned:
+    a model-supplied one is IGNORED, and a markerless ``met=false`` overwrite PRESERVES a
+    prior entry's marker (a successor echoing a banked insufficiency must not silently
+    upgrade it to a refutation) — only ``met=true`` clears it.
     """
     records = result.get("criteria")
     if not isinstance(records, list):
@@ -586,192 +618,18 @@ def harvest_structured_into_bank(
         citation = record.get("citation")
         if citation and not evidence:
             evidence = json.dumps(citation, ensure_ascii=False, default=str)
-        bank.upsert(str(cid), bool(record["met"]), str(evidence), source="harvest")
+        met = bool(record["met"])
+        prior = bank.get(str(cid))
+        preserve = not met and prior is not None and prior.get("evidence_sufficient") is False
+        bank.upsert(
+            str(cid),
+            met,
+            str(evidence),
+            source="harvest",
+            evidence_sufficient=False if preserve else None,
+        )
         written += 1
     return written
-
-
-def assemble_deterministic_verdict(
-    ticket_id: str,
-    criteria: list[str],
-    bank_entries: dict[str, dict[str, Any]],
-    *,
-    id_by_text: dict[str, str] | None = None,
-    runner: str | None = None,
-    model: str | None = None,
-) -> dict[str, Any]:
-    """Assemble a FULL-COVERAGE completion verdict DIRECTLY from the bank — no model call.
-
-    Used when the LLM finalizer fails twice. Banked ``met`` flags are taken as-is; unbanked
-    criteria become ``met=false`` unverified/exhausted placeholders. Cross-criterion downgrade
-    authority never ran, so it is recorded as SKIPPED and the verdict is stamped
-    ``finalizer="deterministic_fallback"`` with ``certifiable=False`` — the completion sidecar
-    reads that field so the signing path WITHHOLDS a certified signature. This is the ticket's
-    OWN self-verdict provenance (distinct from ``child_closure_findings``). A run with any
-    banked progress can never die verdict-less.
-    """
-    ids = id_by_text or criterion_id_map(criteria)
-    criteria_records: list[dict[str, Any]] = []
-    findings: list[dict[str, Any]] = []
-    any_unmet = False
-    for text in criteria:
-        cid = ids[text]
-        entry = bank_entries.get(cid)
-        if entry is not None:
-            met = bool(entry.get("met"))
-            criteria_records.append(
-                {
-                    "criterion": text,
-                    "met": met,
-                    "criterion_id": cid,
-                    "evidence": entry.get("evidence") or "",
-                    "truncated": bool(entry.get("truncated")),
-                }
-            )
-            if not met:
-                any_unmet = True
-                findings.append(
-                    {
-                        "criterion": text,
-                        "detail": "banked verdict: criterion not met.",
-                        "severity": "high",
-                        "citations": [],
-                    }
-                )
-        else:
-            any_unmet = True
-            criteria_records.append(
-                {
-                    "criterion": text,
-                    "met": False,
-                    "criterion_id": cid,
-                    "evidence": "",
-                    "unverified": True,
-                    "exhausted": True,
-                }
-            )
-            findings.append(
-                {
-                    "criterion": text,
-                    "detail": "criterion was never verified (recovery budget exhausted); "
-                    "recorded as an unverified placeholder.",
-                    "severity": "high",
-                    "citations": [],
-                }
-            )
-    return {
-        "verdict": "FAIL" if any_unmet else "PASS",
-        "findings": findings,
-        "criteria": criteria_records,
-        "summary": "Assembled deterministically from banked verdicts after the finalizer "
-        "failed; unverified criteria are met=false placeholders.",
-        "target": {"kind": "ticket", "ticket_ids": [ticket_id]},
-        "reviewers": ["completion-verifier"],
-        "finalizer": _FALLBACK_FINALIZER,
-        "downgrade_authority": "skipped",
-        "certifiable": False,
-        "runner": runner or "deterministic_fallback",
-        "model": model or "deterministic_fallback",
-        "trace_id": None,
-        "provider_provenance": None,
-    }
-
-
-def merge_finalizer_with_bank(
-    result: dict[str, Any],
-    criteria: list[str],
-    bank_entries: dict[str, dict[str, Any]],
-    *,
-    id_by_text: dict[str, str] | None = None,
-) -> dict[str, Any]:
-    """Backfill a full-coverage verdict from an LLM finalizer ``result``.
-
-    The LLM finalizer keys by verbatim criterion; any criterion it omitted is backfilled from
-    the bank (or as a met=false unverified placeholder), guaranteeing full coverage while
-    preserving the finalizer's own judgments (including a cross-criterion downgrade of a
-    banked met=true).
-    """
-    ids = id_by_text or criterion_id_map(criteria)
-    by_text: dict[str, dict[str, Any]] = {}
-    for record in result.get("criteria") or []:
-        if isinstance(record, dict) and record.get("criterion"):
-            by_text[str(record["criterion"]).strip()] = record
-    records: list[dict[str, Any]] = []
-    for text in criteria:
-        existing = by_text.get(text.strip())
-        if isinstance(existing, dict) and isinstance(existing.get("met"), bool):
-            records.append({**existing, "criterion": text, "criterion_id": ids[text]})
-            continue
-        entry = bank_entries.get(ids[text])
-        if entry is not None:
-            records.append(
-                {
-                    "criterion": text,
-                    "met": bool(entry.get("met")),
-                    "criterion_id": ids[text],
-                    "evidence": entry.get("evidence") or "",
-                }
-            )
-        else:
-            records.append(
-                {
-                    "criterion": text,
-                    "met": False,
-                    "criterion_id": ids[text],
-                    "unverified": True,
-                    "exhausted": True,
-                }
-            )
-    any_unmet = any(not r["met"] for r in records)
-    merged = dict(result)
-    merged["criteria"] = records
-    merged["verdict"] = "FAIL" if any_unmet else str(result.get("verdict") or "PASS").upper()
-    merged.setdefault("target", {"kind": "ticket", "ticket_ids": [ticket_id_of(result)]})
-    merged.setdefault("reviewers", ["completion-verifier"])
-    # A real LLM finalizer ran and reconciled the full-coverage verdict — it is certifiable.
-    merged.setdefault("finalizer", "llm_finalizer")
-    merged.setdefault("certifiable", True)
-    if any_unmet:
-        merged["findings"] = _findings_for_unmet(records, result.get("findings"))
-    else:
-        merged["findings"] = []
-    return merged
-
-
-def ticket_id_of(result: dict[str, Any]) -> str:
-    target = result.get("target")
-    if isinstance(target, dict):
-        ids = target.get("ticket_ids")
-        if isinstance(ids, list) and ids:
-            return str(ids[0])
-    return ""
-
-
-def _findings_for_unmet(records: list[dict[str, Any]], existing: Any) -> list[dict[str, Any]]:
-    """Preserve the finalizer's own findings, adding a placeholder finding for any unmet
-    criterion it did not itself report (so a FAIL always names every unmet criterion)."""
-    by_criterion: dict[str, dict[str, Any]] = {}
-    if isinstance(existing, list):
-        for f in existing:
-            if isinstance(f, dict) and f.get("criterion"):
-                by_criterion[str(f["criterion"]).strip()] = f
-    out: list[dict[str, Any]] = []
-    for record in records:
-        if record["met"]:
-            continue
-        text = str(record["criterion"]).strip()
-        if text in by_criterion:
-            out.append(by_criterion[text])
-        else:
-            out.append(
-                {
-                    "criterion": record["criterion"],
-                    "detail": "criterion not met (banked/unverified).",
-                    "severity": "high",
-                    "citations": [],
-                }
-            )
-    return out
 
 
 __all__ = [
@@ -796,4 +654,5 @@ __all__ = [
     "successor_batch_cap",
     "successor_instructions",
     "successor_system_prompt",
+    "ticket_id_of",
 ]
