@@ -22,7 +22,10 @@ import importlib.util
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from rebar_reconciler._backend import OutboundMapper
 
 _ADF_KEY_INBOUND = "rebar_reconciler.adapters.jira.adf"
 _AdfModule_Inbound = None
@@ -45,6 +48,54 @@ def _load_adf():
     spec.loader.exec_module(mod)
     _AdfModule_Inbound = mod
     return mod
+
+
+def _text_matches(a: Any, b: Any) -> bool:
+    """String comparison tolerant of trailing whitespace (Jira strips it on write),
+    falling back to plain equality for non-strings. Mirror of the outbound differ's
+    ``outbound_field_diff._text_matches``; replicated here so the pure inbound-diff leaf
+    stays free of a cross-differ import cycle."""
+    if isinstance(a, str) and isinstance(b, str):
+        return a.rstrip() == b.rstrip()
+    return a == b
+
+
+def _description_forms(
+    local_val: str,
+    jira_val: Any,
+    jira_raw: Any,
+    local_ticket: dict[str, Any],
+    outbound_mapper: OutboundMapper | None,
+) -> tuple[str, Any] | None:
+    """Normalize the description pair for the inbound compare, or signal echo-unchanged.
+
+    Returns ``None`` when Jira's value is the echo of the LOCAL body's landed wire form —
+    the inbound mirror of the outbound ``_baseline_form_matches`` (story 3388/3289). Under
+    a lossy one-way rich-text codec (the DC Markdown->wiki cutover) the local body stays
+    Markdown while Jira echoes the rendered wiki, so a raw/ADF-only compare reports
+    "changed" every pass and the differ pulls Jira's echo of our OWN push back over the
+    local Markdown -- the AC2 echo-safety regression. When the injected outbound port is
+    present we render the local body to its landed wire form (``map_fields_to_remote`` --
+    identity when the rich cutover is off, so the plain-codec path is unchanged) and, if it
+    matches the RAW Jira value, treat the field as unchanged. Matching on the landed form
+    only ADDS a way to conclude "unchanged": it cannot hide a real Jira edit (a genuine
+    remote change no longer equals our landed form) and it cannot start missing an edit the
+    raw compare already caught.
+
+    Otherwise returns the ADF-normalized ``(local_val, jira_val)`` pair for the generic
+    scalar compare (the Cloud path, byte-for-byte unchanged).
+    """
+    if outbound_mapper is not None:
+        landed = outbound_mapper.map_fields_to_remote(
+            {"description": local_ticket.get("description") or ""},
+            ticket=local_ticket,
+        ).get("description")
+        if _text_matches(landed, jira_raw):
+            return None
+    adf = _load_adf()
+    local_norm = adf.normalize_description(adf.fit_text_to_adf_limit(local_val))
+    jira_norm = adf.normalize_description(jira_val) if isinstance(jira_val, str) else jira_val
+    return local_norm, jira_norm
 
 
 # ---------------------------------------------------------------------------

@@ -596,6 +596,7 @@ def _run_differs_inbound(ctx: Any, mutations, outbound_raw, absent_alive_fields,
         local_by_id,
         outbound_mutations=outbound_raw,
         inbound_mapper=backend.inbound,
+        outbound_mapper=backend.outbound,
     )
     sync_logger.log(
         "inbound_differ_complete",
