@@ -582,9 +582,23 @@ def _compute_outbound_create_mutation(
         from rebar_reconciler import projects_store
 
         target = projects_store.resolve_project(ticket, mapping)
-        if not target or target not in mapping.projects:
+        if not target:
             return
-        create_fields[_BRIDGE_TARGET_PROJECT_KEY] = target
+        # Bug 7b9a finding 1: match CASE-INSENSITIVELY so this create-path check
+        # agrees with the applier's cross-project guard, which uppercases both
+        # sides (applier._cross_project_targets). Stamp the CANONICAL mapping key
+        # (not the ticket's raw case) so the transport routes to the real project.
+        # A key with no case-folded match (stale/typo binding) still emits no
+        # create — creates are guard-exempt, so this is the only gate that stops
+        # a create against an unsynced project.
+        # Finding 4 (accepted): the mapping is also read by the applier guard
+        # (read_projects) later in the same pass. That two-read window is left as
+        # is — projects.json is a rare operator CLI write and a pass is a short
+        # single window, so a mid-pass divergence is not worth threading one read.
+        canonical = next((k for k in mapping.projects if k.upper() == target.upper()), None)
+        if canonical is None:
+            return
+        create_fields[_BRIDGE_TARGET_PROJECT_KEY] = canonical
     mutations.append(
         OutboundMutation(
             local_id=local_id,

@@ -144,3 +144,63 @@ def test_apply_allows_matching_project(applier_mod, acli_mod, tmp_path, monkeypa
             applier_mod.apply([_update("REB-1")], f"reb-ok-{int(time.time())}", repo_root=tmp_path)
         except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
             pytest.fail(f"guard wrongly blocked a same-project update: {exc!r}")
+
+
+# --- Bug 7b9a finding 2: the guard's store-loading wiring (many-to-many) -----
+# The single-project tests above pin the fallback (_project). These drive the
+# real read_projects(repo_root) wiring in apply(): a SEEDED projects.json widens
+# the allowed scope to the whole project SET, exercised end-to-end through the
+# caller (not the pure _cross_project_targets helper).
+
+
+def _seed_projects_json(repo_root: Path, keys: list[str]) -> None:
+    import json
+
+    bridge = repo_root / ".tickets-tracker" / ".bridge_state"
+    bridge.mkdir(parents=True, exist_ok=True)
+    record = {
+        "version": 1,
+        "legacy_default": keys[0],
+        "projects": {k: {"repos": []} for k in keys},
+    }
+    (bridge / "projects.json").write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_apply_allows_a_second_seeded_project_via_store_loading(
+    applier_mod, acli_mod, tmp_path, monkeypatch
+):
+    """With JIRA_PROJECT=REB but a seeded mapping {REB, DIG}, an update at DIG-1 is
+    ALLOWED — proving apply() loads read_projects(repo_root) and widens the scope
+    beyond the single _project. Under the single-project fallback DIG-1 would be
+    refused (see test_apply_refuses_foreign_project_before_any_write)."""
+    monkeypatch.setenv("JIRA_PROJECT", "REB")
+    _seed_projects_json(tmp_path, ["REB", "DIG"])
+    fake_client = MagicMock()
+    fake_client.update_issue.return_value = {"key": "DIG-1", "ok": True}
+    with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
+        try:
+            applier_mod.apply(
+                [_update("DIG-1")], f"seeded-ok-{int(time.time())}", repo_root=tmp_path
+            )
+        except applier_mod.CrossProjectTargetError as exc:  # pragma: no cover
+            pytest.fail(
+                f"seeded mapping {{REB, DIG}} must allow a DIG-1 update through the "
+                f"store-loading wiring; got {exc!r}"
+            )
+
+
+def test_apply_refuses_a_project_outside_the_seeded_set(
+    applier_mod, acli_mod, tmp_path, monkeypatch
+):
+    """A key outside the SEEDED set is still refused before any write — the widened
+    scope is the mapping's set, not 'anything'."""
+    monkeypatch.setenv("JIRA_PROJECT", "REB")
+    _seed_projects_json(tmp_path, ["REB", "DIG"])
+    fake_client = MagicMock()
+    with patch.object(applier_mod, "_load_acli", return_value=_make_fake_acli(fake_client)):
+        with pytest.raises(applier_mod.CrossProjectTargetError) as exc:
+            applier_mod.apply(
+                [_update("ACME-1")], f"seeded-bad-{int(time.time())}", repo_root=tmp_path
+            )
+    assert "ACME-1" in str(exc.value)
+    fake_client.update_issue.assert_not_called()
