@@ -8,7 +8,6 @@ global_support = [
     "pyproject.toml",
     "scripts/mutation_gate.py",
     "tests/conftest.py",
-    "tests/**/conftest.py",
     "uv.lock",
 ]
 
@@ -17,7 +16,7 @@ name = "signing"
 mode = "advisory"
 source = "src/rebar/signing.py"
 tests = ["tests/unit/test_signing.py", "tests/interfaces/lifecycle/test_signature.py"]
-support = []
+support = ["tests/unit/conftest.py", "tests/interfaces/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 3
@@ -31,7 +30,12 @@ name = "reducer-processors"
 mode = "advisory"
 source = "src/rebar/reducer/_processors.py"
 tests = ["tests/scripts/reducer/", "tests/interfaces/store/test_reducer_single_source.py"]
-support = []
+support = [
+    "tests/interfaces/conftest.py",
+    "tests/interfaces/store/conftest.py",
+    "tests/scripts/conftest.py",
+    "tests/scripts/reducer/conftest.py",
+]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 5
@@ -48,7 +52,7 @@ tests = [
     "tests/interfaces/queries/test_next_batch_compute.py",
     "tests/interfaces/queries/test_next_batch_behavior.py",
 ]
-support = []
+support = ["tests/interfaces/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 6
@@ -66,7 +70,7 @@ tests = [
     "tests/interfaces/queries/test_ws5d_quality_fileimpact.py",
     "tests/interfaces/lifecycle/test_close_gate_story_epic.py",
 ]
-support = []
+support = ["tests/interfaces/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 0
@@ -80,7 +84,7 @@ name = "validate"
 mode = "advisory"
 source = "src/rebar/_engine_support/validate.py"
 tests = ["tests/interfaces/queries/test_validate_compute.py"]
-support = []
+support = ["tests/interfaces/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 0
@@ -94,7 +98,7 @@ name = "compact-policy"
 mode = "advisory"
 source = "src/rebar/_commands/_compact_policy.py"
 tests = ["tests/unit/test_compact_policy.py"]
-support = []
+support = ["tests/unit/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 0
@@ -108,7 +112,7 @@ name = "push-policy"
 mode = "advisory"
 source = "src/rebar/_store/_push_policy.py"
 tests = ["tests/unit/test_push_policy.py"]
-support = []
+support = ["tests/unit/conftest.py"]
 timeout_constant = 1.0
 timeout_multiplier = 15.0
 survivors_max = 0

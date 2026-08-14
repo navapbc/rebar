@@ -188,6 +188,132 @@ def test_manifest_is_canonical_and_complete() -> None:
     assert "scripts/mutation_gate.py" in manifest.global_support
 
 
+def test_manifest_conftest_support_matches_selected_test_ancestry() -> None:
+    gate = _load()
+    manifest = gate.load_manifest(MANIFEST)
+    tests_root = ROOT / "tests"
+    expected_shard_inputs = {
+        "signing": (
+            "src/rebar/signing.py",
+            ("tests/unit/test_signing.py", "tests/interfaces/lifecycle/test_signature.py"),
+        ),
+        "reducer-processors": (
+            "src/rebar/reducer/_processors.py",
+            ("tests/scripts/reducer/", "tests/interfaces/store/test_reducer_single_source.py"),
+        ),
+        "next-batch": (
+            "src/rebar/_engine_support/next_batch.py",
+            (
+                "tests/interfaces/queries/test_next_batch_compute.py",
+                "tests/interfaces/queries/test_next_batch_behavior.py",
+            ),
+        ),
+        "gates": (
+            "src/rebar/_engine_support/gates.py",
+            (
+                "tests/interfaces/lifecycle/test_gate_rubric_consistency.py",
+                "tests/interfaces/queries/test_ws5d_quality_fileimpact.py",
+                "tests/interfaces/lifecycle/test_close_gate_story_epic.py",
+            ),
+        ),
+        "validate": (
+            "src/rebar/_engine_support/validate.py",
+            ("tests/interfaces/queries/test_validate_compute.py",),
+        ),
+        "compact-policy": (
+            "src/rebar/_commands/_compact_policy.py",
+            ("tests/unit/test_compact_policy.py",),
+        ),
+        "push-policy": (
+            "src/rebar/_store/_push_policy.py",
+            ("tests/unit/test_push_policy.py",),
+        ),
+    }
+    expected_conftest_owners = {
+        "tests/unit/conftest.py": frozenset({"signing", "compact-policy", "push-policy"}),
+        "tests/interfaces/conftest.py": frozenset(
+            {"signing", "reducer-processors", "gates", "next-batch", "validate"}
+        ),
+        "tests/interfaces/store/conftest.py": frozenset({"reducer-processors"}),
+        "tests/scripts/conftest.py": frozenset({"reducer-processors"}),
+        "tests/scripts/reducer/conftest.py": frozenset({"reducer-processors"}),
+    }
+    derived_conftest_owners: dict[str, set[str]] = {}
+    for name, shard in manifest.shards.items():
+        selected_tests: list[Path] = []
+        for configured_test in shard.tests:
+            selected_path = ROOT / configured_test
+            selected_tests.extend(
+                sorted(selected_path.rglob("test_*.py"))
+                if selected_path.is_dir()
+                else [selected_path]
+            )
+        for selected_test in selected_tests:
+            for directory in selected_test.parents:
+                if directory == tests_root:
+                    break
+                conftest = directory / "conftest.py"
+                if conftest.is_file():
+                    relative = conftest.relative_to(ROOT).as_posix()
+                    derived_conftest_owners.setdefault(relative, set()).add(name)
+
+    manifest_conftest_owners: dict[str, set[str]] = {}
+    for name, shard in manifest.shards.items():
+        for support in shard.support:
+            if support.endswith("conftest.py"):
+                manifest_conftest_owners.setdefault(support, set()).add(name)
+
+    unrelated_conftest = "tests/external/live_jira_dc/conftest.py"
+    selector_paths = (
+        unrelated_conftest,
+        *expected_conftest_owners,
+        "tests/conftest.py",
+    )
+    actual = {
+        "global_support": manifest.global_support,
+        "shard_inputs": {
+            name: (shard.source, shard.tests) for name, shard in manifest.shards.items()
+        },
+        "non_conftest_shard_support": {
+            name: tuple(path for path in shard.support if not path.endswith("conftest.py"))
+            for name, shard in manifest.shards.items()
+        },
+        "derived_conftest_owners": {
+            path: frozenset(owners) for path, owners in derived_conftest_owners.items()
+        },
+        "manifest_conftest_owners": {
+            path: frozenset(owners) for path, owners in manifest_conftest_owners.items()
+        },
+        "selector_owners": {
+            path: frozenset(gate.select_shards(manifest, {path}).names) for path in selector_paths
+        },
+    }
+    expected = {
+        "global_support": (
+            ".github/mutation-shards.toml",
+            ".github/workflows/_mutation.yml",
+            ".github/workflows/mutation.yml",
+            ".github/workflows/gerrit-verify.yaml",
+            ".github/workflows/test.yml",
+            "pyproject.toml",
+            "scripts/mutation_gate.py",
+            "tests/conftest.py",
+            "uv.lock",
+        ),
+        "shard_inputs": expected_shard_inputs,
+        "non_conftest_shard_support": {name: () for name in expected_shard_inputs},
+        "derived_conftest_owners": expected_conftest_owners,
+        "manifest_conftest_owners": expected_conftest_owners,
+        "selector_owners": {
+            unrelated_conftest: frozenset(),
+            **expected_conftest_owners,
+            "tests/conftest.py": frozenset(expected_shard_inputs),
+        },
+    }
+
+    assert actual == expected
+
+
 def test_all_manifest_shards_start_in_advisory_mode() -> None:
     gate = _load()
     manifest = gate.load_manifest(MANIFEST)
