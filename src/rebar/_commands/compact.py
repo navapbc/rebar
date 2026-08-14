@@ -292,9 +292,14 @@ def _compact_all_parse(argv: list[str]) -> tuple[bool, int, bool, int | None]:
 
 # raw-git-ok: store-maintenance command, seam-internal
 def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None = None) -> None:
-    """Commit + push the batch of backfilled SNAPSHOTs (one commit for the whole run;
-    the per-ticket calls passed ``--skip-sync`` to defer the push here — bug
-    prone-octet-cheek).
+    """Commit + push whatever the sweep's folds left staged-able, then push.
+
+    Since bug compulsory-pernickety-mantis each fold commits its OWN unit inside its
+    locked section, so this normally finds nothing to stage and acts as (a) a safety net
+    for any residue and (b) the run's ONE batched push (the per-ticket calls pass
+    ``--skip-sync`` to defer the push here — bug prone-octet-cheek). The push must run
+    even when nothing is staged, precisely BECAUSE the per-ticket commits are the ones
+    waiting to be delivered.
 
     ``folded_ids`` scopes the staging to the tickets this run actually folded; ``None`` keeps
     the historical whole-tree behaviour for callers that do not track them."""
@@ -309,17 +314,17 @@ def _commit_backfill(tracker: str, compacted: int, folded_ids: set[str] | None =
     else:
         _git(tracker, "add", "-A")
     if _git(tracker, "diff", "--cached", "--quiet").returncode == 0:
-        sys.stdout.write("No staged changes (SNAPSHOTs may already have been committed).\n")
-        return
-    _git(
-        tracker,
-        "commit",
-        "-q",
-        "--no-verify",
-        "-m",
-        f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
-    )
-    sys.stdout.write("Committed.\n")
+        sys.stdout.write("No staged changes (the folds committed per ticket).\n")
+    else:
+        _git(
+            tracker,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            f"chore: backfill SNAPSHOT files for {compacted} tickets (ticket-compact-all)",
+        )
+        sys.stdout.write("Committed.\n")
     from rebar._store import push
 
     push.push_after_commit(tracker)
@@ -383,7 +388,12 @@ def _sweep_should_yield(tracker: str, done: int) -> bool:
 
 
 def _sweep_one_ticket(
-    tracker: str, tid: str, repo_root, position_commits: dict[str, str] | None
+    tracker: str,
+    tid: str,
+    repo_root,
+    position_commits: dict[str, str] | None,
+    *,
+    no_commit: bool = False,
 ) -> str:
     """Fold ONE ticket for the sweep; return its progress character.
 
@@ -391,17 +401,24 @@ def _sweep_one_ticket(
     ARTIFACT — did a new ``*-SNAPSHOT.json`` appear — not by the return code, because
     ``_compact_locked`` returns 0 for a successful fold AND for every no-op branch (below
     threshold, nothing older than the horizon, no safe placement gap). Counting ``rc == 0`` as
-    work inflated the tally and hid a sweep that folded nothing."""
+    work inflated the tally and hid a sweep that folded nothing.
+
+    Each fold COMMITS its own unit inside its locked section (bug
+    compulsory-pernickety-mantis): the sweep used to pass ``--no-commit`` and batch one
+    commit at the end, which left every fold of the run sitting dirty in the shared
+    worktree until ``_commit_backfill`` — a worker killed mid-sweep stranded the whole
+    batch as the tree dirt that wedges reconverge. ``no_commit`` survives only as the
+    operator's explicit ``compact-all --no-commit`` request. The PUSH stays batched
+    (``--skip-sync``; bug prone-octet-cheek) — commits are local and cheap, pushes are not."""
     import contextlib
     import io
 
+    argv = [tid, "--threshold=0", "--skip-sync"]
+    if no_commit:
+        argv.append("--no-commit")
     before = _snapshot_names(os.path.join(tracker, tid))
     with contextlib.redirect_stderr(io.StringIO()):  # bash 2>/dev/null
-        rc = compact_cli(
-            [tid, "--threshold=0", "--skip-sync", "--no-commit"],
-            repo_root=repo_root,
-            position_commits=position_commits,
-        )
+        rc = compact_cli(argv, repo_root=repo_root, position_commits=position_commits)
     if rc != 0:
         return "E"
     return "." if _snapshot_names(os.path.join(tracker, tid)) - before else "-"
@@ -444,7 +461,9 @@ def _sweep_position_map(repo_root) -> dict[str, str] | None:
     return built or None
 
 
-def _run_sweep(tracker: str, needs: list[str], repo_root) -> tuple[int, int, set[str], list[str]]:
+def _run_sweep(
+    tracker: str, needs: list[str], repo_root, *, no_commit: bool = False
+) -> tuple[int, int, set[str], list[str]]:
     """Fold each selected ticket; return ``(compacted, skipped, folded_ids, error_ids)``.
 
     Extracted from :func:`compact_all_cli` so that function stays under the C901 threshold —
@@ -462,7 +481,9 @@ def _run_sweep(tracker: str, needs: list[str], repo_root) -> tuple[int, int, set
         for tid in needs:
             if _sweep_should_yield(tracker, compacted + skipped + len(error_ids)):
                 break
-            outcome = _sweep_one_ticket(tracker, tid, repo_root, position_commits)
+            outcome = _sweep_one_ticket(
+                tracker, tid, repo_root, position_commits, no_commit=no_commit
+            )
             if outcome == "E":
                 error_ids.append(tid)
             elif outcome == ".":
@@ -501,6 +522,15 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
 
+    # Crash-recovery preamble (bug compulsory-pernickety-mantis): converge any partial
+    # fold a killed worker abandoned, BEFORE selecting — a reverted ticket becomes
+    # foldable again and must be counted. Skipped on --dry-run (no side effects) and
+    # free when no journal is pending. Takes the store write lock only when recovering.
+    if not dry_run:
+        from rebar._commands import compact_recovery
+
+        compact_recovery.recover_abandoned_folds_locked(tracker)
+
     needs, already = _scan_snapshot_state(tracker, threshold, horizon)
     total_needs = len(needs)
     sys.stdout.write(f"Tickets needing no compaction : {already}\n")
@@ -523,7 +553,9 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
 
     sys.stdout.write(f"\nCompacting {total_needs} tickets...\n")
     sys.stdout.write("(. = folded; - = nothing to fold; E = error)\n")
-    compacted, skipped, folded_ids, error_ids = _run_sweep(tracker, needs, repo_root)
+    compacted, skipped, folded_ids, error_ids = _run_sweep(
+        tracker, needs, repo_root, no_commit=no_commit
+    )
 
     sys.stdout.write("\n\n")
     sys.stdout.write(
