@@ -269,7 +269,14 @@ def run_sweep(tracker: str) -> None:
             )
             return
         repo_root = os.path.dirname(tracker)
-        with contextlib.redirect_stdout(io.StringIO()):
+        # Tag the store-lock acquisitions this sweep drives (transitively, via
+        # compact_all_cli -> _compact_locked) as `op=compact-sweep`, so a blocked writer's
+        # LockTimeout names the sweep and its safe-to-interrupt remedy rather than a bare pid
+        # (camerashy-erectable-frog). The label is ambient — it reaches `_owner_stamp` through
+        # the contextvar, not by editing the acquisition call site.
+        from rebar._store import lock_owner as _owner
+
+        with contextlib.redirect_stdout(io.StringIO()), _owner.operation_label("compact-sweep"):
             _compact.compact_all_cli([], repo_root=repo_root)
     except Exception:
         logger.warning("compaction sweep failed; the events stay live", exc_info=True)

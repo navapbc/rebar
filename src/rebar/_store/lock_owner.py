@@ -17,10 +17,13 @@ two readers that feed it, for the mkdir lock dir and for a single-file lock resp
 
 from __future__ import annotations
 
+import contextvars
 import logging
 import os
 import socket
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +52,71 @@ _STAMP_V2_PREFIX = "rebar-lock v2"
 # Placeholder for a field this platform cannot supply (e.g. no /proc). Explicit so a
 # reader can tell "unknown" apart from "missing/malformed" (bug castoff-tigerseye-ammonite).
 _STAMP_UNKNOWN = "-"
+
+# Ambient operation label for the v2 stamp (camerashy-erectable-frog). A holder that is
+# OPTIONAL housekeeping — a compaction sweep — is safe to interrupt, but a blocked writer
+# timing out on the store lock saw only a bare pid and could not tell the sweep apart from a
+# mystery hang mid-write (whose safe response is the opposite: wait). This contextvar lets the
+# sweep TAG its lock acquisitions descriptively: `operation_label(...)` sets it, `_owner_stamp`
+# reads it and appends an `op=<label>` field. The carrier is a contextvar, not a threaded
+# `acquire` parameter, because the label is read synchronously in the SAME process/thread that
+# later calls `lock.acquire` (the sweep folds inline), so it is in scope at the acquisition —
+# including the per-ticket `lock.acquire` inside `compact_txn._compact_locked`, which need not
+# be modified for the label to reach the stamp. The label is DESCRIPTIVE ONLY: staleness and
+# reclamation never read it.
+_operation_label: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "rebar_lock_operation_label", default=None
+)
+
+# Known interruptible operation labels → the remedy an operator can act on without a code
+# search. The compaction sweep's own guarantee (compact_trigger.run_sweep) is that a skipped
+# sweep is a no-op for correctness — the events stay live and the next trigger re-folds them —
+# so terminating it loses no data. The phrasing "safe to interrupt" / "loses no data" is what a
+# LockTimeout surfaces when the holder is labelled with one of these operations.
+_INTERRUPTIBLE_REMEDIES: dict[str, str] = {
+    "compact-sweep": (
+        "this holder is a compaction sweep (optional housekeeping) and is safe to interrupt: "
+        "terminating it loses no data — the events stay live and the next trigger re-folds them"
+    ),
+}
+
+
+def _sanitize_op_label(label: str) -> str:
+    """Reduce *label* to a single colon-free ``key=value`` token value.
+
+    The v2 stamp line must stay colon-free (an older rebar's legacy ``partition(":")`` parse
+    relies on it) and each field is one whitespace-delimited ``key=value`` token, so any ``:``,
+    ``=`` or whitespace in the raw label would break the format — each is replaced with ``-``.
+    """
+    return "".join("-" if (ch in ":=" or ch.isspace()) else ch for ch in label)
+
+
+@contextmanager
+def operation_label(label: str) -> Iterator[None]:
+    """Tag lock acquisitions made in this context with an ``op=<label>`` stamp field.
+
+    Ambient and descriptive: set on enter, reset on exit, so an ordinary writer outside the
+    context stamps exactly as before. Used by the compaction sweep to name itself in the
+    ownership stamp a blocked writer's :class:`LockTimeout` renders."""
+    token = _operation_label.set(_sanitize_op_label(label) if label else None)
+    try:
+        yield
+    finally:
+        _operation_label.reset(token)
+
+
+def interruptible_remedy(holder: str) -> str | None:
+    """The safe-to-interrupt remedy text if *holder* names a known interruptible operation.
+
+    *holder* is a rendered holder description (from :func:`describe_lock_holder`); this reads
+    its ``op=<label>`` token, if any, and returns the mapped remedy — else ``None``. Descriptive
+    only: it never influences reclamation."""
+    for token in holder.split():
+        key, sep, value = token.partition("=")
+        if sep and key == "op":
+            return _INTERRUPTIBLE_REMEDIES.get(value)
+    return None
+
 
 _BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id"
 _PID_NS_PATH = "/proc/self/ns/pid"
@@ -123,11 +191,21 @@ def _owner_stamp() -> str:
     Unknown ``ns``/``start`` are written as ``-``. The absence of any ``:`` is load
     bearing: an older rebar splits the stamp on ``:``, finds no separator, and refuses
     to reclaim — instead of decoding a bogus host/pid pair (bug
-    castoff-tigerseye-ammonite)."""
+    castoff-tigerseye-ammonite).
+
+    When an :func:`operation_label` context is active, an extra colon-free ``op=<label>``
+    field is appended (camerashy-erectable-frog) so a blocked writer's timeout can name the
+    holder — e.g. a compaction sweep — rather than only its pid. The field is optional and
+    descriptive: an older reader ignores it (unknown fields are tolerated) and staleness logic
+    never reads it."""
     pid = os.getpid()
     ns = _read_pid_namespace_id() or _STAMP_UNKNOWN
     start = _process_start_time(pid) or _STAMP_UNKNOWN
-    return f"{_STAMP_V2_PREFIX} host={_host_identity()} ns={ns} pid={pid} start={start}"
+    stamp = f"{_STAMP_V2_PREFIX} host={_host_identity()} ns={ns} pid={pid} start={start}"
+    label = _operation_label.get()
+    if label:
+        stamp += f" op={label}"
+    return stamp
 
 
 def _parse_v2_stamp(stamp: str) -> dict[str, str] | None:

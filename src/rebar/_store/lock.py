@@ -121,6 +121,12 @@ class LockTimeout(Exception):
         message = f"flock: could not acquire lock after {total_wait}s"
         if holder:
             message += f" (holder: {holder})"
+            # If the holder is labelled optional housekeeping (a compaction sweep), state the
+            # safe action inline so an operator need not chase a docstring to learn that
+            # interrupting it is lossless (camerashy-erectable-frog).
+            remedy = _owner.interruptible_remedy(holder)
+            if remedy:
+                message += f"\n    {remedy}"
         super().__init__(message)
 
 
@@ -306,6 +312,8 @@ def describe_lock_holder(tracker: str | os.PathLike) -> str:
         if age is not None:
             parts.append(f"held={age:.0f}s")
         parts.append(f"pid_state={_owner._describe_stamped_pid(fields)}")
+        if "op" in fields:
+            parts.append(f"op={fields['op']}")
         return " ".join(parts)
     except Exception:  # noqa: BLE001 — diagnostics are best-effort; never raise
         return "unknown (ownership stamp could not be read)"
