@@ -995,6 +995,39 @@ this precheck is attestation-safe: checkbox state is normalized out of the mater
 fingerprint (330c; the single normalization seam covers both the plan-review claim gate and
 the completion-verifier staleness check), so the flips do not invalidate a signed plan review.
 
+### Attested-item validity precheck (deterministic, pre-LLM)
+
+The tag that earns the exemption above is itself validated by a second deterministic
+precheck (bug `2f56-313f-6175-41b1`). The completion verifier classifies criteria **solely
+from the author tag** (ADR-0043, by design), so a mistagged criterion would launder
+repository-verifiable work past verification — the verifier accepts a ticket comment where an
+exact path/symbol check was possible. Before any LLM call, the close now fails (exit 1) when
+an `[operator-attested]` AC item:
+
+1. **cites exact repo path/symbol evidence** in its own text or indented continuation lines.
+   Test artifacts always fire (`tests/unit/test_x.py`, `pkg/mod.py::test_y`, bare `test_*`
+   symbols — a test is inherently completion proof); other repo paths (`src/…`, `docs/…`,
+   slash paths with a code extension) fire only when an evidence-introducing word (proxy,
+   proof, evidence, verified, covered, documented, …) presents them as the proof — a path
+   mentioned in plain prose for *orientation* ("the fix shipped in `src/…` is deployed")
+   never blocks a legitimately-external AC. URLs are scrubbed first, and commit hashes /
+   Gerrit change numbers deliberately do *not* fire: they are the attestation-event
+   provenance ADR-0043's contract demands. The remedy is to **untag** — the completion
+   verifier can check the repository — or, for a criterion that *mixes* repository and
+   external evidence, **split**: the cited paths/symbols move to a new untagged criterion
+   and the external outcome keeps the tag with its provenance line; or
+2. **lacks its complete `provenance:` continuation line** (ADR-0043 × ADR-0016) — the same
+   detector the advisory review-side P6 lint uses (`det_measurement_provenance`), promoted
+   to blocking on the close path.
+
+The laundering detector is `det_attestation_launder.py` (pure `re`, precision-first); the
+guard is `txn.ensure_attested_items_valid`, wired into `_completion_precheck` immediately
+after the checkbox precheck. `--force="<reason>"` bypasses it like every close precheck, and
+legitimately external items (deploy/vote/console evidence **with** a complete provenance
+line) close exactly as before. Known interaction (f680): the untag/split/provenance remedy
+edits the description, which stales a signed plan-review attestation as a material change —
+the block message says so, so the re-review cycle is expected rather than a surprise.
+
 ## The Gerrit bugfix-size attestation gate (code review, not claim/close)
 
 A third consumer of the plan-review attestation lives at code-review time, on Gerrit only:
