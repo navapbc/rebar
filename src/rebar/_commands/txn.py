@@ -480,3 +480,67 @@ def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
         'To override: --force="<reason>"',
         returncode=1,
     )
+
+
+def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
+    """Fail the close (CommandError, exit 1) on an invalid ``[operator-attested]`` AC item.
+
+    Deterministic, pre-LLM (bug 2f56-313f-6175-41b1). The completion verifier classifies
+    criteria SOLELY from the author tag (ADR-0043) — by design it never second-guesses
+    ``[operator-attested]`` — so a LAUNDERED tag (a code-verifiable criterion tagged to dodge
+    repository verification) must be rejected HERE, before the tag buys anything. Two checks,
+    in remedy order:
+
+    1. **Laundering** — a tagged item whose own text (or continuation lines) cites exact repo
+       path/symbol evidence. Its remedy is UNTAG (the verifier can check the repository), so
+       it is reported first — never coached into decorating the mistag with provenance.
+    2. **Provenance shape** — a tagged item missing its complete ``provenance:`` continuation
+       line (ADR-0043 x ADR-0016; the same detector the advisory review-side P6 lint uses,
+       promoted to blocking on the close path).
+
+    Silently returns on any read / reduce failure so an unreadable ticket is never blocked
+    here (other guards own that). ``--force`` bypasses it upstream, like every close precheck."""
+    try:
+        state = reduce_ticket(os.path.join(tracker, ticket_id))
+        if not isinstance(state, dict):
+            return
+        description = state.get("description", "") or ""
+    except Exception:  # noqa: BLE001
+        return
+
+    from rebar.llm.plan_review import det_attestation_launder, det_measurement_provenance
+
+    laundered = det_attestation_launder.laundering_gaps(description)
+    if laundered:
+        items_fmt = "\n".join(
+            f"  {line.strip()}\n    cites: {', '.join(cites)}" for line, cites in laundered
+        )
+        raise CommandError(
+            f"Error: ticket {ticket_id} has [operator-attested] Acceptance Criteria items "
+            f"whose evidence is repository-resident (attestation laundering):\n{items_fmt}\n"
+            "A criterion proved by exact repo paths/symbols is code-verifiable: remove the "
+            "[operator-attested] tag and let the completion verifier check the repository.\n"
+            "If the criterion MIXES repository and external evidence, SPLIT it: move the "
+            "repo-verifiable half (the cited paths/symbols above) to a new UNTAGGED "
+            "criterion, and keep the external outcome tagged with its provenance: line.\n"
+            "Note: this description edit stales a signed plan-review attestation (material "
+            "change) — expect to re-run 'rebar review-plan' before re-claiming or closing.\n"
+            'To override: --force="<reason>"',
+            returncode=1,
+        )
+
+    provenance_gaps = det_measurement_provenance.provenance_gaps(description)
+    if provenance_gaps:
+        items_fmt = "\n".join(f"  {line.strip()}" for line, _ in provenance_gaps)
+        raise CommandError(
+            f"Error: ticket {ticket_id} has [operator-attested] Acceptance Criteria items "
+            f"without a complete 'provenance:' continuation line:\n{items_fmt}\n"
+            "Each tagged item needs an indented continuation line under its checkbox:\n"
+            "  provenance: environment=<v>; principal=<v>; "
+            "privilege_posture=<production-equivalent|broader|narrower>; "
+            "instrument=<live-call|simulation|static-analysis> — <justification>\n"
+            "Note: this description edit stales a signed plan-review attestation (material "
+            "change) — expect to re-run 'rebar review-plan' before re-claiming or closing.\n"
+            'To override: --force="<reason>"',
+            returncode=1,
+        )
