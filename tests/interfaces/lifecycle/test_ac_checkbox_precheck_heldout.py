@@ -63,7 +63,11 @@ def test_mixed_case_tag_is_exempt(rebar_repo: Path, monkeypatch) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
-    desc = "## Acceptance Criteria\n- [x] a\n- [ ] [Operator-Attested] restore drill run\n"
+    desc = (
+        "## Acceptance Criteria\n- [x] a\n- [ ] [Operator-Attested] restore drill run\n"
+        "      provenance: environment=production; principal=ops-oncall; "
+        "privilege_posture=production-equivalent; instrument=live-call — drill log reviewed\n"
+    )
     tid = _make(rebar_repo, desc)
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "closed"
@@ -95,7 +99,11 @@ def test_checked_attested_and_checked_plain_close_fine(rebar_repo: Path, monkeyp
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", PASS)
-    desc = "## Acceptance Criteria\n- [X] big case done\n- [x] [operator-attested] drill done\n"
+    desc = (
+        "## Acceptance Criteria\n- [X] big case done\n- [x] [operator-attested] drill done\n"
+        "      provenance: environment=production; principal=ops-oncall; "
+        "privilege_posture=production-equivalent; instrument=live-call — drill log reviewed\n"
+    )
     tid = _make(rebar_repo, desc)
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "closed"

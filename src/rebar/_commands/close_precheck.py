@@ -485,6 +485,12 @@ def _completion_precheck(
     # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
     txn.ensure_ac_boxes_checked(ticket_id, tracker)
 
+    # Attested-item validity precheck (DET, pre-LLM, bug 2f56-313f-6175-41b1): an
+    # [operator-attested] item citing exact repo path/symbol evidence (attestation
+    # laundering), or missing its complete `provenance:` continuation line, blocks the
+    # close BEFORE the verifier can accept the tag at face value (ADR-0043).
+    txn.ensure_attested_items_valid(ticket_id, tracker)
+
     # Deterministic precheck BEFORE the billable LLM call (alongside the open-children guard):
     # a ticket that records file_impact claims a concrete code change, so there MUST be a commit
     # that references it (a `rebar-ticket: <id>` trailer). If none exists, the implementation has
