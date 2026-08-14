@@ -59,6 +59,7 @@ from rebar_reconciler.dispatch_apply_phases import (
     # from here and its __all__ is what the reconciler tests reach for.
     _find_link_id,  # noqa: F401 — re-export for batch_dispatch
     _index_existing_links,  # noqa: F401 — re-export for batch_dispatch
+    _record_comment_id,
     _update_one_apply_reporter,
     _update_one_dispatch_comments,
     _update_one_dispatch_links,
@@ -376,7 +377,11 @@ def create_one(
                     # comment has no cheap Jira idempotency key, so a retry could
                     # duplicate it; a failed post falls to comment_errors and is
                     # re-emitted by the comment differ next pass.
-                    cast("SupportsComments", client).add_comment(jira_key, body)
+                    _comment_result = cast("SupportsComments", client).add_comment(jira_key, body)
+                    # emersed-specific-mutt: capture the returned Jira comment ID and
+                    # persist it against the entry's local_comment_key (HLC) via the
+                    # binding_store's write-ahead map, so a re-sync never re-posts it.
+                    _record_comment_id(binding_store, entry, _comment_result)
                 except Exception as exc:  # noqa: BLE001 — in-band capture into comment_errors; non-fatal
                     # Bug ea6d-e4b2-a316-45ec: non-fatal, but surface it so the
                     # batch outcome no longer reports error=None for an outbound
@@ -413,6 +418,7 @@ def update_one(
     subop_applied: dict[str, int] | None = None,
     fields_synced: dict[str, Any] | None = None,
     link_confirm: Callable[..., None] | None = None,
+    binding_store=None,
 ) -> dict | None:
     """Update an existing Jira issue from the mutation's key and fields.
 
@@ -468,7 +474,7 @@ def update_one(
 
     _labels_computed, _labels_applied = _update_one_dispatch_labels(mutation, client, issue_key)
     _comments_computed, _comments_applied = _update_one_dispatch_comments(
-        mutation, client, issue_key, comment_errors
+        mutation, client, issue_key, comment_errors, binding_store=binding_store
     )
     _links_computed, _links_applied, _links_failed = _update_one_dispatch_links(
         mutation, client, issue_key, link_confirm=link_confirm

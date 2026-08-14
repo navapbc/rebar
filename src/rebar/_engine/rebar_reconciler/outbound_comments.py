@@ -122,30 +122,51 @@ class _IdentityCodec:
 
 def _resolve_codec(codec: Any | None) -> Any:
     """Resolve the injected outbound rich-text codec for the LOCAL comparison
-    key (ticket a32a).
+    key (ticket a32a; default flipped to the real codec by emersed-specific-mutt).
 
-    Mirrors :func:`_resolve_inbound_mapper`/:func:`_resolve_sanitizer`'s
-    injection seam: a caller (or a test) may pass any object exposing
-    ``normalize_outbound(text) -> str`` — typically a real
-    ``adapters/jira_family/rich_text.RichTextCodec`` implementation
-    (``AdfCodec``/``WikiTextCodec``) — so the local comment key can be routed
-    through it the same way ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote``
-    composes ``normalize_outbound(fit_outbound(value))`` for descriptions.
-    ``None`` (the default — no caller wires a real codec into the comment
-    path yet) resolves to :class:`_IdentityCodec`, so behaviour is unchanged
-    for every existing caller."""
-    return codec if codec is not None else _IdentityCodec()
+    A caller (or test) may pass any object exposing ``normalize_outbound(text)
+    -> str`` — typically a real ``adapters/jira_family/rich_text.RichTextCodec``
+    (``AdfCodec``/``WikiTextCodec``) — so the local comment key is routed through
+    it the same way ``OutboundFieldMapper.map_fields_to_remote`` composes
+    ``normalize_outbound(fit_outbound(value))`` for descriptions.
+
+    ``None`` (the default) now resolves to the configured backend's REAL comment
+    codec (Cloud ``AdfCodec``/DC ``WikiTextCodec``, each built with
+    ``rich=<family> in cutover_clients()``) — so ``reconciler.rich_text_cutover``
+    (story 3388, ships ``off``) governs rendering and the local dedup key matches
+    the landed wire instead of an identity no-op. Resolution goes through the
+    NEUTRAL ``_backend_registry.select_backend`` seam (never a direct
+    ``adapters/jira*`` import) so this shared-layer module keeps the Jira-family
+    import boundary — exactly as :func:`_resolve_sanitizer`/:func:`_resolve_inbound_mapper`
+    do. Imported LAZILY inside the function because this module is spec-loaded
+    standalone in tests. A backend that predates ``comment_codec`` falls back to
+    the identity, preserving today's behaviour."""
+    if codec is not None:
+        return codec
+    from rebar.config import load_config
+    from rebar_reconciler._backend_registry import select_backend
+
+    resolved = getattr(select_backend(load_config()).outbound, "comment_codec", None)
+    return resolved if resolved is not None else _IdentityCodec()
 
 
 def _map_comments_for_create(ticket: dict[str, Any]) -> list[dict[str, Any]]:
     """Map all local comments to outbound create mutations.
 
     Every outbound body is decorated with the reconciler marker (Gap 1
-    loop-breaker) so inbound passes can identify our own echoes.
+    loop-breaker) so inbound passes can identify our own echoes, and tagged with
+    its ``local_comment_key`` (the COMMENT event's HLC ``timestamp``) so the
+    enactment site can record the returned Jira comment ID against it
+    (emersed-specific-mutt, append-only comment sync).
     """
     comments = ticket.get("comments", [])
     return [
-        {"action": "add", "body": _decorate_outbound_comment(c.get("body", ""))} for c in comments
+        {
+            "action": "add",
+            "body": _decorate_outbound_comment(c.get("body", "")),
+            "local_comment_key": c.get("timestamp"),
+        }
+        for c in comments
     ]
 
 
@@ -229,6 +250,7 @@ def _diff_comments(
     inbound_mapper: Any | None = None,
     sanitizer: Any | None = None,
     codec: Any | None = None,
+    binding_store: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Compare local comments to Jira comments. Return mutations for new comments.
 
@@ -377,6 +399,21 @@ def _diff_comments(
     for c in local_comments:
         raw = c.get("body", "") if isinstance(c, dict) else c
         body = _normalize_comment_body(raw, inbound_mapper=inbound_mapper)
+        local_comment_key = c.get("timestamp") if isinstance(c, dict) else None
+        # emersed-specific-mutt — PRIMARY identity skip (append-only comment sync):
+        # a comment is already-mirrored when its persistent HLC key is in the
+        # binding_store comment_ids map, OR when the entry carries a
+        # ``jira_comment_id`` (bug 85a1: it originated from an inbound Jira pull, so
+        # pushing it back would loop). Identity is the key/ID, NOT the body — so
+        # same-text comments never collide and an edited body is not seen as new.
+        if isinstance(c, dict) and c.get("jira_comment_id"):
+            continue
+        if (
+            binding_store is not None
+            and local_comment_key is not None
+            and binding_store.is_comment_mapped(local_comment_key)
+        ):
+            continue
         # Bug 6afc-20ee-84e5-4dd5: never mirror skill-to-skill machine-marker
         # comments (BRIDGE_CANARY_ALERT:, etc.) outbound to Jira. Symmetric with
         # the label _EXCLUDED_PREFIXES exclusion.
@@ -384,24 +421,36 @@ def _diff_comments(
             continue
         # Bug 6afc-20ee-84e5-4dd5 (convergence): the send path truncates an
         # over-length body to Jira's 32,767-char limit before it lands, so the
-        # body that comes back in jira_bodies is the TRUNCATED form. Apply the
-        # SAME shared truncation to the expected local body before the membership
-        # test; otherwise the full local body never matches the truncated Jira
-        # body and the diff re-emits forever. The local store is NOT mutated —
-        # `body` here is an in-memory comparison key only.
+        # body in jira_bodies is the TRUNCATED form. Apply the SAME shared
+        # truncation to the expected local body before the membership test, then
+        # (ticket a32a) route the fitted body through the codec's
+        # ``normalize_outbound`` — fit-then-normalize, the order
+        # ``OutboundFieldMapper.map_fields_to_remote`` composes for descriptions.
+        # The local store is NOT mutated — this is an in-memory comparison key.
         #
-        # Ticket a32a: then route the fitted body through the injected codec's
-        # ``normalize_outbound`` — fit-then-normalize, the SAME order
-        # ``OutboundFieldMapper.map_fields_to_remote`` composes for
-        # descriptions (``normalize_outbound(fit_outbound(value))``). The
-        # Jira-side key (``jira_bodies``, above) is already a DECODED value;
-        # this is the missing local-side half of that same fixed point. With
-        # no codec injected this is `_IdentityCodec`, so `compare_body` is
-        # unchanged from before this ticket.
-        compare_body = codec.normalize_outbound(sanitizer.fit_comment(body))
+        # emersed-specific-mutt: this body-equality test is now a SECONDARY
+        # (belt-and-suspenders) skip behind the ID identity above — it guards a
+        # lost map write (a crash between add_comment and record_comment_id's
+        # save) so a re-sync still does not re-post an already-landed body. When
+        # the codec renders RICH (story 3388 cutover on), ``normalize_outbound``
+        # can re-introduce trailing whitespace (e.g. ``adf_to_markdown`` appends a
+        # newline) that the Jira side has already stripped via
+        # ``_normalize_comment_body``; run the local key back through the SAME
+        # normalization so both sides are symmetric and the rich path converges.
+        compare_body = _normalize_comment_body(
+            codec.normalize_outbound(sanitizer.fit_comment(body)), inbound_mapper=inbound_mapper
+        )
         if compare_body and compare_body not in jira_bodies:
             # Decorate the outbound body with the reconciler marker so the
             # inbound differ can identify (and filter) our own echoes on the
-            # next pass (Gap 1 loop-breaker).
-            mutations.append({"action": "add", "body": _decorate_outbound_comment(body)})
+            # next pass (Gap 1 loop-breaker). The mutation carries its
+            # ``local_comment_key`` so the enactment site records the returned
+            # Jira comment ID against it (append-only map).
+            mutations.append(
+                {
+                    "action": "add",
+                    "body": _decorate_outbound_comment(body),
+                    "local_comment_key": local_comment_key,
+                }
+            )
     return mutations

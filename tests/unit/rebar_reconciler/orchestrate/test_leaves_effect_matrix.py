@@ -179,7 +179,7 @@ def _drive_outbound_update(handler, applier, mut_mod, repo_root, monkeypatch):
     client = MagicMock()
     captured: dict = {}
 
-    def fake_update_one(batch, cl, comment_errors=None):
+    def fake_update_one(batch, cl, comment_errors=None, binding_store=None):
         captured["batch"] = batch
         captured["client"] = cl
         return {"updated": True}
@@ -200,7 +200,7 @@ def _drive_outbound_update(handler, applier, mut_mod, repo_root, monkeypatch):
     assert "comment_errors" not in result.payload
 
     # Failure surface: a comment sub-op failure is surfaced (not swallowed).
-    def fake_update_one_err(batch, cl, comment_errors=None):
+    def fake_update_one_err(batch, cl, comment_errors=None, binding_store=None):
         comment_errors.append("add_comment failed: 500")
         return {"updated": False}
 

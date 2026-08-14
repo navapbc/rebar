@@ -422,6 +422,18 @@ class OutboundMapper(Protocol):
         a default the caller CHOOSES, not the residue of an injection that did not happen."""
         ...
 
+    @property
+    def comment_codec(self) -> Any:
+        """The deployment's ``RichTextCodec`` for comment bodies (emersed-specific-mutt).
+
+        Cloud's ``AdfCodec`` / DC's ``WikiTextCodec``, the SAME instance this mapper
+        renders descriptions through, so the outbound comment-diff normalizes its LOCAL
+        dedup key exactly the way the landed wire reads. Injected as a contract via the
+        Backend port so the shared comment-diff layer never reaches for a concrete codec
+        (the Jira-family import boundary). Typed ``Any`` to keep the port neutral of the
+        jira-family ``RichTextCodec`` symbol."""
+        ...
+
 
 class InboundMapper(Protocol):
     """Map a backend issue payload back to local ticket field shapes.
