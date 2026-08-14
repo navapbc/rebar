@@ -27,10 +27,11 @@ import http.server
 import json
 import os
 import secrets
+import socketserver
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 # These live in NON-editor modules, so importing them here creates no back-edge into
 # ``editor`` (keeping this module out of the import cycle — see the module docstring).
@@ -49,6 +50,15 @@ _ASSET_CONTENT_TYPES = {
 }
 _PREVIEW_PATHS = ("/criterion/preview", "/criterion/preview/status")
 _POST_WRITE_PATHS = ("/save", "/prompt/save", "/validate", "/library/create", *_PREVIEW_PATHS)
+
+
+class _LoopbackThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    """Threading HTTP server that keeps the literal bound host without reverse DNS."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = cast(str, self.server_address[0])
+        self.server_port = self.server_address[1]
 
 
 def assets_available() -> bool:

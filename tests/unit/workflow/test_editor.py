@@ -215,6 +215,29 @@ def test_server_binds_loopback_only(_server):
     assert base.startswith("http://127.0.0.1:")  # never a public interface (it can write)
 
 
+@pytest.mark.allow_network  # loopback only; name resolution is deliberately forbidden
+def test_server_starts_and_serves_without_reverse_dns(tmp_path, monkeypatch):
+    path = _wf_file(tmp_path)
+    reverse_dns_calls: list[str] = []
+
+    def reject_reverse_dns(host: str = "") -> str:
+        reverse_dns_calls.append(host)
+        raise AssertionError(f"loopback editor attempted reverse DNS for {host!r}")
+
+    monkeypatch.setattr(socket, "getfqdn", reject_reverse_dns)
+    server, host, port, _token = editor.edit_workflow(
+        path, open_browser=False, serve_forever=False, host="127.0.0.1"
+    )
+    try:
+        assert reverse_dns_calls == []
+        assert (host, port) == server.server_address[:2]
+        xml = urllib.request.urlopen(f"http://{host}:{port}/workflow.bpmn").read().decode("utf-8")
+        assert "bpmn:process" in xml and "rebar:" in xml
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatch):
     constructor_result = object()
     bind_result = object()
