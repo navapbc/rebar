@@ -310,7 +310,10 @@ def _completion_section(completion: dict | None) -> dict:
     sidecar = completion.get("sidecar")
     if not isinstance(sidecar, dict):
         return {"ran": False}
-    if "criteria" in sidecar:  # PASS record
+    # Key PASS vs FAIL on the record's own verdict, NOT on the presence of `criteria`:
+    # FAIL records also carry per-criterion records (with their `evidence_sufficient`
+    # markers) since ticket 1d71, so shape presence no longer discriminates.
+    if str(sidecar.get("verdict") or "").upper() == "PASS":
         rows = []
         for c in sidecar.get("criteria") or []:
             if not isinstance(c, dict):
@@ -327,7 +330,8 @@ def _completion_section(completion: dict | None) -> dict:
                 }
             )
         return {"ran": True, "is_pass": True, "criteria": rows}
-    # FAIL verdict (failures-only findings, no criteria).
+    # FAIL verdict: surface the failures-only findings (per-criterion records, when
+    # present, are the marker-carrying evidence capture — findings stay the display list).
     return {
         "ran": True,
         "is_pass": False,

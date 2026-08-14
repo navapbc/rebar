@@ -175,7 +175,7 @@ def test_third_unique_evidence_response_banks_bounded_fallback_before_return() -
 
     result = asyncio.run(scenario())
     assert result.startswith("result:list_directory:3")
-    assert "recorded met=false" in result
+    assert "insufficient evidence" in result
     assert fallbacks and fallbacks[0][0] == "c00-a"
     assert "bounded" in fallbacks[0][1].casefold()
     assert "c00-a" in banked

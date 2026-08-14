@@ -393,6 +393,31 @@ def _raise_on_verifier_fault(
     )
 
 
+def _verification_fail_message(ticket_id: str, result: dict, items: list, lines: list[str]) -> str:
+    """The refusal message for a completion-verification FAIL (still fail-closed either way).
+
+    A verdict carrying the framework-derived top-level ``evidence_sufficient: false`` marker
+    failed on INSUFFICIENT EVIDENCE — the bounded search exhausted without refuting anything —
+    so the headline says that honestly instead of reporting fabricated "unmet criteria". The
+    verdict's remediation (set by ``reconcile_verdict`` on every FAIL) is appended either way."""
+    noun = "criterion" if len(items) == 1 else "criteria"
+    if result.get("evidence_sufficient") is False:
+        headline = (
+            f"Error: completion verification FAILED for {ticket_id} — insufficient evidence "
+            f"for {len(items)} {noun} (nothing positively refuted); not closing.\n"
+        )
+    else:
+        headline = (
+            f"Error: completion verification FAILED for {ticket_id} — {len(items)} unmet "
+            "criteria; not closing.\n"
+        )
+    message = headline + "\n".join(lines)
+    guidance = result.get("remediation")
+    if guidance:
+        message += "\n\n  " + guidance
+    return message
+
+
 def _completion_precheck(
     ticket_id: str,
     ticket_type: str,
@@ -580,13 +605,7 @@ def _completion_precheck(
         # Surface the verdict's remediation guidance (set by reconcile_verdict on every FAIL) so
         # the caller is pointed at the evidence channel — documenting proof that a requirement is
         # met as a comment on the ticket — rather than left with only the bare list of criteria.
-        guidance = result.get("remediation")
-        message = (
-            f"Error: completion verification FAILED for {ticket_id} — {len(items)} unmet "
-            "criteria; not closing.\n" + "\n".join(lines)
-        )
-        if guidance:
-            message += "\n\n  " + guidance
+        message = _verification_fail_message(ticket_id, result, items, lines)
         # Persist the FAIL verdict to a durable, queryable sidecar (ticket 24ec) BEFORE the
         # raise, so a completion FAIL leaves an artifact (mirroring the plan-review
         # REVIEW_RESULT sidecar) instead of vanishing. Best-effort: emit swallows its own

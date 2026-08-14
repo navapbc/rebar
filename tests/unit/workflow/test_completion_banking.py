@@ -187,12 +187,14 @@ def test_record_tool_signature_and_idempotency(tmp_path) -> None:
 def test_record_tool_docstring_is_the_bounded_commit_transition(tmp_path) -> None:
     doc = inspect.getdoc(_bank(tmp_path).make_record_tool()) or ""
     lowered = doc.casefold()
-    assert "sufficient" not in lowered
     assert "confident" not in lowered
     assert "current criterion id" in lowered
     assert "single commit action" in lowered
     assert "next response after the third repository evidence call" in lowered
-    assert "record `met=false`" in lowered
+    # met=false is a POSITIVE REFUTATION only; a not-found records nothing — the bounded
+    # fallback (framework) owns insufficiency, so the model is never told to bank it.
+    assert "record `met=false`" in lowered and "refut" in lowered
+    assert "record nothing" in lowered
     assert "confirmation selects the next id" in lowered
 
 
@@ -591,7 +593,11 @@ def test_successor_record_tool_carries_batch_manifest_policy(tmp_path) -> None:
     policy = record_tool._rebar_completion_evidence_policy
     assert policy.criterion_ids == tuple(ids[text] for text in criteria)
     policy.fallback_record(ids[criteria[0]], "bounded evidence")
-    assert bank.get(ids[criteria[0]])["source"] == "tool"
+    # The bounded fallback banks the framework's INSUFFICIENCY record (ticket 1d71):
+    # met=false plus the evidence_sufficient=false marker, under its own source.
+    entry = bank.get(ids[criteria[0]])
+    assert entry["source"] == "fallback"
+    assert entry["met"] is False and entry["evidence_sufficient"] is False
 
 
 def test_successor_empty_batch_keeps_record_tool_unflagged(tmp_path) -> None:

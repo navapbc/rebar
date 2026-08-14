@@ -670,7 +670,12 @@ def _render_verdict_text(result: dict) -> None:
         sys.stdout.write(f"\n{result['summary']}\n")
     if findings:
         noun = "criterion" if len(findings) == 1 else "criteria"
-        sys.stdout.write(f"\n{len(findings)} unmet {noun}:\n")
+        # An insufficient-evidence FAIL (framework-derived top-level marker) is an evidence
+        # GAP, not a refutation — say so instead of reporting the criteria as unmet.
+        if result.get("evidence_sufficient") is False:
+            sys.stdout.write(f"\nevidence insufficient for {len(findings)} {noun}:\n")
+        else:
+            sys.stdout.write(f"\n{len(findings)} unmet {noun}:\n")
     for f in findings:
         crit = f.get("criterion") or f.get("dimension") or "?"
         sys.stdout.write(f"\n[{f.get('severity', '?').upper()}] {crit}\n")
