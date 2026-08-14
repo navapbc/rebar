@@ -70,6 +70,9 @@ so `rebar show <bug> --output json` surfaces `close_class`. The closed vocabular
 | `not_a_bug` | behaved as intended |
 | `duplicate` | already tracked elsewhere |
 | `escalated` | handed off to the user/another owner |
+| `obsolete` | the premise no longer holds |
+| `superseded` | replaced by a newer ticket |
+| `wontfix` | a deliberate decision not to do the work |
 | `undetermined` | the escape hatch when no class fits |
 
 A missing or out-of-vocabulary `--class` is refused (the error names the allowed values).
@@ -81,6 +84,36 @@ When the completion-verification close gate is enabled, `duplicate`, `not_a_bug`
 when the bug has a net-active `bug -duplicates-> canonical` link to a live ticket, or a live
 replacement has a net-active `replacement -supersedes-> bug` link. A missing, reversed,
 unlinked, unresolved, archived, or deleted replacement does not bypass verification.
+
+## Administrative close dispositions (any ticket type)
+
+A non-bug ticket (task/story/epic/…) normally closes without `--class`, and its close is
+what the completion-verification gate scores. When the work is **not being completed** —
+the ticket is a duplicate, was superseded, its premise evaporated, or it is a deliberate
+wontfix — closing it "as done" would be dishonest and the verifier would rightly refuse.
+The sanctioned door is the **administrative subset** of the same `--class` vocabulary:
+
+| class | evidence demanded |
+| --- | --- |
+| `duplicate` | a net-active `ticket -duplicates-> canonical` link to a live ticket |
+| `superseded` | a live replacement with a net-active `replacement -supersedes-> ticket` link |
+| `obsolete` | a free-text justification: `--reason=<why the premise no longer holds>` |
+| `wontfix` | a free-text justification: `--reason=<why the work is declined>` |
+
+```sh
+rebar transition <id> in_progress closed --class=obsolete --reason="premise removed by epic X"
+rebar link <dupe> <canonical> duplicates && rebar transition <dupe> in_progress closed --class=duplicate
+```
+
+Any other class on a non-bug close is refused (the error names the four allowed values);
+`obsolete`/`wontfix` without `--reason` are refused. The reason is folded onto the close
+edge as `close_reason` in reduced state (distinct from `force_close_reason`), and the
+completion-verifier close gate mints a **disposition verdict** from the link or reason
+instead of running LLM completion verification — the signed attestation manifest records
+`disposition: <class>` plus the replacement id or reason, so the bypass is auditable, not
+silent. Bug closes may also use `obsolete`/`superseded`/`wontfix` under the same evidence
+rules. A forced close (`--force=<reason>`) remains the unaudited escape hatch; its refusal
+now hints at `--class` when an administrative disposition would fit.
 
 ## Hierarchy and containment (`parent_id`, not a link)
 

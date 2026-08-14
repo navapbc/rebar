@@ -25,7 +25,14 @@ from rebar._commands._seam import CommandError
 
 logger = logging.getLogger(__name__)
 
-_NON_COMPLETION_BUG_CLASSES = frozenset({"duplicate", "not_a_bug", "escalated"})
+_NON_COMPLETION_BUG_CLASSES = frozenset(
+    {"duplicate", "not_a_bug", "escalated", "obsolete", "superseded", "wontfix"}
+)
+
+#: A sentinel distinguishing "this close is not a disposition at all" (keep normal completion
+#: verification) from a disposition path that yielded no sign signal (``None`` — the close
+#: proceeds unsigned). See :func:`_administrative_disposition`.
+_NO_DISPOSITION = object()
 
 
 def _is_live_ticket(ticket_id: str, tracker: str) -> bool:
@@ -61,8 +68,16 @@ def _has_live_replacement_link(
     the inbound reader both expose only net-active links, including links baked
     into snapshots.
     """
-    if ticket_type != "bug" or close_class not in _NON_COMPLETION_BUG_CLASSES:
+    if close_class not in _NON_COMPLETION_BUG_CLASSES:
         return False
+    if ticket_type != "bug":
+        from rebar._commands import close_disposition
+
+        # A non-bug close reaches the disposition path only through the ADMINISTRATIVE
+        # subset (ticket fc20) — not_a_bug/escalated stay bug-only vocabulary, which
+        # transition_core also refuses authoritatively at write time.
+        if close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
+            return False
 
     from rebar.reducer import reduce_ticket
 
@@ -151,35 +166,42 @@ def _ensure_duplicate_close_is_linked(
     Deliberately NOT a claim about the canonical's status: a duplicate of an ALREADY-CLOSED
     canonical is the common case, so the gate asks only that the link exist.
 
-    Scoped to ``duplicate`` alone rather than the whole ``_NON_COMPLETION_BUG_CLASSES`` set:
-    ``not_a_bug`` asserts there is no defect and ``escalated`` may point outside the tracker, so
-    neither owes a ``duplicates`` link; both keep the prior fallthrough to completion verification.
+    Scoped to the REPLACEMENT-BEARING classes — ``duplicate`` and (ticket fc20) ``superseded``,
+    on ANY ticket type — rather than the whole ``_NON_COMPLETION_BUG_CLASSES`` set: ``not_a_bug``
+    asserts there is no defect and ``escalated`` may point outside the tracker, so neither owes a
+    link, and the reason-only administrative classes (obsolete/wontfix) are justified by their
+    ``--reason`` instead; those keep their own paths.
 
     A GUARD FUNCTION, not an inline branch, on purpose — ``_completion_precheck`` sits at its
     recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
     decision points live here and the call site stays unconditional.
     """
-    if ticket_type != "bug" or close_class != "duplicate":
+    del ticket_type  # both classes owe a link on every ticket type (ticket fc20)
+    if close_class not in ("duplicate", "superseded"):
         return
+    if close_class == "duplicate":
+        relation, remedy = "duplicates", f"rebar link {ticket_id} <canonical> duplicates"
+    else:
+        relation, remedy = "supersedes", f"rebar link <replacement> {ticket_id} supersedes"
     named = _recorded_replacement_target(ticket_id, tracker)
     if named:
         detail = (
-            f"its 'duplicates' link names {named}, which is archived, deleted, or no longer "
-            "resolvable, so there is no canonical ticket left to point at. Re-link it to a live "
-            f"one:\n  rebar link {ticket_id} <canonical> duplicates"
+            f"its '{relation}' link names {named}, which is archived, deleted, or no longer "
+            "resolvable, so there is no replacement ticket left to point at. Re-link it to a "
+            f"live one:\n  {remedy}"
         )
     else:
         detail = (
-            "it records no 'duplicates' link, so it names no canonical ticket. Record the "
-            f"relation first:\n  rebar link {ticket_id} <canonical> duplicates"
+            f"it records no '{relation}' link, so it names no replacement ticket. Record the "
+            f"relation first:\n  {remedy}"
         )
     raise CommandError(
-        f"Error: cannot close {ticket_id} as --class duplicate: {detail}\n"
-        "The canonical ticket may already be closed — the gate requires only that the link "
+        f"Error: cannot close {ticket_id} as --class {close_class}: {detail}\n"
+        "The replacement ticket may already be closed — the gate requires only that the link "
         "exist, never that its target still be open. Without it there is nothing to verify: "
-        "the defect's fix lives on the canonical ticket, not here, so completion verification "
+        "the work lives on the replacement ticket, not here, so completion verification "
         "would ask this ticket to prove work it never owned. "
-        'Override with --force="<reason>" if this genuinely duplicates nothing.',
+        'Override with --force="<reason>" if there is genuinely no replacement.',
         returncode=1,
     )
 
@@ -393,7 +415,22 @@ def _raise_on_verifier_fault(
     )
 
 
-def _verification_fail_message(ticket_id: str, result: dict, items: list, lines: list[str]) -> str:
+def _applicable_close_classes(ticket_type: str) -> str:
+    """The ``--class`` values a close of THIS ticket type may carry, as display text.
+
+    Bugs take the full vocabulary; every other type takes only the administrative subset
+    (ticket fc20). Kept in ``CLOSE_CLASSES`` order so the enumeration reads the same
+    everywhere."""
+    from rebar._commands import close_disposition
+
+    if ticket_type == "bug":
+        return ", ".join(txn.CLOSE_CLASSES)
+    return ", ".join(c for c in txn.CLOSE_CLASSES if c in close_disposition.ADMINISTRATIVE_CLASSES)
+
+
+def _verification_fail_message(
+    ticket_id: str, ticket_type: str, result: dict, items: list, lines: list[str]
+) -> str:
     """The refusal message for a completion-verification FAIL (still fail-closed either way).
 
     A verdict carrying the framework-derived top-level ``evidence_sufficient: false`` marker
@@ -415,7 +452,46 @@ def _verification_fail_message(ticket_id: str, result: dict, items: list, lines:
     guidance = result.get("remediation")
     if guidance:
         message += "\n\n  " + guidance
+    # Discoverability (ticket fc20, incident 9b70): a ticket whose work will deliberately NOT
+    # be completed — duplicate/obsolete/superseded/wontfix — can never satisfy the verifier, so
+    # the FAIL message must present the truthful exit rather than leaving --force as the only
+    # visible door. Enumerated per ticket type so a task is never offered a bug-only class.
+    message += (
+        "\n\n  If this ticket's work is NOT meant to be completed (it is a duplicate, its "
+        "premise is obsolete, it was superseded, or it is a deliberate wontfix), close it as "
+        f"an attested disposition instead: --class <value> — one of: "
+        f"{_applicable_close_classes(ticket_type)}. obsolete/wontfix take --reason=<text>; "
+        "duplicate/superseded need a live replacement link."
+    )
     return message
+
+
+def _administrative_disposition(
+    ticket_id: str, ticket_type: str, close_class: str, close_reason: str, tracker: str
+):
+    """Route a qualifying disposition close to its deterministic sign signal (ticket fc20).
+
+    Returns the verdict dict to sign, ``None`` (a disposition path that yields no signal — the
+    close proceeds unsigned, the conservative direction), or the :data:`_NO_DISPOSITION`
+    sentinel meaning "not a disposition — keep normal completion verification". A separate
+    guard function on purpose: ``_completion_precheck`` sits at its recorded shrink-only
+    complexity ceiling, so the decision points live here and its call site stays a single
+    branch.
+
+    Two doors, mirroring :func:`close_disposition.verdict`'s two mints: a REASON-ONLY
+    administrative class (obsolete/wontfix) is attested from its ``--reason`` (validated
+    non-empty by the shared class guard before this runs); every other disposition class
+    still requires a net-active replacement link to a live counterpart
+    (:func:`_has_live_replacement_link`). ATTESTING rather than withholding the signature is
+    the 738a fix: an unsigned exempt close made the certification path count it as
+    uncertified and withhold its parent's signature, with no honest exit."""
+    from rebar._commands import close_disposition
+
+    if close_class in close_disposition.REASON_REQUIRED_CLASSES:
+        return close_disposition.verdict(ticket_id, close_class, tracker, close_reason=close_reason)
+    if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
+        return close_disposition.verdict(ticket_id, close_class, tracker)
+    return _NO_DISPOSITION
 
 
 def _completion_precheck(
@@ -472,39 +548,37 @@ def _completion_precheck(
     if force_close:
         return None  # close, but withhold the signed confirmation (no verify, no sign)
 
-    # Cheap precondition BEFORE the billable LLM call: a bug close needs a valid --class
-    # (ticket ed13 — transition_core would reject it anyway). Shared predicate, so it can't
-    # drift. The old free-text --reason requirement is REMOVED; a valid --class satisfies the
-    # precheck.
-    if ticket_type == "bug" and not txn.bug_close_class_ok(close_class):
-        allowed = ", ".join(txn.CLOSE_CLASSES)
+    # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
+    # (missing bug class, non-administrative class on a non-bug, missing reason for a
+    # reason-only class — tickets ed13 + fc20). Shared rule (:func:`txn.close_class_refusal`),
+    # so it cannot drift from transition_core's authoritative write-side guard, which would
+    # reject the close anyway; failing here spares the LLM call.
+    refusal = txn.close_class_refusal(ticket_type, close_class, close_reason=reason)
+    if refusal:
         raise CommandError(
-            "Error: closing a bug requires --class <value> — one of: "
-            f"{allowed} (checked before running completion verification).",
+            f"Error: {refusal} (checked before running completion verification).",
             returncode=1,
         )
 
-    # A duplicate / not-a-bug / escalated bug with a durable replacement relation is a
-    # disposition, not a claim that this ticket's acceptance criteria were implemented.
-    # Skip the completion-only checks (including file-impact and the billable verifier), but
-    # only when the directional link is net-active and its counterpart is a live ticket.
-    # The bug-class guard above and all structural/write-time close guards still apply.
+    # An administrative/disposition close is a statement about where the work lives (or why it
+    # will not happen), not a claim that this ticket's acceptance criteria were implemented.
+    # Skip the completion-only checks (including file-impact and the billable verifier) when
+    # the disposition qualifies: a reason-only administrative class carries its --reason, and
+    # a replacement-bearing class carries a net-active link to a live counterpart. The
+    # close-class guard above and all structural/write-time close guards still apply.
     tracker = str(config.tracker_dir(repo_root))
-    if _has_live_replacement_link(ticket_id, ticket_type, close_class, tracker):
-        # ATTEST the disposition rather than withholding a signature (bug 738a): skipping the
-        # verifier is right, but leaving the close unsigned made the certification path count an
-        # exempt child as uncertified and withhold its parent's signature, with no honest exit.
-        from rebar._commands import close_disposition
+    disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
+    if disposition is not _NO_DISPOSITION:
+        return disposition
 
-        return close_disposition.verdict(ticket_id, close_class, tracker)
-
-    # NO usable replacement. A `duplicate` close cannot be rescued by the completion verifier —
-    # the work it would ask about lives on the canonical ticket — so falling through printed
-    # advice that could not be followed. Fail HERE, naming the one command that works. Scoped to
-    # `duplicate` alone (not the whole non-completion set): `not_a_bug` asserts there is no defect
-    # and `escalated` may point outside the tracker, so neither owes a `duplicates` link; both keep
-    # the prior fallthrough. Deterministic and pre-LLM, so a duplicate close never buys the wrong
-    # advice with a billable request.
+    # NO usable replacement. A `duplicate`/`superseded` close cannot be rescued by the
+    # completion verifier — the work it would ask about lives on the replacement ticket — so
+    # falling through printed advice that could not be followed. Fail HERE, naming the one
+    # command that works. Scoped to the replacement-bearing classes (not the whole
+    # non-completion set): `not_a_bug` asserts there is no defect and `escalated` may point
+    # outside the tracker, so neither owes a link; both keep the prior fallthrough.
+    # Deterministic and pre-LLM, so such a close never buys the wrong advice with a billable
+    # request.
     _ensure_duplicate_close_is_linked(ticket_id, ticket_type, close_class, tracker)
 
     # AC-checkbox completeness precheck (DET, pre-LLM): unchecked items block close (433c).
@@ -605,7 +679,7 @@ def _completion_precheck(
         # Surface the verdict's remediation guidance (set by reconcile_verdict on every FAIL) so
         # the caller is pointed at the evidence channel — documenting proof that a requirement is
         # met as a comment on the ticket — rather than left with only the bare list of criteria.
-        message = _verification_fail_message(ticket_id, result, items, lines)
+        message = _verification_fail_message(ticket_id, ticket_type, result, items, lines)
         # Persist the FAIL verdict to a durable, queryable sidecar (ticket 24ec) BEFORE the
         # raise, so a completion FAIL leaves an artifact (mirroring the plan-review
         # REVIEW_RESULT sidecar) instead of vanishing. Best-effort: emit swallows its own

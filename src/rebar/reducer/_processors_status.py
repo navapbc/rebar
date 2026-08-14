@@ -69,6 +69,12 @@ def _fold_close_metadata(state: dict, data: dict) -> None:
     # would duplicate the winner-only call sites for no gain.
     if data.get("status") == "closed" and data.get("force_close_reason"):
         state["force_close_reason"] = data["force_close_reason"]
+    # The reason-only administrative disposition's justification (`--class obsolete/wontfix
+    # --reason=<text>`, ticket fc20) travels with the same edge, under the same present-only
+    # rule and the same winner-only application. Distinct from `force_close_reason` above:
+    # this records why a truthful disposition closed, that one records why a gate was bypassed.
+    if data.get("status") == "closed" and data.get("close_reason"):
+        state["close_reason"] = data["close_reason"]
 
 
 def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None:

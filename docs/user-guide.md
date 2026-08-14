@@ -129,11 +129,24 @@ rebar transition <id> closed               # auto-detect current
 Statuses are `idea | open | in_progress | closed | blocked`. Closing a **bug**
 requires a bounded `--class <value>` — one of `regression`, `plan_defect`,
 `env_integration`, `flaky`, `preexisting`, `not_a_bug`, `duplicate`, `escalated`,
-or `undetermined` (the escape hatch). The value is folded into reduced state so
-`rebar show <bug> --output json` surfaces `close_class`:
+`obsolete`, `superseded`, `wontfix`, or `undetermined` (the escape hatch). The
+value is folded into reduced state so `rebar show <bug> --output json` surfaces
+`close_class`:
 
 ```sh
 rebar transition <id> in_progress closed --class=regression
+```
+
+**Any** ticket type can close under an *administrative* disposition when the work
+is not being completed: `--class=duplicate` / `--class=superseded` (backed by a
+live `duplicates` / `supersedes` link) or `--class=obsolete` / `--class=wontfix`
+(which require a free-text `--reason=<justification>`, folded into reduced state
+as `close_reason`). These mint a signed disposition verdict instead of running
+completion verification — see `docs/ticket-model.md` §"Administrative close
+dispositions":
+
+```sh
+rebar transition <id> in_progress closed --class=wontfix --reason="descoped by epic Y"
 ```
 
 ### Blame-Hunt Advisory (bug close → `caused_by`)

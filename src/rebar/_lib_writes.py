@@ -292,6 +292,7 @@ def transition(
             target_status,
             force=force,
             reason=reason,
+            close_reason=("" if (force or force_close) else reason),
             force_close=force_close or "",
             close_class=close_class,
             caused_by=caused_by,

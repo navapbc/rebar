@@ -34,6 +34,9 @@ CloseClass = Literal[
     "not_a_bug",
     "duplicate",
     "escalated",
+    "obsolete",
+    "superseded",
+    "wontfix",
     "undetermined",
 ]
 
@@ -136,6 +139,7 @@ class TicketState(TypedDict):
     creation_channel_inferred: NotRequired[Literal[True]]
     detected_by: NotRequired[str]
     close_class: NotRequired[CloseClass]
+    close_reason: NotRequired[str]
     force_close_reason: NotRequired[str]
 
 
