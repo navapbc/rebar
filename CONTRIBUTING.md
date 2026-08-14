@@ -198,6 +198,22 @@ Two bots review your patchset independently and each casts one vote. Your change
   run on GitHub Actions via gerrit-to-platform) against your exact patchset. `+1` = CI
   passed, `-1` = CI failed. A run link is posted with the vote.
 
+**Documentation-only routing.** A patchset whose every changed path is on the narrow
+documentation allowlist runs one Ubuntu lane containing the same ADR number/index/link,
+docs-index/dead-link, README quickstart, CLI/MCP reference, and environment-registry gates
+used by the full matrix. The path decision is made by classifier code and its complete
+allowlist sparse-checked out from trusted `origin/main`, never by code from the patchset.
+Python, scripts, workflows/actions, dependencies and locks, tests/fixtures, configuration
+or policy, unrecognized paths, and an empty/malformed/unresolvable `HEAD^..HEAD` diff all
+select full Verify. A classifier failure also starts the full fallback route and still
+blocks `Verified`, so routing cannot fail open.
+
+To extend the allowlist, first prove the new path class cannot change executed build,
+test, packaging, policy, or CI behavior; add positive and conservative negative classifier
+tests; and land the classifier change through full Verify. Do not put the allowlist in a
+patchset-controlled config file or duplicate documentation commands in either route: the
+single definition is `.github/actions/docs-gates/action.yml`.
+
 The two votes are **independent**: an LLM finding does not fail CI, and a CI flake does not
 change the review verdict. **Only the two bots and administrators may cast either label**,
 so you cannot self-approve or self-verify your own change. (Both labels block submit today —

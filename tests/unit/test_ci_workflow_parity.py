@@ -26,6 +26,7 @@ _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
 _OPTIONALITY_YML = _ROOT / ".github" / "workflows" / "optionality.yml"
 _OPTIONALITY_REUSABLE_YML = _ROOT / ".github" / "workflows" / "_optionality.yml"
+_DOCS_ACTION = _ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
 # The job that replaced the 5-cell `per-extra` matrix + the `union` job with one venv loop
 # (6 concurrent slots -> 1, under the org-wide 20-job ceiling).
 _OPTIONALITY_LOOP_JOB = "optional-extras"
@@ -61,7 +62,6 @@ _CI_REDUNDANT_HOOKS = {"lint", "typecheck"}
 _SHARED_GATE_SIGNATURES = {
     "module-size gate": ".github/module-size-limit.txt",
     "prompt-index drift gate": "regenerate-index",
-    "env-var registry drift gate": "scripts/gen_env_registry.py",
     "security-rules freshness gate": "security_pin",
     "criteria-routing parity gate": "validate-routing",
     "server.json env-contract drift gate": "scripts/check_server_manifest.py",
@@ -73,6 +73,16 @@ _SHARED_GATE_SIGNATURES = {
     "pip-audit": "pip-audit",
     "default test suite": 'pytest -m "not integration and not external"',
     "integration tier": "pytest -m integration",
+}
+
+_DOCUMENTATION_GATE_SIGNATURES = {
+    "ADR number and cross-reference gate": "scripts/check_adr_numbers.py",
+    "ADR index drift gate": "scripts/gen_adr_index.py",
+    "env-var registry drift gate": "scripts/gen_env_registry.py",
+    "docs index and dead-link gate": "scripts/check_docs_index.py",
+    "README quickstart gate": "scripts/check_readme_quickstart.py",
+    "CLI reference drift gate": "scripts/gen_cli_reference.py",
+    "MCP reference drift gate": "scripts/gen_mcp_reference.py",
 }
 
 _COVERAGE_FLAGS = "--cov=rebar --cov-report=term-missing:skip-covered"
@@ -404,6 +414,10 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
             "if" not in job or normalized_expression(job.get("if")).lower() == "true"
         )
 
+    def full_route_or_classifier_fallback(job: Any) -> bool:
+        condition = normalized_expression(job.get("if")) if isinstance(job, dict) else ""
+        return "needs.classify.result!='success'||needs.classify.outputs.route=='full'" in condition
+
     reusable_raw = _read(_ROOT / ".github" / "workflows" / "_mutation.yml")
     workflow = yaml.safe_load(reusable_raw)
     test_workflow = yaml.safe_load(_read(_TEST_YML))
@@ -482,7 +496,9 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
             },
             "gerrit_mutation": {
                 **mutation_call_contract(gerrit_mutation),
-                "active_by_default": active_by_default(gerrit_mutation),
+                "full_route_or_classifier_fallback": full_route_or_classifier_fallback(
+                    gerrit_mutation
+                ),
                 "exact_inputs": isinstance(gerrit_mutation, dict)
                 and all(
                     (gerrit_mutation.get("with") or {}).get(name) == value
@@ -553,7 +569,7 @@ def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard(
             "gerrit_mutation": {
                 "uses_reusable": True,
                 "secret_paths": [],
-                "active_by_default": True,
+                "full_route_or_classifier_fallback": True,
                 "exact_inputs": True,
                 "included_in_vote_needs": True,
             },
@@ -578,6 +594,16 @@ def test_shared_gate_signatures_live_in_the_reusable() -> None:
             "gate was dropped from the shared workflow (it would stop gating BOTH lanes) or its "
             "signature is stale; update _SHARED_GATE_SIGNATURES to match the renamed/removed gate."
         )
+
+
+def test_documentation_gate_signatures_live_in_the_shared_action() -> None:
+    """Extracted documentation checks remain one definition used by both CI routes."""
+    action = _read(_DOCS_ACTION)
+    bat = _read(_BAT_YML)
+    assert "./.github/actions/docs-gates" in bat
+    for label, signature in _DOCUMENTATION_GATE_SIGNATURES.items():
+        assert signature in action, f"documentation gate {label!r} was dropped from the action"
+        assert signature not in bat, f"documentation gate {label!r} was copied back inline"
 
 
 def test_shared_pytest_job_has_incident_timeout() -> None:
