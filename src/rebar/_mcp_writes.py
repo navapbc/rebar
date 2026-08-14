@@ -288,6 +288,8 @@ def register_write_tools(mcp, ctx) -> None:
         add_tags: list[str] | None = None,
         remove_tags: list[str] | None = None,
         set_tags: list[str] | None = None,
+        bridge_project: str | None = None,
+        repos: list[str] | None = None,
     ) -> WriteAckOut:
         """Edit ticket fields (title/priority/assignee/description/ticket_type).
 
@@ -295,6 +297,13 @@ def register_write_tools(mcp, ctx) -> None:
         or set_tags replaces the whole set (compiled to a delta; add-wins, so a
         concurrent remote add is never silently clobbered). set_tags is mutually
         exclusive with add_tags/remove_tags.
+
+        bridge_project is promote-only — it may be set on an unbound ticket but is
+        rejected once the ticket already holds a binding ("" marks never-sync); repos
+        replaces the associated repositories and is freely editable. Both are
+        present-only: leave them None to edit neither. Unlike the library edit_ticket
+        (a **fields passthrough), this tool's signature is enumerated, so these two are
+        forwarded explicitly to keep the MCP edit surface at parity with CLI/library.
 
         description_warning is non-null when the new description exceeds the plan-review
         admission cap while the claim gate is on: the edit still succeeded, but claiming
@@ -310,6 +319,8 @@ def register_write_tools(mcp, ctx) -> None:
             add_tags=add_tags,
             remove_tags=remove_tags,
             set_tags=set_tags,
+            bridge_project=bridge_project,
+            repos=repos,
         )
         return _ack(description_warning=description_warning)
 

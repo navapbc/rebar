@@ -159,7 +159,10 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
     for key, value in fields.items():
         if value is None:
             continue
-        normalized[key] = str(value)
+        # Scalars are str-coerced (edit_core parses them from strings); list-valued
+        # fields (repos) must pass through intact — str()-ing a list corrupts it into
+        # "['a', 'b']", which the EDIT repos normaliser then comma-splits into garbage.
+        normalized[key] = value if isinstance(value, list) else str(value)
     from rebar._commands import composer
 
     warning = _python_leaf(

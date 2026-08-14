@@ -175,6 +175,41 @@ def test_bridge_project_and_repos_are_parity_across_surfaces(repo: Path) -> None
     assert shapes == [("REB", ["rebar", "api"])] * 3
 
 
+def test_mcp_edit_sets_bridge_project_and_repos_at_parity(repo: Path) -> None:
+    """The MCP edit_ticket tool can set bridge_project and repos, matching the CLI and
+    library edit surfaces. The MCP tool has an enumerated signature (no **fields
+    passthrough), so it must forward these two fields explicitly or the MCP edit surface
+    silently drops them — the parity gap this test pins."""
+    tid = rebar.create_ticket("task", "mcp-edit", repo_root=str(repo))
+    assert _state(repo, tid).get("bridge_project") is None
+    assert _state(repo, tid).get("repos") == []
+
+    mcp_tools: dict = {}
+
+    class _FakeMcp:
+        def tool(self, *_a, annotations=None, **_k):
+            def deco(fn):
+                mcp_tools[fn.__name__] = fn
+                return fn
+
+            return deco
+
+    ctx = types.SimpleNamespace(
+        readonly=lambda: False,
+        dump=lambda obj: obj,
+        allow_llm=lambda: False,
+        logger=logging.getLogger("test"),
+    )
+    from rebar import _mcp_writes
+
+    _mcp_writes.register_write_tools(_FakeMcp(), ctx=ctx)
+    mcp_tools["edit_ticket"](tid, bridge_project="REB", repos=["rebar", "api"])
+
+    state = _state(repo, tid)
+    assert state["bridge_project"] == "REB"
+    assert state["repos"] == ["rebar", "api"]
+
+
 def test_promote_only_refuses_rebind_but_allows_first_set(repo: Path) -> None:
     """Setting bridge_project on an UNBOUND ticket succeeds; the same edit on a
     ticket that already holds a binding is refused (non-zero) with no state change."""
