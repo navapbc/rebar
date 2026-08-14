@@ -1,6 +1,6 @@
 # ADR 0096 — Complete Pandoc corpus replay belongs in external integration
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-14
 **Supersedes:** the testing-assurance clause in
 [ADR 0095](0095-dc-segmenting-wiki-renderer.md) that required every conversion
