@@ -259,7 +259,7 @@ def test_explicit_environment_overrides_rebar_env_id(rebar_repo: Path) -> None:
 def test_matching_rich_detail_is_used_and_mismatch_is_ignored(rebar_repo: Path) -> None:
     _record(rebar_repo, environment_id="reconciler")
     detail_path = rebar_repo / ".tickets-tracker" / ".bridge_state" / "last-pass.json"
-    detail_path.parent.mkdir(parents=True)
+    detail_path.parent.mkdir(parents=True, exist_ok=True)
     detail_path.write_text(
         json.dumps(
             {

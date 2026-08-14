@@ -58,11 +58,16 @@ def _stored_repos(repo: Path, key: str) -> list[str]:
 
 
 def test_set_without_repos_is_an_argument_error(repo: Path) -> None:
-    """``--repos`` is required: omitting it exits non-zero and writes no record."""
+    """``--repos`` is required: omitting it exits non-zero and writes no record.
+
+    A store seeds an empty ``projects.json`` (only a ``legacy_default``) at init
+    (ticket 462d), so "writes no record" means the failed set adds no project entry —
+    asserted directly against ``projects`` rather than the file's absence."""
     rc, _out, _err = _run("projects", "set", "REB")
 
     assert rc != 0
-    assert not _projects_file(repo).exists()
+    record = json.loads(_projects_file(repo).read_text(encoding="utf-8"))
+    assert record["projects"] == {}
 
 
 def test_set_with_explicit_empty_repos_stores_empty_list(repo: Path) -> None:
