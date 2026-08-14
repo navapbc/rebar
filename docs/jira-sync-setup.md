@@ -507,6 +507,107 @@ The producer↔consumer sync contract (epic f89d) is guarded at two tiers:
   A natural home for the live variants is a **scheduled** workflow (e.g. weekly
   `cron`) against a throwaway project, kept separate from the per-PR lane.
 
+## Multi-project rehearsal against the ephemeral Jira DC harness
+
+The many-to-many bridge (one store -> many Jira projects) has a dedicated **opt-in,
+live-only** canary: `tests/external/live_jira_dc/test_multi_project_rehearsal.py`. It
+rehearses the M2M bridge against **throwaway scratch projects provisioned in the ephemeral
+Jira Data Center harness** (the same harness this directory brings up for the DC smoke and
+transport suites), over an **isolated, LOCAL file-based copy of the tickets store**, and
+asserts the one invariant that matters for a multi-project mapping: **work routes to
+exactly its intended project and never contaminates another.** It is the cross-project
+analogue of the round-trip tests above -- hermetic tests can prove routing against a fake,
+but only a live run proves it against real Jira project permissions, real label indexing,
+and real cross-project REST behaviour. It runs in the **`jira-dc-harness` CI job** (see
+below) and can be run locally after `make jira-dc-up`; it never runs in the default or
+per-PR lane.
+
+This replaces the earlier live-Cloud rehearsal (against two fixed Cloud projects over a
+manually-wired encrypted S3 store copy). The DC harness is a fresh, disposable instance we
+own, so isolation is now **structural** rather than asserted: the `scratch_projects`
+fixture creates four brand-new projects and **deletes them all on teardown** (which
+cascades to every issue inside them), and the `store_copy` fixture builds a local copy of
+the `tickets` branch with **no git remote at all** (`REBAR_SYNC_PUSH=off`), so no pass can
+ever reach production. There is no S3 remote to wire and no run-scoped label sweep to
+reason about.
+
+**What it exercises** (ten scenarios, each *preview-gated* -- it computes the plan with
+`bridge_preview`, asserts the planned project set is a subset of the intended project and
+disjoint from every other configured project, then applies with `bridge_sync` and verifies
+live via a DC transport label query, waiting out Lucene index lag with
+`wait_until_searchable` after a create):
+
+- inbound and outbound to **both** of two mapped scratch projects;
+- a ticket with an **explicit empty** project (not synced) and one with the project field
+  **absent** (resolves to the legacy default only);
+- **repo-config variety** -- single-repo, two-repo, and zero-repo (configured-but-empty)
+  projects, both directions;
+- the **contamination guard**: an outbound update whose target falls outside the
+  configured scope is surfaced in the preview plan and refused by `bridge_sync`
+  (`CrossProjectTargetError`), writing nothing;
+- **unknown-project fail-closed**: a mapping entry for a project that does not exist in
+  Jira aborts the pass (the inbound fan-out errors and writes nothing) -- the true
+  fail-closed product behaviour, not a silent empty result;
+- **promote-only** binding (promoting an unbound ticket creates the issue; re-homing a
+  bound ticket is refused);
+- the **capability stamp** (`multi-project-bridge` on `.store-compat.json` once two
+  projects are mapped, and fail-closed refusal of an unknown-capability record);
+- a **failure-path cleanup proof** -- a mid-scenario failure still triggers per-issue
+  cleanup, leaving zero issues behind (independently of the project-drop cascade).
+
+### Prerequisites
+
+- A reachable Jira Data Center harness. In CI the `jira-dc-harness` job builds and boots
+  the vendored image (see `tests/external/live_jira_dc/README.md` and `Dockerfile`).
+  Locally, bring one up with:
+
+  ```bash
+  make jira-dc-up      # docker compose up -d --build --force-recreate; see the README
+  ```
+
+  and tear it down with `make jira-dc-down` when finished. A native x86_64 runner is
+  strongly preferred -- an emulated arm64 host cannot finish booting the image.
+- The `[jira-datacenter]` extra installed (`pip install -e '.[dev,jira-datacenter]'`), so
+  the DC transport is importable; the suite fails loudly rather than skipping silently if
+  the harness is up but the extra is missing.
+
+### Environment variables the harness reads
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `REBAR_RUN_EXTERNAL=1` | yes | opt into the external tier (else every test is inert) |
+| `JIRA_DC_BASE_URL` | optional | harness base URL (default `http://localhost:2990/jira`) |
+| `JIRA_DC_ADMIN` / `JIRA_DC_ADMIN_PASSWORD` | optional | admin basic credentials the fixtures use to provision projects + mint a PAT (default `admin`/`admin`) |
+
+No Cloud credentials, no S3 remote, and no production-remote comparison are needed -- the
+store copy is remoteless and the projects are ephemeral. Without a reachable harness the
+whole suite **skips cleanly** (the module-level `_live_jira_ready()` sentinel).
+
+### Running it
+
+```bash
+make jira-dc-up
+REBAR_RUN_EXTERNAL=1 \
+  pytest -m "external and jira_live" \
+    tests/external/live_jira_dc/test_multi_project_rehearsal.py
+make jira-dc-down
+```
+
+### Cleanup -- ephemeral projects + per-issue finally
+
+Each scenario provisions its own four scratch projects through the `scratch_projects`
+fixture, which **deletes all four on every exit path** (asserting the DELETE's HTTP status
+then polling the direct REST endpoint until it 404s, per ADR 0037 section 3). Deleting a
+Jira project cascades to its issues, so seeded probes and bridge-created issues go with it
+-- there is nothing to sweep by label. Seeded probe issues are additionally registered with
+`track_issue` (deleted, and confirmed gone, before their project) and each scenario that
+seeds a probe also deletes it in a `try/finally`, which is what the failure-path
+cleanup-proof scenario asserts. If a run is killed hard before teardown, the leftover
+`RBJ`-prefixed scratch projects are refused by the harness's own session-start freshness
+check on the next run, which names the recovery command (`make jira-dc-down && make
+jira-dc-up`).
+
+
 ## Optional hardening
 
 DSO also ships a **weekly bridge audit**. rebar exposes the same check as
