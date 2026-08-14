@@ -314,13 +314,23 @@ def test_dc_corpus_has_eligible_units_that_actually_change() -> None:
     pandoc = wiki_render._pandoc_path()
     eligible = 0
     changed = 0
+    render_calls = 0
+    first_changed_call = None
     for body in _load("prose"):
         for kind, text in wiki_render._lock_and_split(body):
             if kind != wiki_render._RENDER:
                 continue
             eligible += 1
-            if wiki_render._render_unit(text, pandoc or "") != text:
+            render_calls += 1
+            rendered = wiki_render._render_unit(text, pandoc or "")
+            if rendered != text:
                 changed += 1
+                if first_changed_call is None:
+                    first_changed_call = render_calls
+                break
+        if changed:
+            break
 
     assert eligible > 0
     assert changed > 0
+    assert render_calls == first_changed_call
