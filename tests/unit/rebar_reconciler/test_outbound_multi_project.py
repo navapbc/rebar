@@ -316,3 +316,91 @@ def test_guard_single_project_string_still_flags_foreign_keys(applier_mod):
         "single-project behaviour (a bare string) is unchanged: a foreign key is "
         f"flagged, the configured one is not; got {offenders}"
     )
+
+
+# ===========================================================================
+# Bug 7b9a finding 1: the create-path membership check is CASE-INSENSITIVE and
+# agrees with the applier guard (which normalizes both sides to uppercase). A
+# bridge_project that matches a mapping key only by case must still create, and
+# the stamped key must be the CANONICAL mapping key (so the transport routes to
+# the real Jira project), not the ticket's raw-case value.
+# ===========================================================================
+
+
+def test_create_membership_check_is_case_insensitive_and_stamps_canonical_key(
+    od, projects_store, binding_store_mod, tmp_path
+):
+    store = _fresh_store(binding_store_mod, tmp_path)
+    # mapping keys are canonical uppercase {"A", "B"}; the ticket names "b" (lower)
+    mutations, _ = _run_diff(
+        od, projects_store, store, [_ticket("loc-lc", bridge_project="b")], _mapping(projects_store)
+    )
+    creates = _creates(mutations)
+    assert len(creates) == 1, (
+        "a bridge_project that matches a mapping key case-insensitively ('b' vs 'B') "
+        "must still emit a create — the create path must agree with the applier guard, "
+        f"which uppercases both sides; got {[(m.local_id, m.action) for m in mutations]}"
+    )
+    assert creates[0].fields.get(pyt_reserved_key) == "B", (
+        "the create must be stamped with the CANONICAL mapping key ('B'), not the "
+        f"ticket's raw case ('b'), so the transport routes to the real project; got "
+        f"{creates[0].fields.get(pyt_reserved_key)!r}"
+    )
+
+
+def test_create_still_suppressed_when_project_absent_even_case_folded(
+    od, projects_store, binding_store_mod, tmp_path
+):
+    """The case-insensitive relaxation must not resurrect a genuinely-absent project:
+    a bridge_project with no case-folded match in the mapping still emits no create."""
+    store = _fresh_store(binding_store_mod, tmp_path)
+    mutations, _ = _run_diff(
+        od,
+        projects_store,
+        store,
+        [_ticket("loc-zz", bridge_project="zz")],
+        _mapping(projects_store),
+    )
+    assert _creates(mutations) == [], (
+        "'zz' has no case-insensitive match in {A, B}; the create must still be "
+        f"suppressed; got "
+        f"{[(m.local_id, m.fields.get(pyt_reserved_key)) for m in _creates(mutations)]}"
+    )
+
+
+# ===========================================================================
+# Bug 7b9a finding 3: the run_differs outbound seam threads
+# projects_store.load_mapping(repo_root); a MALFORMED projects.json must fail
+# CLOSED (ValueError aborts the pass), not silently degrade. This exercises the
+# real seam, not load_mapping in isolation.
+# ===========================================================================
+
+
+def test_run_differs_outbound_seam_fails_closed_on_malformed_projects_json(tmp_path):
+    import types
+
+    from rebar_reconciler import local_label_intent, outbound_differ, run_differs
+
+    bridge = tmp_path / ".tickets-tracker" / ".bridge_state"
+    bridge.mkdir(parents=True)
+    (bridge / "projects.json").write_text("{ this is not valid json", encoding="utf-8")
+
+    backend = types.SimpleNamespace(transport=object())
+    ctx = types.SimpleNamespace(
+        # A scoped pass so pending-binding recovery is skipped (no transport calls).
+        filter_local_ids=["scope"],
+        selection_ids=None,
+        binding_store=types.SimpleNamespace(get_jira_key=lambda _id: None),
+        local_tickets=[],
+        local_label_intent_mod=local_label_intent,
+        tracker_dir=tmp_path / ".tickets-tracker",
+        repo_root=tmp_path,
+        outbound_differ_mod=outbound_differ,
+        pass_id="p-malformed",
+        prev_snapshot={},
+        curr_snapshot={},
+        sync_logger=None,
+        recovery_failures=0,
+    )
+    with pytest.raises(ValueError, match=r"projects\.json"):
+        run_differs._run_differs_outbound(ctx, [], backend)
