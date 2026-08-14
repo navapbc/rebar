@@ -36,6 +36,8 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_DIR = REPO_ROOT / ".github" / "workflows"
+DOCS_ACTION_REF = "./.github/actions/docs-gates"
+DOCS_ACTION = REPO_ROOT / ".github" / "actions" / "docs-gates" / "action.yml"
 
 # The two workflows that run against a CHECKED-OUT GERRIT PATCHSET while their definition
 # comes from the target branch — the exact condition that produces the skew. Other workflows
@@ -87,9 +89,26 @@ def _collect_gate_steps() -> list[GateStep]:
         for job_name, job in workflow["jobs"].items():
             if not _job_is_in_patchset_lane(job):
                 continue
+            expanded_steps: list[dict[str, Any]] = []
             for step in job.get("steps", []) or []:
+                expanded_steps.append(step)
+                if step.get("uses") == DOCS_ACTION_REF:
+                    action = yaml.safe_load(DOCS_ACTION.read_text(encoding="utf-8"))
+                    for nested in action["runs"]["steps"]:
+                        expanded_steps.append(
+                            {
+                                **nested,
+                                "name": f"{step.get('name', 'docs-gates')} / {nested.get('name')}",
+                            }
+                        )
+            for step in expanded_steps:
                 run = step.get("run")
                 if not run:
+                    continue
+                # The route classifier is sparse-checked out from trusted main into this
+                # prefix after the patchset checkout; it is not a patchset-tree script and
+                # therefore has no definition-vs-tree skew.
+                if ".trusted-verify-router/scripts/" in str(run):
                     continue
                 scripts = tuple(dict.fromkeys(_SCRIPT_RE.findall(str(run))))
                 if not scripts:
