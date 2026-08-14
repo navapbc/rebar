@@ -7818,253 +7818,15 @@
     "100b-6146-8018-4400": {
       "baseline": {
         "assignee": null,
-        "description": {
-          "content": [
-            {
-              "content": [
-                {
-                  "text": "## Summary",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "set-file-impact / set-verify-commands accept arbitrary array elements \u2014 only array-ness is validated, so junk violating the documented element contract is stored and flows downstream.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Reproduction Steps",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "(verified on installed 0.4.0 == HEAD, temp store)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "1. rebar set-file-impact <id> '[42, \"string\"]' -> exit 0; get-file-impact -> [42, \"string\"]",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "2. rebar set-file-impact <id> '[{\"reason\":\"no path\"}]' -> exit 0",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "3. rebar set-verify-commands <id> '[{\"x\":1}]' -> exit 0",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "4. Control: non-JSON and non-array inputs ARE rejected.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Expected vs Actual",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Expected (help text): \"JSON array of {path,reason} objects\" / \"{dd_id,dd_text,command}\".",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- Actual: any array contents accepted; junk reaches show/list/--output llm payloads and (once bug vamp-floor-mica is fixed) the scheduler's conflict detection.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Source",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "src/rebar/_engine/ticket-lib-api.sh:1027-1036 (file_impact), :1194-1201 (verify_commands) \u2014 validation stops at jq type == array.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Fix direction",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Per-element jq validation: every element an object containing the required string keys; reject with exit 1 naming the first offending index. Preserve current empty-array semantics. Validated jq expression + [] behavior in the implementation-notes comment. Sequence with/after vamp-floor-mica (relates_to link exists).",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Suggested RED test",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "Each malformed shape above -> exit 1 with index in message; valid arrays and [] -> accepted; round-trip via get-* unchanged for valid input.",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "## Acceptance Criteria",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Element-level validation on both setters (RED tests per malformed shape first)",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] Error names the offending index and the required keys",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] [] semantics preserved; valid-input round-trip unchanged",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            },
-            {
-              "content": [
-                {
-                  "text": "- [ ] MCP set_file_impact/set_verify_commands surface the same rejection cleanly",
-                  "type": "text"
-                }
-              ],
-              "type": "paragraph"
-            }
-          ],
-          "type": "doc",
-          "version": 1
-        },
-        "priority": {
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/priorities/low_new.svg",
-          "id": "4",
-          "name": "Low",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/priority/4"
-        },
-        "status": {
-          "description": "",
-          "iconUrl": "https://jira-prod-us-51-as-2.prod.atl-paas.net/images/icons/statuses/generic.png",
-          "id": "24028",
-          "name": "Done",
-          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/status/24028",
-          "statusCategory": {
-            "colorName": "green",
-            "id": 3,
-            "key": "done",
-            "name": "Done",
-            "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/statuscategory/3"
-          }
-        },
+        "description": "## Summary\nset-file-impact / set-verify-commands accept arbitrary array elements \u2014 only array-ness is validated, so junk violating the documented element contract is stored and flows downstream.\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD, temp store)\n1. rebar set-file-impact <id> '[42, \"string\"]' -> exit 0; get-file-impact -> [42, \"string\"]\n2. rebar set-file-impact <id> '[{\"reason\":\"no path\"}]' -> exit 0\n3. rebar set-verify-commands <id> '[{\"x\":1}]' -> exit 0\n4. Control: non-JSON and non-array inputs ARE rejected.\n\n## Expected vs Actual\n- Expected (help text): \"JSON array of {path,reason} objects\" / \"{dd_id,dd_text,command}\".\n- Actual: any array contents accepted; junk reaches show/list/--output llm payloads and (once bug vamp-floor-mica is fixed) the scheduler's conflict detection.\n\n## Source\nsrc/rebar/_engine/ticket-lib-api.sh:1027-1036 (file_impact), :1194-1201 (verify_commands) \u2014 validation stops at jq type == array.\n\n## Fix direction\nPer-element jq validation: every element an object containing the required string keys; reject with exit 1 naming the first offending index. Preserve current empty-array semantics. Validated jq expression + [] behavior in the implementation-notes comment. Sequence with/after vamp-floor-mica (relates_to link exists).\n\n## Suggested RED test\nEach malformed shape above -> exit 1 with index in message; valid arrays and [] -> accepted; round-trip via get-* unchanged for valid input.\n\n## Acceptance Criteria\n- [ ] Element-level validation on both setters (RED tests per malformed shape first)\n- [ ] Error names the offending index and the required keys\n- [ ] [] semantics preserved; valid-input round-trip unchanged\n- [ ] MCP set_file_impact/set_verify_commands surface the same rejection cleanly",
+        "priority": "Low",
+        "status": "Done",
         "summary": "set-file-impact/set-verify-commands accept arbitrary array elements (documented element contract unenforced)"
       },
       "baseline_advanced_at": "2026-07-19T02:32:03Z",
       "created_at": "2026-06-25T22:58:19Z",
       "jira_key": "REB-26",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-06-25T22:58:19Z"
     },
@@ -19109,7 +18871,7 @@
         "assignee": null,
         "description": "## Context / Problem\n\n`src/rebar/_engine/rebar_reconciler/dispatch_one.py` measures **796 lines** against the repository's hard 800-line module-size gate (`.github/module-size-limit.txt`), which CI enforces with no allowlist escape hatch. Four lines of headroom is not enough for the sibling story that makes the outbound create path target a per-ticket project, so that story cannot land until this file has room.\n\n## Approach\n\nExtract the entire `update_one` sub-tree \u2014 lines **432-796** \u2014 into a new `dispatch_update.py`. This is a pre-existing call-graph seam, not a mechanical cut: `update_one` (`:447`) calls `_update_one_apply_parent` (`:497`), `_update_one_scalar_update` (`:500`), `_update_one_dispatch_labels` (`:506`) and `_update_one_dispatch_links` (`:510`), and `_update_one_scalar_update` is the sole caller of `_is_illegal_transition_400`. Nothing above line 432 calls into the block; the only dependency runs downward, through `_call_with_retry` (`:71-143`), which stays put.\n\nThe repository has already made this exact split twice: `dispatch_apply_phases.py` (226 lines) holds three other `update_one` phases, and `batch_dispatch.py` (148 lines) is the stable re-export facade. This extraction follows the pattern rather than inventing one.\n\n**The import edge the new module must carry.** `update_one` does not only call the four helpers that move with it \u2014 it also calls `_update_one_apply_reporter` (`:498`), `_update_one_filter_fields` (`:499`) and `_update_one_dispatch_comments` (`:507`), which already live in `dispatch_apply_phases` and are imported at `dispatch_one.py:53-55`. Those three imports move to `dispatch_update.py` with their caller; `dispatch_one` drops them, since nothing left in it uses them. This is what makes the extraction land in the module that already owns the other `update_one` phases.\n\n**The one hazard, and how it is avoided.** `dispatch_one.py` must **not** re-export `update_one` back for convenience \u2014 that would create `dispatch_one \u2192 dispatch_update \u2192 dispatch_one`, because `dispatch_update` imports `_call_with_retry` from `dispatch_one`. Instead `batch_dispatch.py`'s import block (`:31-40`) is re-pointed at `dispatch_update` for `update_one` and `_is_illegal_transition_400`. That is the only production re-point needed: `applier.py:122-130` already imports both symbols **from `batch_dispatch`**, not from `dispatch_one`, so its `__all__` at `:329` keeps resolving with no edit.\n\n`batch_dispatch` is the established public surface. Its import block at `:31-38` currently takes six names from `dispatch_one` \u2014 `_call_with_retry`, `_find_link_id`, `_index_existing_links`, `_is_illegal_transition_400`, `create_one` and `update_one`. (`delete_one` is **not** among them; it is defined in `batch_dispatch` itself at `:54`.) After the move that block splits three ways: `_call_with_retry` and `create_one` still come from `dispatch_one`; `_is_illegal_transition_400` and `update_one` come from `dispatch_update`; and `_find_link_id` / `_index_existing_links` are taken directly from `dispatch_apply_phases`, where they are actually defined (`:206` and `:180`) and from which `dispatch_one` only re-exports them. Every edge then points from `batch_dispatch` downward and from `dispatch_update` to `dispatch_one`, never back, so the direction stays acyclic.\n\n**The new module's complete import inventory**, derived by scanning the moved range rather than by inspection:\n\n- stdlib: `json`, `subprocess`, `sys`, `urllib` \u2014 and only these four. `logging`, `time`, `os`,\n  `random` and `pathlib` are imported by `dispatch_one` but unused inside `432-796`, so they stay.\n- `typing`: `Any`, `cast`.\n- from `rebar_reconciler._errors`: `JiraAPIError`, `http_status`.\n- from `rebar_reconciler.dispatch_apply_phases`: `_update_one_apply_reporter`,\n  `_update_one_filter_fields`, `_update_one_dispatch_comments`, `_find_link_id`,\n  `_index_existing_links`.\n- from `rebar_reconciler.pass_io`: `record_parent_divergence` only. That module is imported at\n  `dispatch_one.py:57` alongside `_write_mapping_atomic`, which the moved range does **not** use, so\n  `dispatch_one` keeps its own `pass_io` import for that name.\n- from `rebar_reconciler.dispatch_one`: `_call_with_retry`.\n\n**One CI gate keys on the symbol's file.** `.github/complexity-baseline.json` records per-symbol ceilings keyed as `<file>::<symbol>`, and two of its keys name this module \u2014 `dispatch_one.py::_update_one_dispatch_links` and `dispatch_one.py::create_one`. The first symbol moves, so its key must be re-pointed to `dispatch_update.py::_update_one_dispatch_links` or the complexity gate fails on a file that no longer defines it; `create_one` stays and its key is untouched. This consumer lives outside the source tree and is invisible to any symbol- or import-level search, which is why it is called out explicitly.\n\n**One consumer does need an edit.** `tests/unit/rebar_reconciler/apply/test_synced_fields_reporting_e6e9.py:36` imports `update_one` **directly** from `dispatch_one`, so it breaks the moment the symbol moves and the no-re-export rule forbids papering over it. That import is re-pointed at `batch_dispatch`, which is where every other consumer already gets it. This is the single test edit this story makes, and it is enumerated rather than discovered during implementation \u2014 an earlier draft of this plan wrongly claimed no test changes were needed.\n\nThis is a behaviour-preserving move: no logic is rewritten.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/dispatch_update.py` (new) \u2014 the moved sub-tree, ~405 lines\n- `src/rebar/_engine/rebar_reconciler/dispatch_one.py` \u2014 drops to ~431 lines\n- `src/rebar/_engine/rebar_reconciler/batch_dispatch.py` \u2014 the `:31-38` import block split across\n  `dispatch_one`, `dispatch_update` and `dispatch_apply_phases`; the only production re-point\n- `.github/complexity-baseline.json` \u2014 the `_update_one_dispatch_links` ceiling re-keyed to the new\n  file\n- `tests/unit/rebar_reconciler/apply/test_synced_fields_reporting_e6e9.py` \u2014 its direct\n  `from ... dispatch_one import update_one` at `:36` re-pointed at `batch_dispatch`\n\n`applier.py` is deliberately **not** in scope: it already imports the moved symbols from `batch_dispatch` (`:122-130`), so it needs no change.\n\n## Testing\n\nNo new behaviour, so no new behavioural tests: the oracle is the existing suite passing **unchanged**, which is what proves the move preserved behaviour. Two specific hazards are verified rather than assumed:\n\n- Monkeypatch survival: there are **five** module-attribute patch sites on `dispatch_one`, across\n  three test modules \u2014 `apply/test_applier_identity_write.py:156,195`,\n  `test_cloud_rate_limit_sweep_heldout.py:258,279` and `test_error_taxonomy.py:61` \u2014 and every one of\n  them patches the same attribute, `dispatch_one.time`. All five stay safe: `time` is consumed by\n  `_call_with_retry` and `create_one`, both of which remain resident, and `dispatch_update` reaches\n  the retry helper by importing `_call_with_retry` from `dispatch_one`, so the sleep call still\n  resolves against `dispatch_one`'s globals where the patch is applied. Confirm all five pass\n  unedited \u2014 this is the assertion that proves the split did not silently defeat a patch.\n- Import-cycle check: importing `dispatch_one` and `dispatch_update` in either order must succeed,\n  asserted directly so a future re-export cannot silently reintroduce the cycle.\n- Direct-importer coverage: the one re-pointed test\n  (`test_synced_fields_reporting_e6e9.py`) passes after its import is changed, and a repository-wide\n  grep for `from rebar_reconciler.dispatch_one import update_one` returns no remaining hit. The grep\n  is part of the oracle because this consumer was missed by symbol-level analysis and only a string\n  search surfaced it.\n\n## Acceptance Criteria\n\n- [ ] `dispatch_one.py` and `dispatch_update.py` are each at or below 650 lines; checked by running\n      the module-size gate and recording both counts.\n- [ ] The full existing test suite passes, with exactly one existing test file edited \u2014\n      `tests/unit/rebar_reconciler/apply/test_synced_fields_reporting_e6e9.py`, whose direct import\n      is re-pointed \u2014 and one file added,\n      `tests/unit/rebar_reconciler/test_dispatch_update_split.py`, which holds this story's\n      structural assertions; checked by the gating test command plus confirming the diff under\n      `tests/` touches only those two paths.\n- [ ] All five `dispatch_one.time` patch sites pass unedited; checked by running the three named\n      test modules.\n- [ ] `dispatch_update.py` carries the full import inventory named in the Approach and `dispatch_one`\n      no longer imports what it stopped using; checked by asserting both modules' import lists.\n- [ ] The complexity gate passes with `_update_one_dispatch_links` re-keyed to\n      `dispatch_update.py::_update_one_dispatch_links` and `create_one`'s key unchanged; checked by\n      running the complexity-baseline gate and inspecting both keys.\n- [ ] `batch_dispatch` resolves all six previously-imported names after its block is split; checked\n      by importing each from `batch_dispatch` and asserting no `ImportError`.\n- [ ] No `from rebar_reconciler.dispatch_one import update_one` remains anywhere in the tree; checked\n      by a repository-wide string grep returning zero hits.\n- [ ] `dispatch_one.py` does not import from `dispatch_update.py`; checked by a test that imports the\n      two modules in both orders and asserts no `ImportError`.\n- [ ] `update_one` and `_is_illegal_transition_400` remain reachable through `batch_dispatch` **and**\n      through `applier`'s existing re-export; checked by asserting both resolve from each module\n      after the move, which confirms `applier.py` needed no edit.\n- [ ] No behaviour change: checked by confirming the moved functions' bodies are identical to their\n      pre-move text apart from import lines.",
         "priority": "High",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Size relief: extract the update_one sub-tree from dispatch_one.py into dispatch_update.py"
       },
       "created_at": "2026-08-08T04:20:02Z",
@@ -35515,9 +35277,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\n\nExisting stores \u2014 including client deployments \u2014 have no `.bridge_state/projects.json` and no `bridge_project` on any ticket. Without a migration they read every ticket as absent-project with no recorded legacy default for the resolver to fall back to, so a store that syncs today stops syncing on upgrade.\n\n## Prerequisites (substrate, from cited deps \u2014 already `depends_on` edges)\n\n- `[rebar:c927-0a68-4465-42a2]` \u2014 the projects-mapping store `projects_store.py`: the\n  `.bridge_state/projects.json` record (`{version, legacy_default, projects}`), `load_mapping`, the\n  `Mapping` dataclass, the tri-state resolver `resolve_project` (absent field \u2192 `legacy_default`;\n  `\"\"` \u2192 `None`; key \u2192 verbatim), and `set_project`/`read_projects`.\n- `[rebar:67f9-4a07-9667-446a]` \u2014 registers `multi-project-bridge` in `KNOWN_CAPABILITIES`\n  (`src/rebar/_store/compat.py`), so\n  a store may stamp it and still pass its own compat gate.\n\n`Backend.project` (`_backend.py:598-605`, the effective write/create scope) is pre-existing.\n\n## Approach\n\nShip the migration as ensure units on the idempotent registry (`src/rebar/_store/ensures.py`, `REGISTRY_IDS` `:66`, `_registry()` `:82`) \u2014 rebar's sanctioned seam (`docs/migrations.md:40-56`; the ordered School-A ledger is deliberately not built, `:14-16`). Units run at init/re-init, `fsck --repair`, and MCP boot (`:57-65`), so a client store converges with no operator action.\n\n**No ticket events.** An EDIT-per-ticket migration would be a four-figure event write under the store lock, and MCP-boot runs the sweep on a short lock budget and skips when contended (`:63-65`) \u2014 so it would silently skip at one entry point and converge unpredictably. Instead the unit records `legacy_default` once, and `resolve_project` `[rebar:c927-0a68-4465-42a2]` treats every absent-field ticket as belonging to it. One small write migrates the whole store.\n\nTwo units, both check-then-act and safe to re-run:\n\n1. **Seed the mapping.** If `.bridge_state/projects.json` `[rebar:c927-0a68-4465-42a2]` is absent, write it with\n   `legacy_default` and a single `projects` entry from `Backend.project` (`_backend.py:598-605`); if\n   present, return `ok` and write nothing. Tree-check the committed\n   `tickets:.bridge_state/projects.json` blob before committing so a converged store makes zero commits\n   (`docs/migrations.md:45-46`).\n2. **Converge the capability stamp (backstop, NOT the trigger).** Per the parent epic 0e68, the\n   *authoritative* `multi-project-bridge` stamp is written by the `bridge projects` set/remove write\n   path \u2014 the stamp and the mapping mutation land in the SAME tracker commit (one atomic publish). This\n   ensure unit is only a **convergence backstop for residual divergence**: when the mapping already\n   holds more than one project but `.store-compat.json`'s `required_capabilities` lacks\n   `multi-project-bridge` (a legacy store, or a crash between the write path's two writes), it adds the\n   token; a single-project store is never stamped and stays usable by older binaries. It is\n   level-triggered on the mapping state and decoupled from *how* the store became multi-project, and is\n   never the primary trigger \u2014 the seed above only ever makes a **one-project** mapping, so this unit\n   never fires from the same sweep's seed. The token is registered in `KNOWN_CAPABILITIES` by\n   prerequisite `[rebar:67f9-4a07-9667-446a]` (`src/rebar/_store/compat.py`, the `KNOWN_CAPABILITIES`\n   frozenset), so a stamped store still passes `check_store_compat` on this binary \u2014 this story makes\n   **no** `compat.py` edit, and a test asserts a two-project stamped store passes the gate.\n\nIds are new and never reused (`docs/migrations.md:50-51`).\n\n**Unit bodies live in a new `src/rebar/_store/project_ensures.py`**, not `init.py` (where the six existing units live, e.g. `_store_compat_unit` `:509`). `init.py` is **758 lines** \u2014 ~42 under the 800-line gate (`.github/module-size-limit.txt`), so this is a **cohesion** choice, not size-forced: the projects migration is distinct from init's `.gitignore`/`.gitattributes` constants. `ensures.py` (257 lines) gains only its two registry entries.\n\n## Scope\n\n- `src/rebar/_store/project_ensures.py` (new) \u2014 both unit bodies\n- `src/rebar/_store/ensures.py` \u2014 two `REGISTRY_IDS` entries + two `_registry()` mappings\n- `tests/interfaces/store/test_ensures.py` \u2014 update the hardcoded `expected` id-set literal in\n  `test_registry_id_set_is_frozen` (`:57`, the six existing ids) to add the two new ids so the\n  registry-agreement test passes\n- `docs/migrations.md` \u2014 document the two units and the `multi-project-bridge` token's meaning for\n  other binaries/operators (it gates `.store-compat.json` compatibility)\n- `tests/integration/test_ensure_project_mapping.py` (new) \u2014 the behavioural oracle below\n\n## Testing\n\nReal temp git repos and refs (the shared standard's git row) \u2014 the units commit to `tickets` and the zero-commit-when-converged property is only observable against real refs.\n\n- Happy path: sweeping a no-mapping store creates one whose `legacy_default` equals the backend\n  project, and every ticket resolves to it via `resolve_project`.\n- Load-bearing: the sweep writes **zero ticket events** \u2014 assert the event-file set is identical before\n  and after (distinguishes this from an EDIT-per-ticket migration).\n- Idempotence: a second sweep returns `ok` for both units and the tickets-branch tip SHA is unchanged.\n- Conditional stamp (contrast pair): one-project \u2192 `required_capabilities` empty; two-project \u2192 exactly\n  `multi-project-bridge`. The one-project half proves the stamp is genuinely conditional.\n- Compat-gate safety: a two-project stamped store still passes `check_store_compat` on this binary.\n- Failure path: a raising unit is recorded `failed` and does not abort the sweep or caller.\n\n## Acceptance Criteria\n\n- [ ] A no-mapping store gains one whose `legacy_default` equals the configured backend project;\n      real-git test reads the seeded record.\n- [ ] Every absent-`bridge_project` ticket resolves to that default via `resolve_project`\n      `[rebar:c927-0a68-4465-42a2]`; same test.\n- [ ] The sweep writes zero ticket events; the event-file set is identical before and after.\n- [ ] A second sweep returns `ok` for both units.\n- [ ] A second sweep leaves the tickets-branch tip SHA unchanged (compared across two sweeps).\n- [ ] A one-project mapping leaves `required_capabilities` empty; real-git test.\n- [ ] A two-project mapping adds exactly `multi-project-bridge`; real-git test.\n- [ ] A two-project stamped store still passes `check_store_compat` on this binary; test invokes the\n      gate.\n- [ ] The two new ids are added to `REGISTRY_IDS`.\n- [ ] The two new ids are mapped in `_registry()`.\n- [ ] The two new ids are added to the `expected` literal in `test_registry_id_set_is_frozen`\n      (`test_ensures.py:57`) so that test passes.\n- [ ] A raising unit is recorded `failed` and does not abort the sweep or caller; test monkeypatches a\n      raising unit into `_registry()`.\n- [ ] `docs/migrations.md` documents the two ensure units and the `multi-project-bridge` token's\n      compat meaning for other binaries/operators (that it gates `.store-compat.json` compatibility).",
+        "description": "## Context / Problem\n\nExisting stores \u2014 including client deployments \u2014 have no `.bridge_state/projects.json` and no `bridge_project` on any ticket. Without a migration they read every ticket as absent-project with no recorded legacy default for the resolver to fall back to, so a store that syncs today stops syncing on upgrade.\n\n## Prerequisites (substrate, from cited deps \u2014 already `depends_on` edges)\n\n- `[rebar:c927-0a68-4465-42a2]` \u2014 the projects-mapping store `projects_store.py`: the\n  `.bridge_state/projects.json` record (`{version, legacy_default, projects}`), `load_mapping`, the\n  `Mapping` dataclass, the tri-state resolver `resolve_project` (absent field \u2192 `legacy_default`;\n  `\"\"` \u2192 `None`; key \u2192 verbatim), and `set_project`/`read_projects`.\n- `[rebar:67f9-4a07-9667-446a]` \u2014 registers `multi-project-bridge` in `KNOWN_CAPABILITIES`\n  (`src/rebar/_store/compat.py`), so\n  a store may stamp it and still pass its own compat gate.\n\n`Backend.project` (`_backend.py:598-605`, the effective write/create scope) is pre-existing.\n\n## Approach\n\nShip the migration as ensure units on the idempotent registry (`src/rebar/_store/ensures.py`, `REGISTRY_IDS` `:66`, `_registry()` `:82`) \u2014 rebar's sanctioned seam (`docs/migrations.md:40-56`; the ordered School-A ledger is deliberately not built, `:14-16`). Units run at init/re-init, `fsck --repair`, and MCP boot (`:57-65`), so a client store converges with no operator action.\n\n**No ticket events.** An EDIT-per-ticket migration would be a four-figure event write under the store lock, and MCP-boot runs the sweep on a short lock budget and skips when contended (`:63-65`) \u2014 so it would silently skip at one entry point and converge unpredictably. Instead the unit records `legacy_default` once, and `resolve_project` `[rebar:c927-0a68-4465-42a2]` treats every absent-field ticket as belonging to it. One small write migrates the whole store.\n\nTwo units, both check-then-act and safe to re-run:\n\n1. **Seed the mapping.** If `.bridge_state/projects.json` `[rebar:c927-0a68-4465-42a2]` is absent, write it with\n   `legacy_default` and a single `projects` entry from `Backend.project` (`_backend.py:598-605`); if\n   present, return `ok` and write nothing. Tree-check the committed\n   `tickets:.bridge_state/projects.json` blob before committing so a converged store makes zero commits\n   (`docs/migrations.md:45-46`).\n2. **Converge the capability stamp (backstop, NOT the trigger).** Per the parent epic 0e68, the\n   *authoritative* `multi-project-bridge` stamp is written by the `bridge projects` set/remove write\n   path \u2014 the stamp and the mapping mutation land in the SAME tracker commit (one atomic publish). This\n   ensure unit is only a **convergence backstop for residual divergence**: when the mapping already\n   holds more than one project but `.store-compat.json`'s `required_capabilities` lacks\n   `multi-project-bridge` (a legacy store, or a crash between the write path's two writes), it adds the\n   token; a single-project store is never stamped and stays usable by older binaries. It is\n   level-triggered on the mapping state and decoupled from *how* the store became multi-project, and is\n   never the primary trigger \u2014 the seed above only ever makes a **one-project** mapping, so this unit\n   never fires from the same sweep's seed. The token is registered in `KNOWN_CAPABILITIES` by\n   prerequisite `[rebar:67f9-4a07-9667-446a]` (`src/rebar/_store/compat.py`, the `KNOWN_CAPABILITIES`\n   frozenset), so a stamped store still passes `check_store_compat` on this binary \u2014 this story makes\n   **no** `compat.py` edit, and a test asserts a two-project stamped store passes the gate.\n\nIds are new and never reused (`docs/migrations.md:50-51`).\n\n**Unit bodies live in a new `src/rebar/_store/project_ensures.py`**, not `init.py` (where the six existing units live, e.g. `_store_compat_unit` `:509`). `init.py` is **758 lines** \u2014 ~42 under the 800-line gate (`.github/module-size-limit.txt`), so this is a **cohesion** choice, not size-forced: the projects migration is distinct from init's `.gitignore`/`.gitattributes` constants. `ensures.py` (257 lines) gains only its two registry entries.\n\n## Scope\n\n- `src/rebar/_store/project_ensures.py` (new) \u2014 both unit bodies\n- `src/rebar/_store/ensures.py` \u2014 two `REGISTRY_IDS` entries + two `_registry()` mappings\n- `tests/interfaces/store/test_ensures.py` \u2014 update the hardcoded `expected` id-set literal in\n  `test_registry_id_set_is_frozen` (`:57`, the six existing ids) to add the two new ids so the\n  registry-agreement test passes\n- `docs/migrations.md` \u2014 document the two units and the `multi-project-bridge` token's meaning for\n  other binaries/operators (it gates `.store-compat.json` compatibility)\n- `tests/integration/test_ensure_project_mapping.py` (new) \u2014 the behavioural oracle below\n\n## Testing\n\nReal temp git repos and refs (the shared standard's git row) \u2014 the units commit to `tickets` and the zero-commit-when-converged property is only observable against real refs.\n\n- Happy path: sweeping a no-mapping store creates one whose `legacy_default` equals the backend\n  project, and every ticket resolves to it via `resolve_project`.\n- Load-bearing: the sweep writes **zero ticket events** \u2014 assert the event-file set is identical before\n  and after (distinguishes this from an EDIT-per-ticket migration).\n- Idempotence: a second sweep returns `ok` for both units and the tickets-branch tip SHA is unchanged.\n- Conditional stamp (contrast pair): one-project \u2192 `required_capabilities` empty; two-project \u2192 exactly\n  `multi-project-bridge`. The one-project half proves the stamp is genuinely conditional.\n- Compat-gate safety: a two-project stamped store still passes `check_store_compat` on this binary.\n- Failure path: a raising unit is recorded `failed` and does not abort the sweep or caller.\n\n## Acceptance Criteria\n\n- [x] A no-mapping store gains one whose `legacy_default` equals the configured backend project;\n      real-git test reads the seeded record.\n- [x] Every absent-`bridge_project` ticket resolves to that default via `resolve_project`\n      `[rebar:c927-0a68-4465-42a2]`; same test.\n- [x] The sweep writes zero ticket events; the event-file set is identical before and after.\n- [x] A second sweep returns `ok` for both units.\n- [x] A second sweep leaves the tickets-branch tip SHA unchanged (compared across two sweeps).\n- [x] A one-project mapping leaves `required_capabilities` empty; real-git test.\n- [x] A two-project mapping adds exactly `multi-project-bridge`; real-git test.\n- [x] A two-project stamped store still passes `check_store_compat` on this binary; test invokes the\n      gate.\n- [x] The two new ids are added to `REGISTRY_IDS`.\n- [x] The two new ids are mapped in `_registry()`.\n- [x] The two new ids are added to the `expected` literal in `test_registry_id_set_is_frozen`\n      (`test_ensures.py:57`) so that test passes.\n- [x] A raising unit is recorded `failed` and does not abort the sweep or caller; test monkeypatches a\n      raising unit into `_registry()`.\n- [x] `docs/migrations.md` documents the two ensure units and the `multi-project-bridge` token's\n      compat meaning for other binaries/operators (that it gates `.store-compat.json` compatibility).",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Legacy-store migration: ensure units seeding the project mapping without writing ticket events"
       },
       "created_at": "2026-08-08T03:37:39Z",
@@ -60314,6 +60076,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-25T23:04:38Z"
     },
+    "7b9a-f855-b2e4-49f9": {
+      "created_at": "2026-08-14T15:42:29Z",
+      "jira_id": "4588719",
+      "jira_key": "REB-2912",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T15:42:33Z"
+    },
     "7bcf-4f74-52b4-4969": {
       "baseline": {
         "assignee": null,
@@ -70933,6 +70702,13 @@
       "state": "confirmed",
       "updated_at": "2026-06-28T22:31:02Z"
     },
+    "91aa-167f-1061-4f17": {
+      "created_at": "2026-08-14T15:42:34Z",
+      "jira_id": "4588720",
+      "jira_key": "REB-2913",
+      "state": "confirmed",
+      "updated_at": "2026-08-14T15:42:37Z"
+    },
     "91e7-7159-8af1-4d4d": {
       "baseline": {
         "assignee": null,
@@ -81090,9 +80866,17 @@
       "updated_at": "2026-07-12T19:48:16Z"
     },
     "a38f-e290-9585-40be": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nGerrit Verify currently runs thousands of repeated real Pandoc subprocess conversions over the complete DC wiki corpus. Run 31798375024 attributed at least 184.32 seconds of the macOS critical path to two visible corpus phases alone. The operator confirmed the architecture research and approved moving the complete real-Pandoc corpus replay to the External Integration Tests workflow. Current ADR 0095 explicitly requires every conversion assertion to use the real binary, so this testing-boundary change requires a narrow superseding ADR before implementation.\n\n## Research decision\nPopular maintained OSS precedent supports committed golden/static outputs plus compact live boundary probes: Pandoc uses literal writer outputs; nbconvert and pypandoc use small real-Pandoc probes; Kubernetes client-go commits golden request/response fixtures; Rust compiletest uses blessed output snapshots. The approved design keeps three representative live corpus bodies (code_arrow, table, prose) plus existing compact provenance probes in Gerrit Verify. It preserves every assertion class against committed outputs in Verify. It moves complete real-Pandoc replay to a dedicated weekly/manual Pandoc job inside .github/workflows/external-integration.yml.\n\nThe current External Integration workflow has four Ubuntu-only jobs and no macOS runner. The later implementation ticket must therefore add an explicit pandoc-corpus-replay job whose matrix is os: [ubuntu-latest, macos-latest]; this is planned future implementation scope, not a claim about current workflow state and not part of this documentation-only ADR change. The job will run the complete replay on both platforms. Version drift and platform-specific binary fingerprints fail fast. Deterministic regeneration remains available. The 184.32-second figure is a lower-bound estimate; implementation must obtain paired A/B evidence.\n\n## Plan\n- Add a numbered ADR in docs/adr that narrowly supersedes ADR 0095 only where it mandates a real Pandoc process for every conversion assertion.\n- Preserve the production segmenting renderer, pin/provenance, Linux/macOS platform boundary, fallback behavior, and every safety/fixed-point/richness assertion class.\n- Amend ADR 0095 with a clear Superseded-by notice scoped to the testing-assurance clause.\n- Update docs/architecture.md with the authoritative hot-path versus external-integration verification boundary.\n- Record that the later implementation adds a dedicated pandoc-corpus-replay matrix to the currently Ubuntu-only external-integration workflow.\n- Regenerate the ADR index and number markers using scripts/gen_adr_index.py.\n- Run ADR numbering/index guards, documentation/link checks, lint, and the repository commit-ticket verifier.\n- Submit this documentation-only decision through Gerrit. Do not begin implementation until this ADR is merged after HOLD approval.\n\n## Expected file impact\n- docs/adr/0095-dc-segmenting-wiki-renderer.md\n- docs/adr/0096-pandoc-corpus-verification-boundary.md\n- docs/adr/README.md\n- docs/adr/.numbers/0096\n- docs/architecture.md\n\n## Acceptance Criteria\n- [ ] The ADR cites the confirmed dependency research and named OSS precedents.\n- [ ] The ADR narrows supersession to the test execution boundary.\n- [ ] The ADR preserves every production renderer invariant.\n- [ ] Gerrit Verify retains three representative live corpus contracts plus the compact pin/provenance probes.\n- [ ] Every existing assertion class remains required against committed deterministic outputs in Gerrit Verify.\n- [ ] The ADR states that external-integration.yml is currently Ubuntu-only.\n- [ ] The ADR assigns future implementation of a dedicated pandoc-corpus-replay matrix with ubuntu-latest and macos-latest arms.\n- [ ] Complete real-Pandoc corpus replay is assigned to that weekly/manual external-integration job.\n- [ ] Installed Pandoc version drift fails fast.\n- [ ] Each supported platform binary fingerprint is verified.\n- [ ] Deterministic fixture regeneration remains documented.\n- [ ] The ADR states that 184.32 seconds is a one-run lower bound.\n- [ ] The ADR requires paired A/B implementation evidence.\n- [ ] ADR 0095 points to the superseding decision.\n- [ ] docs/architecture.md documents the verification boundary.\n- [ ] ADR number/index guards pass.\n- [ ] Documentation link guards pass.\n- [ ] No implementation code is included in this ADR change.\n- [ ] No test-routing change is included in this ADR change.\n- [ ] [operator-attested] The ADR reaches HOLD in Gerrit; evidence is the Gerrit change id and HOLD announcement recorded on this ticket.\n- [ ] [operator-attested] The ADR merges only after explicit approval; evidence is the approval identity and merge timestamp recorded on this ticket.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "ADR: move complete Pandoc corpus replay to external integration"
+      },
       "created_at": "2026-08-14T14:43:18Z",
       "jira_id": "4588716",
       "jira_key": "REB-2911",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-14T14:43:21Z"
     },
@@ -101273,7 +101057,7 @@
         },
         "description": "## Context / Problem\n\nA rebar ticket carries no record of which tracker project it syncs into, nor which repos it belongs to. The current ticket state fields are seeded in `src/rebar/reducer/_state.py:29-81` and declared in `src/rebar/schemas/ticket_state.schema.json`; neither includes a project. Today the project is only implicit \u2014 recoverable from a bound issue's key prefix in `bindings.json`, and absent entirely for a ticket that has never been bound. Epic `0e68-41eb-5782-4336` needs it explicit, because a ticket that is deliberately not synced has no binding to infer from.\n\n## Approach\n\nAdd two ticket state fields together, in one edit set: `bridge_project` (string) and `repos` (list of strings). They are one story rather than two because a field is not usable without its write path, and splitting them would put two children on `src/rebar/_commands/composer.py`.\n\n`bridge_project` is **tri-state**, mirroring the established `file_impact_scope` undeclared/none/paths pattern (`docs/ticket-model.md:210-212`): absent means legacy, an explicit empty string means never sync, and a key means sync there. The three states are distinguished so a pre-feature store is not read as \"every ticket is unsynced\". Resolution of the absent state is not implemented here \u2014 it belongs to `resolve_project` in the mapping module.\n\nBoth fields are written into the CREATE event data by `create_core` (`src/rebar/_commands/composer.py:169-220`), projected by the reducer, and seeded in `make_initial_state`. Create-time arguments `--bridge-project` and `--repos` are added to all three write surfaces \u2014 CLI (`composer.create_cli`), library (`src/rebar/_lib_writes.py:79-135`), and MCP (`src/rebar/_mcp_writes.py:47-70`). Note the CLI flag loop rejects unknown options strictly (`composer.py:287-291`), so the new flags must be registered there or they are hard errors.\n\n`bridge_project` is **promote-only**, and \u2014 because a binding is written by the reconciler only *after* creation \u2014 this is an **edit-time** rule, not a create-time one: a genesis CREATE never sees a pre-existing binding. Both fields are therefore also **editable post-create**, and the promote-only guard lives on the edit path, not the create path. Concretely: `bridge_project` and `repos` are added to the whole-field edit surface `edit_core` (`src/rebar/_commands/composer.py`, with matching `--bridge-project` / `--repos` edit flags in `edit_cli`), and projected on replay by the EDIT processor `process_edit` (`src/rebar/reducer/_processors.py`) \u2014 the same seam that already projects title/priority/description edits. Because the guard lives in the shared `edit_core`, all three surfaces (CLI/library/MCP) inherit it, so no per-surface duplication is needed. The guard itself reads whether the ticket currently holds a binding via the single existing `bindings.json` reader in `src/rebar/_ids.py` (`_load_binding_reverse` / `binding_jira_key_map`) \u2014 a read-only dependency, not a modified file: setting `bridge_project` on an **unbound** ticket is allowed, changing it on a ticket that **already holds a binding** is refused with a non-zero exit and no state change. That keeps the change free of any issue-move or unbind/rebind machinery. `repos` stays freely editable on the same edit path \u2014 it never reaches the tracker, so there is no binding to invalidate.\n\n**Out of scope here (named owner):** the parent's repos-field deliverable also includes *inbound defaulting* \u2014 populating `repos` from the project mapping for a ticket arriving from a tracker. That is deliberately **deferred to the multi-project inbound-fetch child** `1734-7c6d-5a6a-48fd` (alias `algebraic-illstarred-mollusk`, \"Multi-project inbound fetch\"), because it depends on the mapping store the inbound fetch already consumes; this leaf owns only the field's schema/reducer projection and its create-time + edit write paths, not any tracker-driven defaulting.\n\nNo schema version bump: `docs/event-schema.md:124-150` states additive fields on an existing event type do not require one. Types are generated from the schemas (`reducer/_state.py:11-13`), so the generator is re-run.\n\n## Scope\n\n- `src/rebar/schemas/ticket_state.schema.json`\n- `src/rebar/reducer/_state.py`\n- `src/rebar/reducer/_processors.py` \u2014 projects both fields from **both** the CREATE and the EDIT\n  events (`process_create` and `process_edit`)\n- `src/rebar/_commands/composer.py` \u2014 CREATE data + create-time args (`create_core`/`create_cli`)\n  **and** the edit surface carrying the promote-only guard (`edit_core`/`edit_cli`, `_EDIT_FIELDS`)\n- `src/rebar/_lib_writes.py`\n- `src/rebar/_mcp_writes.py`\n- Read-only dependency (not modified): `src/rebar/_ids.py` `_load_binding_reverse` /\n  `binding_jira_key_map` \u2014 the single `bindings.json` reader the promote-only guard consults to\n  decide whether the ticket already holds a binding\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard: a producer/consumer contract test for the event\u2192state path (real CREATE event fed through the real reducer, no stubbing), plus a real CLI subprocess test for the argument parsing, since the strict unknown-option rejection is itself part of the mechanism.\n\n- Happy path: `create task \"t\" --bridge-project REB --repos rebar,api` produces a ticket whose state\n  shows `bridge_project == \"REB\"` and `repos == [\"rebar\", \"api\"]` after a full replay.\n- Three-state coverage: a ticket created without the flag replays with the field **absent**; one\n  created with an explicit empty value replays with `\"\"`. These must be distinguishable \u2014 asserting\n  the absent case is not merely falsy is the point of the test.\n- Cross-surface parity: the same ticket shape results from the CLI, the library, and MCP.\n- Failure path: an edit setting `bridge_project` on a ticket that already holds a binding is refused\n  with a non-zero exit and the stored value is unchanged; the same edit on an unbound ticket succeeds.\n- Collateral invariant: replaying a ticket created before this change yields identical state apart\n  from the two new keys.\n\n## Acceptance Criteria\n\n- [x] `bridge_project` and `repos` are declared in the ticket state schema, seeded in\n      `make_initial_state`, and projected by the reducer; checked by a replay test asserting both on\n      a freshly created ticket.\n- [x] `--bridge-project` and `--repos` exist on the CLI, library and MCP create paths and produce\n      identical state; checked by a per-surface test comparing the resulting ticket state.\n- [x] The absent, explicit-empty, and set states are distinguishable after replay; checked by a\n      parameterized test asserting each of the three separately.\n- [x] Setting `bridge_project` via the edit surface (`edit --bridge-project`, promote-only guard in\n      `edit_core`) on a ticket that already holds a binding is refused with a non-zero exit and no\n      state change, while the same edit on an unbound ticket succeeds; checked by a paired test\n      covering both directions.\n- [x] A ticket created before this change replays to the same state apart from the new keys; checked\n      by a fixture-based regression test.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Ticket fields: tri-state bridge_project and repos, with create-time arguments on all three write surfaces"
       },
       "created_at": "2026-08-08T03:37:51Z",
@@ -103608,7 +103392,7 @@
     "d19d-7f60-0137-475a": {
       "baseline": {
         "assignee": null,
-        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. The create client takes its project from a single value set once at construction (`AcliClient.create_issue` uses `self.jira_project`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py:271-327`), and the applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:217-258`, `_cross_project_targets`, added by bug `626d`). With a mapping that lists several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nTwo changes, both narrow.\n\n**Create targets the ticket's project.** The outbound create path resolves the destination through `resolve_project` from the mapping module rather than from the client's single construction-time value. A ticket that resolves to \"not synced\" produces no create mutation at all.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is deliberately the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as it is today. Only keys the store legitimately owns now pass. Creates remain exempt for the existing reason \u2014 their `key` is a local-id placeholder, not a real key, so `_JIRA_KEY_RE` does not match them.\n\nThis is the only existing safety property the epic loosens, which is why it is its own story with a paired test rather than folded into another change.\n\n**Module size.** Two files here are close to the repository's hard 800-line gate, and they are treated differently on purpose. `dispatch_one.py` is at 796 lines, so the sibling size-relief story that extracts its `update_one` sub-tree is a prerequisite of this one \u2014 four lines of headroom cannot absorb the create-path change. `applier.py` is at 772 and is deliberately **not** split. A structural seam exists there (`_apply_batch` and its helpers), but taking it would relocate `_load_acli` and `_load_concurrency` out of the module against which roughly 62 `patch.object(applier, ...)` test sites are written \u2014 and a module-attribute patch does not survive a module move, so those tests would keep passing while silently exercising the real Jira and git paths instead of their fakes. Against that, the change needed here is roughly five lines inside `_cross_project_targets` (`:232-257`), which fits comfortably in the 28 lines available. Splitting `applier.py` for this change would be the mechanical split the module-size policy forbids; if it ever must be split, the honest first move is the 67-line `__all__` and the ~126 lines of banner prose in `:1-198`, which disturb no call graph at all.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/applier.py`\n- `src/rebar/_engine/rebar_reconciler/dispatch_one.py`\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py`\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py`\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test.\n\n- Happy path: a ticket resolving to project `B` in a store whose mapping lists `A` and `B` produces a\n  create call carrying `B`, not the repo default `A`.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises\n  `CrossProjectTargetError`. The negative half is what proves the relaxation did not disable the\n  guard.\n- Precondition assertion: the guard is shown to run **pre-flight** \u2014 the fake transport records zero\n  writes when the out-of-set mutation raises, proving no partial leak.\n- Edge: a ticket resolving to \"not synced\" produces no outbound mutation of any kind.\n- Collateral invariant: with a single-project mapping the guard behaves exactly as before \u2014 an\n  out-of-project key raises, an in-project key passes.\n\n## Acceptance Criteria\n\n- [ ] An outbound create targets the ticket's own resolved project rather than the client default;\n      checked by a fake transport asserting the project on the recorded create call.\n- [ ] An update inside the configured set proceeds and one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [ ] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [ ] A ticket resolving to not-synced emits no outbound mutation; checked by asserting an empty\n      mutation list for it while a synced sibling produces one.\n- [ ] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
+        "description": "## Context / Problem\n\nOutbound sync can only write to one tracker project, and it fails closed on anything else. Both create transports take their project from a single value set once at construction \u2014 Cloud `AcliClient.create_issue` uses `self.jira_project` (`src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py:274-330`) and the Data Center adapter `_IssuesMixin.create_issue` uses `self.project` (`src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py:163-189`, `fields.setdefault(\"project\", {\"key\": self.project})`). The applier scans every outbound mutation pre-flight and raises `CrossProjectTargetError` \u2014 aborting the whole pass \u2014 if any update or delete targets a key outside the one configured project (`applier.py:230-255`, `_cross_project_targets`, added by bug `626d`), and its sole caller (`applier.py:593-610`) feeds it a single string `select_backend(load_config()).project`. With a mapping that lists several projects, correct mutations to the other projects would be treated as the misconfiguration that guard exists to catch.\n\n## Approach\n\nThree changes: resolve the create target per ticket (covering BOTH transports), relax the guard to set membership, and change the guard's caller to supply the set.\n\n**Create targets the ticket's resolved project \u2014 resolved once, above both transports.** The resolution happens where the create mutation is BUILT, in `_compute_outbound_create_mutation` (`outbound_differ.py:502`), which already receives the full local `ticket` (so it can read `bridge_project`). It calls `resolve_project(ticket, mapping)` (`projects_store.py:97-110`) against the store mapping (loaded once via `projects_store.read_projects(repo_root)` and threaded into `compute_outbound_mutations`). Three outcomes:\n  * resolves to \"not synced\" (absent\u2192no legacy_default, or explicit `\"\"`) \u2192 NO create mutation;\n  * resolves to a key **NOT in `mapping.projects`** \u2192 NO create mutation (a stale/typo binding must\n    not create against an unsynced project \u2014 this closes the create-side gap the guard cannot,\n    since creates are guard-exempt: their key is a local-id placeholder, so `_JIRA_KEY_RE` never\n    matches);\n  * resolves to a valid in-set key \u2192 stamped into the mutation's fields under the reserved key\n    `_bridge_target_project`.\nBecause the mutation is consumed by whichever `TicketTransport` is active (`dispatch_one.create_one` splats `mutation[\"fields\"]` into `client.create_issue(ticket_data)` unchanged), resolving here covers Cloud AND Data Center from one site. Each transport reads `ticket_data.get(\"_bridge_target_project\")` and falls back to its construction-time value when the key is absent (legacy single-project behaviour preserved): Cloud `project = ticket_data.get(\"_bridge_target_project\") or self.jira_project`; DC `fields.setdefault(\"project\", {\"key\": ticket_data.get(\"_bridge_target_project\") or self.project})`. The reserved key is not a Jira field name, so it is ignored by field translation and never sent to the tracker.\n\n**The guard relaxes from equality to set membership.** `_cross_project_targets` currently compares each target key's prefix against one `configured_project` string; it instead checks membership in the mapping's project set. This is deliberately the smallest possible weakening: the guard stays fail-closed and still aborts pre-flight before any tracker write, so a stale binding pointing at a project the store does not sync is caught exactly as it is today. Only keys the store legitimately owns now pass.\n\n**The guard's caller supplies the set.** The sole caller (`applier.py:593-610`) currently computes a single `_project = select_backend(load_config()).project`. It instead loads the store's project set via `projects_store.read_projects(repo_root)` (keys of `mapping.projects`) and passes that set. An empty/absent mapping falls back to the single configured project so single-project stores behave exactly as before.\n\n**Module size.** All touched files sit under the 800-line hard gate with headroom: `applier.py` 762, `outbound_differ.py` 737, `acli.py` 747, `dispatch_one.py` 679, DC `_issues.py` 321. The prior dispatch_one size-relief prerequisite is retired \u2014 its motivating story (273a) is closed obsolete because 744a already graduated dispatch_one.py off the gate (now 679). Each edit here is small and local; no split is required or warranted.\n\n## Scope\n\n- `src/rebar/_engine/rebar_reconciler/outbound_differ.py` \u2014 resolve + validate + stamp the target\n  project when building the create mutation; thread the mapping into `compute_outbound_mutations`\n- `src/rebar/_engine/rebar_reconciler/adapters/jira/acli.py` \u2014 Cloud create reads the payload target\n- `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/_issues.py` \u2014 DC create reads the\n  payload target (the second transport; both must honour the per-ticket project)\n- `src/rebar/_engine/rebar_reconciler/applier.py` \u2014 guard set-membership + caller supplies the set\n- Read-only dependency: `src/rebar/_engine/rebar_reconciler/projects_store.py` \u2014 `resolve_project`\n  and `read_projects` / `mapping.projects` (the authoritative project set)\n- tests under `tests/`\n\n## Testing\n\nTier per the shared standard's external-service row: a stateful fake transport fed production-shaped mutations, recording the create calls it receives, because the destination project carried on the call is the contract under test. Both transports are covered.\n\n- Happy path (both transports): a ticket resolving to project `B` in a store whose mapping lists `A`\n  and `B` produces a create call carrying `B`, not the repo default `A` \u2014 asserted against the Cloud\n  fake AND the Data Center fake.\n- Validation edge: a ticket whose `bridge_project` names `Z` (NOT in the `A`/`B` mapping) emits no\n  create mutation \u2014 proving a stale/typo binding cannot create against an unsynced project.\n- Contrast case (the guard, both directions in one paired test): an update targeting `B-1` where the\n  mapping lists `A` and `B` proceeds; an update targeting `C-1` still raises\n  `CrossProjectTargetError`. The negative half proves the relaxation did not disable the guard.\n- Precondition assertion: the guard runs pre-flight \u2014 the fake records zero writes when the\n  out-of-set mutation raises, proving no partial leak.\n- Edge: a ticket resolving to \"not synced\" produces no outbound mutation of any kind.\n- Collateral invariant: with a single-project mapping the guard behaves exactly as before \u2014 an\n  out-of-project key raises, an in-project key passes.\n\n## Acceptance Criteria\n\n- [ ] An outbound create targets the ticket's resolved project rather than the client default, on the\n      Cloud transport; checked by a Cloud fake asserting the project on the recorded create call.\n- [ ] An outbound create targets the ticket's resolved project on the Data Center transport; checked\n      by a DC fake asserting the project on the recorded create call.\n- [ ] A ticket whose resolved project is absent from the mapping set emits no create mutation;\n      checked by asserting an empty mutation list for it.\n- [ ] An update inside the configured set proceeds while one outside it raises\n      `CrossProjectTargetError`; checked by a paired test covering both directions.\n- [ ] When the guard raises, no tracker write has occurred; checked by asserting the fake recorded\n      zero writes.\n- [ ] A ticket resolving to not-synced emits no outbound mutation; checked by asserting an empty\n      mutation list for it while a synced sibling produces one.\n- [ ] Single-project behaviour is unchanged; checked by a regression test running the guard against a\n      one-project mapping in both directions.",
         "priority": "High",
         "status": "To Do",
         "summary": "Multi-project outbound dispatch and cross-project guard relaxation to set membership"
@@ -133563,6 +133347,8 @@
     "REB-2902": "1ec4-d7e9-b1f1-40c3",
     "REB-291": "b7e6-d8b8-29e7-40ad",
     "REB-2911": "a38f-e290-9585-40be",
+    "REB-2912": "7b9a-f855-b2e4-49f9",
+    "REB-2913": "91aa-167f-1061-4f17",
     "REB-292": "b80d-ba60-afe7-42a4",
     "REB-293": "b94d-2777-28d8-4a6f",
     "REB-294": "bb4e-7aae-c5a3-40a6",
