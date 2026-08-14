@@ -246,8 +246,15 @@ class VerifyConfig:
     # Completion-recovery banking + criteria-scaled step floor (epic 10ae, story 2948) — FLAT
     # completion_* fields (see verify_step_floor/plan_recovery_pool + docs; pool = multiplier × N).
     completion_recovery_pool_multiplier: float = 1.5
-    completion_verify_steps_per_criterion: int = 8
-    completion_verify_step_floor_min: int = 48
+    completion_verify_steps_per_criterion: int = 24
+    completion_verify_step_floor_min: int = 160
+    # Evidence-surface scaling terms (ticket 8d74): epic criteria traverse child tickets
+    # (show_ticket + comments + repo reads each), and every run pays a fixed show_ticket+parse
+    # overhead — both sized at 16 steps (mid-band of observed 5-10 requests/child at the
+    # 2x steps→requests halving). Consumed by verify_step_floor's child-traversal + overhead
+    # terms; 0 disables a term.
+    completion_verify_child_traversal_steps: int = 16
+    completion_verify_fixed_overhead_steps: int = 16
     # Validation-assessment cross-checks (bug 5e40) — two per-verdict consistency drops that
     # converge a non-deterministic re-review. Each stays inert (the gate runs un-cross-checked, the
     # verdict byte-identical) until flipped true, mirroring completion_floor_active's evidence gate:
