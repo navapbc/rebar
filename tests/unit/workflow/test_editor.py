@@ -5,10 +5,16 @@ itself is human-validated). The visual format is NEVER written to git.
 
 from __future__ import annotations
 
+import http.server
 import json
+import socket
+import socketserver
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -160,12 +166,45 @@ def test_save_rejects_unmappable_edit_and_leaves_file_untouched(tmp_path):
 # ── The loopback edit server (no browser) ──────────────────────────────────────
 
 
+@contextmanager
+def _instrument_editor_server_setup(
+    monkeypatch: pytest.MonkeyPatch,
+    timed_call: Callable[..., Any],
+) -> Iterator[None]:
+    """Time the constructor's nested bind and reverse-DNS operations independently."""
+    constructor = http.server.ThreadingHTTPServer
+    server_bind = socketserver.TCPServer.server_bind
+    getfqdn = socket.getfqdn
+
+    def timed_constructor(*args: Any, **kwargs: Any) -> Any:
+        return timed_call(
+            "_server",
+            "threading_http_server_constructor",
+            constructor,
+            *args,
+            **kwargs,
+        )
+
+    def timed_server_bind(server: socketserver.TCPServer) -> Any:
+        return timed_call("_server", "tcp_server_bind", server_bind, server)
+
+    def timed_getfqdn(host: str = "") -> str:
+        return timed_call("_server", "socket.getfqdn", getfqdn, host)
+
+    with monkeypatch.context() as timing_patch:
+        timing_patch.setattr(http.server, "ThreadingHTTPServer", timed_constructor)
+        timing_patch.setattr(socketserver.TCPServer, "server_bind", timed_server_bind)
+        timing_patch.setattr(socket, "getfqdn", timed_getfqdn)
+        yield
+
+
 @pytest.fixture
-def _server(tmp_path):
+def _server(tmp_path, monkeypatch, _ci_timed_call):
     path = _wf_file(tmp_path)
-    server, host, port, token = editor.edit_workflow(
-        path, open_browser=False, serve_forever=False, host="127.0.0.1"
-    )
+    with _instrument_editor_server_setup(monkeypatch, _ci_timed_call):
+        server, host, port, token = editor.edit_workflow(
+            path, open_browser=False, serve_forever=False, host="127.0.0.1"
+        )
     yield path, f"http://{host}:{port}", token
     server.shutdown()
     server.server_close()
@@ -174,6 +213,47 @@ def _server(tmp_path):
 def test_server_binds_loopback_only(_server):
     _path, base, _token = _server
     assert base.startswith("http://127.0.0.1:")  # never a public interface (it can write)
+
+
+def test_editor_setup_timing_intercepts_and_restores_each_nested_call(monkeypatch):
+    constructor_result = object()
+    bind_result = object()
+    seen_calls = []
+
+    def constructor(*args, **kwargs):
+        seen_calls.append(("constructor-target", args, kwargs))
+        return constructor_result
+
+    def server_bind(server):
+        seen_calls.append(("bind-target", (server,), {}))
+        return bind_result
+
+    def getfqdn(host):
+        seen_calls.append(("getfqdn-target", (host,), {}))
+        return "localhost"
+
+    monkeypatch.setattr(http.server, "ThreadingHTTPServer", constructor)
+    monkeypatch.setattr(socketserver.TCPServer, "server_bind", server_bind)
+    monkeypatch.setattr(socket, "getfqdn", getfqdn)
+
+    def timed_call(fixture_name, span_name, call, *args, **kwargs):
+        seen_calls.append(("timed", (fixture_name, span_name), {}))
+        return call(*args, **kwargs)
+
+    with _instrument_editor_server_setup(monkeypatch, timed_call):
+        assert http.server.ThreadingHTTPServer(("127.0.0.1", 0), object) is constructor_result
+        server = object()
+        assert socketserver.TCPServer.server_bind(server) is bind_result
+        assert socket.getfqdn("127.0.0.1") == "localhost"
+
+    assert [call[1][1] for call in seen_calls if call[0] == "timed"] == [
+        "threading_http_server_constructor",
+        "tcp_server_bind",
+        "socket.getfqdn",
+    ]
+    assert http.server.ThreadingHTTPServer is constructor
+    assert socketserver.TCPServer.server_bind is server_bind
+    assert socket.getfqdn is getfqdn
 
 
 def _save(base, token, xml):

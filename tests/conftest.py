@@ -24,12 +24,105 @@ import shutil
 import socket
 import subprocess
 import sys
-from collections.abc import Iterator
+import time
+import warnings
+from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 from unittest.mock import patch
 
 import pytest
+
+_CallResult = TypeVar("_CallResult")
+
+_SLOW_SPAN_THRESHOLD_SECONDS = 1.0
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _fixture_timing_enabled() -> bool:
+    """Return whether thresholded pytest timing should be emitted for this process."""
+    explicit = os.environ.get("REBAR_FIXTURE_TIMING", "").strip().lower()
+    ci = os.environ.get("CI", "").strip().lower()
+    return explicit == "1" or ci in _TRUTHY_ENV_VALUES
+
+
+def _report_slow_ci_span(
+    node_id: str,
+    fixture_name: str,
+    span_name: str,
+    elapsed_seconds: float,
+) -> None:
+    """Publish a slow setup span through pytest's xdist-safe warning channel."""
+    if not _fixture_timing_enabled() or elapsed_seconds <= _SLOW_SPAN_THRESHOLD_SECONDS:
+        return
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    warnings.warn(
+        pytest.PytestWarning(
+            f"[rebar-ci-timing] worker={worker} node={node_id} "
+            f"fixture={fixture_name} span={span_name} elapsed={elapsed_seconds:.3f}s"
+        ),
+        stacklevel=2,
+    )
+
+
+def _timed_ci_call(
+    node_id: str,
+    fixture_name: str,
+    span_name: str,
+    call: Callable[..., _CallResult],
+    *args: Any,
+    **kwargs: Any,
+) -> _CallResult:
+    """Call transparently and report only spans above the CI timing threshold."""
+    started = time.monotonic()
+    try:
+        return call(*args, **kwargs)
+    finally:
+        _report_slow_ci_span(
+            node_id,
+            fixture_name,
+            span_name,
+            time.monotonic() - started,
+        )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_fixture_setup(
+    fixturedef: pytest.FixtureDef[Any], request: pytest.FixtureRequest
+) -> Iterator[None]:
+    """Attribute slow fixture setup to its worker, node, and fixture name."""
+    started = time.monotonic()
+    yield
+    _report_slow_ci_span(
+        request.node.nodeid,
+        fixturedef.argname,
+        "fixture_setup",
+        time.monotonic() - started,
+    )
+
+
+@pytest.fixture
+def _ci_timed_call(request: pytest.FixtureRequest) -> Callable[..., Any]:
+    """Bind nested-span timing to the current test node for targeted fixtures."""
+
+    def timed_call(
+        fixture_name: str,
+        span_name: str,
+        call: Callable[..., _CallResult],
+        *args: Any,
+        **kwargs: Any,
+    ) -> _CallResult:
+        return _timed_ci_call(
+            request.node.nodeid,
+            fixture_name,
+            span_name,
+            call,
+            *args,
+            **kwargs,
+        )
+
+    return timed_call
+
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
