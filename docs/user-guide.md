@@ -447,6 +447,34 @@ deterministic, field-level audit manifest without applying changes. Canonical sy
 comparable manifest for both capped and uncapped runs; a capped run also records the complete
 deferred remainder.
 
+**Syncing several tracker projects.** One store can bridge any number of Jira projects. The
+set is a committed mapping owned by the store (`.bridge_state/projects.json` on the tickets
+branch), managed with `rebar bridge projects`:
+
+```sh
+rebar bridge projects list                    # print the mapping as JSON
+rebar bridge projects set DIG --repos digit   # add/replace project DIG's repos (replace semantics)
+rebar bridge projects remove DIG              # drop a project from the sync list
+```
+
+`set` uses replace semantics for the named key's `--repos` list (a comma-separated list of
+repositories that project's tickets belong to); `remove` exits non-zero if the key is absent.
+Each ticket carries a `bridge_project` (its sync target) and `repos`; a ticket with no
+`bridge_project` resolves to the mapping's `legacy_default` (see
+[the ticket model](ticket-model.md#the-project-fields-bridge_project-and-repos)). A store
+created before this feature seeds a one-project mapping from its configured `jira.project`
+automatically at the next `rebar init` / `rebar fsck --repair` (see
+[migrations.md](migrations.md)); the design rationale is [ADR
+0097](adr/0097-many-to-many-tracker-projects.md).
+
+**Upgrade note for mixed-version fleets.** Once a store actually syncs more than one project,
+it stamps a `multi-project-bridge` capability into its committed compatibility record. A
+binary too old to know that capability **fails closed** on the store — it refuses to sync it
+rather than applying a single-project model it cannot honor. **The remedy is to upgrade that
+binary** to one that provides `multi-project-bridge` (every current binary does). A store that
+still syncs a single project stays readable by older binaries, so the fail-closed gate affects
+only genuinely multi-project stores.
+
 `rebar bridge status` reads the reconciler's durable last-pass, pause, and live-lock witnesses.
 Use `--json` for automation, `--target ENVIRONMENT_ID` to select the expected producer, and
 `--max-age 2h` only when age should make an otherwise successful pass stale. Without

@@ -80,6 +80,10 @@ projects model it cannot honor. This binary already registers the token in `KNOW
 (the expand half of the expand/contract rollout), so it recognises — and passes on — such a
 store.
 
+The reasoning behind these two units — why the project set is owned by the store, why the
+migration writes no ticket events, and why the capability is stamped conditionally — is recorded
+in [ADR 0097](adr/0097-many-to-many-tracker-projects.md).
+
 One unit repairs stores whose per-ticket runtime markers predate the `.gitignore` coverage
 (epic becoming-berserk-grunion S1): **`untrack-runtime-markers`** removes tracked
 `*/.archived` and `*/.write.lock` files from the tickets-branch **index** (gitignore never

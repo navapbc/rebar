@@ -320,6 +320,20 @@ not persist a cleartext url.
 
 The SECRET `JIRA_API_TOKEN` stays env-only — never a config key (see Secrets).
 
+**`jira.project` is the seed default, not the only project a store syncs.** A store
+records its full set of tracker projects in a committed mapping —
+`.bridge_state/projects.json` on the tickets branch — that is a property of the **store**,
+not of any one repo (see [ADR 0097](adr/0097-many-to-many-tracker-projects.md)). Manage it
+with `rebar bridge projects {list,set,remove}` (see the [user guide](user-guide.md#jira)).
+The mapping's shape is `{"version": 1, "legacy_default": "REB", "projects": {"REB":
+{"repos": ["rebar"]}}}`; its `projects` key set IS the sync list, and `legacy_default` is
+the project that pre-mapping tickets (those with no `bridge_project` field) resolve to. On a
+store initialized before the mapping existed, the `projects-seed` ensure unit seeds a
+one-project mapping from `jira.project` at the next `init`/`fsck --repair` (see
+[migrations.md](migrations.md)); `jira.project` therefore configures the *first/default*
+project, while additional projects are added through the mapping rather than through config.
+Each project's `repos` entry records which repositories that project's tickets belong to.
+
 **Env-only reconciler flag — silent-no-op canary** (not a config-file key; epic
 f89d, story 2359). `REBAR_RECONCILER_FAIL_SILENT_NOOP` (default off ⇒ **warn-first**):
 an outbound update whose sub-ops are *computed but none applied*

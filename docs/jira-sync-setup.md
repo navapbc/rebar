@@ -90,6 +90,23 @@ project = "REB"                               # env JIRA_PROJECT
 In CI the same three values come from repo **Variables** (and the token from a
 **Secret**); the env overrides the file, so CI and local stay consistent.
 
+> **One store can sync several projects.** The `project` key above configures the
+> **initial/default** tracker project; it is not the only project a store can bridge. The
+> full set lives in a committed mapping (`.bridge_state/projects.json` on the tickets
+> branch) that belongs to the store, managed with `rebar bridge projects {list,set,remove}`
+> — for example `rebar bridge projects set DIG --repos digit` adds project `DIG` alongside
+> `REB`. A store first created before this feature seeds a one-project mapping from
+> `project` automatically at the next `rebar init` / `rebar fsck --repair` and needs no
+> manual step. See the [user guide](user-guide.md#jira), [config reference](config.md), and
+> [ADR 0097](adr/0097-many-to-many-tracker-projects.md).
+>
+> **Mixed-version fleets.** Once a store actually syncs more than one project, it stamps a
+> `multi-project-bridge` capability into its committed compatibility record, and a **binary
+> too old to know that capability fails closed** on the store (refuses it rather than
+> syncing it with a model it cannot honor). The remedy is to upgrade the old binary; a
+> store that still syncs a single project stays readable by older binaries. See
+> [migrations.md](migrations.md).
+
 ## 3. Set the GitHub repo Variables and Secret
 
 Variables (`Settings → Secrets and variables → Actions → Variables`), or via `gh`:
