@@ -19,12 +19,14 @@ from pathlib import Path
 
 import pytest
 import tomllib
+import yaml
 
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "check_complexity_baseline.py"
 BASELINE_PATH = REPO_ROOT / ".github" / "complexity-baseline.json"
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
 
 
 def _load():
@@ -723,6 +725,26 @@ def test_make_sources_cover_src_and_tests():
             break
     else:
         raise AssertionError("no `sources` variable found in Makefile")
+
+
+def test_complexity_lock_runs_once_in_the_non_matrix_lint_job() -> None:
+    """The commit-level lock must not be multiplied by the OS/Python test matrix."""
+    workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+    command = "python scripts/check_complexity_baseline.py --lock"
+    invocations = [
+        (job_name, step)
+        for job_name, job in jobs.items()
+        for step in job.get("steps", [])
+        for _ in range(str(step.get("run", "")).count(command))
+    ]
+
+    assert len(invocations) == 1, "the commit-level complexity lock must execute exactly once"
+    job_name, step = invocations[0]
+    assert job_name == "lint", "the complexity lock belongs in the single lint job"
+    assert "matrix" not in jobs[job_name].get("strategy", {})
+    assert not step.get("continue-on-error", False), "the complexity lock must remain blocking"
+    assert "-f scripts/check_complexity_baseline.py" in step["run"]
 
 
 # ── the lock's base of comparison (bug humble-cinnamoned-mussel) ───────────────────────────

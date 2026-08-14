@@ -189,6 +189,23 @@ jobs:
             echo "scripts/check_wall_clock_asserts.py not in checked-out tree (change predates the gate) — skipping"
           fi
 
+      # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
+      # and LOCKED against main. Raised ceilings and added entries require an administrator
+      # override (force-submit). Removed entries and lowered ceilings pass freely (the ratchet).
+      # The script fetches main by explicit URL (GITHUB_REPOSITORY) and FAILS CLOSED when the
+      # base copy cannot be established — no warn-and-continue. Definition-vs-tree skew guard
+      # (ticket ee2a): skip with a log line when the script is absent from the checked-out tree.
+      - name: Complexity-baseline lock
+        shell: bash
+        run: |
+          if [ ! -f scripts/check_complexity_baseline.py ]; then
+            echo "scripts/check_complexity_baseline.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
+          python scripts/check_complexity_baseline.py --lock
+
   pip-audit:
     # Dependency-vulnerability scan (story 95dc), routed BY LANE (bug 63e8). Audits
     # rebar's actual installed dependency closure against the PyPI advisory / OSV
@@ -464,23 +481,6 @@ jobs:
           else
             echo "Near-cap check: OK (no src/rebar file is within 10% of the ${LIMIT}-LOC cap)."
           fi
-
-      # Complexity-baseline lock (task 47e9): .github/complexity-baseline.json is shrink-only
-      # and LOCKED against main. Raised ceilings and added entries require an administrator
-      # override (force-submit). Removed entries and lowered ceilings pass freely (the ratchet).
-      # The script fetches main by explicit URL (GITHUB_REPOSITORY) and FAILS CLOSED when the
-      # base copy cannot be established — no warn-and-continue. Definition-vs-tree skew guard
-      # (ticket ee2a): skip with a log line when the script is absent from the checked-out tree.
-      - name: Complexity-baseline lock
-        shell: bash
-        run: |
-          if [ ! -f scripts/check_complexity_baseline.py ]; then
-            echo "scripts/check_complexity_baseline.py not in checked-out tree" \
-                 "(change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/check_complexity_baseline.py --lock
 
       # ADR-number bijection gate (story 0743): every docs/adr/NNNN-slug.md is paired with
       # a per-number marker docs/adr/.numbers/NNNN, and every ADR cross-reference resolves.
