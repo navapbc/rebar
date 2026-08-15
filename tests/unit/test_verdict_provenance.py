@@ -339,3 +339,98 @@ def test_gateway_credentials_in_a_configured_base_url_never_reach_the_record() -
     assert "hunter2" not in json.dumps(rec)
     assert "alice" not in json.dumps(rec)
     assert rec["endpoint_host"] == "gw.internal"
+
+
+# ── 8274: bedrock region provenance — the resolved region + its source enter the record ────
+# rebar resolves the Bedrock region itself (REBAR_LLM_BEDROCK_REGION > AWS_DEFAULT_REGION >
+# AWS_REGION > boto3/profile; `bedrock_model.resolve_bedrock_region`); the verdict records
+# WHICH source supplied it so an operator can tell a knob-set run from an env-inherited one.
+
+
+def _strip_region_env(monkeypatch) -> None:
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_bedrock_record_carries_the_region_and_the_rebar_knob_as_source(monkeypatch) -> None:
+    """Happy path: the configured knob resolves, and BOTH additive keys land verbatim."""
+    _strip_region_env(monkeypatch)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name="us-east-1",
+    )
+    assert rec["region"] == "us-east-1"
+    assert rec["region_source"] == "REBAR_LLM_BEDROCK_REGION"
+
+
+@pytest.mark.parametrize(
+    ("var", "value"),
+    [("AWS_DEFAULT_REGION", "eu-west-1"), ("AWS_REGION", "us-west-2")],
+)
+def test_bedrock_record_names_the_env_var_that_supplied_the_region(
+    monkeypatch, var: str, value: str
+) -> None:
+    """Each env source is recorded under ITS OWN name — the label is the audit trail."""
+    _strip_region_env(monkeypatch)
+    monkeypatch.setenv(var, value)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name=None,
+    )
+    assert rec["region"] == value
+    assert rec["region_source"] == var
+
+
+def test_bedrock_record_omits_region_keys_when_only_a_profile_could_resolve(
+    monkeypatch,
+) -> None:
+    """When nothing in rebar's chain resolves, the keys are ABSENT — not None, not a guess.
+    This seam never imports boto3, so a profile-resolved region is unobservable here, and
+    synthesising one would put an unverified fact into a signed record (the endpoint_host
+    rule)."""
+    _strip_region_env(monkeypatch)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name=None,
+    )
+    assert "region" not in rec
+    assert "region_source" not in rec
+
+
+def test_non_bedrock_records_never_carry_region_keys(monkeypatch) -> None:
+    """The runner threads `bedrock_region_name` unconditionally, so the PROVIDER check must
+    gate the record: an anthropic run with region env set records nothing region-shaped."""
+    _strip_region_env(monkeypatch)
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    rec = _provenance(
+        provider="anthropic",
+        model="anthropic:claude-opus-4-8",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name="us-east-1",
+    )
+    assert "region" not in rec
+    assert "region_source" not in rec
+
+
+def test_region_bearing_record_stays_json_serializable(monkeypatch) -> None:
+    """The record is embedded in signed sidecar payloads; the additive keys must not break
+    serialization."""
+    _strip_region_env(monkeypatch)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name="us-east-1",
+    )
+    assert json.loads(json.dumps(rec))["region_source"] == "REBAR_LLM_BEDROCK_REGION"

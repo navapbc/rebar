@@ -285,8 +285,9 @@ Things that bite on the Bedrock default:
   carry a `-v1:0` suffix, and an id that does not exist fails only at call time.
 - **Credentials are ambient, never rebar-managed** — the AWS chain (`AWS_PROFILE`, env keys,
   instance role). `ANTHROPIC_API_KEY` is not consulted on this path.
-- **A region must resolve.** `REBAR_LLM_BEDROCK_REGION` is rebar's own knob (and so is
-  visible to the verdict's provider provenance); otherwise boto3's resolution applies.
+- **A region must resolve.** rebar's own chain is `REBAR_LLM_BEDROCK_REGION` (rebar's knob,
+  recorded with its source in the verdict's provider provenance) > `AWS_DEFAULT_REGION` >
+  `AWS_REGION` > boto3's profile resolution — plain `AWS_REGION` works.
   Nothing resolving at all is a hard error, not a silent default.
 - `pip install 'pydantic-ai-slim[bedrock]'` if the provider package is missing; the error
   names the package.

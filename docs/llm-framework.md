@@ -192,10 +192,11 @@ Three things bite in practice:
   the `us.` / `global.` prefixed form, and take every id **verbatim** from
   `aws bedrock list-inference-profiles --region <region>` — the version suffixes are not uniform
   across models, and `list-foundation-models` does not list profiles at all.
-- **A region must resolve, and `AWS_REGION` alone does not resolve one.** Measured on
-  boto3/botocore 1.43.62, `AWS_REGION` with `AWS_DEFAULT_REGION` unset leaves
-  `boto3.session.Session().region_name` as `None`. Set `REBAR_LLM_BEDROCK_REGION` (rebar's own
-  knob, so the value is visible to rebar's config layer) or `AWS_DEFAULT_REGION`. Instance-metadata
+- **A region must resolve.** rebar resolves it as `REBAR_LLM_BEDROCK_REGION` (rebar's own
+  knob; the value and its source are recorded in the verdict's provider provenance) >
+  `AWS_DEFAULT_REGION` > `AWS_REGION` > the active profile's config, and passes the result
+  explicitly to boto3 — so exporting plain `AWS_REGION` works even though botocore alone does
+  not consult it (measured on boto3/botocore 1.43.62). Instance-metadata
   reachability supplies **credentials, never a region** — credential and region discovery are
   independent, so a working instance role does not remove this step.
 
@@ -387,7 +388,7 @@ for the future code-review op's "deterministic reviewer-selection rules."
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_MODEL` | — | the model-class slots (see above); these are the interface |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_PROVIDER` | inferred | per-class provider override; rejected if not in `KNOWN_PROVIDER_NAMES` |
 | `REBAR_LLM_{FRONTIER,STANDARD,TRIVIAL}_ENDPOINT` | — | per-class OpenAI-compatible endpoint |
-| `REBAR_LLM_BEDROCK_REGION` | — | AWS region for the Bedrock path; **`AWS_REGION` alone does not resolve one** (see §"AWS Bedrock") |
+| `REBAR_LLM_BEDROCK_REGION` | — | AWS region for the Bedrock path; first in rebar's own chain `REBAR_LLM_BEDROCK_REGION` > `AWS_DEFAULT_REGION` > `AWS_REGION` > profile (see §"AWS Bedrock") |
 | `REBAR_LLM_BASE_URL` | — | OpenAI-compatible endpoint (LMStudio/Ollama/vLLM). **Load-bearing twice over:** it is what registers the `openai` provider builder at all, and it flips the signed verdict tier to `best_effort` |
 | `REBAR_LLM_API_KEY` | — | explicit model key (e.g. for a local server). Only valid **with** `REBAR_LLM_BASE_URL` — alone it is a hard `LLMConfigError`. A dummy value is no longer needed; the builder supplies `"not-needed"` itself |
 | `REBAR_LLM_CONFIG_FILE` | — | path to a provider-overlay TOML; **outranks the project's `rebar.toml`**, so it is the one-line switch between provider arms |
