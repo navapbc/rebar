@@ -453,6 +453,7 @@ class PydanticAIRunner:
                 base_url=cfg.base_url,
                 caps=caps,
                 web=web_requested,
+                bedrock_region_name=cfg.bedrock_region_name,
             )
             if fallback_targets:
                 # A verdict produced by a fallback must not attest the primary. The ordered

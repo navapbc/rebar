@@ -26,6 +26,7 @@ MEASURED facts (recorded on ticket 2932; treat as facts, not assumptions):
 from __future__ import annotations
 
 import logging
+import os
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError
@@ -36,6 +37,39 @@ logger = logging.getLogger(__name__)
 # a bare on-demand id, per the module docstring's MEASURED ValidationException. MEASURED to
 # cache (ticket 2932).
 DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+
+
+def resolve_bedrock_region(bedrock_region_name: str | None) -> tuple[str | None, str | None]:
+    """rebar's OWN Bedrock region chain: ``(region, source)``, or ``(None, None)``.
+
+    Order, with the EXACT ``source`` label returned for each arm (bug 8274; the label is
+    recorded verbatim as ``region_source`` in the verdict's provider provenance):
+
+    1. ``bedrock_region_name`` — the configured knob (``REBAR_LLM_BEDROCK_REGION`` env or
+       ``[tool.rebar.llm].bedrock_region_name``) → ``"REBAR_LLM_BEDROCK_REGION"``.
+    2. ``AWS_DEFAULT_REGION`` env → ``"AWS_DEFAULT_REGION"``.
+    3. ``AWS_REGION`` env → ``"AWS_REGION"``.
+    4. Nothing set → ``(None, None)``: boto3's own resolution (the active profile) applies.
+
+    ``AWS_REGION`` is in REBAR's chain because botocore's is measured NOT to consult it
+    (botocore/boto3 1.43.62: ``AWS_DEFAULT_REGION`` unset + ``AWS_REGION`` set →
+    ``boto3.session.Session().region_name`` is ``None``; the oracle test
+    ``test_botocore_still_ignores_aws_region_but_rebar_now_closes_the_trap`` re-measures it
+    every run) — yet ``AWS_REGION`` is the standard variable modern AWS tooling documents and
+    operators actually export. Resolving it here and passing the value EXPLICITLY as
+    ``region_name=`` makes botocore's quirk irrelevant. Empty-string values are treated as
+    unset (botocore parity), and rebar still never invents a default region.
+
+    Pure and stdlib-only (config value + ``os.environ``; no boto3), so the provenance seam
+    (``capabilities.provenance_for``) can call it without pulling boto3 into a signed-record
+    path, and both call sites deterministically agree."""
+    if bedrock_region_name:
+        return bedrock_region_name, "REBAR_LLM_BEDROCK_REGION"
+    for var in ("AWS_DEFAULT_REGION", "AWS_REGION"):
+        value = os.environ.get(var)
+        if value:
+            return value, var
+    return None, None
 
 
 def build_bedrock_provider(cfg: LLMConfig):
@@ -66,20 +100,15 @@ def build_bedrock_provider(cfg: LLMConfig):
       backoff) and is deliberately not mapped — honoring only the keys that translate is
       what keeps this wiring honest rather than inventing semantics.
 
-    ``cfg.bedrock_region_name`` (``REBAR_LLM_BEDROCK_REGION``) is passed to the boto3
-    session when set; otherwise the session falls back to boto3's own region resolution
-    (``AWS_DEFAULT_REGION`` or the active profile's config) — never a rebar-invented
-    default region, since a wrong region is a silent-until-call misconfiguration, not a
-    value rebar can safely guess.
-
-    ``AWS_REGION`` is NOT one of those sources: MEASURED on botocore/boto3 1.43.62, with
-    ``AWS_DEFAULT_REGION`` genuinely unset and ``AWS_REGION=us-east-1``,
-    ``boto3.session.Session().region_name`` is ``None``, so setting ``AWS_REGION`` alone
-    leaves this path failing. ``AWS_DEFAULT_REGION`` is botocore's canonical region
-    variable and does resolve — the same asymmetry the review-bot service in
-    ``infra/compose/docker-compose.yml`` records, which is why it sets both
-    ``REBAR_LLM_BEDROCK_REGION`` and ``AWS_DEFAULT_REGION``. Re-measure before trusting
-    this on a materially newer botocore.
+    The region is resolved by rebar's OWN chain — :func:`resolve_bedrock_region`:
+    ``cfg.bedrock_region_name`` (``REBAR_LLM_BEDROCK_REGION``) → ``AWS_DEFAULT_REGION`` →
+    ``AWS_REGION`` → boto3's own resolution (the active profile's config) — and passed to the
+    boto3 session EXPLICITLY as ``region_name=``, so botocore's measured refusal to consult
+    ``AWS_REGION`` (see the resolver's docstring, bug 8274) cannot strand an operator whose
+    shell exports only that standard variable. Never a rebar-invented default region, since a
+    wrong region is a silent-until-call misconfiguration, not a value rebar can safely guess.
+    The resolved source label is what ``capabilities.provenance_for`` records as
+    ``region_source`` in the verdict's provider provenance.
 
     Authentication is deliberately NOT parameterized here beyond region: no
     ``aws_access_key_id``/``aws_secret_access_key`` argument is ever threaded through, so
@@ -96,28 +125,25 @@ def build_bedrock_provider(cfg: LLMConfig):
     import boto3
     from botocore.config import Config as BotoConfig
 
-    region = cfg.bedrock_region_name or None
+    region, _region_source = resolve_bedrock_region(cfg.bedrock_region_name)
     session = boto3.session.Session(region_name=region)
     if not session.region_name:
-        # MEASURED in compose-review-bot-1 (ticket a574): the container has no AWS_REGION, no
-        # AWS_DEFAULT_REGION and no profile, so boto3 resolves NOTHING and client construction
-        # raised a bare `NoRegionError` from deep inside botocore — a stack trace that names
-        # no rebar setting. Every earlier Bedrock probe in this epic passed region_name
-        # explicitly, which is exactly why ambient resolution was never exercised. Pre-check
-        # boto3's OWN resolution (rather than inventing a default region, which would be a
-        # silent-until-call misconfiguration) and fail with a typed, actionable error instead.
+        # MEASURED in compose-review-bot-1 (ticket a574): the container has no region env vars
+        # and no profile, so boto3 resolves NOTHING and client construction raised a bare
+        # `NoRegionError` from deep inside botocore — a stack trace that names no rebar
+        # setting. Pre-check the combined resolution (rebar's chain above, then boto3's own —
+        # rather than inventing a default region, which would be a silent-until-call
+        # misconfiguration) and fail with a typed, actionable error instead.
         raise LLMConfigError(
             "a bedrock model/provider is configured but no AWS region could be resolved. "
-            "Set REBAR_LLM_BEDROCK_REGION (rebar's own knob, so the value is visible to "
-            "rebar's config layer and to the verdict's provider provenance), or "
-            "AWS_DEFAULT_REGION / the active profile's config. NOTE: AWS_REGION alone does "
-            "NOT resolve a region — MEASURED on botocore/boto3 1.43.62, with "
-            "AWS_DEFAULT_REGION unset and AWS_REGION set, boto3 resolves no region at all, "
-            "so if you have only set AWS_REGION that is why you are seeing this. "
-            "AWS_DEFAULT_REGION is botocore's canonical region variable. NOTE ALSO: "
-            "instance-metadata (IMDS) reachability does NOT supply a region "
-            "— credential discovery and region discovery are independent, so a working "
-            "instance role does not remove the need to set one."
+            "rebar resolves the region as REBAR_LLM_BEDROCK_REGION (rebar's own knob; the "
+            "value and its source are recorded in the verdict's provider provenance) > "
+            "AWS_DEFAULT_REGION > AWS_REGION > boto3's own resolution (the active profile's "
+            "config), and none of those supplied one. Set REBAR_LLM_BEDROCK_REGION, or "
+            "export AWS_DEFAULT_REGION or AWS_REGION. NOTE: instance-metadata (IMDS) "
+            "reachability does not supply a region — credential discovery and region "
+            "discovery are independent, so a working instance role does not remove the "
+            "need to set one."
         )
     attempts = max(1, int(cfg.llm_retry_max_attempts))
     boto_config = BotoConfig(

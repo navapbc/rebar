@@ -551,7 +551,13 @@ def web_access_provenance(caps: ModelCapabilities, *, web: bool) -> str:
 
 
 def provenance_for(
-    *, provider: str, model: str, base_url: str | None, caps: ModelCapabilities, web: bool = False
+    *,
+    provider: str,
+    model: str,
+    base_url: str | None,
+    caps: ModelCapabilities,
+    web: bool = False,
+    bedrock_region_name: str | None = None,
 ) -> dict:
     """The ``provider_provenance`` record for a signed gate verdict (story S5/343b).
 
@@ -587,6 +593,16 @@ def provenance_for(
     ``web_search_capabilities`` to this run, not the criterion's declared intent. It is recorded
     (with its route) under ``capabilities.web_access``; see ``web_access_provenance``.
 
+    BEDROCK REGION (bug 8274). On a ``"bedrock"`` run the record additionally carries ``region``
+    + ``region_source`` when rebar's OWN chain resolved the region —
+    ``bedrock_model.resolve_bedrock_region``, the same pure stdlib-only resolver the provider
+    builder feeds to the boto3 session, so record and runtime cannot disagree. Both keys are
+    ABSENT (never guessed) when only boto3's ambient profile resolution could supply one: this
+    seam never imports boto3, so that value is unobservable here, and synthesising it would put
+    an unverified fact into a signed record — the exact rule ``endpoint_host`` follows above.
+    ``bedrock_region_name`` is threaded unconditionally by the runner; the provider check gates
+    the record, so a non-bedrock verdict never carries region keys.
+
     Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
     latter retains embedded credentials (``user:secret@host``), and no credential material may
     appear in a signed record."""
@@ -594,7 +610,7 @@ def provenance_for(
 
     endpoint_host = urlparse(base_url).hostname if base_url else None
     via_gateway = provider in _GATEWAY_PROVIDER_NAMES
-    return {
+    record = {
         "provider": provider,
         "model": model,
         "endpoint_host": endpoint_host,
@@ -610,6 +626,14 @@ def provenance_for(
             "web_access": web_access_provenance(caps, web=web),
         },
     }
+    if provider == "bedrock":
+        from rebar.llm.bedrock_model import resolve_bedrock_region
+
+        region, region_source = resolve_bedrock_region(bedrock_region_name)
+        if region is not None:
+            record["region"] = region
+            record["region_source"] = region_source
+    return record
 
 
 # The execution modes that re-send an ACCUMULATED MESSAGE HISTORY and therefore need a
