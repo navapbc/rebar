@@ -5,6 +5,13 @@
 The `rebar` CLI has two command families. **Help-backed subcommands** are the dispatcher arms with pinned usage text (rendered verbatim below). **Intercept-arm commands** are advanced commands handled before the dispatcher; each owns its own `--help` and is documented here by a curated one-liner — run `rebar <cmd> --help` for full usage.
 Bridge operations use the canonical nested forms `rebar bridge fsck`, `rebar bridge check-access`, and `rebar bridge setup`; retained top-level spellings are identified below as compatibility aliases.
 
+## Mutation confirmations and global output flags
+
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`, `transition`, `reopen`, `claim`) confirms its result on stdout with one kubectl-style line: `<past-tense-verb> <args-summary>` on a successful write, `no change: <reason>` on an idempotent no-op (exit 0 in both cases). Two global flags are extracted for these verbs at the top-level router (position-independent within the verb's arguments; tokens after `--` are never consumed):
+
+- `--quiet` / `-q` — suppress the text confirmation line only; errors, exit codes, JSON output, and `link`'s machine-readable REDIRECT record are untouched.
+- `--output <text|json>` / `-o <mode>` — verbs that already accepted `--output` (`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON shapes unchanged; the newly-covered verbs emit one uniform mutation envelope `{"outcome": "<verb-past>"|"noop", "subject": <id/edge>, "detail": <str>}` — **pre-1.0 UNSTABLE**: the envelope's field set may still change before 1.0. `--quiet` together with `--output json` still prints the JSON.
+
 ## Help-backed subcommands
 
 The 54 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):

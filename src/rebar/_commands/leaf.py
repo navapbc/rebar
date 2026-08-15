@@ -53,7 +53,7 @@ def comment(
     source: dict | None = None,
     repo_root=None,
     allow_secret_pattern: str = "",
-) -> None:
+) -> str:
     """Append a COMMENT event (mirrors ``ticket_comment``).
 
     ``source`` (P1.2 import): optional per-comment provenance — recognised keys
@@ -63,6 +63,10 @@ def comment(
 
     ``allow_secret_pattern``: audited force override for the write-time secret screen
     (bug e7a9) — see :func:`rebar._commands._seam.append_event`.
+
+    Returns the resolved ticket id (the CLI's confirmation subject, ticket
+    6bda-9d58-8546-4638); pre-existing callers ignored the ``None`` return, so the
+    widening is additive.
     """
     tracker = tracker_dir(repo_root)
     if not ticket_id:
@@ -85,14 +89,19 @@ def comment(
         repo_root=repo_root,
         allow_secret_pattern=allow_secret_pattern,
     )
+    return resolved
 
 
-def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
+def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> dict:
     """Add a tag via a TAG_DELTA event (P2.3; was a whole-field EDIT clobber).
 
     Idempotent: adding an already-present tag is a no-op (exit 0, no event). No
     ghost check — matches the bash path, which resolves the id then tags. Emits an
     add delta so concurrent adds on other clones converge instead of clobbering.
+
+    Returns the small wrote-vs-noop outcome ``{"wrote", "id", "tag"}`` (ticket
+    6bda-9d58-8546-4638); pre-existing callers ignored the ``None`` return, so the
+    widening is additive.
     """
     from rebar.reducer._version import TAG_DELTA
 
@@ -103,7 +112,7 @@ def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     resolved = require_id(ticket_id, tracker)
     tags = current_tags(resolved, tracker)
     if tag_value in tags:
-        return
+        return {"wrote": False, "id": resolved, "tag": tag_value}
     append_event(
         resolved,
         TAG_DELTA,
@@ -112,12 +121,14 @@ def tag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
         repo_root=repo_root,
         author_fallback="unknown",
     )
+    return {"wrote": True, "id": resolved, "tag": tag_value}
 
 
-def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
+def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> dict:
     """Remove a tag via a TAG_DELTA event (P2.3; was a whole-field EDIT clobber).
 
-    Idempotent: removing an absent tag is a no-op (exit 0, no event).
+    Idempotent: removing an absent tag is a no-op (exit 0, no event). Returns the
+    ``{"wrote", "id", "tag"}`` outcome, exactly as :func:`tag`.
     """
     from rebar.reducer._version import TAG_DELTA
 
@@ -128,7 +139,7 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
     resolved = require_id(ticket_id, tracker)
     tags = current_tags(resolved, tracker)
     if tag_value not in tags:
-        return
+        return {"wrote": False, "id": resolved, "tag": tag_value}
     append_event(
         resolved,
         TAG_DELTA,
@@ -137,6 +148,7 @@ def untag(ticket_id: str, tag_value: str, *, repo_root=None) -> None:
         repo_root=repo_root,
         author_fallback="unknown",
     )
+    return {"wrote": True, "id": resolved, "tag": tag_value}
 
 
 def _terminal_fold(resolved: str, ticket_dir, repo_root) -> None:
@@ -172,14 +184,18 @@ def _terminal_fold(resolved: str, ticket_dir, repo_root) -> None:
         )
 
 
-def archive(ticket_id: str, *, repo_root=None) -> None:
+def archive(ticket_id: str, *, repo_root=None) -> dict:
     """Archive an open ticket (mirrors ``ticket_archive``).
 
     Idempotent: an existing ``.archived`` marker or ARCHIVED event short-circuits
-    to a silent no-op (writing the marker if only the event was present, e.g. after
+    to a no-op (writing the marker if only the event was present, e.g. after
     a clone). Status-gated: only ``open`` tickets may be archived. On success folds
     the live log terminally (see :func:`_terminal_fold`), then writes an ARCHIVED
-    event, the ``.archived`` marker, and prints the confirmation line.
+    event and the ``.archived`` marker.
+
+    Returns the ``{"wrote", "id"}`` outcome (ticket 6bda-9d58-8546-4638); the CLI
+    prints the confirmation from it (the former in-seam ``Archived ticket`` print
+    moved there, so library/MCP callers no longer get a stray stdout line).
     """
     from rebar.reducer import reduce_ticket
     from rebar.reducer.marker import write_marker
@@ -191,10 +207,10 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
     ticket_dir = tracker / resolved
 
     if (ticket_dir / ".archived").exists():
-        return
+        return {"wrote": False, "id": resolved}
     if ticket_dir.is_dir() and any(p.name.endswith("-ARCHIVED.json") for p in ticket_dir.iterdir()):
         write_marker(str(ticket_dir))
-        return
+        return {"wrote": False, "id": resolved}
 
     status = (reduce_ticket(str(ticket_dir)) or {}).get("status", "")
     if not status:
@@ -207,7 +223,7 @@ def archive(ticket_id: str, *, repo_root=None) -> None:
     _terminal_fold(resolved, ticket_dir, repo_root)
     append_event(resolved, "ARCHIVED", {}, tracker, repo_root=repo_root)
     write_marker(str(ticket_dir))
-    print(f"Archived ticket '{resolved}'")
+    return {"wrote": True, "id": resolved}
 
 
 def _validate_json_array(payload: str, label: str, required_keys: tuple[str, ...]):
@@ -248,8 +264,13 @@ def _validate_no_file_impact_reason(reason: str) -> None:
 
 def set_file_impact(
     ticket_id: str, json_array: str, *, no_file_impact_reason: str | None = None, repo_root=None
-) -> None:
-    """Append a FILE_IMPACT event, retaining legacy bytes unless declaring none."""
+) -> dict:
+    """Append a FILE_IMPACT event, retaining legacy bytes unless declaring none.
+
+    Returns ``{"id", "count", "none_declared"}`` — the confirmation subject +
+    path count (ticket 6bda-9d58-8546-4638); the former ``None`` return had no
+    consumers, so the widening is additive.
+    """
     tracker = tracker_dir(repo_root)
     if not ticket_id:
         raise CommandError("Error: ticket_id must be non-empty")
@@ -267,15 +288,23 @@ def set_file_impact(
             }
         )
     append_event(resolved, "FILE_IMPACT", data, tracker, repo_root=repo_root)
+    return {
+        "id": resolved,
+        "count": len(file_impact),
+        "none_declared": no_file_impact_reason is not None,
+    }
 
 
-def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> None:
+def declare_no_file_impact(ticket_id: str, reason: str, *, repo_root=None) -> dict:
     """Explicitly declare that a ticket touches no repository file."""
-    set_file_impact(ticket_id, "[]", no_file_impact_reason=reason, repo_root=repo_root)
+    return set_file_impact(ticket_id, "[]", no_file_impact_reason=reason, repo_root=repo_root)
 
 
-def set_verify_commands(ticket_id: str, json_array: str, *, repo_root=None) -> None:
-    """Append a VERIFY_COMMANDS event (mirrors ``ticket_set_verify_commands``)."""
+def set_verify_commands(ticket_id: str, json_array: str, *, repo_root=None) -> tuple[str, int]:
+    """Append a VERIFY_COMMANDS event (mirrors ``ticket_set_verify_commands``).
+
+    Returns ``(resolved_id, command_count)`` for the CLI confirmation (ticket
+    6bda-9d58-8546-4638); the former ``None`` return had no consumers."""
     tracker = tracker_dir(repo_root)
     if not ticket_id:
         raise CommandError("Error: ticket_id must be non-empty")
@@ -291,3 +320,4 @@ def set_verify_commands(ticket_id: str, json_array: str, *, repo_root=None) -> N
         tracker,
         repo_root=repo_root,
     )
+    return resolved, len(verify_commands)

@@ -159,9 +159,9 @@ def test_library_cli_mcp_share_current_log(rebar_repo: Path) -> None:
     log_id = lib["id"]
 
     # CLI appends to the SAME current log (reads the local pointer)
-    rc, out, err = _cli(rebar_repo, "session-log", "append", "from cli")
+    rc, out, err = _cli(rebar_repo, "session-log", "append", "from cli", "-o", "json")
     assert rc == 0, err
-    assert json.loads(out)["id"] == log_id
+    assert json.loads(out)["subject"] == log_id
 
     # MCP appends to the SAME current log
     from rebar.mcp_server import build_server
@@ -178,12 +178,12 @@ def test_library_cli_mcp_share_current_log(rebar_repo: Path) -> None:
 
 
 def test_cli_start_then_append(rebar_repo: Path) -> None:
-    rc, out, err = _cli(rebar_repo, "session-log", "start", "--summary=cli session")
+    rc, out, err = _cli(rebar_repo, "session-log", "start", "--summary=cli session", "-o", "json")
     assert rc == 0, err
-    sid = json.loads(out)["id"]
-    rc, out, err = _cli(rebar_repo, "session-log", "append", "logged")
+    sid = json.loads(out)["subject"]
+    rc, out, err = _cli(rebar_repo, "session-log", "append", "logged", "-o", "json")
     assert rc == 0, err
-    assert json.loads(out)["id"] == sid
+    assert json.loads(out)["subject"] == sid
 
 
 def test_cli_unknown_action_is_usage_error(rebar_repo: Path) -> None:

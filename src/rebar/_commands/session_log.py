@@ -235,9 +235,42 @@ def _parse_opts(argv: list[str]) -> tuple[dict, list[str]]:
     return opts, positionals
 
 
+def _confirm_session_log(verb: str, result: dict) -> None:
+    """Normalized confirmation (ticket 6bda-9d58-8546-4638) for start/append.
+
+    Replaces the former unconditional raw-JSON print with the shared contract,
+    keeping every datum that JSON carried: the log id, its alias (when this call
+    knows one), and append's ``created`` flag (surfaced as the ``new log`` marker).
+    ``--output json`` yields the uniform envelope instead.
+    """
+    from rebar._commands import _confirm
+
+    log_id, alias = result["id"], result.get("alias")
+    if verb == "start":
+        who = f"{alias} ({log_id})" if alias else log_id
+        _confirm.emit("session-log-started", log_id, f"started {who}", f"session-log started {who}")
+    elif result.get("created"):
+        _confirm.emit(
+            "session-log-appended",
+            log_id,
+            f"new log {alias or log_id}",
+            f"session-log appended to {alias} ({log_id}; new log)"
+            if alias
+            else f"session-log appended to {log_id} (new log)",
+        )
+    else:
+        _confirm.emit(
+            "session-log-appended",
+            log_id,
+            "existing log",
+            f"session-log appended to {log_id}",
+        )
+
+
 def session_log_cli(argv: list[str]) -> int:
     """``rebar session-log append "<entry>"`` / ``rebar session-log start`` — verb
-    dispatch mirroring scratch's sub-action pattern. Prints a JSON result."""
+    dispatch mirroring scratch's sub-action pattern. Prints the shared mutation
+    confirmation (text line, or the uniform envelope under ``--output json``)."""
     if not argv:
         print(_USAGE)
         return 1
@@ -258,5 +291,5 @@ def session_log_cli(argv: list[str]) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
-    print(json.dumps(result, ensure_ascii=False))
+    _confirm_session_log(verb, result)
     return 0

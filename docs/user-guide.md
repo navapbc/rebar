@@ -22,6 +22,37 @@ search / list ──▶ ready ──▶ claim ──▶ (work + comment) ──�
 4. **Work**, recording progress as comments.
 5. **Close** it when the acceptance criteria are met.
 
+## Mutation confirmations
+
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`,
+`tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`,
+`session-log`, `transition`, `reopen`, `claim`) confirms its result on stdout with one
+kubectl-style line — `<past-tense-verb> <args-summary>` on a successful write,
+`no change: <reason>` on an idempotent no-op (exit 0 in both cases):
+
+```
+$ rebar tag c50e-7326 perf
+tagged c50e-7326-9cac-45e4: +perf
+$ rebar tag c50e-7326 perf
+no change: tag perf already on c50e-7326-9cac-45e4
+```
+
+Two global flags are extracted for these verbs at the top-level router
+(position-independent within the verb's arguments; tokens after `--` are never
+consumed, so a comment body containing `--quiet` survives verbatim):
+
+- `--quiet` / `-q` suppresses the text confirmation only — errors, exit codes, JSON
+  output, and `link`'s machine-readable REDIRECT record are untouched.
+- `--output <text|json>` / `-o <mode>`: verbs that already accepted `--output`
+  (`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON
+  shapes; the newly-covered verbs emit one uniform mutation envelope
+  `{"outcome": "<verb-past>"|"noop", "subject", "detail"}` — **pre-1.0 UNSTABLE**
+  (the field set may still change before 1.0). `--quiet` + `--output json` still
+  prints the JSON.
+
+Confirmation lines go to stdout; warnings and logs go to stderr. Scripts should
+parse `--output json`, never the text lines.
+
 ## Finding work
 
 **Search** does a full-text, case-insensitive AND over titles, descriptions,

@@ -129,7 +129,7 @@ def test_reason_boundary_and_legacy_array_cli_contract(rebar_repo: Path) -> None
         json.dumps(impact),
     )
     assert legacy.returncode == 0, legacy.stderr
-    assert legacy.stdout == ""
+    assert legacy.stdout == f"impact set on {ticket_id}: 1 paths\n"
 
     read_back = _cli(rebar_repo, "get-file-impact", ticket_id)
     assert read_back.returncode == 0, read_back.stderr
