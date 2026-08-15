@@ -362,7 +362,11 @@ def _projects(parsed: argparse.Namespace) -> int:
         return 0
     if verb == "set":
         repos = [r for r in parsed.repos.split(",") if r] if parsed.repos else []
-        rebar.bridge_projects_set(parsed.key, repos)
+        try:
+            rebar.bridge_projects_set(parsed.key, repos)
+        except RebarError as exc:
+            sys.stderr.write(f"Error: {exc}\n")
+            return 1
         return 0
     if verb == "remove":
         try:

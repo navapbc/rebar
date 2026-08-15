@@ -113,3 +113,28 @@ def test_mapping_write_leaves_sibling_bridge_state_byte_identical(repo: Path) ->
     assert _run("projects", "set", "REB", "--repos", "rebar")[0] == 0
 
     assert (_h("bindings.json"), _h("prev_snapshot.json")) == before
+
+
+def test_set_invalid_key_is_a_clean_cli_error_and_writes_nothing(repo: Path) -> None:
+    """A syntactically-invalid project key (ticket 209b) is rejected at the write path
+    with a clean non-zero CLI error (no traceback) and adds no project entry."""
+    rc, _out, err = _run("projects", "set", "le-g", "--repos", "rebar")
+
+    assert rc != 0
+    assert "le-g" in err
+    assert "Traceback" not in err
+    record = json.loads(_projects_file(repo).read_text(encoding="utf-8"))
+    assert record["projects"] == {}
+
+
+def test_remove_invalid_key_is_a_clean_cli_error_and_mutates_nothing(repo: Path) -> None:
+    """remove rejects a syntactically-invalid key with a clean non-zero error before mutation."""
+    assert _run("projects", "set", "REB", "--repos", "rebar")[0] == 0
+    before = _projects_file(repo).read_bytes()
+
+    rc, _out, err = _run("projects", "remove", "le-g")
+
+    assert rc != 0
+    assert "le-g" in err
+    assert "Traceback" not in err
+    assert _projects_file(repo).read_bytes() == before
