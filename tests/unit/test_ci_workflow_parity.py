@@ -71,7 +71,7 @@ _SHARED_GATE_SIGNATURES = {
     "config-check": "make config-check",
     "pre-commit all hooks": "pre-commit run --all-files",
     "pip-audit": "pip-audit",
-    "default test suite": 'pytest -m "not integration and not external"',
+    "default test suite": 'pytest -m "$DEFAULT_SUITE_MARKS"',
     "integration tier": "pytest -m integration",
 }
 
@@ -170,7 +170,7 @@ def test_both_lanes_delegate_to_the_shared_gate_workflow() -> None:
 
 
 def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
-    """Compatibility cells run every test; only the primary Ubuntu cell traces coverage."""
+    """Every cell runs both tiers; only primary Ubuntu traces coverage and policy."""
     import yaml
 
     workflow = yaml.safe_load(_read(_BAT_YML))
@@ -186,7 +186,8 @@ def test_matrix_keeps_every_test_tier_but_collects_coverage_once() -> None:
     default_steps = [
         step
         for step in steps
-        if 'pytest -m "not integration and not external"' in step.get("run", "")
+        if step.get("name", "").startswith("Run the default suite")
+        and 'pytest -m "$DEFAULT_SUITE_MARKS"' in step.get("run", "")
     ]
     integration_steps = [step for step in steps if "pytest -m integration" in step.get("run", "")]
     assert len(default_steps) == 1
@@ -644,7 +645,7 @@ _PYTEST_INVOCATION = re.compile(
 # fails loudly instead of passing vacuously over an empty lane set. This is a liveness floor,
 # NOT an allowlist: a new lane needs no entry here, it just has to carry the guard.
 _EXPECTED_PYTEST_FORMS = {
-    "_build-and-test.yml": 'pytest -m "not integration and not external"',  # bare, with -m
+    "_build-and-test.yml": 'pytest -m "$DEFAULT_SUITE_MARKS"',  # bare, with -m
     "structured-output-baseline.yml": "pytest tests/external/",  # bare, NO -m
     "_eval-discipline.yml": "python -m pytest",  # module form
     "_optionality.yml": "/tmp/clean/bin/python -m pytest",  # path-prefixed module form
@@ -846,6 +847,99 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
         f"{proc.stdout}\n{proc.stderr}"
     )
     return [line.strip() for line in proc.stdout.splitlines() if "::" in line]
+
+
+_REPO_POLICY_MODULES = (
+    "tests/unit/test_comment_hygiene_guard.py",
+    "tests/scripts/test_check_config_reads_heldout.py",
+    "tests/unit/test_tests_import_convention.py",
+    "tests/unit/test_external_isolation.py",
+    "tests/unit/test_compute_validity_callers.py",
+    "tests/unit/test_canonical.py",
+    "tests/unit/test_subcall_class_selection.py",
+)
+_REPO_POLICY_NODE_IDS = {
+    "tests/unit/test_comment_hygiene_guard.py::test_the_real_tree_is_clean",
+    "tests/scripts/test_check_config_reads_heldout.py::test_real_repo_is_clean_with_default_paths",
+    "tests/scripts/test_check_config_reads_heldout.py::test_real_schema_markers_all_carry_pointers",
+    "tests/scripts/test_check_config_reads_heldout.py::test_string_read_fields_keep_their_marker_and_do_not_fire[lock_lease_secs-getattr]",
+    "tests/scripts/test_check_config_reads_heldout.py::test_string_read_fields_keep_their_marker_and_do_not_fire[require_plan_review_for_close-gate_enabled]",
+    "tests/scripts/test_check_config_reads_heldout.py::"
+    "test_string_read_fields_keep_their_marker_and_do_not_fire"
+    "[require_plan_review_for_claim-string key]",
+    "tests/scripts/test_check_config_reads_heldout.py::"
+    "test_string_read_fields_keep_their_marker_and_do_not_fire"
+    "[require_completion_verification_for_close-string key]",
+    "tests/scripts/test_check_config_reads_heldout.py::test_the_real_schema_parks_no_markers_against_a_ticket",
+    "tests/scripts/test_check_config_reads_heldout.py::test_ci_wires_the_gate",
+    "tests/unit/test_tests_import_convention.py::test_no_tests_rooted_imports_anywhere_under_tests",
+    "tests/unit/test_external_isolation.py::test_no_external_marked_test_outside_external_dir",
+    "tests/unit/test_compute_validity_callers.py::test_every_compute_validity_call_consumes_a_mapping_not_a_tuple",
+    "tests/unit/test_compute_validity_callers.py::test_plan_validity_profiles_are_selected_by_named_keyword",
+    "tests/unit/test_canonical.py::test_no_raw_event_serializers_in_src",
+    "tests/unit/test_subcall_class_selection.py::test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work",
+    "tests/unit/test_subcall_class_selection.py::test_the_provenance_analysis_can_see_the_sites_it_judges",
+    "tests/unit/test_subcall_class_selection.py::test_no_run_request_inherits_the_raw_config_model",
+    "tests/unit/test_subcall_class_selection.py::test_every_unfollowable_site_is_registered_with_a_reason",
+    "tests/unit/test_subcall_class_selection.py::test_neither_registry_has_stale_entries",
+}
+
+
+def test_repo_policy_nodes_partition_the_default_selection_exactly() -> None:
+    """The 19 OS-invariant guards run once without hiding mixed-module behavior."""
+    default_nodes = set(_collect_node_ids(_REPO_POLICY_MODULES, _DEFAULT_SELECTION))
+    policy_nodes = set(_collect_node_ids(_REPO_POLICY_MODULES, "repo_policy"))
+    non_policy_nodes = set(
+        _collect_node_ids(_REPO_POLICY_MODULES, f"{_DEFAULT_SELECTION} and not repo_policy")
+    )
+
+    assert policy_nodes == _REPO_POLICY_NODE_IDS
+    assert policy_nodes.isdisjoint(non_policy_nodes)
+    assert policy_nodes | non_policy_nodes == default_nodes
+
+
+def test_repo_policy_nodes_run_only_in_the_existing_primary_cell() -> None:
+    """Route policy nodes by selector, without a new job or pytest session."""
+    import yaml
+
+    workflow = yaml.safe_load(_read(_BAT_YML))
+    assert set(workflow["jobs"]) == {"lint", "pip-audit", "test"}
+    cells = _expanded_test_matrix(workflow)
+    assert cells == [
+        ("ubuntu-latest", "3.11"),
+        ("ubuntu-latest", "3.12"),
+        ("ubuntu-latest", "3.13"),
+        ("macos-latest", "3.13"),
+    ]
+
+    steps = workflow["jobs"]["test"]["steps"]
+    default_step = next(
+        step for step in steps if step.get("name", "").startswith("Run the default suite")
+    )
+    selector_key, selector_expression = next(
+        (key, value)
+        for key, value in default_step.get("env", {}).items()
+        if isinstance(value, str) and _DEFAULT_SELECTION in value and "repo_policy" in value
+    )
+    expression = re.fullmatch(
+        r"\$\{\{\s*matrix\.os == 'ubuntu-latest'\s*&&\s*"
+        r"matrix\.python-version == '3\.13'\s*&&\s*"
+        r"'(?P<primary>[^']+)'\s*\|\|\s*'(?P<non_primary>[^']+)'\s*\}\}",
+        selector_expression,
+    )
+    assert expression is not None
+    assert expression.group("primary") == _DEFAULT_SELECTION
+    assert expression.group("non_primary") == f"{_DEFAULT_SELECTION} and not repo_policy"
+    assert f'pytest -m "${selector_key}"' in default_step["run"]
+
+    pytest_steps = [
+        step for step in steps if re.search(r"(?m)^\s*pytest\s", step.get("run", "")) is not None
+    ]
+    assert len(pytest_steps) == 2, "routing must not add a pytest collection/fixture session"
+    integration_step = next(
+        step for step in steps if step.get("name", "").startswith("Run the integration tier")
+    )
+    assert "pytest -m integration" in integration_step["run"]
 
 
 def test_optionality_suite_still_runs_in_the_default_selection() -> None:

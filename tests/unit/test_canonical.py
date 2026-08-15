@@ -19,6 +19,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from rebar._store.canonical import canonical_bytes, canonical_str
 
 _SRC = Path(__file__).resolve().parents[2] / "src" / "rebar"
@@ -134,6 +136,7 @@ def _scan_bash(root: Path) -> list[str]:
     return hits
 
 
+@pytest.mark.repo_policy
 def test_no_raw_event_serializers_in_src():
     py = _scan_python(_SRC)
     sh = _scan_bash(_SRC)

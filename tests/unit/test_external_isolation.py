@@ -84,6 +84,7 @@ def test_external_dir_all_skipped_without_opt_in(tmp_path: Path) -> None:
     assert " passed" not in out, f"external tests EXECUTED without opt-in:\n{out}"
 
 
+@pytest.mark.repo_policy
 def test_no_external_marked_test_outside_external_dir() -> None:
     """The confinement invariant: every test marked ``external`` is under tests/external/.
 

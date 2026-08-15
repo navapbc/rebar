@@ -569,6 +569,7 @@ _EXPECTED_RUN_REQUEST_SITES = [
 ]
 
 
+@pytest.mark.repo_policy
 def test_provenance_scan_preserves_verdicts_with_linear_whole_tree_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -611,6 +612,7 @@ def run_request_sites() -> list[tuple[str, str, str]]:
     return _run_request_sites()
 
 
+@pytest.mark.repo_policy
 def test_the_provenance_analysis_can_see_the_sites_it_judges(
     run_request_sites: list[tuple[str, str, str]],
 ) -> None:
@@ -621,6 +623,7 @@ def test_the_provenance_analysis_can_see_the_sites_it_judges(
     assert all(expr for _, expr, _ in sites), "a RunRequest site passes no config= at all"
 
 
+@pytest.mark.repo_policy
 def test_no_run_request_inherits_the_raw_config_model(
     run_request_sites: list[tuple[str, str, str]],
 ) -> None:
@@ -643,6 +646,7 @@ def test_no_run_request_inherits_the_raw_config_model(
     )
 
 
+@pytest.mark.repo_policy
 def test_every_unfollowable_site_is_registered_with_a_reason(
     run_request_sites: list[tuple[str, str, str]],
 ) -> None:
@@ -654,6 +658,7 @@ def test_every_unfollowable_site_is_registered_with_a_reason(
     )
 
 
+@pytest.mark.repo_policy
 def test_neither_registry_has_stale_entries(
     run_request_sites: list[tuple[str, str, str]],
 ) -> None:
