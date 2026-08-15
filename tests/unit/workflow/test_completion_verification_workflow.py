@@ -313,7 +313,8 @@ def test_reconcile_matches_completion_py_tail(monkeypatch):
     # Parity: the workflow's reconcile produces the SAME completion_verdict as completion.py's
     # own normalize → resolve_citations → reconcile → validate tail on the same raw agent output.
     from rebar.llm import findings as _findings
-    from rebar.llm.completion import _REVIEWER_ID, reconcile_verdict
+    from rebar.llm.completion import reconcile_verdict
+    from rebar.llm.completion_reconcile import _REVIEWER_ID
     from rebar.llm.config import LLMConfig
 
     raw_findings = [

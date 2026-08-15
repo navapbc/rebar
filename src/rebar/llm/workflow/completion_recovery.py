@@ -11,7 +11,10 @@ BATCHED successor runs over only the UNVERIFIED remainder, denominated in a MODE
 budget pool, then finalizes a FULL-COVERAGE verdict from the bank — with a deterministic
 no-LLM fallback so a run with any banked progress can never die verdict-less. The mechanical
 pieces (bank store, id minting, pool/batch arithmetic, deterministic finalizer) live in
-``completion_banking``; this module owns orchestration only. The normal workflow still owns
+``completion_banking``, the criteria contract (enumeration, admission bounds, coverage) in
+``completion_criteria``, and the failure taxonomy (exhaustion classification, bounded
+diagnostics, workflow-failure finalization) in ``completion_failures``; this module owns
+orchestration only. The normal workflow still owns
 child precheck and deterministic reconciliation, so recovery cannot bypass either.
 """
 
@@ -19,8 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-from typing import Any, NoReturn
+from typing import Any
 
 from rebar.llm.completion_tool_policy import make_completion_record_tool
 from rebar.llm.config import LLMConfig
@@ -39,404 +41,25 @@ from . import completion_banking as _bank
 from . import completion_verdict_cache as _cache
 from . import executor as _ex
 from .completion_banking import _banked_evidence_payload
+from .completion_criteria import (
+    _validate_coverage,
+    _validate_recovery_inputs,
+    explicit_completion_criteria,
+    physical_context_ceiling,
+)
+from .completion_failures import (
+    _bounded_diagnostic,
+    _is_token_exhaustion,
+    raise_completion_workflow_failure,
+)
 from .runs import RunnerAgentStep
 
-_CHECKBOX = re.compile(r"(?m)^\s*-\s*\[[ xX]\]\s*(?P<text>\S.*)$")
-_AC_HEADING = re.compile(r"^\s*##\s+acceptance criteria\b", re.IGNORECASE)
-_H2_HEADING = re.compile(r"^\s*##(?:\s+|$)")
-_MAX_CRITERIA = 32
-_MAX_CRITERION_CHARS = 4_000
-_MAX_TOTAL_CRITERIA_CHARS = 32_000
-# PHYSICAL context ceiling. Each verifier run (primary or successor) must fit ONE model
-# window. Derived from the resolved verifier model's OWN window (model_classes.own_window_tokens)
-# at a deliberately conservative 2 chars/token (English prose averages ~4), leaving the other
-# half of the window for the system prompt, criteria, tool traffic, and output. The old ECONOMIC
-# product bound (len(context) × len(criteria)) is RETIRED: story 2948 deleted the per-criterion
-# fan-out that re-sent the context once per criterion, so spend no longer scales with the
-# criterion count — a successor batches ≤ batch_cap criteria over ONE full-context run.
-_CONTEXT_CHARS_PER_TOKEN = 2
+# Finalizer bounds stay with the orchestrator: they size ITS finalizer call, not the criteria
+# contract (completion_criteria owns the per-run admission bounds).
 _MAX_FINALIZER_INPUT_CHARS = 132_000
 _FINALIZER_OUTPUT_TOKENS = 8_000
 
 logger = logging.getLogger(__name__)
-
-
-def explicit_completion_criteria(ticket: dict[str, Any]) -> list[str]:
-    """Return stable, explicit checklist requirements from a ticket.
-
-    Recovery deliberately does not ask an already-exhausted agent to rediscover
-    scope. Explicit Markdown checkboxes under canonical ``## Acceptance
-    Criteria`` sections are the mechanically enumerable completion surface.
-    Bugs also get an independent resolution criterion; other ticket types
-    without such checkboxes fail closed.
-    """
-
-    description = str(ticket.get("description") or "")
-    completion_lines: list[str] = []
-    in_completion_section = False
-    for line in description.splitlines():
-        if _AC_HEADING.match(line):
-            in_completion_section = True
-            continue
-        if _H2_HEADING.match(line):
-            in_completion_section = False
-            continue
-        if in_completion_section:
-            completion_lines.append(line)
-
-    criteria: list[str] = []
-    seen: set[str] = set()
-    for match in _CHECKBOX.finditer("\n".join(completion_lines)):
-        text = match.group("text").strip()
-        if text and text not in seen:
-            seen.add(text)
-            criteria.append(text)
-    title = str(ticket.get("title") or "ticket").strip()
-    ticket_type = ticket.get("ticket_type") or ticket.get("type")
-    if str(ticket_type or "").strip().lower() == "bug":
-        bug_core = (
-            f"Bug '{title}' is actually resolved: the reported defect no longer "
-            "reproduces and expected behavior holds."
-        )
-        if bug_core not in seen:
-            criteria.append(bug_core)
-    if not criteria:
-        raise CompletionRecoveryError(
-            "cannot enumerate completion recovery criteria for a non-bug ticket "
-            "without explicit acceptance-criteria checkboxes"
-        )
-    return criteria
-
-
-def physical_context_ceiling(model: str | None) -> int:
-    """The max recovery context in chars: the resolved model's own window * 2 chars/token.
-
-    Story a9dd note: the completion gate now pre-loads the ticket's declared file_impact
-    contents + referencing-commit diffs into a ``<prefetched_file_contents>`` section that is
-    part of the assembled ``context`` string — so those prefetch bytes are ALREADY counted by
-    ``_validate_recovery_inputs``'s ceiling check below. ``gate_ops`` pre-trims that section to
-    THIS ceiling via ``completion_prefetch.fit_within_ceiling`` before assembling the context,
-    so an oversize prefetch is trimmed at the gate rather than tripping this validator here."""
-    from rebar.llm.model_classes import own_window_tokens
-
-    return own_window_tokens(model) * _CONTEXT_CHARS_PER_TOKEN
-
-
-def _validate_recovery_inputs(criteria: list[str], context: str, model: str | None) -> None:
-    """Reject hostile/unbounded recovery work before the first recovery call."""
-
-    if len(criteria) > _MAX_CRITERIA:
-        raise CompletionRecoveryError(
-            "completion recovery criterion-count bound exceeded",
-            diagnostic={
-                "criteria_total": len(criteria),
-                "criteria_limit": _MAX_CRITERIA,
-                "criteria_completed": 0,
-            },
-        )
-    oversized = next(
-        (
-            (index, len(criterion))
-            for index, criterion in enumerate(criteria)
-            if len(criterion) > _MAX_CRITERION_CHARS
-        ),
-        None,
-    )
-    if oversized is not None:
-        index, chars = oversized
-        raise CompletionRecoveryError(
-            "completion recovery per-criterion character bound exceeded",
-            diagnostic={
-                "criterion_index": index,
-                "criterion_chars": chars,
-                "criterion_char_limit": _MAX_CRITERION_CHARS,
-                "criteria_completed": 0,
-            },
-        )
-    total_chars = sum(len(criterion) for criterion in criteria)
-    if total_chars > _MAX_TOTAL_CRITERIA_CHARS:
-        raise CompletionRecoveryError(
-            "completion recovery total criterion character bound exceeded",
-            diagnostic={
-                "criteria_chars": total_chars,
-                "criteria_char_limit": _MAX_TOTAL_CRITERIA_CHARS,
-                "criteria_completed": 0,
-            },
-        )
-    context_ceiling = physical_context_ceiling(model)
-    if len(context) > context_ceiling:
-        raise CompletionRecoveryError(
-            "completion recovery context bound exceeded",
-            diagnostic={
-                "context_chars": len(context),
-                "context_char_limit": context_ceiling,
-                "criteria_completed": 0,
-            },
-        )
-
-
-def _normalized_finish_reason(exc: BaseException) -> str:
-    """Return allowlisted typed finish metadata, preferring runner diagnostics."""
-
-    outcome = getattr(exc, "outcome", None)
-    sources = (
-        getattr(exc, "diagnostic", None),
-        getattr(outcome, "diagnostic", None),
-        outcome,
-        getattr(exc, "usage", None),
-    )
-    for source in sources:
-        if isinstance(source, dict):
-            value = source.get("finish_reason")
-            if isinstance(value, str) and value.strip():
-                return re.sub(r"[\s-]+", "_", value.strip().lower())
-    value = getattr(exc, "finish_reason", None)
-    if isinstance(value, str):
-        return re.sub(r"[\s-]+", "_", value.strip().lower())
-    return ""
-
-
-def _is_token_exhaustion(exc: BaseException) -> bool:
-    """Classify typed output exhaustion without mistaking generic context text."""
-
-    finish_reason = _normalized_finish_reason(exc)
-    if finish_reason in {
-        "length",
-        "max_tokens",
-        "max_output_tokens",
-        "context_length_exceeded",
-        "context_window_exceeded",
-        "context_window_overflow",
-        "maximum_context_length_exceeded",
-    }:
-        return True
-
-    message = str(exc).lower()
-    return any(
-        marker in message
-        for marker in (
-            "finish_reason=length",
-            "finish_reason: length",
-            "max_tokens",
-            "max tokens",
-            "token cap",
-            "context length exceeded",
-            "context_length_exceeded",
-            "context window exceeded",
-            "context-window exceeded",
-            "context window overflow",
-            "context-window overflow",
-            "maximum context length exceeded",
-        )
-    )
-
-
-def _bounded_diagnostic(
-    exc: BaseException,
-    *,
-    stage: str,
-    total: int,
-    completed: int,
-) -> dict[str, Any]:
-    """Extract only safe, bounded failure metadata from runner exceptions."""
-
-    diagnostic: dict[str, Any] = {
-        "stage": stage,
-        "exception_type": type(exc).__name__,
-        "recovery_attempted": True,
-        "criteria_total": total,
-        "criteria_completed": completed,
-        "trace_id": None,
-        "requests": None,
-        "tool_calls": None,
-        "input_tokens": None,
-        "output_tokens": None,
-    }
-    allowed = {
-        "trace_id",
-        "finish_reason",
-        "requests",
-        "request_count",
-        "request_limit",
-        "tool_calls",
-        "tool_calls_limit",
-        "tool_calls_distinct",
-        "max_consecutive_repeat",
-        "top_repeated_tool_calls",
-        "distinct_ratio_window",
-        "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "cache_write_tokens",
-        "criteria_limit",
-        "criterion_index",
-        "criterion_chars",
-        "criterion_char_limit",
-        "criteria_chars",
-        "criteria_char_limit",
-        "context_chars",
-        "context_char_limit",
-        "evidence_chars",
-        "evidence_char_limit",
-        "total_evidence_chars",
-        "total_evidence_char_limit",
-        "finalizer_input_chars",
-        "finalizer_input_char_limit",
-        "criteria_unmet",
-        "criteria_returned",
-        "criteria_exhausted",
-        "criteria_completed",
-        "coverage_exact",
-    }
-
-    def merge(source: object, *, overwrite: bool = False) -> None:
-        if not isinstance(source, dict):
-            return
-        for key, value in source.items():
-            if key not in allowed:
-                continue
-            if key == "top_repeated_tool_calls":
-                # The one sanctioned non-scalar: a bounded list of
-                # {"signature", "count"} dicts (hashed signatures, no prompt or
-                # argument text). Copy it so the diagnostic never aliases the
-                # exception's own structure.
-                if not isinstance(value, list):
-                    continue
-                if overwrite or diagnostic.get(key) is None:
-                    diagnostic[key] = [
-                        dict(item) if isinstance(item, dict) else item for item in value
-                    ]
-                continue
-            if not isinstance(value, (str, int, float, bool)) and value is not None:
-                continue
-            if overwrite or diagnostic.get(key) is None:
-                diagnostic[key] = value
-
-    inherited = getattr(exc, "diagnostic", None)
-    merge(inherited, overwrite=True)
-    outcome = getattr(exc, "outcome", None)
-    outcome_diag = getattr(outcome, "diagnostic", None)
-    merge(outcome_diag)
-    merge(outcome)
-    merge(getattr(exc, "usage", None))
-    for key in allowed:
-        value = getattr(exc, key, None)
-        if isinstance(value, (str, int, float, bool)) and diagnostic.get(key) is None:
-            diagnostic[key] = value
-    return diagnostic
-
-
-def _validate_coverage(
-    result: dict[str, Any], expected: list[str], id_by_text: dict[str, str]
-) -> None:
-    """Fail closed unless the verdict covers every expected criterion — by criterion ID,
-    ORDER-INSENSITIVE (story 2948).
-
-    The old contract required an ordered full-list equality and so could not accept a
-    remainder-scoped or banked-union result; the reworked contract accepts the banked-union-
-    successor set as long as the returned criterion IDs, as a SET, cover the expected IDs.
-    Retry-on-missing is preserved: a record short of full coverage raises
-    ``CompletionRecoveryError`` naming the count so the caller can retry/backfill.
-    """
-    records = result.get("criteria")
-    if not isinstance(records, list):
-        raise CompletionRecoveryError(
-            "completion recovery finalizer omitted per-criterion coverage",
-            diagnostic={"criteria_total": len(expected), "criteria_returned": 0},
-        )
-    returned_ids: set[str] = set()
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        cid = record.get("criterion_id")
-        if not cid:
-            cid = id_by_text.get(str(record.get("criterion") or "").strip())
-        if cid:
-            returned_ids.add(str(cid))
-    expected_ids = {id_by_text[text] for text in expected}
-    if not expected_ids.issubset(returned_ids):
-        raise CompletionRecoveryError(
-            "completion recovery finalizer returned incomplete criterion coverage",
-            diagnostic={
-                "criteria_total": len(expected),
-                "criteria_returned": len(returned_ids),
-                "coverage_exact": False,
-            },
-        )
-    if any(not isinstance(record.get("met"), bool) for record in records):
-        raise CompletionRecoveryError(
-            "completion recovery finalizer returned an untyped criterion decision",
-            diagnostic={"criteria_total": len(expected), "coverage_exact": True},
-        )
-    verdict = str(result.get("verdict") or "").strip().upper()
-    if verdict == "PASS" and any(not record["met"] for record in records):
-        raise CompletionRecoveryError(
-            "completion recovery finalizer returned an unmet criterion with a PASS verdict",
-            diagnostic={
-                "criteria_total": len(expected),
-                "criteria_unmet": sum(not record["met"] for record in records),
-                "coverage_exact": True,
-            },
-        )
-
-
-def raise_completion_workflow_failure(
-    ticket_id: str,
-    result: _ex.RunResult,
-    failure_diagnostic: dict[str, Any] | None,
-    workflow_steps_recorded: int,
-    repo_root: str | None,
-) -> NoReturn:
-    """Finalize a failed completion workflow without widening dispatch policy."""
-
-    diagnostic = dict(failure_diagnostic or {})
-    diagnostic.setdefault("workflow_steps_recorded", workflow_steps_recorded)
-    diagnostic.setdefault("workflow_status", result.status)
-    if failure_diagnostic:
-        from rebar.llm import usage_log
-        from rebar.llm.gate_error_sidecar import emit_gate_error
-
-        emit_gate_error(
-            ticket_id,
-            "completion",
-            cause=result.error or "completion LLM tier failed",
-            evidence_ref="completion-verification/recovery",
-            diagnostic=diagnostic,
-            repo_root=repo_root,
-        )
-        message = (
-            result.error or "completion verification bounded recovery failed without a verdict"
-        )
-        # The primary run's repetition summary lands under aggregate_-prefixed
-        # keys; format_repetition reads bare names, so project before rendering.
-        repetition = {
-            key.removeprefix("aggregate_"): value
-            for key, value in diagnostic.items()
-            if key.startswith("aggregate_")
-        }
-        if all(
-            repetition.get(field) is not None
-            for field in (
-                "requests",
-                "tool_calls",
-                "tool_calls_distinct",
-                "max_consecutive_repeat",
-                "top_repeated_tool_calls",
-            )
-        ):
-            # distinct_ratio_window is None BY DESIGN below REPETITION_WINDOW
-            # tool calls; render a placeholder rather than dropping the line.
-            if repetition.get("distinct_ratio_window") is None:
-                repetition["distinct_ratio_window"] = "n/a(<window)"
-            message = f"{message}\n{usage_log.format_repetition(repetition)}"
-        raise CompletionRecoveryError(
-            message,
-            diagnostic=diagnostic,
-        )
-    raise LLMError(
-        "completion verification workflow did not produce a verdict: "
-        f"{result.error or 'LLM tier failed'}"
-    )
 
 
 class CompletionAgentStep(_ex.AgentStepRunner):
@@ -795,5 +418,6 @@ class CompletionAgentStep(_ex.AgentStepRunner):
 __all__ = [
     "CompletionAgentStep",
     "explicit_completion_criteria",
+    "physical_context_ceiling",
     "raise_completion_workflow_failure",
 ]

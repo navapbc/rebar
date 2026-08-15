@@ -6,11 +6,11 @@ import pytest
 
 from rebar.llm.errors import CompletionRecoveryError
 from rebar.llm.workflow.completion_banking import criterion_id_map
-from rebar.llm.workflow.completion_recovery import (
+from rebar.llm.workflow.completion_criteria import (
     _validate_coverage,
     _validate_recovery_inputs,
-    explicit_completion_criteria,
 )
+from rebar.llm.workflow.completion_recovery import explicit_completion_criteria
 
 
 def test_pass_like_verdict_cannot_hide_an_unmet_criterion() -> None:

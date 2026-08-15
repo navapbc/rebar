@@ -18,6 +18,7 @@ import pytest
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import CompletionRecoveryError, LLMBudgetExhaustedError, LLMError
 from rebar.llm.workflow import completion_banking as cb
+from rebar.llm.workflow import completion_criteria as cc
 from rebar.llm.workflow import completion_recovery as cr
 from rebar.llm.workflow.executor import StepContext
 
@@ -216,7 +217,7 @@ def test_validate_coverage_order_insensitive_success() -> None:
             {"criterion_id": ids["B crit"], "met": False},
         ],
     }
-    cr._validate_coverage(result, criteria, ids)  # no raise
+    cc._validate_coverage(result, criteria, ids)  # no raise
 
 
 def test_validate_coverage_retries_on_missing() -> None:
@@ -224,7 +225,7 @@ def test_validate_coverage_retries_on_missing() -> None:
     ids = cb.criterion_id_map(criteria)
     result = {"verdict": "FAIL", "criteria": [{"criterion_id": ids["A crit"], "met": True}]}
     with pytest.raises(CompletionRecoveryError, match="incomplete criterion coverage"):
-        cr._validate_coverage(result, criteria, ids)
+        cc._validate_coverage(result, criteria, ids)
 
 
 def test_merge_finalizer_backfills_remainder_from_bank(tmp_path) -> None:
@@ -236,7 +237,7 @@ def test_merge_finalizer_backfills_remainder_from_bank(tmp_path) -> None:
     # The finalizer scored only C (by verbatim text); A/B are backfilled from the bank.
     finalizer_result = {"verdict": "PASS", "criteria": [{"criterion": "C crit", "met": True}]}
     merged = cb.merge_finalizer_with_bank(finalizer_result, criteria, bank.all(), id_by_text=ids)
-    cr._validate_coverage(merged, criteria, ids)
+    cc._validate_coverage(merged, criteria, ids)
     by_text = {r["criterion"]: r["met"] for r in merged["criteria"]}
     assert by_text == {"A crit": True, "B crit": True, "C crit": True}
     assert merged["verdict"] == "PASS"

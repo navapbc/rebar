@@ -32,6 +32,7 @@ import pytest
 
 from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.errors import CompletionRecoveryError, UnretryableOutputError
+from rebar.llm.workflow import completion_criteria as _cc
 from rebar.llm.workflow import completion_recovery as _cr
 from rebar.llm.workflow.completion_recovery import CompletionAgentStep
 from rebar.llm.workflow.executor import StepContext
@@ -109,7 +110,7 @@ def test_c9f7_shape_proceeds_past_preflight_with_zero_runner_calls() -> None:
     criteria = [f"criterion {i}" for i in range(_C9F7_CRITERIA)]
     context = "x" * _C9F7_CONTEXT_CHARS
     # Must not raise under the resolved default verifier model.
-    _cr._validate_recovery_inputs(criteria, context, VERIFIER_DEFAULT_MODEL)
+    _cc._validate_recovery_inputs(criteria, context, VERIFIER_DEFAULT_MODEL)
 
 
 def test_physical_ceiling_refuses_an_oversized_haiku_context() -> None:
@@ -120,13 +121,13 @@ def test_physical_ceiling_refuses_an_oversized_haiku_context() -> None:
     # isolating the PHYSICAL ceiling as the sole cause of refusal.
     over = "x" * (400_000 + 1)
     with pytest.raises(CompletionRecoveryError) as caught:
-        _cr._validate_recovery_inputs(["c"], over, _HAIKU)
+        _cc._validate_recovery_inputs(["c"], over, _HAIKU)
     diag = caught.value.diagnostic
     assert diag["context_chars"] == 400_001
     assert diag["context_char_limit"] == 400_000
 
     # The same 400,001-char context is admitted under the default sonnet model.
-    _cr._validate_recovery_inputs(["c"], "x" * 400_000, _SONNET)
+    _cc._validate_recovery_inputs(["c"], "x" * 400_000, _SONNET)
 
 
 def test_a_shape_under_both_ceilings_is_admitted() -> None:
@@ -134,7 +135,7 @@ def test_a_shape_under_both_ceilings_is_admitted() -> None:
     false refusal)."""
     context = "x" * 100_000
     criteria = [f"criterion {i}" for i in range(10)]
-    _cr._validate_recovery_inputs(criteria, context, _SONNET)
+    _cc._validate_recovery_inputs(criteria, context, _SONNET)
 
 
 # --------------------------------------------------------------------------- #
