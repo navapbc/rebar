@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _topology_template import clone_topology_template
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "prepare_reclaim_backup.py"
 HELPER_PREFIX = "refs/reclaim-backup/"
@@ -82,11 +83,11 @@ def _clone(remote: Path, destination: Path, local_pin_tip: str) -> Path:
     return destination
 
 
-@pytest.fixture
-def backup_fixture(tmp_path: Path) -> BackupFixture:
-    seed = tmp_path / "seed"
-    remote = tmp_path / "source.git"
-    repo = tmp_path / "repo"
+def _build_backup_fixture(workspace: Path, topology: Path) -> BackupFixture:
+    seed = workspace / "seed"
+    remote = topology / "source.git"
+    repo = topology / "repo"
+    topology.mkdir()
     seed.mkdir()
     _git(seed, "init", "-q")
     _git(seed, "config", "user.name", "Backup Test")
@@ -139,6 +140,36 @@ def backup_fixture(tmp_path: Path) -> BackupFixture:
         annotated_tag_object=annotated_tag_object,
         blob_oid=blob_oid,
         local_pin_tip=diverged_tip,
+    )
+
+
+@pytest.fixture(scope="session")
+def _backup_fixture_template(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, BackupFixture]:
+    workspace = tmp_path_factory.mktemp("backup-fixture-template")
+    topology = workspace / "topology"
+    return topology, _build_backup_fixture(workspace, topology)
+
+
+@pytest.fixture
+def backup_fixture(
+    _backup_fixture_template: tuple[Path, BackupFixture],
+    tmp_path: Path,
+) -> BackupFixture:
+    template, fixture = _backup_fixture_template
+    topology = clone_topology_template(template, tmp_path / "backup-topology")
+    return BackupFixture(
+        remote=topology / "source.git",
+        repo=topology / "repo",
+        old_tip=fixture.old_tip,
+        ancestor_tip=fixture.ancestor_tip,
+        descendant_tip=fixture.descendant_tip,
+        diverged_tip=fixture.diverged_tip,
+        unrelated_tip=fixture.unrelated_tip,
+        annotated_tag_object=fixture.annotated_tag_object,
+        blob_oid=fixture.blob_oid,
+        local_pin_tip=fixture.local_pin_tip,
     )
 
 

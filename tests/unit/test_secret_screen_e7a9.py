@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _topology_template import clone_topology_template
 
 import rebar
 from rebar._commands import leaf
@@ -105,9 +107,7 @@ _BENIGN: tuple[str, ...] = (
 )
 
 
-@pytest.fixture
-def rebar_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    repo = tmp_path / "repo"
+def _init_secret_repo(repo: Path) -> None:
     repo.mkdir()
     for args in (
         ("init", "-q"),
@@ -115,9 +115,47 @@ def rebar_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         ("config", "user.name", "Test"),
     ):
         subprocess.run(["git", *args], cwd=repo, check=True)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
+
+
+@pytest.fixture(scope="session")
+def _secret_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("secret-repo-template")
+    repo = root / "repo"
+    from rebar import config as _config
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("REBAR_ROOT", str(repo))
+        patch.setenv("XDG_CONFIG_HOME", str(root / "xdg-empty"))
+        for variable in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+            patch.delenv(variable, raising=False)
+        _config.reset_config_cache()
+        try:
+            _init_secret_repo(repo)
+        finally:
+            _config.reset_config_cache()
     return repo
+
+
+@pytest.fixture
+def rebar_repo(
+    _secret_repo_template: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Path]:
+    repo = clone_topology_template(_secret_repo_template, tmp_path / "repo")
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    _config.reset_config_cache()
+    _ensures._reset_pending_cache()
+    try:
+        yield repo
+    finally:
+        _config.reset_config_cache()
+        _ensures._reset_pending_cache()
 
 
 @pytest.fixture

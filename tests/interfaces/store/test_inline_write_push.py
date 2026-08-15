@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _topology_template import clone_topology_template
 
 import rebar
 from rebar._store import push
@@ -29,10 +30,9 @@ def _git(*args: str, cwd: Path) -> None:
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
-@pytest.fixture
-def repo_with_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    origin = tmp_path / "origin.git"
-    repo = tmp_path / "work"
+def _build_repo_with_origin(root: Path) -> Path:
+    origin = root / "origin.git"
+    repo = root / "work"
     subprocess.run(
         ["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True, text=True
     )
@@ -41,9 +41,49 @@ def repo_with_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     _git("config", "user.email", "t@t.co", cwd=repo)
     _git("config", "user.name", "t", cwd=repo)
     _git("remote", "add", "origin", str(origin), cwd=repo)
-    monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
-    yield repo
+    return repo
+
+
+@pytest.fixture(scope="session")
+def _repo_with_origin_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    root = tmp_path_factory.mktemp("inline-origin-template")
+    repo = root / "work"
+    from rebar import config as _config
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("REBAR_ROOT", str(repo))
+        patch.setenv("XDG_CONFIG_HOME", str(root / "xdg-empty"))
+        for variable in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+            patch.delenv(variable, raising=False)
+        _config.reset_config_cache()
+        try:
+            _build_repo_with_origin(root)
+        finally:
+            _config.reset_config_cache()
+    return root
+
+
+@pytest.fixture
+def repo_with_origin(
+    _repo_with_origin_template: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Iterator[Path]:
+    root = clone_topology_template(_repo_with_origin_template, tmp_path / "inline-origin")
+    repo = root / "work"
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    _config.reset_config_cache()
+    _ensures._reset_pending_cache()
+    try:
+        yield repo
+    finally:
+        _config.reset_config_cache()
+        _ensures._reset_pending_cache()
 
 
 def _ahead(repo: Path) -> int:
