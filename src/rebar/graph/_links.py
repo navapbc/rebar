@@ -6,6 +6,7 @@ import glob as _glob
 import json
 import logging
 import os
+from collections.abc import Callable
 
 from rebar.reducer._sort import prefix_ts as _prefix_ts
 
@@ -149,11 +150,64 @@ def _write_link_event(
     )
 
 
+def _resolve_link_endpoints(
+    source_id: str, target_id: str, tracker_dir: str, relation: str
+) -> tuple[str, str, dict | None]:
+    """Validate the relation, resolve hierarchy promotion, compose the REDIRECT record.
+
+    The validation + promotion prologue of :func:`add_dependency`, extracted along
+    its existing seam so the caller stays under the complexity ceiling. Returns
+    ``(resolved_source, resolved_target, redirect_record)`` where the record is
+    ``None`` unless promotion moved an endpoint. Raises ValueError on an invalid
+    relation, a resolver error, or a redundant (ancestor-descendant) link.
+    """
+    if relation not in CANONICAL_RELATIONS:
+        canonical_list = ", ".join(sorted(CANONICAL_RELATIONS))
+        raise ValueError(f"invalid relation '{relation}': must be one of {canonical_list}")
+
+    # The relation is passed through so the resolver can gate promotion: only
+    # blocking deps (blocks/depends_on) are promoted to a comparable type-tier;
+    # all other relations link the exact pair.
+    hierarchy_result = resolve_hierarchy_link(source_id, target_id, tracker_dir, relation)
+
+    if "error" in hierarchy_result:
+        raise ValueError(hierarchy_result["error"])
+
+    if hierarchy_result.get("is_redundant"):
+        msg = (
+            f"ERROR: redundant link — {source_id} and {target_id} are in an "
+            "ancestor-descendant relationship; the hierarchy already expresses it"
+        )
+        logger.error(msg)
+        raise ValueError(msg)
+
+    resolved_source = str(hierarchy_result["resolved_source"])
+    resolved_target = str(hierarchy_result["resolved_target"])
+
+    redirect_record = None
+    if hierarchy_result.get("was_redirected"):
+        logger.warning(
+            "REDIRECT: %s\u2192%s promoted to %s\u2192%s",
+            source_id,
+            target_id,
+            resolved_source,
+            resolved_target,
+        )
+        redirect_record = {
+            "redirected": True,
+            "original": {"source": source_id, "target": target_id},
+            "resolved": {"source": resolved_source, "target": resolved_target},
+        }
+    return resolved_source, resolved_target, redirect_record
+
+
 def add_dependency(
     source_id: str,
     target_id: str,
     tracker_dir: str,
     relation: str = "blocks",
+    *,
+    on_outcome: Callable[[dict], None] | None = None,
 ) -> dict | None:
     """Add a dependency from source_id to target_id with cycle check.
 
@@ -170,52 +224,24 @@ def add_dependency(
     because rebar-mcp speaks MCP-over-stdio and a stray print would corrupt the
     JSON-RPC stream. Returning it lets those callers report the substitution instead
     of silently recording a different edge (bug 1803-df54-18bb-4881).
+
+    ``on_outcome`` (ticket 6bda-9d58-8546-4638) is the PARALLEL wrote-vs-noop channel:
+    the ``dict | None`` return above is a consumed contract (REDIRECT record or not)
+    that cannot distinguish a fresh write from the idempotent no-op, so when a
+    callable is given it is invoked exactly once, just before return, with
+    ``{"wrote", "source", "target", "relation"}`` (resolved endpoints). The return
+    value's type and meaning are unchanged.
     """
-    # Step 0: Validate relation grammar before touching disk
-    if relation not in CANONICAL_RELATIONS:
-        canonical_list = ", ".join(sorted(CANONICAL_RELATIONS))
-        raise ValueError(f"invalid relation '{relation}': must be one of {canonical_list}")
-
-    # Step 1: Resolve hierarchy. The relation is passed through so the resolver
-    # can gate promotion: only blocking deps (blocks/depends_on) are promoted to
-    # a comparable type-tier; all other relations link the exact pair.
-    hierarchy_result = resolve_hierarchy_link(source_id, target_id, tracker_dir, relation)
-
-    if "error" in hierarchy_result:
-        raise ValueError(hierarchy_result["error"])
-
-    if hierarchy_result.get("is_redundant"):
-        msg = (
-            f"ERROR: redundant link — {source_id} and {target_id} are in an "
-            "ancestor-descendant relationship; the hierarchy already expresses it"
-        )
-        logger.error(msg)
-        raise ValueError(msg)
-
-    resolved_source = str(hierarchy_result["resolved_source"])
-    resolved_target = str(hierarchy_result["resolved_target"])
-    was_redirected = bool(hierarchy_result.get("was_redirected"))
-
-    # Compose the machine-readable REDIRECT record now, but DEFER emitting it to
-    # stdout until AFTER the durable LINK commit below (bug hulky-bag-aisle). The
-    # emit previously ran here, before the write \u2014 so a reader closing the pipe
-    # early (`rebar link ... | head`) raised BrokenPipeError and aborted the
-    # function before it committed, silently losing the link (exit status masked
-    # by the pipe). Durable data first, user-facing chatter second.
-    redirect_record = None
-    if was_redirected:
-        logger.warning(
-            "REDIRECT: %s\u2192%s promoted to %s\u2192%s",
-            source_id,
-            target_id,
-            resolved_source,
-            resolved_target,
-        )
-        redirect_record = {
-            "redirected": True,
-            "original": {"source": source_id, "target": target_id},
-            "resolved": {"source": resolved_source, "target": resolved_target},
-        }
+    # Steps 0–1: validate relation grammar + resolve hierarchy promotion, composing
+    # the machine-readable REDIRECT record — but DEFER emitting it to stdout until
+    # AFTER the durable LINK commit below (bug hulky-bag-aisle). The emit previously
+    # ran here, before the write — so a reader closing the pipe early
+    # (`rebar link ... | head`) raised BrokenPipeError and aborted the function
+    # before it committed, silently losing the link (exit status masked by the
+    # pipe). Durable data first, user-facing chatter second.
+    resolved_source, resolved_target, redirect_record = _resolve_link_endpoints(
+        source_id, target_id, tracker_dir, relation
+    )
 
     def _emit_redirect() -> None:
         if redirect_record is not None:
@@ -270,10 +296,17 @@ def add_dependency(
                 f"cannot create depends_on link — target ticket '{target_id}' is closed"
             )
 
+    def _report_outcome(wrote: bool) -> None:
+        if on_outcome is not None:
+            on_outcome(
+                {"wrote": wrote, "source": source_id, "target": target_id, "relation": relation}
+            )
+
     if _is_active_link(source_id, target_id, relation, tracker_dir):
         # Idempotent no-op: the link already exists. Nothing durable to protect, so
         # surface the redirect record (parity with the pre-fix behavior) and return.
         _emit_redirect()
+        _report_outcome(False)
         return redirect_record
 
     _write_link_event(source_id, target_id, relation, tracker_dir)
@@ -287,6 +320,7 @@ def add_dependency(
     # stdout. A BrokenPipeError here propagates loudly (exit non-zero) but the link
     # is already persisted, satisfying the write-or-fail-loudly invariant.
     _emit_redirect()
+    _report_outcome(True)
     return redirect_record
 
 

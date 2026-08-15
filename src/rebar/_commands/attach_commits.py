@@ -28,5 +28,14 @@ def attach_commits_cli(args: list[str]) -> int:
         result = rebar.attach_commits(ticket_id, shas)
     except RebarError as exc:  # surfaced as a clean CLI error, not a traceback
         raise CommandError(f"Error: {exc}", returncode=1) from None
-    print(f"ATTACHED: {result['attached']} commit(s) to {result['ticket_id']}")
+    # Normalized confirmation (was `ATTACHED: <n> commit(s) to <id>`; both data —
+    # the count and the resolved id — are preserved). Ticket 6bda-9d58-8546-4638.
+    from rebar._commands import _confirm
+
+    _confirm.emit(
+        "commits-attached",
+        result["ticket_id"],
+        f"{result['attached']} commit(s)",
+        f"commits attached to {result['ticket_id']}: {result['attached']}",
+    )
     return 0

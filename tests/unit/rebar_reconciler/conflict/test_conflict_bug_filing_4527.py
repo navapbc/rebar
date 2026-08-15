@@ -94,7 +94,11 @@ def test_files_bug_with_detected_by_and_dedup_tag(mod, tmp_path):
     runner = FakeRunner(
         {
             ("list",): (0, "[]", ""),
-            ("create",): (0, "Created ticket alias (aaaa-1111-2222-3333): title\n", ""),
+            ("create",): (
+                0,
+                '{"id": "aaaa-1111-2222-3333", "alias": "alias", "title": "title"}\n',
+                "",
+            ),
         }
     )
     result = mod.file_conflict_bug_ticket(_cli(tmp_path), _pending(), runner=runner, now_epoch=NOW)
@@ -210,7 +214,7 @@ def test_dedup_search_failure_falls_back_to_create(mod, tmp_path):
     runner = FakeRunner(
         {
             ("list",): (1, "", "list exploded"),
-            ("create",): (0, "Created ticket alias (bbbb-1111-2222-3333): t\n", ""),
+            ("create",): (0, '{"id": "bbbb-1111-2222-3333", "alias": "alias", "title": "t"}\n', ""),
         }
     )
     result = mod.file_conflict_bug_ticket(_cli(tmp_path), _pending(), runner=runner, now_epoch=NOW)

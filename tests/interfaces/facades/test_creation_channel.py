@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -48,14 +49,23 @@ def _create_data(rebar_repo: Path, ticket_id: str) -> dict:
     return json.loads(matches[0].read_bytes())["data"]
 
 
+_CANONICAL_ID_RE = re.compile(r"\b[0-9a-f]{4}(?:-[0-9a-f]{4}){3}\b")
+
+
 def _extract_id(stdout: str) -> str:
-    """Last non-empty stdout line, unwrapped from a ``{"id": ...}`` JSON line if present."""
-    last = [ln for ln in stdout.splitlines() if ln.strip()][-1].strip()
-    try:
-        obj = json.loads(last)
-        return obj["id"] if isinstance(obj, dict) and "id" in obj else last
-    except (json.JSONDecodeError, TypeError):
-        return last
+    """Ticket id from CLI stdout: JSON ``{"id": ...}`` line, else the canonical
+    id embedded in the one-line mutation confirmation."""
+    for ln in reversed([ln.strip() for ln in stdout.splitlines() if ln.strip()]):
+        try:
+            obj = json.loads(ln)
+        except json.JSONDecodeError:
+            obj = None
+        if isinstance(obj, dict) and "id" in obj:
+            return obj["id"]
+        m = _CANONICAL_ID_RE.search(ln)
+        if m:
+            return m.group(0)
+    raise AssertionError(f"could not parse ticket id from: {stdout!r}")
 
 
 def _cli_id(*args: str) -> str:

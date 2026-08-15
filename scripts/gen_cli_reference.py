@@ -174,6 +174,32 @@ def render() -> str:
         "spellings are identified below as compatibility aliases."
     )
     lines.append("")
+    lines.append("## Mutation confirmations and global output flags")
+    lines.append("")
+    lines.append(
+        "Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, "
+        "`edit`, `tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, "
+        "`attach-commits`, `session-log`, `transition`, `reopen`, `claim`) confirms its "
+        "result on stdout with one kubectl-style line: `<past-tense-verb> <args-summary>` "
+        "on a successful write, `no change: <reason>` on an idempotent no-op (exit 0 in "
+        "both cases). Two global flags are extracted for these verbs at the top-level "
+        "router (position-independent within the verb's arguments; tokens after `--` are "
+        "never consumed):"
+    )
+    lines.append("")
+    lines.append(
+        "- `--quiet` / `-q` — suppress the text confirmation line only; errors, exit "
+        "codes, JSON output, and `link`'s machine-readable REDIRECT record are untouched."
+    )
+    lines.append(
+        "- `--output <text|json>` / `-o <mode>` — verbs that already accepted `--output` "
+        "(`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON "
+        "shapes unchanged; the newly-covered verbs emit one uniform mutation envelope "
+        '`{"outcome": "<verb-past>"|"noop", "subject": <id/edge>, "detail": <str>}` — '
+        "**pre-1.0 UNSTABLE**: the envelope's field set may still change before 1.0. "
+        "`--quiet` together with `--output json` still prints the JSON."
+    )
+    lines.append("")
 
     # ── Help-backed subcommands ──────────────────────────────────────────────
     subs = sorted(_help.known_subcommands())

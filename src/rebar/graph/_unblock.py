@@ -5,7 +5,7 @@ that ``ticket-transition.sh`` subprocessed for ``--batch-close``). Uses
 ``rebar.reducer`` directly instead of the importlib-loaded engine reducer. The
 ordering contract is load-bearing for byte-parity: ``reduce_all_tickets`` iterates
 ``sorted(os.listdir(...))`` so ``newly_unblocked`` (hence the comma-joined
-``UNBLOCKED: a,b,c`` line and the JSON array) is deterministic.
+``unblocked: a,b,c`` confirmation segment and the JSON array) is deterministic.
 
 A ticket is *newly* unblocked when it is open, has at least one blocker, was NOT
 already unblocked before the batch close, and all its direct blockers

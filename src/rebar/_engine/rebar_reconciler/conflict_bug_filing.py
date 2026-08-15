@@ -181,11 +181,17 @@ def file_conflict_bug_ticket(
         tag,
         "--detected-by",
         _DETECTED_BY,
+        "--output",
+        "json",
     ]
     if parent_id:
         cmd.extend(["--parent", parent_id])
     rc, stdout, _stderr = runner(cmd)
     if rc != 0:
         return ""
-    lines = [ln for ln in stdout.splitlines() if ln.strip()]
-    return lines[-1] if lines else ""
+    # Parse create's stable JSON shape instead of scraping text lines — the text
+    # confirmation is a human channel and not a parse target (ticket 6bda-9d58-8546-4638).
+    try:
+        return str(json.loads(stdout)["id"])
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return ""
