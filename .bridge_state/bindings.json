@@ -785,9 +785,31 @@
       "updated_at": "2026-08-15T14:51:14Z"
     },
     "05b8-4efe-8d58-4c27": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "The scheduled **Reconcile Bridge** GitHub Action (and the Reconciler Heartbeat Canary) fails every run on live `navapbc/rebar` since 2026-08-15T02:39Z. ACLI aborts the inbound fetch with:\n\n`\u2717 Error: failed to parse JQL query: the value 'leg' does not exist for the field 'project'` on JQL `project = LEG AND status != \"Done\"`, so `reconcile_once` raises and the pass exits 1.\n\n## Root cause\n\nThe live `tickets` branch's `.bridge_state/projects.json` was overwritten with the multi-project **rehearsal fixture** mapping \u2014 keys `LEG`/`ONE`/`TWO`/`ZERO` (repos `rebar-legacy`/`rebar`/`rebar-web,rebar-api`/none), `legacy_default: null` \u2014 none of which exist in the live REB Jira Cloud. The story-1734 multi-project fan-out (`fetcher._build_snapshot`: `project_list = list(read_projects().keys()) or [_query_project]`) issues `jql_active(proj)` for EVERY mapped key; the first, `project = LEG \u2026`, is syntactically valid (passes `_PROJECT_KEY_RE`) but Jira rejects it because project LEG does not exist \u2192 ACLI exit 1 \u2192 whole pass fails.\n\nThe corruption landed as ad-hoc `git commit` calls on the live tickets branch (`9f1b2cff98` \"commit mapping\" + `275bd7507e` \"scrub\", authored `t <t@t.co>` \u2014 the test-fixture git identity) at 2026-08-14T19:18-0700 (=08-15T02:18Z), 21 min before the first consistent failure. The known-good green-run state (commit `0d9f4b8459`) was `{legacy_default: \"REB\", projects: {}}` \u2014 empty projects \u2192 fan-out falls back to the single configured project REB.\n\n## Acceptance Criteria\n\n- [ ] The live `origin/tickets:.bridge_state/projects.json` is restored to the canonical\n  single-project state `{\"version\": 1, \"legacy_default\": \"REB\", \"projects\": {}}` (byte-identical\n  to the ensure-registry seed), removing the nonexistent LEG/ONE/TWO/ZERO keys.\n- [ ] A live `rebar bridge preview` against REB runs without the JQL parse error (no\n  `project = LEG` query is issued) \u2014 verified by command output.\n- [ ] The next scheduled Reconcile Bridge run completes green (verified via `gh run view`).\n\n## Testing\n\n- Reproduce the fan-out locally: `python3 -c \"from rebar_reconciler.fetcher import jqls_for; print(jqls_for('LEG'))\"`\n  shows the failing `project = LEG AND status != \"Done\"` query.\n- Verify the repair with `rebar bridge preview` (read-only; no Jira writes) against live REB.\n- Confirm the scheduled `Reconcile Bridge` workflow run goes green.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Reconcile Bridge broken: rehearsal projects.json (LEG/ONE/TWO/ZERO) leaked to live tickets branch"
+      },
       "created_at": "2026-08-15T14:51:14Z",
       "jira_id": "4588844",
       "jira_key": "REB-3007",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:18Z"
     },
@@ -1248,9 +1270,17 @@
       "updated_at": "2026-08-15T14:51:47Z"
     },
     "0b55-8202-e14a-4b06": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nOperator direction (2026-08-15): approach chauvinist-subsolar-arctichare (19ea-29af-ebb3-410b) as an EXPERIMENT. The auto-resume design (adolescent-evilminded-locust) re-runs the whole verifier and relies on the verdict cache to skip credited criteria; it passes NO information about WHERE the failed attempt already searched. Question to answer empirically: does handing a resumption the prior attempt's search frontier as an EXCLUSION list (\"already searched, found nothing: ...\") measurably reduce re-search overlap and steps-to-verdict? Blocker noted at design time: verifier telemetry does not carry argument-level tool-call transcripts \u2014 the PoC must capture them harness-side.\n\n## Protocol (rapid PoC \u2014 throwaway harness, no production code)\n1. Corpus: >=2 real CLOSED tickets with large surfaces (description near the 8000-char cap, many prose ACs/comments). Run read-only (--source local, never signs); disable/bypass the verdict cache in-harness so exhaustion is reproducible.\n2. Transcript capture: wrap the verifier's tool executor in-harness (monkeypatch at the workflow seam) to log every tool call with full arguments (file paths read, grep patterns, dirs listed) per criterion.\n3. Force exhaustion: run attempt 1 with a deliberately REDUCED step budget (harness override) so it FAILs insufficiency-only with a partial bank; keep the transcript.\n4. Extract frontier: from the transcript, derive per-criterion searched-set (paths read, patterns tried) and a compact exclusion summary (<=1500 chars).\n5. Resume two ways with the same reduced budget: (A) CONTROL \u2014 plain re-run (locust behavior: cache-seeded only; re-enable cache for both arms); (B) TREATMENT \u2014 same, plus the exclusion summary injected into the verifier prompt.\n6. Metrics table (the deliverable): re-search overlap rate (tool calls in attempt 2 repeating attempt-1 arguments) A vs B, newly-banked PASSes per step A vs B, attempts-to-clean-close A vs B, token cost delta.\n\n## Acceptance criteria\n- [ ] Harness exists in the experiment worktree (throwaway; NOT pushed to Gerrit; no src/rebar changes).\n- [ ] Argument-level transcripts captured for >=2 large tickets across forced-exhaustion + both resume arms.\n- [ ] Metrics table posted as a comment on THIS ticket and on chauvinist-subsolar-arctichare: overlap rate, PASS-per-step, attempts, cost.\n- [ ] Verdict comment: does the exclusion list measurably beat plain cache-seeded resume? Include a go/no-go recommendation and what telemetry production would need to carry.\n- [ ] No store writes beyond ticket comments; no signatures minted (--source local only).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Experiment: search-frontier exclusion-list resumption (arctichare PoC)"
+      },
       "created_at": "2026-08-15T14:51:48Z",
       "jira_id": "4588845",
       "jira_key": "REB-3008",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:51Z"
     },
@@ -2853,9 +2883,17 @@
       "updated_at": "2026-08-15T14:53:08Z"
     },
     "19ea-29af-ebb3-410b": {
+      "baseline": {
+        "assignee": null,
+        "description": "Steering an auto-resumed completion verification away from already-searched places (negative frontier, advisory not hard-exclusion to avoid permanent blind spots) and toward where credited evidence was found (positive frontier) requires per-call argument-level transcript telemetry (paths read, search queries run) that the verifier workflow does not currently capture. Two-part capability: (1) transcript capture in the LLM runner telemetry; (2) deterministic frontier-digest extractor + resumption prompt injection, scoped within a single close invocation (same pinned ref), never persisted cross-run. Parent: adolescent-evilminded-locust implements unsteered auto-resume (proven sufficient live via 8d74 re-close 2026-08-14); this idea upgrades it if unsteered resumption proves insufficient at scale.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Search-frontier handoff for completion-verifier resumptions (needs argument-level tool-call transcript)"
+      },
       "created_at": "2026-08-15T14:53:09Z",
       "jira_id": "4588846",
       "jira_key": "REB-3009",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:11Z"
     },
@@ -7362,9 +7400,31 @@
       "updated_at": "2026-08-15T14:56:44Z"
     },
     "3b87-66ed-9c0f-4d73": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Summary\n\n`resolve_project` (`src/rebar/_engine/rebar_reconciler/projects_store.py`) collapses the tri-state `bridge_project` field's **`None` \"absent/legacy\" sentinel** into the same branch as the explicit `\"\"` \"never-sync\" value, so a legacy ticket (no `bridge_project` flag) is **suppressed from outbound create** instead of routing to `legacy_default`. This is the direct cause of live DC rehearsal scenario 4 (`test_absent_project_resolves_to_legacy_default`) failing with `assert 0 == 1` \u2014 the legacy-default ticket never lands in the legacy project.\n\n## Proven root cause (rebar-debug Phase 1 complete)\n\n`create_ticket` with no `bridge_project` stores `bridge_project: None` (present-but-null, seeded by the reducer `_state.py:58`), NOT an absent key. `resolve_project`'s `if not value: return None` lumps that `None` absent/legacy sentinel with `\"\"` never-sync, and its `if \"bridge_project\" not in ticket` branch is dead because the reducer ALWAYS materializes the key \u2014 so `legacy_default` never fires for the cohort it exists to serve.\n\nThe authoritative **cef7 tri-state contract** (`src/rebar/reducer/_state.py:53-58`) states `bridge_project` is seeded `None` as the deliberate \"absent/legacy\" sentinel; `\"\"` is explicit never-sync; a non-empty string is the sync target. `None` must route to `legacy_default`. Runtime-confirmed: `resolve_project({\"bridge_project\": None}, ld=\"LEG\")` \u2192 `None` (vs. explicit `\"LEG\"` \u2192 `\"LEG\"`); the outbound create gate (`outbound_differ.py:584`) `if not target: return` then drops the create. Confirmed original (not regression) via `git blame a22e6f3642`.\n\n## Fix plan\n\nRewrite `resolve_project` to honor the tri-state explicitly (and update its docstring to document the present-but-null `None` sentinel):\n\n    value = ticket.get(\"bridge_project\")\n    if value is None:      # absent key OR the None absent/legacy sentinel\n        return mapping.legacy_default or None\n    if value == \"\":        # explicit never-sync\n        return None\n    return value\n\n## Blast radius / caller-dependency sweep (gate CLEARED)\n\nSingle production caller: `outbound_differ.py:584` \u2014 the malfunctioning create gate itself, which expects the contract-correct target. No existing test pins `None`->None; all existing tests (`{}`->legacy_default, `\"\"`->None, empty-legacy->None) stay green. The only behavior change is the previously-untested `{\"bridge_project\": None}` case, changing toward the cef7 contract. The outbound create is double-guarded \u2014 it fires only when the mapping is seeded AND `legacy_default` is both set and a key in the mapping \u2014 i.e. exactly the designed cef7 legacy migration. No behavioral dependency on the buggy path found; gate clears without escalation.\n\n## Testing\n\n- Held-out RED unit test added to `tests/unit/rebar_reconciler/test_projects_store_heldout.py`,\n  verified RED before the fix and GREEN after; teeth proven by a defect-seeded mutation that\n  returns it to RED. Proof command:\n  `pytest tests/unit/rebar_reconciler/test_projects_store_heldout.py -q`.\n- Full projects-store + ensure-mapping suites stay green:\n  `pytest tests/unit/rebar_reconciler/test_projects_store_happy.py tests/unit/rebar_reconciler/test_projects_store_heldout.py tests/integration/test_ensure_project_mapping.py -q`.\n- Live DC rehearsal proven end-to-end in CI via the `Live External Integration` workflow:\n  `pytest tests/external/live_jira_dc/test_multi_project_rehearsal.py` with `REBAR_RUN_EXTERNAL=1`.\n\n## Acceptance Criteria\n\n- [x] Held-out RED unit test `resolve_project({\"bridge_project\": None}, ld=X) == X` seen RED\n      before the fix and GREEN after, teeth verified by defect-seeded mutation\n      (`pytest tests/unit/rebar_reconciler/test_projects_store_heldout.py -q`).\n- [x] All existing `tests/unit/rebar_reconciler/test_projects_store_*.py` and\n      `tests/integration/test_ensure_project_mapping.py` stay green (command above).\n- [x] Scenario 4 strengthened with a meaningful `{legacy} <= _planned_projects(preview)`\n      assertion, replacing the vacuous empty-plan `_assert_scope`.\n- [x] A successful LIVE DC rehearsal run of `test_multi_project_rehearsal.py` (all scenarios\n      incl. scenario 4) passing in the CI `Live External Integration` workflow \u2014 proven\n      end-to-end, not merely built.\n- [x] Landed through Gerrit at `LLM-Review +1` AND `Verified +1`.\n\n## Evidence (all AC met)\n\n- RED->GREEN: `test_resolve_project_null_sentinel_routes_to_legacy_default` seen RED\n  (`assert None == 'REB'`), GREEN after fix; mutation (reintroduce `if not value`) returns RED.\n- 15 projects-store/ensure + 21 outbound unit tests green; lint + typecheck green.\n- Scenario 4 strengthened with `legacy in _planned_projects(preview)`.\n- Live DC run 31879125045 (`jira DC harness smoke`): 73 passed, 1 xfailed incl. scenario 4.\n- Gerrit 1810: LLM-Review +1 + Verified +1, MERGED (0551f5aa8a).",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "resolve_project collapses None absent/legacy sentinel into never-sync, suppressing legacy-default outbound create"
+      },
       "created_at": "2026-08-15T14:56:44Z",
       "jira_id": "4588847",
       "jira_key": "REB-3010",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:49Z"
     },
@@ -7471,9 +7531,17 @@
       "updated_at": "2026-08-15T14:56:55Z"
     },
     "3bfc-b16c-c3c4-4e55": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nSurfaced immediately AFTER fixing the completion-verifier observed_upsert kwarg TypeError (ticket 9c7c-4844-f53c-4eac, Gerrit 1805, merged). With the signature drift fixed, the completion verifier now runs to a verdict on the bedrock arm, and a DIFFERENT, pre-existing behavioral assertion in the same test fails:\n\n    tests/external/test_completion_banking_behavior_0707.py::test_dense_completion_banks_and_terminates_in_two_of_three_trials\n\nLive run 31870102530 ('Live External Integration', bedrock arm 94977302870): 1 failed, 17 passed. The failure:\n\n    AssertionError: dense completion banking successes=0/3\n    trials = [{'banked': 5, 'verdict': 'PASS', 'error': None, 'calls_at_bank': [11, 11, 11, 11, 11], 'evidence_calls': 11}, ...x3]\n\nAll 3 trials reached a valid PASS verdict with error=None (the TypeError is gone), banking all 5 criteria \u2014 but `_bounded_bank_gaps` (test helper) requires each criterion's FIRST tool-sourced bank to fall within <=3 filesystem-evidence calls of the previous (`all(gap <= 3)`). On this run the bedrock model (bedrock:us.anthropic.claude-sonnet-4-6) gathered all 11 evidence-tool calls up front, then bulk-banked all 5 criteria at once (calls_at_bank=[11,11,11,11,11] -> gaps=[11,0,0,0,0], first gap 11 > 3), in all 3 trials. So 0/3 met the incremental-banking oracle; the test needs >=2/3.\n\n## Why this is distinct\n\n- This test is bedrock-PINNED (`_MODEL = 'bedrock:us.anthropic.claude-sonnet-4-6'`, decorated `@skip_unless_provider('bedrock')`), so it only runs on the bedrock arm; the anthropic/openai arms skip it. It is the sole oracle for incremental/bounded banking.\n- The 9c7c fix (thread upsert **kwargs through the observation stub) only OBSERVES banking; it does not change model behavior or the banking counters. The failing assertion is about WHEN the model interleaves the record tool with evidence gathering.\n\n## Root cause (to investigate)\n\nEither (a) genuine model-behavior variance/flakiness on bedrock (the model now front-loads evidence gathering and bulk-banks, so the <=3 bounded-gap oracle no longer holds on bedrock), or (b) a real regression in the banking prompt / bounded-search interleaving that suppresses incremental banking. Investigate whether the bulk-bank pattern is stable across reruns (flaky vs deterministic), compare to the last known-green bedrock run, and inspect the completion-verifier banking prompt / bounded-fallback for changes that could have shifted the model from incremental to bulk banking. Decide whether to fix the interleaving behavior or relax/rescope the `_bounded_bank_gaps` oracle for bedrock.\n\n## Acceptance Criteria\n\n- [ ] Determine whether the bulk-bank pattern is deterministic or flaky on the bedrock arm (rerun evidence).\n- [ ] Either restore incremental banking (gaps <= 3) so >=2/3 trials pass, or rescope/relax the oracle with a documented rationale.\n- [ ] test_dense_completion_banks_and_terminates_in_two_of_three_trials passes on the bedrock arm of Live External Integration.\n\n## Testing\n\n- Repeated workflow_dispatch of 'Live External Integration' (bedrock arm) to characterize variance.\n- pytest -m 'external' tests/external/test_completion_banking_behavior_0707.py on bedrock creds.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Bedrock completion eval: dense banking not incremental (_bounded_bank_gaps 0/3)"
+      },
       "created_at": "2026-08-15T14:56:56Z",
       "jira_id": "4588848",
       "jira_key": "REB-3011",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:58Z"
     },
@@ -10044,9 +10112,17 @@
       "updated_at": "2026-08-15T14:58:59Z"
     },
     "4f7a-62d1-c754-4f53": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n\nThe Reconciler Heartbeat Canary (reconcile-bridge-canary.yml) detected that reconcile-bridge.yml has not completed a successful run within the 4-hour window (bridge cadence: hourly). Inspect the Actions tab.\n\n## Expected vs Actual\n\n- **Expected:** reconcile-bridge.yml completes a successful run at least once\n  every 4h.\n- **Actual:** Reconciler unhealthy \u2014 canonical status is FAILED.\n- **First red canary run:** 2026-08-15T04:09:12Z\n- **Detected at:** 2026-08-15T06:05:14Z (second consecutive red canary run)\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/31868526726\n\n## Acceptance Criteria\n\n- [ ] reconcile-bridge.yml is running and its most recent run succeeded.\n- [ ] Root cause identified (workflow disabled / runner outage / acli auth /\n      Jira creds / reconciler error) and addressed.\n\nThis ticket auto-closes when the next successful reconcile-bridge run is detected.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "[heartbeat-canary] reconcile-bridge stale (2026-08-15T05:33:33Z) \u2014 no success within 4h"
+      },
       "created_at": "2026-08-15T14:58:59Z",
       "jira_id": "4588849",
       "jira_key": "REB-3012",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:02Z"
     },
@@ -10097,9 +10173,31 @@
       "updated_at": "2026-08-15T14:59:06Z"
     },
     "5014-d0c6-5bbe-47fb": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nThe READ-ONLY, S3-backed live **Jira Cloud** multi-project bridge rehearsal was dropped when the effort pivoted to Jira Data Center. Sibling story 368f landed the DC harness (git/file-backed, throwaway low-volume projects). Two dimensions DC cannot exercise remain uncovered: the **S3 store backend** and **real Cloud ticket volume/diversity** across the two real Cloud projects **REB** and **DIG**. This story restores that coverage \u2014 strictly read-only against Cloud.\n\n## Approach\nAdd a new opt-in live suite `tests/external/live_jira_cloud_s3/` that drives the reconciler against REB + DIG over an ISOLATED, S3-backed copy of the ticket store, using ONLY read paths proven non-mutating on Jira:\n- **Inbound fetch** via `rebar_reconciler.fetcher.compute_snapshot(...)` \u2014 the\n  read-only counterpart of `fetch_snapshot` (writes nothing; only issues JQL\n  searches). The store's `projects.json` mapping drives a per-project JQL fan-out\n  (`fetcher._build_snapshot`), so a REB+DIG mapping fetches both projects.\n- **`rebar.bridge_preview(...)`** \u2014 dry-run (`Mode.DRY_RUN` \u2192 `MODE_CAPS=0` \u2192\n  `persist=False`), so no leaf applier runs and nothing is written to Jira or the\n  store.\nStructural read-only enforcement: an autouse fixture monkeypatches every mutating method on the Cloud transport class (`AcliClient.create_issue/update_issue/ add_comment/add_label/remove_label/set_entity_property/delete_issue/ transition_issue_by_name/unassign_issue/set_parent/update_priority/ update_issuetype/update_comment/delete_comment/delete_issue_link`) to raise, so the suite is STRUCTURALLY unable to invoke an outbound Jira mutation; read methods are untouched. Every Jira-touching scenario also asserts per-project issue counts are identical before and after (belt-and-braces). The store is a FRESH, isolated store (never the production remote): its ONLY git remote is a throwaway `s3://<bucket>/<unique-prefix>` wired via `git-remote-s3`, with `REBAR_SYNC_PUSH=off`. Store CONTENT is irrelevant to a read-only fetch (volume comes from live Jira), so a minimal store is the correct, lighter isolation boundary \u2014 it cannot reach production. The prefix is deleted in teardown. Avoiding the prior failure: map ONLY real, reachable projects (REB, DIG). One negative-control scenario maps an UNKNOWN key and asserts the fetch FAILS CLOSED (raises), never silently succeeds \u2014 the documented correct behaviour.\n\n## Scope\n- `tests/external/live_jira_cloud_s3/conftest.py` (new) \u2014 gating sentinel\n  `_live_jira_ready` (earns `jira_live`), the isolated S3 store fixture, the\n  structural read-only guard fixture, and the throwaway-prefix teardown.\n- `tests/external/live_jira_cloud_s3/test_multi_project_rehearsal.py` (new) \u2014 the\n  read-only scenarios below.\n- `tests/external/live_jira_cloud_s3/README.md` (new) \u2014 runbook + env vars.\n- `.github/workflows/external-integration.yml` (edit) \u2014 a new manually-dispatched\n  `jira-cloud-s3-rehearsal` job running `pytest -m external\n  tests/external/live_jira_cloud_s3 -q -rA`, plus `--ignore=tests/external/\n  live_jira_cloud_s3` on the existing `external` job so it is not double-collected.\nThis is a test/CI-only change; no `src/rebar` runtime code changes.\n\n## Testing\nThis ticket IS a live test suite. Scenarios (all read-only):\n1. `test_one_store_maps_both_projects` \u2014 the S3 store maps REB and DIG with the\n   expected repo lists; its only remote is the throwaway S3 prefix.\n2. `test_inbound_fetch_pulls_both_projects` \u2014 `compute_snapshot` with REB+DIG mapped\n   yields keys from BOTH projects at real volume (each project > 0; total in the\n   thousands), every key \u2208 {REB,DIG} (per-project attribution via key prefix).\n3. `test_fetch_is_scoped_per_project` \u2014 REB-only mapping \u2192 snapshot \u2286 REB and zero\n   DIG; DIG-only \u2192 \u2286 DIG and zero REB (mapping scopes the fetch; no contamination).\n4. `test_bridge_preview_read_only_and_scoped` \u2014 `bridge_preview` plan targets only\n   REB/DIG; per-project Jira counts identical before/after.\n5. `test_s3_store_roundtrips_with_mapping_intact` \u2014 push the store's `tickets`\n   branch to the S3 prefix, clone it back, assert the REB+DIG mapping survives.\n6. `test_unknown_project_fails_closed` \u2014 an unknown mapped key makes `compute_snapshot`\n   RAISE (fail-closed), never a silent empty fetch.\n7. `test_read_only_guard_is_real` \u2014 calling a patched mutator raises, proving the\n   structural guard is not vacuous.\nLocal validation: `ruff check`, `ruff format --check`, `mypy` on the new files; `pytest --collect-only`; then a real green `REBAR_RUN_EXTERNAL=1 pytest -m external tests/external/live_jira_cloud_s3 -q -rA` against live REB+DIG+S3.\n\n## Acceptance Criteria\n- [x] The new suite exists under `tests/external/live_jira_cloud_s3/`, is gated by\n      `REBAR_RUN_EXTERNAL` + Jira/AWS creds, and enforces the read-only invariant\n      STRUCTURALLY (verified: `test_read_only_guard_is_real` passes and the guard\n      fixture is autouse on every Jira-touching test).\n- [x] It is wired into CI as a dedicated `jira-cloud-s3-rehearsal` job in\n      `.github/workflows/external-integration.yml`, and the `external` job ignores\n      the new dir (verified by reading the workflow).\n- [x] An ACTUAL green live run demonstrates all five validations \u2014 both projects\n      fetched into one S3 store, correct per-project resolution, read-only preview\n      scoping, S3 round-trip, and ZERO Jira writes (verified: the captured\n      `-rA` run output is attached as a ticket comment, showing before/after Jira\n      counts equal and the guard active).\n- [x] The throwaway S3 prefix is deleted after the run (verified: an `aws s3 ls`\n      of the prefix returns empty, recorded on the ticket).\n- [x] `ruff check`, `ruff format --check`, and `mypy` pass on the new files.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Read-only S3-backed live Jira Cloud multi-project rehearsal (REB + DIG)"
+      },
       "created_at": "2026-08-15T14:59:07Z",
       "jira_id": "4588850",
       "jira_key": "REB-3013",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:10Z"
     },
@@ -12371,6 +12469,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:06Z"
     },
+    "6454-d06e-7361-4e3d": {
+      "created_at": "2026-08-15T15:34:24Z",
+      "jira_id": "4588858",
+      "jira_key": "REB-3021",
+      "state": "confirmed",
+      "updated_at": "2026-08-15T15:34:27Z"
+    },
     "6490-7b01-0998-472e": {
       "created_at": "2026-08-15T15:01:06Z",
       "jira_key": "REB-165",
@@ -12856,9 +12961,17 @@
       "updated_at": "2026-08-15T15:01:32Z"
     },
     "69b2-2488-6008-42d1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context and confirmed RCA\n\nGerrit Verify run 31874837464 completed in 29m11s with macOS at 27m38s. macOS spent 20.88s in test_hook_falls_back_to_git_when_env_unset, 16.38s setting up build-provenance artifacts, 10.69s rebuilding from sdist, plus 8.98s in a blank-env build. Ubuntu repeats these builds in three Python cells. Local profiling showed the fallback exports the 3,019-file / 42.4MB checkout although hatch_build.py resolves one SHA then writes src/rebar/_build_info.py: git add costs 1.37-1.53s; python -m build costs 3.85-4.32s. A same-hook minimal package preserved the exact SHA while reducing paired totals from 6.30/9.26s to 2.66/5.43s.\n\nThe exact -n 3 --dist worksteal selector proved built_artifacts initializes on three workers, each paying 6.60-6.74s setup. This is a bounded contributor, not the cause of multi-minute host variation. The pre-repair selected-six serial baseline is 18.23s.\n\nLive run 31874837464 received patchset 9aecb53e and checked it out, but artifact-probe built with trusted-main GITHUB_SHA 7d908fb. Truthiness-only probes accepted the wrong nonempty COMMIT, violating ducal-statuelike-ladybird exact-source identity.\n\n## Ticket and OSS research\n\nNo prior rejection exists. ducal-statuelike-ladybird requires real sdist/wheel exact provenance. square-tragic-llama accepts a minimal Git fixture retaining exact fallback SHA plus shallow-source control. despotic-dorsal-greatdane approves immutable artifact reuse but stops at per-worker scope. cryptic-damp-panda identifies repeated package builds as coverage-neutral residual work.\n\nFour popular active projects use this placement: pytest 68308aa has one Ubuntu package job before its matrix; pip f399c371 has packaging jobs outside Unix/Python tests; Poetry 92b74dc has one Ubuntu build/install smoke job outside its OS/Python matrix; Pydantic 02c5c975 has a dedicated Ubuntu distribution build outside its matrix. This is 4/4 consensus for one full-package integration job plus lighter behavioral probes in the broad matrix. Rebar remains stricter by retaining real isolated PEP 517 sdist-to-wheel execution through the production hook in every cell.\n\n## Plan\n\n1. Freeze RED workflow plus build-hook contracts. The workflow oracle rejects GITHUB_SHA, requires git rev-parse --short HEAD after final checkout, then requires exact equality from installed wheel plus sdist. Build-hook oracles retain env SHA, preserved sdist SHA, git fallback SHA, blank-env failure.\n2. Create one shared fixture around checkout-current hatch_build.py plus the src/rebar/_build_info.py boundary. Migrate all whole-tree forms: _clean_tree, _self_contained_checkout, and the inline git archive plus tar extraction in test_hook_fails_when_rebar_build_commit_empty. Re-derive completeness by string-sweeping git archive and tar extraction in build-semantics tests. The direct full-Rebar WheelBuilder content test remains intentional.\n3. The fixture creates a tiny Hatch package, copies production hatch_build.py, declares it as the real custom hook, provides src/rebar/__init__.py at the production target, initializes Git, then commits only that tree. The hook writes and force-includes src/rebar/_build_info.py into sdist plus wheel, exercising preserve-existing through the real archive boundary. Default PEP 517 isolation remains; Hatchling, Git, archive creation, and wheel inspection are not mocked.\n4. Convert repeated semantics tests in test_attestation_signing.py plus test_build_provenance.py to the fixture. Retain every named assertion, the no-git helper branch, direct full-package content test, and shallow-source control.\n5. Keep the full-Rebar replay in shared _artifact-probe.yml, serving test.yml branch-head checkout plus gerrit-verify.yaml patchset checkout. Compute REBAR_EXPECTED_COMMIT using git rev-parse --short HEAD after either final checkout. Build with that value. Require exact equality for wheel plus install-from-sdist. Preserve import, CLI, schema, packaging, and vote-gating probes.\n6. Seed the wrong-SHA defect, a whole-tree fixture regression, and one precedence defect. Each oracle must return RED before restoration. Record focused serial plus exact-xdist timings against pre-repair 18.23s selected-six serial and 6.60-6.74s per-worker setup baselines. Timing quantifies runner work but is evidence only, not a retention gate, because host variation dominates wall-clock.\n7. Run focused tests, workflow consumers, make lint, typecheck, plus full default/integration selectors. Push immediately through Gerrit without a control-only run. Record hosted macOS plus Ubuntu durations from that treatment.\n\n## Test contract card\n\nauthoritative_contract: ducal-statuelike-ladybird requires real sdist-to-wheel provenance, exact env/git fallback, blank-env failure, sdist preservation, plus exact source identity; both workflow consumers must build their final checkout. trigger_preconditions: each matrix cell runs production hatch_build.py through isolated PEP 517 on the minimal package; artifact-probe has completed its final checkout. production_path: copied production hatch_build.py resolves, writes, then force-includes COMMIT during sdist plus wheel builds; artifact-probe builds then installs full distributions. test_tier: minimal real-build probes across every current OS/Python cell plus one full-project artifact integration job per workflow lane. observable_postcondition: existing semantics remain; full artifacts equal the short SHA of final checkout. negative_control: wrong nonempty SHA fails; blank env fails; no-git/no-bake remains None; shallow source remains supported. collateral_invariants: no selector, assertion, isolation mode, worker, platform, Python cell, coverage, mutation, probe, runner, or vote dependency is removed. ci_gate: focused serial/xdist tests, workflow contracts, make lint, make typecheck, Gerrit Verified, LLM-Review.\n\n## Acceptance Criteria\n\n- [ ] Every OS/Python cell executes a real isolated sdist-to-wheel build through production hatch_build.py on the minimal fixture.\n- [ ] The env-override probe requires the exact supplied SHA.\n- [ ] The install-from-sdist probe requires the exact preserved SHA.\n- [ ] The git-fallback probe requires the exact committed fixture SHA.\n- [ ] The blank-env probe requires a nonzero real-build exit.\n- [ ] No hook-semantics test retains _clean_tree, _self_contained_checkout, or inline git-archive materialization.\n- [ ] A repository string sweep finds no other full-checkout archive in hook-semantics fixtures.\n- [ ] Both artifact workflow lanes derive expected SHA after final checkout.\n- [ ] The installed full-Rebar wheel equals expected SHA.\n- [ ] The installed full-Rebar sdist equals expected SHA.\n- [ ] A wrong nonempty full-artifact SHA fails the workflow oracle.\n- [ ] The direct full-Rebar WheelBuilder content test remains enabled.\n- [ ] The shallow-source negative control remains enabled.\n- [ ] The OS/Python matrix remains unchanged.\n- [ ] Pytest selectors, xdist workers, coverage, plus mutation remain unchanged.\n- [ ] Artifact import, CLI, schema, plus vote-gating probes remain unchanged.\n- [ ] A precedence mutation returns the build-hook oracle to RED.\n- [ ] Focused serial plus exact-xdist timings are recorded against the 18.23s serial and 6.60-6.74s per-worker setup baselines as non-gating evidence.\n- [ ] The first hosted treatment records macOS plus all Ubuntu job/test durations.\n- [ ] Gerrit records LLM-Review +1 before merge.\n- [ ] Gerrit records Verified +1 before merge.\n- [ ] Gerrit records zero unresolved comments before merge.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Scale build-provenance fixtures and pin artifact probe to patchset SHA"
+      },
       "created_at": "2026-08-15T15:01:32Z",
       "jira_id": "4588851",
       "jira_key": "REB-3014",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:36Z"
     },
@@ -13848,6 +13961,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:28Z"
     },
+    "7332-a728-7108-4b55": {
+      "created_at": "2026-08-15T15:34:28Z",
+      "jira_id": "4588859",
+      "jira_key": "REB-3022",
+      "state": "confirmed",
+      "updated_at": "2026-08-15T15:34:30Z"
+    },
     "7359-5254-f634-48a3": {
       "baseline": {
         "assignee": {
@@ -14387,9 +14507,31 @@
       "updated_at": "2026-08-15T15:02:56Z"
     },
     "77b5-be18-6395-4984": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nGitHub code-scanning alert #88 (`py/incomplete-url-substring-sanitization`, Security/quality) flags the upstream-URL assertion in `test_notice_names_pandoc_its_version_and_its_licence` in `tests/unit/test_notice_records_pandoc_gpl.py` (currently line 51):\n\n```python\nassert \"pandoc.org\" in text or \"github.com/jgm/pandoc\" in text, (...)\n```\n\nThis is not real URL sanitization \u2014 there is no untrusted input; the test checks that NOTICE mentions upstream so the GPL source-availability obligation is actionable. But the finding is still worth fixing: bare substring containment accepts a NOTICE that only contains a lookalike host \u2014 prefix-style (`https://notpandoc.org`) or suffix-style (`https://pandoc.org.evil.com`) \u2014 which does NOT actionably point at upstream. The same rule class was fixed before in `test_llm_fallback_chain.py` (ticket revealable-ungracious-billygoat, alerts 81/82) with parsed-origin netloc equality.\n\n## Approach\nReplace the two substring checks with a single scheme+host-anchored regex whose host ends with an explicit end-of-host boundary (a negative lookahead), so BOTH lookalike classes are rejected:\n\n```python\n_UPSTREAM_RE = re.compile(\n    r\"https?://(www\\.)?pandoc\\.org(?![\\w.-])|https?://github\\.com/jgm/pandoc(?![\\w-])\"\n)\nassert _UPSTREAM_RE.search(text), (...)\n```\n\n`(?![\\w.-])` after `pandoc\\.org` refuses to end the host before a dot, letter, digit, or hyphen, so `https://pandoc.org.evil.com` is rejected (unlike a `\\b` anchor, which matches before a literal dot) while `https://pandoc.org`, `https://pandoc.org/`, and `http://www.pandoc.org` all match. `(?![\\w-])` after the github path rejects `https://github.com/jgm/pandoc-extras` (a different repo) while allowing a trailing `/`, whitespace, or end of text. This handles arbitrary subdomain sequences per the CodeQL guidance, matching the strictness of the parsed-origin prior art without urlparse machinery \u2014 appropriate because the subject is a whole document, not a single URL to validate. Alternative weighed: extracting every URL from NOTICE and comparing parsed netlocs exactly, as `test_llm_fallback_chain.py` does \u2014 rejected as over-engineering for a one-line document-content assertion; the lookahead-anchored regex achieves the same rejection set here.\n\nRED-first demonstration (already executed): the old expression accepts both `https://notpandoc.org.evil.com` (prefix) and `https://pandoc.org.evil.com` (suffix); the anchored regex rejects both and still accepts the real NOTICE.\n\n## Scope\n- `tests/unit/test_notice_records_pandoc_gpl.py` \u2014 only the upstream-URL assertion in `test_notice_names_pandoc_its_version_and_its_licence` (plus the module-level compiled regex it uses). Do NOT touch the pandoc version pin strings or NOTICE content (a parallel agent is bumping pypandoc-binary in the same file; anchoring the change to the assertion, not a line number, keeps the two changes rebase-clean).\n\nSibling sweep (already executed): alert #88 is the only open code-scanning alert repo-wide; grep for URL/hostname substring-`in` checks found no other same-class occurrences in scope (remaining matches are scheme-anchored full-URL literals or error-message assertions).\n\n## Testing\nTest-only change. Happy path: `pytest tests/unit/test_notice_records_pandoc_gpl.py -x -q` stays green against the real NOTICE. Failure path: the RED demonstration shows the anchored regex rejects `https://pandoc.org.evil.com`, `https://notpandoc.org`, and a bare schemeless `pandoc.org` mention, all of which (except the last two prefix forms partially) satisfied the old expression.\n\n## Acceptance Criteria\n- [x] The upstream-URL assertion in `test_notice_names_pandoc_its_version_and_its_licence` no longer uses bare substring containment; it matches via a scheme+host-anchored regex with an explicit end-of-host boundary. Verify: read the diff.\n- [x] The new assertion rejects a suffix-style lookalike: `_UPSTREAM_RE.search(\"https://pandoc.org.evil.com\")` is None. Verify: run the expression in Python.\n- [x] The new assertion rejects a prefix-style lookalike: `_UPSTREAM_RE.search(\"https://notpandoc.org\")` is None. Verify: run the expression in Python.\n- [x] The new assertion accepts the real NOTICE, preserving the test's intent that NOTICE actionably points at upstream. Verify: `pytest tests/unit/test_notice_records_pandoc_gpl.py -x -q` passes.\n- [x] The diff touches only the upstream-URL assertion and its supporting regex; version pins and NOTICE content are unchanged. Verify: read the diff.\n- [x] `make lint` passes. Verify: run it.\n- [x] `make typecheck` passes. Verify: run it.\n- [x] The change is pushed to Gerrit for review. Verify: a Gerrit change exists for the commit.\n- [ ] After the fix lands and CodeQL re-runs, alert #88 clears without dismissal. Verify: `gh api repos/navapbc/rebar/code-scanning/alerts` shows no open alert #88.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "code-scanning #88: anchor upstream-URL assertions in NOTICE test (incomplete URL substring sanitization)"
+      },
       "created_at": "2026-08-15T15:02:56Z",
       "jira_id": "4588852",
       "jira_key": "REB-3015",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:03:00Z"
     },
@@ -17486,9 +17628,17 @@
       "updated_at": "2026-08-15T15:05:32Z"
     },
     "901b-676a-01c9-45fd": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nOperator direction (2026-08-15): approach viral-peppy-lowchen (b4be-0ed8-22cb-4b01) as an EXPERIMENT before any production design. Experience says a pure evidence-prepacked single-pass verifier yields false-positive REJECTIONS whenever the prepack is imperfect \u2014 and a perfect prepack over natural-language prose ACs is unrealistic. Operator counter-proposal to test: use the single pass as a FILTER that may only PASS or ABSTAIN per criterion (never reject), then run the existing agentic verifier scoped to the remaining criteria \u2014 narrowing agentic work, not eliminating it. Structural consequence: false-positive rejection is impossible by construction; the residual risks to MEASURE are false-positive PASSes and insufficient coverage (filter abstains so often it saves nothing).\n\n## Protocol (rapid PoC \u2014 throwaway harness, no production code)\n1. Corpus: select >=3 real CLOSED tickets with large surfaces (description near the 8000-char cap, >=6 prose ACs, comments; at least one with children), e.g. the tapeworm CLI-normalization ticket (7998 chars) and the bettong decomposition ticket. Ground truth for these = all ACs met (they passed the close gate). Add >=3 ADVERSARIAL variants: copies (in-harness, not written to the store) with 1-2 ACs edited to be genuinely unmet (reference a symbol/behavior that does not exist at the verified ref). Ground truth = those ACs unmet.\n2. Prepack builder (harness script): per AC, deterministically assemble evidence \u2014 file_impact paths + their content slices, grep hits for symbols/strings the AC names, referencing commits + diffs, test names/results where cited. Cap per-AC pack size; record pack-build failures honestly (missing evidence -> thin pack, NOT a synthesized one).\n3. Filter pass: ONE LLM call, no tools: given ticket text + per-AC packs, emit per AC either PASS(with citations) or ABSTAIN. The contract forbids FAIL.\n4. Fallback: run the existing agentic completion-verifier scoped to only the ABSTAINed ACs (harness-level criteria subsetting; read-only --source local, never signs).\n5. Metrics table (the deliverable): filter coverage (%% ACs PASSed at step 3), false-PASS count on adversarial unmet ACs (MUST be 0 for the design to survive), agentic steps/tokens/wall-time for step 4 vs a pure-agentic control run of the same ticket, per-ticket totals.\n\n## Acceptance criteria\n- [ ] Harness exists in the experiment worktree (throwaway; NOT pushed to Gerrit; no src/rebar changes).\n- [ ] >=3 real large closed tickets + >=3 adversarial variants run end-to-end through filter+fallback AND a pure-agentic control.\n- [ ] Metrics table posted as a comment on THIS ticket and on viral-peppy-lowchen: coverage, false-PASS count, cost deltas.\n- [ ] Verdict comment: does filter+fallback beat pure-agentic on cost WITHOUT any false PASS? Include failure modes observed and a go/no-go recommendation for productizing.\n- [ ] No store writes beyond ticket comments; no signatures minted (--source local only).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Experiment: prepack single-pass FILTER + narrowed agentic fallback (lowchen PoC)"
+      },
       "created_at": "2026-08-15T15:05:32Z",
       "jira_id": "4588853",
       "jira_key": "REB-3016",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:36Z"
     },
@@ -19179,9 +19329,17 @@
       "updated_at": "2026-08-15T15:06:52Z"
     },
     "9d44-c0c0-8d4d-4074": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context and evidence\n\nThe remaining macOS critical path is filesystem-heavy. The N=3000 import long pole reproduces at 20.19-21.63s on the same macOS host with 15.39-16.65s system CPU versus 4.59-5.67s user CPU. cProfile attributes 13.69s to 24 required git-add/git-commit pairs, while the full default suite creates thousands of temporary Git stores below pytest --basetemp. The workflow deliberately uses runner.temp rather than /tmp because the macOS tmp cleaner previously deleted live test trees.\n\nMaintained OSS precedent matches this mechanism. Apple Git CI creates a 4GB APFS RAM disk for test output and documents greater-than-2x test speedup from avoiding slow storage for many small writes (apple-oss-distributions/Git src/git/.gitlab-ci.yml lines 82-88 at 6b2f9bfe). Aeron creates a macOS APFS RAM disk in GitHub Actions for its temporary test filesystem (aeron-io/aeron .github/workflows/ci.yml lines 62-68 at 092f184a). Git t/perf/README says putting test roots on tmpfs can massively speed the suite. Tracker search found no prior RAM-disk/tmpfs proposal or rejection. This changes storage placement only: no test, worker, platform, behavioral assertion, coverage, mutation work, or runner is removed or added.\n\nOperator direction: do not land a control-only patchset, because an extra full-matrix run would create the contention this work is intended to reduce. Use the next full Verify run initiated by another session as the timing control. Storage sizing comes from the stable local full-suite temp tree or one local explicit-basetemp reproduction; only an implementation change may trigger another Gerrit run.\n\n## Plan\n\n1. Watch the next unrelated full Gerrit Verify run for ambient context without modifying it, and use a no-extra-run trusted-workflow control only when its selectors and collection/pass/skip counts match the treatment. Capture macOS default/integration/job and Ubuntu job wall times, slow-duration tail, queue delay, run conclusion, checked-out patchset, and collection counts. The primary control ultimately captured as 31868300174 used runner.temp and matched the first treatment at 13,397 passed / 65 skipped default and 158 passed / 11 skipped integration; unrelated-run timings remain contextual rather than causal proof.\n2. Measure retained temp allocated bytes and file count from a stable local full-suite run using the same selectors and distinct explicit basetemps. Size the RAM disk with at least 50% headroom while keeping it below 40% of detected runner physical memory. If the requirement cannot fit, stop and report infeasibility rather than risk memory pressure or a full volume.\n3. In the existing build/test matrix job, create an APFS RAM disk only when runner.os is macOS, after setup/gates and immediately before pytest. Publish its exact device and /Volumes/RebarTests mount path through step outputs; /Volumes is outside the /tmp and /var/folders locations subject to the macOS tmp cleaner. Non-macOS cells continue using runner.temp byte-for-byte. Route both unchanged pytest selectors to separate basetemps below that mount.\n4. Always report filesystem type, allocated bytes, file count, and capacity, then detach the exact device created by setup after both pytest tiers, including failure/cancellation paths where GitHub permits cleanup. Do not use a broad disk target, persistent mount, cache, extra runner, or extra job.\n5. Add static workflow contract tests proving macOS-only creation, measured bounded sizing, unchanged selectors/xdist worker counts/timeouts/coverage flags, distinct default/integration basetemps, and always-run exact-device cleanup. Explicitly re-run the existing workflow consumers tests/unit/test_ci_workflow_parity.py, tests/unit/test_gate_step_tree_skew.py, tests/unit/test_extra_coverage_guard.py, and tests/unit/test_worktree_python_pin.py; these consumers should remain unchanged unless an existing invariant truly changes. Run actionlint and zizmor.\n6. Push the implementation through Gerrit immediately. Compare matched selector/collection-count treatments primarily with exact no-RAM control 31868300174 and secondarily with recent green runs; report absolute/percentage savings and Ubuntu non-regression. Retain only if the full matrix is green and both macOS default-suite and job wall times improve by at least the larger of 5% or the observed recent-green range. Worked 5% floor from the exact 17m26s default / 20m36s job control: treatment must be at most 16m33.7s default and 19m34.2s job before any larger observed-range requirement; otherwise revert the lifecycle.\n\n## Test contract card\n\nauthoritative_contract: .github/workflows/_build-and-test.yml executes the unchanged default and integration pytest selectors on Ubuntu 3.11/3.12/3.13 and macOS 3.13, with coverage once on Ubuntu 3.13. trigger_preconditions: macOS matrix cell reaches the pytest steps after all existing gates. production_path: GitHub Actions creates an ephemeral APFS RAM device, pytest tmp_path/basetemp writes real Git repositories there, then cleanup detaches only that device. test_tier: static workflow contract tests plus the actual full Gerrit Verify matrix. observable_postcondition: identical collection/pass/skip counts and gates, lower macOS pytest/job wall time, bounded RAM use, no mounted device after cleanup. negative_control: every Ubuntu cell keeps runner.temp and existing behavior; a RAM-disk setup/sizing failure fails loudly before tests rather than silently changing coverage. collateral_invariants: no test selection, assertion, marker, worker count, timeout, coverage, mutation shard, Python/platform cell, or runner concurrency changes. ci_gate: actionlint, zizmor, workflow contract tests, full Gerrit Verify, LLM-Review.\n\n## Acceptance Criteria\n\n- [ ] The next unrelated full Verify run records control macOS default/integration/job wall times, Ubuntu job times, queue delay, slow tail, and conclusion without a control-only patchset.\n- [ ] Local retained-temp evidence yields at least 50% RAM-disk headroom below 40% of detected physical memory.\n- [ ] The selected outcome is platform-safe: if retained, only macOS creates and uses the APFS RAM disk while Ubuntu retains runner.temp; if rejected by the AC7 retention oracle, the RAM-disk lifecycle is absent and every cell uses runner.temp.\n- [ ] Default and integration selectors, markers, xdist counts/distribution, timeouts, coverage-once behavior, collection/pass/skip counts, and all platform/Python cells remain unchanged.\n- [ ] If the RAM-disk outcome is retained, cleanup runs under always(), reports final filesystem usage, and detaches only the exact device created by setup; if rejected by AC7, no RAM-disk cleanup lifecycle remains.\n- [ ] Static workflow tests, actionlint, zizmor, focused/full pytest, LLM-Review, and Gerrit Verified are green.\n- [ ] Against a no-RAM control with matching selectors and collection/pass/skip counts, both macOS default-suite and job wall times are lower than control by at least the larger of 5% or the observed recent-green range, with no Ubuntu regression; otherwise the experimental lifecycle is fully reverted. For the captured 17m26s default / 20m36s job control, the 5% floor is at most 16m33.7s default and 19m34.2s job before applying any larger observed-range requirement.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Use a measured macOS RAM disk for Git-heavy pytest temp trees"
+      },
       "created_at": "2026-08-15T15:06:53Z",
       "jira_id": "4588854",
       "jira_key": "REB-3017",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:55Z"
     },
@@ -19612,6 +19770,20 @@
       "jira_key": "REB-676",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:24Z"
+    },
+    "a011-491c-f7e5-4dd9": {
+      "created_at": "2026-08-15T15:34:31Z",
+      "jira_id": "4588860",
+      "jira_key": "REB-3023",
+      "state": "confirmed",
+      "updated_at": "2026-08-15T15:34:34Z"
+    },
+    "a01d-b024-49dd-4254": {
+      "created_at": "2026-08-15T15:34:35Z",
+      "jira_id": "4588861",
+      "jira_key": "REB-3024",
+      "state": "confirmed",
+      "updated_at": "2026-08-15T15:34:37Z"
     },
     "a060-e873-2e0c-4721": {
       "created_at": "2026-08-15T15:07:24Z",
@@ -22106,16 +22278,46 @@
       "updated_at": "2026-08-15T15:09:32Z"
     },
     "b5e6-a289-e51b-41b2": {
+      "baseline": {
+        "assignee": null,
+        "description": "The 'main Gerrit Verified Gate' workflow's macOS pytest job has a post-test step 'Report and release macOS default-suite pytest tree' that runs 'rm -rf' over the pytest RAM-disk basetemp. The snapshot tests (tests covering .rebar/run_snapshots, e.g. test_snapshot_is_read_only, test_snapshot_extracts_tracked) legitimately create read-only snapshot trees (0555 dirs / 0444 files). On macOS BSD 'rm', files inside a read-only directory cannot be unlinked ('Permission denied'), so the directory stays 'Directory not empty' and the step exits 1 EVEN THOUGH pytest itself passed (13393 passed, 65 skipped). This is intermittent (depends on which worker/snapshots land on the RAM disk) and blocks the Verified vote for otherwise-green changes. Fix: make the cleanup 'chmod -R u+w' the tree before 'rm -rf' (or use 'chflags -R nouchg' + 'rm -rf'), mirroring how the snapshot tests' own teardown restores perms. Observed on change 1808 patchsets 1 and 2 (3 consecutive macOS runs); recent unrelated changes pass the same job, confirming it is environmental, not change-specific.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "macOS Verified-gate cleanup step fails on read-only run_snapshots dirs"
+      },
       "created_at": "2026-08-15T15:09:32Z",
       "jira_id": "4588855",
       "jira_key": "REB-3018",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:35Z"
     },
     "b5f8-d3f9-39d9-4195": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\nWhen the completion verifier fails a close with \"insufficient evidence\" because the evidence search EXHAUSTED its step budget without refuting any criterion, the correct next action is mechanical: run it again. The verdict cache (Gerrit 1796) banks per-criterion PASSes at finalize even on overall FAIL, so a re-run seeds the credited criteria and spends its whole budget on the formerly-insufficient ones. This was demonstrated live (2026-08-14, ticket deadbeat-warlike-ostrich / 8d74): first close FAILed on exhaustion; an identical re-run closed clean with zero operator-added evidence. Operator ruling: bounded-search exhaustion is the gate's problem to resolve, not the operator's \u2014 the gate should auto-resume instead of demanding a human retype the same command.\n\n## Mechanism (maps to existing callables only)\nA resumption is a WHOLE-VERIFIER RE-RUN \u2014 exactly what the manual 8d74 re-close did \u2014 not a partial continuation. No new verification entry point:\n1. The resumption loop lives at the shared close-gate verification seam: `close_precheck._completion_precheck` (src/rebar/_commands/close_precheck.py:497), specifically wrapping its `llm.verify_completion(...)` invocation (:638) and the verdict inspection that follows. This IS the shared seam \u2014 CLI, MCP, and library closes all flow through `rebar.transition` -> transition.py:23 -> `transition_close.close_ticket` (:454 calls `_completion_precheck`) -> that one call site. `gate_dispatch.produce_completion_verdict` / `CompletionAgentStep` are verdict PRODUCERS inside `verify_completion` and are NOT touched.\n2. Classification: a FAIL qualifies for auto-resume ONLY when it is insufficiency-only. The framework ALREADY computes exactly this: `_insufficiency_only(result)` (src/rebar/llm/completion_reconcile.py:115) is True when every unmet criterion carries the framework-derived `evidence_sufficient: false` marker (set by the banking/assembly seams; reconcile derives and strips model-minted markers at :198-210, so a model cannot mint it) and at least one unmet record exists; an unmet record WITHOUT the marker is a genuine refutation \u2192 no resume. This ticket REUSES that predicate unchanged \u2014 no new schema field, no model-facing vocabulary, no prompt change. Existing consumers of the signal (completion_reconcile derivation :198, `_insufficiency_only` :115, completion_sidecar payload passthrough :382, completion_tool_policy, the finalizer prompt's banked-evidence rule) are enumerated in the change and stay untouched; the resumption loop is a NEW caller of the existing predicate.\n3. On qualification: re-invoke `verify_completion` with the same args/ref. The verdict cache seeds credited PASSes (existing behavior, no change needed); the fresh budget concentrates on remaining criteria (budget derivation unchanged \u2014 `verify_step_floor` stays parameterized on the total criteria count; concentration is emergent from cache hits consuming ~0 steps, as observed in the 8d74 live run).\n4. Bounded by count AND by progress. Count: `verify.auto_resume_max` resumptions per close invocation, default 2, 0 disables. Progress: a resumption is only dispatched when the just-finished attempt made progress \u2014 its cache-credited PASS count strictly exceeds the attempt before it (the first FAIL's credited count is the baseline). A zero-progress attempt means the next re-run would be an identical spin (same seeded cache, same budget, same remainder), so the loop stops early and surfaces the failure even with resumptions remaining. Each attempt logged to the ticket trail (comment or verdict metadata): attempt number, criteria credited-from-cache count, criteria remaining.\n5. Overall outcome: PASS on any attempt \u2192 close proceeds. Still exhausted after the bounded resumptions \u2192 the existing failure surface, with the message stating auto-resume was attempted N times (operator sees honest state).\n\n## Out of scope (split to child idea ticket)\nSearch-frontier handoff (steering a resumption away from already-searched places / toward where credited evidence was found) requires an argument-level tool-call transcript the verifier telemetry does not currently carry. That capability question \u2014 and the extractor design on top of it \u2014 is a separate idea ticket linked discovered_from this one; THIS ticket's resumption passes no frontier and needs no fallback (cache seeding alone proved sufficient live).\n\n## Acceptance criteria\n- [ ] Qualification is `_insufficiency_only` (completion_reconcile.py:115) REUSED \u2014 asserted by test that the resumption loop calls it (no parallel reimplementation); no schema/prompt changes (diff-scope test or review assertion).\n- [ ] Auto-resume triggers only on insufficiency-only FAILs: unit tests cover (a) all-unmet carry evidence_sufficient:false \u2192 resumes; (b) any unmet without the marker (refutation) \u2192 fails fast, no resume; (c) plain PASS \u2192 no resume; (d) FAIL with zero unmet records \u2192 no resume.\n- [ ] Resumption re-invokes the existing `verify_completion` entry (asserted via call-count on the real seam), with the same ref binding (`--ref` closes resume against the same pinned ref).\n- [ ] Bounded by `verify.auto_resume_max` (default 2, 0 disables; config-registry regenerated); attempts beyond the bound surface the existing failure with an attempts-count message (tested).\n- [ ] Progress condition: a resumption dispatches only when the prior attempt strictly increased the cache-credited PASS count; unit tests cover (a) increasing count \u2192 resumes; (b) unchanged count \u2192 stops early with the failure surfaced, no further LLM run; (c) progress then stall \u2192 exactly one extra attempt.\n- [ ] Resumption trail recorded per attempt (attempt number, cache-credited count, remaining count) and visible on the ticket or in the close output (tested).\n- [ ] The loop sits at the shared gate seam: an MCP-or-library-path close exercises it in a test, not only the CLI path.\n- [ ] Child idea ticket for frontier handoff created + linked discovered_from this ticket before this ticket closes.\n- [ ] `make lint` / `make typecheck` clean; lands via Gerrit (LLM-Review +1, Verified +1).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Close gate auto-resumes verification on search exhaustion instead of failing to the operator"
+      },
       "created_at": "2026-08-15T15:09:36Z",
       "jira_id": "4588856",
       "jira_key": "REB-3019",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:42Z"
     },
@@ -26682,9 +26884,17 @@
       "updated_at": "2026-08-15T15:13:08Z"
     },
     "dc89-cd11-acd6-4e61": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Land PR #127 through Gerrit: pypandoc-binary 1.17 + ruff 0.16.2; mcp 2.0 deferred to 732b\n\n## Context / Problem\n\nGitHub is a read-only mirror: dependabot PRs can never merge there; content is re-applied locally and landed as a Gerrit change, then the PR closed by hand. PR #127 (\"deps: bump the uv-lock group across 1 directory with 3 updates\", branch `dependabot/uv/uv-lock-dd93acce05`) proposes:\n\n* `pypandoc-binary` `1.15` -> `1.17` \u2014 pinned EXACTLY (`wiki` extra + `dev` group): the\n  byte-safety tests assert byte-level pandoc output.\n* `ruff` `0.16.1` -> `0.16.2` \u2014 pinned EXACTLY in `dev` (hook, local lint, CI identical).\n* `mcp` `1.29.0` -> `2.0.0` (major), loosening the pyproject ceiling `<2` -> `<3`.\n\nThe `mcp` half is the THIRD re-proposal (PRs #124, #125, #127). It was rejected on evidence under ticket 1dfd (mcp 2.0 removes `mcp.server.fastmcp`, imported by `src/rebar/mcp_server.py` and `scripts/gen_mcp_reference.py`); the migration is tracked as open epic `732b-51df-acf2-477b` (bared-nickel-insect), whose migrate-vs-defer analysis recommends staying on `mcp>=1.28.1,<2` until 2.0.x stabilizes. PR #125 applied the same rule (ticket carnivoral-consistent-lhasaapso, change 1483). This ticket lands only the safe subset.\n\n## Approach\n\nLand the **safe subset** of PR #127 \u2014 the `pypandoc-binary` and `ruff` bumps \u2014 leaving the `mcp` ceiling at `<2` so the resolver keeps 1.29.0. In a fresh worktree (`../deps-bump`) branched from current `origin/main`:\n\n1. Edit `pyproject.toml`: `pypandoc-binary==1.15` -> `==1.17` in BOTH the `wiki` extra\n   and the `dev` group (the notice test enforces one distinct pin value);\n   `ruff==0.16.1` -> `==0.16.2` in `dev`. Keep both pins exact.\n2. `uv lock --upgrade-package pypandoc-binary --upgrade-package ruff` so `uv.lock` is\n   regenerated by uv, never hand-edited (CI gates on `uv lock --check`); then sync the\n   venv so the new wheels are installed.\n3. **pandoc provenance (NOTICE)**: determine the new BUNDLED pandoc version empirically\n   (`pypandoc.get_pandoc_version()`). If it differs from 3.6.1, update `NOTICE` (the\n   `Version:` line and the `pypandoc-binary==1.15` wheel reference) and the\n   version-string assertion in `tests/unit/test_notice_records_pandoc_gpl.py` (the\n   `\"3.6.1\" in text` line) so the GPL provenance record matches what ships. Do NOT touch\n   the upstream-URL assertion (`\"pandoc.org\" in text or ...`) \u2014 a parallel change owns\n   that exact line; the two diffs must rebase cleanly past each other.\n4. **Byte-safety corpus (the load-bearing consumer of the shipped binary)**: the DC wiki\n   renderer's baseline pins the installed pandoc exactly:\n   `scripts/generate_dc_wiki_legacy_outputs.py` freezes `LEGACY_PANDOC_VERSION = \"3.6.1\"`\n   and a per-platform `SUPPORTED_PANDOC_BINARY_SHA256` map (darwin-arm64 + linux-x86_64);\n   `tests/unit/rebar_reconciler/test_wiki_render_hardening.py::test_the_installed_pandoc_matches_the_legacy_fixture_provenance`\n   validates the installed binary's version + SHA-256 against the provenance embedded in\n   `tests/fixtures/dc_wiki_legacy_outputs.json` and the three\n   `tests/fixtures/dc_wiki_replay/` files. Bumping the wheel means deliberately\n   re-establishing the reviewed baseline (the act the generator's docstring sanctions):\n   a. Update `LEGACY_PANDOC_VERSION` to the new bundled version.\n   b. Recompute BOTH fingerprints: darwin-arm64 = SHA-256 of the locally installed\n      pandoc; linux-x86_64 = download the exact `pypandoc_binary` 1.17 manylinux x86_64\n      wheel recorded (URL + hash) in `uv.lock`, extract, hash the `pandoc` inside \u2014 no\n      Linux host needed; wheel integrity is attested by uv.lock.\n   c. Regenerate the legacy manifest + three replay files with\n      `python scripts/generate_dc_wiki_legacy_outputs.py` (supported binaries of one\n      version emit byte-identical fixtures, so a darwin regeneration is valid for CI's\n      linux gate; the provenance test enforces this).\n   d. Confirm with the script's non-writing `--check` and the full\n      `tests/unit/rebar_reconciler/test_wiki_render_hardening.py` module.\n   If the regenerated bytes churn implausibly (unit count deviates from 884, or `--check`\n   disagrees after regeneration), STOP and defer the pypandoc half too (land ruff alone)\n   rather than commit an unreviewed baseline.\n5. **ruff verdict drift**: run `make lint`; if 0.16.2 flags existing code or reformats\n   files, apply the minimal fix and note it in the commit message. NEVER touch\n   `.github/complexity-baseline.json`.\n6. Do NOT touch the `mcp` constraints, `.github/workflows/_optionality.yml`, or ADR 0050 \u2014\n   those are 732b's edit-set.\n7. Verify (`make lint && make typecheck`, `pytest tests/unit`, the generator's `--check`),\n   commit with a `rebar-ticket:` trailer + DCO sign-off, push\n   `git push gerrit HEAD:refs/for/main`, and leave the ticket `in_progress` while the\n   orchestrator shepherds `LLM-Review` and `Verified`; close only after the change merges\n   and PR #127 is closed with a comment pointing the mcp half at 732b.\n\n## Scope\n\n* `pyproject.toml` \u2014 the two `pypandoc-binary==` pins (`wiki` + `dev`) and the `ruff==`\n  pin in `dev`.\n* `uv.lock` \u2014 regenerated `pypandoc-binary`/`ruff` entries + incidental `uv lock` churn.\n* `NOTICE` + `tests/unit/test_notice_records_pandoc_gpl.py` \u2014 only if the bundled pandoc\n  version changed (expected), and never the upstream-URL assertion line.\n* `scripts/generate_dc_wiki_legacy_outputs.py` \u2014 `LEGACY_PANDOC_VERSION` and both\n  `SUPPORTED_PANDOC_BINARY_SHA256` entries, nothing else in the script.\n* `tests/fixtures/dc_wiki_legacy_outputs.json` and the three files under\n  `tests/fixtures/dc_wiki_replay/` \u2014 regenerated wholesale by the generator, never\n  hand-edited.\n* Minimal source fixes ONLY if ruff 0.16.2 changes a lint/format verdict on existing code.\n* OUT: the `mcp` 1.29.0 -> 2.0.0 bump and its `<2` -> `<3` ceiling move (deferred to epic\n  `732b-51df-acf2-477b` / bared-nickel-insect \u2014 already filed, so no new ticket is needed);\n  `.github/workflows/_optionality.yml`; ADR 0050; `.github/complexity-baseline.json`;\n  dependabot configuration; any other open dependency PR.\n\n## Acceptance Criteria\n\n- [ ] AC1: `pyproject.toml` has `pypandoc-binary==1.17` (twice: `wiki` + `dev`) and\n  `ruff==0.16.2`, and still has `mcp>=1.28.1,<2` in both the `mcp` extra and `dev` \u2014\n  checked with `grep -nE 'pypandoc-binary==|ruff==|mcp>=' pyproject.toml`.\n- [ ] AC2: `uv.lock` records `pypandoc-binary` 1.17, `ruff` 0.16.2, and `mcp` 1.29.0 \u2014\n  checked with `grep -A1 -E '^name = \"(pypandoc-binary|ruff|mcp)\"$' uv.lock` \u2014 and\n  `uv lock --check` exits 0 (the same gate CI runs).\n- [ ] AC3: `NOTICE` names the pandoc version actually bundled by 1.17 (verified via\n  `pypandoc.get_pandoc_version()` in the synced venv) and references\n  `pypandoc-binary==1.17`; `pytest tests/unit/test_notice_records_pandoc_gpl.py` exits 0.\n- [ ] AC4: the byte-safety baseline is re-established: `LEGACY_PANDOC_VERSION` + both\n  `SUPPORTED_PANDOC_BINARY_SHA256` fingerprints match the 1.17 wheels (darwin from the\n  installed binary, linux from the uv.lock-pinned manylinux x86_64 wheel), the fixtures\n  are regenerated by the script (never hand-edited),\n  `python scripts/generate_dc_wiki_legacy_outputs.py --check` exits 0, and\n  `pytest tests/unit/rebar_reconciler/test_wiki_render_hardening.py` exits 0.\n- [ ] AC5: `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` exits 0 in the worktree under\n  ruff 0.16.2, `make typecheck` exits 0, and `pytest tests/unit` exits 0.\n- [ ] AC6: A Gerrit change carrying this diff exists on refs/for/main with this ticket's\n  `rebar-ticket:` trailer and a DCO sign-off \u2014 checked via `git log -1 --format=%B HEAD`\n  and the change URL printed by the push.\n- [ ] AC7: The mcp 2.0 half is NOT landed (no edit to the `mcp` constraints,\n  `_optionality.yml`, or ADR 0050 \u2014 `git diff origin/main --stat` shows none), and the\n  deferral is recorded as a ticket comment naming epic `732b-51df-acf2-477b`.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Land dependabot PR #127 through Gerrit: pypandoc-binary 1.17 + ruff 0.16.2 (mcp 2.0 deferred to 732b)"
+      },
       "created_at": "2026-08-15T15:13:08Z",
       "jira_id": "4588857",
       "jira_key": "REB-3020",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:12Z"
     },
@@ -30912,6 +31122,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:23Z"
     },
+    "fea4-f98c-f1a2-4168": {
+      "created_at": "2026-08-15T15:34:38Z",
+      "jira_id": "4588862",
+      "jira_key": "REB-3025",
+      "state": "confirmed",
+      "updated_at": "2026-08-15T15:34:41Z"
+    },
     "fec5-d8bb-86cd-453e": {
       "created_at": "2026-08-15T15:16:24Z",
       "jira_key": "REB-1758",
@@ -32880,6 +33097,11 @@
     "REB-3019": "b5f8-d3f9-39d9-4195",
     "REB-302": "c248-8634-3662-4755",
     "REB-3020": "dc89-cd11-acd6-4e61",
+    "REB-3021": "6454-d06e-7361-4e3d",
+    "REB-3022": "7332-a728-7108-4b55",
+    "REB-3023": "a011-491c-f7e5-4dd9",
+    "REB-3024": "a01d-b024-49dd-4254",
+    "REB-3025": "fea4-f98c-f1a2-4168",
     "REB-303": "c26a-54fe-a968-4d6a",
     "REB-304": "c3c9-fd78-55aa-409e",
     "REB-305": "c4f3-1b98-7383-40e9",
