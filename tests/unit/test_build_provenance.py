@@ -18,21 +18,11 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from _build_provenance_fixture import materialize_build_hook_package
 
 import rebar
 
 REPO = Path(rebar.__file__).resolve().parents[2]
-
-
-def _clean_tree(dest: Path) -> Path:
-    """A clean copy of the repo build inputs with NO .git (mirrors the sdist-extract tree
-    the wheel is built from). Uses `git archive` so it is fast and ignores untracked cruft."""
-    dest.mkdir(parents=True, exist_ok=True)
-    tar = subprocess.run(
-        ["git", "-C", str(REPO), "archive", "HEAD"], capture_output=True, check=True
-    ).stdout
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=tar, check=True)
-    return dest
 
 
 def _build(tree: Path, outdir: Path, env_extra: dict) -> subprocess.CompletedProcess:
@@ -61,7 +51,8 @@ def _wheel_commit(wheel: Path) -> str | None:
 def built_artifacts(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
     """Build the shared successful prerequisite once per pytest worker/session."""
     root = tmp_path_factory.mktemp("build-provenance")
-    tree = _clean_tree(root / "src")
+    tree = root / "src"
+    materialize_build_hook_package(REPO, tree)
     out = root / "dist"
     cp = _build(tree, out, {"REBAR_BUILD_COMMIT": "abc1234"})
     assert cp.returncode == 0, f"build failed: {cp.stderr[-2000:]}"
@@ -117,7 +108,8 @@ def test_wheel_from_sdist_bakes_env_commit(built_artifacts: tuple[Path, Path]) -
 
 
 def test_build_fails_when_env_set_but_empty(tmp_path: Path) -> None:
-    tree = _clean_tree(tmp_path / "src")
+    tree = tmp_path / "src"
+    materialize_build_hook_package(REPO, tree)
     out = tmp_path / "dist"
     cp = _build(tree, out, {"REBAR_BUILD_COMMIT": ""})
     assert cp.returncode != 0, "an empty REBAR_BUILD_COMMIT (release context) must fail the build"

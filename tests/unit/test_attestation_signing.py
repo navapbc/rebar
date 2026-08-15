@@ -12,6 +12,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _build_provenance_fixture import materialize_build_hook_package
 
 import rebar
 from rebar import signing
@@ -407,11 +408,7 @@ def _wheel_baked_commit(outdir: Path) -> str | None:
 def test_hook_fails_when_rebar_build_commit_empty(tmp_path: Path) -> None:
     """AC3(a): `REBAR_BUILD_COMMIT=""` (set-but-empty, release context) fails the real build."""
     tree = tmp_path / "src"
-    tree.mkdir()
-    tar = subprocess.run(
-        ["git", "-C", str(_REPO_ROOT), "archive", "HEAD"], capture_output=True, check=True
-    ).stdout
-    subprocess.run(["tar", "-x", "-C", str(tree)], input=tar, check=True)
+    materialize_build_hook_package(_REPO_ROOT, tree)
     import os
 
     env = {**os.environ, "REBAR_BUILD_COMMIT": ""}
@@ -422,40 +419,6 @@ def test_hook_fails_when_rebar_build_commit_empty(tmp_path: Path) -> None:
         env=env,
     )
     assert cp.returncode != 0, "an empty REBAR_BUILD_COMMIT must fail the build (release fail-fast)"
-
-
-def _self_contained_checkout(source_repo: Path, dest: Path) -> str:
-    """Materialize ``source_repo``'s HEAD tree into ``dest`` as a fresh one-commit repo.
-
-    Cloning the source checkout copies its object database and validates history
-    connectivity, so it fails outright when the source is a shallow or promisor
-    (partial) clone whose historical objects are unavailable. Exporting only the
-    HEAD tree and re-initializing sidesteps that: the fixture needs *a* git
-    checkout, not the source's history. The returned short SHA is the fixture's
-    own — unrelated to the source's HEAD — which additionally strengthens the
-    oracle: the value can only reach the wheel by the build hook actually running
-    ``git rev-parse`` inside the build tree.
-    """
-    dest.mkdir(parents=True, exist_ok=True)
-    tar = subprocess.run(
-        ["git", "-C", str(source_repo), "archive", "HEAD"], capture_output=True, check=True
-    ).stdout
-    subprocess.run(["tar", "-x", "-C", str(dest)], input=tar, check=True)
-    for args in (
-        ["git", "-c", "init.templateDir=", "init", "-q", "--initial-branch=main"],
-        ["git", "config", "user.email", "fixture@example.invalid"],
-        ["git", "config", "user.name", "fixture"],
-        ["git", "config", "commit.gpgsign", "false"],
-        ["git", "add", "-A", "-f"],
-        ["git", "commit", "-q", "--no-verify", "-m", "fixture checkout"],
-    ):
-        subprocess.run(args, cwd=dest, check=True, capture_output=True)
-    return subprocess.run(
-        ["git", "-C", str(dest), "rev-parse", "--short", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
@@ -470,7 +433,7 @@ def test_self_contained_checkout_survives_shallow_source(tmp_path: Path) -> None
         ["git", "commit", "-q", "--allow-empty", "--no-verify", "-m", "one"],
     ):
         subprocess.run(args, cwd=origin, check=True, capture_output=True)
-    (origin / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    shutil.copy2(_REPO_ROOT / "hatch_build.py", origin / "hatch_build.py")
     for args in (
         ["git", "add", "-A"],
         ["git", "commit", "-q", "--no-verify", "-m", "two"],
@@ -482,7 +445,7 @@ def test_self_contained_checkout_survives_shallow_source(tmp_path: Path) -> None
     )
     assert (shallow / ".git" / "shallow").exists(), "fixture source must actually be shallow"
 
-    short = _self_contained_checkout(shallow, tmp_path / "dest")
+    short = materialize_build_hook_package(shallow, tmp_path / "dest")
 
     assert len(short) >= 7 and all(c in "0123456789abcdef" for c in short)
     assert (tmp_path / "dest" / "pyproject.toml").is_file()
@@ -497,7 +460,7 @@ def test_hook_falls_back_to_git_when_env_unset(tmp_path: Path) -> None:
     import os
 
     clone = tmp_path / "clone"
-    short = _self_contained_checkout(_REPO_ROOT, clone)
+    short = materialize_build_hook_package(_REPO_ROOT, clone)
     env = {k: v for k, v in os.environ.items() if k != "REBAR_BUILD_COMMIT"}
     cp = subprocess.run(
         [sys.executable, "-m", "build", "--outdir", str(tmp_path / "d"), str(clone)],
