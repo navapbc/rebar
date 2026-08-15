@@ -12,14 +12,14 @@ dependencies live in pyproject.toml.
 pandoc
 --------------------------------------------------------------------------------
 Component:  pandoc
-Version:    3.6.1
+Version:    3.9
 Licence:    GPL-2.0-or-later
 Upstream:   https://pandoc.org  (source: https://github.com/jgm/pandoc)
 Copyright:  Copyright (C) 2006-2024 John MacFarlane
 
 How it reaches a rebar install
     pandoc is NOT vendored in this repository and is not a required dependency.
-    The executable is bundled inside the third-party `pypandoc-binary==1.15`
+    The executable is bundled inside the third-party `pypandoc-binary==1.17`
     wheel, which is pulled in ONLY by the optional `wiki` extra
     (`pip install rebar[wiki]`). An install without that extra contains no
     pandoc, and the Data Center wiki renderer degrades to passing Markdown

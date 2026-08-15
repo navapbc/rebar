@@ -46,7 +46,7 @@ def _declared_pins() -> set[str]:
 def test_notice_names_pandoc_its_version_and_its_licence() -> None:
     text = _notice_text()
     assert "pandoc" in text.lower()
-    assert "3.6.1" in text, "NOTICE must name the bundled pandoc VERSION, not just the component"
+    assert "3.9" in text, "NOTICE must name the bundled pandoc VERSION, not just the component"
     assert "GPL" in text, "NOTICE must record pandoc's licence"
     assert "pandoc.org" in text or "github.com/jgm/pandoc" in text, (
         "NOTICE must point at upstream so the GPL's source-availability obligation is actionable"

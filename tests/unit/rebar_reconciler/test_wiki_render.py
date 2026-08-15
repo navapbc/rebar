@@ -52,11 +52,11 @@ def test_pypandoc_and_pandoc_versions_are_pinned() -> None:
 
     import pypandoc
 
-    assert pypandoc.__version__ == "1.15"
+    assert pypandoc.__version__ == "1.17"
     banner = subprocess.run(
         [wiki_render._pandoc_path() or "", "--version"], capture_output=True, text=True
     ).stdout
-    assert banner.splitlines()[0].strip() == "pandoc 3.6.1"
+    assert banner.splitlines()[0].strip() == "pandoc 3.9"
 
 
 @pytest.mark.parametrize(
@@ -323,8 +323,8 @@ def test_adr_0095_records_the_required_sections() -> None:
     assert "## Platform" in adr
     assert "## Deferrals" in adr
     # The pin the non-skipping tests assert must be stated here too.
-    assert "3.6.1" in adr
-    assert "1.15" in adr
+    assert "3.9" in adr
+    assert "1.17" in adr
     # And the marker file backing the number bijection exists.
     assert (root / "docs/adr/.numbers/0095").read_text(encoding="utf-8").strip() == (
         "0095-dc-segmenting-wiki-renderer.md"

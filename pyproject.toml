@@ -177,7 +177,7 @@ metrics = ["lizard>=1.23"]
 # safety tests assert byte-level output, so an unpinned floor would let local and CI
 # diverge. wiki_render imports it lazily and returns the input Markdown unchanged when
 # it is absent, so `import rebar` stays dependency-free.
-wiki = ["pypandoc-binary==1.15"]
+wiki = ["pypandoc-binary==1.17"]
 # Markdown-aware Jira Cloud ADF conversion (story e59d, epic 708d). OPTIONAL — never
 # required by core rebar. `marklas` (MIT) over `mistune` (BSD-3-Clause) converts
 # Markdown<->ADF so Cloud renders real headings/lists/code instead of literal source.
@@ -224,7 +224,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.16.1",
+    "ruff==0.16.2",
     # Provider wrapper shell is checked identically on every developer and CI host.
     # shellcheck-py 0.11.0.1 packages the upstream ShellCheck 0.11.0 binary.
     "shellcheck-py==0.11.0.1",
@@ -251,7 +251,7 @@ dev = [
     "pytest-timeout==2.4.0",
     # DC wiki renderer's pandoc (the `wiki` extra) so the render-path tests actually RUN
     # in CI rather than skipping; the renderer itself degrades safely without it.
-    "pypandoc-binary==1.15",
+    "pypandoc-binary==1.17",
     # Markdown<->ADF engine (the `adf` extra) so the Cloud conversion tests actually
     # RUN in CI instead of skipping; adf.py itself degrades safely without it.
     "marklas==0.8.6",

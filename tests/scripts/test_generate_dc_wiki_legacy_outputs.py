@@ -100,7 +100,7 @@ def test_build_fixture_pins_ordered_inputs_outputs_and_binary(
     fixture = generator.build_fixture(
         units,
         pandoc=str(pandoc),
-        pandoc_version="3.6.1",
+        pandoc_version="3.9",
         generating_platform="darwin-arm64",
         converter=fake_convert,
         binary_hasher=lambda _path: binary_sha256,
@@ -108,7 +108,7 @@ def test_build_fixture_pins_ordered_inputs_outputs_and_binary(
 
     assert calls == [(unit, str(pandoc)) for unit in units]
     assert fixture["pandoc"] == {
-        "version": "3.6.1",
+        "version": "3.9",
         "generating_platform": "darwin-arm64",
         "binary_sha256": binary_sha256,
         "supported_platform_binary_sha256": generator.SUPPORTED_PANDOC_BINARY_SHA256,
@@ -190,7 +190,7 @@ def test_validation_accepts_each_supported_platform(
     generator.validate_pandoc_provenance(
         provenance,
         platform_key=platform_key,
-        version="3.6.1",
+        version="3.9",
         binary_sha256=fingerprints[platform_key],
     )
 
@@ -198,9 +198,9 @@ def test_validation_accepts_each_supported_platform(
 @pytest.mark.parametrize(
     ("platform_key", "version", "binary_sha256", "message"),
     [
-        ("windows-x86_64", "3.6.1", "0" * 64, "unsupported Pandoc platform"),
+        ("windows-x86_64", "3.9", "0" * 64, "unsupported Pandoc platform"),
         ("linux-x86_64", "3.7", "0" * 64, "Pandoc version mismatch"),
-        ("linux-x86_64", "3.6.1", "0" * 64, "Pandoc binary SHA-256 mismatch"),
+        ("linux-x86_64", "3.9", "0" * 64, "Pandoc binary SHA-256 mismatch"),
     ],
 )
 def test_validation_rejects_platform_version_and_hash_drift_with_diagnostics(
@@ -244,7 +244,7 @@ def test_validation_rejects_an_incomplete_supported_platform_map(
         generator.validate_pandoc_provenance(
             provenance,
             platform_key="darwin-arm64",
-            version="3.6.1",
+            version="3.9",
             binary_sha256=fingerprints["darwin-arm64"],
         )
 
