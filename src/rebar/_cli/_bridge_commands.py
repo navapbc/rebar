@@ -251,13 +251,19 @@ def _passthrough_help(command: str) -> int:
     if command == "fsck":
         text = (
             "Usage: rebar bridge fsck [--tickets-tracker=<path>] [--output json] "
-            "[--repair]\n\n"
+            "[--repair] [--live-visibility]\n\n"
             "Audit committed event compatibility, binding drift, and forward/reverse "
             "binding-store integrity without Jira access.\n\n"
             "--repair prunes reverse bindings that have no forward entry "
             "(store_integrity / reverse_missing_forward). It is the only writing mode, "
             "refuses when any other integrity kind is present, and records a durable "
-            "audit line. The audit itself never writes.\n"
+            "audit line. The audit itself never writes.\n\n"
+            "--live-visibility additionally runs a READ-ONLY, ADVISORY live check that "
+            "the mapped project keys + legacy_default are visible to the bridge bot, "
+            "reusing the reconcile-pass visibility helper. It requires live Jira "
+            "credentials (JIRA_URL / JIRA_USER / JIRA_API_TOKEN) and skips cleanly when "
+            "they are absent. The advisory is written to stderr and never changes the "
+            "exit code or the JSON output contract.\n"
         )
     elif command == "check-access":
         text = (

@@ -623,6 +623,17 @@ def main(argv: list[str] | None = None) -> int:
             "itself never writes."
         ),
     )
+    parser.add_argument(
+        "--live-visibility",
+        action="store_true",
+        help=(
+            "Opt-in: additionally run a READ-ONLY, ADVISORY live check that the mapped "
+            "project keys + legacy_default are visible to the bridge bot, reusing the "
+            "reconcile-pass visibility helper. Requires live Jira credentials "
+            "(JIRA_URL / JIRA_USER / JIRA_API_TOKEN); when absent it skips cleanly. The "
+            "advisory is written to stderr and never changes the exit code."
+        ),
+    )
     args = parser.parse_args(raw)
 
     # Resolve tracker path: explicit arg > env override > repo root default
@@ -668,6 +679,19 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(findings))
     else:
         print(_format_report(findings))
+
+    # Opt-in live mapped-project visibility (ticket 9702): READ-ONLY + ADVISORY.
+    # Rendered to STDERR so the pinned stdout JSON contract (bridge_fsck.schema.json)
+    # is byte-identical to today, and it NEVER changes the exit code below.
+    if args.live_visibility:
+        from rebar._engine_support.bridge_fsck_visibility import (
+            audit_mapped_project_visibility,
+            format_visibility_advisory,
+        )
+
+        verdict = audit_mapped_project_visibility(tracker_path.parent)
+        for line in format_visibility_advisory(verdict):
+            print(line, file=sys.stderr)
 
     # unknown_event_types is an informational WARN (upgrade signal), never a bridge
     # "issue" — it must not change the exit code. Alertable binding_drift IS real
