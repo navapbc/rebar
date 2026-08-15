@@ -197,7 +197,10 @@ def test_canonical_run_pass_maps_reschedule_to_benign_zero(main_mod, tmp_path, c
             return applier_mod
         return None
 
-    with patch.object(main_mod, "_try_load_step", side_effect=_load_step):
+    with (
+        patch.object(main_mod, "_try_load_step", side_effect=_load_step),
+        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
+    ):
         rc = main_mod.run_pass(repo_root=tmp_path, route="sync")
 
     assert rc == 0
@@ -265,6 +268,7 @@ def test_main_returns_0_when_reconcile_succeeds(main_mod, tmp_path):
 
     with (
         patch.object(main_mod, "_try_load_step", return_value=stub),
+        patch.object(main_mod, "_project_visibility_preflight", return_value=None),
         patch.object(main_mod, "_load_sibling_keyed", side_effect=_fake_load_sibling),
     ):
         rc = main_mod.main(["--repo-root", str(tmp_path)])
