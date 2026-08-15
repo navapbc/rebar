@@ -12,15 +12,17 @@ The record shape::
 The ``projects`` key set IS the store's sync list. ``legacy_default`` is the
 project pre-epic tickets (those with no ``bridge_project`` field) resolve to.
 
-Importable standalone: stdlib only, no ``rebar.*`` imports. Takes ``repo_root``
-and derives paths directly, mirroring ``binding_store``.
+Importable standalone: the READ path is stdlib only (no ``rebar.*`` imports), takes
+``repo_root`` and derives paths directly, mirroring ``binding_store`` — that is what the
+engine reconciler's read-only importers rely on. The WRITE path (``_write_record``, only
+ever reached from the ``rebar._lib_ops`` library layer) lazily imports the shared
+``rebar._store`` seams (``fsutil.atomic_write``) rather than hand-rolling the write.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -175,21 +177,15 @@ def _read_record(repo_root: Path) -> dict[str, Any]:
 
 
 def _write_record(repo_root: Path, record: dict[str, Any]) -> None:
-    """Atomically persist the record (tempfile + os.replace).
+    """Atomically persist the record via the shared ``fsutil.atomic_write`` seam.
 
-    Creates ``.bridge_state`` if missing; never touches sibling files.
+    Creates ``.bridge_state`` if missing (``atomic_write`` requires the parent dir to
+    already exist); never touches sibling files. The serialized bytes are exactly
+    ``json.dumps(record, indent=2, sort_keys=True)`` plus a single trailing newline —
+    byte-identical to the previous hand-rolled write.
     """
+    from rebar._store import fsutil
+
     path = _projects_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix="projects_", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(record, f, indent=2, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp, str(path))
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    fsutil.atomic_write(path, json.dumps(record, indent=2, sort_keys=True) + "\n")

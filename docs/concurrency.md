@@ -663,6 +663,26 @@ rebar** — `create` / `comment` / `transition` / `link`, or, when you genuinely
 commit and deliver pending tracker content yourself,
 `rebar._store.push.commit_and_push_tickets_branch`, which does it under the write lock.
 
+### The two-part tickets-branch mutation invariant
+
+**EVERY mutation of tickets-branch state must (1) run under the unified write lock AND
+(2) auto-commit + auto-publish it.** The two halves are not separable: taking the lock
+without publishing leaves durable state stranded in the worktree (and forces the ad-hoc
+hand-commits this section exists to forbid), while publishing without the lock races a
+concurrent writer into a lost update. Both come from the shared seams, used as-is — never
+hand-rolled:
+
+- `rebar._store.lock.write_lock(tracker)` — hold it around the read-modify-write of the
+  on-disk state (the `atomic_write` itself must land inside the lock's critical section).
+- `rebar._store.push.commit_and_push_tickets_branch(tracker, message=…)` — commit all
+  pending tracker changes under the same lock (+ rebase guard), then push.
+
+This applies to sidecar state that lives on the tickets branch beside the event log too,
+not only the event log. The `.bridge_state/projects.json` projects mapping is the worked
+example: its mutators (`bridge_projects_set` / `bridge_projects_remove`) perform the
+read-modify-write under `write_lock` via `fsutil.atomic_write`, then publish through
+`commit_and_push_tickets_branch` — no bespoke lock, tempfile dance, or `git` invocation.
+
 The rule is **no _ad-hoc_ raw git in the tracker**, not "no raw git ever". That distinction
 is deliberate. A blanket prohibition with no sanctioned door is what produced bug `2fa6`:
 the store was wedged, every rebar write failed, and improvised `git add -A` / `commit` /
