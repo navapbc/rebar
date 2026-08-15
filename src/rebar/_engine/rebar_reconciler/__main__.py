@@ -466,6 +466,26 @@ def run_pass(
     )
 
 
+def _project_visibility_preflight(repo_root: Path, target_mode, route: str | None):
+    """Thin adapter over the sibling preflight (ticket a011).
+
+    The backend-gated project-visibility logic lives in ``_preflight.py`` (kept out
+    of this module for the size cap). Here we only translate its lightweight
+    ``PreflightAbort`` verdict into this module's classified ``PassResult``. Loaded
+    via the sibling-keyed loader so tests can pre-seed it.
+    """
+    preflight = _load_sibling_keyed("rebar_reconciler._preflight", "_preflight.py")
+    abort = preflight.project_visibility_preflight(repo_root, target_mode, route)
+    if abort is None:
+        return None
+    return PassResult(
+        _Disposition.OPERATIONAL_FAILURE,
+        dict(abort.details),
+        canonical_message=abort.message,
+        legacy_message=abort.message,
+    )
+
+
 def run_pass_result(
     repo_root: Path | None = None,
     pass_id: str | None = None,
@@ -486,6 +506,14 @@ def run_pass_result(
         if route not in {"preview", "sync"}:
             print("OK: no-op (reconcile.py not present in this deployment)")
         return PassResult(_Disposition.CONVERGED, {})
+
+    # Preflight (ticket a011): verify every mapped project + legacy_default is
+    # visible to the backend BEFORE reconcile_once — the only outbound-mutation
+    # call. A missing/invisible key (or an unreachable backend) aborts the pass
+    # here rather than crashing deep in fan-out (the 05b8 incident class).
+    preflight_abort = _project_visibility_preflight(repo_root, target_mode, route)
+    if preflight_abort is not None:
+        return preflight_abort
 
     applier = _try_load_step("applier")
 
