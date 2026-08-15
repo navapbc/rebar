@@ -1,25 +1,5 @@
 {
-  "legacy_default": null,
-  "projects": {
-    "LEG": {
-      "repos": [
-        "rebar-legacy"
-      ]
-    },
-    "ONE": {
-      "repos": [
-        "rebar"
-      ]
-    },
-    "TWO": {
-      "repos": [
-        "rebar-web",
-        "rebar-api"
-      ]
-    },
-    "ZERO": {
-      "repos": []
-    }
-  },
+  "legacy_default": "REB",
+  "projects": {},
   "version": 1
 }
