@@ -8,7 +8,7 @@ calls), so they are ``external`` (excluded from the default run) and skip withou
 runner provenance, so a regression in the new default surfaces here.
 
 Coverage (the operations the cutover repoints onto pydantic_ai):
-  * review_ticket  — findings mode, opus (validates opus param handling: no temperature 400)
+  * review_code    — findings mode on opus (validates opus param handling: no temperature 400)
   * review_code    — findings mode
   * scan_epics_for_spec — batch structured output
   * verify_completion   — completion_verdict structured output (the close gate)
@@ -65,21 +65,30 @@ def _cfg(repo: Path, model: str):
 
 
 @_skip
-def test_pydantic_review_ticket_opus(rebar_repo: Path) -> None:
+def test_pydantic_review_code_opus(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The primary review op via pydantic_ai on OPUS — validates opus parameter handling
-    (no `temperature` sent, which would 400) on the new runner."""
+    (no `temperature` sent, which would 400) on the new runner.
+
+    Retargeted from the removed public ``rebar.llm.review_ticket`` (bug 751a): that
+    findings-mode reviewer no longer exists, so the opus param-handling intent is preserved
+    through the surviving findings-returning op, ``review_code``, forced onto the frontier
+    (opus) model. ``review_code`` is the OFF-BY-DEFAULT four-pass gate (epic b744): enabling it
+    makes this exercise the REAL pydantic_ai path (not the inert ``code-review-disabled``
+    result), so a live opus ``temperature`` 400 would surface here. The finalized verdict
+    stamps the CONFIGURED model/runner (``cfg.model``/runner name), so the frontier-model and
+    ``pydantic_ai`` provenance assertions still hold."""
     import rebar.llm as llm
 
-    epic = rebar.create_ticket(
-        "epic",
-        "Add login",
-        description="Build login.\n\n## Acceptance Criteria\n- [ ] users can log in",
-        repo_root=str(rebar_repo),
-    )
+    # review_code is an OFF-BY-DEFAULT four-pass gate (epic b744): enable it so this LIVE test
+    # exercises the real gated pydantic_ai path rather than the inert empty result.
+    monkeypatch.setenv("REBAR_VERIFY_ENABLE_CODE_REVIEW", "1")
+
+    diff = "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+API_KEY = 'hardcoded-secret'\n"
     (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
-    result = llm.review_ticket(
-        epic,
-        "ticket-quality",
+    result = llm.review_code(
+        diff_text=diff,
+        changed_files=["app.py"],
+        reviewers=["code-quality"],
         repo_root=str(rebar_repo),
         config=_cfg(rebar_repo, _class_model("frontier")),
     )
