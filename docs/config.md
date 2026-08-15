@@ -104,6 +104,21 @@ verify.max_ticket_description_chars = 8000   # blocking plan-review and completi
 verify.require_completion_verification_for_close = false  # gate work-ticket close on a PASS completion
                                              # verdict (signed onto the ticket); fail-closed. ON for
                                              # this project's rebar.toml.
+verify.auto_resume_max             = 2       # bounded auto-resume for the completion close gate
+                                             # (ticket b5f8): when a close FAILs on pure evidence-
+                                             # search exhaustion (every unmet criterion carries the
+                                             # framework-set `evidence_sufficient: false` marker —
+                                             # nothing positively refuted), the gate re-runs
+                                             # `verify_completion` itself; the cross-run verdict
+                                             # cache seeds prior validated PASSes so each re-run
+                                             # spends its budget on the formerly-insufficient
+                                             # criteria. At most this many resumptions per close
+                                             # invocation, and only while the prior attempt strictly
+                                             # increased the cache-credited PASS count (zero progress
+                                             # stops early). Integer >= 0; 0 disables auto-resume.
+                                             # Per-attempt trail (attempt number, cache-credited
+                                             # count, remaining unmet) rides the close output and the
+                                             # durable COMPLETION_VERDICT sidecar record.
 verify.require_plan_review_for_claim = false # gate claim on a successful (non-BLOCK) plan review attestation
 verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate detection during
                                              # `review-plan`: emits up to three suggested

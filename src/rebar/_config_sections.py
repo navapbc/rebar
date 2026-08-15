@@ -36,6 +36,7 @@ _SECTIONS: dict[str, dict] = {
         "completion_verify_step_floor_min": lambda v, k: _as_int(v, k, minimum=1),
         "completion_verify_child_traversal_steps": lambda v, k: _as_int(v, k, minimum=0),
         "completion_verify_fixed_overhead_steps": lambda v, k: _as_int(v, k, minimum=0),
+        "auto_resume_max": lambda v, k: _as_int(v, k, minimum=0),
         "contradiction_xcheck_active": lambda v, k: _as_bool(v, k),
         "comment_trail_xcheck_active": lambda v, k: _as_bool(v, k),
         "require_environment": lambda v, k: _as_str(v, k),

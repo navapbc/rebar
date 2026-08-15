@@ -351,6 +351,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
         }
         if metrics is not None:
             payload["metrics"] = dict(metrics)
+        # Carry the close gate's bounded auto-resume trail (ticket b5f8) when present, so a
+        # PASS reached via resumption stays diagnosable from the durable record alone.
+        if v.get("auto_resume_trail"):
+            payload["auto_resume_trail"] = list(v["auto_resume_trail"])
         return payload
     payload = {
         "schema": SCHEMA,
@@ -381,6 +385,10 @@ def build_payload(verdict: dict[str, Any], *, material: str | None = None) -> di
     # set, so every existing FAIL record keeps its exact prior shape.
     if v.get("evidence_sufficient") is False:
         payload["evidence_sufficient"] = False
+    # Carry the bounded auto-resume trail (ticket b5f8) the same way: only written when
+    # present, so every existing FAIL record keeps its exact prior shape.
+    if v.get("auto_resume_trail"):
+        payload["auto_resume_trail"] = list(v["auto_resume_trail"])
     if metrics is not None:
         payload["metrics"] = dict(metrics)
     return payload

@@ -453,6 +453,13 @@ def _verification_fail_message(
     guidance = result.get("remediation")
     if guidance:
         message += "\n\n  " + guidance
+    # Bounded auto-resume trail (ticket b5f8): when the gate re-ran the verifier before this
+    # failure surfaced, say so honestly — per attempt: the cache-credited PASS count and the
+    # remaining unmet count. Empty string for a close that never resumed (branch-free here,
+    # so this function stays at its frozen complexity ceiling).
+    from rebar._commands import close_autoresume
+
+    message += close_autoresume.attempts_note(result)
     # Discoverability (ticket fc20, incident 9b70): a ticket whose work will deliberately NOT
     # be completed — duplicate/obsolete/superseded/wontfix — can never satisfy the verifier, so
     # the FAIL message must present the truthful exit rather than leaving --force as the only
@@ -628,32 +635,18 @@ def _completion_precheck(
     _check_work_landed(ticket_id, resolved_id, accepted_ids, tracker, code_root)
 
     try:
-        from rebar import llm  # LAZY — preserves the optionality contract
+        # The billable verifier run, wrapped in the bounded auto-resume loop (ticket b5f8):
+        # an insufficiency-only FAIL (search exhaustion, nothing positively refuted) re-runs
+        # `llm.verify_completion` itself — the verdict cache seeds the credited PASSes — up
+        # to `verify.auto_resume_max` times while each attempt strictly grows the credited
+        # count. The `graph=False` / `source="attested"` / `ref` / `fetch=False` call-site
+        # rationale is documented on the helper, which imports `rebar.llm` LAZILY so the
+        # optionality contract holds. Extracted along this call seam so this function stays
+        # at its frozen complexity ceiling.
+        from rebar._commands import close_autoresume
 
-        # graph=False: the close gate verifies THIS ticket's OWN completion criteria, NOT its
-        # whole descendant subtree. Children are separate tickets gated on their own close; the
-        # agent reads the actual code regardless of whether child ticket TEXT is inlined, so
-        # graph=True would only bloat the context and make an epic close re-verify the entire
-        # feature in one run (impractical — it blows the step budget). The standalone
-        # `rebar verify-completion <id> --graph` remains available for a deep human review.
-        # source="attested", ref="HEAD" (epic raze-vet-ditch S4): the close gate verifies an
-        # IMMUTABLE snapshot of the committed tree being closed (HEAD), not the live mutable
-        # checkout — the fix for the motivating wrong-branch false-negative (the verdict is
-        # reproducible + branch-independent) AND it makes the verdict SIGNABLE so the close signs
-        # a `verified-at-sha` attestation (the child-closure gate trusts only children closed
-        # with a certified signature). HEAD resolves offline (no origin needed) and is "the state
-        # about to be pushed" for the single-dev flow. `source=local` (opt-in) is the read-only
-        # verify-before-push back-out that never signs.
-        # fetch=False: ref="HEAD" always resolves from the LOCAL object DB, so there is no
-        # reason to hit the network — and fetching the real origin on every close would add
-        # latency and a failure surface (a slow/unreachable remote) to a purely local verify.
-        result = llm.verify_completion(
-            ticket_id,
-            graph=False,
-            source="attested",
-            ref=(ref or "HEAD"),
-            fetch=False,
-            repo_root=repo_root,
+        result = close_autoresume.verify_with_auto_resume(
+            ticket_id, ref=ref, repo_root=repo_root, cfg_root=cfg_root
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         from rebar.llm import failure as _failure
