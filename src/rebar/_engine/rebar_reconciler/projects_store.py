@@ -140,8 +140,35 @@ def read_projects(repo_root: str | os.PathLike[str]) -> dict[str, dict[str, Any]
     return load_mapping(repo_root).projects
 
 
+def _require_valid_key(key: str) -> None:
+    """Reject a syntactically-invalid project key BEFORE any read/write/publish.
+
+    Reuses ``fetcher._validate_project_key`` — the single source of the key grammar
+    (``_PROJECT_KEY_RE``) — so this is SYNTACTIC only (no duplicated regex, and no
+    network/Jira call). Raising here, before ``_read_record``/``_write_record``,
+    guarantees a malformed key never mutates or publishes the mapping. The fetcher
+    lives beside this module in ``rebar_reconciler``; the import is lazy to keep the
+    read path stdlib-only (mirroring ``_write_record``'s lazy seam import).
+    """
+    from rebar_reconciler.fetcher import _PROJECT_KEY_RE, _validate_project_key
+
+    try:
+        _validate_project_key(key)
+    except ValueError as exc:
+        raise ValueError(
+            f"invalid bridge project key {key!r}: a Jira project key must match "
+            f"{_PROJECT_KEY_RE.pattern} (a letter followed by letters, digits, or "
+            f"underscores). Refusing to write the projects mapping."
+        ) from exc
+
+
 def set_project(repo_root: str | os.PathLike[str], key: str, repos: list[str]) -> None:
-    """Set ``key``'s repos list (REPLACE semantics) and persist atomically."""
+    """Set ``key``'s repos list (REPLACE semantics) and persist atomically.
+
+    The key is validated syntactically first (``_require_valid_key``); an invalid key
+    raises ``ValueError`` before any file write or publish.
+    """
+    _require_valid_key(key)
     root = Path(repo_root)
     record = _read_record(root)
     record["projects"][key] = {"repos": list(repos)}
@@ -151,9 +178,11 @@ def set_project(repo_root: str | os.PathLike[str], key: str, repos: list[str]) -
 def remove_project(repo_root: str | os.PathLike[str], key: str) -> None:
     """Remove ``key`` from the projects mapping.
 
-    Raises ``KeyError`` naming the key if it is not present, so the caller can
-    exit non-zero and report it.
+    The key is validated syntactically first (``_require_valid_key``); an invalid key
+    raises ``ValueError`` before any mutation. Raises ``KeyError`` naming the key if it
+    is (validly) not present, so the caller can exit non-zero and report it.
     """
+    _require_valid_key(key)
     root = Path(repo_root)
     record = _read_record(root)
     if key not in record["projects"]:

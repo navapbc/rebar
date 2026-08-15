@@ -94,3 +94,62 @@ def test_load_mapping_malformed_record_raises(tmp_path: Path) -> None:
     # Contract is "raises, not silent degrade" (fail-closed); the impl raises ValueError.
     with pytest.raises(ValueError):
         projects_store.load_mapping(tmp_path)
+
+
+# -- write-time key validation (ticket 209b) -------------------------------
+# set_project / remove_project must reject a syntactically-invalid project key
+# with a clear error BEFORE any file write, reusing fetcher._validate_project_key
+# (no duplicated regex, no network/Jira call).
+
+_INVALID_KEYS = ["le-g", "", "1x", "LEG ", " REB", "RE B", "_x", "9"]
+
+
+def _projects_json(repo_root: Path) -> Path:
+    return repo_root / ".tickets-tracker" / ".bridge_state" / "projects.json"
+
+
+@pytest.mark.parametrize("bad_key", _INVALID_KEYS)
+def test_set_project_rejects_invalid_key_and_writes_nothing(tmp_path: Path, bad_key: str) -> None:
+    """A syntactically-invalid key raises and leaves projects.json unwritten."""
+    with pytest.raises(ValueError):
+        projects_store.set_project(tmp_path, bad_key, ["rebar"])
+
+    assert not _projects_json(tmp_path).exists()
+
+
+def test_set_project_invalid_key_does_not_mutate_existing_record(tmp_path: Path) -> None:
+    """An invalid key must not disturb an already-persisted mapping (no partial write)."""
+    _write_record(
+        tmp_path,
+        {"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}},
+    )
+    before = _projects_json(tmp_path).read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        projects_store.set_project(tmp_path, "le-g", ["x"])
+
+    assert _projects_json(tmp_path).read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("good_key", ["REB", "PROJ_2", "A", "Dig", "X9_y"])
+def test_set_project_accepts_valid_key_and_writes(tmp_path: Path, good_key: str) -> None:
+    """A valid key is accepted unchanged and persisted (B's write path preserved)."""
+    projects_store.set_project(tmp_path, good_key, ["rebar", "other"])
+
+    mapping = projects_store.load_mapping(tmp_path)
+    assert mapping.projects[good_key] == {"repos": ["rebar", "other"]}
+
+
+@pytest.mark.parametrize("bad_key", _INVALID_KEYS)
+def test_remove_project_rejects_invalid_key_before_mutation(tmp_path: Path, bad_key: str) -> None:
+    """remove_project rejects an invalid key with the same guard, before any mutation."""
+    _write_record(
+        tmp_path,
+        {"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}},
+    )
+    before = _projects_json(tmp_path).read_text(encoding="utf-8")
+
+    with pytest.raises(ValueError):
+        projects_store.remove_project(tmp_path, bad_key)
+
+    assert _projects_json(tmp_path).read_text(encoding="utf-8") == before
