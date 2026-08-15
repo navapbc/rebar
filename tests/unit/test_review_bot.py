@@ -2350,10 +2350,10 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
     and overrunning the grace period means SIGKILL, which is strictly worse than a clean cancel.
 
     To tell the two apart the QUEUE drain must consume most of the budget first: a webhook
-    review runs for 1.2s of a 2s budget, and the reconciler review then outlasts whatever is
-    left. Sharing one deadline finishes near 2s; a second independent window would spend 1.2s
-    plus a further 2s. (With an empty queue the two are indistinguishable, which is exactly the
-    vacuous shape this avoids.)"""
+    review runs for 0.12s of a 0.2s test budget, and the reconciler review then outlasts
+    whatever is left. The 60/40 ratio is the contract; production's 1200s budget is unchanged.
+    With an empty queue the two are indistinguishable, which is exactly the vacuous shape this
+    avoids."""
     import types
 
     pytest.importorskip("fastapi")
@@ -2375,7 +2375,7 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
                 event, config=config, gerrit=gerrit, dedup=dedup, force=force
             )
         started.append(change_id)
-        await asyncio.sleep(1.2)  # the webhook's review eats most of the budget
+        await asyncio.sleep(0.12)  # the webhook's review eats most of the test budget
         completed.append(change_id)
         return {"status": "voted", "change_id": change_id}
 
@@ -2383,8 +2383,9 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
 
     def _endless_gate(request):
         started.append("gap0")
-        time.sleep(6)  # outlasts the whole budget (kept short: an orphaned thread is joined
-        return _verdict_from_findings([])  # by asyncio.run's teardown after the drain)
+        # Outlast the whole test budget; asyncio.run joins the orphaned worker at teardown.
+        time.sleep(0.6)
+        return _verdict_from_findings([])
 
     gerrit = ReconcileGerrit(events=[_events_log_event("rebar~main~Igap0", "rev-gap0", number=1)])
     monkeypatch.setattr(gd, "produce_code_review_verdict", _endless_gate, raising=True)
@@ -2393,8 +2394,8 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
     monkeypatch.setattr(
         "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
     )
-    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "2")
-    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.2")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.03")
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
 
     drain_timeouts = _spy_drain_wait(monkeypatch)
@@ -2411,18 +2412,18 @@ def test_shutdown_reconciler_drain_shares_the_queue_drain_budget(monkeypatch, tm
         f"the webhook review must drain and the reconciler's must outlast the budget: {completed}"
     )
     # THE CONTRACT, read structurally off the budget the drain was actually handed rather than
-    # off a stopwatch. SHUTDOWN_DRAIN_SECONDS is 2s and the webhook review already spent ~1.2s
-    # of it, so a SHARED deadline can hand the reconciler wait only the ~0.8s that remain. Two
-    # independent windows would hand it a fresh 2.0s — which is what breaks the
+    # off a stopwatch. The 0.2s test budget and ~0.12s webhook review retain production's
+    # important 60/40 geometry, so a SHARED deadline can hand the reconciler wait only the
+    # ~0.08s that remain. Two independent windows would hand it a fresh 0.2s — which breaks the
     # stop_grace_period sizing that test_reviewbot_stop_grace_period_covers_an_in_flight_store_
     # write pins, and an overrun means SIGKILL mid-store-write.
     assert drain_timeouts, (
         "the reconciler drain never ran, so this test is no longer exercising the shared "
         "deadline at all"
     )
-    assert drain_timeouts[0] is not None and drain_timeouts[0] < 1.5, (
-        f"the reconciler drain was given {drain_timeouts[0]}s against a 2s "
-        "SHUTDOWN_DRAIN_SECONDS of which the queue drain had already spent ~1.2s. It must "
+    assert drain_timeouts[0] is not None and drain_timeouts[0] < 0.15, (
+        f"the reconciler drain was given {drain_timeouts[0]}s against a 0.2s test "
+        "SHUTDOWN_DRAIN_SECONDS of which the queue drain had already spent ~0.12s. It must "
         "receive only what REMAINS of one shared deadline, not a fresh full window."
     )
 
@@ -2444,10 +2445,17 @@ def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypa
     cfg = _cfg(tmp_path)
     _patch_review(monkeypatch, [])
 
+    import threading
+
+    release_fetch = threading.Event()
+
     class SlowFetchGerrit(ReconcileGerrit):
         def list_events(self, since=None):
             self.list_since_calls.append(since)
-            time.sleep(3)  # blocking, off-loop via to_thread — no review is in flight
+            # A barrier, not a sleep: this remains genuinely blocked off-loop until shutdown
+            # has proven it does not drain unrelated reconciler work. The timeout is cleanup
+            # protection only, so a broken test cannot orphan the executor thread forever.
+            assert release_fetch.wait(timeout=10)
             return []
 
     gerrit = SlowFetchGerrit()
@@ -2455,15 +2463,18 @@ def test_shutdown_is_prompt_when_the_reconciler_has_no_review_in_flight(monkeypa
     monkeypatch.setattr(
         "rebar._snapshot.start_background_janitor", lambda: (None, None), raising=False
     )
-    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "5")
-    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.3")
+    monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "0.2")
+    monkeypatch.setenv("SHUTDOWN_CANCEL_SECONDS", "0.03")
     fake_app = types.SimpleNamespace(state=types.SimpleNamespace(config=cfg))
     drain_timeouts = _spy_drain_wait(monkeypatch)
 
     async def _run():
-        async with appmod.lifespan(fake_app):
-            # the reconciler is inside the blocking fetch
-            await _await_probe(gerrit.list_since_calls, what="the events-log fetch")
+        try:
+            async with appmod.lifespan(fake_app):
+                # the reconciler is inside the blocking fetch
+                await _await_probe(gerrit.list_since_calls, what="the events-log fetch")
+        finally:
+            release_fetch.set()
 
     asyncio.run(asyncio.wait_for(_run(), timeout=30))
 

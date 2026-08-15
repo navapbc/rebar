@@ -113,7 +113,12 @@ def box(tmp_path: Path) -> dict[str, object]:
         f"""
         case "$*" in
           *"compose build"*)  echo "compose-build" >> "{cmd_log}" ;;
-          *"compose up"*)     echo "compose-up" >> "{cmd_log}" ;;
+          *"compose up"*)
+            echo "compose-up" >> "{cmd_log}"
+            if [ "$(cat "{health_file}")" = "DOWN_UNTIL_DEPLOY" ]; then
+              printf '%s' '{{"status":"ok","in_flight":0}}' > "{health_file}"
+            fi
+            ;;
           *"compose logs"*)   echo "bot-log-tail" ;;
           *"image inspect"*)  exit 0 ;;
           *tag*:latest*:prev*) echo "tag-save-prev" >> "{cmd_log}" ;;
@@ -123,13 +128,14 @@ def box(tmp_path: Path) -> dict[str, object]:
         """,
     )
     # curl stub: serves the file-backed /health body to BOTH the drain probe and the readiness
-    # gate. Exit 22 (curl's HTTP-error code) when the body is the sentinel "DOWN".
+    # gate. Exit 22 (curl's HTTP-error code) for either unreachable sentinel; the docker stub
+    # changes DOWN_UNTIL_DEPLOY to a healthy replacement only when compose-up actually runs.
     _stub(
         bin_dir,
         "curl",
         f"""
         body="$(cat "{health_file}")"
-        [ "$body" = "DOWN" ] && exit 22
+        case "$body" in DOWN|DOWN_UNTIL_DEPLOY) exit 22 ;; esac
         printf '%s' "$body"
         exit 0
         """,
@@ -326,7 +332,10 @@ def test_the_bound_is_not_reset_by_a_new_commit_landing(box: dict[str, object]) 
         f"tick 1 should defer (bound not yet spent)\n{first.stdout}\n{first.stderr}"
     )
 
-    time.sleep(3)  # let the 2s bound elapse
+    # Inject the elapsed episode through its persisted clock seam. Production still reads the
+    # real clock; only the fixture timestamp is aged, avoiding a three-second passive wait.
+    state: Path = box["state"]  # type: ignore[assignment]
+    (state / "deploy-defer").write_text(f"{int(time.time()) - 3}\n")
 
     _set_target(box, "b" * 40)  # a NEW commit lands, as during a burst
     second = _run(box)
@@ -550,8 +559,11 @@ def test_a_missing_inflight_field_is_treated_as_unknown_not_as_idle(
 def test_an_unreachable_bot_is_unknown_and_does_not_block_the_deploy(
     box: dict[str, object],
 ) -> None:
-    """A down bot must still be redeployable — that is the recovery path."""
-    _set_health_body(box, "DOWN")  # curl exits non-zero for both probe and readiness
+    """A down old bot must be replaceable by a healthy new bot — that is the recovery path."""
+    # The first probe sees the old bot down; after compose-up, readiness sees the replacement
+    # healthy. Rollback of a replacement that stays unhealthy is covered by the dedicated
+    # autodeploy health-gate suite, so repeating its full HEALTH_TIMEOUT here adds no contract.
+    _set_health_body(box, "DOWN_UNTIL_DEPLOY")
     result = _run(box)
     commands = _commands(box)
     context = f"commands={commands}\n{result.stdout}\n{result.stderr}"
@@ -562,4 +574,26 @@ def test_an_unreachable_bot_is_unknown_and_does_not_block_the_deploy(
     )
     assert "compose-build" in commands, (
         f"the deploy must proceed so a broken bot can be replaced\n{context}"
+    )
+
+
+def test_a_persistently_unreachable_replacement_rolls_back_without_deferring(
+    box: dict[str, object],
+) -> None:
+    """A failed replacement remains a health-gate failure, never a drain-gate deferral."""
+    _set_health_body(box, "DOWN")
+    env: dict[str, str] = box["env"]  # type: ignore[assignment]
+    env["HEALTH_TIMEOUT"] = "0"  # exercise the failure path without a passive readiness wait
+
+    result = _run(box)
+    commands = _commands(box)
+    context = f"rc={result.returncode}\ncommands={commands}\n{result.stdout}\n{result.stderr}"
+
+    assert not _markers(result, "AUTODEPLOY_DEFERRED"), (
+        f"an unreachable old bot must not be classified as busy even when its replacement also "
+        f"fails health checks\n{context}"
+    )
+    assert "compose-build" in commands and "tag-rollback-latest" in commands, (
+        f"the deploy must be attempted, then the persistently-unhealthy replacement rolled back"
+        f"\n{context}"
     )
