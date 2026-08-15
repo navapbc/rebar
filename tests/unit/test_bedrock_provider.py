@@ -701,24 +701,26 @@ def test_an_ambient_boto3_region_is_still_honoured(monkeypatch) -> None:
     assert provider_seen.get("bedrock_client") is seen["sentinel"]  # built, not rejected
 
 
-def test_aws_region_alone_resolves_nothing_and_still_raises(monkeypatch, tmp_path) -> None:
-    """4e71. Pins the BEHAVIOUR the corrected docstring/error message rests on, not its prose.
+def test_botocore_still_ignores_aws_region_but_rebar_now_closes_the_trap(
+    monkeypatch, tmp_path
+) -> None:
+    """8274 (rewrites the 4e71 oracle, which pinned the old raise). Two claims in one test:
 
-    Uses the REAL boto3 resolution chain (no Session stub) so this is an oracle on botocore
-    itself: with AWS_DEFAULT_REGION genuinely absent from the environment — deleted, not set
-    empty — and AWS_REGION set, botocore resolves no region, and the typed LLMConfigError is
-    still raised. Profile config files are pointed at nonexistent paths so an ambient
-    ~/.aws/config on a developer machine cannot supply a region and mask the asymmetry.
+    1. The MEASURED botocore quirk still holds — with AWS_DEFAULT_REGION genuinely absent
+       (deleted, not set empty) and AWS_REGION set, the REAL boto3 resolution chain resolves
+       nothing. If a future botocore starts honouring AWS_REGION this arm goes RED, the signal
+       to re-measure and simplify rebar's own chain.
+    2. rebar no longer inherits that quirk: `build_bedrock_provider` resolves AWS_REGION in
+       its OWN chain and passes it explicitly as `region_name=`, so the build now SUCCEEDS
+       where it used to raise a typed LLMConfigError (the 4e71-era behaviour).
 
-    If a future botocore starts honouring AWS_REGION this test goes RED, which is the signal
-    to re-measure and re-word the docstring rather than let the claim decay into folklore.
-    A test on the message text would instead be a change-detector on prose.
+    Profile config files are pointed at nonexistent paths so an ambient ~/.aws/config on a
+    developer machine cannot supply a region and mask either claim.
     """
     import boto3
 
     from rebar.llm.bedrock_model import build_bedrock_provider
     from rebar.llm.config import LLMConfig
-    from rebar.llm.errors import LLMConfigError
 
     _stub_bedrock_provider(monkeypatch)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
@@ -727,12 +729,101 @@ def test_aws_region_alone_resolves_nothing_and_still_raises(monkeypatch, tmp_pat
     monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "absent-config"))
     monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "absent-credentials"))
 
-    # the claim under test: AWS_REGION alone is not a region source for botocore
+    # claim 1: AWS_REGION alone is still not a region source for botocore itself
     assert boto3.session.Session().region_name is None
 
+    # claim 2: rebar's own chain consumes AWS_REGION and the session receives it explicitly
+    seen = _spy_boto_session(monkeypatch)
     cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
-    with pytest.raises(LLMConfigError):
+    build_bedrock_provider(cfg)
+    assert seen["session_kwargs"].get("region_name") == "us-east-1"
+
+
+# ── 8274: rebar's OWN region chain — AWS_REGION honoured, precedence pinned ─────────────────
+# botocore ignores AWS_REGION (measured above), the standard variable operators actually set;
+# rebar resolves the region itself and hands it to the session explicitly so the quirk is moot.
+
+
+def _strip_region_sources(monkeypatch) -> None:
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_region_resolution_precedence_each_source_beats_the_ones_after_it(monkeypatch) -> None:
+    """8274 AC2. All three sources set to DISTINCT regions, then stripped front-to-back, pins
+    the full order: REBAR_LLM_BEDROCK_REGION > AWS_DEFAULT_REGION > AWS_REGION > nothing.
+    Exercises the pure resolver directly — the seam the provenance record reads too — so a
+    reordered or dropped arm cannot hide behind the builder's session plumbing."""
+    from rebar.llm.bedrock_model import resolve_bedrock_region
+
+    _strip_region_sources(monkeypatch)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+
+    assert resolve_bedrock_region("us-east-1") == ("us-east-1", "REBAR_LLM_BEDROCK_REGION")
+    assert resolve_bedrock_region(None) == ("eu-west-1", "AWS_DEFAULT_REGION")
+    monkeypatch.delenv("AWS_DEFAULT_REGION")
+    assert resolve_bedrock_region(None) == ("us-west-2", "AWS_REGION")
+    monkeypatch.delenv("AWS_REGION")
+    assert resolve_bedrock_region(None) == (None, None)
+
+
+def test_empty_string_env_regions_are_treated_as_unset(monkeypatch) -> None:
+    """Botocore parity: an empty AWS_DEFAULT_REGION does not resolve a region there, so an
+    empty value must fall through rebar's chain too, not resolve as ''."""
+    from rebar.llm.bedrock_model import resolve_bedrock_region
+
+    _strip_region_sources(monkeypatch)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "")
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    assert resolve_bedrock_region(None) == ("us-west-2", "AWS_REGION")
+    monkeypatch.setenv("AWS_REGION", "")
+    assert resolve_bedrock_region("") == (None, None)
+
+
+def test_aws_region_alone_builds_and_reaches_the_session_explicitly(monkeypatch) -> None:
+    """8274 AC1 (the symptom itself). Only AWS_REGION is set — the shell shape operators
+    actually have — and the build must succeed with THAT region passed explicitly to the
+    boto3 session (never left to botocore, which ignores AWS_REGION)."""
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    provider_seen = _stub_bedrock_provider(monkeypatch)
+    _strip_region_sources(monkeypatch)
+    monkeypatch.setenv("AWS_REGION", "us-west-2")
+    seen = _spy_boto_session(monkeypatch)
+    cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
+
+    build_bedrock_provider(cfg)
+
+    assert seen["session_kwargs"].get("region_name") == "us-west-2"
+    assert provider_seen.get("bedrock_client") is seen["sentinel"]
+
+
+def test_no_region_error_names_the_full_chain_and_drops_the_stale_warning(monkeypatch) -> None:
+    """8274 AC4. The no-region-anywhere error must name every source in rebar's chain — an
+    operator can fix it by setting ANY of the three — and the old 'AWS_REGION alone does NOT
+    resolve a region' guidance must be gone: rebar now consults AWS_REGION itself, so that
+    paragraph would send operators away from a variable that works."""
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.errors import LLMConfigError
+
+    _stub_bedrock_provider(monkeypatch)
+    _no_ambient_region(monkeypatch)
+    cfg = LLMConfig(repo_path=".", model="bedrock:us.anthropic.claude-sonnet-4-6")
+
+    with pytest.raises(LLMConfigError) as ei:
         build_bedrock_provider(cfg)
+    text = str(ei.value)
+    for source in ("REBAR_LLM_BEDROCK_REGION", "AWS_DEFAULT_REGION", "AWS_REGION"):
+        assert source in text, f"the error no longer names {source} as a region source"
+    assert "does NOT resolve" not in text, (
+        "the stale AWS_REGION-does-not-work guidance survived — AWS_REGION is now a live "
+        "source in rebar's own chain, so this paragraph misdirects operators"
+    )
+    # IMDS note stays: credential discovery and region discovery are independent
+    assert "IMDS" in text
 
 
 # ── 61d8: llm_retry_max_attempts / timeout_s must reach the botocore client Config ──────────
