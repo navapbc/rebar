@@ -1,10 +1,10 @@
 {
-  "completed_at": "2026-08-15T17:38:28Z",
+  "completed_at": "2026-08-15T18:42:10Z",
   "environment_id": "reconciler",
   "failure_kind": null,
-  "lock_fence": 10,
+  "lock_fence": 11,
   "outcome": "success",
-  "pass_id": "2026-08-15T17-31-05",
+  "pass_id": "2026-08-15T18-34-04",
   "process_exit_code": 0,
   "schema_version": 1
 }
