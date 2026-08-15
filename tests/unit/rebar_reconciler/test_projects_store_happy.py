@@ -59,3 +59,31 @@ def test_resolve_project_absent_field_falls_back_to_legacy_default(tmp_path: Pat
     mapping = projects_store.load_mapping(tmp_path)
 
     assert projects_store.resolve_project({}, mapping) == "REB"
+
+
+def test_write_record_serialized_bytes_are_byte_identical(tmp_path: Path) -> None:
+    """``set_project`` persists projects.json with the exact serialized bytes contract:
+    ``json.dump(record, indent=2, sort_keys=True)`` plus a single trailing newline.
+
+    Pins the on-disk bytes across the swap from the hand-rolled tempfile+os.replace write
+    to the shared ``fsutil.atomic_write`` seam — the conversion must be byte-preserving.
+    """
+    projects_store.set_project(tmp_path, "REB", ["rebar"])
+
+    written = (tmp_path / ".tickets-tracker" / ".bridge_state" / "projects.json").read_bytes()
+
+    expected = (
+        b'{\n  "legacy_default": null,\n  "projects": {\n    "REB": {\n'
+        b'      "repos": [\n        "rebar"\n      ]\n    }\n  },\n  "version": 1\n}\n'
+    )
+    assert written == expected
+
+
+def test_write_record_first_write_creates_bridge_state_dir(tmp_path: Path) -> None:
+    """First write must still create the ``.bridge_state`` parent dir (atomic_write itself
+    requires the parent to already exist, so the mkdir is preserved through the swap)."""
+    (tmp_path / ".tickets-tracker").mkdir(parents=True, exist_ok=True)
+
+    projects_store.set_project(tmp_path, "REB", ["rebar"])
+
+    assert (tmp_path / ".tickets-tracker" / ".bridge_state" / "projects.json").exists()

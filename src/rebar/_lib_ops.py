@@ -109,9 +109,14 @@ def bridge_projects_list(*, repo_root=None) -> dict:
 
 def bridge_projects_set(key, repos, *, repo_root=None) -> None:
     """Replace ``key``'s repos with ``repos`` in the bridge-projects mapping."""
+    from rebar._store import lock, push
+
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
-    store.set_project(root, key, list(repos))
+    tracker = config.tracker_dir(repo_root)
+    with lock.write_lock(tracker):
+        store.set_project(root, key, list(repos))
+    push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
 def bridge_projects_remove(key, *, repo_root=None) -> None:
@@ -119,13 +124,18 @@ def bridge_projects_remove(key, *, repo_root=None) -> None:
 
     Raise ``RebarError`` (naming the key) if it is not present.
     """
+    from rebar._store import lock, push
+
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
+    tracker = config.tracker_dir(repo_root)
     try:
-        store.remove_project(root, key)
+        with lock.write_lock(tracker):
+            store.remove_project(root, key)
     except KeyError as exc:
         message = f"bridge project {key!r} is not in the mapping"
         raise RebarError(message, returncode=2, stderr=message) from exc
+    push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
 def _engine_module(module_name: str):
