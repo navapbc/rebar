@@ -17,7 +17,7 @@ Jira Data Center rich text is produced by a **segmenting** renderer
 through pandoc and passes everything else through byte-for-byte, rather than by
 converting a whole body in one call.
 
-pandoc is delivered by the **`pypandoc-binary==1.15` wheel** (the `wiki` extra),
+pandoc is delivered by the **`pypandoc-binary==1.17` wheel** (the `wiki` extra),
 which bundles the pandoc executable, so the path is self-contained with no host
 install.
 
@@ -59,7 +59,7 @@ story `3388` supplies state-based echo suppression instead.
 
 Observed in a clean environment on this pin, and asserted by non-skipping tests:
 
-- `pypandoc.__version__ == "1.15"`, bundled pandoc **3.6.1**.
+- `pypandoc.__version__ == "1.17"`, bundled pandoc **3.9**.
 - `commonmark -> jira --wrap=none`:
   - `# Heading` → `h1. {anchor:}Heading\n` (the anchor is content-free and is stripped)
   - `` `mono` `` → `{{mono}}\n`

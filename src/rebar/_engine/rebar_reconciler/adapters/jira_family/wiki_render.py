@@ -4,11 +4,11 @@ Data Center stores rich text as WIKI markup (REST v2) while rebar authors Markdo
 and currently sends it literally, so ``# Heading`` reads as a hash in Jira.
 
 Converting a whole body in one pandoc call is not an option. Measured on the pinned
-pandoc 3.6.1, its jira writer escapes a prose ``->`` to ``\\->``, rewrites a Markdown
-table delimiter row to ``| \\-\\-\\- |``, escapes punctuation inside inline code
-(`` `->` `` becomes ``{{\\->}}``), and DELETES HTML comments outright — a lone
-``<!-- rebar:reconciler-echo -->`` renders to the empty string, which would drop
-rebar's own reconciler echo marker.
+pandoc 3.9 (and originally on 3.6.1), its jira writer escapes a prose ``->`` to
+``\\->``, rewrites a Markdown table delimiter row to ``| \\-\\-\\- |``, escapes
+punctuation inside inline code (`` `->` `` becomes ``{{\\->}}``), and DELETES HTML
+comments outright — a lone ``<!-- rebar:reconciler-echo -->`` renders to the empty
+string, which would drop rebar's own reconciler echo marker.
 
 So this module SEGMENTS: it converts only structurally-safe units and passes
 everything else through byte-for-byte. A unit that cannot convert losslessly is

@@ -16,12 +16,12 @@ assertion to execute the real Pandoc binary
   `tests/unit/rebar_reconciler/test_wiki_render_corpus.py`,
   `tests/unit/rebar_reconciler/test_wiki_render_hardening.py`, and
   `scripts/generate_dc_wiki_legacy_outputs.py`.
-- **Finding:** rebar pins `pypandoc-binary==1.15` and Pandoc 3.6.1. The
+- **Finding:** rebar pins `pypandoc-binary==1.17` and Pandoc 3.9. The
   committed compatibility fixture pins both supported binaries: Darwin arm64
   SHA-256
-  `94ebf1efbce3561379e8f25de3efe5aeabee64dc36dd8e8b9e96cf05b4195c52`
+  `d7b1e75cd20ee6a788a1399492be07d4559949e18e55f34cfc5c91807fdfa90d`
   and Linux x86_64 SHA-256
-  `4715627586c5d9c732e8f5a6b6bb9e27c4216a76a7729e043b24374dedf8a1f0`.
+  `decd3dd11a3fe0c16ce56443343ec53adde6fbed6f97d7f56f06b1c424248e7b`.
 - **Finding:** the corpus and hardening suites collectively cover 178 source
   bodies and 884 prepared Pandoc-bound units. They assert corpus integrity,
   secret scrubbing, protected excerpts, exact table and comment retention,

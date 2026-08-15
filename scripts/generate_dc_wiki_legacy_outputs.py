@@ -56,10 +56,10 @@ _MAX_FIXTURE_BYTES = 500_000
 LEGACY_PANDOC_FROM = "commonmark"
 LEGACY_PANDOC_TO = "jira"
 LEGACY_PANDOC_ARGS = ("--wrap=none",)
-LEGACY_PANDOC_VERSION = "3.6.1"
+LEGACY_PANDOC_VERSION = "3.9"
 SUPPORTED_PANDOC_BINARY_SHA256 = {
-    "darwin-arm64": "94ebf1efbce3561379e8f25de3efe5aeabee64dc36dd8e8b9e96cf05b4195c52",
-    "linux-x86_64": "4715627586c5d9c732e8f5a6b6bb9e27c4216a76a7729e043b24374dedf8a1f0",
+    "darwin-arm64": "d7b1e75cd20ee6a788a1399492be07d4559949e18e55f34cfc5c91807fdfa90d",
+    "linux-x86_64": "decd3dd11a3fe0c16ce56443343ec53adde6fbed6f97d7f56f06b1c424248e7b",
 }
 _LEGACY_ANCHOR_RE = re.compile(r"\{anchor:[^}]*\}")
 
