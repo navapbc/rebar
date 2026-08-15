@@ -255,6 +255,15 @@ class VerifyConfig:
     # terms; 0 disables a term.
     completion_verify_child_traversal_steps: int = 16
     completion_verify_fixed_overhead_steps: int = 16
+    # Bounded auto-resume for the completion-verification close gate (ticket b5f8): when a
+    # close FAILs on pure evidence-search exhaustion (every unmet criterion carries the
+    # framework-set per-criterion `evidence_sufficient: false` marker — nothing positively
+    # refuted), the gate re-runs `verify_completion` itself instead of asking the operator to
+    # retype the same close; the cross-run verdict cache seeds prior validated PASSes, so each
+    # re-run concentrates its budget on the formerly-insufficient criteria. At most this many
+    # resumptions per close invocation, and only while the prior attempt strictly increased
+    # the cache-credited PASS count (zero progress stops early). 0 disables auto-resume.
+    auto_resume_max: int = 2
     # Validation-assessment cross-checks (bug 5e40) — two per-verdict consistency drops that
     # converge a non-deterministic re-review. Each stays inert (the gate runs un-cross-checked, the
     # verdict byte-identical) until flipped true, mirroring completion_floor_active's evidence gate:
