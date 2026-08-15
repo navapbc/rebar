@@ -178,12 +178,16 @@ def _make_outbound_ticket(
     bridge_project: str | None,
     repos: list[str] | None = None,
     omit_project: bool = False,
+    return_id: bool = False,
 ) -> str:
     """Create a rebar ticket tagged *run_label* so the bridge stamps the label on create.
 
     ``omit_project`` leaves the ``bridge_project`` field ABSENT (scenario 4's legacy
     path); otherwise ``bridge_project`` is written verbatim (an empty string is the
-    explicit "not synced" signal of scenario 3). Returns the ticket alias.
+    explicit "not synced" signal of scenario 3). Returns the ticket alias, or the
+    canonical local id when ``return_id`` is set — ``--only``/``--except`` selection
+    (``resolve_selection``) resolves canonical local ids and Jira keys but NOT aliases,
+    so a scenario that scopes a pass to this ticket must hold the id.
     """
     kwargs: dict[str, Any] = {"tags": [run_label], "return_alias": True, "repo_root": str(work)}
     if repos is not None:
@@ -191,6 +195,8 @@ def _make_outbound_ticket(
     if not omit_project:
         kwargs["bridge_project"] = bridge_project
     created = rebar.create_ticket("task", title, **kwargs)
+    if return_id:
+        return created["id"]
     return created["alias"] or created["id"]
 
 
@@ -442,7 +448,12 @@ def test_absent_project_resolves_to_legacy_default(
     work = store_copy
     legacy = scratch_projects["legacy"]
     tid = _make_outbound_ticket(
-        work, run_label, "368f legacy default", bridge_project=None, omit_project=True
+        work,
+        run_label,
+        "368f legacy default",
+        bridge_project=None,
+        omit_project=True,
+        return_id=True,
     )
     # Set legacy_default HERE (the base copy leaves it None to avoid flooding production
     # tickets). Because setting it makes every absent-bridge_project production ticket
@@ -611,12 +622,12 @@ def test_promote_only_binding_is_one_way(
     one_keys = _wait_label_count(dc_transport, one, run_label, 1)
     assert len(one_keys) == 1, f"promote did not create the `one` issue: {one_keys}"
 
-    # Re-pointing the bound ticket to `two` must be refused. The library wraps the applier's
-    # CrossProjectTargetError as a RebarError carrying the guard's message; assert both the
-    # fail-closed AND its reason so an unrelated failure cannot read as the guard firing.
-    rebar.edit_ticket(alias, repo_root=str(work), bridge_project=two)
-    with pytest.raises(rebar.RebarError, match="outside the configured scope"):
-        rebar.bridge_sync(repo_root=str(work))
+    # Re-pointing the bound ticket to `two` must be refused AT EDIT TIME. The promote-only
+    # guard fires inside rebar.edit_ticket when it would overwrite an existing binding —
+    # earlier and safer than sync — so the re-point never reaches the applier. Assert the
+    # refusal AND its reason so an unrelated edit failure cannot read as the guard firing.
+    with pytest.raises(rebar.RebarError, match="promote-only"):
+        rebar.edit_ticket(alias, repo_root=str(work), bridge_project=two)
     assert _keys_by_label(dc_transport, two, run_label) == [], (
         "a bound ticket was re-homed into `two`"
     )
@@ -641,7 +652,24 @@ def test_capability_stamp_and_fail_closed(
     work = store_copy
     tracker = work / ".tickets-tracker"
 
-    # The mapping already holds >1 project (one + two + zero + legacy); converging stamps it.
+    # The scratch mapping (one + two + zero + legacy) is written to the WORKTREE by
+    # `bridge_projects_set` but never committed. In normal production a committed
+    # `.bridge_state/projects.json` blob always exists, so `run_ensures`'s `projects-seed`
+    # unit (tree-check keyed on that blob) skips and the worktree mapping survives. The base
+    # copy's `scrub_bridge_state(commit=True)` committed the blob's REMOVAL, so here the tree
+    # has NO blob — and `projects-seed` runs BEFORE `projects-compat-stamp`. Without this
+    # commit, `projects-seed` re-seeds a legacy-only mapping over the worktree (project_count
+    # → 0) and the stamp unit then no-ops on a "single-project mapping (0)". Commit the
+    # mapping so the tree-check finds it, `projects-seed` skips, and the ">1 project"
+    # precondition actually holds when the stamp unit reads it.
+    subprocess.run(["git", "add", ".bridge_state/projects.json"], cwd=tracker, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "--no-verify", "-m", "commit scratch mapping (368f scenario 9)"],
+        cwd=tracker,
+        check=True,
+    )
+
+    # The mapping now holds >1 project (one + two + zero + legacy); converging stamps it.
     list(run_ensures(str(tracker)))
     record = json.loads((tracker / ".store-compat.json").read_text())
     assert "multi-project-bridge" in record.get("required_capabilities", []), (
