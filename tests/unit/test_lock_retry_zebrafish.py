@@ -25,9 +25,10 @@ from rebar._commands import txn
 from rebar._store import lock as _lock
 
 # One pass is deliberately tiny so the suite runs in seconds; the SHAPE under test (a holder
-# that outlives a single budget) is identical to the 70s-holder-vs-60s-budget field case.
-_PASS_S = 1
-_HOLD_S = 2.5
+# that outlives a single budget by 2.5x) is identical to the 70s-holder-vs-60s-budget field
+# case. Keep the production retry backoff real: only this fixture's pass/holder windows scale.
+_PASS_S = 0.2
+_HOLD_S = 0.5
 
 
 def _spawn_holder(tracker: str, hold_s: float) -> subprocess.Popen[str]:

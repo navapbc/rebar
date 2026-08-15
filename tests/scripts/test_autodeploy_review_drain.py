@@ -129,6 +129,12 @@ def box(tmp_path: Path) -> dict[str, object]:
         "curl",
         f"""
         body="$(cat "{health_file}")"
+        if [ "$body" = "DOWN_ONCE" ]; then
+          once="{tmp_path / "health-down-once-seen"}"
+          if [ ! -e "$once" ]; then touch "$once"; exit 22; fi
+          printf '%s' '{{"status":"ok","in_flight":0}}'
+          exit 0
+        fi
         [ "$body" = "DOWN" ] && exit 22
         printf '%s' "$body"
         exit 0
@@ -326,7 +332,10 @@ def test_the_bound_is_not_reset_by_a_new_commit_landing(box: dict[str, object]) 
         f"tick 1 should defer (bound not yet spent)\n{first.stdout}\n{first.stderr}"
     )
 
-    time.sleep(3)  # let the 2s bound elapse
+    # Inject the elapsed episode through its persisted clock seam. Production still reads the
+    # real clock; only the fixture timestamp is aged, avoiding a three-second passive wait.
+    state: Path = box["state"]  # type: ignore[assignment]
+    (state / "deploy-defer").write_text(f"{int(time.time()) - 3}\n")
 
     _set_target(box, "b" * 40)  # a NEW commit lands, as during a burst
     second = _run(box)
@@ -550,8 +559,11 @@ def test_a_missing_inflight_field_is_treated_as_unknown_not_as_idle(
 def test_an_unreachable_bot_is_unknown_and_does_not_block_the_deploy(
     box: dict[str, object],
 ) -> None:
-    """A down bot must still be redeployable — that is the recovery path."""
-    _set_health_body(box, "DOWN")  # curl exits non-zero for both probe and readiness
+    """A down old bot must be replaceable by a healthy new bot — that is the recovery path."""
+    # The first probe sees the old bot down; after compose-up, readiness sees the replacement
+    # healthy. Rollback of a replacement that stays unhealthy is covered by the dedicated
+    # autodeploy health-gate suite, so repeating its full HEALTH_TIMEOUT here adds no contract.
+    _set_health_body(box, "DOWN_ONCE")
     result = _run(box)
     commands = _commands(box)
     context = f"commands={commands}\n{result.stdout}\n{result.stderr}"
