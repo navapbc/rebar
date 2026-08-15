@@ -18,6 +18,7 @@ import json as _json
 from test_concurrency_regression import (  # noqa: F401
     _engine_run,
     _tracker,
+    _two_clones_template,
     two_clones,
 )
 

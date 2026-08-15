@@ -32,6 +32,7 @@ from _store_template import (
 )
 
 import rebar
+from rebar import signing
 
 
 def _rewrite(path: Path, old: str, new: str) -> None:
@@ -124,6 +125,20 @@ def test_bare_worktree_repair_is_destructive_and_is_rejected(
     ), "expected bare repair to redirect the SOURCE store into the copy"
 
 
+def test_copy_rejects_shared_git_object_alternates(
+    _rebar_repo_template: Path, tmp_path: Path
+) -> None:
+    """A reference clone must not keep reading another topology's objects."""
+    source = _clone_template(_rebar_repo_template, tmp_path / "reference-source")
+    shared_objects = tmp_path / "shared-objects"
+    shared_objects.mkdir()
+    alternates = source / ".git/objects/info/alternates"
+    alternates.write_text(f"{shared_objects.resolve()}\n", encoding="utf-8")
+
+    with pytest.raises(AssertionError, match="object alternates"):
+        _clone_template(source, tmp_path / "reference-copy")
+
+
 def test_no_file_in_a_copy_contains_the_template_path(
     _rebar_repo_template: Path, rebar_repo: Path
 ) -> None:
@@ -188,6 +203,27 @@ def test_signing_key_keeps_restrictive_mode(rebar_repo: Path) -> None:
     assert mode == 0o600, f"signing key mode widened to {oct(mode)}"
 
 
+def test_opcert_signing_key_is_isolated_per_store(
+    _rebar_repo_template: Path, tmp_path: Path
+) -> None:
+    """A copied store must never inherit another environment's private key."""
+    template_tracker = _rebar_repo_template / ".tickets-tracker"
+    template_key = Path(signing.ensure_opcert_key(template_tracker))
+    template_private = template_key.read_bytes()
+    template_public = template_key.with_suffix(".pub").read_bytes()
+
+    copies = [
+        _clone_template(_rebar_repo_template, tmp_path / name) for name in ("opcert-a", "opcert-b")
+    ]
+    copy_keys = [Path(signing.ensure_opcert_key(copy / ".tickets-tracker")) for copy in copies]
+
+    assert template_key.read_bytes() == template_private
+    assert template_key.with_suffix(".pub").read_bytes() == template_public
+    assert len({template_private, *(key.read_bytes() for key in copy_keys)}) == 3
+    assert len({template_public, *(key.with_suffix(".pub").read_bytes() for key in copy_keys)}) == 3
+    assert all((key.stat().st_mode & 0o777) == 0o600 for key in copy_keys)
+
+
 def test_two_stores_are_mutually_independent(
     _rebar_repo_template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -215,3 +251,87 @@ def test_template_stays_virgin(_rebar_repo_template: Path, monkeypatch: pytest.M
     monkeypatch.chdir(_rebar_repo_template)
     assert rebar.list_tickets() == [], "the template has been seeded with tickets"
     assert not (_rebar_repo_template / ".rebar").exists(), "template carries .rebar state"
+
+
+def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
+    _rebar_repo_template: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A copied store must push only to the matching copied sibling origin."""
+    source = tmp_path / "source"
+    source.mkdir()
+    source_origin = source / "origin.git"
+    subprocess.run(
+        ["git", "init", "-q", "--bare", str(source_origin)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    source_work = _clone_template(_rebar_repo_template, source / "work")
+    subprocess.run(
+        ["git", "-C", str(source_work), "remote", "add", "origin", str(source_origin)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    upstream_url = "https://example.invalid/rebar.git"
+    subprocess.run(
+        ["git", "-C", str(source_work), "remote", "add", "upstream", upstream_url],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(source_work), "push", "-q", "origin", "HEAD:tickets"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    destination_origin = destination / "origin.git"
+    shutil.copytree(source_origin, destination_origin, symlinks=True)
+    destination_work = _clone_template(source_work, destination / "work")
+
+    copied_origin = subprocess.run(
+        ["git", "-C", str(destination_work), "remote", "get-url", "origin"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert Path(copied_origin).resolve() == destination_origin.resolve(), (
+        "the copied store still pushes to its template topology's origin"
+    )
+    copied_upstream = subprocess.run(
+        ["git", "-C", str(destination_work), "remote", "get-url", "upstream"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert copied_upstream == upstream_url, "non-local remotes must remain unchanged"
+
+    source_before = _tickets_ref(source_work)
+    destination_before = _tickets_ref(destination_work)
+    assert destination_before == source_before, "precondition: copied ticket refs initially match"
+
+    monkeypatch.setenv("REBAR_ROOT", str(destination_work))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "destination-gate"))
+    monkeypatch.chdir(destination_work)
+    rebar.create_ticket("task", "destination-only ticket", return_alias=True)
+
+    assert _tickets_ref(destination_work) != destination_before, (
+        "the destination ticket ref did not advance"
+    )
+    assert _tickets_ref(source_work) == source_before, (
+        "writing to the destination moved the source ticket ref"
+    )
+
+    source_root = str(source.resolve()).encode()
+    offenders = [
+        str(path.relative_to(destination))
+        for path in destination.rglob("*")
+        if path.is_file() and not path.is_symlink() and source_root in path.read_bytes()
+    ]
+    assert not offenders, f"destination still embeds source topology paths: {offenders}"

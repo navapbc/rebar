@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _topology_template import clone_topology_template
 
 from rebar import _engine
 from rebar._commands import fsck
@@ -252,16 +253,15 @@ def _init_bare_remote(remote: Path, cwd: Path) -> Path:
 
 
 # ─────────────────────────── fixtures ───────────────────────────────────────
-@pytest.fixture
-def two_clones(tmp_path: Path):
+def _build_two_clones(root: Path) -> tuple[Path, Path, Path, str]:
     """A bare remote + two initialized clones (A, B) sharing one tickets branch.
 
     A creates a seed ticket and pushes it; B mounts the same tickets branch.
     Returns (remote, repo_a, repo_b, seed_ticket_id).
     """
-    remote = _init_bare_remote(tmp_path / "remote.git", tmp_path)
+    remote = _init_bare_remote(root / "remote.git", root)
 
-    repo_a = _make_repo(remote, tmp_path / "a")
+    repo_a = _make_repo(remote, root / "a")
     _git("commit", "-q", "--allow-empty", "-m", "init", cwd=repo_a)
     _git("push", "-q", "-u", "origin", "HEAD:main", cwd=repo_a)
 
@@ -273,7 +273,7 @@ def two_clones(tmp_path: Path):
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_a)
 
     # B clones main + the tickets branch, then mounts it via init.
-    repo_b = _make_repo(remote, tmp_path / "b")
+    repo_b = _make_repo(remote, root / "b")
     _git("fetch", "-q", "origin", "tickets", cwd=repo_b)
     _engine_run(repo_b, "init")
     tracker_b = _tracker(repo_b)
@@ -281,6 +281,46 @@ def two_clones(tmp_path: Path):
     _git("fetch", "-q", "origin", "tickets", cwd=tracker_b)
 
     return remote, repo_a, repo_b, seed
+
+
+@pytest.fixture(scope="session")
+def _two_clones_template(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> tuple[Path, str]:
+    root = tmp_path_factory.mktemp("two-clones-template")
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("XDG_CONFIG_HOME", str(root / "xdg-empty"))
+        patch.setenv("REBAR_GATE_TMPDIR", str(root / "gate"))
+        for variable in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+            patch.delenv(variable, raising=False)
+        _config.reset_config_cache()
+        _ensures._reset_pending_cache()
+        try:
+            _remote, _repo_a, _repo_b, seed = _build_two_clones(root)
+        finally:
+            _config.reset_config_cache()
+            _ensures._reset_pending_cache()
+    return root, seed
+
+
+@pytest.fixture
+def two_clones(
+    _two_clones_template: tuple[Path, str],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, Path, str]:
+    template, seed = _two_clones_template
+    root = clone_topology_template(template, tmp_path / "two-clones")
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    _config.reset_config_cache()
+    _ensures._reset_pending_cache()
+    return root / "remote.git", root / "a", root / "b", seed
 
 
 # ── harness integrity: the fixture's own remote must not rewrite itself ───────────────────

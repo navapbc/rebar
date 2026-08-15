@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _topology_template import clone_topology_template
 
 import rebar
 
@@ -54,16 +55,15 @@ def _by_alias(repo: Path, alias_substr: str) -> dict:
     raise AssertionError(f"no ticket with title containing {alias_substr!r}")
 
 
-@pytest.fixture
-def scenario(rebar_repo: Path) -> dict:
+def _seed_scenario(repo: Path) -> dict[str, str]:
     """A store with known child-counts and a blocking pair.
 
     E1: 3 live children (open, closed, in_progress) + 1 deleted (not counted) → 3
     E2: 1 child → 1 ; E3: 0 children → 0
     Blocking (root tasks): BLK(open) blocks BLKD; UNB has no blockers.
     """
-    r = str(rebar_repo)
-    s: dict = {}
+    r = str(repo)
+    s: dict[str, str] = {}
     s["E1"] = rebar.create_ticket("epic", "epic-E1", repo_root=r)
     s["cA"] = rebar.create_ticket("task", "child-cA", parent=s["E1"], repo_root=r)  # open
     s["cB"] = rebar.create_ticket("task", "child-cB", parent=s["E1"], repo_root=r)
@@ -77,7 +77,7 @@ def scenario(rebar_repo: Path) -> dict:
         cwd=r,
         capture_output=True,
         text=True,
-        env=_env(rebar_repo),
+        env=_env(repo),
     )
     s["E2"] = rebar.create_ticket("epic", "epic-E2", repo_root=r)
     s["e2c"] = rebar.create_ticket("task", "child-e2c", parent=s["E2"], repo_root=r)
@@ -86,8 +86,53 @@ def scenario(rebar_repo: Path) -> dict:
     s["BLKD"] = rebar.create_ticket("task", "task-BLKD", repo_root=r)
     rebar.link(s["BLK"], s["BLKD"], "blocks", repo_root=r)  # BLK blocks BLKD
     s["UNB"] = rebar.create_ticket("task", "task-UNB", repo_root=r)
-    s["repo"] = rebar_repo
     return s
+
+
+@pytest.fixture(scope="session")
+def _list_filters_template(
+    tmp_path_factory: pytest.TempPathFactory,
+    _rebar_repo_template: Path,
+) -> tuple[Path, dict[str, str]]:
+    root = tmp_path_factory.mktemp("list-filters-template")
+    repo = clone_topology_template(_rebar_repo_template, root / "repo")
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("REBAR_ROOT", str(repo))
+        patch.setenv("REBAR_GATE_TMPDIR", str(root / "gate"))
+        patch.setenv("XDG_CONFIG_HOME", str(root / "xdg-empty"))
+        for variable in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+            patch.delenv(variable, raising=False)
+        patch.chdir(repo)
+        _config.reset_config_cache()
+        _ensures._reset_pending_cache()
+        try:
+            seeded = _seed_scenario(repo)
+        finally:
+            _config.reset_config_cache()
+            _ensures._reset_pending_cache()
+    return repo, seeded
+
+
+@pytest.fixture
+def scenario(
+    _list_filters_template: tuple[Path, dict[str, str]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    template, seeded = _list_filters_template
+    repo = clone_topology_template(template, tmp_path / "repo")
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
+    monkeypatch.chdir(repo)
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    _config.reset_config_cache()
+    _ensures._reset_pending_cache()
+    return {**seeded, "repo": repo}
 
 
 # ── children_count (opt-in) ──────────────────────────────────────────────────
