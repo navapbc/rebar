@@ -41,7 +41,8 @@ pipx install nava-rebar
 
 ```bash
 rebar init
-tid=$(rebar create task "x" | tail -1)
+tid=$(rebar create task "x" -o json |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 rebar claim "$tid" --assignee alice
 ```
 ```python
@@ -87,7 +88,8 @@ def test_extract_returns_bash_only_not_python():
 def test_extract_captures_id_pipeline():
     """The captured block keeps the id-capture pattern (no hard-coded id)."""
     block = chk.extract_quickstart_bash(_SYNTHETIC)
-    assert 'tid=$(rebar create task "x" | tail -1)' in block
+    assert """tid=$(rebar create task "x" -o json |""" in block
+    assert 'print(json.load(sys.stdin)["id"])' in block
     assert 'rebar claim "$tid"' in block
 
 
@@ -122,7 +124,10 @@ def test_main_passes_on_valid_quickstart(tmp_path: Path, monkeypatch):
     """A valid runnable quickstart block makes main() exit 0."""
     readme = _write_readme(
         tmp_path,
-        'rebar init\ntid=$(rebar create task "x" | tail -1)\n'
+        """rebar init
+tid=$(rebar create task "x" -o json |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+"""
         'rebar claim "$tid" --assignee alice\n'
         'rebar transition "$tid" in_progress closed\n',
     )

@@ -120,7 +120,7 @@ def test_create_non_bug_warns_missing_file_impact_on_stderr(repo: Path) -> None:
     assert "set-file-impact" in proc.stderr
     # stdout carries only the created-ticket data lines — the warning must not leak there.
     assert "Warning: no file_impact recorded" not in proc.stdout
-    assert "Created ticket" in proc.stdout
+    assert proc.stdout.startswith("created ")
 
 
 def test_create_bug_does_not_warn_missing_file_impact(repo: Path) -> None:

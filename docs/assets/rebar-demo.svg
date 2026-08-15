@@ -12,11 +12,11 @@
     <text x="20" y="108" fill="#7ee787">● b93f-… <tspan fill="#c9d1d9">bug   Fix claim race on parent cascade</tspan></text>
 
     <text x="20" y="144" fill="#58a6ff">$ <tspan fill="#c9d1d9">rebar claim 4a1c --assignee alice</tspan></text>
-    <text x="20" y="164" fill="#e3b341">CLAIMED: 4a1c-… (assignee: alice)</text>
+    <text x="20" y="164" fill="#e3b341">claimed 4a1c-…: open -&gt; in_progress (assignee alice)</text>
 
     <text x="20" y="200" fill="#58a6ff">$ <tspan fill="#c9d1d9">rebar transition 4a1c in_progress closed</tspan></text>
-    <text x="20" y="220" fill="#c9d1d9">4a1c-…: in_progress → closed</text>
-    <text x="20" y="240" fill="#7ee787">UNBLOCKED: b93f-…</text>
+    <text x="20" y="220" fill="#c9d1d9">transitioned 4a1c-…: in_progress -&gt; closed;</text>
+    <text x="20" y="240" fill="#7ee787">unblocked: b93f-…</text>
 
     <text x="20" y="276" fill="#58a6ff">$ <tspan fill="#c9d1d9">rebar search "reconciler push"</tspan></text>
     <text x="20" y="296" fill="#c9d1d9">1 match  4a1c-…  [closed]  Add retry/backoff to reconciler push</text>

@@ -22,6 +22,7 @@ this test is only about parent-exit survival + the event landing.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -162,9 +163,10 @@ def test_async_push_survives_parent_exit_and_lands_event(
     out, err = proc.communicate(timeout=30)
     assert proc.returncode == 0, f"parent create failed: rc={proc.returncode}\n{err}"
 
-    # The CLI prints the full ticket id as its last non-empty stdout line.
-    ticket_id = [ln.strip() for ln in out.splitlines() if ln.strip()][-1]
-    assert ticket_id and "-" in ticket_id, f"could not parse ticket id from: {out!r}"
+    # The CLI prints a one-line confirmation embedding the full ticket id.
+    id_match = re.search(r"\b[0-9a-f]{4}(?:-[0-9a-f]{4}){3}\b", out)
+    assert id_match, f"could not parse ticket id from: {out!r}"
+    ticket_id = id_match.group(0)
 
     # 3. The detached push child must reach `git push` and block in the shim.
     assert _wait_for(entered.exists, timeout=30), "detached push child never reached git push"

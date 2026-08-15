@@ -184,7 +184,8 @@ create_output=$("$TICKET_CLI" create task "E2E-PROBE: sync validation ${PROBE_TS
     -d "Description for E2E probe test" \
     --priority 1 \
     --tags "${PROBE_TAG},${E2E_TAG}" 2>&1)
-LOCAL_ID=$(echo "$create_output" | tail -1)
+# `create` prints a one-line confirmation embedding the id — extract it.
+LOCAL_ID=$(echo "$create_output" | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1)
 
 if [ -z "$LOCAL_ID" ]; then
     fail_test "Phase1.create-local" "ticket create returned no ID: ${create_output}"

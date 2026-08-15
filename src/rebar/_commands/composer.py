@@ -403,12 +403,11 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
     if fmt == "json":
         print(json.dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
     else:
-        alias, tid = res["alias"], res["id"]
-        if alias and alias != tid:
-            print(f"Created ticket {alias} ({tid}): {res['title']}")
-        else:
-            print(f"Created ticket {tid}: {res['title']}")
-        print(tid)
+        # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line, all the
+        # data the old two-line form carried (alias, id, title).
+        from rebar._commands._confirm import confirm_created
+
+        confirm_created("", res)
 
     # Nudge the author to record file_impact now (it cannot be passed at create
     # time). The plan-review file-impact-coverage gate (P9) flags any leaf work
@@ -594,10 +593,14 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     tag_add: list[str] = []
     tag_remove: list[str] = []
     tag_set: list[str] | None = None
+    # Field NAMES this invocation set, in parse order (never values) — the
+    # confirmation line's payload (ticket 6bda-9d58-8546-4638).
+    set_names: list[str] = []
 
     def _accept_tag(name: str, val: str) -> None:
         nonlocal tag_set
         items = [t for t in val.split(",")]
+        set_names.append(name)
         if name == "add-tag":
             tag_add.extend(items)
         elif name == "remove-tag":
@@ -643,6 +646,7 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
             return 1
         else:
             fields[name] = val
+            set_names.append(name)
     try:
         edit_warning = edit_core(
             ticket_id,
@@ -655,6 +659,12 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    # Mutation confirmation (ticket 6bda-9d58-8546-4638): field NAMES only, never
+    # values — comma-joined in invocation order (deduped).
+    from rebar._commands import _confirm
+
+    names = ", ".join(dict.fromkeys(set_names))
+    _confirm.emit("edited", ticket_id, names, f"edited {ticket_id}: {names}")
     # Advisory description-cap heads-up (ticket 594b) on the CLI's stderr channel; the
     # edit already committed, so it never changes the exit code. Emitted BEFORE --review
     # so the author sees why the review is about to refuse admission.

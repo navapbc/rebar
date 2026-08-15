@@ -134,10 +134,12 @@ def assert_eq(expected: object, actual: object, label: str) -> None:
 
 
 _ID_RE = re.compile(r"^[0-9a-f]{4}-")
+# `create` prints a one-line confirmation embedding the id: `created <alias> (<id>): <title>`.
+_CANONICAL_ID_RE = re.compile(r"\b[0-9a-f]{4}(?:-[0-9a-f]{4}){3}\b")
 
 
 def _last_id() -> str:
-    ids = [ln for ln in OUT.splitlines() if _ID_RE.match(ln)]
+    ids = _CANONICAL_ID_RE.findall(OUT)
     return ids[-1] if ids else ""
 
 

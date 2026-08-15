@@ -142,7 +142,7 @@ def _write_unlink(
     )
 
 
-def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo_root=None) -> None:
+def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo_root=None) -> dict:
     """Remove the net-active link id1→id2 (+ reciprocal for relates_to).
 
     With ``relation=None``, the pair-scoped unlink case: resolve both ids,
@@ -151,6 +151,10 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
     explicit ``relation`` (bug e39f), removes exactly that relation's net-active
     link — a pair holding several relations keeps the others. Raises
     :class:`CommandError`.
+
+    Returns ``{"source", "target", "relation"}`` — the resolved edge actually
+    removed (ticket 6bda-9d58-8546-4638); the former ``None`` return was unconsumed
+    (the library facade discards it), so the widening is additive.
     """
     if relation is not None:
         from rebar.graph._links import CANONICAL_RELATIONS
@@ -181,6 +185,7 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
                 f"orphaned link, removed from '{id1}' only",
                 file=sys.stderr,
             )
+    return {"source": id1, "target": id2, "relation": link_relation}
 
 
 def unlink_cli(argv: list[str], *, repo_root=None) -> int:
@@ -190,8 +195,12 @@ def unlink_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
     relation = argv[2] if len(argv) > 2 else None
     try:
-        unlink_core(argv[0], argv[1], relation, repo_root=repo_root)
+        out = unlink_core(argv[0], argv[1], relation, repo_root=repo_root)
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    from rebar._commands import _confirm
+
+    edge = f"{out['source']} -/-> {out['target']} ({out['relation']})"
+    _confirm.emit("unlinked", edge, "unlinked", f"unlinked {edge}")
     return 0

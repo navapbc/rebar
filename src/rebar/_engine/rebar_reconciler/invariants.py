@@ -37,16 +37,15 @@ _TICKET_ID_RE = re.compile(r"\b[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\b
 
 
 def _extract_ticket_id(stdout: str) -> str:
-    """Extract a canonical rebar ticket ID from ticket-create.sh stdout.
+    """Extract a canonical rebar ticket ID from ``rebar create`` stdout.
 
-    ticket-create.sh emits two lines on success:
-        Created ticket <alias> (<id>): <title>      # human-readable
-        <id>                                         # canonical, final line
+    ``rebar create`` emits a one-line confirmation on success:
+        created <alias> (<id>): <title>
 
     The canonical ID is the LAST occurrence of the 16-hex pattern in
-    stdout — that matches the final line emitted by the script and is
-    robust to alias prefixes, descriptive titles, or extra log lines
-    that happen to contain hex tokens earlier in the output.
+    stdout — robust to alias prefixes, descriptive titles, or extra log
+    lines that happen to contain hex tokens earlier in the output (and
+    to the legacy two-line format that ended with a bare-``<id>`` line).
 
     Returns the empty string when no canonical-format ID is found
     (e.g. on garbage output like "ERROR" or a malformed CLI shim).

@@ -531,7 +531,7 @@ create_ticket() {
     local output
     output=$("$TICKET_CLI" create "$type" "$title" -d "$desc" --priority "$priority" --tags "$tags" 2>&1)
     local id
-    id=$(echo "$output" | tail -1)
+    id=$(echo "$output" | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1)
     if [ -z "$id" ]; then
         # FATAL: index-aligned arrays (LOCAL_IDS, JIRA_KEYS) cannot tolerate
         # a gap. Abort the probe immediately rather than corrupt subsequent
@@ -995,7 +995,7 @@ EPIC_LOCAL_ID=$("$TICKET_CLI" create epic \
     -d "Epic for parent/child probe" \
     --priority 2 \
     --tags "${PROBE_TAG}" \
-    2>&1 | tail -1) || true
+    2>&1 | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1) || true
 
 # Validate that the returned value is a real ticket UUID, not an error string.
 # The ticket CLI prints errors to stderr and the ID to stdout; with 2>&1 both
@@ -1017,7 +1017,7 @@ if [ -n "$EPIC_LOCAL_ID" ]; then
         -d "Inbound parent resolution test" \
         --priority 2 \
         --tags "${PROBE_TAG}" \
-        2>&1 | tail -1) || true
+        2>&1 | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1) || true
     if ! is_valid_ticket_id "$THIRD_LOCAL_ID"; then
         fail_test "Phase2c.create-third" "ticket create task (inbound-parent) returned no valid ID (got: ${THIRD_LOCAL_ID})"
         THIRD_LOCAL_ID=""
@@ -1088,7 +1088,7 @@ if [ -n "$EPIC_LOCAL_ID" ]; then
         --priority 2 \
         --parent "$EPIC_LOCAL_ID" \
         --tags "${PROBE_TAG}" \
-        2>&1 | tail -1) || true
+        2>&1 | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1) || true
     if ! is_valid_ticket_id "$CHILD_LOCAL_ID"; then
         fail_test "Phase2c.create-child" "ticket create task --parent returned no valid ID (got: ${CHILD_LOCAL_ID})"
         CHILD_LOCAL_ID=""
@@ -1162,7 +1162,7 @@ if [ -n "$CHILD_LOCAL_ID" ] && [ -n "$EPIC_JIRA_KEY" ]; then
         -d "Second epic for reparent probe" \
         --priority 2 \
         --tags "${PROBE_TAG}" \
-        2>&1 | tail -1) || true
+        2>&1 | grep -oE '[0-9a-f]{4}(-[0-9a-f]{4}){3}' | tail -1) || true
     if ! is_valid_ticket_id "$EPIC2_LOCAL_ID"; then
         fail_test "Phase2c.create-epic2" "ticket create epic2 returned no valid ID (got: ${EPIC2_LOCAL_ID})"
         EPIC2_LOCAL_ID=""
