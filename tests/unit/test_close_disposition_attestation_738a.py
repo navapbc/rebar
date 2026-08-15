@@ -28,7 +28,10 @@ def test_the_disposition_classes_match_the_close_gates_own_set():
 
 @pytest.mark.parametrize(
     "close_class",
-    sorted(close_disposition.DISPOSITION_CLASSES - close_disposition.REASON_REQUIRED_CLASSES),
+    sorted(
+        (close_disposition.DISPOSITION_CLASSES - close_disposition.REASON_REQUIRED_CLASSES)
+        | close_disposition.REPLACEMENT_SATISFIES_REASON_CLASSES
+    ),
 )
 def test_every_replacement_bearing_class_can_produce_a_verdict(close_class, monkeypatch):
     """All replacement-bearing exempt classes, not just `duplicate`.
@@ -38,7 +41,8 @@ def test_every_replacement_bearing_class_can_produce_a_verdict(close_class, monk
     siblings of the same defect — identical code path, gap appearing the moment one is linked.
     Parametrizing means the fix covers them before that happens rather than after. The
     REASON-ONLY administrative classes (obsolete/wontfix, ticket fc20) mint from their
-    ``close_reason`` instead — asserted separately below — so they are excluded here.
+    ``close_reason`` instead — asserted separately below — while `not_a_bug`/`escalated`
+    (reason-required since bug d54b, replacement checked FIRST) must keep this mint unchanged.
     """
     monkeypatch.setattr(
         close_disposition, "find_replacement", lambda *a, **k: "dead-beef-cafe-0001"

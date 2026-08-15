@@ -169,8 +169,9 @@ def _ensure_duplicate_close_is_linked(
     Scoped to the REPLACEMENT-BEARING classes — ``duplicate`` and (ticket fc20) ``superseded``,
     on ANY ticket type — rather than the whole ``_NON_COMPLETION_BUG_CLASSES`` set: ``not_a_bug``
     asserts there is no defect and ``escalated`` may point outside the tracker, so neither owes a
-    link, and the reason-only administrative classes (obsolete/wontfix) are justified by their
-    ``--reason`` instead; those keep their own paths.
+    link — since bug d54b both are reason-required instead (a live replacement link still
+    satisfies them first), and the reason-only administrative classes (obsolete/wontfix) are
+    justified by their ``--reason``; those keep their own paths.
 
     A GUARD FUNCTION, not an inline branch, on purpose — ``_completion_precheck`` sits at its
     recorded ceiling in ``.github/complexity-baseline.json``, which is shrink-only, so the
@@ -463,6 +464,10 @@ def _verification_fail_message(
         f"{_applicable_close_classes(ticket_type)}. obsolete/wontfix take --reason=<text>; "
         "duplicate/superseded need a live replacement link."
     )
+    if ticket_type == "bug":
+        message += (
+            " not_a_bug/escalated take --reason=<text> or a live replacement link (bug d54b)."
+        )
     return message
 
 
@@ -478,10 +483,11 @@ def _administrative_disposition(
     complexity ceiling, so the decision points live here and its call site stays a single
     branch.
 
-    Two doors, mirroring :func:`close_disposition.verdict`'s two mints: a REASON-ONLY
-    administrative class (obsolete/wontfix) is attested from its ``--reason`` (validated
-    non-empty by the shared class guard before this runs); every other disposition class
-    still requires a net-active replacement link to a live counterpart
+    Two doors, mirroring :func:`close_disposition.verdict`'s mints: a REASON-REQUIRED class
+    (obsolete/wontfix always; not_a_bug/escalated unless a live replacement link stands in —
+    bug d54b, checked replacement-first inside ``verdict``) is attested from its ``--reason``
+    or replacement (validated by the shared class guard before this runs); every other
+    disposition class still requires a net-active replacement link to a live counterpart
     (:func:`_has_live_replacement_link`). ATTESTING rather than withholding the signature is
     the 738a fix: an unsigned exempt close made the certification path count it as
     uncertified and withhold its parent's signature, with no honest exit."""
@@ -550,10 +556,15 @@ def _completion_precheck(
 
     # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
     # (missing bug class, non-administrative class on a non-bug, missing reason for a
-    # reason-only class — tickets ed13 + fc20). Shared rule (:func:`txn.close_class_refusal`),
-    # so it cannot drift from transition_core's authoritative write-side guard, which would
-    # reject the close anyway; failing here spares the LLM call.
-    refusal = txn.close_class_refusal(ticket_type, close_class, close_reason=reason)
+    # reason-required class — tickets ed13 + fc20 + bug d54b). Shared rule
+    # (:func:`txn.close_class_refusal`), so it cannot drift from transition_core's
+    # authoritative write-side guard, which would reject the close anyway; failing here spares
+    # the LLM call. ticket_id + tracker let the rule honor a not_a_bug/escalated close whose
+    # live replacement link stands in for its --reason.
+    tracker = str(config.tracker_dir(repo_root))
+    refusal = txn.close_class_refusal(
+        ticket_type, close_class, close_reason=reason, ticket_id=ticket_id, tracker=tracker
+    )
     if refusal:
         raise CommandError(
             f"Error: {refusal} (checked before running completion verification).",
@@ -563,10 +574,10 @@ def _completion_precheck(
     # An administrative/disposition close is a statement about where the work lives (or why it
     # will not happen), not a claim that this ticket's acceptance criteria were implemented.
     # Skip the completion-only checks (including file-impact and the billable verifier) when
-    # the disposition qualifies: a reason-only administrative class carries its --reason, and
-    # a replacement-bearing class carries a net-active link to a live counterpart. The
-    # close-class guard above and all structural/write-time close guards still apply.
-    tracker = str(config.tracker_dir(repo_root))
+    # the disposition qualifies: a reason-required class carries its --reason (or, for
+    # not_a_bug/escalated, a replacement link instead), and a replacement-bearing class
+    # carries a net-active link to a live counterpart. The close-class guard above and all
+    # structural/write-time close guards still apply.
     disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
     if disposition is not _NO_DISPOSITION:
         return disposition
@@ -576,7 +587,8 @@ def _completion_precheck(
     # falling through printed advice that could not be followed. Fail HERE, naming the one
     # command that works. Scoped to the replacement-bearing classes (not the whole
     # non-completion set): `not_a_bug` asserts there is no defect and `escalated` may point
-    # outside the tracker, so neither owes a link; both keep the prior fallthrough.
+    # outside the tracker, so neither owes a link — since bug d54b they are reason-required
+    # instead (a live replacement still short-circuits first) and never reach this fallthrough.
     # Deterministic and pre-LLM, so such a close never buys the wrong advice with a billable
     # request.
     _ensure_duplicate_close_is_linked(ticket_id, ticket_type, close_class, tracker)

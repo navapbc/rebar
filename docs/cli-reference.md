@@ -538,7 +538,8 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--class=<v
   idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
   bug close requires --class <value>: regression | plan_defect | env_integration | flaky | preexisting | not_a_bug | duplicate | escalated | obsolete | superseded | wontfix | undetermined.
   Any ticket type may close under an administrative disposition --class: duplicate | obsolete | superseded | wontfix. obsolete/wontfix REQUIRE --reason=<text> (recorded as close_reason and signed into the disposition attestation); duplicate/superseded require a live replacement link. Non-bug closes refuse any other class.
-  --reason=<text>: without --force, admitted only on a close whose --class is obsolete or wontfix; with --force it supplies the gate-bypass audit note.
+  Bug-only dispositions not_a_bug/escalated REQUIRE --reason=<text> (why no defect exists / where the work was escalated to) unless a live replacement link stands in.
+  --reason=<text>: without --force, admitted only on a close whose --class is reason-required (obsolete, wontfix, not_a_bug, or escalated); with --force it supplies the gate-bypass audit note.
   With the completion gate enabled, an administrative disposition (or duplicate/not_a_bug/escalated on a bug) skips verification only when its evidence holds: a live duplicates/supersedes link, or the required close reason.
   --ref=<ref>: Completion close gate: verify (and sign) against the committed tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit while your worktree stays at the epic tip; default HEAD.
 ```

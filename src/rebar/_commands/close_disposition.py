@@ -51,10 +51,26 @@ DISPOSITION_CLASSES = frozenset(
 #: :func:`rebar._commands.txn.close_class_refusal`, gate-independent.
 ADMINISTRATIVE_CLASSES = frozenset({"duplicate", "obsolete", "superseded", "wontfix"})
 
-#: Administrative classes that carry no replacement link, so the close's justification IS the
-#: operator's ``--reason`` text: it is REQUIRED at write time, persists as ``close_reason`` on
-#: the close STATUS event, and is what the disposition attestation signs.
-REASON_REQUIRED_CLASSES = frozenset({"obsolete", "wontfix"})
+#: Classes whose close must carry the operator's ``--reason`` text as its justification: it is
+#: REQUIRED at write time, persists as ``close_reason`` on the close STATUS event, and is what
+#: the disposition attestation signs. Two shapes share the requirement: the administrative pair
+#: (``obsolete``/``wontfix``, ticket fc20) carries no replacement link at all, and the bug-only
+#: pair (``not_a_bug``/``escalated``, bug d54b) may substitute a live replacement link for the
+#: reason — see :data:`REPLACEMENT_SATISFIES_REASON_CLASSES`. Before d54b the bug-only pair fell
+#: through to FULL completion verification when unlinked, which demands proof a nonexistent (or
+#: out-of-tracker) defect was fixed — an unpassable gate that forced operators to ``--force``.
+REASON_REQUIRED_CLASSES = frozenset({"obsolete", "wontfix", "not_a_bug", "escalated"})
+
+#: The reason-required classes for which a LIVE REPLACEMENT LINK satisfies the requirement
+#: instead of ``--reason`` (bug d54b). The replacement is checked FIRST, so the pre-d54b linked
+#: path is preserved unchanged; the reason mint is the fallback for the close that names nothing
+#: in-tracker (``not_a_bug``: the RCA proved no defect exists; ``escalated``: the work went to
+#: another owner/system — the reason names where). DELIBERATE decision recorded on ticket d54b:
+#: ``escalated`` is reason-required the same way as ``not_a_bug`` because the structural problem
+#: is identical — no defect is fixed in-repo, so completion verification is unpassable — while
+#: replacement-preferred behavior is kept by the check order. ``obsolete``/``wontfix`` are
+#: excluded on purpose: their justification IS the reason, and a stray link must not substitute.
+REPLACEMENT_SATISFIES_REASON_CLASSES = frozenset({"not_a_bug", "escalated"})
 
 
 def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | None:
@@ -102,6 +118,18 @@ def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | No
     return None
 
 
+def _mint(close_class: str, **evidence: str) -> dict:
+    """A deterministic disposition sign signal carrying ``evidence`` (replacement or reason)."""
+    return {
+        "verdict": "PASS",
+        "disposition": close_class,
+        **evidence,
+        "model": "none (deterministic disposition)",
+        "runner": "close_disposition",
+        "findings": [],
+    }
+
+
 def verdict(
     ticket_id: str, close_class: str, tracker: str, *, close_reason: str = ""
 ) -> dict | None:
@@ -113,33 +141,57 @@ def verdict(
     producer rather than left as ``n/a``, so an auditor reading the manifest can tell at a glance
     that no model was consulted — which is the honest description of what happened.
 
-    Two mints (ticket fc20): a REASON-ONLY administrative class (:data:`REASON_REQUIRED_CLASSES`)
-    is attested from ``(class, close_reason)`` — it names no replacement, so an empty reason
+    Three doors, in precedence order. A :data:`REPLACEMENT_SATISFIES_REASON_CLASSES` close checks
+    its replacement link FIRST (the pre-d54b mint, preserved unchanged — a linked ``not_a_bug``/
+    ``escalated`` attests the replacement even when a reason was also given), falling back to the
+    reason mint. A purely reason-required administrative class (obsolete/wontfix, ticket fc20) is
+    attested from ``(class, close_reason)`` only — it names no replacement, so an empty reason
     yields ``None`` (fail-closed: an unjustified disposition must not sign). Every other
     disposition class keeps the replacement-bearing mint from :func:`find_replacement`.
     """
     if close_class in REASON_REQUIRED_CLASSES:
+        if close_class in REPLACEMENT_SATISFIES_REASON_CLASSES:
+            replacement = find_replacement(ticket_id, close_class, tracker)
+            if replacement is not None:
+                return _mint(close_class, replacement=replacement)
         if not close_reason:
             return None
-        return {
-            "verdict": "PASS",
-            "disposition": close_class,
-            "close_reason": close_reason,
-            "model": "none (deterministic disposition)",
-            "runner": "close_disposition",
-            "findings": [],
-        }
+        return _mint(close_class, close_reason=close_reason)
     replacement = find_replacement(ticket_id, close_class, tracker)
     if replacement is None:
         return None
-    return {
-        "verdict": "PASS",
-        "disposition": close_class,
-        "replacement": replacement,
-        "model": "none (deterministic disposition)",
-        "runner": "close_disposition",
-        "findings": [],
-    }
+    return _mint(close_class, replacement=replacement)
+
+
+def reason_refusal(close_class: str, ticket_id: str = "", tracker: str = "") -> str | None:
+    """The write-side refusal for a reason-required close missing its ``--reason``, or ``None``.
+
+    Shared vocabulary logic for :func:`rebar._commands.txn.close_class_refusal` (bug d54b): a
+    :data:`REPLACEMENT_SATISFIES_REASON_CLASSES` close is exempt when a live replacement link
+    exists (checked only when the caller can name the store — a missing ``ticket_id``/``tracker``
+    fails toward requiring the reason, never toward waving the close through), and its refusal
+    names BOTH doors so the operator is told exactly which flag to add instead of falling through
+    to completion verification, which is unpassable for these classes.
+    """
+    if close_class in REPLACEMENT_SATISFIES_REASON_CLASSES:
+        if ticket_id and tracker and find_replacement(ticket_id, close_class, tracker):
+            return None
+        what = (
+            "why no defect exists"
+            if close_class == "not_a_bug"
+            else "where the work was escalated to"
+        )
+        return (
+            f"--class {close_class} requires --reason=<text> stating {what} (recorded as "
+            "close_reason on the close event and signed into the disposition attestation), "
+            "or a live replacement link (an outbound 'duplicates' or inbound 'supersedes' "
+            "relation), which satisfies it instead"
+        )
+    return (
+        f"--class {close_class} requires --reason=<text> stating why: the reason is "
+        "recorded as close_reason on the close event and signed into the disposition "
+        "attestation"
+    )
 
 
 def decorate_manifest(manifest: list[str], result: dict) -> list[str]:

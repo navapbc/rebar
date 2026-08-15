@@ -278,9 +278,10 @@ def transition(
     from rebar._commands.txn import ConcurrencyMismatch
     from rebar._engine_support.resolver import resolve_ticket_id
 
-    # Mirror the CLI's admission rule (tickets 3803 + fc20): the free-text ``reason`` is
-    # persisted as ``close_reason`` ONLY on a non-force close whose class requires one
-    # (obsolete/wontfix). Any other combination discards it here exactly as the CLI
+    # Mirror the CLI's admission rule (tickets 3803 + fc20 + bug d54b): the free-text
+    # ``reason`` is persisted as ``close_reason`` ONLY on a non-force close whose class can
+    # require one (obsolete/wontfix/not_a_bug/escalated). Any other combination discards it
+    # here exactly as the CLI
     # refuses it, so the library and CLI paths cannot drift.
     admits_close_reason = not (force or force_close) and (
         close_class in close_disposition.REASON_REQUIRED_CLASSES

@@ -212,10 +212,11 @@ def test_a_dead_replacement_target_gets_a_different_remedy_than_naming_none(monk
     assert "records no 'duplicates' link" not in dead_message
 
 
-@pytest.mark.parametrize("close_class", ["not_a_bug", "escalated", "plan_defect", "preexisting"])
-def test_other_close_classes_are_unaffected_by_the_missing_link(close_class, monkeypatch, tmp_path):
-    """Scope guard. `not_a_bug` asserts there IS no defect and `escalated` may point outside the
-    tracker, so neither owes a `duplicates` link; ordinary classes never did. All must still reach
+@pytest.mark.parametrize("close_class", ["plan_defect", "preexisting"])
+def test_ordinary_close_classes_are_unaffected_by_the_missing_link(
+    close_class, monkeypatch, tmp_path
+):
+    """Scope guard. Ordinary classes never owed a `duplicates` link. They must still reach
     the completion verifier exactly as before, or this fix would block closes it was never
     authorized to touch — including the close of this very ticket, which is a `plan_defect`.
     """
@@ -225,6 +226,27 @@ def test_other_close_classes_are_unaffected_by_the_missing_link(close_class, mon
     assert store.llm_calls == [_BUG], (
         "the unaffected classes must still run completion verification"
     )
+
+
+@pytest.mark.parametrize("close_class", ["not_a_bug", "escalated"])
+def test_reason_required_dispositions_are_refused_pre_llm_not_routed_to_the_verifier(
+    close_class, monkeypatch, tmp_path
+):
+    """`not_a_bug` asserts there IS no defect and `escalated` may point outside the tracker, so
+    neither owes a `duplicates` link — but since bug d54b neither falls through to the completion
+    verifier either (which would demand proof a nonexistent defect was fixed, an unpassable
+    gate). With no replacement link and no `--reason`, the close is refused pre-LLM naming both
+    doors, and never spends a billable request.
+    """
+    store = _Store({_BUG: _bug_state()})
+
+    with pytest.raises(CommandError) as excinfo:
+        _run(store, tmp_path, monkeypatch, close_class=close_class)
+
+    message = str(excinfo.value)
+    assert "--reason" in message
+    assert "replacement" in message
+    assert store.llm_calls == [], "the completion verifier ran on a close that cannot pass"
 
 
 def test_a_force_close_still_bypasses_the_new_duplicate_check(monkeypatch, tmp_path):
