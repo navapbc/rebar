@@ -32,6 +32,13 @@ _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 
 _PIN_RE = re.compile(r"pypandoc-binary==([0-9][0-9A-Za-z.]*)")
 
+# Scheme+host-anchored so a lookalike host (https://pandoc.org.evil.com,
+# https://notpandoc.org) cannot satisfy the upstream-pointer check; the
+# negative lookaheads mark an explicit end-of-host / end-of-repo boundary.
+_UPSTREAM_RE = re.compile(
+    r"https?://(www\.)?pandoc\.org(?![\w.-])|https?://github\.com/jgm/pandoc(?![\w-])"
+)
+
 
 def _notice_text() -> str:
     assert _NOTICE.is_file(), "NOTICE is missing — it records the bundled pandoc's GPL obligation"
@@ -48,8 +55,9 @@ def test_notice_names_pandoc_its_version_and_its_licence() -> None:
     assert "pandoc" in text.lower()
     assert "3.6.1" in text, "NOTICE must name the bundled pandoc VERSION, not just the component"
     assert "GPL" in text, "NOTICE must record pandoc's licence"
-    assert "pandoc.org" in text or "github.com/jgm/pandoc" in text, (
-        "NOTICE must point at upstream so the GPL's source-availability obligation is actionable"
+    assert _UPSTREAM_RE.search(text), (
+        "NOTICE must point at upstream (https://pandoc.org or https://github.com/jgm/pandoc) "
+        "so the GPL's source-availability obligation is actionable"
     )
 
 
