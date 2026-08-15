@@ -46,12 +46,12 @@ from rebar_reconciler.fetch_paging import (  # noqa: F401
 # Split-JQL contract (bug f6cc-b174-9e9a-435c — single JQL hit 1000-issue
 # ACLI ceiling because DIG has > 1000 issues across active + Done):
 #
-#   Query 1 (active working set): `project = <PROJ> AND status != "Done"`
+#   Query 1 (active working set): `project = <PROJ> AND statusCategory != "Done"`
 #       The reconciler's primary scope — every issue we actively reconcile.
 #       Empirically 1,050 issues on 2026-05-26 (probe run 26430555890),
 #       headroom for moderate growth before the 1,200 ceiling triggers.
 #
-#   Query 2 (recent Done): `project = <PROJ> AND status = "Done" ORDER BY updated DESC`
+#   Query 2 (recent Done): `project = <PROJ> AND statusCategory = "Done" ORDER BY updated DESC`
 #       Server-side sort + client-side cap at _DONE_RECENT_CAP. We capture
 #       the most-recently-updated 1,000 Done issues; older Done items are
 #       intentionally NOT in the snapshot. They remain in Jira but are
@@ -65,10 +65,14 @@ from rebar_reconciler.fetch_paging import (  # noqa: F401
 # builders below derive the project from config; an absent/invalid project key is
 # rejected (fail-closed) rather than silently searching all projects.
 #
-# "Done" is assumed the only Done-equivalent status (probe confirmed on DIG:
-# To Do, In Progress, Done — no Closed / Resolved). A project whose workflow adds
-# another closed-equivalent status would need this to move to
-# `statusCategory != "Done"`.
+# The active/done split is scoped by Jira's built-in ``statusCategory`` meta-status
+# (To Do / In Progress / Done) rather than any literal status NAME. Every workflow
+# status — including a client's custom Closed / Resolved / Cancelled — maps onto one
+# of those three categories, so ``statusCategory != "Done"`` (active) and
+# ``statusCategory = "Done"`` (done-recent) are correct across ALL workflows, not
+# just DIG/REB (which happen to expose only To Do / In Progress / Done). A literal
+# ``status = "Done"`` would mis-scope any workflow whose closed-equivalent status is
+# not spelled exactly "Done" (ticket 7332).
 _PROJECT_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -88,13 +92,16 @@ def _validate_project_key(project: str) -> str:
 
 
 def jql_active(project: str) -> str:
-    """Active-working-set query (``status != \"Done\"``) scoped to ``project``."""
-    return f'project = {_validate_project_key(project)} AND status != "Done"'
+    """Active-working-set query (``statusCategory != \"Done\"``) scoped to ``project``."""
+    return f'project = {_validate_project_key(project)} AND statusCategory != "Done"'
 
 
 def jql_done_recent(project: str) -> str:
     """Recent-Done query (``ORDER BY updated DESC``) scoped to ``project``."""
-    return f'project = {_validate_project_key(project)} AND status = "Done" ORDER BY updated DESC'
+    return (
+        f"project = {_validate_project_key(project)} "
+        f'AND statusCategory = "Done" ORDER BY updated DESC'
+    )
 
 
 def jqls_for(project: str) -> tuple[str, str]:
@@ -490,8 +497,9 @@ def _build_snapshot(
 
     Snapshot-BUILDING body shared by :func:`fetch_snapshot` (which writes the
     result) and :func:`compute_snapshot` (which returns it). For each mapped
-    project it issues ``jql_active`` (``status != "Done"``) then ``jql_done_recent``
-    (Done, ``ORDER BY updated DESC``, capped at ``_DONE_RECENT_CAP``); each
+    project it issues ``jql_active`` (``statusCategory != "Done"``) then
+    ``jql_done_recent`` (Done category, ``ORDER BY updated DESC``, capped at
+    ``_DONE_RECENT_CAP``); each
     paginates via ``_iter_pages`` and merges into one dict, deduped via
     ``seen_keys`` with a ``fetcher-dedup-suppressed`` alert.
 

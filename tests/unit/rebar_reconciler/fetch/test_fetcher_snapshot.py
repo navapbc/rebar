@@ -36,8 +36,8 @@ FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "f
 # Split-JQL contract (bug f6cc-b174-9e9a-435c). fetch_snapshot now issues
 # TWO queries (active first, then Done-recent). Both must reach
 # search_issues verbatim.
-EXPECTED_JQL_ACTIVE = 'project = DIG AND status != "Done"'
-EXPECTED_JQL_DONE_RECENT = 'project = DIG AND status = "Done" ORDER BY updated DESC'
+EXPECTED_JQL_ACTIVE = 'project = DIG AND statusCategory != "Done"'
+EXPECTED_JQL_DONE_RECENT = 'project = DIG AND statusCategory = "Done" ORDER BY updated DESC'
 EXPECTED_JQLS = {EXPECTED_JQL_ACTIVE, EXPECTED_JQL_DONE_RECENT}
 # Neutral JQL for direct _iter_pages / collect calls — those helpers
 # accept any JQL string; the JQL contract is on fetch_snapshot, not them.
@@ -159,8 +159,8 @@ def test_collect_passes_jql_to_client_unchanged(fetcher):
 
 def test_fetch_snapshot_uses_split_jqls(tmp_path, fetcher):
     """fetch_snapshot issues both split JQLs verbatim:
-    * ``project = DIG AND status != "Done"``
-    * ``project = DIG AND status = "Done" ORDER BY updated DESC``
+    * ``project = DIG AND statusCategory != "Done"``
+    * ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
     """
     mock_acli, holder = _make_paginating_acli(total=10, page_size=100)
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):

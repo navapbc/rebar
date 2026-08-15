@@ -486,8 +486,8 @@ def _make_jql_partitioned_acli(issues: list[dict]) -> object:
             # Dedup JQL (labels = "rebar-id:...") keeps the base behaviour.
             if jql.strip().startswith('labels = "rebar-id:'):
                 return super().search_issues(jql, **kwargs)
-            # Active query carries ``status != "Done"``; Done-recent carries
-            # ``status = "Done"``. Distinguish on the ``!=`` operator so the
+            # Active query carries ``statusCategory != "Done"``; Done-recent
+            # carries ``statusCategory = "Done"``. Distinguish on the ``!=`` operator so the
             # active substring (which also contains ``= "Done"``) isn't
             # mis-classified as the Done query. Partition over the LIVE
             # state (base returns reflected writes), not the seed list.
