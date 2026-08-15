@@ -604,11 +604,78 @@ jobs:
           fi
           python scripts/check_config_reads.py
 
+      # The suite creates tens of thousands of tiny files and Git stores. On macOS that
+      # workload spends material time in filesystem syscalls, so keep its ephemeral pytest
+      # roots on a bounded APFS RAM disk. Linux remains on runner.temp exactly as before.
+      # A setup failure after attach detaches the exact device immediately; the always-run
+      # cleanup below reports capacity/usage and detaches that same captured device.
+      - name: Create bounded APFS RAM disk for macOS pytest
+        id: macos_ramdisk
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eEuo pipefail
+
+          ramdisk_bytes=$((2 * 1024 * 1024 * 1024))
+          physical_bytes=$(sysctl -n hw.memsize)
+          if ! [[ "$physical_bytes" =~ ^[0-9]+$ ]]; then
+            echo "::error::hw.memsize returned a non-numeric value: $physical_bytes"
+            exit 1
+          fi
+          if (( ramdisk_bytes * 100 >= physical_bytes * 40 )); then
+            echo "::error::Refusing a 2 GiB pytest RAM disk: it must be less than 40% of physical memory ($physical_bytes bytes)."
+            exit 1
+          fi
+
+          sectors=$((ramdisk_bytes / 512))
+          attach_output=$(hdiutil attach -nomount ram://${sectors})
+          device=${attach_output%%[[:space:]]*}
+
+          cleanup_setup_error() {
+            status=$?
+            trap - ERR
+            echo "::warning::RAM-disk setup failed; detaching captured device $device"
+            hdiutil detach "$device" || echo "::error::Failed to detach $device after setup error"
+            exit "$status"
+          }
+          trap cleanup_setup_error ERR
+
+          if ! [[ "$device" =~ ^/dev/disk[0-9]+$ ]]; then
+            echo "::error::hdiutil returned an unexpected device identifier: $device"
+            false
+          fi
+          diskutil erasevolume APFS RebarTests "$device"
+
+          # APFS exposes the mounted volume through a synthesized device, so resolve the
+          # actual /Volumes path by matching its physical store to hdiutil's exact device.
+          mount_path=""
+          for candidate in /Volumes/RebarTests*; do
+            [ -d "$candidate" ] || continue
+            candidate_info=$(diskutil info -plist "$candidate" 2>/dev/null || true)
+            candidate_store=$(printf '%s' "$candidate_info" \
+              | plutil -extract APFSPhysicalStores.0.APFSPhysicalStore raw -o - - 2>/dev/null \
+              || true)
+            if [ "/dev/$candidate_store" = "$device" ]; then
+              mount_path=$(printf '%s' "$candidate_info" \
+                | plutil -extract MountPoint raw -o - -)
+              break
+            fi
+          done
+          if [[ "$mount_path" != /Volumes/* ]] || [ ! -d "$mount_path" ]; then
+            echo "::error::Could not resolve the APFS mount path owned by $device"
+            false
+          fi
+
+          echo "device=$device" >> "$GITHUB_OUTPUT"
+          echo "mount_path=$mount_path" >> "$GITHUB_OUTPUT"
+          echo "macOS pytest RAM disk: $device mounted at $mount_path (2 GiB of $physical_bytes bytes)"
+          trap - ERR
+
       - name: Run the default suite (Python tiers; excludes integration + external)
-        # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
-        # the macOS tmp-cleaner reaps pytest's default /tmp/pytest-of-* basetemp
-        # mid-run, producing a spurious FileNotFoundError cascade. -p no:cacheprovider
-        # keeps a stale cache from leaking across runs.
+        # Pin --basetemp outside /tmp: on long runs the macOS tmp-cleaner can reap
+        # pytest's default /tmp/pytest-of-* basetemp mid-run. Ubuntu stays under
+        # runner.temp; macOS uses the bounded APFS volume created immediately above.
+        # -p no:cacheprovider keeps a stale cache from leaking across runs.
         #
         # Coverage is reported (term-missing) and carries a conservative floor
         # (fail_under in [tool.coverage.report], pyproject.toml): the floor sits well
@@ -648,8 +715,33 @@ jobs:
           pytest -m "not integration and not external"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
           -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
-          --basetemp="${{ runner.temp }}/rebar-basetemp"
+          --basetemp="${{ runner.os == 'macOS' && steps.macos_ramdisk.outputs.mount_path || runner.temp }}/rebar-basetemp"
           ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
+
+      # The tiers are sequential, and the measured default tree is larger than 1 GiB.
+      # Release only its exact basetemp after a successful default run so integration can
+      # reuse the 2 GiB volume. On default failure this normal-success step is skipped and
+      # the final always-run reporter retains the failed tree for diagnosis.
+      - name: Report and release macOS default-suite pytest tree
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          RAMDISK_MOUNT_PATH: ${{ steps.macos_ramdisk.outputs.mount_path }}
+          DEFAULT_BASETEMP: ${{ steps.macos_ramdisk.outputs.mount_path }}/rebar-basetemp
+        run: |
+          set -euo pipefail
+          if [[ "$RAMDISK_MOUNT_PATH" != /Volumes/* ]] \
+             || [ "$DEFAULT_BASETEMP" != "$RAMDISK_MOUNT_PATH/rebar-basetemp" ] \
+             || [ ! -d "$DEFAULT_BASETEMP" ]; then
+            echo "::error::Refusing to release unexpected default basetemp: $DEFAULT_BASETEMP"
+            exit 1
+          fi
+
+          allocated_kib=$(du -sk "$DEFAULT_BASETEMP" | awk '{print $1}')
+          file_count=$(find "$DEFAULT_BASETEMP" -type f -print | wc -l | tr -d '[:space:]')
+          echo "default basetemp allocated usage: $allocated_kib KiB"
+          echo "default basetemp file count: $file_count"
+          rm -rf -- "$DEFAULT_BASETEMP"
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)
         # These need no live services (mocked acli / local git), so they run in CI
@@ -663,4 +755,24 @@ jobs:
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
           -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
-          --basetemp="${{ runner.temp }}/rebar-basetemp-int"
+          --basetemp="${{ runner.os == 'macOS' && steps.macos_ramdisk.outputs.mount_path || runner.temp }}/rebar-basetemp-int"
+
+      - name: Report and detach macOS pytest RAM disk
+        if: always() && runner.os == 'macOS' && steps.macos_ramdisk.outputs.device != ''
+        shell: bash
+        env:
+          RAMDISK_DEVICE: ${{ steps.macos_ramdisk.outputs.device }}
+          RAMDISK_MOUNT_PATH: ${{ steps.macos_ramdisk.outputs.mount_path }}
+        run: |
+          set -euo pipefail
+          echo "macOS pytest RAM-disk usage before detach:"
+          df -h "$RAMDISK_MOUNT_PATH" \
+            || echo "::warning::Could not report filesystem capacity for $RAMDISK_MOUNT_PATH"
+          du -sh "$RAMDISK_MOUNT_PATH" \
+            || echo "::warning::Could not report allocated usage for $RAMDISK_MOUNT_PATH"
+          if file_count=$(find "$RAMDISK_MOUNT_PATH" -type f -print | wc -l | tr -d '[:space:]'); then
+            echo "file count: $file_count"
+          else
+            echo "::warning::Could not count files under $RAMDISK_MOUNT_PATH"
+          fi
+          hdiutil detach "$RAMDISK_DEVICE"
