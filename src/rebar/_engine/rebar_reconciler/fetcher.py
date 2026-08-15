@@ -323,15 +323,13 @@ def _enrich_parents(client: TicketTransport, project_key: str, snapshot: dict, l
     BackendPaginationStallError re-raises out. Mutates ``snapshot`` in place."""
     try:
         if project_key and hasattr(client, "get_parent_map"):
-            # The merge lives in ``merge_parent_map`` (ticket 88d9) so the three-state
-            # queried/absent/unobserved contract it establishes is directly testable.
+            # merge_parent_map (ticket 88d9) owns the three-state
+            # queried/absent/unobserved contract so it is directly testable.
             merge_parent_map(snapshot, client.get_parent_map(project_key))
     except urllib.error.HTTPError as exc:
-        # API retirements (HTTP 410 GONE) must be loud — a transient WARNING
-        # would let a permanent endpoint removal hide in the noise. Transient
-        # HTTP faults stay at WARNING (ticket 8b25). get_parent_map already
-        # swallows 410 internally; this catch is the defense-in-depth net for
-        # any 410 that surfaces from a future enrichment path.
+        # API retirements (HTTP 410 GONE) must be loud; transient HTTP faults stay
+        # at WARNING (ticket 8b25). get_parent_map already swallows 410 internally —
+        # this catch is the defense-in-depth net for any 410 from a future path.
         if exc.code == 410:
             log.error(
                 "fetch_snapshot: parent enrichment hit HTTP 410 GONE — the Jira "
@@ -348,8 +346,7 @@ def _enrich_parents(client: TicketTransport, project_key: str, snapshot: dict, l
             )
     except BackendPaginationStallError:
         # A stalled pager means a truncated whole-project map the differ would treat
-        # as authoritative (every missing parent reads as parentless). Loud beats
-        # fail-open here.
+        # as authoritative (every missing parent reads as parentless) — fail loud.
         raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip parent enrichment, write degraded snapshot
         log.warning(
@@ -362,19 +359,13 @@ def _enrich_parents(client: TicketTransport, project_key: str, snapshot: dict, l
 def _enrich_comments(client: TicketTransport, project_key: str, snapshot: dict, log) -> None:
     """Comment-state enrichment for ONE project (story 1734 fan-out helper).
     Fail-open; BackendPaginationStallError re-raises. Mutates ``snapshot``."""
-    # Comment-state enrichment (Action viability): the per-commented-ticket
-    # ``acli comment list`` calls the differ would otherwise issue every pass
-    # (~1-2s each, fleet-wide) are amortised into ONE paged REST search via
-    # client.get_comment_map(). We merge the returned ``comment`` field into
-    # each snapshot entry so outbound_differ._diff_comments takes the
-    # snapshot-carried path (no client.get_comments round-trip).
-    #
-    # Invariant: only entries the search actually returned a comment field for
-    # are enriched; entries the search omits keep NO ``comment`` key, so the
-    # differ falls back to the per-ticket get_comments path for them (the
-    # never-emit-blind safety invariant stays intact). On any search failure
-    # the enrichment is skipped entirely and every ticket falls back — the
-    # reconciler pass still completes.
+    # Comment-state enrichment (Action viability): amortise the per-ticket
+    # ``acli comment list`` calls into ONE paged REST search via
+    # client.get_comment_map(), merging the ``comment`` field so
+    # outbound_differ._diff_comments takes the snapshot-carried path. Only entries
+    # the search returned a comment field for are enriched; the rest keep NO
+    # ``comment`` key and fall back to the per-ticket path (never-emit-blind
+    # invariant intact). Any failure skips enrichment entirely — the pass completes.
     try:
         if project_key and hasattr(client, "get_comment_map"):
             comment_map = client.get_comment_map(project_key)
@@ -398,8 +389,7 @@ def _enrich_comments(client: TicketTransport, project_key: str, snapshot: dict, 
                 exc,
             )
     except BackendPaginationStallError:
-        # A stalled pager means a truncated whole-project comment map. Loud beats
-        # fail-open here — see _paged_search / _iter_cursor_pages.
+        # A stalled pager means a truncated whole-project comment map — fail loud.
         raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip comment enrichment, per-ticket fallback
         log.warning(
@@ -413,13 +403,11 @@ def _enrich_issuelinks(client: TicketTransport, project_key: str, snapshot: dict
     """Issuelink enrichment for ONE project (story 1734 fan-out helper). Fail-open;
     BackendPaginationStallError re-raises. Mutates ``snapshot`` in place."""
     # Issuelink enrichment (bug 3f04): the base search omits issuelinks, so the
-    # inbound link differ (_diff_links_inbound) and the outbound dedup
-    # (_existing_jira_links) both saw zero Jira links — inbound link sync was
-    # dead and outbound re-emitted every link each pass. Amortise into ONE paged
-    # REST search via client.get_issuelinks_map() and merge the issuelinks array
-    # into each snapshot entry. Only entries the search returned a list for are
-    # enriched; on any failure the enrichment is skipped (differs degrade to
-    # "no Jira links" — additive ADD-only sync stays safe) and the pass completes.
+    # inbound link differ and the outbound dedup both saw zero Jira links. Amortise
+    # into ONE paged REST search via client.get_issuelinks_map() and merge the
+    # array into each entry. Only entries the search returned a list for are
+    # enriched; on any failure enrichment is skipped (differs degrade to "no Jira
+    # links" — ADD-only sync stays safe) and the pass completes.
     try:
         if project_key and hasattr(client, "get_issuelinks_map"):
             # The merge lives in ``merge_issuelinks_map`` (ticket 6c0a) so the
@@ -442,9 +430,8 @@ def _enrich_issuelinks(client: TicketTransport, project_key: str, snapshot: dict
                 exc,
             )
     except BackendPaginationStallError:
-        # A stalled pager means a truncated whole-project link map, which the differs
-        # would read as an authoritative "no Jira links" (removals undetectable).
-        # Loud beats fail-open here.
+        # A stalled pager means a truncated whole-project link map the differs would
+        # read as an authoritative "no Jira links" (removals undetectable) — fail loud.
         raise
     except Exception as exc:  # noqa: BLE001 — fail-open: skip issuelink enrichment, write degraded snapshot
         log.warning(
@@ -476,6 +463,24 @@ def _enrich_project(client: TicketTransport, project_key: str, snapshot: dict, l
     return snapshot
 
 
+def _fetch_project(
+    client: TicketTransport,
+    queries: tuple[tuple[str, int | None], ...],
+) -> list[dict]:
+    """Drain BOTH base queries (active + done-recent) for ONE project into one
+    ordered list of raw issues (story 1734 fan-out helper, symmetric to
+    ``_enrich_project``). The caller merges the result ONLY on success, so a
+    mid-pagination failure leaves NO partial keys behind; ``queries`` is built
+    outside the caller's boundary so an invalid key still fails closed in
+    ``jql_active`` (bug 626d) and truncation signals propagate.
+    """
+    issues: list[dict] = []
+    for jql, cap in queries:
+        for page in _iter_pages(client, jql, page_size=100, cap=cap):
+            issues.extend(page)
+    return issues
+
+
 def _build_snapshot(
     pass_id: str,
     repo_root: Path | None = None,
@@ -483,58 +488,40 @@ def _build_snapshot(
     """Fetch all matching DIG issues across the two-JQL split and build the
     normalized snapshot dict — WITHOUT writing it to disk.
 
-    This is the snapshot-BUILDING body shared by :func:`fetch_snapshot` (which
-    writes the result) and :func:`compute_snapshot` (which returns it without
-    writing). Issues two queries in order (see ``jqls_for``), both scoped to the
-    configured ``jira.project``:
-
-      1. ``jql_active(project)``  — active working set (``status != "Done"``).
-      2. ``jql_done_recent(project)`` — Done issues, ``ORDER BY updated DESC``,
-         capped at ``_DONE_RECENT_CAP``.
-
-    Each query paginates via ``_iter_pages``. Results are merged into a
-    single snapshot dict; cross-query duplicates (which should not occur —
-    status partitions the set — but are tolerated for robustness) are
-    deduped via ``seen_keys`` and emit a ``fetcher-dedup-suppressed`` alert.
-
-    Note: the dedup-alert path (``alert_store.append``) is an observability
-    write that fires only on a cross-query duplicate, which the status
-    partition makes impossible in normal operation — it is not a snapshot-
-    persistence write and is preserved in both code paths.
+    Snapshot-BUILDING body shared by :func:`fetch_snapshot` (which writes the
+    result) and :func:`compute_snapshot` (which returns it). For each mapped
+    project it issues ``jql_active`` (``status != "Done"``) then ``jql_done_recent``
+    (Done, ``ORDER BY updated DESC``, capped at ``_DONE_RECENT_CAP``); each
+    paginates via ``_iter_pages`` and merges into one dict, deduped via
+    ``seen_keys`` with a ``fetcher-dedup-suppressed`` alert.
 
     Raises:
-        SilentTruncationError: Per-query ACLI ceiling hit, or same-token-
-            twice cursor stall on either query.
-        BackendPaginationStallError: an enrichment read's pager proved the server
-            stopped honouring its paging parameter (ticket 18a4). Deliberately
-            re-raised PAST all three fail-open enrichment handlers: a stalled pager
-            is a truncated whole-project read, and degrading around it writes a
-            snapshot the differ then treats as authoritative.
-        Any exception raised by ``AcliClient.search_issues()`` propagates out.
+        SilentTruncationError / BackendPaginationStallError: a truncated read on
+            any query (ceiling hit, same-token-twice, or a stalled pager) —
+            re-raised past the fail-open handlers (fail loud).
+        A per-project transport error aborts only when a SINGLE project is mapped
+            (fail-closed regression parity); with multiple projects it is isolated
+            (see the base-query loop below).
     """
     if repo_root is None:
         repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
 
-    # S4: _load_acli now returns the configured backend's transport directly (a
-    # TicketTransport, i.e. an AcliClient carrying its resolved connection settings).
+    # S4: _load_acli returns the configured backend's transport directly (a
+    # TicketTransport carrying its resolved connection settings).
     client = _load_acli()
 
-    # Resolve the project key for JQL scoping via the Backend port's
-    # ``query_project`` (ticket 97f2/bbf1) — the UN-defaulted configured project:
-    # an absent/invalid value must raise in jql_active() to fail the pass closed
-    # rather than searching all projects, so we deliberately do NOT read
-    # client.jira_project (which now defaults to "DIG").
+    # Resolve the JQL-scoping project via the Backend port's ``query_project``
+    # (ticket 97f2/bbf1) — the UN-defaulted configured project: an absent/invalid
+    # value must raise in jql_active() to fail the pass closed rather than search
+    # unscoped (so we do NOT read client.jira_project, which defaults to "DIG").
     from rebar.config import load_config
     from rebar_reconciler._backend_registry import select_backend
 
     _query_project = select_backend(load_config()).query_project
 
-    # Multi-project fan-out (story 1734): the store's projects.json mapping is the
-    # authoritative sync list — fetch EVERY mapped project, not just the single
-    # configured jira.project. An UNSEEDED store (empty mapping) falls back to
-    # ``[_query_project]``, reproducing the exact pre-1734 single-project queries +
-    # enrichment (regression parity). A malformed mapping fails closed in
-    # read_projects() rather than silently degrading to one project.
+    # Multi-project fan-out (story 1734): projects.json is the authoritative sync
+    # list. An UNSEEDED store falls back to ``[_query_project]`` (pre-1734
+    # single-project parity); a malformed mapping fails closed in read_projects().
     from rebar_reconciler import projects_store
 
     project_list = list(projects_store.read_projects(repo_root).keys()) or [_query_project]
@@ -545,59 +532,76 @@ def _build_snapshot(
     seen_keys: set[str] = set()
     snapshot: dict[str, dict] = {}
 
-    # Per-query caps: active is uncapped (the ACLI ceiling is its only bound);
-    # Done is intentionally capped to the most-recently-updated _DONE_RECENT_CAP
-    # issues. Stored as (jql, cap) tuples so the iteration is observable. One
-    # active + done pair PER project in the fan-out; an absent/invalid project key
-    # raises in jql_active(), failing the pass closed rather than searching all
-    # projects (bug 626d). The _ACLI_CEILING is enforced PER query inside
-    # _iter_pages, so it is inherently a per-project bound, never a shared budget.
-    queries: tuple[tuple[str, int | None], ...] = tuple(
-        pair
-        for proj in project_list
-        for pair in ((jql_active(proj), None), (jql_done_recent(proj), _DONE_RECENT_CAP))
-    )
-
-    for jql, cap in queries:
-        for page in _iter_pages(client, jql, page_size=100, cap=cap):
-            for issue in page:
-                key = issue.get("key", "")
-                if not key:
-                    continue
-                if key in seen_keys:
-                    # Cross-page (or cross-query) duplicate — dedup AND
-                    # emit observable alert.
-                    alert_store.append(
-                        {
-                            "kind": "fetcher-dedup-suppressed",
-                            "key": key,
-                            "pass_id": pass_id,
-                        },
-                        repo_root=repo_root,
-                    )
-                    continue
-                seen_keys.add(key)
-                fields = issue.get("fields", {})
-                if not isinstance(fields, dict):
-                    fields = {}
-                snapshot[key] = {k: fields[k] for k in sorted(fields.keys())}
-
     import logging as _log_mod
 
     _fetcher_log = _log_mod.getLogger(__name__)
+
+    # Base-query fan-out (story 1734) with PER-PROJECT resilience (bug 05b8): the
+    # (jql, cap) pair is built OUTSIDE the per-project try so an invalid key still
+    # fails CLOSED in jql_active() (bug 626d). Each project drains into a LOCAL list
+    # via _fetch_project and merges ONLY on success, so a transport fault degrades
+    # only THAT project (alert + CONTINUE, mirroring the enrichment loop) with no
+    # partial read reaching the snapshot as deletions; a truncation signal still
+    # re-raises. The single-project path (one key / unseeded fallback) has no OTHER
+    # project to protect, so it fails CLOSED unchanged (no empty snapshot).
+    _isolate_projects = len(project_list) > 1
+    for _proj in project_list:
+        project_queries: tuple[tuple[str, int | None], ...] = (
+            (jql_active(_proj), None),
+            (jql_done_recent(_proj), _DONE_RECENT_CAP),
+        )
+        try:
+            project_issues = _fetch_project(client, project_queries)
+        except (BackendPaginationStallError, SilentTruncationError):
+            raise
+        except Exception as exc:  # fail-open per project (mirrors _enrich_project)
+            if not _isolate_projects:
+                raise
+            _fetcher_log.warning(
+                "fetch_snapshot: base-query fetch for project %r failed (%r); "
+                "SKIPPING it (issues NOT merged) and continuing the pass (%s)",
+                _proj,
+                exc,
+                pass_id,
+            )
+            alert_store.append(
+                {
+                    "kind": "fetcher-project-fetch-failed",
+                    "project": _proj,
+                    "pass_id": pass_id,
+                    "error": repr(exc),
+                    "timestamp_ns": time.time_ns(),
+                },
+                repo_root=repo_root,
+            )
+            continue
+        # Atomic merge — reached only when BOTH queries for this project succeeded.
+        # Dedup (seen_keys) + the fetcher-dedup-suppressed alert run here.
+        for issue in project_issues:
+            key = issue.get("key", "")
+            if not key:
+                continue
+            if key in seen_keys:
+                alert_store.append(
+                    {"kind": "fetcher-dedup-suppressed", "key": key, "pass_id": pass_id},
+                    repo_root=repo_root,
+                )
+                continue
+            seen_keys.add(key)
+            fields = issue.get("fields", {})
+            if not isinstance(fields, dict):
+                fields = {}
+            snapshot[key] = {k: fields[k] for k in sorted(fields.keys())}
+
     # Enrichment fan-out (story 1734): one parent/comment/issuelink pass PER
-    # mapped project, each pass failing open independently so a per-project fault
-    # degrades only that project. A BackendPaginationStallError still re-raises
-    # out of the helper (a stalled pager is a truncated whole-project read).
+    # mapped project, each failing open independently; a BackendPaginationStallError
+    # still re-raises out of the helper (a stalled pager is a truncated read).
     for _proj in project_list:
         _enrich_project(client, _proj, snapshot, _fetcher_log)
 
-    # Proactive unmapped-status detection (defense-in-depth): surface a Jira
-    # workflow status the reconciler has no mapping for at snapshot-build time, so a
-    # newly-added Jira-side status is flagged for a mapping BEFORE it reaches an
-    # outbound mutation and trips the status preflight (the failure mode that once
-    # stalled the whole bridge via a stale IDEA status). Fully fail-open — detection
-    # must never break the fetch.
+    # Proactive unmapped-status detection (defense-in-depth): flag a Jira status
+    # the reconciler has no mapping for at snapshot-build time, before it reaches
+    # an outbound mutation and trips the status preflight. Fully fail-open.
     try:
         _flag_unmapped_statuses(snapshot, pass_id, repo_root, alert_store, _fetcher_log)
     except Exception as exc:  # noqa: BLE001 — detection is best-effort; never fail the fetch

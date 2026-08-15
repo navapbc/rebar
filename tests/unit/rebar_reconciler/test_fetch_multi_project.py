@@ -22,8 +22,10 @@ Held-out RED oracle for 1734 — kept out of the fix subagent's tree.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import sys
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -175,6 +177,68 @@ def test_single_project_fallback_is_regression_identical(fetcher, tmp_path, monk
     assert client.comment_calls == ["REB"]
     assert client.issuelink_calls == ["REB"]
     assert {"REB-1", "REB-2"} <= set(snapshot)
+
+
+# --- per-project resilience: one bad project must not abort the pass -------
+
+
+class _PartialFailClient(_FakeClient):
+    """A ``_FakeClient`` whose ``search_issues`` RAISES a transport error for one
+    project's base queries (an ACLI 400 / HTTPError, mirroring the mapped-but-
+    nonexistent-key incident 05b8) while serving every other project normally."""
+
+    def __init__(self, active_by_project: dict[str, list[dict]], failing_project: str) -> None:
+        super().__init__(active_by_project)
+        self.failing_project = failing_project
+
+    def search_issues(self, jql: str, start_at: int = 0, max_results: int = 50) -> list[dict]:
+        if self._project_of(jql) == self.failing_project:
+            raise urllib.error.HTTPError(
+                "https://jira.example/rest/api/2/search",
+                400,
+                "Bad Request (unknown project)",
+                hdrs=None,  # type: ignore[arg-type]
+                fp=None,
+            )
+        return super().search_issues(jql, start_at=start_at, max_results=max_results)
+
+
+def _alert_records(repo_root: Path) -> list[dict]:
+    alerts_dir = repo_root / "bridge_state" / "bridge_alerts"
+    records: list[dict] = []
+    for path in sorted(alerts_dir.glob("*.jsonl")) if alerts_dir.exists() else ():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                records.append(json.loads(line))
+    return records
+
+
+def test_one_project_base_query_failure_does_not_abort_pass(fetcher, tmp_path, monkeypatch):
+    """One mapped project's base-query transport error must degrade only that
+    project: the other project's issues still land, NO partial keys from the
+    failed project leak into the snapshot, and an observable per-project alert
+    naming the project + pass fires. (Always-on regression for incident 05b8 —
+    the P0-3 gap the outage had no test for.)"""
+    monkeypatch.setenv("JIRA_PROJECT", "OK")
+    _seed_projects(tmp_path, {"OK": ["ro"], "BAD": ["rb"]})
+    client = _PartialFailClient({"OK": _issues("OK", 2)}, failing_project="BAD")
+
+    with patch.object(fetcher, "_load_acli", return_value=client):
+        snapshot = fetcher.compute_snapshot("m2m-badproject", repo_root=tmp_path)
+
+    # The good project's issues still land — the pass was NOT aborted.
+    assert {"OK-1", "OK-2"} <= set(snapshot)
+    # No partial/empty keys from the failed project reached the shared snapshot
+    # (a leaked partial would read as a deletion downstream).
+    assert not any(k.startswith("BAD-") for k in snapshot)
+    # The failure is observable: a per-project alert names BAD + the pass id.
+    alerts = _alert_records(tmp_path)
+    assert any(
+        a.get("kind") == "fetcher-project-fetch-failed"
+        and a.get("project") == "BAD"
+        and a.get("pass_id") == "m2m-badproject"
+        for a in alerts
+    ), alerts
 
 
 # --- stamping: bridge_project + repos on inbound create --------------------
