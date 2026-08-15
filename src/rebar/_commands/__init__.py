@@ -27,7 +27,7 @@ from rebar._commands._seam import CommandError, forced_secret_write
 
 
 class _Cmd(NamedTuple):
-    func: Callable[..., None]
+    func: Callable[..., object]
     min_args: int
     usage: str
     # Max positional args; None = unbounded. Most leaf commands ignore extra args
@@ -148,11 +148,25 @@ _SET_FILE_IMPACT_USAGE = (
 
 def _set_file_impact_cli(args: list[str]) -> int:
     """Parse the two mutually-exclusive file-impact write forms."""
+    from rebar._commands import _confirm
+
     if len(args) == 2 and args[1] != "--none":
-        leaf.set_file_impact(args[0], args[1])
+        out = leaf.set_file_impact(args[0], args[1])
+        _confirm.emit(
+            "file-impact-set",
+            out["id"],
+            f"{out['count']} paths",
+            f"impact set on {out['id']}: {out['count']} paths",
+        )
         return 0
     if len(args) == 3 and args[1] == "--none":
-        leaf.declare_no_file_impact(args[0], args[2])
+        out = leaf.declare_no_file_impact(args[0], args[2])
+        _confirm.emit(
+            "file-impact-set",
+            out["id"],
+            "none declared",
+            f"impact set on {out['id']}: none declared",
+        )
         return 0
     raise CommandError(_SET_FILE_IMPACT_USAGE, returncode=2)
 
@@ -230,8 +244,15 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         with forced_secret_write(allow_secret_pattern):
-            entry.func(*positionals)
+            out = entry.func(*positionals)
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    # Mutation confirmation (ticket 6bda-9d58-8546-4638): each leaf function
+    # returns its small outcome; the formatter prints the kubectl-style line (or
+    # the --output json envelope) on the CLI's behalf, so library/MCP callers of
+    # the same functions stay print-free.
+    from rebar._commands import _confirm
+
+    _confirm.leaf_confirm(command, out)
     return 0

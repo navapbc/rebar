@@ -79,10 +79,9 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
     if fmt == "json":
         print(json.dumps({"id": res["id"], "alias": res["alias"], "title": res["title"]}))
     else:
-        alias, tid = res["alias"], res["id"]
-        if alias and alias != tid:
-            print(f"Created idea {alias} ({tid}): {res['title']}")
-        else:
-            print(f"Created idea {tid}: {res['title']}")
-        print(tid)
+        # Normalized confirmation (ticket 6bda-9d58-8546-4638): one line keeping the
+        # old form's idea marker, alias, id, and title.
+        from rebar._commands._confirm import confirm_created
+
+        confirm_created("idea ", res)
     return 0

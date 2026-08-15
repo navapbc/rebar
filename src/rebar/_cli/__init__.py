@@ -420,8 +420,52 @@ def _dispatch_suffix(sub: str, rest: list[str]) -> int:
     raise RuntimeError(f"rebar: subcommand {sub!r} is known but has no in-process handler")
 
 
+# Mutating verbs that confirm their result on stdout (ticket 6bda-9d58-8546-4638).
+# The global --quiet / --output flags are pre-extracted here at the router — BEFORE
+# any partition dispatch — because the positional-only _REGISTRY leaves
+# (rebar._commands.__init__) usage-error on any option-looking token, so a
+# per-verb parse could never see them.
+_CONFIRM_SCOPE = _WRITES_FULL | _LIFECYCLE
+# Verbs that parsed --output themselves before the global extraction existed. The
+# extracted format is re-injected so their own parse_output keeps producing the
+# byte-identical, pre-existing JSON shapes (their parsers strip the flag again
+# before any positional handling, so the position of the re-injection is inert).
+_LEGACY_OUTPUT = frozenset({"create", "idea", "transition", "claim", "reopen"})
+
+
+def _dispatch_confirmable(sub: str, rest: list[str]) -> int:
+    """Pre-extract the global output flags for a mutating verb, then dispatch.
+
+    Extraction is position-independent but never consumes tokens after ``--``
+    (see :func:`rebar._commands._confirm.extract_global_flags`); the result is
+    installed as the per-invocation confirmation context every confirmation
+    emit consults."""
+    from rebar._commands._confirm import (
+        OutputFormatError,
+        confirmation_context,
+        extract_global_flags,
+    )
+
+    try:
+        rest, quiet, fmt = extract_global_flags(rest)
+    except OutputFormatError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 2
+    if sub in _LEGACY_OUTPUT:
+        rest = [*rest, "--output", fmt]
+    with confirmation_context(quiet=quiet, fmt=fmt):
+        return _dispatch_route(sub, rest)
+
+
 def _dispatch(sub: str, rest: list[str]) -> int:
     """Route a known subcommand to its in-process implementation."""
+    if sub in _CONFIRM_SCOPE:
+        return _dispatch_confirmable(sub, rest)
+    return _dispatch_route(sub, rest)
+
+
+def _dispatch_route(sub: str, rest: list[str]) -> int:
+    """The partition dispatch proper (post any global-flag extraction)."""
     if sub in _DISPATCH_PRIMARY:
         return _dispatch_primary(sub, rest)
     if sub in _DISPATCH_MIDDLE:

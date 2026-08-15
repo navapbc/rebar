@@ -460,7 +460,17 @@ def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: 
     except CommandError as exc:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
-    sys.stdout.write(f"Reverted event '{archived_uuid}' on ticket '{resolved}'\n")
+    # Normalized confirmation (ticket 6bda-9d58-8546-4638): was
+    # `Reverted event '<uuid>' on ticket '<id>'` — the reverted-event uuid and the
+    # resolved id both survive inside the transition-shaped line.
+    from rebar._commands import _confirm
+
+    _confirm.emit(
+        "transitioned",
+        resolved,
+        f"archived -> open (reverted event {archived_uuid})",
+        f"transitioned {resolved}: archived -> open (reverted event {archived_uuid})",
+    )
     return 0
 
 
@@ -527,7 +537,59 @@ def _plain_reason_refused(reason: str, force: bool, target_status: str, close_cl
     )
 
 
-def transition_cli(argv: list[str], *, repo_root=None) -> int:
+def _emit_transition_result(
+    fmt: str,
+    ticket_id: str,
+    current_status: str,
+    target_status: str,
+    result: dict,
+    verb: str,
+) -> None:
+    """Print ``transition``'s result on the active channel (ticket 6bda-9d58-8546-4638).
+
+    The JSON success payload is the PRE-EXISTING shape, byte-identical; the no-op
+    path (which never had a JSON shape) and the text confirmations follow the
+    shared mutation contract. ``verb`` is ``"reopened"`` for the ``reopen`` alias —
+    its line drops the unblocked segment (reopening cannot unblock anything) —
+    and ``"transitioned"`` otherwise, where the line preserves the UNBLOCKED ids
+    datum the old close-path output carried.
+    """
+    from rebar._commands import _confirm
+
+    if result["noop"]:
+        _confirm.emit(
+            "noop",
+            ticket_id,
+            f"already {target_status}",
+            f"no change: {ticket_id} already {target_status}",
+        )
+        return
+    if fmt == "json":
+        payload = {
+            "ticket_id": ticket_id,
+            "from": current_status,
+            "to": target_status,
+            "newly_unblocked": result["newly_unblocked"],
+        }
+        # Same field-by-field rebuild hazard as the library return: without this the
+        # completion-signature marker never reaches a CLI consumer parsing --output json,
+        # leaving a close that landed WITHOUT its signature undetectable except by reading
+        # English off stderr (bug silvern-dewy-damselfly).
+        if "completion_signature" in result:
+            payload["completion_signature"] = result["completion_signature"]
+        sys.stdout.write(json.dumps(payload) + "\n")
+        return
+    if verb == "reopened":
+        _confirm.emit_text(f"reopened {ticket_id}: {current_status} -> {target_status}")
+        return
+    ids = result["newly_unblocked"]
+    _confirm.emit_text(
+        f"transitioned {ticket_id}: {current_status} -> {target_status}; "
+        f"unblocked: {','.join(ids) if ids else 'none'}"
+    )
+
+
+def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "transitioned") -> int:
     """``rebar transition`` entry: parse ``--output``, autodetect/validate, run the
     un-archive seam or :func:`transition_compute`, print, return the exit code."""
     try:
@@ -605,27 +667,7 @@ def transition_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
 
-    if result["noop"]:
-        sys.stdout.write("No transition needed\n")
-        return 0
-
-    if fmt == "json":
-        payload = {
-            "ticket_id": ticket_id,
-            "from": current_status,
-            "to": target_status,
-            "newly_unblocked": result["newly_unblocked"],
-        }
-        # Same field-by-field rebuild hazard as the library return: without this the
-        # completion-signature marker never reaches a CLI consumer parsing --output json,
-        # leaving a close that landed WITHOUT its signature undetectable except by reading
-        # English off stderr (bug silvern-dewy-damselfly).
-        if "completion_signature" in result:
-            payload["completion_signature"] = result["completion_signature"]
-        sys.stdout.write(json.dumps(payload) + "\n")
-    elif target_status == "closed":
-        ids = result["newly_unblocked"]
-        sys.stdout.write(f"UNBLOCKED: {','.join(ids) if ids else 'none'}\n")
+    _emit_transition_result(fmt, ticket_id, current_status, target_status, result, _confirm_verb)
     return 0
 
 
@@ -650,4 +692,6 @@ def reopen_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stderr.write(text)
         return 1
     out_flag = ["--output", fmt] if fmt != "text" else []
-    return transition_cli([rest[0], "closed", "open", *out_flag], repo_root=repo_root)
+    return transition_cli(
+        [rest[0], "closed", "open", *out_flag], repo_root=repo_root, _confirm_verb="reopened"
+    )

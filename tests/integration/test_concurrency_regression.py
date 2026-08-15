@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -213,7 +214,17 @@ def _list_status(repo: Path) -> dict[str, str]:
 
 
 def _create(repo: Path, ttype: str, title: str) -> str:
-    return _engine_run(repo, "create", ttype, title).stdout.strip().splitlines()[-1]
+    return _extract_created_id(_engine_run(repo, "create", ttype, title).stdout)
+
+
+_CANONICAL_ID_RE = re.compile(r"\b[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\b")
+
+
+def _extract_created_id(stdout: str) -> str:
+    """The canonical id inside ``create``'s one-line confirmation."""
+    match = _CANONICAL_ID_RE.search(stdout)
+    assert match, stdout
+    return match.group(0)
 
 
 # The upkeep posture the fixture's bare remote is pinned to. Keys are git config keys.
@@ -1376,16 +1387,14 @@ def test_scenario_a_normal_horizon_real_remote_append_visible_no_repair(two_clon
     # injected clock authoritative), then ONE young comment at real current time (no
     # override) that stays live and bounds the snapshot ts below current time.
     hlc0 = {"REBAR_HLC": "0"}
-    tid = (
+    tid = _extract_created_id(
         _engine_run_env(
             repo_a,
             "create",
             "task",
             "far-past compaction subject",
             env_extra={**hlc0, "REBAR_HLC_NOW": _A_FAR_PAST},
-        )
-        .stdout.strip()
-        .splitlines()[-1]
+        ).stdout
     )
     _engine_run_env(
         repo_a, "comment", tid, "fold-1", env_extra={**hlc0, "REBAR_HLC_NOW": _A_FAR_PAST + 1}
@@ -1560,8 +1569,8 @@ def test_scenario_b_far_future_snapshot_orphan_real_fsck_repair_converges(two_cl
 # below add the CROSS-agent race coverage that Concurrency Doctrine sub-cases (a)
 # [same-tracker, two processes] and (b) [two offline clones] describe.
 def _last_id(cp: subprocess.CompletedProcess) -> str:
-    """The ticket id a `create` prints on the last stdout line (warnings go to stderr)."""
-    return cp.stdout.strip().splitlines()[-1]
+    """The ticket id inside `create`'s confirmation line (warnings go to stderr)."""
+    return _extract_created_id(cp.stdout)
 
 
 def _status_assignee(repo: Path, ticket_id: str) -> tuple[str, str | None]:

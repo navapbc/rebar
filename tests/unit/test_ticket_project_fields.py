@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import types
@@ -61,9 +62,11 @@ def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess:
 
 
 def _created_id(proc: subprocess.CompletedProcess) -> str:
-    """The canonical id a ``create`` prints on its last stdout line."""
+    """The canonical id inside ``create``'s one-line confirmation."""
     assert proc.returncode == 0, proc.stderr
-    return proc.stdout.strip().splitlines()[-1].strip()
+    match = re.search(r"\b[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}\b", proc.stdout)
+    assert match, proc.stdout
+    return match.group(0)
 
 
 def _state(repo: Path, tid: str) -> dict:

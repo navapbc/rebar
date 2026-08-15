@@ -175,10 +175,9 @@ class CliAdapter(Adapter):
             if key == "tags" and isinstance(val, (list, tuple)):
                 val = ",".join(val)
             args += [flag, str(val)]
-        cp = self._run(*args)
+        cp = self._run(*args, "--output", "json")
         assert cp.returncode == 0, f"cli create failed: {cp.stderr}"
-        lines = [ln for ln in cp.stdout.splitlines() if ln.strip()]
-        return lines[-1].strip()
+        return str(json.loads(cp.stdout)["id"])
 
     def show(self, tid: str) -> dict:
         return self._ok_json("show", tid)

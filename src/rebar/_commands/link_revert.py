@@ -29,7 +29,13 @@ logger = logging.getLogger(__name__)
 
 
 def link_core(
-    src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, quiet: bool = False
+    src_raw: str,
+    tgt_raw: str,
+    relation: str,
+    *,
+    repo_root=None,
+    quiet: bool = False,
+    on_outcome=None,
 ) -> dict | None:
     """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
     non-dry-run path → ticket-graph.py --link → add_dependency).
@@ -38,7 +44,10 @@ def link_core(
     note), the redundant-link guard, cycle detection, and the LINK event write —
     the SAME function the bash path calls, so parity is structural. ``quiet``
     suppresses add_dependency's stdout/stderr (the library facade discards it, as
-    the subprocess path did); the CLI lets it through. Raises :class:`CommandError`.
+    the subprocess path did); the CLI lets it through. ``on_outcome`` is forwarded
+    verbatim to :func:`rebar.graph._links.add_dependency` (the parallel
+    wrote-vs-noop channel; the ``dict | None`` REDIRECT return is unchanged).
+    Raises :class:`CommandError`.
     """
     import contextlib
     import io
@@ -59,8 +68,8 @@ def link_core(
             # a tool call would corrupt the JSON-RPC stream. The record travels back as
             # a RETURN VALUE instead.
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
-                return add_dependency(src_id, tgt_id, str(tracker), relation)
-        return add_dependency(src_id, tgt_id, str(tracker), relation)
+                return add_dependency(src_id, tgt_id, str(tracker), relation, on_outcome=on_outcome)
+        return add_dependency(src_id, tgt_id, str(tracker), relation, on_outcome=on_outcome)
     except (CyclicDependencyError, ValueError) as exc:
         raise CommandError(f"Error: {exc}") from None
 
@@ -100,8 +109,37 @@ def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) 
     return 0
 
 
+def _confirm_link(outcome: dict | None, record: dict | None) -> None:
+    """Print ``link``'s confirmation (ticket 6bda-9d58-8546-4638).
+
+    Text mode: when a REDIRECT record was printed the record IS the invocation's
+    one stdout result — no extra text line on top. JSON mode: the uniform envelope,
+    with the record nested as a ``redirect`` field when present (add_dependency's
+    raw print was sunk by ``quiet=True`` in that mode, keeping stdout one document).
+    """
+    from rebar._commands import _confirm
+
+    if outcome is None:  # defensive: seam did not report — print nothing rather than guess
+        return
+    edge = f"{outcome['source']} -> {outcome['target']} ({outcome['relation']})"
+    extra = {"redirect": record} if record is not None else None
+    if _confirm.json_mode():
+        verb = "linked" if outcome["wrote"] else "noop"
+        detail = edge if outcome["wrote"] else f"already linked {edge}"
+        _confirm.emit(verb, edge, detail, "", extra=extra)
+        return
+    if record is not None:
+        return  # the redirect record already went to stdout — one result per invocation
+    if outcome["wrote"]:
+        _confirm.emit_text(f"linked {edge}")
+    else:
+        _confirm.emit_text(f"no change: already linked {edge}")
+
+
 def link_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``link``: parse --dry-run, resolve, delegate."""
+    from rebar._commands import _confirm
+
     dry_run = "--dry-run" in argv
     rest = [a for a in argv if a != "--dry-run"]
     if len(rest) < 3:
@@ -112,11 +150,28 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
     if dry_run:
         return _link_dry_run(src_raw, tgt_raw, relation, repo_root=repo_root)
 
+    outcome: dict | None = None
+
+    def _capture(o: dict) -> None:
+        nonlocal outcome
+        outcome = o
+
     try:
-        link_core(src_raw, tgt_raw, relation, repo_root=repo_root)
+        # Under --output json the redirect record must nest in the envelope instead
+        # of printing raw (one JSON document per invocation), so the seam's stdout
+        # is sunk; in text mode it prints byte-identical, --quiet included.
+        record = link_core(
+            src_raw,
+            tgt_raw,
+            relation,
+            repo_root=repo_root,
+            quiet=_confirm.json_mode(),
+            on_outcome=_capture,
+        )
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
+    _confirm_link(outcome, record)
     return 0
 
 
@@ -204,5 +259,14 @@ def revert_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
-    print(f"Reverted event '{target_uuid}' on ticket '{resolved}'")
+    # Normalized confirmation (was `Reverted event '<uuid>' on ticket '<id>'`;
+    # both data — the event uuid and the resolved id — are preserved).
+    from rebar._commands import _confirm
+
+    _confirm.emit(
+        "reverted",
+        resolved,
+        f"event {target_uuid}",
+        f"reverted {resolved}: event {target_uuid}",
+    )
     return 0
