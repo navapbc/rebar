@@ -737,10 +737,16 @@ jobs:
             exit 1
           fi
 
-          allocated_kib=$(du -sk "$DEFAULT_BASETEMP" | awk '{print $1}')
-          file_count=$(find "$DEFAULT_BASETEMP" -type f -print | wc -l | tr -d '[:space:]')
-          echo "default basetemp allocated usage: $allocated_kib KiB"
-          echo "default basetemp file count: $file_count"
+          if allocated_kib=$(du -sk "$DEFAULT_BASETEMP" | awk '{print $1}'); then
+            echo "default basetemp allocated usage: $allocated_kib KiB"
+          else
+            echo "::warning::Could not report allocated usage for $DEFAULT_BASETEMP"
+          fi
+          if file_count=$(find "$DEFAULT_BASETEMP" -type f -print | wc -l | tr -d '[:space:]'); then
+            echo "default basetemp file count: $file_count"
+          else
+            echo "::warning::Could not count files under $DEFAULT_BASETEMP"
+          fi
           rm -rf -- "$DEFAULT_BASETEMP"
 
       - name: Run the integration tier (concurrency + reconciler; network-guarded)

@@ -125,6 +125,18 @@ def test_successful_default_tree_is_measured_then_released_before_integration() 
     assert body.index("find ") < removal.start()
     assert "rebar-basetemp-int" not in repr(release.get("env", {})) + body
 
+    for command in ("du -sk", "find "):
+        guarded_measurement = re.search(
+            rf"(?ms)^\s*if\s+(?P<result>[A-Za-z_]\w*)=\$\({re.escape(command)}.*?\);"
+            rf"\s*then\s+.*?\$(?:\{{)?(?P=result)(?:\}})?.*?"
+            rf"^\s*else\s+(?P<failure>.*?)^\s*fi\s*$",
+            body,
+        )
+        assert guarded_measurement, (
+            f"{command} observability must be guarded so failure cannot suppress release"
+        )
+        assert "::warning::" in guarded_measurement.group("failure")
+
 
 def test_ramdisk_cleanup_always_reports_usage_and_detaches_captured_device() -> None:
     setup_id = _step_running("hdiutil attach -nomount")["id"]
