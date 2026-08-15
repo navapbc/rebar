@@ -1,15 +1,23 @@
 """Tests for _commit_binding_store_snapshot failure path (Finding 3).
 
 RED → GREEN specification:
-  - commit failure (mock subprocess) → returns False + ERROR logged to stderr
-    + alert appended to alert_store
-  - commit success → returns True, no alert written
+  - commit-phase failure (seam raises a commit-phase ``PushDeliveryError``) →
+    returns False + ERROR logged to stderr + alert appended to alert_store
+  - commit success (seam returns) → returns True, no alert written
   - call site in reconcile_once: on False, logs loud ERROR naming the
     consequence (bindings at risk of clobber on next merge); does NOT abort pass
 
 These tests exercise the clobbered-bindings failure class: a silent commit failure
 followed by a ``git merge origin/tickets`` loses bindings and causes the next
 pass to see bound tickets as unbound.
+
+Ticket ``6454-d06e-7361-4e3d`` re-pointed these tests off the retired raw
+``subprocess.run`` staging/commit mechanism and onto the authoritative
+``rebar._store.push.commit_and_push_tickets_branch`` seam the helper now delegates
+to. A COMMIT-phase ``PushDeliveryError`` (the locked commit itself never landed)
+is the fail-open + alert case; a PUSH-phase failure (the commit landed, delivery
+is best-effort) is NOT — that is covered by the delegation test in
+``tests/unit/rebar_reconciler/test_reconcile_binding_snapshot.py``.
 """
 
 from __future__ import annotations
@@ -23,9 +31,22 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from rebar._store.push_classify import PushDeliveryError
+
 REPO_ROOT = Path(__file__).resolve().parents[4]
 RECONCILE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "reconcile.py"
 ALERT_STORE_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "alert_store.py"
+
+_SEAM = "rebar._store.push.commit_and_push_tickets_branch"
+
+
+def _commit_phase_error() -> PushDeliveryError:
+    """A ``PushDeliveryError`` whose reason names the LOCKED-COMMIT phase.
+
+    The helper re-raises (fail-open + alert) only for commit-phase reasons; a
+    push-phase reason means the commit already landed and is swallowed as success.
+    """
+    return PushDeliveryError("commit-failed", "simulated commit failure", "/x", "origin/tickets")
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
@@ -55,20 +76,19 @@ def alert_store_mod() -> ModuleType:
 
 
 # ---------------------------------------------------------------------------
-# Test 1: commit failure → returns False + ERROR logged + alert appended
+# Test 1: commit-phase failure → returns False + ERROR logged + alert appended
 # ---------------------------------------------------------------------------
 
 
 def test_commit_failure_returns_false_and_logs_error(
     tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType, capsys
 ) -> None:
-    """When git commit subprocess fails, _commit_binding_store_snapshot must
-    return False and print an ERROR message to stderr.
+    """When the seam raises a COMMIT-phase failure, _commit_binding_store_snapshot
+    must return False and print an ERROR message to stderr.
 
     RED: before fix, function returned None and callers could not detect failure.
-    GREEN: function returns False on subprocess error.
+    GREEN: function returns False on a commit-phase seam failure.
     """
-    # Create bindings.json so the function doesn't early-return True
     tracker_dir = tmp_path / ".tickets-tracker"
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
@@ -77,34 +97,14 @@ def test_commit_failure_returns_false_and_logs_error(
 
     stub_bs = MagicMock()
 
-    import subprocess as _sp
-
-    def _failing_run(*args, **kwargs):
-        # Simulate git add succeeding but git commit failing
-        cmd = args[0] if args else kwargs.get("args", [])
-        if isinstance(cmd, list) and "commit" in cmd:
-            result = MagicMock()
-            result.returncode = 1
-            result.stdout = ""
-            result.stderr = "error: lock file exists"
-            raise _sp.CalledProcessError(1, cmd, "", "error: lock file exists")
-        if isinstance(cmd, list) and "diff" in cmd and "--cached" in cmd:
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "bindings.json\n"
-            return result
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = ""
-        return result
-
-    with patch("subprocess.run", side_effect=_failing_run):
+    with patch(_SEAM, side_effect=_commit_phase_error()):
         result = reconcile_mod._commit_binding_store_snapshot(
             stub_bs, tmp_path, "test-pass-fail-001"
         )
 
     assert result is False, (
-        f"_commit_binding_store_snapshot must return False when git commit fails, got {result!r}"
+        f"_commit_binding_store_snapshot must return False when the locked commit fails, "
+        f"got {result!r}"
     )
 
     captured = capsys.readouterr()
@@ -117,7 +117,7 @@ def test_commit_failure_returns_false_and_logs_error(
 def test_commit_failure_appends_alert(
     tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
-    """When git commit fails, an alert must be appended to the alert_store.
+    """When the locked commit fails, an alert must be appended to the alert_store.
 
     This ensures the failure is visible to operators via bridge_alerts even
     if the reconciler log is not immediately checked.
@@ -130,28 +130,12 @@ def test_commit_failure_appends_alert(
 
     stub_bs = MagicMock()
 
-    import subprocess as _sp
-
-    def _failing_run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        if isinstance(cmd, list) and "commit" in cmd:
-            raise _sp.CalledProcessError(1, cmd, "", "error: simulated commit failure")
-        if isinstance(cmd, list) and "diff" in cmd and "--cached" in cmd:
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "bindings.json\n"
-            return result
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = ""
-        return result
-
     # Pre-register the alert_store module so _load() in reconcile.py picks it up
     _alert_key = "rebar_reconciler.alert_store"
     sys.modules[_alert_key] = alert_store_mod
 
     try:
-        with patch("subprocess.run", side_effect=_failing_run):
+        with patch(_SEAM, side_effect=_commit_phase_error()):
             result = reconcile_mod._commit_binding_store_snapshot(
                 stub_bs, tmp_path, "test-pass-alert-001"
             )
@@ -195,8 +179,8 @@ def test_commit_failure_appends_alert(
 def test_commit_success_returns_true_no_alert(
     tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
-    """When git commit succeeds, _commit_binding_store_snapshot returns True
-    and no alert is written.
+    """When the seam commits successfully, _commit_binding_store_snapshot returns
+    True and no alert is written.
     """
     tracker_dir = tmp_path / ".tickets-tracker"
     bridge_dir = tracker_dir / ".bridge_state"
@@ -206,21 +190,11 @@ def test_commit_success_returns_true_no_alert(
 
     stub_bs = MagicMock()
 
-    def _succeeding_run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        result = MagicMock()
-        result.returncode = 0
-        if isinstance(cmd, list) and "diff" in cmd and "--cached" in cmd:
-            result.stdout = "bindings.json\n"
-        else:
-            result.stdout = ""
-        return result
-
     _alert_key = "rebar_reconciler.alert_store"
     sys.modules[_alert_key] = alert_store_mod
 
     try:
-        with patch("subprocess.run", side_effect=_succeeding_run):
+        with patch(_SEAM, return_value=None):
             result = reconcile_mod._commit_binding_store_snapshot(
                 stub_bs, tmp_path, "test-pass-ok-001"
             )
@@ -262,27 +236,11 @@ def test_commit_failure_dedup_suppresses_second_alert(
 
     stub_bs = MagicMock()
 
-    import subprocess as _sp
-
-    def _failing_run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        if isinstance(cmd, list) and "commit" in cmd:
-            raise _sp.CalledProcessError(1, cmd, "", "error: simulated")
-        if isinstance(cmd, list) and "diff" in cmd and "--cached" in cmd:
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "bindings.json\n"
-            return result
-        result = MagicMock()
-        result.returncode = 0
-        result.stdout = ""
-        return result
-
     _alert_key = "rebar_reconciler.alert_store"
     sys.modules[_alert_key] = alert_store_mod
 
     try:
-        with patch("subprocess.run", side_effect=_failing_run):
+        with patch(_SEAM, side_effect=_commit_phase_error()):
             reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")
             # Second call with same pass_id — should be deduped
             reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "dedup-pass-001")

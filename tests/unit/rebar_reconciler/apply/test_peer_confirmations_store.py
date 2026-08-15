@@ -212,45 +212,48 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
 def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkeypatch):
     """AC9. A confirmation-ONLY change must actually commit.
 
-    ``_commit_binding_store_snapshot`` keeps TWO parallel lists: ``_rel_files``
-    (what gets staged) and ``_tracked_basenames`` (the bug-1e08 per-file
-    idempotency guard). Adding the sidecar to only the first makes
-    ``_tracked_basenames & _staged_basenames`` empty, so the helper returns
-    "already up-to-date" and the evidence is silently dropped on every pass. This
-    test fails if either list is missed.
+    A pass that changes ONLY the peer-confirmation sidecar must still be committed
+    back to the tickets branch — else the evidence is silently dropped on every
+    fresh-checkout pass. Ticket 6454-d06e-7361-4e3d routed the commit through the
+    shared ``push.commit_and_push_tickets_branch`` seam (``git add -A`` under the
+    write lock), which stages every pending file, so this pins the behavior — the
+    sidecar lands in HEAD — end-to-end against a real tickets repo.
     """
+    import subprocess
+
+    from rebar._store import push
+
     helpers = importlib.import_module("rebar_reconciler.reconcile_helpers")
     git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
 
     assert "PEER_CONFIRMATIONS_FILE" in git_adapter.__all__
 
-    committed: dict = {}
-
-    monkeypatch.setattr(
-        git_adapter, "add", lambda tracker_dir, *rel: committed.setdefault("staged", list(rel))
+    tracker = tmp_path / git_adapter.TRACKER_DIR
+    subprocess.run(["git", "init", "-b", "tickets", str(tracker)], check=True, capture_output=True)
+    for key, value in (("user.email", "t@t.com"), ("user.name", "Test")):
+        subprocess.run(
+            ["git", "-C", str(tracker), "config", key, value], check=True, capture_output=True
+        )
+    subprocess.run(
+        ["git", "-C", str(tracker), "commit", "--allow-empty", "-m", "init", "--no-verify"],
+        check=True,
+        capture_output=True,
     )
-    monkeypatch.setattr(
-        git_adapter,
-        "diff_cached_names",
-        lambda tracker_dir: os.path.basename(git_adapter.PEER_CONFIRMATIONS_FILE) + "\n",
-    )
-    monkeypatch.setattr(
-        git_adapter,
-        "commit",
-        lambda tracker_dir, message, **_kw: committed.setdefault("message", message),
-    )
+    (tracker / ".bridge_state").mkdir(parents=True)
+    (tracker / git_adapter.PEER_CONFIRMATIONS_FILE).write_text('{"version": 1, "records": {}}')
 
-    repo_root = tmp_path
-    tracker_dir = repo_root / git_adapter.TRACKER_DIR
-    (tracker_dir / ".bridge_state").mkdir(parents=True)
-    (tracker_dir / git_adapter.PEER_CONFIRMATIONS_FILE).write_text('{"version": 1, "records": {}}')
+    # Neutralize delivery so the real locked commit runs without a remote.
+    monkeypatch.setattr(push, "push_tickets_branch", lambda *a, **k: None)
 
-    ok = helpers._commit_binding_store_snapshot(object(), repo_root, "pass-1")
+    ok = helpers._commit_binding_store_snapshot(object(), tmp_path, "pass-1")
 
     assert ok is True
-    assert git_adapter.PEER_CONFIRMATIONS_FILE in committed["staged"]
-    assert "message" in committed, (
-        "confirmation-only change was not committed — _tracked_basenames is missing the sidecar"
+    landed = subprocess.run(
+        ["git", "-C", str(tracker), "show", f"HEAD:{git_adapter.PEER_CONFIRMATIONS_FILE}"],
+        capture_output=True,
+    )
+    assert landed.returncode == 0, (
+        "confirmation-only change was not committed back by _commit_binding_store_snapshot"
     )
 
 

@@ -464,31 +464,55 @@ def test_a_status_change_on_an_ANCESTOR_invalidates_the_record(
     )
 
 
-def test_the_record_file_is_staged_for_commit_back(monkeypatch):
+def test_the_record_file_is_staged_for_commit_back(tmp_path, monkeypatch):
     """The record must be COMMITTED, or it dies with the CI checkout each pass.
 
     Every reconcile pass runs in a fresh checkout of the tickets branch. A file
     written only to the working tree is discarded between passes, so the skip
     would never take effect in production and the bug would survive the fix
     while every unit test still passed. This cell pins the commit-back wiring.
+
+    Ticket 6454-d06e-7361-4e3d routed the commit through the shared, write-lock
+    -protected ``push.commit_and_push_tickets_branch`` seam, which stages
+    ``git add -A`` under the lock — so this pins the behavior (the record lands in
+    HEAD) end-to-end against a real tickets repo, not the retired selective-staging
+    source shape.
     """
+    import subprocess
+
+    from rebar._store import push
+
     git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
     helpers = importlib.import_module("rebar_reconciler.reconcile_helpers")
 
     assert git_adapter.IMPOSSIBLE_LINKS_FILE == ".bridge_state/impossible_links.json"
 
-    source = Path(helpers.__file__).read_text(encoding="utf-8")
-    staged_block = source[source.index("_rel_files = [") : source.index("_existing_rel = [")]
-    assert "IMPOSSIBLE_LINKS_FILE" in staged_block, (
-        "the impossible-link record is not staged by _commit_binding_store_snapshot, "
-        "so it will not survive to the next pass"
+    tracker = tmp_path / git_adapter.TRACKER_DIR
+    subprocess.run(["git", "init", "-b", "tickets", str(tracker)], check=True, capture_output=True)
+    for key, value in (("user.email", "t@t.com"), ("user.name", "Test")):
+        subprocess.run(
+            ["git", "-C", str(tracker), "config", key, value], check=True, capture_output=True
+        )
+    subprocess.run(
+        ["git", "-C", str(tracker), "commit", "--allow-empty", "-m", "init", "--no-verify"],
+        check=True,
+        capture_output=True,
     )
-    basenames_block = source[
-        source.index("_tracked_basenames = {") : source.index("if not (_tracked_basenames")
-    ]
-    assert "IMPOSSIBLE_LINKS_FILE" in basenames_block, (
-        "the record is staged but not in the per-file idempotency set, so a pass that "
-        "changes ONLY this file would be skipped and never committed"
+    (tracker / ".bridge_state").mkdir(parents=True)
+    (tracker / git_adapter.IMPOSSIBLE_LINKS_FILE).write_text('{"version": 1, "records": {}}')
+
+    # Neutralize delivery so the real locked commit runs without a remote.
+    monkeypatch.setattr(push, "push_tickets_branch", lambda *a, **k: None)
+
+    ok = helpers._commit_binding_store_snapshot(object(), tmp_path, "pass-1")
+    assert ok is True
+    landed = subprocess.run(
+        ["git", "-C", str(tracker), "show", f"HEAD:{git_adapter.IMPOSSIBLE_LINKS_FILE}"],
+        capture_output=True,
+    )
+    assert landed.returncode == 0, (
+        "the impossible-link record is not committed back by _commit_binding_store_snapshot, "
+        "so it will not survive to the next pass"
     )
 
 

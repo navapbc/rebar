@@ -21,7 +21,6 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
-import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -181,11 +180,14 @@ def _commit_binding_store_snapshot(
     bound tickets as unbound, generating outbound CREATE mutations instead of
     UPDATE mutations and producing a no-op dedup-skip rather than field updates.
 
-    Fix: after every successful binding_store.save(), git-stage the file and
-    commit it to the tickets orphan branch inside the .tickets-tracker worktree.
-    This mirrors what the GHA workflow's "commit-back" step does via
-    ``git add -A``, but runs inline so local probe runs that don't go through
-    GHA also get durable bindings.
+    Fix: after every successful binding_store.save(), commit the tickets orphan
+    branch through the shared ``push.commit_and_push_tickets_branch`` seam, which
+    stages ``git add -A`` and commits UNDER the unified write lock (+ rebase guard)
+    then pushes. Committing under the lock is the point: the prior raw
+    ``git_adapter.add``/``commit`` took no lock and raced the ticket-CLI push and
+    the concurrent GHA commit-back. The seam mirrors what the GHA "commit-back"
+    step does (``git add -A``), so local probe runs that don't go through GHA also
+    get durable, race-free bindings.
 
     Returns:
         True  — commit succeeded (or nothing to commit — bindings already current).
@@ -197,58 +199,45 @@ def _commit_binding_store_snapshot(
     bindings as normal.  The caller must NOT abort on False — commit failure
     must never break the sync pass.
     """
+    from rebar._store import push
+    from rebar._store.push_classify import PushDeliveryError
     from rebar_reconciler import git_adapter
 
     tracker_dir = repo_root / git_adapter.TRACKER_DIR
-    # Stage the live, retired, and GET-rotation binding state files. The
-    # absence-lifecycle GC writes bindings-retired.json; a retirement-only pass
-    # must also be committed (else a soft-deleted binding is silently lost on
-    # the next ``git merge origin/tickets``).
-    _rel_files = [
-        git_adapter.BINDINGS_FILE,
-        git_adapter.BINDINGS_RETIRED_FILE,
-        git_adapter.GET_ROTATION_FILE,
-        # Bug b8b1: the impossible-inbound-link record. Every pass runs in a fresh
-        # checkout, so an uncommitted record is discarded between passes and the
-        # skip never takes effect in production.
-        git_adapter.IMPOSSIBLE_LINKS_FILE,
-        # Epic a4bd: the per-link peer-confirmation record. Same fresh-checkout
-        # argument as the impossible-link record above.
-        git_adapter.PEER_CONFIRMATIONS_FILE,
-    ]
-    _existing_rel = [rel for rel in _rel_files if (tracker_dir / rel).exists()]
-    if not _existing_rel:
-        return True  # Nothing to commit — not a failure
 
+    # A failure of the LOCKED COMMIT phase means the bindings never got committed to the
+    # tickets branch — the clobber-on-next-``git merge origin/tickets`` risk this helper
+    # exists to close — so it is the fail-open + alert case below. A PUSH-phase failure is
+    # different: the locked commit already landed, so the bindings are durably on the local
+    # tickets branch (delivery is best-effort; fsck surfaces PUSH_PENDING). These reasons are
+    # the ones ``commit_and_push_tickets_branch`` raises BEFORE it reaches the push.
+    _commit_phase_reasons = {
+        "stage-failed",
+        "commit-failed",
+        "commit-lock-timeout",
+        "merge-recovery-blocked",
+    }
     try:
-        # Stage only our three state files (never git add -A: avoid staging
-        # unrelated working-tree changes in the tickets worktree).
-        git_adapter.add(tracker_dir, *_existing_rel)
-        # Check if there is actually a diff to commit (idempotent).
-        staged_names = git_adapter.diff_cached_names(tracker_dir)
-        # PER-FILE idempotency (bug 1e08): the prior substring test
-        # ``"bindings.json" not in status.stdout`` does NOT match
-        # ``bindings-retired.json`` as a distinct file, so a retirement-only
-        # change (only bindings-retired.json staged) would be silently skipped.
-        # Match on basename membership over the staged-file lines instead.
-        _staged_basenames = {
-            os.path.basename(line.strip()) for line in staged_names.splitlines() if line.strip()
-        }
-        _tracked_basenames = {
-            os.path.basename(git_adapter.BINDINGS_FILE),
-            os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
-            os.path.basename(git_adapter.GET_ROTATION_FILE),
-            os.path.basename(git_adapter.IMPOSSIBLE_LINKS_FILE),
-            os.path.basename(git_adapter.PEER_CONFIRMATIONS_FILE),
-        }
-        if not (_tracked_basenames & _staged_basenames):
-            return True  # Already up-to-date; nothing to commit.
-        git_adapter.commit(
-            tracker_dir,
-            f"reconciler: persist binding-store snapshot [pass {pass_id}]",
-            no_verify=True,
-            quiet=True,
-        )
+        # Route through the shared, write-lock-protected commit+push seam. The prior raw
+        # git_adapter.add/commit took NO write lock, racing the ticket-CLI push and the GHA
+        # commit-back (the exact race the write lock exists to prevent). The seam stages
+        # ``git add -A`` under the lock — a deliberate widening from the prior selective
+        # 5-file staging that matches the GHA commit-back and the projects_store conversion;
+        # the reconciler's tickets worktree only ever holds tickets-branch state, so nothing
+        # that does not belong on the branch is swept. A clean tree is a no-op commit; a
+        # retirement-only change makes the tree dirty and is still committed (bug 1e08
+        # outcome preserved).
+        try:
+            push.commit_and_push_tickets_branch(
+                tracker_dir,
+                message=f"reconciler: persist binding-store snapshot [pass {pass_id}]",
+                strict=True,
+            )
+        except PushDeliveryError as exc:
+            if exc.reason in _commit_phase_reasons:
+                raise
+            # Push-phase failure: the locked commit already succeeded, so the bindings are
+            # safe on the local tickets branch; delivery is best-effort and left PUSH_PENDING.
         return True
     except Exception as exc:  # noqa: BLE001 — fail-open: return False, log + alert, FS copy persists
         print(
