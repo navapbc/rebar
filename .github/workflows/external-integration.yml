@@ -14,6 +14,9 @@ name: Live External Integration
 #                       (docker-compose.langfuse.yml, headless-init) and asserts a
 #                       review run emits a trace fetchable via the Langfuse API.
 #   * jira-dc-harness — the Jira Data Center harness smoke lane.
+#   * jira-cloud-s3-rehearsal — read-only many-to-many bridge rehearsal against real
+#                            Jira Cloud (REB + DIG) over the S3 store backend; gated on
+#                            an S3-capable OIDC role (vars.AWS_S3_REHEARSAL_ROLE_ARN).
 #   * pandoc-corpus-replay — complete real-Pandoc corpus + settling replay on
 #                            Linux and macOS; routine Verify uses static outputs.
 #
@@ -238,7 +241,8 @@ jobs:
         # the main thread and cannot fire while blocked in a C-level socket/subprocess call.
         run: >-
           pytest -m "external and llm_live" tests/external -q
-          --ignore=tests/external/live_jira_dc --timeout=900 --timeout-method=thread
+          --ignore=tests/external/live_jira_dc
+          --ignore=tests/external/live_jira_cloud_s3 --timeout=900 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Summarize LLM token usage → job summary
@@ -379,6 +383,10 @@ jobs:
         # tests included and no harness, the canary stays silent; the two tiers must stay
         # independent so each job's canary means what it says). The dedicated jira-dc-harness
         # job below covers tests/external/live_jira_dc/ with its own canary.
+        # --ignore=tests/external/live_jira_cloud_s3: same reasoning — that suite needs an
+        # S3 store backend this job cannot provision, so its jira_live tests would all-skip
+        # and be masked by the Cloud tests executing here; the dedicated jira-cloud-s3-rehearsal
+        # job covers it with its own canary.
         # `and not llm_live`: the live-LLM modules moved to the `external-llm` provider matrix
         # above (story f124), which runs them once per provider. Running them here too would
         # bill a fourth, provider-ambiguous copy — and, worse, this job's Jira all-skip canary
@@ -393,7 +401,8 @@ jobs:
         # observed mean per test — ample room for a slow Jira Cloud round trip.
         run: >-
           pytest -m "external and not llm_live" tests/external -q
-          --ignore=tests/external/live_jira_dc --timeout=600 --timeout-method=thread
+          --ignore=tests/external/live_jira_dc
+          --ignore=tests/external/live_jira_cloud_s3 --timeout=600 --timeout-method=thread
           -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
       - name: Summarize LLM token usage → job summary
@@ -623,6 +632,133 @@ jobs:
       - name: Tear down the Jira DC harness
         if: always()
         run: cd tests/external/live_jira_dc && docker compose down -v
+
+  # ── the Jira Cloud + S3 rehearsal lane: read-only, real Cloud, S3 store backend ─────────
+  #
+  # Complements jira-dc-harness. DC is git/file-backed and low-volume, so it exercises
+  # neither the S3 store backend nor real Cloud ticket volume/diversity; this job drives the
+  # many-to-many bridge against the two REAL Cloud projects REB + DIG over an ISOLATED,
+  # S3-backed store, READ-ONLY (structural guard + before/after Jira counts). See
+  # tests/external/live_jira_cloud_s3/README.md.
+  #
+  # GATED on vars.AWS_S3_REHEARSAL_ROLE_ARN because it needs an S3-capable AWS identity, and
+  # the Bedrock CI role (vars.AWS_BEDROCK_CI_ROLE_ARN) has NO S3 permissions. Until an
+  # operator provisions a scoped S3 OIDC role and sets that variable, the job does not run
+  # (a red "missing infra" job every week would be noise, and the jira_live all-skip canary
+  # would fail it anyway). The AUTHORITATIVE acceptance evidence meanwhile is a clean LOCAL
+  # live run — the story's AC does not require this job to be green, only a genuine green run.
+  jira-cloud-s3-rehearsal:
+    name: jira Cloud + S3 rehearsal (read-only, real Cloud + S3 store)
+    if: ${{ vars.AWS_S3_REHEARSAL_ROLE_ARN != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for OIDC AssumeRoleWithWebIdentity on the S3 rehearsal role.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          enable-cache: true
+
+      # `[dev]` installs the reconciler + its deps; git-remote-s3 is the git transport helper
+      # the S3 store backend rides on (it is NOT a rebar dependency — the store is
+      # backend-agnostic — so it is installed explicitly here, mirroring the local runbook).
+      - name: Install rebar + the S3 git-remote helper
+        run: |
+          uv sync --locked --extra dev
+          uv pip install git-remote-s3==0.3.2
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "rebar CI"
+          git config --global init.defaultBranch main
+
+      - name: Cache acli binary
+        id: cache-acli
+        uses: actions/cache@v6
+        with:
+          path: ~/.acli
+          key: acli-${{ runner.os }}-${{ vars.ACLI_VERSION || 'unset' }}
+
+      - name: Download + verify + install acli
+        if: steps.cache-acli.outputs.cache-hit != 'true'
+        env:
+          ACLI_VERSION: ${{ vars.ACLI_VERSION }}
+          ACLI_SHA256: ${{ vars.ACLI_SHA256 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACLI_VERSION:-}" ] || [ "$ACLI_VERSION" = "latest" ]; then
+            echo "::error::ACLI_VERSION repo variable is unset or 'latest'. Pin a specific version (e.g. 1.3.14-stable) and set ACLI_SHA256 to its digest."
+            exit 1
+          fi
+          mkdir -p ~/.acli
+          curl -sSL "https://acli.atlassian.com/linux/${ACLI_VERSION}/acli_${ACLI_VERSION}_linux_amd64.tar.gz" -o ~/.acli/acli.tar.gz
+          if [ -n "${ACLI_SHA256:-}" ]; then
+            echo "${ACLI_SHA256}  $HOME/.acli/acli.tar.gz" | sha256sum -c --strict
+          else
+            echo "::warning::ACLI_SHA256 unset — proceeding without checksum verification. Set it to: $(sha256sum ~/.acli/acli.tar.gz | awk '{print $1}')"
+          fi
+          tar xzf ~/.acli/acli.tar.gz -C ~/.acli/ --strip-components=1
+          chmod +x ~/.acli/acli
+          rm -f ~/.acli/acli.tar.gz
+
+      - name: Add acli to PATH and authenticate
+        env:
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          sudo ln -sf "$HOME/.acli/acli" /usr/local/bin/acli
+          echo "$JIRA_API_TOKEN" | acli jira auth login \
+            --site "$JIRA_URL" \
+            --email "$JIRA_USER" \
+            --token
+
+      # OIDC → the scoped S3 rehearsal role (s3:List/Get/Put/DeleteObject on the throwaway
+      # rehearsal bucket ONLY; NO Jira access — the suite reaches Jira over acli above). The
+      # region is where the rehearsal bucket lives (us-east-1 by default).
+      - name: Configure AWS credentials (OIDC → the scoped S3 rehearsal role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_S3_REHEARSAL_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_S3_REHEARSAL_REGION || 'us-east-1' }}
+
+      - name: Run the read-only Cloud + S3 rehearsal
+        env:
+          # Live-Jira creds (repo variables + secret), mirroring the external job.
+          JIRA_URL: ${{ vars.JIRA_URL }}
+          JIRA_USER: ${{ vars.JIRA_USER }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          # The bucket the throwaway per-run prefix is created under (overridable). Its
+          # region is set on the AWS credentials step above.
+          REBAR_REHEARSAL_S3_BUCKET: ${{ vars.REBAR_REHEARSAL_S3_BUCKET || 'rebar-rehearsal-368f-896586841071' }}
+          AWS_REGION: ${{ vars.AWS_S3_REHEARSAL_REGION || 'us-east-1' }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_S3_REHEARSAL_REGION || 'us-east-1' }}
+          # The external tier is inert unless opted in (tests/external/conftest.py's
+          # _require_external_opt_in guard).
+          REBAR_RUN_EXTERNAL: "1"
+          # git-remote-s3 clones a bare mirror; allow git to treat it as safe.
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: safe.bareRepository
+          GIT_CONFIG_VALUE_0: all
+        # -rA surfaces the PASSED tests' captured stdout — several scenarios record real Cloud
+        # volume / RECON no-write evidence rather than only asserting, so that output is the
+        # acceptance record. Per-test hang guard (ticket d835-1846-95d1-4d84); a full-project
+        # Cloud fetch over acli is legitimately slow, so 1800s (~30m) exceeds the ~16m local
+        # whole-suite time with margin. --timeout-method=thread is load-bearing (the default
+        # signal method cannot fire while blocked in a subprocess call).
+        run: >-
+          pytest -m external tests/external/live_jira_cloud_s3 -q -rA --durations=25
+          --timeout=1800 --timeout-method=thread
+          -p no:cacheprovider --basetemp="${{ runner.temp }}/rebar-basetemp"
 
   pandoc-corpus-replay:
     name: Pandoc corpus replay (${{ matrix.os }})
