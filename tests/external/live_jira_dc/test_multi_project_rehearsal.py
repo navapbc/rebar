@@ -462,6 +462,15 @@ def test_absent_project_resolves_to_legacy_default(
 
     preview = rebar.bridge_preview(only=[tid], repo_root=str(work))
     _assert_scope(preview, {legacy}, work)
+    # Positive invariant: the None-sentinel ticket MUST be planned into the legacy
+    # project. `_assert_scope` alone is vacuous on an empty plan (a suppressed create
+    # reads as "in scope"), so this is what actually catches the resolve_project
+    # None->never-sync regression (bug obsolete-lax-siamang) at preview time.
+    assert legacy in _planned_projects(preview), (
+        f"the absent-project ticket was not planned into the legacy default {legacy}; "
+        f"planned={sorted(_planned_projects(preview))} — resolve_project suppressed the "
+        "create instead of routing the None sentinel to legacy_default"
+    )
 
     rebar.bridge_sync(only=[tid], repo_root=str(work))
 

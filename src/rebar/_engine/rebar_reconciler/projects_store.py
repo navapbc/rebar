@@ -112,15 +112,20 @@ def resolve_inbound_bridge_fields(
 def resolve_project(ticket: dict[str, Any], mapping: Mapping) -> str | None:
     """Tri-state resolution of a ticket's optional ``bridge_project`` field.
 
-    - field ABSENT → the mapping's ``legacy_default`` (a str, or ``None`` when
-      the default is empty/None).
-    - ``""`` (present, empty string) → ``None``.
+    - field ABSENT, or present as ``None`` (the reducer's seeded "absent/legacy"
+      sentinel, cef7 ``_state.py:53-58``) → the mapping's ``legacy_default`` (a
+      str, or ``None`` when the default is empty/None).
+    - ``""`` (present, empty string) → ``None`` (the deliberate never-sync value).
     - non-empty string → that value verbatim (not validated against the set).
+
+    ``None`` and ``""`` are distinct: the reducer materializes ``bridge_project``
+    as ``None`` for every no-flag create, so treating ``None`` as never-sync would
+    suppress the entire legacy cohort ``legacy_default`` exists to serve.
     """
-    if "bridge_project" not in ticket:
-        return mapping.legacy_default or None
     value = ticket.get("bridge_project")
-    if not value:
+    if value is None:
+        return mapping.legacy_default or None
+    if value == "":
         return None
     return value
 

@@ -54,6 +54,20 @@ def test_resolve_project_explicit_empty_string_is_none(tmp_path: Path) -> None:
     assert projects_store.resolve_project({"bridge_project": ""}, mapping) is None
 
 
+def test_resolve_project_null_sentinel_routes_to_legacy_default(tmp_path: Path) -> None:
+    """A present-but-null ``bridge_project`` (the reducer's seeded absent/legacy sentinel,
+    cef7 `_state.py:53-58`) is NOT the ``""`` never-sync value — it must route to
+    ``legacy_default`` exactly like an absent field, so a no-flag legacy ticket syncs to
+    the legacy project instead of being silently suppressed from outbound create."""
+    _write_record(
+        tmp_path,
+        {"version": 1, "legacy_default": "REB", "projects": {"REB": {"repos": ["rebar"]}}},
+    )
+    mapping = projects_store.load_mapping(tmp_path)
+
+    assert projects_store.resolve_project({"bridge_project": None}, mapping) == "REB"
+
+
 def test_resolve_project_empty_legacy_default_degrades_to_none(tmp_path: Path) -> None:
     """An unconfigured store (empty ``legacy_default``) makes a legacy ticket resolve to None."""
     _write_record(tmp_path, {"version": 1, "legacy_default": "", "projects": {}})
