@@ -5,13 +5,13 @@ out-of-scope/pre-existing even when they are defects in the epic's own deliverab
 direct-children close gate cannot see them (event-precise backtest over 56 epic closes: 2 real
 at-close escapes, 30a2 and 5b09). The gate is three-staged, cheapest-first:
 
-1. **DET caused_by floor** (:func:`rebar.llm.completion.epic_bug_floor_findings`) — an
+1. **DET caused_by floor** (:func:`epic_bug_floor_findings`, below) — an
    open/in_progress bug with a ``caused_by`` edge into the subtree deterministically blocks
    the close (enforced in ``gate_ops.completion_precheck``, no LLM call). The hard tier.
-2. **DET candidate filter** (:func:`rebar.llm.completion.epic_bug_candidates`) — status/type
+2. **DET candidate filter** (:func:`epic_bug_candidates`, below) — status/type
    + (created-after-first-claim OR linked-any-relation-any-depth, both directions), ceiling
-   :data:`rebar.llm.completion.EPIC_BUG_SCREEN_CEILING`.
-3. **This module** — one single-turn TRIVIAL-class (haiku-tier) call per candidate, forced
+   :data:`EPIC_BUG_SCREEN_CEILING`.
+3. **The LLM screen** — one single-turn TRIVIAL-class (haiku-tier) call per candidate, forced
    choice ``A`` (defect in something this epic changed/built) / ``B`` (same subsystem,
    pre-existing or adjacent) / ``C`` (unrelated) + one-line citation. A-verdicts are forwarded
    to the completion verifier as a compact evidence block (:data:`FORWARD_CAP` rows of
@@ -71,6 +71,162 @@ _FAN_OUT_WORKERS = 8
 _DEGRADE = {"verdict": "C", "citation": ""}
 
 ScreenFn = Callable[[dict, str], dict]
+
+
+# Enforced screen ceiling for the epic-close bug screen (ticket 4b54): at most this many
+# candidates are LLM-evaluated per close — linked-to-subtree candidates first, then by created
+# timestamp descending — and the remainder is recorded as an unevaluated-overflow count in the
+# sidecar tally (visible to the operator, never silently dropped). Backtested fan-out over 56
+# epic closes: median 3, p90 11, max 24, so 32 clears every observed close.
+EPIC_BUG_SCREEN_CEILING = 32
+
+
+def _epic_subtree_states(ticket_id: str, repo_root) -> list[dict]:
+    """Compiled states of the epic + every descendant (parent links, any depth), BFS."""
+    from rebar import _reads
+
+    root = _reads.show_ticket(ticket_id, repo_root=repo_root)
+    out: list[dict] = [root]
+    seen = {root.get("ticket_id", ticket_id)}
+    frontier = [root.get("ticket_id", ticket_id)]
+    while frontier:
+        next_frontier: list[str] = []
+        for pid in frontier:
+            for child in _reads.list_tickets(parent=pid, repo_root=repo_root):
+                cid = child.get("ticket_id")
+                if cid and cid not in seen:
+                    seen.add(cid)
+                    out.append(child)
+                    next_frontier.append(cid)
+        frontier = next_frontier
+    return out
+
+
+def _open_bugs(repo_root) -> list[dict]:
+    """Every open or in_progress bug in the store (the only tickets the screen may see)."""
+    from rebar import _reads
+
+    bugs: list[dict] = []
+    for status in ("open", "in_progress"):
+        bugs.extend(_reads.list_tickets(status=status, ticket_type="bug", repo_root=repo_root))
+    return bugs
+
+
+def _first_in_progress_ns(ticket_id: str, repo_root) -> int | None:
+    """ns-epoch timestamp of the ticket's FIRST ``open -> in_progress`` STATUS event.
+
+    Read WITH retired tombstones (the ``event_metrics._event_files`` idiom,
+    ``include_retired=True``) — snapshot compaction folds old events, so the compiled state
+    alone cannot supply this anchor. ``None`` when no such event exists (never claimed)."""
+    import json as _json
+    import os as _os
+
+    from rebar import config as _config
+    from rebar.metrics.event_metrics import _event_files
+
+    ticket_dir = _os.path.join(str(_config.tracker_dir(repo_root)), ticket_id)
+    if not _os.path.isdir(ticket_dir):
+        return None
+    for path in _event_files(ticket_dir, "STATUS", include_retired=True):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                event = _json.load(handle)
+        except (OSError, ValueError):
+            continue
+        data = event.get("data") or {}
+        if data.get("current_status") == "open" and data.get("status") == "in_progress":
+            ts = event.get("timestamp")
+            if isinstance(ts, int):
+                return ts
+    return None
+
+
+def epic_bug_floor_findings(ticket_id: str, repo_root) -> list[dict]:
+    """The deterministic ``caused_by`` floor of the epic-close bug screen (ticket 4b54).
+
+    Any OPEN/IN_PROGRESS bug carrying a ``caused_by`` edge into the epic's subtree (the epic
+    or any descendant) deterministically blocks the epic's close, exactly like an unclosed
+    direct child — semantically unambiguous (the bug RECORDS this work broke it), 0 false
+    positives over the 56-close backtest. ``caused_by`` is DIRECTIONAL and lives on the BUG's
+    own compiled ``deps[]`` with no reciprocal on the epic side, so the floor enumerates the
+    open bugs and scans EACH BUG's deps — the epic's own deps cannot supply these edges.
+    Returns blocking findings shaped exactly like :func:`child_closure_findings`'s."""
+    subtree = {
+        s.get("ticket_id") for s in _epic_subtree_states(ticket_id, repo_root) if s.get("ticket_id")
+    }
+    found: list[dict] = []
+    for bug in _open_bugs(repo_root):
+        bid = bug.get("ticket_id")
+        if bid is None or bid in subtree:
+            continue  # in-hierarchy bugs belong to the direct-children gate
+        for dep in bug.get("deps") or []:
+            if dep.get("relation") != "caused_by":
+                continue
+            target = dep.get("target_id")
+            if target not in subtree:
+                continue
+            title = (bug.get("title") or "")[:50]
+            status = bug.get("status")
+            found.append(
+                {
+                    "criterion": f"no open caused_by bug against the subtree of {ticket_id}",
+                    "severity": "high",
+                    "dimension": "completion",
+                    "detail": (
+                        f"bug {bid} ('{title}') is '{status}' and records caused_by -> "
+                        f"{target} inside this epic's subtree — the epic's own work broke it. "
+                        "Before closing the epic: fix (close) the bug, re-parent it under the "
+                        "epic as delegated work, or dispute the caused_by link if it is wrong."
+                    ),
+                    "citations": [
+                        {
+                            "kind": "source",
+                            "description": f"ticket {bid} caused_by {target}; status={status}",
+                        }
+                    ],
+                }
+            )
+            break  # one finding per bug, however many subtree edges it carries
+    return found
+
+
+def epic_bug_candidates(ticket_id: str, repo_root) -> tuple[list[dict], int]:
+    """The deterministic candidate filter of the epic-close bug screen (ticket 4b54).
+
+    Candidates = OPEN/IN_PROGRESS bugs OUTSIDE the epic's subtree that are (a) created after
+    the epic's FIRST ``open -> in_progress`` transition (fallback: the epic's ``created_at``
+    when it was never claimed — a wider window is the safe direction, over-inclusion only
+    feeds the cheap screen), OR (b) linked by ANY relation, EITHER direction, to the epic or
+    any descendant. Commit-relation matching was evaluated and REJECTED (0 unique catches,
+    2 FPs on the backtest). Returns ``(candidates, unevaluated_overflow)`` — at most
+    :data:`EPIC_BUG_SCREEN_CEILING` candidates, linked-to-subtree first, then created
+    descending; the remainder is counted, never silently dropped."""
+    states = _epic_subtree_states(ticket_id, repo_root)
+    subtree = {s.get("ticket_id") for s in states if s.get("ticket_id")}
+    incoming: set[str] = set()  # ids that SUBTREE members link out to (epic-side edges)
+    for s in states:
+        for dep in s.get("deps") or []:
+            target = dep.get("target_id")
+            if target:
+                incoming.add(target)
+    anchor = _first_in_progress_ns(ticket_id, repo_root)
+    if anchor is None:
+        root = states[0] if states else {}
+        anchor = root.get("created_at") or 0
+    qualifying: list[tuple[bool, int, dict]] = []
+    for bug in _open_bugs(repo_root):
+        bid = bug.get("ticket_id")
+        if bid is None or bid in subtree:
+            continue
+        linked = bid in incoming or any(
+            dep.get("target_id") in subtree for dep in bug.get("deps") or []
+        )
+        created = bug.get("created_at") or 0
+        if linked or created > anchor:
+            qualifying.append((linked, created, bug))
+    qualifying.sort(key=lambda q: (0 if q[0] else 1, -q[1]))
+    kept = [bug for _linked, _created, bug in qualifying[:EPIC_BUG_SCREEN_CEILING]]
+    return kept, max(0, len(qualifying) - len(kept))
 
 
 def _epic_material(root_state: dict, children_titles: list[str]) -> str:
@@ -264,15 +420,15 @@ def run_screen(
     see). The ONE exception (bug 1019, operator-ratified): a systemic provider error
     (:class:`LLMUnavailableError`) re-raises so the close gate FAILS CLOSED — a blind
     screen must not report success."""
-    from rebar.llm import completion, completion_sidecar
+    from rebar.llm import completion_sidecar
 
     try:
-        candidates, overflow = completion.epic_bug_candidates(epic_id, repo_root)
+        candidates, overflow = epic_bug_candidates(epic_id, repo_root)
         if not candidates and overflow == 0:
             return {"block": "", "tally": [], "overflow": 0}
         children_titles = [
             s.get("title", "")
-            for s in completion._epic_subtree_states(epic_id, repo_root)[1:]
+            for s in _epic_subtree_states(epic_id, repo_root)[1:]
             if s.get("title")
         ]
         tally = screen_candidates(

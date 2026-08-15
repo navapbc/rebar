@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from rebar.llm.workflow import completion_banking as cb
+from rebar.llm.workflow import completion_criteria as ccrit
 from rebar.llm.workflow import completion_recovery as cr
 
 pytestmark = pytest.mark.unit
@@ -285,7 +286,7 @@ def test_validate_coverage_passes_marker_records_rejects_untyped() -> None:
             }
         ],
     }
-    cr._validate_coverage(ok, ["Ship the fix"], ids)  # marker passes through
+    ccrit._validate_coverage(ok, ["Ship the fix"], ids)  # marker passes through
     from rebar.llm.errors import CompletionRecoveryError
 
     bad = {
@@ -293,7 +294,7 @@ def test_validate_coverage_passes_marker_records_rejects_untyped() -> None:
         "criteria": [{"criterion": "Ship the fix", "met": "false"}],
     }
     with pytest.raises(CompletionRecoveryError):
-        cr._validate_coverage(bad, ["Ship the fix"], ids)
+        ccrit._validate_coverage(bad, ["Ship the fix"], ids)
 
 
 def test_finalizer_banked_evidence_payload_carries_marker(tmp_path) -> None:

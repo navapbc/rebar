@@ -39,6 +39,7 @@ import pytest
 
 from rebar.llm.config import VERIFIER_DEFAULT_MODEL, LLMConfig
 from rebar.llm.errors import CompletionRecoveryError, UnretryableOutputError
+from rebar.llm.workflow import completion_criteria as _cc
 from rebar.llm.workflow import completion_recovery as _cr
 from rebar.llm.workflow.completion_recovery import CompletionAgentStep
 from rebar.llm.workflow.executor import StepContext
@@ -187,8 +188,8 @@ def test_the_criteria_budget_never_exceeds_the_context_budget() -> None:
     """Criteria ⊂ description ⊂ context, so a criteria budget larger than the context budget
     advertises capacity that cannot be used — the 32,000-vs-24,000 incoherence that made the
     top quarter of the criteria budget structurally unreachable."""
-    assert _cr._MAX_TOTAL_CRITERIA_CHARS <= _DEFAULT_CONTEXT_CEILING, (
-        f"criteria budget ({_cr._MAX_TOTAL_CRITERIA_CHARS:,}) exceeds the context budget "
+    assert _cc._MAX_TOTAL_CRITERIA_CHARS <= _DEFAULT_CONTEXT_CEILING, (
+        f"criteria budget ({_cc._MAX_TOTAL_CRITERIA_CHARS:,}) exceeds the context budget "
         f"({_DEFAULT_CONTEXT_CEILING:,}); every criteria set above the context budget would be "
         "accepted by one bound and refused by the other"
     )

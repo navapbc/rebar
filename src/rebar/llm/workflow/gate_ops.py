@@ -61,9 +61,9 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm.completion import (
         child_closure_findings,
         deterministic_child_failure,
-        epic_bug_floor_findings,
     )
     from rebar.llm.config import resolve_gate_config
+    from rebar.llm.epic_bug_screen import epic_bug_floor_findings
 
     tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
     if not tid:
@@ -184,7 +184,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     # prefetch section SEPARATELY so the ceiling accounting is explicit at the gate: trim the
     # section to the resolved model's physical context ceiling before concatenating (an
     # oversize prefetch is TRIMMED, never allowed to overflow — see completion_prefetch and
-    # completion_recovery.physical_context_ceiling).
+    # completion_criteria.physical_context_ceiling).
     from rebar.llm.workflow import completion_prefetch
 
     base, _ids = operations.assemble_context(str(tid), graph=graph, repo_root=ctx.repo_root)

@@ -38,7 +38,6 @@ from pathlib import Path
 import pytest
 
 import rebar
-from rebar.llm import completion
 from rebar.llm import completion_sidecar as sidecar
 from rebar.llm import epic_bug_screen as ebs
 
@@ -76,7 +75,7 @@ def test_open_caused_by_bug_blocks_with_teaching_message(rebar_repo: Path) -> No
     bug = rebar.create_ticket("bug", "parser drops widgets", repo_root=str(rebar_repo))
     rebar.link(bug, child, "caused_by", repo_root=str(rebar_repo))
 
-    found = completion.epic_bug_floor_findings(epic, str(rebar_repo))
+    found = ebs.epic_bug_floor_findings(epic, str(rebar_repo))
 
     assert len(found) == 1
     detail = found[0]["detail"]
@@ -91,7 +90,7 @@ def test_caused_by_targeting_the_epic_itself_blocks(rebar_repo: Path) -> None:
     bug = rebar.create_ticket("bug", "epic broke the build", repo_root=str(rebar_repo))
     rebar.link(bug, epic, "caused_by", repo_root=str(rebar_repo))
 
-    assert len(completion.epic_bug_floor_findings(epic, str(rebar_repo))) == 1
+    assert len(ebs.epic_bug_floor_findings(epic, str(rebar_repo))) == 1
 
 
 def test_in_progress_caused_by_bug_blocks(rebar_repo: Path) -> None:
@@ -100,7 +99,7 @@ def test_in_progress_caused_by_bug_blocks(rebar_repo: Path) -> None:
     rebar.link(bug, child, "caused_by", repo_root=str(rebar_repo))
     rebar.claim(bug, repo_root=str(rebar_repo))
 
-    assert len(completion.epic_bug_floor_findings(epic, str(rebar_repo))) == 1
+    assert len(ebs.epic_bug_floor_findings(epic, str(rebar_repo))) == 1
 
 
 def test_closed_caused_by_bug_passes(rebar_repo: Path) -> None:
@@ -109,7 +108,7 @@ def test_closed_caused_by_bug_passes(rebar_repo: Path) -> None:
     rebar.link(bug, child, "caused_by", repo_root=str(rebar_repo))
     rebar.transition(bug, "open", "closed", close_class="regression", repo_root=str(rebar_repo))
 
-    assert completion.epic_bug_floor_findings(epic, str(rebar_repo)) == []
+    assert ebs.epic_bug_floor_findings(epic, str(rebar_repo)) == []
 
 
 def test_discovered_from_alone_does_not_trip_the_floor(rebar_repo: Path) -> None:
@@ -117,7 +116,7 @@ def test_discovered_from_alone_does_not_trip_the_floor(rebar_repo: Path) -> None
     bug = rebar.create_ticket("bug", "parser drops widgets", repo_root=str(rebar_repo))
     rebar.link(bug, child, "discovered_from", repo_root=str(rebar_repo))
 
-    assert completion.epic_bug_floor_findings(epic, str(rebar_repo)) == []
+    assert ebs.epic_bug_floor_findings(epic, str(rebar_repo)) == []
 
 
 def test_caused_by_outside_the_subtree_does_not_block(rebar_repo: Path) -> None:
@@ -126,14 +125,14 @@ def test_caused_by_outside_the_subtree_does_not_block(rebar_repo: Path) -> None:
     bug = rebar.create_ticket("bug", "stranger broke things", repo_root=str(rebar_repo))
     rebar.link(bug, stranger, "caused_by", repo_root=str(rebar_repo))
 
-    assert completion.epic_bug_floor_findings(epic, str(rebar_repo)) == []
+    assert ebs.epic_bug_floor_findings(epic, str(rebar_repo)) == []
 
 
 # ------------------------------------------------------------------ DET candidate filter
 
 
 def _candidate_ids(epic: str, repo: Path) -> list[str]:
-    cands, _overflow = completion.epic_bug_candidates(epic, str(repo))
+    cands, _overflow = ebs.epic_bug_candidates(epic, str(repo))
     return [c["ticket_id"] for c in cands]
 
 
@@ -227,7 +226,7 @@ def test_ceiling_linked_first_then_created_desc_with_overflow(
     """The enforced screen ceiling truncates linked-first, remainder becomes overflow.
 
     The real ceiling is 32; patched to 5 here so the test doesn't create 35 tickets."""
-    monkeypatch.setattr(completion, "EPIC_BUG_SCREEN_CEILING", 5)
+    monkeypatch.setattr(ebs, "EPIC_BUG_SCREEN_CEILING", 5)
     epic, child = _epic_with_child(rebar_repo)
     unlinked = [
         rebar.create_ticket("bug", f"window bug {i}", repo_root=str(rebar_repo)) for i in range(6)
@@ -235,7 +234,7 @@ def test_ceiling_linked_first_then_created_desc_with_overflow(
     linked = rebar.create_ticket("bug", "linked bug", repo_root=str(rebar_repo))
     rebar.link(linked, child, "relates_to", repo_root=str(rebar_repo))
 
-    cands, overflow = completion.epic_bug_candidates(epic, str(rebar_repo))
+    cands, overflow = ebs.epic_bug_candidates(epic, str(rebar_repo))
 
     assert len(cands) == 5
     assert overflow == 2  # 7 qualifying - 5 kept
@@ -447,7 +446,7 @@ def test_precheck_skips_screen_for_non_epics(
         raise AssertionError("screen must not run for non-epics")
 
     monkeypatch.setattr(ebs, "run_screen", _fail)
-    monkeypatch.setattr(completion, "epic_bug_floor_findings", _fail)
+    monkeypatch.setattr(ebs, "epic_bug_floor_findings", _fail)
 
     out = gate_ops.completion_precheck(_precheck_ctx(task, rebar_repo))
 
