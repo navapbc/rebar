@@ -24,6 +24,9 @@
 #     overkill for a monthly actions-only stream; parked as idea
 #     misogynic-cerulean-goldfish); and alerts-only with no version-update PRs
 #     (loses the ready-made diff; security alerts fire regardless and stay on).
+#   - mcp major pinned out (semver-major ignore in the uv block) per epic
+#     732b-51df-acf2-477b (fastmcp import removal); remove the ignore when the
+#     migration epic lands. 1.x patch/security bumps still flow; alerts stay on.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
@@ -46,6 +49,9 @@ updates:
       uv-lock:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
     labels:
       - "dependencies"
     commit-message:
