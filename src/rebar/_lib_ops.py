@@ -108,21 +108,32 @@ def bridge_projects_list(*, repo_root=None) -> dict:
 
 
 def bridge_projects_set(key, repos, *, repo_root=None) -> None:
-    """Replace ``key``'s repos with ``repos`` in the bridge-projects mapping."""
+    """Replace ``key``'s repos with ``repos`` in the bridge-projects mapping.
+
+    A syntactically-invalid ``key`` (rejected by ``set_project``) is mapped to a
+    ``RebarError`` (returncode 2) — the same clean library-error contract the CLI/MCP
+    consumers already handle for ``remove``'s absent-key ``KeyError`` — and no lock is
+    held for a commit/publish, so nothing is persisted or pushed.
+    """
     from rebar._store import lock, push
 
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
-    with lock.write_lock(tracker):
-        store.set_project(root, key, list(repos))
+    try:
+        with lock.write_lock(tracker):
+            store.set_project(root, key, list(repos))
+    except ValueError as exc:
+        raise _invalid_bridge(str(exc)) from exc
     push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 
 def bridge_projects_remove(key, *, repo_root=None) -> None:
     """Remove ``key`` from the bridge-projects mapping.
 
-    Raise ``RebarError`` (naming the key) if it is not present.
+    Raise ``RebarError`` (naming the key) if it is not present, and likewise map a
+    syntactically-invalid ``key`` (rejected by ``remove_project``) to a ``RebarError``
+    (returncode 2) so the CLI/MCP consumers get one clean error contract.
     """
     from rebar._store import lock, push
 
@@ -135,6 +146,8 @@ def bridge_projects_remove(key, *, repo_root=None) -> None:
     except KeyError as exc:
         message = f"bridge project {key!r} is not in the mapping"
         raise RebarError(message, returncode=2, stderr=message) from exc
+    except ValueError as exc:
+        raise _invalid_bridge(str(exc)) from exc
     push.commit_and_push_tickets_branch(tracker, message="bridge: update projects mapping")
 
 

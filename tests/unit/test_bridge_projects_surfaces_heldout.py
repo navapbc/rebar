@@ -129,3 +129,31 @@ def test_pinned_group_help_and_metavar_name_projects() -> None:
     subactions = [a for a in parser._actions if a.dest == "command"]
     assert subactions, "bridge parser has no command subparsers action"
     assert "projects" in subactions[0].metavar
+
+
+def test_invalid_key_is_rebarerror_through_lib_and_mcp(repo: Path) -> None:
+    """A syntactically-invalid key (ticket 209b) surfaces as one clean ``RebarError``
+    (returncode 2) through BOTH the library and the MCP write tools — the same error
+    contract the consumers already handle for ``remove``'s absent-key case — and writes
+    nothing."""
+    from rebar._errors import RebarError
+
+    projects_file = repo / ".tickets-tracker" / ".bridge_state" / "projects.json"
+    before = projects_file.read_bytes() if projects_file.exists() else None
+
+    # Library surface.
+    with pytest.raises(RebarError) as lib_set:
+        rebar.bridge_projects_set("le-g", ["rebar"], repo_root=str(repo))
+    assert lib_set.value.returncode == 2
+    with pytest.raises(RebarError):
+        rebar.bridge_projects_remove("le-g", repo_root=str(repo))
+
+    # MCP write-tool surface (invalid key raises the same clean RebarError).
+    writes = _write_tools()
+    with pytest.raises(RebarError):
+        writes.tools["bridge_projects_set"]("1x", ["rebar"])
+    with pytest.raises(RebarError):
+        writes.tools["bridge_projects_remove"]("1x")
+
+    after = projects_file.read_bytes() if projects_file.exists() else None
+    assert after == before
