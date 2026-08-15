@@ -7,15 +7,15 @@ Done-recent) instead of one combined query.
 Builds a 1500-issue ACLI fixture (1000 active + 500 Done) and verifies:
 
   * The fetcher invokes the ACLI stub with both split JQL strings verbatim:
-    ``project = DIG AND status != "Done"``
-    ``project = DIG AND status = "Done" ORDER BY updated DESC``
+    ``project = DIG AND statusCategory != "Done"``
+    ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
   * The fetcher paginates through the working set in 100-step ``start_at``
     increments (start_at=0, 100, 200, ..., 1400). At least 10 paginated
     invocations must occur across both queries combined.
 
 AC-mandated source-literal tokens (grep -F greppable):
-  * ``project = DIG AND status != "Done"``
-  * ``project = DIG AND status = "Done" ORDER BY updated DESC``
+  * ``project = DIG AND statusCategory != "Done"``
+  * ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
   * ``range(1, 1501)``  (the combined 1500-issue fixture builder; now
     split as range(1, 1001) for active + range(1001, 1501) for Done)
 """
@@ -36,8 +36,8 @@ FETCHER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "f
 # (bug f6cc-b174-9e9a-435c): one for the active working set, one for
 # Done issues ordered by updated DESC. Both must reach search_issues
 # verbatim; tests assert the union of jqls seen == {ACTIVE, DONE_RECENT}.
-EXPECTED_JQL_ACTIVE = 'project = DIG AND status != "Done"'
-EXPECTED_JQL_DONE_RECENT = 'project = DIG AND status = "Done" ORDER BY updated DESC'
+EXPECTED_JQL_ACTIVE = 'project = DIG AND statusCategory != "Done"'
+EXPECTED_JQL_DONE_RECENT = 'project = DIG AND statusCategory = "Done" ORDER BY updated DESC'
 EXPECTED_JQLS = {EXPECTED_JQL_ACTIVE, EXPECTED_JQL_DONE_RECENT}
 
 
@@ -90,7 +90,7 @@ class _PaginatingClient:
         self.calls: list[dict] = []
 
     def _pool_for(self, jql: str) -> list[dict]:
-        if 'status = "Done"' in jql:
+        if 'statusCategory = "Done"' in jql:
             return _DONE_POOL
         return _ACTIVE_POOL
 
@@ -123,8 +123,8 @@ def test_fetcher_calls_acli_with_split_jqls_verbatim(tmp_path, fetcher):
     verbatim, and the union of JQLs seen must be exactly the split pair.
 
     Required strings (bug f6cc-b174-9e9a-435c contract):
-      * ``project = DIG AND status != "Done"``
-      * ``project = DIG AND status = "Done" ORDER BY updated DESC``
+      * ``project = DIG AND statusCategory != "Done"``
+      * ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC``
     """
     mock_acli, holder = _make_paginating_acli()
     with patch.object(fetcher, "_load_acli", return_value=mock_acli):
