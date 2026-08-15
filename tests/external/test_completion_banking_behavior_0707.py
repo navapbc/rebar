@@ -13,6 +13,7 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
+import _bank_observer
 import _live_llm
 import pytest
 
@@ -75,18 +76,9 @@ def _observe_trial(
             counted.append(wrapped)
         return counted
 
-    def observed_upsert(
-        self: banking.CriterionBank,
-        criterion_id: str,
-        met: bool,
-        evidence: str,
-        *,
-        source: str = "tool",
-    ) -> dict[str, Any]:
-        if source == "tool" and criterion_id not in writes:
-            writes.append(criterion_id)
-            calls_at_first_write.append(evidence_calls)
-        return original_upsert(self, criterion_id, met, evidence, source=source)
+    observed_upsert = _bank_observer.make_observed_upsert(
+        original_upsert, writes, calls_at_first_write, lambda: evidence_calls
+    )
 
     with monkeypatch.context() as trial_patch:
         trial_patch.setattr(banking.CriterionBank, "upsert", observed_upsert)
