@@ -10,6 +10,8 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-15
+
 ### Removed
 
 - **Closing a ticket no longer compacts it.** Compaction was the store's longest write-lock
@@ -25,6 +27,34 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 - **BREAKING — `purge-bridge` is removed with no compatibility alias.** Invoking it follows the
   standard unknown-subcommand path and exits non-zero. No persisted data format changes.
+
+- **BREAKING (pre-1.0)** — the deprecated `jira.resolved_statuses` and
+  `reconciler.resolved_statuses` config keys (and their auto-derived
+  `REBAR_JIRA_RESOLVED_STATUSES` / `REBAR_RECONCILER_RESOLVED_STATUSES` env twins) are
+  removed and tombstoned **warn-class**: a config still carrying one keeps loading, logs
+  that the key was removed, and drops it. There is no replacement — resolved/unresolved
+  discrimination is outbound-owned (ADR 0028), so just delete the line. Operator-approved
+  early removal (pre-1.0 pass #3), 2026-08-12.
+
+- **BREAKING (pre-1.0)** — the bare `REBAR_LLM_MODEL` environment variable is removed
+  and tombstoned: setting it now fails loud with a migration error instead of being
+  ignored. Use the `[tool.rebar.llm.model_classes]` slots, the per-class
+  `REBAR_LLM_<CLASS>_MODEL` variables, or the top-level `[tool.rebar.llm].model` key —
+  which is NOT removed and still resolves CLI > config > default. Operator-approved
+  early removal (pre-1.0 pass #3), 2026-08-12.
+
+- **BREAKING (pre-1.0)** — the single-pass review operation's three public entry
+  points are removed: the CLI verb `rebar review`, the library function
+  `rebar.llm.review_ticket()`, and the MCP `review_ticket` tool. v0.11.0 turned the
+  CLI verb into a forwarding shim and deprecated the library/MCP surfaces; this
+  deletes them. Use `rebar review-plan` / `rebar.llm.review_plan()` / the
+  `review_plan` MCP tool. Operator-approved early removal (pre-1.0 pass #3),
+  2026-08-12.
+
+- **BREAKING (pre-1.0)** — `rebar init` no longer strips the retired
+  `.reconciler-* merge=ours` line from an already-committed `.gitattributes`; the
+  ensure-unit is create-only. A clone last swept before 2026-07-05 must strip the
+  line by hand.
 
 ### Added
 
@@ -98,35 +128,6 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   note, the library kwarg `rebar.transition(..., force_close=...)` keeps its name, the
   unresolved-children close guard remains unbypassable, and no force bypass is exposed over
   MCP.
-
-## [Unreleased]
-
-### Removed
-
-- **BREAKING (pre-1.0)** — the deprecated `jira.resolved_statuses` and
-  `reconciler.resolved_statuses` config keys (and their auto-derived
-  `REBAR_JIRA_RESOLVED_STATUSES` / `REBAR_RECONCILER_RESOLVED_STATUSES` env twins) are
-  removed and tombstoned **warn-class**: a config still carrying one keeps loading, logs
-  that the key was removed, and drops it. There is no replacement — resolved/unresolved
-  discrimination is outbound-owned (ADR 0028), so just delete the line. Operator-approved
-  early removal (pre-1.0 pass #3), 2026-08-12.
-- **BREAKING (pre-1.0)** — the bare `REBAR_LLM_MODEL` environment variable is removed
-  and tombstoned: setting it now fails loud with a migration error instead of being
-  ignored. Use the `[tool.rebar.llm.model_classes]` slots, the per-class
-  `REBAR_LLM_<CLASS>_MODEL` variables, or the top-level `[tool.rebar.llm].model` key —
-  which is NOT removed and still resolves CLI > config > default. Operator-approved
-  early removal (pre-1.0 pass #3), 2026-08-12.
-- **BREAKING (pre-1.0)** — the single-pass review operation's three public entry
-  points are removed: the CLI verb `rebar review`, the library function
-  `rebar.llm.review_ticket()`, and the MCP `review_ticket` tool. v0.11.0 turned the
-  CLI verb into a forwarding shim and deprecated the library/MCP surfaces; this
-  deletes them. Use `rebar review-plan` / `rebar.llm.review_plan()` / the
-  `review_plan` MCP tool. Operator-approved early removal (pre-1.0 pass #3),
-  2026-08-12.
-- **BREAKING (pre-1.0)** — `rebar init` no longer strips the retired
-  `.reconciler-* merge=ours` line from an already-committed `.gitattributes`; the
-  ensure-unit is create-only. A clone last swept before 2026-07-05 must strip the
-  line by hand.
 
 ## [0.11.0] - 2026-08-06
 
@@ -1463,7 +1464,8 @@ gate coverage, and a batch of reconciler and CI durability fixes.
 - Harden concurrency, extract txn, rename to rebar, agent-fitness features
 - Rename dist to nava-rebar; add PyPI Trusted Publishing workflow
 
-[unreleased]: https://github.com/navapbc/rebar/compare/v0.11.0...HEAD
+[unreleased]: https://github.com/navapbc/rebar/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/navapbc/rebar/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/navapbc/rebar/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/navapbc/rebar/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/navapbc/rebar/compare/v0.9.1...v0.10.0
