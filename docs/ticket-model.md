@@ -80,10 +80,17 @@ A missing or out-of-vocabulary `--class` is refused (the error names the allowed
 (`idea → closed` is a reject/drop and skips this gate.)
 
 When the completion-verification close gate is enabled, `duplicate`, `not_a_bug`, and
-`escalated` describe non-completion dispositions. They skip completion verification only
-when the bug has a net-active `bug -duplicates-> canonical` link to a live ticket, or a live
-replacement has a net-active `replacement -supersedes-> bug` link. A missing, reversed,
-unlinked, unresolved, archived, or deleted replacement does not bypass verification.
+`escalated` describe non-completion dispositions and skip completion verification only
+when their evidence holds. For `duplicate` that evidence is a net-active
+`bug -duplicates-> canonical` link to a live ticket, or a live replacement with a
+net-active `replacement -supersedes-> bug` link. `not_a_bug` and `escalated` are
+**reason-required** (bug d54b): a live replacement link (same shapes as above) satisfies
+them and is checked first, but without one the close REQUIRES `--reason=<text>` — why no
+defect exists, or where the work was escalated to — which persists as `close_reason` and
+is signed into the disposition attestation. A close with neither is refused at write time
+naming both doors; it never falls through to the completion verifier (which would demand
+proof that a nonexistent defect was fixed). A missing, reversed, unlinked, unresolved,
+archived, or deleted replacement does not count as a replacement.
 
 ## Administrative close dispositions (any ticket type)
 

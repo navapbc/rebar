@@ -239,7 +239,10 @@ def test_administrative_vocabulary_refusal_applies_even_to_a_force_close(store, 
     assert _state(store, tid)["status"] == "in_progress"
 
 
-@pytest.mark.parametrize("close_class", sorted(close_disposition.REASON_REQUIRED_CLASSES))
+@pytest.mark.parametrize(
+    "close_class",
+    sorted(close_disposition.REASON_REQUIRED_CLASSES & close_disposition.ADMINISTRATIVE_CLASSES),
+)
 def test_forced_administrative_close_accepts_force_reason_as_justification(store, close_class):
     """--force=<reason> satisfies the reason requirement (the force_close_reason arm of
     txn.close_class_refusal): the bypass note IS the justification. It persists as

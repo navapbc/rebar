@@ -20,6 +20,7 @@ import rebar.llm
 SKIP = "skip"  # disposition: exempt, closes without the verifier
 VERIFY = "verify"  # ordinary close: the verifier runs and decides
 BLOCK_EARLY = "block_early"  # c8fd: refused before the verifier, with the link remedy named
+BLOCK_REASON = "block_reason"  # d54b: refused before the verifier, naming --reason OR a link
 
 
 @pytest.mark.parametrize(
@@ -28,9 +29,9 @@ BLOCK_EARLY = "block_early"  # c8fd: refused before the verifier, with the link 
         ("replacement_supersedes_bug", "not_a_bug", SKIP),
         ("bug_duplicates_canonical", "duplicate", SKIP),
         ("closed_duplicate_target", "duplicate", SKIP),
-        ("bug_supersedes_replacement", "not_a_bug", VERIFY),
+        ("bug_supersedes_replacement", "not_a_bug", BLOCK_REASON),
         ("duplicate_link_wrong_class", "regression", VERIFY),
-        ("no_relation", "not_a_bug", VERIFY),
+        ("no_relation", "not_a_bug", BLOCK_REASON),
         ("no_relation", "duplicate", BLOCK_EARLY),
         ("archived_duplicate_target", "duplicate", BLOCK_EARLY),
     ],
@@ -97,6 +98,15 @@ def test_completion_gate_skips_only_valid_noncompletion_link_shapes(
 
     if expect == VERIFY:
         assert calls == [bug]
+        return
+
+    if expect == BLOCK_REASON:
+        # d54b: a not_a_bug/escalated close with no usable replacement used to land in VERIFY,
+        # where the verifier demanded proof a nonexistent defect was fixed — an unpassable gate.
+        # It is now refused pre-LLM naming both doors: add --reason, or record a replacement link.
+        assert calls == [], "a reason-required disposition must not reach the verifier"
+        message = str(excinfo.value)
+        assert "--reason" in message and "replacement" in message
         return
 
     # BLOCK_EARLY: refused without spending a request, and the message must carry the one

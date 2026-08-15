@@ -197,18 +197,22 @@ def close_class_refusal(
     force_close_reason: str = "",
     target_status: str = "closed",
     from_idea: bool = False,
+    ticket_id: str = "",
+    tracker: str = "",
 ) -> str | None:
     """The refusal message for an invalid close-class combination, or ``None`` when valid.
 
     Shared by :func:`transition_core` (the authoritative, gate-independent write-side guard —
     neither ``--force`` nor a disabled completion gate skips it) and the completion gate's
     cheap pre-LLM check in ``close_precheck`` so the two cannot drift. Three rules (tickets
-    ed13 + fc20): a bug close REQUIRES a class from the full vocabulary; a non-bug close MAY
-    carry one only from ``close_disposition.ADMINISTRATIVE_CLASSES`` (``not_a_bug`` /
-    ``escalated`` stay bug-only); and a reason-only class (``obsolete`` / ``wontfix``)
-    REQUIRES a reason — the CLI ``--reason`` text (persisted as ``close_reason``), or the
-    ``--force=<reason>`` bypass note when the close is forced. ``idea -> closed`` is a
-    reject/drop, not a completion, and bypasses all three."""
+    ed13 + fc20 + bug d54b): a bug close REQUIRES a class from the full vocabulary; a non-bug
+    close MAY carry one only from ``close_disposition.ADMINISTRATIVE_CLASSES`` (``not_a_bug`` /
+    ``escalated`` stay bug-only); and a reason-required class REQUIRES a reason — the CLI
+    ``--reason`` text (persisted as ``close_reason``), the ``--force=<reason>`` bypass note when
+    the close is forced, or (``not_a_bug``/``escalated`` only) a live replacement link, checked
+    when the caller passes ``ticket_id``+``tracker`` (:func:`close_disposition.reason_refusal`;
+    omitting them fails toward requiring the reason). ``idea -> closed`` is a reject/drop, not a
+    completion, and bypasses all three."""
     if target_status != "closed" or from_idea:
         return None
     from rebar._commands import close_disposition
@@ -228,11 +232,7 @@ def close_class_refusal(
     if close_class in close_disposition.REASON_REQUIRED_CLASSES and not (
         close_reason or force_close_reason
     ):
-        return (
-            f"--class {close_class} requires --reason=<text> stating why: the reason is "
-            "recorded as close_reason on the close event and signed into the disposition "
-            "attestation"
-        )
+        return close_disposition.reason_refusal(close_class, ticket_id, tracker)
     return None
 
 
@@ -302,9 +302,10 @@ def transition_core(
         # The open-children structural guard is enforced elsewhere and is NOT relaxed for idea.
         from_idea = current_status == "idea"
 
-        # Close-class guard (tickets ed13 + fc20): a bug closing from a non-idea status
-        # REQUIRES a bounded ``--class <value>``; a non-bug close MAY carry one only from the
-        # ADMINISTRATIVE subset; obsolete/wontfix REQUIRE a reason. The shared rule
+        # Close-class guard (tickets ed13 + fc20 + bug d54b): a bug closing from a non-idea
+        # status REQUIRES a bounded ``--class <value>``; a non-bug close MAY carry one only from
+        # the ADMINISTRATIVE subset; a reason-required class (obsolete/wontfix, and — unless a
+        # live replacement link exists — not_a_bug/escalated) REQUIRES a reason. The shared rule
         # (:func:`close_class_refusal`) is also run by the completion gate's pre-check so the
         # two cannot drift, but THIS is the authoritative, gate-independent enforcement point:
         # it runs on every close, forced or not, gate on or off. On success ``close_class``
@@ -317,6 +318,8 @@ def transition_core(
             force_close_reason=force_close_reason,
             target_status=target_status,
             from_idea=from_idea,
+            ticket_id=ticket_id,
+            tracker=tracker_dir,
         )
         if refusal:
             raise CommandError(f"Error: {refusal}", returncode=1)
