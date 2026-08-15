@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -82,26 +80,26 @@ def is_deduped(key: str, repo_root: Path, window_ns: int = _24H_NS) -> bool:
 
 
 def _atomic_write(path: Path, content: str) -> None:
-    """Replace `path` atomically with `content`.
+    """Replace `path` atomically with `content` via the shared ``fsutil.atomic_write`` seam.
 
-    Writes via tempfile + fsync + os.replace so a crash mid-write cannot leave
-    the destination truncated or partially written — the prior `write_text`
-    approach truncated first and could lose the whole file on SIGKILL/OOM.
+    ``fsutil.atomic_write`` writes a temp file in the same directory + ``os.replace`` (with
+    ``fsync=True``: file + dir fsync), so a crash mid-write cannot leave the destination
+    truncated or partially written — the prior ``write_text`` approach truncated first and
+    could lose the whole file on SIGKILL/OOM.
+
+    The prior hand-rolled ``mkstemp``+``os.replace`` produced a 0o600 file (mkstemp's default,
+    never chmod'd) and created the parent dir first; ``fsutil.atomic_write`` requires the
+    parent to already exist and defaults to the umask mode, so BOTH are preserved explicitly
+    here: the ``mkdir`` below and ``permissions=0o600`` keep the on-disk bytes AND mode
+    byte-identical to before. These alert files live in the git-ignored, local-scratch
+    ``bridge_state/bridge_alerts`` tree (NOT the committed tickets branch), so no commit /
+    publish path is involved — the atomic write alone is the whole contract.
     """
     parent = path.parent
     parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_str = tempfile.mkstemp(dir=str(parent), prefix=f".{path.name}.tmp.")
-    tmp_path = Path(tmp_str)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp_path, path)
-        tmp_path = None  # type: ignore[assignment]
-    finally:
-        if tmp_path is not None and tmp_path.exists():
-            tmp_path.unlink()
+    from rebar._store import fsutil
+
+    fsutil.atomic_write(path, content, permissions=0o600, fsync=True)
 
 
 def patch_bug_filed(key: str, bug_ticket_id: str, repo_root: Path) -> None:
