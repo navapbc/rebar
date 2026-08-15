@@ -65,3 +65,66 @@ def test_library_set_then_list_roundtrip(repo: Path) -> None:
     rebar.bridge_projects_set("REB", ["rebar"], repo_root=str(repo))
 
     assert rebar.bridge_projects_list(repo_root=str(repo)) == {"REB": {"repos": ["rebar"]}}
+
+
+def test_mutation_runs_under_write_lock_and_publishes(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tickets-branch invariant regression guard: a projects.json mutation runs its
+    read-modify-write UNDER ``lock.write_lock`` and is then published via
+    ``push.commit_and_push_tickets_branch`` — both through the shared seams, with the
+    tracker path, and with the RMW nested inside the lock (no ad-hoc git)."""
+    import contextlib
+
+    from rebar import config
+    from rebar._store import lock, push
+
+    events: list[str] = []
+    seen_tracker: dict[str, object] = {}
+
+    @contextlib.contextmanager
+    def _spy_write_lock(tracker, **kwargs):
+        seen_tracker["lock"] = tracker
+        events.append("lock-enter")
+        try:
+            yield
+        finally:
+            events.append("lock-exit")
+
+    def _spy_commit_and_push(tracker, *, message, **kwargs):
+        seen_tracker["push"] = tracker
+        seen_tracker["message"] = message
+        events.append("commit-push")
+
+    monkeypatch.setattr(lock, "write_lock", _spy_write_lock)
+    monkeypatch.setattr(push, "commit_and_push_tickets_branch", _spy_commit_and_push)
+
+    rebar.bridge_projects_set("REB", ["rebar"], repo_root=str(repo))
+
+    tracker = config.tracker_dir(str(repo))
+    # The RMW is committed + pushed under the lock via the seam, with the tracker path.
+    assert events == ["lock-enter", "lock-exit", "commit-push"]
+    assert Path(seen_tracker["lock"]) == tracker
+    assert Path(seen_tracker["push"]) == tracker
+    assert seen_tracker["message"] == "bridge: update projects mapping"
+    # And the RMW actually landed on disk despite the seam being stubbed.
+    assert rebar.bridge_projects_list(repo_root=str(repo)) == {"REB": {"repos": ["rebar"]}}
+
+
+def test_remove_missing_key_does_not_publish(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed mutation (unknown key) must not commit or push — the publish seam is only
+    reached after a successful read-modify-write."""
+    from rebar import RebarError
+    from rebar._store import push
+
+    called = {"n": 0}
+    monkeypatch.setattr(
+        push,
+        "commit_and_push_tickets_branch",
+        lambda *a, **k: called.__setitem__("n", called["n"] + 1),
+    )
+
+    with pytest.raises(RebarError):
+        rebar.bridge_projects_remove("NOPE", repo_root=str(repo))
+
+    assert called["n"] == 0
