@@ -6,9 +6,9 @@ hit the 1000-issue ACLI ceiling because the DIG project has > 1000
 issues spanning To Do + In Progress + Done.
 
 Post-fix, ``fetch_snapshot`` issues TWO queries in order:
-  1. ``project = DIG AND status != "Done"`` — the active working set,
+  1. ``project = DIG AND statusCategory != "Done"`` — the active working set,
      no client-side cap (only the per-query ACLI ceiling bounds it).
-  2. ``project = DIG AND status = "Done" ORDER BY updated DESC`` — capped
+  2. ``project = DIG AND statusCategory = "Done" ORDER BY updated DESC`` — capped
      to ``_DONE_RECENT_CAP`` (1000) most-recently-updated Done issues.
 
 These tests assert observable behavior of that contract:
