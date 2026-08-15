@@ -55,6 +55,7 @@ def _tests_rooted_imports(source: str, path: Path) -> list[str]:
     return hits
 
 
+@pytest.mark.repo_policy
 def test_no_tests_rooted_imports_anywhere_under_tests() -> None:
     """No module under ``tests/`` imports through a ``tests.``-rooted absolute path.
 

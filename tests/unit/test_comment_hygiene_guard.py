@@ -264,6 +264,7 @@ def test_string_literals_are_not_scanned(tmp_path: Path) -> None:
     assert _run(tmp_path).returncode == 0
 
 
+@pytest.mark.repo_policy
 def test_the_real_tree_is_clean() -> None:
     """AC: the guard passes the remediated tree with zero suppressions. Runs the
     script exactly as CI does."""

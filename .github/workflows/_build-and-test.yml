@@ -635,6 +635,12 @@ jobs:
         # skip nobody reads. Skips keyed on a missing binary/version floor are unaffected.
         env:
           REBAR_REQUIRE_EXTRAS: "1"
+          # Repository-policy tests inspect this immutable checkout's text/AST, so their
+          # result cannot vary by OS or Python. Keep them in the existing primary Ubuntu
+          # 3.13 process (which also owns coverage) and omit only their duplicate executions
+          # from the other three cells. Both expression branches are intentionally non-empty
+          # shell strings; this changes no job, runner, setup, collection, or fixture session.
+          DEFAULT_SUITE_MARKS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy' }}
         # --timeout (pytest-timeout) is the per-test HANG GUARD: timeout-minutes above only
         # bounds the whole job, so a single deadlocked test stays invisible behind the last
         # -q dot and eats the full 60 min with no traceback (the ubuntu/py3.11 incident, ticket
@@ -645,7 +651,7 @@ jobs:
         # 300s dwarfs the slowest legitimate test (the tail is seconds; the 300s snapshot-fetch
         # backstop is monkeypatched down in-test) while a true hang fails in 5 min, not 60.
         run: >-
-          pytest -m "not integration and not external"
+          pytest -m "$DEFAULT_SUITE_MARKS"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
           -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp"

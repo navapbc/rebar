@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 from rebar.llm.plan_review import attest
 
 
@@ -28,6 +30,7 @@ def _validity_calls(tree: ast.AST) -> list[ast.Call]:
     ]
 
 
+@pytest.mark.repo_policy
 def test_every_compute_validity_call_consumes_a_mapping_not_a_tuple() -> None:
     assert hasattr(attest, "PlanValidityProfile"), "additive validity contract is absent"
     calls = []
@@ -68,6 +71,7 @@ def test_every_compute_validity_call_consumes_a_mapping_not_a_tuple() -> None:
     assert calls, "compute_validity must have in-repository consumers"
 
 
+@pytest.mark.repo_policy
 def test_plan_validity_profiles_are_selected_by_named_keyword() -> None:
     assert hasattr(attest, "PlanValidityProfile"), "plan validity profiles are absent"
     profiled = []
