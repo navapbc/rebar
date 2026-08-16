@@ -13221,8 +13221,16 @@
       "updated_at": "2026-08-15T14:59:47Z"
     },
     "5662-95c3-c4b6-4afd": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n\nRun `rebar bridge-fsck` \u2014 the offline binding-drift arm (epic 3006-e198, the convergence parity oracle) reports a non-empty `binding_drift` section.\n\n## Expected vs Actual\n\n- **Expected:** `binding_drift` is empty (every bound pair converged).\n- **Actual:** dangling=170\n- **Detected at:** 2026-07-19T19:27:03Z\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/29700523761\n\n## Acceptance Criteria\n\n- [ ] Each reported drift is triaged (would_terminal \u2192 local archive/delete\n      to propagate; dangling \u2192 confirmed 404 GC; unbound_jira \u2192 adopt or\n      archive the Jira-native issue; local_gone \u2192 investigate).\n- [ ] `rebar bridge-fsck` reports an empty `binding_drift` section.\n\nThis ticket auto-closes when bridge-fsck next reports zero binding drift.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "[binding-drift] bridge-fsck found 170 unhealed binding drift(s)"
+      },
       "created_at": "2026-08-15T14:59:47Z",
       "jira_key": "REB-1377",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:47Z"
     },
@@ -13287,8 +13295,16 @@
       "updated_at": "2026-08-15T14:59:51Z"
     },
     "5766-fe6f-83d0-4252": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Workflow engine: conditional overlays (via if:) + delegating batch step\n\n## Context\n\nSplit out of soupy-spool-revel (6f2d) per the brainstorm (session logs boom-demon-jug ad3f + woody-meat-seize). The e6d9 engine (declarative IR + thin worklist interpreter, run-state on the git event log; step kinds uses/prompt/branch/loop/map + bounded-concurrent map fan-out) is closed. To express a reusable 4-pass LLM-review pipeline ON the engine (epic B migrates plan-review + completion-verification), the engine needs support for (1) conditional criterion INCLUSION and (2) budgeted BATCH orchestration. This epic adds ONLY that, engine-only (no plan-review coupling). A prior-art survey (Argo/Step Functions/dbt/LangGraph/Airflow/Dagster/Temporal) + a code investigation grounded the design.\n\n## The two concepts (one already exists, one is genuinely new)\n\n1. **Conditional overlay = the EXISTING `if:` skip-guard (do NOT add a new field).** Code investigation\n   found the engine ALREADY does per-step conditional inclusion: the v1 `if:` skip-guard (retained in\n   v2; interpreter.py _guard_scoped) evaluates a predicate over run-start-journaled inputs + recorded\n   prior outputs, is replay-deterministic (no live-store access), records a durable `skipped` event,\n   and fails closed. So overlays ADOPT `if:`. The deliberately-CLOSED expression grammar (lint_refs.py\n   _ALLOWED_EXPR; pinned by the v2 schema `expression`  \u2014 no operators/regex/functions) is the only\n   gap: it can branch on a boolean in scope but cannot COMPUTE one. The clean design (keeping the grammar\n   tiny + injection-safe) is a DETERMINISTIC scripted PRECOMPUTE step that turns each overlay trigger\n   (has-children, has-linked-session-log, keyword/trigger match over a text input) into a boolean output\n   the criterion's `if:` references; plus optionally journaling the resolved included-set at run-start\n   for coverage. NO new IR field is added.\n\n2. **Batch orchestration = a THIN delegating step (genuinely new).** No surveyed engine makes adaptive\n   cost-budgeted batching first-class \u2014 it is app code everywhere \u2014 and encoding it in the IR would break\n   the replay invariant (batch composition depends on a runtime token estimate + which call hit a context\n   limit, so its control state is a recorded DECISION-TREE, not a function of outputs). So the IR gains a\n   thin `batch` step declaring only params (group, usd_budget, model_ladder); a batch-RUNNER (behind a\n   seam) does the adaptive packing / token-estimation / context-limit fallback / model-escalation /\n   shed-to-INDETERMINATE / fingerprint-checkpoint and JOURNALS its batch-plan + fallback as OPAQUE events\n   the interpreter stores but never interprets. Epic A ships the seam + a reference default runner; epic\n   B supplies the production runner (extracting the gate's sizing.py) behind this seam.\n\n## Scope (engine-only)\n\n- Overlay-via-`if:`: a deterministic trigger-precompute scripted step + a documented precompute-then-`if:`\n  pattern + optional run-start journaling of the resolved included-set. The expression grammar is UNCHANGED.\n- The `batch` step kind: schema/JSON Schema + the batch-runner SEAM + a reference default runner + the\n  journaled batch-plan/fallback event vocabulary + interpreter wiring (store the opaque plan, do not interpret).\n- A THROWAWAY demo workflow exercising an `if:`-gated (overlay) step + a `batch` step end-to-end (dry-run\n  via FakeAgentRunner), removed by epic B; retained meanwhile as the visual-editing refinement sample.\n- VISUAL EDITING in the workflow editor for the batch step (NEW) and the `if:` overlay predicate (EXISTING\n  \u2014 confirm/extend the editor renders + edits `if:` and supports add/remove of a conditionally-included prompt).\n\n## Acceptance Criteria\n\n- [ ] Overlays adopt `if:` (no new IR field): a deterministic precompute scripted step computes overlay-\n      trigger booleans (has-children, has-linked-session-log, text/keyword trigger match) as step outputs;\n      a criterion gated by `if: ${{ steps.<triggers>.outputs.<name> }}` is included when truthy and skipped\n      (durable event) when falsy; the expression grammar is NOT extended. (A1)\n- [ ] Replay determinism for inclusion: a mid-run store edit does not change the included/skipped outcome\n      (read from the run-start journal, not live state); the resolved included-set is observable for coverage\n      (journaled at run-start OR documented as recovered from skip statuses \u2014 decide + record). (A1)\n- [ ] A `batch` step kind exists with declarative params (group/usd_budget/model_ladder), a batch-runner\n      SEAM + a reference default runner; the runner journals its batch-plan + fallback as OPAQUE events the\n      interpreter STORES but never branches on (a test asserts this); replay reads the recorded plan. (A2)\n- [ ] The Burr-tripwire stays green (no asyncio/threading leaks outside the confined fan-out). (A2)\n- [ ] A throwaway demo workflow exercises an `if:`-gated overlay step + a `batch` step end-to-end under the\n      FakeAgentRunner (offline, no live calls), with a test; it is clearly labeled disposable. (A3)\n- [ ] The workflow visual editor renders/edits the `batch` step and the `if:` overlay predicate, and\n      supports add/remove of a conditionally-included prompt. (A4)\n- [ ] make lint + the full test suite pass.\n- [ ] The engine expresses conditional criterion inclusion (via `if:` + a precompute pattern) and budgeted\n- [ ] A demo proves both offline; the batch step + the `if:` overlay are visually editable.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Workflow engine: first-class conditional overlays + delegating batch step (engine-only; + throwaway demo + visual editing)"
+      },
       "created_at": "2026-08-15T14:59:51Z",
       "jira_key": "REB-142",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:51Z"
     },
@@ -13369,8 +13385,16 @@
       "updated_at": "2026-08-15T14:59:54Z"
     },
     "5886-d028-7954-4763": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n1. Configure a Jira project whose workflow has a status with no entry in the reconciler's `_JIRA_TO_LOCAL_STATUS` map (e.g. a custom state like \"In UAT\").\n2. Move a Jira issue bound to a **closed** local ticket into that unmapped status.\n3. Run a reconcile pass with inbound sync enabled.\n\n**Expected:** the unmapped status is skipped (local status left untouched) and the unmapped status is surfaced as a deduped bridge alert. **Actual (before fix):** `inbound_differ._map_jira_to_local_fields` did `_JIRA_TO_LOCAL_STATUS.get(status_raw, \"open\")` \u2014 the `\"open\"` default silently REOPENED the closed local ticket. This class of bug bit once before (ticket 929a). Audit Reliability finding #7 (MEDIUM).\n\n## Why it matters\nReopening closed work corrupts board state, re-enters tickets into ready/next-batch dispatch, and invalidates the meaning of completion attestations \u2014 all with no operator signal.\n\n## What / files\n- `src/rebar/_engine/rebar_reconciler/inbound_differ.py`: `_map_jira_to_local_fields` no longer defaults an unmapped status to `\"open\"` \u2014 it OMITS the status field from the mapped dict when the Jira status has no `_JIRA_TO_LOCAL_STATUS` entry and no `rebar-status:` label. `_diff_jira_vs_local` skips the status field when it is absent from the mapped dict, so no status change is emitted (no silent reopen).\n- Observability reuses the EXISTING fetcher alert: `fetcher.py` already emits a deduped `fetcher-unmapped-jira-status` bridge alert (built from the same `config.jira_to_local_status` mapping) for any unmapped status seen in a snapshot \u2014 so no second, redundant alert is added in the differ (alert at fetch, skip at diff is the correct split).\n- `docs/jira-sync-setup.md`: documents the skip + existing-alert behaviour for unmapped inbound statuses.\n\n## Scope\nIn: inbound_differ.py skip logic, docs. Out: adding a redundant differ-side alert (the fetcher already alerts); changing any existing status mapping; the `idea\u2194IDEA` round-trip must stay unaffected.\n\n## Acceptance Criteria\n- [ ] An inbound Jira status with no mapping is skipped (no local status change) \u2014 a closed bound local ticket stays closed\n- [ ] The unmapped status is surfaced via the existing deduped `fetcher-unmapped-jira-status` bridge alert (no silent handling)\n- [ ] Regression test: an unmapped inbound status against a **closed** bound local ticket emits no status change (`\"status\" not in changed`); mapped statuses (incl. `IDEA\u2192idea`, `Done\u2192closed`) still flow\n- [ ] `docs/jira-sync-setup.md` documents the skip + alert behaviour\n- [ ] Existing reconciler/bridge suites stay green; `make test` green",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Unmapped inbound Jira status defaults to open \u2014 can silently reopen closed local tickets"
+      },
       "created_at": "2026-08-15T14:59:55Z",
       "jira_key": "REB-819",
+      "peer_parent": "REB-824",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:55Z"
     },
@@ -13387,8 +13411,16 @@
       "updated_at": "2026-08-15T14:59:56Z"
     },
     "58b0-104b-777c-4227": {
+      "baseline": {
+        "assignee": null,
+        "description": "Jira reconciler silently fails to sync comments and inbound links while reporting `converged` \u2014 three distinct defects, all hidden behind a pass that counts failed sub-operations toward \"applied N of N\" and exits 0.\n\n## Context\n\nInvestigation (/rebar-debug, 2026-07-17) established that status/existence sync is healthy (0 drift across ~1200 tickets), but three field-level sync paths are broken and invisible:\n\n- **Comment sync (P1):** `get_comments()` returns only the first 50 of N comments\n  (no `--paginate`), so outbound dedup re-posts the rest every pass. 13 tickets have\n  been inflated to Jira's 5000-comment hard cap (local truth: 22-76 comments each);\n  further adds fail `COMMENTS_PER_ISSUE_LIMIT_EXCEEDED` and are swallowed.\n- **Inbound link direction (P2):** `_diff_links_inbound` (inbound_differ.py:519-527)\n  AND `_diff_link_removals` (outbound_links.py:198-203) both invert the\n  inward/outward -> blocks/depends_on mapping. Latent since 2026-06-15 (`f6687adf4`);\n  UNMASKED when the outbound direction fix landed (`6b25dbead`/`43d154523`, 07-16/17)\n  \u2014 the two inversions previously cancelled on round-trip. Now ~815 inbound link\n  applies/pass are cycle-rejected by rebar's guard.\n- **Observability (meta):** a pass with failed sub-ops still prints `applied N of N`\n  / exits 0 / logs `converged`. The `RECONCILER_FAIL_SILENT_NOOP` flag (default off)\n  exists but is not enabled; swallowed comment failures land in `comment_errors` and\n  are never counted as failures.\n\n## Jira cleanup safety plan (T4 \u2014 destructive-step rollback)\n\nThe comment de-duplication is IRREVERSIBLE (Jira comment deletion cannot be undone via API). It is a deliberate, justified destructive step (the tickets are permanently unable to sync until duplicates are purged), executed only with these guardrails:\n\n- [ ] **Pre-deletion backup:** export the FULL comment payload (id, body, author,\n      created) for all 13 tickets to a versioned JSON artifact BEFORE any deletion, so\n      any comment can be re-created if needed.\n- [ ] **Dry-run first:** the cleanup script has a `--dry-run` (default) mode that\n      lists exactly which comment IDs would be deleted and which one canonical copy of\n      each distinct body is kept; a human reviews the dry-run diff before `--execute`.\n- [ ] **Keep-one dedup rule:** for each distinct normalized body, keep the OLDEST\n      copy (lowest created) and delete the rest; never delete a body with only one copy.\n      Only delete comments authored by the bridge bot identity (never human comments).\n- [ ] **Idempotent + resumable:** re-running is safe; on partial failure, re-run\n      `--dry-run` to see the remaining duplicates and resume. Deletions are logged\n      (ticket, comment id, body hash) to an artifact as they happen.\n- [ ] **Sequencing:** run ONLY after P1 is deployed to main, else the buggy\n      reconciler re-inflates duplicates within minutes.\n\n## Acceptance Criteria\n\n- [ ] All child tickets (P1, P2, observability, test-hardening, Jira-cleanup) are closed.\n- [ ] A reconcile pass shows 0 comment-cap failures and 0 inbound link\n      cycle-rejections for the previously-affected tickets.\n- [ ] The cleanup backup artifact + dry-run log exist before any live deletion.\n- [ ] P1: outbound comment sync is idempotent \u2014 a steady-state pass emits 0 comment\n- [ ] P2: an inbound Jira `Blocks` link round-trips to the correct rebar relation\n- [ ] Observability: a pass with any silent sub-op no-op reports failure (non-zero\n- [ ] Test hardening: unit + integration + E2E coverage added for all three failure\n- [ ] Jira data cleanup: the 13 capped tickets are de-duplicated so new comments can",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Jira reconciler: silent comment + inbound-link sync failures"
+      },
       "created_at": "2026-08-15T14:59:57Z",
       "jira_key": "REB-1303",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:57Z"
     },
@@ -13435,14 +13467,44 @@
       "updated_at": "2026-08-15T14:59:58Z"
     },
     "58ef-91fa-20c1-4f29": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n\nThe deterministic Pass 3 of code-review ignores project routing. `code_review_decide` passes `registry.threshold_for` as a bare callable and calls `registry.nit_suppressed_criteria()` with no arguments (`src/rebar/llm/code_review/workflow_ops.py:419,427`), so both read the **packaged** routing map and a project overlay's threshold / blocking / nit-suppression re-tunes are dropped \u2014 even though those resolvers already accept an optional routing map (`src/rebar/llm/code_review/registry.py:309-343`) and `registry.effective_routing(repo_root)` already exists on `origin/main` (`registry.py:171-176`). Third of five seams (root cause on superseded bug 8a4b).\n\n## Approach\n\nPure wiring \u2014 thread the repository-effective routing map into the two Pass-3 resolvers:\n\n- In `code_review_decide`, compute `routing = registry.effective_routing(ctx.repo_root)`\n  (`ctx.repo_root` is already used in this function at `workflow_ops.py:414`).\n- Bind that map into the `threshold_for` callable handed to `pass3_over_findings` (e.g.\n  `functools.partial(registry.threshold_for, routing_map=routing)`), and pass it to\n  `registry.nit_suppressed_criteria(routing)`.\n\nNo `registry.py` change is needed \u2014 the optional `routing_map` parameters landed with story 5065, and `effective_routing` is on `origin/main` today (cited above).\n\n**Rejected alternative.** Re-implementing routing resolution inside `workflow_ops` \u2014 the shared resolvers already exist and are the single source of truth; duplicating them would diverge from plan-review's routing semantics.\n\n## Scope\n\n- `src/rebar/llm/code_review/workflow_ops.py` \u2014 thread `effective_routing(ctx.repo_root)` into the\n  Pass-3 `threshold_for` binding and `nit_suppressed_criteria` call.\n- `tests/unit/test_code_review_project_criteria.py` \u2014 extend this shared test file (a new file\n  first created earlier in the stack; this ticket appends its Pass-3 routing cases). This ticket\n  **depends on** child 2 `[rebar:761e-5af2-ed57-408a]`, which will introduce both the synthetic-repo\n  fixture and the logical `project.<name>` attribution on code-review findings; the Pass-3 tests\n  here consume a finding carrying that logical id.\n\n## Testing\n\n- Happy path (routing): a synthetic repo re-tunes `project.foo` (lower block threshold + blocking,\n  and separately `nit_suppressed`); assert Pass 3 blocks / demotes the project finding per the\n  **project** routing, not the packaged default. The routed finding carries the logical\n  `project.foo` id that child 2 `[rebar:761e-5af2-ed57-408a]` will attribute.\n- Parity: with no overlay, Pass-3 dispositions are byte-identical to today (packaged-default path).\n\nTier: unit; feeds deterministic findings (carrying logical `project.foo`) through `code_review_decide` with a synthetic effective routing \u2014 no LLM.\n\n## Acceptance Criteria\n\n- [ ] Project routing (threshold / blocking / nit-suppression) governs the deterministic Pass 3\n      for a project finding; verified by\n      `rtk .venv/bin/pytest -q tests/unit/test_code_review_project_criteria.py -k routing`.\n- [ ] With no overlay, Pass-3 dispositions are unchanged (parity); verified by the same `-k routing`\n      selector asserting the packaged-default path.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Thread repository-effective routing into code-review Pass 3"
+      },
       "created_at": "2026-08-15T14:59:59Z",
       "jira_key": "REB-1448",
+      "peer_parent": "REB-1442",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:59Z"
     },
     "58f2-b6ed-363e-4608": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nAn LLM plan review can consume the full model cost, return `PASS`, and still leave the reviewed ticket without a signed plan-review attestation unless signing was separately requested. That discards the review's durable gate artifact: the subsequent claim path cannot distinguish the paid, passing review from no review at all and may require another billable run or a manual recovery step.\n\nThe intended contract is already stated by the dedicated `rebar review-plan` documentation and library docstring: a non-blocking PASS signs the plan-review attestation consumed by the claim gate. All public routes that perform the same billable plan review must converge on one default: sign a fresh attestation after PASS. Deliberately skipping the signature must be explicit, visible, and exceptional.\n\n**Scope decision (2026-07-24): MCP is OUT of scope for this epic.** The MCP `review_plan` tool derives signing from server read-only mode (`sign=not ro`, `src/rebar/_mcp_llm.py`) and exposes no caller-facing `sign` parameter. Adding one \u2014 plus the machine-readable read-only unsigned reason \u2014 is a distinct public-contract change to a different boundary, with its own generated-reference and tool-schema consequences. It is split out rather than carried here. This epic now covers the **CLI** and **library** plan-review boundaries only.\n\n## Reproduction Steps\n1. Create or select an open, non-exempt ticket with a reviewable plan and no current plan-review attestation.\n2. Run the plan-review operation through a public plan-review route without an explicit no-sign option.\n3. Allow the LLM review to complete with verdict `PASS`.\n4. Run `rebar verify-signature <ticket-id> --output json`.\n5. Observe that verification reports the ticket as unsigned even though the full review cost was incurred and no opt-out was requested.\n\n## Expected Behavior\nEvery mutating public plan-review entry point signs and persists a plan-review attestation by default when the final verdict is a signable, non-degraded `PASS`. The attestation binds the reviewed material fingerprint and verified source SHA exactly as the claim gate expects.\n\nSkipping signing requires an explicit opt-out at the relevant boundary: `--no-sign` for CLI use, `sign=False` for library use. The output clearly states whether the attestation was signed and, when deliberately skipped, why.\n\n## Actual Behavior\nThe default behavior is correct on the CLI and library routes, but nothing at the real parser/API boundary PINS it: a future refactor could silently flip the default with no test failing. The signing default is therefore an undefended invariant rather than a defect in itself.\n\n## Approach\n1. Inventory the CLI dispatcher, the dedicated `review-plan` command, and the library `review_plan` call paths and identify where the default changes or the signing wrapper is bypassed.\n2. Route every mutating plan-review surface through the same sign-on-PASS finalization seam. Keep the structural guards that prohibit signatures for BLOCK, INDETERMINATE, degraded, local/unattested-source, and otherwise non-signable results.\n3. Make deliberate unsigned execution explicit at each public boundary. CLI exposes `--no-sign`; the library exposes `sign=False`.\n4. Preserve idempotent reuse of an already-current attestation. A default invocation should neither rerun the LLM nor emit a duplicate signature when the claim gate already accepts the current attestation.\n5. Preserve signing-failure behavior: a PASS whose signature persistence was attempted but failed is not reported as ordinary success. It returns the established retryable failure disposition and points to the non-LLM `sign-review` recovery path when the PASS sidecar remains current.\n6. Update user, CLI, and LLM-framework documentation so the default, opt-out syntax, non-signable verdicts, and recovery behavior match the implementation.\n\nRejected: leaving signing opt-in to avoid ticket writes. The review is already a gate operation whose purpose is to produce the claim-consumable attestation; callers needing a pure read have an explicit no-sign mechanism. Rejected: signing BLOCK, INDETERMINATE, degraded, or local-source results, because those are not certifiable PASS outcomes. Rejected (2026-07-24): carrying the MCP `sign` opt-out here \u2014 see the scope decision above.\n\n## Scope\n- `src/rebar/_cli/_llm_commands.py`\n- `src/rebar/llm/plan_review/__init__.py`\n- `src/rebar/llm/plan_review/attest.py`\n- plan-review dispatcher/finalization modules found during the call-path inventory\n- `tests/interfaces/lifecycle/test_plan_review_gate.py`\n- `tests/interfaces/lifecycle/test_exit_codes.py`\n- library surface tests for plan review\n- `docs/cli-reference.md`\n- `docs/user-guide.md`\n- `docs/llm-framework.md`\n- `docs/plan-review-gate.md`\n\nExplicitly NOT in scope: `src/rebar/_mcp_llm.py`, MCP surface tests, and generated MCP reference inputs/outputs.\n\n## Testing / Verification\n- Unit tests cover sign-on-PASS and never-sign verdict/source guards at the shared finalization seam.\n- CLI tests exercise default signing and explicit `--no-sign` through the actual argument parser and dispatcher.\n- Library contract tests exercise default `sign=True` and explicit `sign=False`.\n- An end-to-end lifecycle test runs a passing plan review through the real CLI route, verifies the resulting signature, and then proves the claim gate accepts it without a second LLM call.\n- Documentation/help drift checks pin the default and every supported opt-out/recovery path.\n\n## Acceptance Criteria\n- [ ] A non-exempt ticket receiving a non-degraded PASS through each mutating public plan-review entry point (CLI `review-plan`, library `review_plan`) gets a persisted plan-review attestation by default; interface tests verify the attestation is present and claim-valid.\n- [ ] An end-to-end lifecycle test invokes the real CLI `review-plan` route without an opt-out, verifies the attestation matches the current material fingerprint, and proves a subsequent `rebar claim` succeeds without another LLM call.\n      (Note: the epic's original wording named an \"affected `rebar review` plan route\". No such\n      route exists \u2014 `rebar review` is the separate `review_ticket` op, `_cli/__init__.py:413` \u2014\n      so the e2e was written against the real `review-plan` CLI route.)\n- [ ] CLI unsigned execution requires the explicit `--no-sign` flag; parser tests prove omission signs and presence deliberately skips signing.\n- [ ] Library unsigned execution requires explicit `sign=False`; contract tests prove the default is `sign=True`.\n- [ ] BLOCK, INDETERMINATE, and degraded results remain unsigned, and explicit `sign=False`\n      withholds the signature; table-driven tests verify each guard, including a direct\n      `attest.sign_plan_review` refusal test so the guard is pinned at the artifact that owns\n      it rather than at one caller.\n      **Scope amendment (2026-07-24, audited):** this criterion originally also asserted that\n      *exempt* and *unattested local-source* results remain unsigned. Investigation proved\n      BOTH assert behavior that does not hold on current main, and each is a defect in its own\n      right rather than missing coverage of this epic's invariant. They are DELEGATED, not\n      dropped:\n      - `--source local` signs a claim-valid attestation with `verified_at_sha=None` ->\n        5128-0856-d80f-4eb6 (melancholy-firstborn-shihtzu). Root cause proven; repair blocked\n        on a suite-wide decision (the offline suite defaults to `source=local`).\n      - a `bug` returns `runner='pydantic_ai'`, runs a full review and signs, so the\n        `runner != \"exempt\"` guard never engages -> 26a4-a0e8-e539-464d (quibbling-bionic-olm).\n      Pinning either as-is would have encoded a defect as expected behavior.\n- [ ] A PASS with an attempted signature-persistence failure returns the established retryable nonzero disposition and identifies `sign-review` as the recovery path; `tests/interfaces/lifecycle/test_exit_codes.py` verifies the behavior.\n- [ ] Re-running the default operation with a current claim-valid attestation reuses it without an LLM call or duplicate signature event; an interface test verifies both conditions.\n- [ ] `rebar review-plan --help` states that PASS signs by default and names the explicit unsigned exception; a help drift test verifies the generated text.\n- [ ] `docs/cli-reference.md`, `docs/user-guide.md`, `docs/llm-framework.md`, and `docs/plan-review-gate.md` accurately describe sign-on-PASS, explicit opt-out, never-sign outcomes, and `sign-review` recovery; documentation checks pass.\n- [ ] `make lint`, `make typecheck`, and the default non-integration pytest suite exit zero.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Plan review PASS does not sign an attestation by default on every public route"
+      },
       "created_at": "2026-08-15T14:59:59Z",
       "jira_key": "REB-1416",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:59Z"
     },
@@ -13565,8 +13627,30 @@
       "updated_at": "2026-08-15T15:00:03Z"
     },
     "5977-7ddb-40a7-47ed": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\n`src/rebar/_commands/composer.py` (~line 112) validates titles with `if not title:`, which is falsy only for the empty string \u2014 a whitespace-only title such as `\"   \"` is truthy and is accepted. Per the decision for this epic, whitespace-only titles must be rejected. Separately, cross-facade parity tests use only simple ASCII values, and the create path's empty/`>255` title rejection has code enforcement but only an edit-path test, leaving input-handling contracts thinly covered.\n\n## What\n\nCommitted policy decisions (so the test oracle is unambiguous):\n- **Whitespace validation:** reject a title iff `title.strip()` is empty (covers `\"\"`,\n  spaces, tabs, newlines). A title with surrounding whitespace but real content (e.g.\n  `\"  hi  \"`) is ACCEPTED and **stored as-is** \u2014 validation must not silently mutate the\n  value, so round-trip assertions expect the original bytes back.\n- **Unicode normalization:** **preserve as-is (byte-identical round-trip); do NOT\n  normalize** \u2014 with ONE documented pre-existing exception: `create_core`/`edit_core`\n  already substitute `U+2192 (\u2192)` \u2192 `->` (`src/rebar/_commands/composer.py:121` and\n  `:385`). That substitution is OUT OF SCOPE for this story and is retained; U+2192 is\n  therefore EXCLUDED from the byte-identity corpus (or included only as an explicit\n  \"documented normalization\" case asserting `\u2192` becomes `->`). Composed (NFC) and\n  decomposed (NFD) forms of the same string are otherwise treated as distinct values,\n  each round-tripping unchanged \u2014 the oracle is per-form byte-identity, not cross-form\n  equality.\n- **Rejection identity (across facades):** \"rejected identically\" does NOT mean an\n  identical wire representation \u2014 it means all three facades reject with the SAME\n  human-readable message substring on their facade-appropriate surface: CLI \u2192 nonzero\n  exit + message on stderr; library \u2192 `CommandError` (or the documented exception type)\n  carrying the message; MCP \u2192 an error result carrying the message. The shared invariant\n  is the message + \"all three reject,\" not a shared exit code.\n\nThen:\n- Reject whitespace-only titles consistently across the CLI, library, and MCP\n  create/edit surfaces.\n- Add a create-path test for empty and `>255`-char title rejection.\n- Add a curated cross-facade text corpus for values representable through all three\n  facades; handle argv-impossible values (NUL) in library/MCP tests only.\n\n## Scope\n\n- `src/rebar/_commands/composer.py` (title validation)\n- `tests/interfaces/facades/` (corpus + create-path validation tests)\n\n## Acceptance Criteria\n\n- [ ] A whitespace-only title (spaces/tabs/newlines) is rejected on create AND edit\n      across CLI, library, and MCP, with a clear error.\n- [ ] Create-path tests assert rejection of an empty title and a `>255`-char title.\n- [ ] A title with surrounding whitespace + content (`\"  hi  \"`) is accepted and stored\n      byte-identically (no silent trimming).\n- [ ] A shared corpus (leading `-`/`--`, quotes, backslashes, LF/CRLF, emoji/non-BMP,\n      NFC and NFD forms of one string as SEPARATE byte-identity cases, and a string of\n      \u22651000 characters) round-trips byte-identically \u2014 EXCEPT U+2192, handled per the\n      documented `\u2192`\u2192`->` exception \u2014 or is rejected identically (per the rejection-\n      identity definition above) across all three facades; persisted/replayed content and\n      structured output are asserted, with no stdout/stderr contamination.\n- [ ] NUL / other argv-impossible values are covered via library/MCP tests only.\n- [ ] Breaking-change handling: this is a user-visible tightening (callers passing\n      whitespace previously succeeded). Document a back-out/expand-contract note. Run a\n      concrete one-off store scan run pre-merge:\n      `rebar list --output json | jq -e '[.[] | select(.title | test(\"^[[:space:]]*$\"))] | length == 0'`\n      (exit 0 = zero whitespace-only titles \u2192 no migration needed). If it exits nonzero,\n      file a migration sub-task before landing.\n- [ ] User-facing docs updated with concrete, grep-able artifacts: a `CHANGELOG.md` entry\n      mentioning the whitespace-title rejection (`grep -qi 'whitespace' CHANGELOG.md`) and\n      the CLI `create`/`edit` help text updated to state the non-empty-after-trim rule\n      (verifiable by `rebar create --help` containing the rule).\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Reject whitespace-only titles + create-path validation + cross-facade text corpus"
+      },
       "created_at": "2026-08-15T15:00:04Z",
       "jira_key": "REB-1062",
+      "peer_parent": "REB-1064",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:04Z"
     },
@@ -26150,10 +26234,24 @@
     },
     "bf7c-333e-29b0-4ee4": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nDiscovered while validating courageous-deserving-manatee. The exact extras-enforced default-suite command selected 13,600 tests and finished with one unrelated failure after 1:33:35: `tests/unit/test_test_suite_store_isolation.py::test_plan_review_outage_unit_test_does_not_write_ambient_store`.\n\n## Proven failure\nThe outer helper launches `tests/unit/test_gate_engine_cutover.py::test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate` in a captured subprocess with a 90-second timeout. The inner pytest prints `.[100%]`, proving its assertion completed, but intermittently does not terminate; `subprocess.communicate()` times out and kills the Python process. The focused outer node reproduced the same `TimeoutExpired` in 105.55s under `REBAR_REQUIRE_EXTRAS=1`. Without a code change, a later focused execution passed in 1.49s, proving a flaky shutdown/liveness class rather than an authorship regression. The identical full suite without the environment guard had already passed 13,575 tests in 1:29:34.\n\nThis differs from closed bug 89d5-61da-b621-47f8: that ticket added a CI hang watchdog but did not identify or fix this named nested-process shutdown failure.\n\n## Plan\n- Build a bounded reproduction around the captured inner pytest process and inspect its process/thread/pipe ownership after the test reports 100%.\n- Identify the resource that prevents interpreter exit (thread, child process, inherited pipe, or plugin teardown) and prove the mechanism with a discriminating A/B under `REBAR_REQUIRE_EXTRAS=1`.\n- Fix the lifecycle owner rather than extending the 90-second timeout or retrying until green.\n\n## Acceptance Criteria\n- [ ] A deterministic or fault-injected RED test names the resource that keeps the successful inner pytest process alive.\n- [ ] The fix makes the captured inner process exit normally and preserves the ambient-store non-mutation assertions.\n- [ ] A repeated focused stress run under `REBAR_REQUIRE_EXTRAS=1` completes without timeout.\n- [ ] The CI-faithful extras-enforced default-suite selection passes without this timeout.\n\n## Non-overlap\nDo not modify `src/rebar/attest/authorship.py` or `src/rebar/attest/authorship_resolution.py`; this is independent test-lifecycle work.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "REBAR_REQUIRE_EXTRAS store-isolation child can hang after pytest reports 100%"
       },
       "created_at": "2026-08-16T11:34:47Z",
@@ -27952,6 +28050,13 @@
       "peer_parent": "REB-2658",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:51Z"
+    },
+    "cf0f-2e26-87ca-47a8": {
+      "created_at": "2026-08-16T15:34:30Z",
+      "jira_id": "4588896",
+      "jira_key": "REB-3057",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T15:34:33Z"
     },
     "cf14-d845-075a-4f74": {
       "created_at": "2026-08-15T15:11:51Z",
@@ -33523,6 +33628,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:04Z"
     },
+    "fb03-2609-ef83-4b41": {
+      "created_at": "2026-08-16T15:34:35Z",
+      "jira_id": "4588897",
+      "jira_key": "REB-3058",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T15:34:37Z"
+    },
     "fb2e-2aa1-9e0f-457a": {
       "baseline": {
         "assignee": null,
@@ -35995,6 +36107,8 @@
     "REB-3054": "5b32-37c4-f99a-4315",
     "REB-3055": "da5e-13f1-9aad-4cc9",
     "REB-3056": "bf7c-333e-29b0-4ee4",
+    "REB-3057": "cf0f-2e26-87ca-47a8",
+    "REB-3058": "fb03-2609-ef83-4b41",
     "REB-306": "c647-e14c-dd45-4e2a",
     "REB-307": "c768-a0ad-0567-412c",
     "REB-308": "c799-3a71-3bcd-433e",
