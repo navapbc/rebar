@@ -373,7 +373,9 @@ def _metric_invoke(
     or returns unparseable output fails open to abstain. (Lands the plumbing; the
     rich per-function complexity path is a follow-up.)
     """
-    res = harness.run_tool([binary, "--format", "json", str(repo_root)], backend=BACKEND_METRIC)
+    res = harness.run_tool(
+        [binary, "--by-file", "--format", "json", str(repo_root)], backend=BACKEND_METRIC
+    )
     if res.abstained:
         return [
             res.as_abstain(

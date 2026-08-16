@@ -17,6 +17,7 @@ Every emitted record must pass ``ev.validate``.
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from pathlib import Path
@@ -307,6 +308,87 @@ def test_unconfigured_custom_language_is_skipped_with_coverage(tmp_path: Path) -
 
 
 # ── metric backend (scc/lizard absent -> no_tool) ────────────────────────────
+
+
+def test_metric_backend_requests_per_file_json_and_emits_only_over_cutoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from rebar.grounding import harness as _h
+
+    large = tmp_path / "large.py"
+    boundary = tmp_path / "boundary.py"
+    large.write_text("x = 1\n" * 801)
+    boundary.write_text("x = 1\n" * 800)
+    assert len(large.read_text().splitlines()) == 801
+    assert len(boundary.read_text().splitlines()) == 800
+
+    captured: list[list[str]] = []
+
+    def argv_faithful_scc(cmd: list[str], **_kwargs) -> _h.RunResult:
+        captured.append(cmd)
+        files = []
+        if "--by-file" in cmd:
+            files = [
+                {"Location": str(large), "Code": 801},
+                {"Location": str(boundary), "Code": 800},
+            ]
+        return _h.RunResult(
+            backend=reg_mod.BACKEND_METRIC,
+            completed=True,
+            returncode=0,
+            stdout=json.dumps([{"Name": "Python", "Files": files}]),
+        )
+
+    monkeypatch.setattr(engine_b, "_resolve_binary", lambda _candidates: "scc")
+    monkeypatch.setattr(engine_b.harness, "run_tool", argv_faithful_scc)
+    detectors = list(reg_mod.load_registry().by_backend(reg_mod.BACKEND_METRIC))
+
+    records = engine_b._run_metric(detectors, tmp_path)
+
+    matches = [r for r in records if r["outcome"] == ev.OUTCOME_MATCH]
+    assert len(matches) == 1
+    assert matches[0]["detector_id"] == "rebar.builtin.smell.metric-oversize"
+    assert matches[0]["location"] == {"file": str(large)}
+    assert matches[0]["coverage"] == {"backend": reg_mod.BACKEND_METRIC, "status": ev.STATUS_RAN}
+    assert matches[0]["detail"] == f"{large}: 801 LOC > 800"
+    assert len(captured) == 1
+    assert captured[0][0] == "scc"
+    assert "--by-file" in captured[0]
+    assert captured[0][-1] == str(tmp_path)
+    _all_valid(records)
+
+
+@pytest.mark.parametrize(
+    ("run_result", "expected_reason"),
+    [
+        ({"completed": False, "abstain_reason": "timeout"}, "timeout"),
+        ({"completed": True, "returncode": 2, "stdout": ""}, "other"),
+        ({"completed": True, "returncode": 0, "stdout": "not-json"}, "parse_error"),
+    ],
+)
+def test_metric_backend_present_tool_failures_remain_fail_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    run_result: dict[str, object],
+    expected_reason: str,
+) -> None:
+    from rebar.grounding import harness as _h
+
+    monkeypatch.setattr(engine_b, "_resolve_binary", lambda _candidates: "scc")
+    monkeypatch.setattr(
+        engine_b.harness,
+        "run_tool",
+        lambda _cmd, **_kwargs: _h.RunResult(backend=reg_mod.BACKEND_METRIC, **run_result),
+    )
+    detectors = list(reg_mod.load_registry().by_backend(reg_mod.BACKEND_METRIC))
+
+    records = engine_b._run_metric(detectors, tmp_path)
+
+    assert len(records) == 1
+    assert records[0]["outcome"] == ev.OUTCOME_ABSTAIN
+    assert records[0]["reason"] == expected_reason
+    assert records[0]["coverage"]["backend"] == reg_mod.BACKEND_METRIC
+    _all_valid(records)
 
 
 def test_metric_backend_no_tool_when_absent(js_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
