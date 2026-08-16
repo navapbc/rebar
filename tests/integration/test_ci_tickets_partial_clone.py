@@ -7,6 +7,7 @@ import re
 import socket
 import subprocess
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,8 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HISTORICAL_BYTES = 141 * 1024 * 1024
+_SMALL_HISTORICAL_BYTES = 1024
+_SMALL_PACK_LIMIT_KIB = 1024
 _STANDALONE_LIMIT = 102400
 
 
@@ -60,9 +63,13 @@ class TicketServer:
     historical_blob: str
 
 
-@pytest.fixture(scope="module")
-def ticket_server(tmp_path_factory: pytest.TempPathFactory) -> TicketServer:
-    root = tmp_path_factory.mktemp("tickets-partial-clone")
+def _ticket_server(
+    tmp_path_factory: pytest.TempPathFactory,
+    *,
+    fixture_name: str,
+    historical_bytes: int,
+) -> Iterator[TicketServer]:
+    root = tmp_path_factory.mktemp(fixture_name)
     source = root / "source"
     source.mkdir()
     _git(source, "init", "--quiet", "--initial-branch=main")
@@ -79,7 +86,7 @@ def ticket_server(tmp_path_factory: pytest.TempPathFactory) -> TicketServer:
     _git(tracker, "config", "user.email", "ci@example.com")
     _git(tracker, "config", "user.name", "CI fixture")
     large = tracker / "historical.bin"
-    _write_incompressible(large, _HISTORICAL_BYTES)
+    _write_incompressible(large, historical_bytes)
     _git(tracker, "add", "historical.bin")
     _git(tracker, "commit", "--quiet", "-m", "large historical payload")
     historical_blob = _git(tracker, "rev-parse", "HEAD:historical.bin")
@@ -150,6 +157,24 @@ def ticket_server(tmp_path_factory: pytest.TempPathFactory) -> TicketServer:
         except subprocess.TimeoutExpired:
             daemon.kill()
             daemon.wait()
+
+
+@pytest.fixture(scope="module")
+def ticket_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TicketServer]:
+    yield from _ticket_server(
+        tmp_path_factory,
+        fixture_name="tickets-partial-clone",
+        historical_bytes=_HISTORICAL_BYTES,
+    )
+
+
+@pytest.fixture(scope="module")
+def small_ticket_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TicketServer]:
+    yield from _ticket_server(
+        tmp_path_factory,
+        fixture_name="tickets-partial-clone-small",
+        historical_bytes=_SMALL_HISTORICAL_BYTES,
+    )
 
 
 def _init_client(path: Path) -> None:
@@ -255,37 +280,52 @@ def _run_guard(repo: Path, workflow: Path, job: str, env_name: str, limit: int) 
 
 
 def test_named_origin_filter_is_negotiated_and_omits_blob(
-    tmp_path: Path, ticket_server: TicketServer
+    tmp_path: Path, small_ticket_server: TicketServer
 ) -> None:
     client = tmp_path / "named"
     trace = _fetch(
         client,
-        ticket_server,
+        small_ticket_server,
         named_origin=True,
         named_filter=_standalone_checkout_filter(),
     )
     _assert_filter_protocol(trace)
-    _assert_historical_blob_missing(client, ticket_server)
+    _assert_historical_blob_missing(client, small_ticket_server)
 
 
 def test_direct_depth_filter_is_negotiated_and_omits_blob(
-    tmp_path: Path, ticket_server: TicketServer
+    tmp_path: Path, small_ticket_server: TicketServer
 ) -> None:
     client = tmp_path / "depth"
-    trace = _fetch(client, ticket_server, *_gerrit_fetch_options("require-ticket"))
+    trace = _fetch(client, small_ticket_server, *_gerrit_fetch_options("require-ticket"))
     _assert_filter_protocol(trace)
-    _assert_historical_blob_missing(client, ticket_server)
+    _assert_historical_blob_missing(client, small_ticket_server)
 
 
 def test_direct_full_filter_is_negotiated_and_omits_blob(
-    tmp_path: Path, ticket_server: TicketServer
+    tmp_path: Path, small_ticket_server: TicketServer
 ) -> None:
     client = tmp_path / "full-filtered"
-    trace = _fetch(client, ticket_server, *_gerrit_fetch_options("verify-identity"))
+    trace = _fetch(client, small_ticket_server, *_gerrit_fetch_options("verify-identity"))
     _assert_filter_protocol(trace)
-    _assert_historical_blob_missing(client, ticket_server)
+    _assert_historical_blob_missing(client, small_ticket_server)
 
 
+def test_small_server_full_fetch_keeps_historical_blob_below_one_mib(
+    tmp_path: Path, small_ticket_server: TicketServer
+) -> None:
+    client = tmp_path / "small-full"
+    _fetch(client, small_ticket_server)
+    historical = _run(
+        ["git", "cat-file", "-e", small_ticket_server.historical_blob],
+        cwd=client,
+        check=False,
+    )
+    assert historical.returncode == 0, "full fetch must include the small historical blob"
+    assert _size_pack_kib(client) < _SMALL_PACK_LIMIT_KIB
+
+
+@pytest.mark.xdist_group("large_ticket_server")
 def test_standalone_guard_rejects_full(tmp_path: Path, ticket_server: TicketServer) -> None:
     client = tmp_path / "standalone-full"
     _fetch(client, ticket_server)
@@ -299,6 +339,7 @@ def test_standalone_guard_rejects_full(tmp_path: Path, ticket_server: TicketServ
     )
 
 
+@pytest.mark.xdist_group("large_ticket_server")
 def test_standalone_guard_accepts_blobless(tmp_path: Path, ticket_server: TicketServer) -> None:
     client = tmp_path / "standalone-blobless"
     _fetch(client, ticket_server, "--filter=blob:none")
@@ -312,9 +353,7 @@ def test_standalone_guard_accepts_blobless(tmp_path: Path, ticket_server: Ticket
     )
 
 
-def test_gerrit_verify_has_no_standalone_pack_guard(
-    tmp_path: Path, ticket_server: TicketServer
-) -> None:
+def test_gerrit_verify_has_no_standalone_pack_guard() -> None:
     """The gerrit-verify tickets-pack guard was removed deliberately (a092).
 
     The `tickets` branch is append-only full-history (ADR 0051), so its pack only
@@ -335,18 +374,20 @@ def test_gerrit_verify_has_no_standalone_pack_guard(
 
 
 @pytest.mark.parametrize("lane", ["standalone", "gerrit"])
-def test_identity_no_promisor_fetch(tmp_path: Path, ticket_server: TicketServer, lane: str) -> None:
+def test_identity_no_promisor_fetch(
+    tmp_path: Path, small_ticket_server: TicketServer, lane: str
+) -> None:
     client = tmp_path / f"identity-{lane}"
     if lane == "standalone":
         _fetch(
             client,
-            ticket_server,
+            small_ticket_server,
             named_origin=True,
             named_filter=_standalone_checkout_filter(),
         )
     else:
-        _fetch(client, ticket_server, *_gerrit_fetch_options("verify-identity"))
-    _assert_historical_blob_missing(client, ticket_server)
+        _fetch(client, small_ticket_server, *_gerrit_fetch_options("verify-identity"))
+    _assert_historical_blob_missing(client, small_ticket_server)
     tracker = client / ".tickets-tracker"
     _git(client, "worktree", "add", "-B", "tickets", str(tracker), "origin/tickets")
     before = _git(client, "count-objects", "-v")
@@ -362,17 +403,17 @@ def test_identity_no_promisor_fetch(tmp_path: Path, ticket_server: TicketServer,
 
 
 def test_blobless_tickets_reconverges_and_pushes(
-    tmp_path: Path, ticket_server: TicketServer
+    tmp_path: Path, small_ticket_server: TicketServer
 ) -> None:
     client = tmp_path / "client"
     _fetch(
         client,
-        ticket_server,
+        small_ticket_server,
         named_origin=True,
         named_filter=_standalone_checkout_filter(),
     )
-    _assert_historical_blob_missing(client, ticket_server)
-    _git(client, "remote", "set-url", "--push", "origin", str(ticket_server.bare))
+    _assert_historical_blob_missing(client, small_ticket_server)
+    _git(client, "remote", "set-url", "--push", "origin", str(small_ticket_server.bare))
     tracker = client / ".tickets-tracker"
     _git(client, "worktree", "add", "-B", "tickets", str(tracker), "origin/tickets")
     _git(client, "config", "merge.ours.driver", "true")
@@ -382,7 +423,7 @@ def test_blobless_tickets_reconverges_and_pushes(
     _git(tracker, "commit", "--quiet", "-m", "local event")
 
     remote = tmp_path / "remote-writer"
-    _run(["git", "clone", "--quiet", str(ticket_server.bare), str(remote)], cwd=tmp_path)
+    _run(["git", "clone", "--quiet", str(small_ticket_server.bare), str(remote)], cwd=tmp_path)
     _git(remote, "config", "user.email", "ci@example.com")
     _git(remote, "config", "user.name", "CI fixture")
     _git(remote, "checkout", "--quiet", "tickets")
@@ -398,4 +439,6 @@ def test_blobless_tickets_reconverges_and_pushes(
     assert (tracker / "remote-event.json").read_text(encoding="utf-8") == '{"side":"remote"}\n'
     assert (tracker / ".bridge_state" / "cursor").read_text(encoding="utf-8") == "local\n"
     _git(tracker, "push", "origin", "HEAD:tickets")
-    assert _git(ticket_server.bare, "rev-parse", "tickets") == _git(tracker, "rev-parse", "HEAD")
+    assert _git(small_ticket_server.bare, "rev-parse", "tickets") == _git(
+        tracker, "rev-parse", "HEAD"
+    )
