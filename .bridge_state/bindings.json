@@ -11138,8 +11138,16 @@
       "updated_at": "2026-08-15T14:58:18Z"
     },
     "4a0e-5841-1523-474a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n\nThe original epic problem: the plan-review verify pass chunks findings token-naively. Bespoke used a hard-coded `batch_size=12` (`range(0, len(findings), 12)`); the workflow does ONE aggregate call, which a pathological huge-findings ticket could push past the model context window. Replace the magic count with PRINCIPLED, token-based chunking \u2014 estimate the verify request vs the selected model's window (reusing the `sizing.py` machinery), splitting only when needed. This depends on WS1 (single verify path) and WS2 (the per-step `model:` whose window we size against).\n\n## What\n\n- Replace any count-based batching with a token estimate vs the verify step's resolved model window,\n  reusing `largest_window_tokens(model)` + the `est_tokens` (chars/4) estimator \u2014 no new magic constant,\n  no new tokenizer dependency.\n- Budget formula: `budget = floor(largest_window_tokens(model) * HEADROOM)`, `HEADROOM` a named config\n  knob `verify.verify_window_headroom` (default 0.8). A chunk fits when\n  `est_tokens(system_prompt + verify_instructions(chunk)) + projected_output(chunk) <= budget`.\n- Projected output: `projected_output(chunk) = len(chunk) * PER_FINDING_VERIFY_TOKENS`, a named\n  per-finding reserve sized from the `plan_review_verification` schema (~256 tok/finding, documented).\n- `<= budget` \u2192 ONE aggregate verify call (unchanged). `> budget` \u2192 minimal principled splits that\n  preserve GLOBAL finding enumeration and re-merge by finding `index` (existing merge contract).\n- Single-oversized-finding edge case: escalate from the RESOLVED verify model via\n  `models_at_or_above(resolved_verify_model)`; if still too large at the top of the ladder, mark the\n  finding INDETERMINATE (non-blocking, surfaced) \u2014 never silently drop.\n\n## Scope\n\nIn scope: the token-budget chunking decision in the workflow verify path, the `verify.verify_window_headroom` config key, the `PER_FINDING_VERIFY_TOKENS` reserve, the oversized-finding escalation/INDETERMINATE path, and tests (via a deterministic window-shrink seam). Out of scope: WS1 migration, WS2 model/editor work, WS4 coach nit. Depends on WS1 (single path) and WS2 (resolved per-step model). Touches `src/rebar/llm/plan_review/sizing.py`, `workflow_ops.py` (the verify-inputs op), and config.\n\n## Acceptance Criteria\n\n- [ ] A token estimate (no magic `batch_size` constant) decides verify chunking, reusing\n      `largest_window_tokens` + `est_tokens`.\n- [ ] The fit test is `est_tokens(request) + projected_output <= floor(window * HEADROOM)`, where\n      `HEADROOM` is the config knob `verify.verify_window_headroom` (default 0.8) and\n      `projected_output = len(chunk) * PER_FINDING_VERIFY_TOKENS` (a named per-finding reserve).\n- [ ] `<= budget` findings \u2192 one aggregate verify call (unchanged behavior).\n- [ ] `> budget` findings \u2192 minimal principled splits that preserve global enumeration and re-merge\n      verifications by finding `index`; a test (via a deterministic window-shrink seam) asserts\n      principled splitting, NOT count-12.\n- [ ] The `> budget` test also asserts the chars/4 estimate plus headroom keeps a real request under\n      the actual model window (the estimator safety margin is grounded, not assumed).\n- [ ] A single finding larger than the budget escalates from the resolved verify model via\n      `models_at_or_above`; if still too large at the top of the ladder it is marked INDETERMINATE\n      (non-blocking, surfaced) \u2014 never silently dropped; a test covers this path.\n- [ ] `make lint` + `make check` + the full test suite pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "WS3: Principled token-based chunking for the workflow Pass-2 verify"
+      },
       "created_at": "2026-08-15T14:58:19Z",
       "jira_key": "REB-481",
+      "peer_parent": "REB-438",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:19Z"
     },
@@ -11276,14 +11284,30 @@
       "updated_at": "2026-08-15T14:58:23Z"
     },
     "4a7e-0094-91e7-4413": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\n\nReplace the destructive `git reset --hard origin/tickets` in the unrelated-histories path of `_do_reconverge` with a non-destructive union merge, so local-only ticket commits are never orphaned into the reflog. This makes the reflog non-load-bearing and is what makes stock gc (WU-1) safe by construction.\n\n## Scope (files)\n\n- `src/rebar/_store/sync.py`: in `_do_reconverge`, Path 1 (no merge-base / unrelated\n  histories, ~71-85) replace `reset --hard origin/tickets` with\n  `git merge --allow-unrelated-histories origin/tickets --no-edit`, **reusing the\n  existing diverged-Path-3 conflict handling** (`merge --abort` -> keep local ->\n  hint `fsck`). Do not invent new conflict handling \u2014 extend the proven Path-3 code.\n- Keep `reset --hard` ONLY for the ff-adopt path (`local_ahead` empty, ~90) which\n  discards nothing.\n- Update the module docstring summary line that currently asserts\n  \"unrelated histories -> reset --hard (never a merge)\".\n\n## Depends on\n\nWU-3 (`.gitattributes merge=ours`) so the union merge converges on `bindings.json` instead of conflicting.\n\n## Acceptance Criteria\n\n- [ ] Path 1 uses `git merge --allow-unrelated-histories origin/tickets --no-edit`\n- [ ] Conflict handling reuses Path 3 (`merge --abort`, keep local, hint fsck)\n- [ ] ff-adopt path (`reset --hard`) unchanged; no orphaning `reset --hard` remains\n- [ ] Test: union recovery from unrelated histories loses no local tickets\n- [ ] Full non-integration suite green",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "WU-2: Union-merge (not reset --hard) in sync.py Path 1"
+      },
       "created_at": "2026-08-15T14:58:24Z",
       "jira_key": "REB-120",
+      "peer_parent": "REB-244",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:24Z"
     },
     "4af8-2d88-719e-4478": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nSplit from S4 (rebar:6673). The reconciler's backend-neutral core still reached the Jira vendor field MAPPER directly after the epic landed: outbound_differ + apply_inbound + reconcile_check import adapters/jira/outbound_fields; inbound_differ imports inbound_fields; and outbound_links held the Jira link map. This routes the core MAPPER access through the Backend port via dependency injection (ADR 0035 \u00a7(d)).\n\n## Delivered (mapper entrypoint injected via the port)\n- outbound_differ.compute_outbound_mutations: injected outbound_mapper (Backend-port OutboundMapper), calls map_local_to_remote(); module-level _map_local_to_jira_fields import dropped.\n- inbound_differ.compute_inbound_mutations: injected inbound_mapper, calls map_remote_to_local(); direct _map_jira_to_local_fields import dropped.\n- apply_inbound._build_hard_delete_recreate: resolves the mapper lazily via select_backend(load_config()).outbound.\n- run_differs: production injection point \u2014 obtains the configured Backend once and threads backend.outbound / backend.inbound into both differ phases. Injected params default to None, resolving via the neutral select_backend seam (direct differ-test call sites behave identically).\n- outbound_links._RELATION_TO_JIRA_LINK relocated into adapters/jira/jira_fields.py.\n\n## Scope boundary (documented residual)\nOnly the vendor MAPPER entrypoint is routed through the port. Non-mapping helpers with NO port equivalent stay directly imported by the differ (outbound_fields' _diff_fields/_extract_jira_field/_assignee_matches and inbound value maps), and reconcile_check keeps its lazy internal-helper _load_sibling. These operate on the vendor-shaped snapshot and have no Backend-port method; fully relocating them (or extending the port) is a smaller separate follow-up. The neutrality gate documents this boundary explicitly.\n\n## Acceptance Criteria\n- [ ] outbound_differ.py, inbound_differ.py, apply_inbound.py have NO module-level import of the vendor MAPPER entrypoint (_map_local_to_jira_fields / _map_jira_to_local_fields); they receive it via Backend-port injection \u2014 verified by the AST assertions in tests/unit/rebar_reconciler/test_backend_neutrality.py.\n- [ ] The injected mapper is actually USED by each differ (not bypassed) \u2014 verified by positive injection tests in the neutrality gate (a passed-in fake mapper is exercised).\n- [ ] outbound_links._RELATION_TO_JIRA_LINK is single-sourced in adapters/jira/ (jira_fields.py) and imported from there.\n- [ ] Behaviour-preserving: full reconcile unit+integration suite green; whole test tree still collects cleanly.\n- [ ] make lint && make typecheck && make test green.\n- [Documented residual, not this ticket] Relocating the non-mapping outbound_fields helpers + reconcile_check's lazy load off the core (or onto the port) is a smaller follow-up.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Route reconciler differ/apply core-importer sites off vendor mappers via dependency injection (S4 follow-up)"
+      },
       "created_at": "2026-08-15T14:58:24Z",
       "jira_key": "REB-1482",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:24Z"
     },
@@ -11316,8 +11340,16 @@
       "updated_at": "2026-08-15T14:58:26Z"
     },
     "4b2f-cb7b-ac31-44de": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nMake prompts contract-bearing palette citizens like scripted ops, and represent the single_turn vs agentic distinction precisely so the runner can be written without inventing protocol.\n\n## What\n- `execution_mode` is a CLOSED enum `{single_turn, agentic}` on the PROMPT front-matter (NOT the\n  workflow IR; it is DISTINCT from the existing step `mode:[findings,structured,text]`, which controls\n  output shaping and is unchanged). Document the relationship between the two fields.\n- Runner DISPATCH protocol (`src/rebar/llm/runner.py` + `src/rebar/llm/workflow/runs.py`\n  RunnerAgentStep): `agentic` = the current pydantic_ai tool-using path (unchanged). `single_turn` =\n  ONE `pydantic_ai` model call with NO tools; the resolved prompt is rendered with the step's `with:`\n  inputs marshaled as template variables; the model is asked for structured output validated against\n  the prompt's `outputs` contract (reuse the existing structured-output stack); no tool loop.\n- Surface the resolved prompt's consumes/produces/description in the inspector (reuse S0's path).\n- `outputs` contract change on an override/variant is BREAKING: `validate` flags override-vs-builtin drift.\n\n## Scope\nIn: enum + runner dispatch (both modes) + prompt-contract surfacing + drift flag. Out: deep/runtime validation (S5).\n\n## Acceptance Criteria\n- [ ] `execution_mode` is a `{single_turn,agentic}` enum on prompt front-matter, documented as distinct from step `mode`.\n- [ ] `single_turn` runs exactly one model call with zero tools and returns output validated against the prompt's `outputs` contract; `agentic` is the unchanged tool-using path; both covered by tests.\n- [ ] An agent step surfaces its prompt's contract in the inspector.\n- [ ] `validate` flags an override/variant that changes a prompt's `outputs` contract.\n- [ ] A live `single_turn` prompt produces structured output validated against its `outputs` contract.\n- [ ] A prompt that LACKS `execution_mode` defaults to `agentic` (back-compat) \u2014 tested; the field is otherwise the closed `{single_turn,agentic}` enum, and S3's migration stamps it explicitly on existing prompts.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Prompt contracts in IR/runner + execution_mode + inspector surfacing"
+      },
       "created_at": "2026-08-15T14:58:26Z",
       "jira_key": "REB-122",
+      "peer_parent": "REB-338",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:26Z"
     },
@@ -11370,26 +11402,72 @@
       "updated_at": "2026-08-15T14:58:29Z"
     },
     "4b56-4682-bb34-4fd1": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\nThe base (Pass-1) and verifier (Pass-2) prompts are the shared spine of the gate. Two evidence-backed calibration changes belong here, kept minimal so the architecture's separation of concerns holds.\n\n## What\n- Base prompt: add ONE positive-framed linter/CI-deference line (\"automated tooling already enforces\n  style/format/imports/types; your value is substantive issues they cannot see\"). Justified by the\n  in-repo experiment (recall 2.0->2.33 substantive with fewer nits, Sonnet tier). NOTE: the experiment\n  also found the pink-elephant priming fear NOT SUPPORTED at small scale (n=3 diffs, deterministic reps)\n  \u2014 treat this as DIRECTIONAL, not proven; the durable guard is the eval no-fire case, not the claim.\n- Pass-2 verifier (code-review-verify.md ONLY, not the shared kernel): add domain-agnostic verification\n  discipline \u2014 evidence-contradiction rubric (\"authoritative tone is not evidence\"), caller verification\n  before crediting reachability, step-by-step arithmetic for computed claims, and absence-claim\n  active-search feeding the EXISTING sub-questions (no new axis, no contract change). Guidance prefers\n  AST/LSP/code-graph tools over grep when available, grep as fallback.\n\n## Scope\nEdits to src/rebar/llm/reviewers/code-review-base.md and code-review-verify.md. No kernel/contract change; plan-review's shared verifier untouched. Dropped from the original bundle: verbatim excerpt, threshold-invariance language, fragility naming (compensating mechanisms rebar solves elsewhere).\n\n## Acceptance Criteria\n- [ ] Base prompt has exactly one positive-framed deference line; nit/recall eval passes.\n- [ ] Verifier prompt adds contradiction rubric, caller verification, arithmetic gate, absence search.\n- [ ] Verifier guidance prefers AST/LSP tools when available, falls back to grep.\n- [ ] No change to the shared verification contract or plan-review verifier; plan-review evals green.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Base-prompt + Pass-2 verifier calibration (shared spine)"
+      },
       "created_at": "2026-08-15T14:58:29Z",
       "jira_key": "REB-673",
+      "peer_parent": "REB-677",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:29Z"
     },
     "4b59-3bf9-d4a4-4768": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why / Summary\n\nThe inbound link differ maps Jira `Blocks` issuelinks to the INVERTED rebar relation (`blocks`<->`depends_on`). Latent since f6687adf4 (2026-06-15); UNMASKED when the outbound direction fix (6b25dbead/43d154523) corrected the write path \u2014 the two inversions had been cancelling on round-trip. Result: ~815 inbound link applies/pass are cycle-rejected by rebar's guard, and the reconciler never converges.\n\n## Root cause (proven, LIVE-validated)\n\n- `_diff_links_inbound` (inbound_differ.py:519-527) AND `_diff_link_removals`\n  (outbound_links.py:198-203) both invert inward/outward -> relation.\n- LIVE Jira ground truth: REB-458 (\"0250 blocks ba7e\") carries `outwardIssue: REB-461`\n  with `type.outward == \"blocks\"`. So **outwardIssue+Blocks => rebar `blocks`;\n  inwardIssue+Blocks => rebar `depends_on`.** The code does the OPPOSITE (verified by\n  running the current `_diff_links_inbound` on real REB-461 JSON \u2014 it emits the\n  cycle-causing inverse).\n\n## Chronic-pattern guardrails (this fix MUST NOT repeat prior failures)\n\nPrior link fixes (3f04, c8ed, 3b86) each corrected ONE seam and were validated by a ROUND-TRIP / self-consistency oracle that is invariant under double inversion \u2014 so the mirror stayed broken and every audit read through the inversion. This fix must:\n\n- [ ] Fix BOTH mirror sites in lockstep (inbound add AND removal path).\n- [ ] UNIFY the duplicated direction logic into ONE helper (the inward/outward->relation\n      mapping is copy-pasted in inbound_differ.py and outbound_links.py; `_JIRA_LINK_TO_RELATION`\n      is re-declared in acli_graph.py:53, inbound_differ.py:459). One source of truth so the\n      next inversion cannot reappear on an untouched copy.\n- [ ] Assert ABSOLUTE direction pinned to a captured LIVE-JIRA ground-truth fixture\n      (real REB-458/461 issuelinks JSON), NOT round-trip agreement. A test that asserts\n      \"outbound<->inbound agree\" is banned here \u2014 it passes on inverted code.\n\n## The completeness requirement (a pure branch-swap is NOT sufficient)\n\nMeasured on 17 real tickets: a pure swap eliminates the 30 cycle-rejections but then emits ~all MIRROR-adds (the counterpart already owns the edge; ~400 spurious deps store-wide). The fix must add INVERSE-AWARE CROSS-TICKET dedup: emit an inbound link only if the edge X<->Y is absent in rebar in EITHER equivalent form (X has (blocks,Y) OR Y has (depends_on,X); and the relates_to symmetric case). `compute_inbound_mutations` already receives `local_tickets_by_id`, so the counterpart's deps are available.\n\n- [ ] The dedup map MUST include the FULL local set (incl. archived tickets) \u2014 a residual\n      mirror to archived cf10 in the live prototype was ONLY a map-exclusion artifact;\n      cf10 owns the inverse edge. Verify `local_tickets_by_id` completeness or the fix\n      re-emits mirrors to archived counterparts.\n\n## Reproduction Steps\n\n1. Local ticket A has dep `A blocks B`; both bound to Jira; outbound has (correctly)\n   written REB-A outward Blocks -> REB-B.\n2. Run inbound diff (or a reconcile pass).\n3. Observe: inbound emits `A depends_on B` (inverted) -> rebar cycle-guard rejects it\n   (\"would create a cycle\"). Expected: 0 inbound emits (edge already synced).\n\n- Expected: inbound emits 0 link mutations for an already-synced link (either direction).\n- Actual: inbound emits the inverted relation, cycle-rejected every pass.\n\n## Acceptance Criteria\n\n- [ ] A `_diff_links_inbound` unit test on the CAPTURED LIVE REB-458 issuelinks JSON\n      (outwardIssue Blocks) asserts relation == `blocks`; on REB-461 JSON (inwardIssue\n      Blocks) asserts relation == `depends_on`. RED on current code. Proving command:\n      `pytest tests/unit/rebar_reconciler/diffing/ -k link_direction -q`.\n- [ ] A `_diff_links_inbound` test with the counterpart owning the inverse edge asserts\n      0 emitted mutations (inverse-aware dedup). RED on a pure-swap fix.\n- [ ] The removal-path mirror (`_diff_link_removals`) has an equivalent absolute-direction\n      test. RED on current code.\n- [ ] Existing tests that encode the reversed convention (test_reconcile_roundtrip.py:522,\n      test_link_dedup.py:198) are corrected to the live-Jira shape and pass.\n- [ ] LIVE fix-verification (pre-land): the fixed inbound differ, run against real REB\n      issuelinks for the ~815 affected pairs, emits 0 cycle-rejecting mutations and 0\n      mirror-adds (prototype already validated: converges to 0 with the full local map).\n- [ ] `make test` passes; no new external dependency.\n\n## Notes\nP2 of epic 58b0. Blocked-independent of P1. The observability promotion (separate child) should land AFTER this so the reconciler isn't flipped to fail-loud while this noise exists.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Inbound link differ inverts blocks<->depends_on (unmasked by outbound fix); needs inverse-aware cross-ticket dedup"
+      },
       "created_at": "2026-08-15T14:58:30Z",
       "jira_key": "REB-1309",
+      "peer_parent": "REB-1303",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:30Z"
     },
     "4b5b-9972-63c3-473c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Dependencies (STACKED \u2014 review with --ref HEAD)\nDocuments the whole identity epic shipped by ddbe/4e9d/bde5/e165/264f/2f13/3183 (all committed on this branch). Review with `--ref HEAD`.\n\n## Context\nDocument the authenticated-identity model end-to-end so operators and agents can adopt it, and record the load-bearing architectural decisions as an ADR.\n\n## What\n### 1. `docs/identity.md` \u2014 the identity model end-to-end\nA new operator/agent guide covering, with concrete `rebar identity \u2026` examples:\n- **The `identity` entity** (`src/rebar/\u2026`): a gate/graph/Jira-sync-exempt ticket-type\n  (like `session_log`) holding name, email, `{provider, external_id}` mappings, and\n  public keys; the `.rebar/current_identity` self-identity pointer.\n- **Tiers**: real identities vs. `placeholder` ghosts (inbound-minted, idempotently\n  upgraded) \u2014 how to tell them apart (`is_placeholder`) and how ghosts get promoted.\n- **Event attribution**: every local event carries denormalized `author`/`author_email`\n  + optional `author_id`; replay back-compat.\n- **Authorship attestation** (`rebar.authorship.v1`): SSHSIG over the foundation attest\n  substrate; trust root = the identity's in-band keys.\n- **Key rotation / era-scoping**: TOFU genesis, signed add/revoke, epoch-scoped validity\n  (`identity key add|revoke`), and WHY validity is merged-log-position (epoch) not\n  wall-clock.\n- **Provider-neutral Jira mapping**: outbound assignee/reporter by opaque accountId, the\n  `/user/search` bootstrap, and the **Modify-Reporter** permission constraint +\n  documented degradation.\n- **Opt-in enforcement**: `identity.require_authenticated`, the write-gate, and the\n  crucial **\"the merge-gate is the control; the local write-gate is UX-only\"** caveat;\n  replay-never-rejects; `rebar verify-authorship`.\n\n### 2. ADR `docs/adr/0045-authenticated-identity.md`\nRecords the load-bearing decisions and their rationale/alternatives:\n- **git-bug-style entity**: identity as a first-class event-sourced ticket entity\n  (reusing the exempt-type substrate) rather than a side table.\n- **Opaque-id keying**: mappings keyed on the provider's stable opaque id, NEVER email.\n- **In-band TOFU**: trust-on-first-use genesis keys carried in-band on the identity,\n  with a signed rotation chain (filling git-bug's IsProtected), and era-scoped validity.\n\n### 3. Docs index\nAdd `docs/identity.md` (and the ADR per the ADR-dir convention) to the docs index so the docs-index completeness gate stays green.\n\n## Acceptance Criteria\n- [ ] `docs/identity.md` exists and covers ALL of: the identity model, tiers, opt-in\n  enforcement + the merge-gate-is-the-control caveat, Jira accountId mapping +\n  Modify-Reporter constraint, key-rotation/era-scoping, and the provider-neutral seam.\n- [ ] `docs/adr/0045-authenticated-identity.md` exists and records the git-bug-entity,\n  opaque-id-keying, and in-band-TOFU decisions (context / decision / consequences).\n- [ ] The docs-index completeness gate passes (`python scripts/check_docs_index.py\n  --check` exits 0) with the new docs indexed.\n\n## file_impact\n- `docs/identity.md` (new operator/agent guide)\n- `docs/adr/0045-authenticated-identity.md` (new ADR)\n- the docs index file (add the new docs so check_docs_index passes)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "identity: docs + ADR (model, tiers, enforcement, Jira mapping, rotation)"
+      },
       "created_at": "2026-08-15T14:58:31Z",
       "jira_key": "REB-959",
+      "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:31Z"
     },
     "4b5c-e6e0-0425-4294": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n\nThe Reconciler Heartbeat Canary detected that reconcile-bridge.yml has not completed a successful run within the 2-hour window (cron: */20). Inspect the Actions tab.\n\n## Expected vs Actual\n\n- **Expected:** reconcile-bridge.yml completes a successful run at least once\n  every 2h.\n- **Actual:** Last successful run was 3h 4m ago (threshold: 2h).\n- **Detected at:** 2026-07-26T01:36:26Z\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/30183062354\n\n## Acceptance Criteria\n\n- [ ] reconcile-bridge.yml is running and its most recent run succeeded.\n- [ ] Root cause identified (workflow disabled / runner outage / acli auth /\n      Jira creds / reconciler error) and addressed.\n\nThis ticket auto-closes when the next successful reconcile-bridge run is detected.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "[heartbeat-canary] reconcile-bridge stale (3h 4m ago) \u2014 no success within 2h"
+      },
       "created_at": "2026-08-15T14:58:31Z",
       "jira_key": "REB-1586",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:31Z"
     },
@@ -25834,6 +25912,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:31Z"
     },
+    "bf7c-333e-29b0-4ee4": {
+      "created_at": "2026-08-16T11:34:47Z",
+      "jira_id": "4588894",
+      "jira_key": "REB-3056",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T11:34:51Z"
+    },
     "bfa8-51d0-3286-4779": {
       "created_at": "2026-08-15T15:10:31Z",
       "jira_key": "REB-1716",
@@ -35665,6 +35750,7 @@
     "REB-3052": "fc43-3c50-ec6c-4a3e",
     "REB-3054": "5b32-37c4-f99a-4315",
     "REB-3055": "da5e-13f1-9aad-4cc9",
+    "REB-3056": "bf7c-333e-29b0-4ee4",
     "REB-306": "c647-e14c-dd45-4e2a",
     "REB-307": "c768-a0ad-0567-412c",
     "REB-308": "c799-3a71-3bcd-433e",
