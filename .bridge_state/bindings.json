@@ -11590,8 +11590,16 @@
       "updated_at": "2026-08-15T14:58:35Z"
     },
     "4c1c-8588-5a3b-498b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nA vanished git object poisons the SHARED index and CASCADES: `git commit` (whole-index) fails `error: invalid object <sha> for '<path>'` / `error: Error building trees`, and because the failed commit leaves the poisoned entry staged, EVERY subsequent write's commit fails identically until the index is reset. This is the residual behind the enrich-prune concurrency flake after Mode A (4f8d) and Mode B (ac26) were fixed (CI: `lost=28..50 swallowed_write_raises=28..50`, all on ONE object). Genesis: a loose object that vanishes between `git add` and `git commit` (a background gc repack, or a partial/interrupted object write under CI FS/memory pressure).\n\n## Reproduction Steps\n1. Baseline commit so HEAD exists. 2. Stage an event file, then delete its loose object\n   (`objects/xx/rest`) \u2014 a vanished object. 3. A NEW rebar write's whole-index commit builds a\n   tree from the index and fails `invalid object \u2026 Error building trees`; the next write\n   fails identically (proven cascade \u2014 `tests/.../test_event_append_transient_retry.py`).\n\n**Expected:** a locked write self-heals and no write is lost. **Actual (pre-fix):** the poison persists (the per-path `_unstage` clears the CURRENT write's path, never the earlier poison's) and wedges every later commit.\n\n## Root Cause\n`git write-tree` verifies each index blob EXISTS; a missing one fails the tree build. The failed commit leaves the poisoned entry in the index. rebar's existing recovery only unstages the current write's path, so a cross-path poison is never cleared \u2192 cascade.\n\n## Fix\n`event_append._recover_from_invalid_object`: on the `invalid object`/`Error building trees` signature, `git read-tree HEAD` (reset the WHOLE index to HEAD \u2014 drops the poison regardless of path; worktree untouched), re-`git add` this write's file(s) \u2014 regenerating a missing object from the intact worktree file \u2014 and retry the commit. Non-destructive on a false positive; bounded (one recovery attempt); emits a WARNING naming any orphaned worktree path. Verified accepted pattern (git-annex regenerates its index identically); vetted by an adversarial code review (APPROVE) and a prior-art sweep (acceptable-with-caveats, all met).\n\n## Acceptance Criteria\n- [ ] A cross-path vanished-object poison self-heals instead of cascading; a subsequent write\n  also succeeds (RED test `test_cross_path_poisoned_index_self_heals`, mutation-checked).\n- [ ] A write whose OWN object vanished regenerates it and commits\n  (`test_own_vanished_object_is_regenerated`).\n- [ ] The heal logs a WARNING naming any orphaned worktree path (observability guardrail).\n- [ ] `make lint` + `make typecheck` pass; the enrich-prune concurrency test passes; no\n  existing store test weakened.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Vanished git object poisons the shared index and cascades all writes (enrich-prune Mode D)"
+      },
       "created_at": "2026-08-15T14:58:36Z",
       "jira_key": "REB-1299",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:36Z"
     },
@@ -11656,8 +11664,16 @@
       "updated_at": "2026-08-15T14:58:39Z"
     },
     "4c7f-4fd3-11ce-474c": {
+      "baseline": {
+        "assignee": null,
+        "description": "# S7 \u2014 Documentation, ADR, and regenerated references for MCP auth\n\n## Why\nThe capability must be usable and auditable by a third-party operator, and the design decisions + residual risks must be recorded for maintainers and the rigorous security review. This story writes the operator guide and the ADR, and does the FINAL consistency check of the derived reference artifacts (each key-adding story S1\u2013S6 already registers ITS keys and regenerates its slice; S7 confirms the integrated whole is consistent).\n\n## What\n- New `docs/mcp-auth.md` \u2014 the operator guide:\n  - How to enable the HTTP transport + auth; each of the five verifier modes (`static`, `jwt`,\n    `introspection`, `proxy`, `custom`) with a flat-config example each, and the closed\n    `auth_strategies` vocabulary. State the flat-schema limitation: **one instance per strategy type**\n    (for multiple issuers, use the `custom` verifier).\n  - The **security model:** resource-server-only (no AS/DCR); the composite as the single audience/\n    fail-closed choke point (every token's `resource` == `auth_resource_server_url`, RFC 8707); no\n    token passthrough; DNS-rebinding/Origin defaults; the non-loopback bind requirements (allowlists\n    + TLS-at-edge ack); tokens/secrets never logged.\n  - **Behind-a-proxy deployment:** TLS terminates at the edge (nginx/ALB) and rebar binds loopback;\n    the external host must be in `http_allowed_hosts` and the external origin in `http_allowed_origins`;\n    `auth_resource_server_url` MUST be the external https URL (it drives the served PRM `resource` and\n    the `WWW-Authenticate: resource_metadata` URL \u2014 NOT the request scheme), and is validated https\n    for non-loopback. Include a concrete nginx/ALB header + allowlist example.\n  - **The three interactive-client connection paths** (so RS-only isn't experienced as \"can't\n    connect\"): (1) static bearer via Claude Code `--header \"Authorization: Bearer \u2026\"` / Claude.ai\n    `static_headers` \u2014 pairs with the static verifier; (2) automatic OAuth when the org IdP supports\n    DCR or CIMD (Keycloak/Auth0/Okta can); (3) pre-registered `--client-id`/`--client-secret` for\n    IdPs without anonymous DCR (Entra, Cognito). Note rebar serves the PRM that drives discovery.\n  - **Residual risks (documented, not fixed here):** authenticated \u2260 authorized \u2014 any authenticated\n    principal wields rebar's full ambient authority (writes auto-push; `reconcile live` uses rebar's\n    own creds) gated only by server-level `required_scopes` and the existing `REBAR_MCP_READONLY`/\n    `ALLOW_JIRA_SYNC`/`ALLOW_LLM` env gates, which now also gate remote actors; per-tool\n    scope\u2192capability authorization is deferred; rate-limiting/brute-force is delegated to the edge\n    proxy in v1, with mandated \u2265128-bit static tokens (document the generator one-liner).\n- A new ADR under `docs/adr/` recording: the resource-server-only decision (no AS / no DCR); building\n  our own verifiers on the official SDK seam vs adopting standalone `fastmcp` (semver-exempt auth,\n  CVE history); the composite audience choke point (motivated by the SDK having no `.resource`\n  backstop + the audience-confusion precedent PVE-2026-93393); the five verifier modes; the transport\n  hardening (citing GHSA-9h52-p55h-vw2f DNS-rebinding, oauth2-proxy CVE-2026-40575 forwarded-header,\n  CVE-2026-27124 confused-deputy); and the explicitly deferred items (AS/DCR, per-tool authz,\n  in-process rate-limiting, AWS deployment).\n- **Final reference/manifest consistency check:** confirm `docs/mcp-reference.md`/`docs/env-vars.md`\n  are fully regenerated for the integrated set of new keys and `scripts/check_server_manifest.py` +\n  the reference drift gates pass on the combined branch (S1\u2013S6 each regenerated their slice; S7\n  verifies the union).\n\n## Approach & rationale\nDocumentation-and-ADR story sequenced last so it documents the *actually shipped* surface (S1\u2013S6); regeneration (not hand-editing) keeps the derived docs authoritative and drift-gated. A docs/mechanical leaf \u2014 no runtime behavior.\n\n## Scope\n`docs/mcp-auth.md`, the ADR, and the final reference/manifest consistency verification only. No code behavior. Subset of the epic. Depends on S1\u2013S6 (documents them).\n\n## Acceptance Criteria\nThe ADR filename is fixed at `docs/adr/0050-mcp-optional-auth-resource-server.md`; each criterion below has a single, unambiguous shell proving command that exits 0.\n\n- [ ] `docs/mcp-auth.md` exists and covers: enabling HTTP+auth; all five verifier modes with a\n      flat-config example each + the `auth_strategies` vocabulary + the one-instance-per-type\n      limitation; the security model (composite audience choke point, fail-closed, no passthrough);\n      behind-a-proxy deployment (TLS + allowlists + `auth_resource_server_url` drives discovery URLs)\n      with an nginx/ALB example; the three interactive-client connection paths; and the residual risks\n      (per-tool authz deferral, rate-limiting delegation, static-token entropy). Proving command:\n      `test -f docs/mcp-auth.md && for h in 'Enabling the HTTP transport' '### `static`' '### `jwt`' '### `introspection`' '### `proxy`' '### `custom`' 'single audience' 'Behind a proxy' 'interactive-client' 'out of scope'; do grep -Fq \"$h\" docs/mcp-auth.md || exit 1; done`\n      (each required section string is present).\n- [ ] `docs/mcp-auth.md` is linked from `docs/README.md`. Proving command:\n      `grep -Fq 'mcp-auth.md' docs/README.md && python scripts/check_docs_index.py --check`\n      (the docs-index completeness gate exits 0 with the new file linked).\n- [ ] The ADR `docs/adr/0050-mcp-optional-auth-resource-server.md` exists and records: the\n      resource-server-only + build-own-verifiers decision, the composite audience choke point, the five\n      verifier modes, the transport-hardening vulnerability CLASSES it mitigates (DNS-rebinding,\n      forwarded-header spoofing, confused-deputy, audience-confusion), and the deferred items. The\n      advisory identifiers (GHSA-9h52-p55h-vw2f, CVE-2026-40575, CVE-2026-27124, PVE-2026-93393) are\n      cited as upstream-tracked references for those classes, NOT asserted as independently\n      NVD-verified facts. Proving command:\n      `test -f docs/adr/0050-mcp-optional-auth-resource-server.md && for s in 'esource' 'composite' 'DNS-rebinding' 'forwarded-header' 'confused-deputy' 'audience' 'defer'; do grep -Fiq \"$s\" docs/adr/0050-mcp-optional-auth-resource-server.md || exit 1; done`.\n- [ ] `docs/mcp-reference.md` and `docs/env-vars.md` are regenerated for the integrated new-key set and\n      the drift gates for them and for `server.json` pass. Proving command (all three exit 0):\n      `python scripts/gen_mcp_reference.py --check && python scripts/gen_env_registry.py --check && python scripts/check_server_manifest.py`.\n- [ ] `make lint && make test` pass (docs/mechanical leaf; no typecheck-relevant code added here).\n\n## Compatibility\nDocs only; no runtime or dependency change beyond what S1\u2013S6 introduced.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "S7 \u2014 Documentation, ADR, and regenerated references for MCP auth"
+      },
       "created_at": "2026-08-15T14:58:40Z",
       "jira_key": "REB-1181",
+      "peer_parent": "REB-1173",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:40Z"
     },
@@ -11732,20 +11748,72 @@
       "updated_at": "2026-08-15T14:58:42Z"
     },
     "4cdf-e52c-e68e-4f7d": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThree verify flags default to True and are documented as already operator-authorized on field evidence, with their `false` value being only a \"back-out\": `progressive_drift_refresh`, `remediation_mode`, `novelty_drop_active`. Keeping an off-switch for settled behavior is config debt. Make all three always-on and delete the off switch.\n\n## What\n\nFor each flag: delete the field + validator from `VerifyConfig`, delete the `if not <flag>: return/None` back-out branch, and hardcode the enabled path.\n\n- `progressive_drift_refresh` (`_config_schema.py:251`): reader `_progressive_enabled`\n  (`llm/plan_review/__init__.py:68-75`), gate at `:490-497`. Inline the `drift_refresh`\n  call under the existing `if sign` guard.\n- `remediation_mode` (`:265`): reader `_remediation_decision` (`__init__.py:79-95`),\n  drop the `if not \u2026remediation_mode: return None` at `:92`.\n- `novelty_drop_active` (`:284`): TWO readers (shared plan + code review):\n  `_maybe_apply_rising_floor` (`__init__.py:206`) and `apply_region_gated_floor`\n  (`code_review/workflow_ops.py:609`). Drop both `if not \u2026: return` guards.\n\n## Scope\n\nKEEP (independent tuning params, NOT orphaned \u2014 verify they still parse/apply): `remediation_window_minutes`, `novelty_drop_threshold`, `novelty_priority_floor`. KEEP the config-unreadable try/except fail-safes and the self-gates (no-prior-memory, `if sign`) \u2014 they provide conservative behavior orthogonal to the removed operator switch. Do NOT touch the separate `completion_*` keys.\n\n## Acceptance Criteria\n\n- [ ] The three flags removed from schema + parser + `rebar.toml` (none currently set there, so verify no stragglers).\n- [ ] Each back-out branch deleted; enabled path hardcoded; the three retained tuning params still parse and drive the drop math.\n- [ ] False-path tests removed/rewritten (`test_plan_review_gate.py`, `test_plan_review_remediation_gate.py`, `test_plan_review_convergence.py`, `test_code_review_region_gate.py`, `test_plan_review_rising_floor.py`); default-True assertions dropped.\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Make the three settled verify defaults always-on (remove off switches)"
+      },
       "created_at": "2026-08-15T14:58:42Z",
       "jira_key": "REB-1091",
+      "peer_parent": "REB-1093",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:42Z"
     },
     "4dc0-d003-c236-45de": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n\n`.github/workflows/reconcile-bridge.yml` already has the full key-materialize + job-level signing wiring (story 9e76/cc0b): it reads the `REBAR_BOT_SIGNING_KEY` secret, masks it (`::add-mask::`), writes it to a `0600` file at `${RUNNER_TEMP}/rebar-bot-signing-key`, and exports `REBAR_IDENTITY_SIGNING_KEY=<that path>` (`.github/workflows/reconcile-bridge.yml:211-228`), with the bot email defaulted to `joeoakhart+bot@navapbc.com` (`:205`, `:267`) so reconciler events resolve to identity `594c-9dcf-5ad6-4e6d`. The wiring is **secret-gated**: with the secret empty it writes **unsigned/advisory** (`:220-222`). This story confirms CI signs in steady state \u2014 provisioning + verification of existing wiring, not new plumbing. It does **not** modify the workflow YAML.\n\n## Precondition (verified, not created)\n\n- Identity `594c-9dcf-5ad6-4e6d` (Rebar Bot) already exists (one registered ed25519 key); CI\n  resolves to it via the `BRIDGE_BOT_EMAIL` default. Same identity local signing (79da) uses.\n- The canonical private key lives in AWS SSM SecureString `/rebar/prod/rebar-bot-signing-key`\n  (ADR-0012); its public half is exactly the key registered on 594c (verified locally by\n  `ssh-keygen -y` match during 79da).\n- A `REBAR_BOT_SIGNING_KEY` secret already exists (`gh secret list`, last set 2026-07-14), but a\n  GitHub secret value cannot be read back, so its correctness is only *proven* by a run that\n  signs \u2014 not by its presence.\n\n## What\n\n1. **Set the secret from the authoritative SSM source.** `gh secret set REBAR_BOT_SIGNING_KEY\n   --repo navapbc/rebar` fed the decrypted SSM value (piped, never echoed). This guarantees the\n   secret holds the key whose public half is registered on 594c. **T4 (irreversible overwrite):\n   this is safe and recoverable \u2014 SSM is the single source of truth (ADR-0012) and is left\n   unchanged; the \"rollback\" for the write-only secret is simply to re-run `gh secret set` from\n   the same SSM param.** Record the `gh secret list` timestamp.\n2. **Prove CI signs.** Capture `C=$(git -C .tickets-tracker rev-parse HEAD)`, trigger a\n   `reconcile-bridge` run (`workflow_dispatch`), wait for it to land ticket writes (fetch\n   `origin/tickets`), and verify the events it introduced are signed + verified.\n\n## Scope\n\nThe GitHub Actions workflow that writes tickets (`reconcile-bridge`). Secret set from SSM + one live signing proof. No enforcement flip (8d39); no workflow-YAML change; empty `file_impact` (no tracked repo-file change).\n\n## Acceptance Criteria\n\n- [ ] **The signing secret is set from SSM.** `REBAR_BOT_SIGNING_KEY` on `navapbc/rebar` is set\n      from `/rebar/prod/rebar-bot-signing-key` (whose public half is registered on 594c).\n      Evidence recorded: the `gh secret set` success + the `gh secret list` timestamp line.\n- [ ] **A CI run produces signed, verified bot events.** With `C` = the tickets-branch HEAD\n      captured before a `reconcile-bridge` run, after the run lands its writes on `origin/tickets`:\n      (a) **non-vacuous** \u2014 the run advanced the tickets branch with bot-authored commits:\n      `git -C .tickets-tracker rev-list \"$C\"..origin/tickets --count` > 0 **and**\n      `git -C .tickets-tracker log \"$C\"..origin/tickets --format='%ae' | sort -u` contains\n      `joeoakhart+bot@navapbc.com`; and (b) **every non-exempt event the run introduced verifies\n      under enforcement**: `rebar verify-identity --all --require-authenticated --since \"$C\"`\n      exits 0 (an unsigned in-scope bot write would make this non-zero \u2014 this is exactly the\n      enforcement the flip applies). Record `C`, the run URL, and the new commit range.\n- [ ] [operator-attested] The secret is set in GitHub settings and a real run proves signing.\n      Evidence recorded as a comment: the workflow-run URL, `C`, the new tickets commit range,\n      the `verify-identity --since C` exit-0 result, and the `gh secret list` timestamp.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Populate REBAR_BOT_SIGNING_KEY and confirm GitHub Actions produces signed ticket events"
+      },
       "created_at": "2026-08-15T14:58:43Z",
       "jira_key": "REB-1182",
+      "peer_parent": "REB-1225",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:43Z"
     },
     "4dd2-312b-7ded-4938": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "# purge-bridge commits on the tickets tracker with a raw, unlocked whole-index git commit (same class as the enrich-queue prune race)\n\n## Summary\n\n`rebar/_commands/purge_bridge.py` (~lines 135-152) commits its ticket-directory deletions with a raw `git -C <tracker> add -A` + `git -C <tracker> commit --no-verify` that takes **neither the unified store write lock nor a commit pathspec** \u2014 the same defect class as bug `eclectic-spotted-barb` (the enrich-queue prune), where an unlocked whole-index commit races concurrent locked store writes and sweeps/strands them.\n\nDiscovered during the Step-7 sibling sweep for `eclectic-spotted-barb`. Lower exposure than the enrich-queue prune (which fired opportunistically on every write via the `[agents]` drain child): `purge-bridge` is a **manual operator command**, so it only races if an operator runs it while agents are writing. Filed separately because (a) its blast radius is much smaller and (b) the fix is not a drop-in `delete_events` swap \u2014 it removes whole ticket **directories** via `git add -A`, so it needs the unified write lock wrapped around a pathspec-scoped or `-A` commit (or a locked batch delete), not the enrich-queue prune's exact pattern.\n\n## Reproduction Steps\n\n1. While concurrent agents are performing normal locked store writes, run `rebar purge-bridge`.\n2. Its unlocked `git add -A` + whole-index `git commit` can sweep a concurrent writer's staged\n   event into the purge commit / advance HEAD under the writer's ref update, dropping/stranding\n   that write (same sweep-and-strand as `eclectic-spotted-barb`).\n\n## Expected vs Actual\n\n- **Expected:** every store write serializes through the unified write lock (invariant I5); a\n  concurrent write is never dropped by a maintenance command's commit.\n- **Actual:** `purge-bridge`'s commit runs outside the lock and can race concurrent locked writes.\n\n## Acceptance Criteria\n\n- [ ] `purge_bridge.py`'s deletion commit routes through the unified store write lock (no raw\n  unlocked `git add -A` + `git commit` on the tracker).\n  - Proving: `rg -n 'subprocess.run.*git.*commit' src/rebar/_commands/purge_bridge.py` shows no\n    unlocked whole-index commit; the write path acquires the store write lock.\n- [ ] A concurrency regression test (mirroring\n  `tests/interfaces/store/test_enrich_drain_prune_concurrency.py`) shows `purge-bridge` racing\n  concurrent locked writes loses nothing (RED before, GREEN after).\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "purge-bridge commits on the tickets tracker with a raw, unlocked whole-index git commit (same class as the enrich-queue prune race)"
+      },
       "created_at": "2026-08-15T14:58:44Z",
       "jira_key": "REB-1260",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:44Z"
     },
@@ -11779,8 +11847,16 @@
       "updated_at": "2026-08-15T22:37:06Z"
     },
     "4dde-5686-b6c9-4d77": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nReplace every hardcoded `tickets` / `origin/tickets` branch literal in the git-invoking code paths with `tickets_branch()` + `f\"origin/{branch}\"`.\n\nCall sites:\n- `src/rebar/_commands/init.py` (~272-295, 281): orphan branch + worktree creation, fetch, mount.\n- `src/rebar/_store/sync.py` (read reconverge, ~83-153).\n- `src/rebar/_store/push.py` (push refspec line 112, conflict merge ~124-165).\n- `src/rebar/_engine/rebar_reconciler/_concurrency.py:56`.\n- `src/rebar/_engine/rebar_reconciler/_advisory_lock.py:498,533`.\n- `src/rebar/_engine_support/reads.py:187` (rev-parse --verify).\n- `src/rebar/_commands/fsck.py:227-236` (PUSH_PENDING vs origin/<branch>).\n\n## Acceptance Criteria\n- [ ] No remaining `\"tickets\"` / `\"origin/tickets\"` string literals in the listed git code paths.\n- [ ] All listed call sites resolve the branch via `tickets_branch()`.\n- [ ] Push/pull/fetch/reconcile/fsck work unchanged at the default branch name.\n\n## Files\n- `src/rebar/_commands/init.py`, `src/rebar/_store/sync.py`, `src/rebar/_store/push.py`\n- `src/rebar/_engine/rebar_reconciler/_concurrency.py`, `.../_advisory_lock.py`\n- `src/rebar/_engine_support/reads.py`, `src/rebar/_commands/fsck.py`\n\n## Depends on\n- Child 2 (`tickets_branch()` resolver must exist).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "migrate branch call sites (init/sync/push/reconciler/fsck/reads) to tickets_branch()"
+      },
       "created_at": "2026-08-15T14:58:44Z",
       "jira_key": "REB-127",
+      "peer_parent": "REB-200",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:44Z"
     },
@@ -11833,8 +11909,30 @@
       "updated_at": "2026-08-15T14:58:46Z"
     },
     "4e19-5846-0e3f-4882": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe plan-review `REVIEW_RESULT` sidecar is the only durable record of a review's four passes, but its `_slim` step drops the pass-1 `evidence` and `scenarios` fields, and it does not persist the numeric `block_threshold`/`blocking_enabled` each finding was judged against (these are resolved from the criteria registry at decision time and then discarded). Without them an auditor cannot see a finding's grounding quotes or the exact decision boundary that was applied.\n\n## What\n\nExtend the plan-review sidecar to a new schema version `plan_review_result_v2` that additionally persists, per finding: the pass-1 `evidence[]` and `scenarios[]`, and the resolved `block_threshold` (float) and `blocking_enabled` (bool) that pass-3 used. All existing fields and the all-buckets pooling (blocking + advisory + overflow + indeterminate + dropped) are unchanged.\n\n## Scope\n\n- `src/rebar/llm/plan_review/sidecar.py` \u2014 bump `SCHEMA` to `plan_review_result_v2`; stop stripping\n  `evidence`/`scenarios` in `_slim`; thread the resolved `block_threshold`/`blocking_enabled` from\n  the pass-3 decision into each persisted finding; `latest_review_result` accepts both `v1` and `v2`.\n- `src/rebar/llm/review_kernel/decide.py` \u2014 expose the resolved `block_threshold`/`blocking_enabled`\n  on each finding's decision output (the `ThresholdResolver` result is currently used then dropped).\n\n## Approach rationale\n\nBump the schema and widen the payload rather than write a parallel record, so the single existing emit/prune/read path carries the richer data unchanged in shape. The resolved threshold is captured at the exact point pass-3 applies it, which is the only place it is knowable without re-reading the registry (avoiding historical drift).\n\n## Compatibility & rollback\n\n`v1` sidecars remain valid and are read with the new fields absent (readers treat missing threshold/evidence as \"not recorded\"). No backfill. Reverting restores the `v1` payload; already- written `v2` events remain readable by the tolerant reader. Adding fields to the payload does not change the reducer-ignored status or the event type, so older clients keep skipping the event.\n\n## Acceptance Criteria\n\n- [ ] Running `review-plan` emits a `REVIEW_RESULT` event whose `schema` is `plan_review_result_v2`\n      and whose every persisted finding carries `evidence`, `scenarios`, `block_threshold`, and\n      `blocking_enabled`. Oracle: an in-process integration test drives a review with a stub LLM\n      runner and asserts on the emitted event JSON via the real sidecar emit path (test-design \u00a73\n      producer/consumer shape).\n- [ ] `pass3_decide`/`pass3_over_findings` expose the resolved `block_threshold`/`blocking_enabled`\n      on each finding. Oracle: a unit test against the real decide functions asserting the fields\n      are present with the resolved values.\n- [ ] `latest_review_result` reads both a `v1` and a `v2` sidecar file without error, reporting the\n      new fields absent for `v1`. Oracle: a unit test feeding one hand-written `v1` and one `v2`\n      event.\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "plan-review sidecar -> lossless v2 (evidence, scenarios, thresholds)"
+      },
       "created_at": "2026-08-15T14:58:47Z",
       "jira_key": "REB-1183",
+      "peer_parent": "REB-1215",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:47Z"
     },
@@ -11859,8 +11957,16 @@
       "updated_at": "2026-08-15T14:58:48Z"
     },
     "4e21-d1a9-622b-4d4f": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Jira descriptions render a line break at the end of every soft-wrapped source line\n\n## Context / Problem\n\nTickets synced into Jira are hard to read: a visible break appears at the end of each fixed-width line of prose. Confirmed live on REB-1581, whose stored description is 27 top-level ADF nodes, ALL of type `paragraph` \u2014 a single prose paragraph is split across four consecutive paragraph nodes of 102/108/106/111 chars.\n\nRoot cause: `text_to_adf` (src/rebar/_engine/rebar_reconciler/adapters/jira/adf.py:239-251) splits the description on `\\n` and wraps EVERY source line in its own ADF paragraph node. Rebar descriptions are authored hard-wrapped at ~95-110 columns, so each soft-wrapped continuation line becomes a separate Jira paragraph.\n\n## Acceptance criteria\n\n- A blank-line-delimited block of soft-wrapped prose renders in Jira as ONE paragraph, with the wrapped lines joined.\n- Intentional structure is preserved: blank-line paragraph separation still produces separate paragraphs, and list items / headings stay on their own lines rather than being joined into a run-on.\n- No description re-sync churn: the differ must not re-emit a description update on every pass. The identical normalization must be applied to the local value at ALL THREE compare sites (outbound_fields.py:566, inbound_differ.py:209, reconcile_check.py:180-189), following the existing `fit_text_to_adf_limit` precedent.\n- Verified live against Jira with a probe ticket, which is then removed from both Jira and rebar.\n\n## Design notes / risks\n\n- Joining soft-wrapped lines is inherently lossy, so the documented round-trip invariant `adf_to_text(text_to_adf(t)) == t` (adf.py:9, pinned by tests/unit/rebar_reconciler/mutate/test_adf.py:694-699) must be restated as idempotency on already-normalized text. This is a deliberate contract change, not test weakening.\n- Grouping shrinks the ADF (~8432 -> ~7977 chars on a real ticket), moving where `fit_text_to_adf_limit` truncates. That converges but causes a one-time re-emit for currently-truncated descriptions; check against test_inbound_differ.py:484 and test_reconcile_roundtrip.py:221 (the tarry-amble-bugle clobber class).\n- Churn history this must not regress: bug 626d, bug 85a1, and the DIG-4175 plateau (339 outbound updates across batches 7-20 from a trailing `\\n\\n`).\n- Emitting `hardBreak` instead of joining WOULD preserve invertibility (`_handle_hard_break` decodes to `\"\\n\"`), but does not fix the report \u2014 a hardBreak is still a per-line break. Rejected.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Jira sync injects a line break at the end of every soft-wrapped description line"
+      },
       "created_at": "2026-08-15T14:58:49Z",
       "jira_key": "REB-1583",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:49Z"
     },
@@ -11963,8 +12069,16 @@
       "updated_at": "2026-08-15T14:58:52Z"
     },
     "4e73-8550-ae15-4da8": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nThe `external integration (live services)` job of the `external-integration` GitHub Action fails at the pytest step. Every live LLM call raises immediately (0.1s, before any network I/O): `Model requests are not allowed, since ALLOW_MODEL_REQUESTS is False`, surfacing as `test_execution_mode_live.py:44 AssertionError: assert 'failed' == 'succeeded'`.\n\n## Reproduction Steps\n\n1. Trigger the `external-integration` workflow (or run `REBAR_RUN_EXTERNAL=1 pytest -m external tests/external`).\n2. Observe the live tests fail with the `ALLOW_MODEL_REQUESTS is False` RuntimeError.\n\nExpected: the external tier makes REAL model calls and the live tests pass. Actual: the tier's model calls are blocked before any network I/O; the job fails.\n\n## Root Cause\n\n`tests/conftest.py::_no_live_model_requests` (session-scoped autouse, added 2026-06-29 in commit 9450d0462 / PR #85) sets pydantic-ai's global `models.ALLOW_MODEL_REQUESTS = False` as a CI safety net against accidental billing. The opt-in external tier never re-enables the switch, so all its live calls raise.\n\nConfirmed by guard-commit ancestry vs run outcome: last success (sha aa3ae84ab, 06-16) had the guard ABSENT; both failing runs (07-06, 07-09) have it PRESENT.\n\n## Acceptance Criteria\n\n- [ ] The external tier re-enables `ALLOW_MODEL_REQUESTS` (only when opted in via `REBAR_RUN_EXTERNAL`), guarded for the lean lane where pydantic-ai is absent.\n- [ ] The default suite's session safety-net remains intact (non-external tests still see the switch False).\n- [ ] A RED->GREEN test in `tests/external/` proves the switch is on for the tier and makes no billable call.\n- [ ] `make lint` passes on the change.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "external-integration 'external' job fails: session test guard leaves ALLOW_MODEL_REQUESTS False for the live tier"
+      },
       "created_at": "2026-08-15T14:58:53Z",
       "jira_key": "REB-880",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:53Z"
     },
@@ -25913,9 +26027,17 @@
       "updated_at": "2026-08-15T15:10:31Z"
     },
     "bf7c-333e-29b0-4ee4": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nDiscovered while validating courageous-deserving-manatee. The exact extras-enforced default-suite command selected 13,600 tests and finished with one unrelated failure after 1:33:35: `tests/unit/test_test_suite_store_isolation.py::test_plan_review_outage_unit_test_does_not_write_ambient_store`.\n\n## Proven failure\nThe outer helper launches `tests/unit/test_gate_engine_cutover.py::test_plan_review_workflow_outage_degrades_to_unsigned_indeterminate` in a captured subprocess with a 90-second timeout. The inner pytest prints `.[100%]`, proving its assertion completed, but intermittently does not terminate; `subprocess.communicate()` times out and kills the Python process. The focused outer node reproduced the same `TimeoutExpired` in 105.55s under `REBAR_REQUIRE_EXTRAS=1`. Without a code change, a later focused execution passed in 1.49s, proving a flaky shutdown/liveness class rather than an authorship regression. The identical full suite without the environment guard had already passed 13,575 tests in 1:29:34.\n\nThis differs from closed bug 89d5-61da-b621-47f8: that ticket added a CI hang watchdog but did not identify or fix this named nested-process shutdown failure.\n\n## Plan\n- Build a bounded reproduction around the captured inner pytest process and inspect its process/thread/pipe ownership after the test reports 100%.\n- Identify the resource that prevents interpreter exit (thread, child process, inherited pipe, or plugin teardown) and prove the mechanism with a discriminating A/B under `REBAR_REQUIRE_EXTRAS=1`.\n- Fix the lifecycle owner rather than extending the 90-second timeout or retrying until green.\n\n## Acceptance Criteria\n- [ ] A deterministic or fault-injected RED test names the resource that keeps the successful inner pytest process alive.\n- [ ] The fix makes the captured inner process exit normally and preserves the ambient-store non-mutation assertions.\n- [ ] A repeated focused stress run under `REBAR_REQUIRE_EXTRAS=1` completes without timeout.\n- [ ] The CI-faithful extras-enforced default-suite selection passes without this timeout.\n\n## Non-overlap\nDo not modify `src/rebar/attest/authorship.py` or `src/rebar/attest/authorship_resolution.py`; this is independent test-lifecycle work.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "REBAR_REQUIRE_EXTRAS store-isolation child can hang after pytest reports 100%"
+      },
       "created_at": "2026-08-16T11:34:47Z",
       "jira_id": "4588894",
       "jira_key": "REB-3056",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T11:34:51Z"
     },
