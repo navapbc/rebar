@@ -30,7 +30,17 @@ def assert_nodes_do_not_mutate_external_store(tmp_path: Path, *node_ids: str) ->
     env = {**os.environ, "REBAR_ROOT": str(repo)}
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *node_ids],
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "--basetemp",
+            str(tmp_path / "nested-pytest"),
+            *node_ids,
+        ],
         cwd=Path(__file__).resolve().parent.parent,
         env=env,
         capture_output=True,
