@@ -12579,8 +12579,16 @@
       "updated_at": "2026-08-15T14:59:23Z"
     },
     "5199-ffba-77db-4267": {
+      "baseline": {
+        "assignee": null,
+        "description": "The MCP tool and the Python library both pass a ticket_id to `validate`, but the engine `validate` is REPO-WIDE and rejects positionals. Reproduced empirically.\n\n- Engine: src/rebar/_engine/validate-issues.sh:81-84 \u2014 catch-all `*) echo \"Unknown option: $1\"; exit 1`.\n- Library: src/rebar/__init__.py:197-203 \u2014 `validate(ticket_id, *, repo_root=None)` builds `[\"validate\", ticket_id, \"--json\"]`. Signature REQUIRES ticket_id (cannot be called id-less -> TypeError).\n- MCP: src/rebar/mcp_server.py:153-156 \u2014 `validate(ticket_id: str) -> dict`.\n- Repro: `rebar validate <id>` -> `Unknown option: <id>`, exit 1; `rebar.validate('<id>')` -> {'output':'Unknown option: <id>','exit_code':1}; `rebar.validate()` -> TypeError.\n\n## Fix\n- Library: make validate repo-wide (no ticket_id); call `[\"validate\",\"--json\"]`; parse stdout JSON into the report dict. NOTE: validate's nonzero exit is score-encoded (exit = 5 - score), NOT an error \u2014 do not raise on nonzero; return the report.\n- MCP: drop the ticket_id param (`def validate() -> dict`); update docstring.\n- Update any existing tests that call validate with an id.\n\n## Acceptance Criteria\n- [ ] `rebar.validate()` (no id) returns the repo-wide report dict {score,critical_issues,major_issues,minor_issues,warnings,suggestions}\n- [ ] MCP `validate` tool takes no ticket_id and returns the report\n- [ ] Score-encoded nonzero exit does not raise / is not treated as failure\n- [ ] Test covers library + MCP repo-wide validate; existing id-passing tests updated",
+        "priority": "High",
+        "status": "Done",
+        "summary": "validate() passes ticket_id but engine validate is repo-wide (lib + MCP broken)"
+      },
       "created_at": "2026-08-15T14:59:23Z",
       "jira_key": "REB-135",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:23Z"
     },
@@ -12845,8 +12853,16 @@
       "updated_at": "2026-08-15T14:59:34Z"
     },
     "5436-4196-04a7-4727": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nAdd tests proving a fresh `rebar init` honors a custom `tracker.dir` and `tracker.branch` end-to-end, plus a regression test that defaults reproduce today's behavior, and an `fsck` WARN when the configured branch/dir does not match what is actually mounted.\n\n- e2e/init test: configure custom dir + branch in `[tool.rebar]`, run `init`, assert the\n  orphan branch is created under the custom name, the worktree/symlink uses the custom dir,\n  it is gitignored, and create/list/show round-trip.\n- regression: with no config, the branch is `tickets` and the dir is `.tickets-tracker`.\n- `fsck` mismatch: configured-vs-mounted divergence emits a WARN (not a hard error).\n\n## Acceptance Criteria\n- [ ] e2e test: custom dir + branch init creates + mounts + gitignores correctly and round-trips.\n- [ ] Regression test pins default dir/branch behavior.\n- [ ] `fsck` WARNs on configured-vs-mounted branch/dir mismatch.\n- [ ] `pytest -m \"not integration\"` green.\n\n## Files\n- `tests/interfaces/` or `tests/unit/` (new init/config test module)\n- `src/rebar/_commands/fsck.py` (mismatch WARN)\n\n## Depends on\n- Child 3 and Child 4 (the call sites must be migrated first).\n\n## Review refinements (plan-review gate)\n- E6/F1 (conf 0.86): the custom-branch e2e must exercise a **write+sync path on a non-default\n  branch** (create -> push/pull or reconcile dry-run -> read-back), not only create/list/show,\n  so the migrated push/sync/reconciler/advisory-lock paths are actually verified end-to-end.\n- E5 (conf 1.0): branch/`dir` validator **accept/reject unit tests are owned by child 14b8** (the\n  config-level validators); this child does NOT duplicate them \u2014 it covers init/e2e/regression/fsck.\n- E2/T9 (conf 1.0): pin the fsck mismatch mechanism \u2014 \"configured\" = the precedence-resolved\n  `tracker.dir`/`tracker.branch`; \"mounted\" = the actual worktree/symlink + checked-out branch\n  (`git worktree list` / symlink target). The WARN compares those two.\n- COH (conf 1.0): the init e2e creates a real orphan branch + worktree, but the default suite\n  runs `pytest -m \"not integration\"` \u2014 the test must run there via a tmp-repo fixture (or be\n  explicitly integration-marked AND a non-integration variant added). State which.\n- [ ] e2e exercises a non-default-branch write+sync round-trip (not just create/list/show).\n- [ ] (Validator accept/reject unit tests are covered by child 14b8 \u2014 not duplicated here.)\n- [ ] fsck \"configured\" (precedence-resolved) vs \"mounted\" (worktree/symlink) source-of-truth pinned.\n- [ ] The init test runs under `pytest -m \"not integration\"` (tmp-repo fixture) \u2014 or is dual-tiered.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "tests: custom dir+branch init e2e, defaults regression, fsck mismatch WARN"
+      },
       "created_at": "2026-08-15T14:59:35Z",
       "jira_key": "REB-138",
+      "peer_parent": "REB-200",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:35Z"
     },
@@ -12913,8 +12929,30 @@
       "updated_at": "2026-08-15T14:59:37Z"
     },
     "5506-0850-6e71-4dd2": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe visual editor's batch-criteria work (story B-UX) must let a user SELECT criteria and prompts from the library AND CREATE new ones (\"full in-editor authoring\"). The prompt/criteria library today supports enumerate (`load_catalog`/`registry.load_criteria`), read (`get_prompt`), and a committed derived index (`regenerate-index`) \u2014 but has NO programmatic WRITE path. In-editor authoring needs to create/update a prompt-library entry (front-matter + rubric body) and keep the committed prompt index + the drift CI gate green. This is the data-model layer the editor sits on; per the epic's sequencing it lands BEFORE the UX.\n\n## What\n\nAdd a library WRITE + structured-enumerate data model for prompts and criteria (criteria are prompt-library entries; D5 \u2014 a criterion's id IS its prompt-library id):\n\n- An enumerate API returning the authorable list (id, kind=prompt|criterion, description, inputs/\n  outputs, is-overlay) for the editor's pickers \u2014 a superset of the read-only inspector data.\n- A create/update API that writes a prompt-library `.md` (front-matter + body) to the correct home\n  (`.rebar/prompts/<id>.md` for user prompts; the packaged reviewers dir is read-only at runtime),\n  validates the front-matter, and regenerates the committed reviewers index so the drift gate stays\n  green.\n- Validation + conflict handling (id collision, malformed front-matter, reserved ids).\n\n## Scope\n\n- New library write/enumerate functions (likely in `rebar.llm.prompts` + a thin criteria view over\n  `plan_review.registry`), stdlib-only at import.\n- Index regeneration wired so a create/update leaves `reviewers/index.json` consistent.\n- Unit tests for enumerate shape, create/update round-trip, index regen, and validation/conflict.\n- NO editor/frontend code here (that is B-UX); this is the backend data model only.\n\n## Acceptance Criteria\n\n- [ ] An enumerate API lists authorable prompts + criteria with the fields the editor pickers need\n      (id, kind, description, inputs/outputs, is-overlay), covering both packaged and `.rebar/prompts` entries.\n- [ ] A create/update API writes a validated prompt-library `.md` to `.rebar/prompts/<id>.md` and\n      regenerates the committed index so the prompt-drift CI gate stays green.\n- [ ] Validation rejects id collisions, malformed front-matter, and reserved ids with clear errors.\n- [ ] Unit tests cover enumerate, create/update round-trip, index regen, and the validation paths.\n- [ ] `make lint` + the full test suite pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "B-DM: Prompt + criteria library write/enumerate/index data model (the editor's backend)"
+      },
       "created_at": "2026-08-15T14:59:38Z",
       "jira_key": "REB-407",
+      "peer_parent": "REB-184",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:38Z"
     },
@@ -12967,8 +13005,30 @@
       "updated_at": "2026-08-15T14:59:40Z"
     },
     "5566-dac3-5b7f-49ae": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nRemoving config keys leaves stale references across docs, CLI help text, and release notes. This story is the accuracy sweep: delete/correct every reference to a removed key and verify the config docs match the post-prune schema. It should close LAST (after the removal stories land) so it sweeps the final state.\n\n## What\n\nSweep and correct references to each REMOVED key:\n- `require_signature_for_close`: `docs/manifest-signing.md:60`, `docs/config.md:96,386`,\n  `docs/llm-framework.md:471`, `docs/migrations.md:142`, `docs/release-notes.md:46`,\n  `src/rebar/_cli/help/transition.txt:7`, `docs/cli-reference.md:377`.\n- `baseline_dual_write` / `baseline_consumer_swap`: `docs/jira-sync-setup.md:329-348`\n  (the phased-rollout section), `docs/config.md`, any ADR-0026 operator notes.\n- `progressive_drift_refresh` / `remediation_mode` / `novelty_drop_active`:\n  `docs/config.md`, `docs/plan-review-gate.md`, `docs/workflow-authoring-v2.md` if referenced.\n- Then a full-repo grep for each removed key name across `docs/`, `*.md`, `src/rebar/_cli/help/`.\n\nAlso: correct any doc statements that become inaccurate once behavior is hardcoded (e.g. \"default on; explicit false is the back-out\" must no longer imply a toggle), and record the KEEP decisions (signature mirror, completion floor) where docs discuss them.\n\n## Scope\n\nDocs/help/release-notes only \u2014 no behavior change. Depends on stories d6bd, 4cdf, and the require_signature retirement having landed so the final state is swept.\n\n## Acceptance Criteria\n\n- [ ] No active/reference documentation presents any removed key (`require_signature_for_close`, `baseline_dual_write`, `baseline_consumer_swap`, `progressive_drift_refresh`, `remediation_mode`, `novelty_drop_active`, `emit_legacy_signature_mirror`) as a live, configurable option. Guide/reference docs (`docs/config.md`, `plan-review-gate.md`, `review-kernel.md`, `manifest-signing.md`, `llm-framework.md`, `jira-sync-setup.md`, `README.md`, `CLAUDE.md`) and CLI help contain zero such references. Retained, by explicit decision: past-tense removal/one-way-door RECORDS in the changelog/migration docs (`docs/release-notes.md`, `docs/migrations.md`) and historical ADRs \u2014 these announce the removal (as 7ed9's AC required) and are the appropriate historical home, analogous to tickets/ADRs.\n- [ ] Docs describing the now-hardcoded behaviors no longer describe a config toggle; the retained tuning params are still documented.\n- [ ] `docs/config.md` matches the pruned schema exactly (every listed key exists; no removed key listed).\n- [ ] CLI help (`transition` etc.) and golden help fixtures regenerated and consistent.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Doc-accuracy sweep: purge removed config keys, correct config docs"
+      },
       "created_at": "2026-08-15T14:59:40Z",
       "jira_key": "REB-1092",
+      "peer_parent": "REB-1093",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:40Z"
     },
@@ -13119,8 +13179,16 @@
       "updated_at": "2026-08-15T14:59:46Z"
     },
     "562f-fed4-231d-4dac": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nTicket write operations fail hard on git `index.lock` contention and NEVER self-heal: a single interrupted/crashed commit leaves a stale `.git/worktrees/<tracker>/index.lock` that wedges **every** subsequent ticket write (`comment`, `edit`, `create`, `link`, `tag`, \u2026) until a human manually removes it. Even *transient* contention (two clones committing at once) surfaces as a hard error with no retry. Locks should be transient and ticket operations should retry + reclaim provably-stale locks to be self-healing.\n\n## Reproduction Steps\n1. Drive any ticket write through `rebar._store.event_append.stage_and_commit` (e.g.\n   `rebar comment <id> \"...\"`).\n2. Simulate an interrupted commit by leaving a stale git index lock:\n   `touch \"$(git -C <tracker> rev-parse --git-dir)/index.lock\"` (no git process holds it).\n3. Run `rebar comment <id> \"anything\"` again.\n\nObserved in the wild: after an interrupted `rebar comment`, a ~15-minute-old `/Users/.../.git/worktrees/-tickets-tracker/index.lock` (0 bytes, no owning process per `lsof`) blocked five consecutive `rebar comment` retries; the store only recovered after a manual `rm` of the lock file.\n\n## Expected vs Actual\n- **Expected:** a transient `index.lock` contention is retried with bounded backoff and\n  succeeds once the peer releases; a *provably stale* `index.lock` (no live owning git\n  process / older than a threshold) is detected and reclaimed automatically \u2014 mirroring the\n  stale-lock reclamation rebar ALREADY does for its own mkdir write-lock\n  (`_store/lock.py::_mkdir_lock_is_stale` / `_reclaim_mkdir_lock`). Ticket writes are\n  self-healing in the common case; only a genuinely-held lock (live peer) waits/fails.\n- **Actual:** `stage_and_commit` (`src/rebar/_store/event_append.py:145-175`) shells out to\n  `git add`/`git commit` and raises `StoreError(\"Error: git commit failed while holding\n  lock: \u2026 Unable to create '<gitdir>/index.lock': File exists. Another git process seems to\n  be running \u2026\")` on the FIRST failure \u2014 no retry, no backoff, no stale detection. The\n  rebar `_store/lock.py` write lock is held around this, but that lock only reclaims its OWN\n  mkdir lock; the git-owned `index.lock` created transiently by `git add`/`git commit` is\n  not covered by any retry or staleness check, so one dead commit wedges all writes.\n\n## Context / root cause\nTwo lock layers exist and only one self-heals:\n- `_store/lock.py` (rebar write lock: fcntl + mkdir) \u2014 ALREADY reclaims a provably-stale\n  mkdir lock (owner stamp `<host>:<pid>`, dead-pid probe).\n- git's `index.lock` (created per `git add`/`git commit` inside `stage_and_commit`) \u2014 NOT\n  covered. Interrupted/killed commits (CI cancellation, `^C`, OOM, a crashed peer) strand it.\n\nThe `edf7`/`6818` history in the surrounding comments shows related git-race hardening (surfacing stderr, healing UU/unmerged paths), but transient/stale `index.lock` itself is still fatal-on-first-try.\n\n## Acceptance Criteria\n- [ ] `stage_and_commit` (and the sibling inline committers `txn.py::claim_core`/\n      `transition_core`, `compact.py`) retry a git `index.lock` \"File exists / Another git\n      process seems to be running\" failure with bounded exponential backoff (small, capped\n      total wait) before surfacing an error\n- [ ] A *provably stale* `index.lock` (no live owning git process AND/OR older than a\n      configurable threshold) is detected and reclaimed automatically, reusing/mirroring the\n      staleness logic in `_store/lock.py` (`_mkdir_lock_is_stale` / `_reclaim_mkdir_lock`);\n      a genuinely-held lock (live peer within the window) is NOT stolen\n- [ ] A concurrency test: two processes committing to the same tracker serialize and BOTH\n      succeed (no spurious hard failure from transient `index.lock` contention)\n- [ ] A stale-lock test: a pre-created `index.lock` with no owning process is reclaimed and\n      the ticket write succeeds without manual intervention\n- [ ] The retry/reclaim is fail-safe: a lock genuinely held by a live peer still waits within\n      budget then surfaces a clear, actionable error (never silently drops the write, never\n      corrupts the index)\n- [ ] No regression to the existing `edf7` stderr-surfacing and `6818` unmerged-path healing\n      behavior",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Ticket writes fail hard on git index.lock \u2014 add retry + stale-lock reclamation (self-healing)"
+      },
       "created_at": "2026-08-15T14:59:46Z",
       "jira_key": "REB-875",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:46Z"
     },
