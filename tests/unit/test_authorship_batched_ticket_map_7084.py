@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -177,11 +178,29 @@ def _positions(repo: Path) -> list[str]:
     return sorted(p.name[: -len(".json")].rsplit("-", 1)[0] for p in (repo / TICKET).glob("*.json"))
 
 
+def _fixture_batched_map(
+    ticket_dir: str,
+    *,
+    repo_root: str | None = None,
+    resolve: Callable[..., dict[str, str]] | None = None,
+) -> dict[str, str]:
+    """Resolve the fixture map, recovering from a one-shot Git read transient."""
+    resolver = resolve or authorship.build_ticket_position_commit_map
+    for _attempt in range(5):
+        position_map = resolver(ticket_dir, repo_root=repo_root)
+        if position_map:
+            return position_map
+    repo = Path(ticket_dir).parent
+    raise AssertionError(
+        f"batched map remained empty after 5 attempts\nobject-store forensics:\n{_forensics(repo)}"
+    )
+
+
 def test_batched_map_matches_the_per_event_resolver_for_every_event(tracker: Path) -> None:
     """The equivalence property: identical commit attribution for every event of a
     realistic ticket."""
     ticket_dir = str(tracker / TICKET)
-    batched = authorship.build_ticket_position_commit_map(ticket_dir)
+    batched = _fixture_batched_map(ticket_dir)
 
     positions = _positions(tracker)
     assert len(positions) == 8  # 2 base + 2 side + 2 mainline + 1 shared + 1 post-merge
@@ -190,6 +209,63 @@ def test_batched_map_matches_the_per_event_resolver_for_every_event(tracker: Pat
         expected = authorship.resolve_event_commit(position, ticket_dir)
         assert expected is not None, position
         assert batched.get(position) == expected, position
+
+
+@pytest.mark.parametrize("mode", ["rc128", "empty", "eagain"])
+def test_fixture_batched_map_recovers_from_one_transient_git_read(
+    tracker: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    """A one-shot process/Git transient must not fail the fixture equivalence oracle."""
+    real_run = subprocess.run
+    broad_calls = 0
+
+    def transient_once(cmd, *args, **kwargs):
+        nonlocal broad_calls
+        is_broad = isinstance(cmd, list) and "--format=%x1e%H" in cmd
+        if not is_broad:
+            return real_run(cmd, *args, **kwargs)
+        broad_calls += 1
+        if broad_calls == 1:
+            if mode == "rc128":
+                return subprocess.CompletedProcess(
+                    cmd, 128, stdout="", stderr="fatal: transient read"
+                )
+            if mode == "empty":
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            raise BlockingIOError(11, "Resource temporarily unavailable")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(authorship.subprocess, "run", transient_once)
+    ticket_dir = str(tracker / TICKET)
+
+    batched = _fixture_batched_map(ticket_dir)
+
+    positions = _positions(tracker)
+    assert broad_calls == 2
+    assert set(batched) == set(positions)
+    for position in positions:
+        assert batched[position] == authorship.resolve_event_commit(position, ticket_dir)
+
+
+def test_fixture_batched_map_persistent_failure_is_bounded_and_diagnostic(
+    tracker: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persistent failure stays loud and bounded rather than becoming an infinite retry."""
+    calls = 0
+
+    def always_empty(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return {}
+
+    monkeypatch.setattr(authorship, "build_ticket_position_commit_map", always_empty)
+
+    with pytest.raises(AssertionError, match="batched map remained empty after 5 attempts") as exc:
+        _fixture_batched_map(str(tracker / TICKET))
+
+    assert calls == 5
+    assert "fsck --full:" in str(exc.value)
+    assert "count-objects -v:" in str(exc.value)
 
 
 def test_the_off_first_parent_add_is_resolved_to_the_older_side_branch_commit(
@@ -201,7 +277,7 @@ def test_the_off_first_parent_add_is_resolved_to_the_older_side_branch_commit(
     ticket_dir = str(tracker / TICKET)
     position = "1500-shared01"
 
-    batched = authorship.build_ticket_position_commit_map(ticket_dir)[position]
+    batched = _fixture_batched_map(ticket_dir)[position]
     per_event = authorship.resolve_event_commit(position, ticket_dir)
     assert batched == per_event
 
@@ -278,6 +354,36 @@ def test_batching_costs_one_git_walk_not_one_per_event(
         data["author_id"] = "id-1"
         Path(path).write_text(json.dumps(data))
 
+    real_run = subprocess.run
+    broad_calls = 0
+
+    def transient_broad_read_once(cmd, *args, **kwargs):
+        nonlocal broad_calls
+        is_broad = isinstance(cmd, list) and "--format=%x1e%H" in cmd
+        if not is_broad:
+            return real_run(cmd, *args, **kwargs)
+        broad_calls += 1
+        if broad_calls == 1:
+            return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: transient read")
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(authorship.subprocess, "run", transient_broad_read_once)
+
+    real_batched_resolve = authorship.build_ticket_position_commit_map
+
+    def stable_fixture_resolve(ticket_dir: str, *, repo_root: str | None = None) -> dict[str, str]:
+        return _fixture_batched_map(
+            ticket_dir,
+            repo_root=repo_root,
+            resolve=real_batched_resolve,
+        )
+
+    monkeypatch.setattr(
+        authorship,
+        "build_ticket_position_commit_map",
+        stable_fixture_resolve,
+    )
+
     per_event_calls: list[str] = []
     real_resolve = authorship.resolve_event_commit
     monkeypatch.setattr(
@@ -292,6 +398,7 @@ def test_batching_costs_one_git_walk_not_one_per_event(
     compact._build_authorship_ledger(paths, None)
 
     assert len(paths) >= 8
+    assert broad_calls == 2
     assert per_event_calls == [], "every position should have been served by the batched map"
 
 
