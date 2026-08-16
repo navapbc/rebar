@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32'",
@@ -152,16 +152,16 @@ wheels = [
 
 [[package]]
 name = "botocore"
-version = "1.43.69"
+version = "1.43.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jmespath" },
     { name = "python-dateutil" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/da/726b23443ebc77078387fbf330ef7240bc6a96553e566e45a647cd8f714c/botocore-1.43.69.tar.gz", hash = "sha256:5caa46b740d9a886137146ffbb69edb691f702bfe74c64e85621947ae00181fd", size = 15911844, upload-time = "2026-08-11T19:24:20.778Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/1a/ad4ff28cd0caa8ff4f39f18491169dc9ff4b2e359589be1f7108048e1915/botocore-1.43.70.tar.gz", hash = "sha256:a7bebdd0b1c8265e72759a4f7f61e9e43d57968b2c2a5e1e7b350d0a1e3ce81c", size = 15936837, upload-time = "2026-08-12T19:23:30.58Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/64/ef/a1effbe4ffabadc38ea9425c54601262eaac8cbb5b6089f8f76536d3c8b1/botocore-1.43.69-py3-none-any.whl", hash = "sha256:b1f0e01c53d6b84ee9c184ebf3636c3b3aef85e0ae8498c74afb8734ff224f87", size = 15596589, upload-time = "2026-08-11T19:24:18.283Z" },
+    { url = "https://files.pythonhosted.org/packages/69/b2/c16b4e2e7ccab1f0887c22fbe2d9859ceb4d35fb637cce8a380d51b52b06/botocore-1.43.70-py3-none-any.whl", hash = "sha256:95bc23a6472f8876349ae334b526e66006f6cf3c87bf39d3e9f057dc8c2eb85f", size = 15628519, upload-time = "2026-08-12T19:23:27.38Z" },
 ]
 
 [[package]]
@@ -1171,11 +1171,11 @@ wheels = [
 
 [[package]]
 name = "json-repair"
-version = "0.63.0"
+version = "0.63.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7d/88/600f1b41f3a0e383a2e95014c25fa9fdc5fb0d6d77323e7b8e9d517271e3/json_repair-0.63.0.tar.gz", hash = "sha256:27ce6724ede2eff84c39c7d142dbfcd07c3635ebb79e4fa8e81d1b57367a1cbe", size = 52085, upload-time = "2026-08-11T09:28:29.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0b/29/e702c7237a55a07afcc0e77c974749c2850dd992b81443496faacd9e82f1/json_repair-0.63.1.tar.gz", hash = "sha256:78bf4f23aa30238049ea7111cb23f39047c29b5ade0550660065c619cd209aa0", size = 52347, upload-time = "2026-08-12T18:11:42.882Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/84/1f5ee13057a3f6eec537664e95dfd71b94ac9e1bbf0a3ba8fc7f0c13b6f1/json_repair-0.63.0-py3-none-any.whl", hash = "sha256:e086519c8aba422a08f3b1c0882dcf5a0d2a47e65b450e3f23b224cdc12c545d", size = 50648, upload-time = "2026-08-11T09:28:28.717Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/34/1e5355d8caa9b88bb18b950b26c2b57aee4717445b4860100b1a05e13335/json_repair-0.63.1-py3-none-any.whl", hash = "sha256:5d8c543275166a5fc6ca9e9f32e4e542c58237844aafb3510a83d559daaab171", size = 50776, upload-time = "2026-08-12T18:11:41.754Z" },
 ]
 
 [[package]]
