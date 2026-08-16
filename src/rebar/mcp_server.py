@@ -576,11 +576,16 @@ def _resolve_http_runtime(mcp_cfg, *, auth_enabled: bool):
 def build_server(cfg=None):
     try:
         from mcp.server.fastmcp import FastMCP
+        from mcp.server.fastmcp.server import Settings
     except ImportError as exc:  # pragma: no cover - dependency guard
         raise SystemExit(
             "The rebar MCP server requires the 'mcp' extra. "
             "Install it with: pip install 'nava-rebar[mcp]'"
         ) from exc
+
+    # MCP v1 leaves Settings.lifespan unresolved until the model is rebuilt after
+    # FastMCP is defined; complete it before pydantic-settings inspects the field.
+    Settings.model_rebuild()
 
     if cfg is None:
         cfg = rebar.config.load_config()
