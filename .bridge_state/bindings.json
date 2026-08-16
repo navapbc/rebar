@@ -1,5 +1,12 @@
 {
   "bindings": {
+    "0024-fa99-d5bb-49bc": {
+      "created_at": "2026-08-16T20:36:16Z",
+      "jira_id": "4588904",
+      "jira_key": "REB-3065",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T20:36:20Z"
+    },
     "003c-2dd2-203a-4725": {
       "baseline": {
         "assignee": null,
@@ -1997,6 +2004,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:12Z"
     },
+    "0f8f-8178-96b4-4901": {
+      "created_at": "2026-08-16T20:36:24Z",
+      "jira_id": "4588905",
+      "jira_key": "REB-3066",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T20:36:27Z"
+    },
     "0f8f-ec8a-8c93-4fc5": {
       "baseline": {
         "assignee": {
@@ -2290,6 +2304,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:21Z"
+    },
+    "10c8-9981-3877-4ed5": {
+      "created_at": "2026-08-16T20:36:30Z",
+      "jira_id": "4588906",
+      "jira_key": "REB-3067",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T20:36:33Z"
     },
     "10e3-709e-b1ff-4343": {
       "created_at": "2026-08-15T14:52:22Z",
@@ -3000,10 +3021,24 @@
     },
     "16c1-0f0c-8169-4696": {
       "baseline": {
-        "assignee": null,
-        "description": "## Reproduction Steps\n\nRun `rebar bridge fsck` \u2014 the offline bridge audit reports alerting binding drift or a forward/reverse binding-store integrity inconsistency.\n\n## Expected vs Actual\n\n- **Expected:** alerting `binding_drift` cells and `store_integrity` are empty.\n- **Actual:** unbound_jira=4\n- **Detected at:** 2026-08-15T16:04:32Z\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/31894395779\n\n## Acceptance Criteria\n\n- [ ] Each reported drift is triaged (would_terminal \u2192 local archive/delete\n      to propagate; unbound_jira \u2192 adopt or archive the Jira-native issue;\n      local_gone \u2192 investigate; retired_overlap \u2192 remove the duplicate live/\n      retired membership; store_integrity \u2192 repair the inconsistent forward/\n      reverse index entries).\n- [ ] `rebar bridge fsck` reports empty alerting `binding_drift` cells and\n      `store_integrity`.\n\nThis ticket auto-closes when bridge fsck next reports zero alerting audit findings.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nBridge fsck reported unbound Jira issues. ACLI inspection on 2026-08-16 proved the remaining three are not Jira-native work to adopt or archive: each is an exact identity match for an existing local `code_review` artifact, including `rebar-id` label, title, revision, PASS decision, and fingerprint. The missing state was only the forward/reverse binding-store entries.\n\n## Exact mappings\n- `a750-2710-e903-4a45` (`firstborn-removable-javalina`) \u2194 `REB-806`\n- `d494-d34f-cf36-43df` (`festive-egotistic-terrier`) \u2194 `REB-807`\n- `ee21-fcd3-edad-462c` (`impossible-censorian-kangaroo`) \u2194 `REB-808`\n\n## Executed remediation\n- Claimed this ticket before changing shared tracker state.\n- Under `rebar._store.lock.write_lock`, verified fsck still reported exactly the three alerting unbound Jira keys with no other alerting or integrity findings.\n- Re-read local artifacts and live Jira issues through ACLI; exact identities still matched.\n- Called public `BindingStore.bind_confirm` for each exact pair, atomically saved, and published with `commit_and_push_tickets_branch(strict=True)`.\n- Re-read every forward/reverse mapping and re-ran fsck.\n\n## Acceptance Criteria\n- [x] `REB-806`, `REB-807`, and `REB-808` map bidirectionally to the three exact existing local code-review tickets listed above.\n- [x] No new local ticket or Jira issue is created, archived, or transitioned.\n- [x] The mutation runs under rebar\u2019s unified tracker write lock and publishes through the supported commit-and-push seam.\n- [x] `rebar bridge fsck` reports no alerting `binding_drift` and no `store_integrity` findings after repair.\n- [x] A ticket comment records the guarded before/after evidence and delivered tracker commit.",
         "priority": "High",
-        "status": "To Do",
+        "status": "Done",
         "summary": "[binding-drift] bridge fsck found 4 audit finding(s)"
       },
       "created_at": "2026-08-15T16:36:01Z",
@@ -15417,8 +15452,30 @@
       "updated_at": "2026-08-15T15:01:18Z"
     },
     "6755-689b-72c2-4dac": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## What\n\nAdd intent-based navigation so each audience (human client, LLM client, human contributor, LLM contributor) reaches the right doc fast, plus a compact symptom\u2192recovery troubleshooting table for the most common failure modes.\n\n## Scope\n- Add a short \"Choose your path\" router near the top of `docs/README.md` routing by\n  intent, e.g. \"Start using rebar\", \"Drive rebar over MCP\", \"Contribute a code\n  change\", \"Understand the internals\".\n- Add a compact troubleshooting table mapping common symptoms to specific fixes, e.g.\n  \"claim/transition exits 10\" \u2192 optimistic-concurrency, pick another ticket;\n  \"`rebar-mcp` missing\" \u2192 install the `[mcp]` extra; \"`unknown key \u2026 ignored`\" \u2192\n  stale global build, use the repo venv. Keep it small; expand on demand.\n\nKeep the router and table concise \u2014 this is a routing aid, not a second manual.\n\n## Acceptance Criteria\n- [ ] `docs/README.md` opens with a short intent router covering the four audiences.\n- [ ] A troubleshooting table maps at least the three symptoms above to concrete\n      recovery steps with links.\n- [ ] Every router/table link resolves (verified locally with the link checker; the\n      docs-index / link CI gate added by sibling `f088` then keeps it enforced \u2014 this\n      ticket does not require `f088` to pre-exist).\n\nFiles: `docs/README.md`.",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "P2: Add intent-based router + symptom->fix troubleshooting table to docs index"
+      },
       "created_at": "2026-08-15T15:01:18Z",
       "jira_key": "REB-1009",
+      "peer_parent": "REB-1008",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:18Z"
     },
@@ -15451,8 +15508,30 @@
       "updated_at": "2026-08-15T15:01:19Z"
     },
     "6777-5581-1ef1-4b7b": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Finding\n\nFuture ChatGPT sessions may have the GitHub connector and repository visibility but lack a local clone, direct Gerrit access, shell network access, or a mounted Rebar tracker. Existing general agent guidance does not explain how to recognize this environment, what operations remain safe, or when ticket creation cannot be completed natively.\n\n## Evidence\n\n- `AGENTS.md:27-45` requires work to be found, created, claimed, and recorded in Rebar before implementation.\n- `AGENTS.md:124-131` states that GitHub is a read-only mirror and all code changes land through Gerrit.\n- `templates/rebar-usage.md:18-30` requires search-before-create and native Rebar create/claim/link commands.\n- `docs/concurrency.md:21-26` defines the tracker as a dedicated orphan `tickets` branch with append-only event files.\n- `docs/concurrency.md:171-176` requires all writes to use the lock-guarded append/commit path; raw hand-authored tracker mutations are unsafe.\n- `docs/import-export.md:52-64` documents `rebar import` as the only sanctioned bulk-ingest path: it composes ordinary events through the normal locked write path (no raw-event injection), consumes NDJSON (`src/rebar/schemas/export.schema.json`), assigns fresh local ids/HLC timestamps, and is idempotent by `source_id` (the imported line's own `ticket_id` becomes the created ticket's `source_id`).\n- `src/rebar/schemas/export.schema.json`'s `required` array is `[\"schema_version\", \"ticket_id\", \"ticket_type\", \"title\", \"status\"]`. **`rebar import` does not JSON-Schema-validate against this file** \u2014 `src/rebar/_io/import_ndjson.py` (lines 221-225) checks only `ticket_id`/`ticket_type` directly and, if either is missing, **silently skips the record with a logged warning** (`warn(f\"skipping record without ticket_id/ticket_type: ...\")`) via a bare `continue` \u2014 it does not raise, and does not check `schema_version`/`status`/`title` at all. The `skipped` counter (line 205, incremented at line 227) counts ONLY already-imported records (`sid in seen_source`) \u2014 a missing-`ticket_id`/`ticket_type` record is warned about but does **not** increment `skipped`; it is invisible to the return summary's counters and detectable only via the `warnings` list. A fallback payload missing a required field is therefore silently dropped on import (surfaced only in `warnings`, not in any counter), not rejected with an error.\n- `docs/mcp-reference.md` documents the `create_ticket` MCP tool's input schema (title, ticket_type, description, parent_id, etc.).\n\n## Remediation\n\nAdd concise ChatGPT-specific guidance that teaches sessions to detect connector-limited execution, prefer the installed native Rebar CLI/MCP when a valid tracker worktree exists, respect the GitHub-read-only/Gerrit workflow, and avoid inventing tracker state or substituting GitHub Issues. Define a safe fallback that prepares fully formed ticket content and reports the exact missing capability rather than claiming tickets were created. Document the exceptional import path for appending CLI-generated NDJSON without hand-authoring or mutating existing events.\n\n**Capability check and decision rule (resolves T8 findings):** the environment capability check enumerates six dimensions \u2014 local checkout, native `rebar`/`rebar-mcp` binary, tracker worktree (a directory containing a valid `tickets` branch checkout, confirmed via `rebar exists <known-id>` or equivalent), network/remote access, GitHub connector, and Gerrit availability. \"Native ticket creation is impossible\" is defined precisely as: **the tracker-worktree dimension fails** (no accessible `tickets` branch checkout) **AND** **the network/remote dimension fails or the native `rebar`/`rebar-mcp` binary is unavailable** \u2014 i.e., the session cannot reach a real store through either the CLI, the MCP server, or a git-remote clone/fetch. Any other combination of capability failures does not trigger the fallback; the guidance must state this rule explicitly so an executor does not need to infer it.\n\n**Fallback payload schema (resolves T8 finding on AC6, and round-2 findings G6/T1):** the reviewable ticket payload MUST conform to `src/rebar/schemas/export.schema.json`'s actual `required` array \u2014 `schema_version`, `ticket_id`, `ticket_type`, `title`, `status` \u2014 plus `description` (including a `## Acceptance Criteria` block) and `parent_id` if applicable. This resolves an apparent conflict: a never-yet-created ticket has no rebar-assigned id, but the schema's `ticket_id` is **not** a rebar-assigned id here \u2014 it is a **provenance id the agent generates itself** (a stable UUID4), which becomes the imported ticket's `source_id` on `rebar import` (per `docs/import-export.md`'s idempotent-by-`source_id` behavior) \u2014 re-running the same fallback payload through `rebar import` later is then a no-op, not a duplicate. The guidance must state each field's fallback value precisely: `schema_version: 1`, `ticket_id: <agent-generated UUID4, becomes source_id on import>`, `status: \"open\"`, `ticket_type`/`title`/`description` from the ticket content, `parent_id` if applicable \u2014 the same shape produced by `rebar export` and consumed by `rebar import`, so a maintainer can review it and optionally ingest it via `rebar import` without hand-transcription.\n\n**Exceptional import mechanism (resolves E4 and G6 findings on AC7):** the only sanctioned exceptional import path is `rebar import` (or the library's `rebar.import_tickets()`), which is the native locked write path already documented in `docs/import-export.md` \u2014 never raw event-file injection and never a GitHub Contents API write to the `tickets` branch. The guidance must state precisely what this path does, not assert unverified behavior: it accepts NDJSON compiled-state projections conforming to the fallback payload schema above (not raw event files), assigns fresh local ids and HLC timestamps to each ticket (source provenance preserved via `source_id`/`source_created_at`/`source_author`), and is idempotent by `source_id`. Before invoking it, the operator confirms the target branch is current (`git fetch` + `rebar exists <known-id>` against the intended tracker) and runs `rebar import --dry-run` first \u2014 but the guidance must state its actual, narrower guarantee precisely: in dry-run mode (`src/rebar/_io/import_ndjson.py` ~lines 144-161), a record missing `ticket_id`/`ticket_type` hits a bare `continue` with **no counter increment and no warning at all** (the `warnings` list is never populated in the dry-run branch); only already-imported records (a `source_id` already present in the target) increment `skipped`. So a malformed record is invisible to `would_create`/`skipped` individually, but **is** detectable by comparing `would_create + skipped` against the total NDJSON line/record count: any shortfall is exactly the count of malformed (missing `ticket_id`/`ticket_type`) records, since those are the only category dry-run drops without incrementing either counter. Afterward, the operator runs `rebar validate` (or `rebar fsck`) against the tracker to confirm store integrity.\n\nCascade flag: guidance must remain consistent with Rebar's append-only, optimistic-concurrency, and native-command invariants; it must not normalize direct contents-API writes as the ordinary workflow.\n\n## Acceptance Criteria\n\n- [ ] A ChatGPT-specific guidance file or clearly labeled section is discoverable from `AGENTS.md` without bloating the canonical startup context. Verify: `grep -qi 'chatgpt' AGENTS.md`.\n- [ ] Guidance includes an environment capability check covering local checkout, native `rebar`/`rebar-mcp`, tracker worktree, network/remote access, GitHub connector, and Gerrit availability. Verify: `grep -qi 'tracker worktree' docs/chatgpt-agent-guide.md && grep -qi 'gerrit' docs/chatgpt-agent-guide.md`.\n- [ ] Guidance states that the GitHub repository is a read-only mirror for code changes and that GitHub Issues are not a substitute for the Rebar tracker. Verify: `grep -qi 'read-only mirror' docs/chatgpt-agent-guide.md`.\n- [ ] Guidance requires search-before-create and native parent/child creation whenever the live tracker is accessible. Verify: `grep -qi 'search-before-create' docs/chatgpt-agent-guide.md`.\n- [ ] Guidance prohibits hand-authoring, modifying, or deleting event files and explains the append-only reason. Verify: `grep -qi 'append-only' docs/chatgpt-agent-guide.md`.\n- [ ] Guidance defines precisely when native ticket creation counts as \"impossible\" (the tracker-worktree-and-network/binary decision rule above) and, in that case, requires producing a reviewable ticket payload conforming to `src/rebar/schemas/export.schema.json`'s required fields (`schema_version: 1`, an agent-generated UUID4 `ticket_id`, `ticket_type`, `title`, `status: \"open\"`, plus `description` with an Acceptance Criteria block and `parent_id` if applicable) plus a transparent capability-gap report, without claiming persistence occurred. Verify: `grep -qi 'export.schema.json' docs/chatgpt-agent-guide.md && grep -qi 'schema_version' docs/chatgpt-agent-guide.md`.\n- [ ] The documented exceptional import mechanism names `rebar import` (or `rebar.import_tickets()`) as the only sanctioned path \u2014 never raw event-file injection or Contents API writes \u2014 states it accepts NDJSON (not raw events), assigns fresh local ids/HLC timestamps, correctly describes missing-`ticket_id`/`ticket_type` records as silently skipped with NO warning and NO counter increment in `--dry-run` mode specifically (only already-imported records increment `skipped` there), recommends detecting malformed records via a `would_create + skipped == total record count` comparison, requires confirming the target branch head before invocation, and requires running `rebar validate` or `rebar fsck` afterward. Verify: `grep -qi 'rebar import' docs/chatgpt-agent-guide.md && grep -qi 'rebar validate\\|rebar fsck' docs/chatgpt-agent-guide.md && grep -qi 'dry-run' docs/chatgpt-agent-guide.md`.\n- [ ] A lightweight documentation test (`tests/unit/test_chatgpt_guide_links.py`) asserts each of the following specific invariants against `docs/chatgpt-agent-guide.md` and `AGENTS.md`, and exits 0 only if ALL hold:\n  1. `AGENTS.md` links to `docs/chatgpt-agent-guide.md` (discoverability).\n  2. The guide does not recommend GitHub Issues as a substitute for the Rebar tracker (no phrase matching \"github issues\" co-occurring with \"instead of\"/\"substitute for\"/\"in place of\" the tracker).\n  3. The guide does not describe a direct GitHub Contents-API write to the `tickets` branch as a sanctioned or normal path (no phrase pairing \"contents api\" with \"tickets branch\" in an affirmative/how-to context).\n  4. The guide names `rebar import` (not a raw event-file write) as the only sanctioned exceptional ingest mechanism.\n  5. The guide's fallback-payload field list matches `src/rebar/schemas/export.schema.json`'s actual `required` array (`schema_version`, `ticket_id`, `ticket_type`, `title`, `status`).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Document safe ChatGPT workflows for connector-limited Rebar environments"
+      },
       "created_at": "2026-08-15T15:01:20Z",
       "jira_key": "REB-1432",
+      "peer_parent": "REB-1433",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:20Z"
     },
@@ -15565,26 +15644,58 @@
       "updated_at": "2026-08-15T15:01:26Z"
     },
     "6846-45db-4111-4592": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n\nRun `rebar bridge-fsck` \u2014 the offline binding-drift arm (epic 3006-e198, the convergence parity oracle) reports a non-empty `binding_drift` section.\n\n## Expected vs Actual\n\n- **Expected:** `binding_drift` is empty (every bound pair converged).\n- **Actual:** dangling=1\n- **Detected at:** 2026-07-13T05:20:53Z\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/29225891270\n\n## Acceptance Criteria\n\n- [ ] Each reported drift is triaged (would_terminal \u2192 local archive/delete\n      to propagate; dangling \u2192 confirmed 404 GC; unbound_jira \u2192 adopt or\n      archive the Jira-native issue; local_gone \u2192 investigate).\n- [ ] `rebar bridge-fsck` reports an empty `binding_drift` section.\n\nThis ticket auto-closes when bridge-fsck next reports zero binding drift.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "[binding-drift] bridge-fsck found 1 unhealed binding drift(s)"
+      },
       "created_at": "2026-08-15T15:01:26Z",
       "jira_key": "REB-1071",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:26Z"
     },
     "68cb-504d-8c57-487e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nE3 is the write/lifecycle cluster of Tier E (story adult-oxide-slave / kickoff lad-cipher-arena): port the ~7 still-bash commands the dispatcher routes to (transition, reopen, claim, compact, compact-all, scratch, delete) in-process over rebar._commands/_store/graph/reducer. Coupled to E5c: relocate the ticket_txn.py locked critical section into the rebar package so transition/claim run in-process without putting the engine dir on sys.path (test_engine_dir guard). Touches the single locked write path + the optimistic-concurrency exit-10 contract. Plan opus-reviewed (REVISE -> 11 revisions folded in). No bash deleted (back-loads to E7/E8). No kill-switch; rollback = git revert.\n\n## What\nPer-command pattern (E0-E2): characterize bash arm -> port reusing rebar.* (one source for error strings) -> route argparse in-process + rewire library off _run -> dual-run byte-parity test (tests/interfaces/test_e3_*.py) -> green commit + child ticket. Sub-commits:\n- E5c: rebar/_commands/txn.py {transition_core, claim_core}; reuse ONLY event_append.event_filename\n  + hand-rolled rename/add/commit under ONE lock-hold (NOT stage_and_commit: re-locks per event +\n  sorted bytes). Preserve json.dump(ensure_ascii=False). Convert sys.exit/stderr -> return + typed\n  exceptions; old _engine/ticket_txn.py becomes a thin shim re-exiting 10/1/2. Preserve dual-leg\n  fcntl+mkdir lock (stiff-mop-lane fix). Golden-bytes test (STATUS + CLAIM, before/after identical).\n- Port ticket-unblock.py batch-close/newly_unblocked -> rebar/graph/_unblock.py (faithful: exclude\n  already-unblocked, tombstone-aware, sorted(listdir) ordering pins UNBLOCKED byte-order); shim the .py.\n- transition: full 486-line wrapper split into (a) validation/no-op/ghost/init, (b) close-path\n  (children guard + unblock + force-close comment + compact-on-close + scratch cleanup), (c) un-archive\n  seam archived->open (in-process revert + live-ARCHIVED scan + exact reason; skips --output/UNBLOCKED).\n  reopen folds in as transition(closed,open).\n- claim: over claim_core; reproduce _emit_error_envelope stderr (ticket_not_found/concurrency_conflict/\n  claim_failed), not just happy path CLAIMED:.\n- CONCURRENCY MATRIX rerun (-m integration): writer storm, claim storm, two-clone convergence.\n- compact/compact-all: TICKET_TRACKER_DIR (singular), 4 skip/success strings, --no-commit/--skip-sync;\n  then rewire transition compact-on-close off the subprocess.\n- scratch: filesystem-only, NO init; set/get/clear JSON envelopes.\n- delete (own ticket, LAST, after matrix green): port ticket-delete-unlink-scan.py faithfully\n  (net-active-link order), children guard + --user-approved strings, UNLINK + STATUS(deleted) +\n  ARCHIVED + tombstone/.archived in one commit; shares ported unblock logic.\nFold in: git config user.name -> \"Unknown\" fallback parity; 2-arg autodetect + =/space flag variants in parity scenarios; close bug stiff-mop-lane via preserved dual-leg lock.\n\n## Scope\nThe 7 write/lifecycle commands + E5c relocation + the unblock-logic port. NOT in scope: store/locking/ event-schema design changes (ratified sound); E4 init/fsck; E5/E5b bridge+reconciler (Jira gate); E6-E9. Canonicalization of event bytes (sorted keys) is a different epic (P1.0) -- preserve current unsorted bytes here.\n\n## Acceptance Criteria\n- [ ] rebar._commands.txn houses transition_core/claim_core; _engine/ticket_txn.py is a thin shim re-exiting 10/1/2 identically\n- [ ] All 7 commands routed in-process in rebar._cli; library functions rewired off _run subprocess\n- [ ] newly_unblocked logic ported to rebar.graph; _engine/ticket-unblock.py shimmed\n- [ ] Dual-run byte-parity tests (stdout/stderr/exit, text + --output json) green for every command incl. edge cases\n- [ ] Golden-bytes test confirms STATUS/CLAIM committed bytes unchanged by the relocation\n- [ ] Concurrency matrix (-m integration) green after the write-path relocation\n- [ ] Dual-leg fcntl+mkdir lock preserved; bug stiff-mop-lane closed\n- [ ] Full suite green at each cluster boundary; no module over 800 LOC; no <100-LOC shards",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Tier E E3: port write/lifecycle cmds (transition/reopen/claim/compact/compact-all/scratch/delete) in-process + E5c ticket_txn relocation"
+      },
       "created_at": "2026-08-15T15:01:27Z",
       "jira_key": "REB-171",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:27Z"
     },
     "68e1-5dbc-732c-4cd3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe pattern only pays off if future sessions can discover and reuse it. A first-class doc is how the next agent adds an ensure correctly, understands the invariants, and knows the accepted trade-offs and the A-tier future.\n\n## What\nWrite `docs/migrations.md` AND add a link to it from the docs index and CLAUDE.md. Cover: how to add an ensure unit (append to the `ensures.py` registry with a stable id + a check-then-act callable returning ok/changed/failed); the entry points (init/re-init, `rebar fsck --repair`, MCP server startup \u2014 all reconcile unconditionally under the write lock); the applied-set `.ensure-applied` marker + the `.ensure-hinted` rate-limited pending-hint; the marker-gates-hint-never-repair invariant; the hot-path performance contract (no sweep on writes; \u22641 marker read/process); the ACCEPTED long-lived-MCP trade-off (converges at boot, does not re-sweep mid-life \u2014 drift caught at next `fsck --repair`); and the A-tier future (committed store-format version + ordered ledger, fail-closed on too-new) with the committed-version recommendation. Use gc-config as the worked reference unit.\n\n## Scope\nIn: `docs/migrations.md` + the index/CLAUDE.md link. Out: code (WS1-3), tests (WS5).\n\n## Acceptance Criteria\n- [ ] `docs/migrations.md` documents adding an ensure unit (registry + stable id + check-then-act + typed result) with gc-config as the worked reference\n- [ ] Documents the entry points, `.ensure-applied` + `.ensure-hinted`, the pending-hint, and the marker-gates-hint-never-repair invariant\n- [ ] Documents the hot-path performance contract AND the accepted long-lived-MCP re-sweep trade-off\n- [ ] Documents the post-rollback behavior (old code ignores the git-ignored markers; committed `.gitattributes`/`.gitignore` content persists harmlessly)\n- [ ] Captures A-tier future (committed store-format version + ordered ledger, fail-closed on too-new) + committed-version recommendation\n- [ ] A link to `docs/migrations.md` is added from the docs index and CLAUDE.md (verifiable: the link string is present in both)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "WS4: docs/migrations.md \u2014 first-class ensure-pattern reuse guide"
+      },
       "created_at": "2026-08-15T15:01:28Z",
       "jira_key": "REB-850",
+      "peer_parent": "REB-560",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:28Z"
     },
     "68ef-da4f-b64b-4903": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe core deliverable of the epic: an `in_progress` ticket should carry the coding-agent session that STARTED it, end-to-end (written on the STATUS event AND folded into compiled state), additively \u2014 without disturbing `assignee` / `author`, and byte-identical to today when no session id is present. Recording without folding produces no observable outcome, so both halves ship together.\n\n## What\n- **Write (`src/rebar/_commands/txn.py`).** In `claim_core` and `transition_core`, when the\n  event is an `open -> in_progress` STATUS, call the shared `resolve_session_id()` (story\n  6014) via a small `_stamp_session(status_data)` helper; when it returns non-None, add\n  `data[\"session\"]`. When None, OMIT the key entirely so the event bytes are identical to the\n  pre-feature path. Stamp on ANY `open -> in_progress` STATUS \u2014 the `claim` command AND a\n  bare `transition <id> open in_progress` (including the parent-first cascade) \u2014 not just\n  `claim`.\n- **Fold (`src/rebar/reducer/_processors.py`).** In `process_status`, a\n  `_fold_claimed_session(state, data)` helper sets `state[\"claimed_session\"] = data.get(\"session\")`\n  on the `open -> in_progress` edge (`current_status == \"open\" and status == \"in_progress\"`).\n  It is invoked ONLY in the two branches that APPLY this event's status \u2014 the normal-update\n  branch and the fork-WINNER branch \u2014 and NEVER in the branch where the existing chain wins,\n  so a losing concurrent claim never overwrites the winner's session (epic advisory G6/T8).\n  The edge condition reads the **incoming event's** `data.get(\"current_status\")` and\n  `data.get(\"status\")` \u2014 NOT the post-update `state[\"status\"]` (already mutated to\n  `in_progress` by the time the helper runs) \u2014 so in the fork-winner branch it still keys on\n  the event's declared `open -> in_progress` edge, never firing for a `<other> -> in_progress`\n  winner (advisory T8).\n  `claimed_session` records the session of the CURRENT claim episode (mirrors `assignee`): a\n  session-less re-claim folds `None`, deliberately CLEARING any stale prior id so the field\n  never mis-attributes the current in_progress slot to a past session (advisory T9). A later\n  non-claim edge (e.g. `blocked -> in_progress`) leaves it untouched.\n- **Initial-state default (`src/rebar/reducer/_state.py`).** Add `claimed_session: None` to\n  `make_initial_state()` (mirrors `assignee`), so a fresh event-replay always carries the key\n  (value `None`) rather than key-absent.\n- **Compiled-state schema (`src/rebar/schemas/ticket_state.schema.json`).** Add a\n  `claimed_session: {type: [string, null]}` property beside `assignee` so the new public\n  compiled-state field is enumerated in the schema.\n- **Interim key-presence contract (until S3).** A snapshot persisted BEFORE this stack lacks\n  `claimed_session` entirely, so during the coexistence window a snapshot-served state may be\n  key-absent while a fresh-replay state is `None`. Consumers MUST therefore read via\n  `state.get(\"claimed_session\")` (tolerating both); S3 (199b) adds the snapshot-restore default\n  + compaction round-trip that closes the window. This story does not claim key-presence for\n  pre-existing snapshots.\n- **Forward/back-compat.** `data[\"session\"]` is an additive data key; a reducer build without\n  the fold ignores unknown data keys (it only reads `data.get(\"status\")` / `current_status`),\n  so an older clone tolerates the event. Absent-session events are byte-identical to today.\n- **Dependency.** The shared `resolve_session_id()` is story 6014, landed as the BASE COMMIT\n  of this stacked change series; this story is plan-reviewed with `--ref HEAD` so the review\n  snapshot includes it.\n\n## Scope\n- IN: the write stamp (both cores) + the reducer fold + the `make_initial_state` default +\n  the `ticket_state.schema.json` property + unit/integration tests (present,\n  absent/byte-identical, bare-transition, fork-winner gating, forward-compat tolerance,\n  session-less stale-clear, initial-state default).\n- OUT: snapshot/compaction default + pretty read surface + MCP outputSchema (S3 / 199b);\n  `OPENCODE_SESSION_ID`/`CODEX_THREAD_ID` + harness provenance (S5 / c557); capture hooks\n  (S4 / S6). The shared resolver itself is story 6014 (already landed as this stack's base).\n\n## Acceptance Criteria\n- [ ] Claiming with a session env var set records `claimed_session` in compiled state.\n      Proof: `pytest tests/unit/test_claimed_session.py -k claim_records -q`.\n- [ ] Claiming with NO session env var set folds `claimed_session` to `None` (key-present,\n      consistent with the initial-state default) AND the written STATUS event carries no\n      `session` key (byte-identical no-session event path). Proof:\n      `pytest tests/unit/test_claimed_session.py -k absent -q` asserts\n      `state[\"claimed_session\"] is None` AND `\"session\" not in` the STATUS event's `data`.\n- [ ] A bare `transition <id> open in_progress` records it too (cascade parents included).\n      Proof: `pytest tests/unit/test_claimed_session.py -k transition -q`.\n- [ ] Fork-winner gating: when two competing `open -> in_progress` STATUS events carry\n      DIFFERENT session ids, compiled `claimed_session` equals the lexical-UUID WINNER's\n      session (never the loser's). Proof:\n      `pytest tests/unit/test_claimed_session.py -k fork -q` replays both events in BOTH\n      orders and asserts the winner's session each time.\n- [ ] Forward-compat: `process_status` folds a STATUS whose `data` carries both `session` and\n      an arbitrary UNKNOWN extra key without error, and the unknown key does not enter state\n      (proxy for an older clone tolerating the additive key). Proof:\n      `pytest tests/unit/test_claimed_session.py -k forward_compat -q`.\n- [ ] Stale-clear (T9): a later `open -> in_progress` claim carrying NO session folds\n      `claimed_session` back to `None` (never leaves a stale prior id). Proof:\n      `pytest tests/unit/test_claimed_session.py -k session_less_reclaim -q`.\n- [ ] `make_initial_state()` defaults `claimed_session` to `None` (key-present). Proof:\n      `pytest tests/unit/test_claimed_session.py -k initial_state -q`.\n- [ ] `ticket_state.schema.json` enumerates `claimed_session` as `[string, null]`. Proof:\n      `grep -n '\"claimed_session\"' src/rebar/schemas/ticket_state.schema.json`.\n\n## Depends on\n- S1 (shared resolver `resolve_session_id`) \u2014 landed as the base of this stack.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Record the claiming session id on open->in_progress (claim + bare transition)"
+      },
       "created_at": "2026-08-15T15:01:29Z",
       "jira_key": "REB-800",
+      "peer_parent": "REB-544",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:29Z"
     },
@@ -15659,8 +15770,16 @@
       "updated_at": "2026-08-15T15:01:31Z"
     },
     "6982-2e75-f8fa-43b9": {
+      "baseline": {
+        "assignee": null,
+        "description": "Integrate the task-decomposition SOTA research (docs/research/task-decomposition-sota-2026.md, commit 143d5074e, ticket englacial-communal-conure/d39b) into the plan-review gate: validate each recommendation experimentally with evals FIRST, implement only behind its results gate, then dogfood in production review. Per operator direction (2026-07-15): no A/B testing - validation is eval-based (the E-gates below), post-ship observation is dogfooding via R7 instrumentation, and the approach must be clearly documented at every step.\n\n## Context\nGATE TERMS: each child R1-R7 story carries its own falsifiable pass/fail thresholds (drawn from the report's section-6 experiment table) INSIDE its Acceptance Criteria - the child ACs are the authoritative 'gate rows'; this epic does not duplicate the numbers. R6 is the one deliberate exception: a deterministic pass-4 coaching move with no detection behavior ships first with no eval gate (validated by dogfooding via R7 metrics). Experiment ids follow the report's numbering; E4 (the in-situ A/B experiment) is deliberately DROPPED per the operator's no-A/B directive, which is why the experiment set is E1/E2/E3/E5/E6. INCONCLUSIVE-GATE RULE: an experiment that fails its own validity gate (e.g. E1 kappa < 0.7) or returns an ambiguous result gets at most ONE documented re-run with changed method; if still not clearly passing, every dependent R-story closes deferred with the results recorded - ambiguity never rounds up to a pass. ORDERING: first wave after E1 is R7 + R6 (instrumentation and the no-gate move), so dogfood monitoring exists before any detection change lands; R2/R3/R4 each touch criteria_routing.json and land serially in any order (file-impact keeps them out of one batch); R1 does not depend on R5 (the probe is effective without the kernel sub-answer; R5 strengthens its verification later); R5's IMPACT_MODEL_VERSION bump is coordinated at claim time with the floor-split story's own potential bump so the corpus segments cleanly (one bump train, never two half-bumps). The report's \u00a75 mined this store's own history: post-claim description edits on 16/505 claimed work tickets (3.2%), 15 substantive; of 8 with persisted reviews, 3 were review MISSES sharing one defect class (plan asserts a capability an existing module lacks: dc58, db7b, 5886) and 4 were advisories applied only post-claim (latency, not blindness). Small n: 3/8 identifies the defect CLASS (binomial 95% CI 9-76%), it is not a precise miss rate - child E1 re-verifies these claims before anything depends on them. \u00a76 defines R1-R7, each with a falsifiable experiment. Implementation targets: src/rebar/llm/plan_review/ (orchestrator, det_floor.py, passes.py, criteria_routing.json), src/rebar/llm/review_kernel/ (SHARED with code-review - R5 requires the E5 non-regression gate), src/rebar/llm/reviewers/plan_review_*.md. Calibration assets in docs/experiments/plan-review-gate/ are extended, not replaced. This epic runs alongside the calibration-3 line (task relishable-ammonitic-hoverfly, story large-sleepful-needlefish); implementation children that touch criteria_routing.json/review_kernel sequence after the floor-split story to avoid file conflicts.\n\n## Acceptance Criteria\n> RECONCILED AT CLOSE (2026-07-19). The original ACs below tracked the ORIGINAL plan (batch evals + inter-rater kappa). Several were changed by explicit, OPERATOR-APPROVED cost decisions during execution: the batch-eval gating strategy was retired in favor of an advisory-first + standing-dogfood strategy, the finding-adjudication/kappa corpus was descoped, and the expensive E2/E3 LLM batch baselines were permanently rejected on cost and superseded by story d8a5. Each AC is restated to reflect what was actually delivered, honestly noting the deferrals/descopes and their rationale. All 13 children are closed.\n\n- [x] **E1 outcome corpus frozen** \u2014 the plan-review OUTCOME corpus IS frozen + committed under docs/experiments/plan-review-gate/runs/ with a versioned README (628 rows, event-mined; landed via Gerrit 740+744). **DESCOPED (operator-approved):** the finding-adjudication corpus + inter-rater \u03ba\u22650.7 gate were invalidated (tool-less, plan-truncated labeling ~79% contaminated vs the whole-plan/code-grounded/agentic production gate) and descoped; the independent human-adjudicated gold set is parked as idea e59d-c078-724d-46e5 (relates_to this epic). Recorded on E1/e95e. The INCONCLUSIVE-GATE RULE's 'E1 \u03ba<0.7' example is moot (\u03ba descoped).\n\n- [x] **Each experiment child closed with a docs writeup \u2014 with an operator-approved rescope of E2/E3.** E1 (e95e) \u2714, E6 (a880) \u2714, E5 (5342) \u2714 (byte-identical cross-gate replay writeup) closed with committed docs/experiments/ artifacts. **E2 (d125) / E3 (def5) RESCOPED (operator-approved, cost):** their deterministic corpus/harness were built as WIP, but the expensive LLM batch baseline was PERMANENTLY REJECTED on cost and SUPERSEDED by story d8a5 (`criterion_effectiveness.py`, change #798) \u2014 a zero-LLM sidecar-native effectiveness recorder that supplies the same detection/blocking-FP evidence continuously in production. Batch mining was also confirmed dead on its own terms (only ~4 plan-v3 baselines exist vs the ~200 the counterfactual replay assumed). E2/E3 closed on that basis with the result recorded, not as a passed batch-eval gate.\n\n- [x] **Each recommendation R1\u2013R7 landed through Gerrit + closed signed \u2014 with R1/R3/R4 re-planned advisory-first.** All of R1 (59b7), R2 (b080), R3 (3a27), R4 (03a9), R5 (ea39), R6 (5dac), R7 (b1a4) landed through Gerrit and closed. **STRATEGY CHANGE (operator-approved):** because the E2/E3 batch-eval gate was rejected, R1/R3/R4 were re-planned **advisory-first** rather than batch-eval-gated: each ships in **advisory posture** (never blocks a plan), passes a bounded \u2264~8-run sanity check, and is auto-monitored by d8a5's standing dogfood effectiveness recorder, with the advisory\u2192blocking **promotion gate** documented (a criterion only promotes on accumulated dogfood evidence). The original intent \u2014 'no detection-bearing recommendation implemented without its eval gate' \u2014 is met by advisory-safety (no blocking risk pre-evidence) + standing dogfood monitoring, NOT by pre-ship batch evals. R6 shipped ship-first as planned (deterministic rendering + validator compliance); R2/R5 landed per their own child gate terms.\n\n- [x] **Landed changes in the packaged registry, no config-flag, R7 dogfood documented, docs/plan-review-gate.md updated.** SATISFIED as-is: advisory criteria live directly in the packaged `criteria_routing.json` + `CANONICAL_LLM` (no config-flag or overlay gating); d8a5's standing effectiveness recorder + the advisory\u2192blocking promotion-gate protocol are documented in docs/plan-review-gate.md.\n\nNOTE \u2014 the batch-eval \u2192 advisory-first + standing-dogfood pivot AND the E2/E3 batch-baseline deferral were **operator-approved cost decisions** (LLM spend minimized, human-adjudication time over budget). They replace, rather than fail, the original batch-eval-gated plan.\n\n### Original Acceptance Criteria (pre-reconciliation, for audit)\n- [ ] E1 ground-truth corpora are frozen and committed under docs/experiments/plan-review-gate/runs/ with a versioned README (outcome corpus + finding-adjudication corpus, inter-rater kappa >= 0.7 recorded).\n- [ ] Each experiment child (E1, E2, E3, E5, E6 - no E4, see Context) is closed with its results committed as a docs/experiments/ writeup (the repo artifact is the criterion; ticket comments mirror it).\n- [ ] Each recommendation child (R1-R7) is either landed through Gerrit with its own AC gate terms demonstrably passed (R6's terms are ship-first: deterministic rendering + validator compliance), or closed/deferred with the failing result recorded - no detection-bearing recommendation implemented without its eval gate.\n- [ ] All landed criteria/rubric changes are incorporated directly into the packaged registry/rubrics (no config-flag or overlay gating), with R7 dogfood monitoring documented, and docs/plan-review-gate.md updated to match.\n- [ ] Every implemented recommendation has a committed docs/experiments/ writeup showing its gate row passed before implementation; every rejected/deferred recommendation has the failing result recorded.\n- [ ] The gate ships with no blocking-FP regression: validated changes are incorporated DIRECTLY into the packaged review process (no config-flag or overlay gating - operator direction 2026-07-15); new criteria enter at advisory POSTURE first where their child's gate terms say so, with R7 dogfood monitoring: when a criterion's trailing blocking-FP proxy exceeds 10% (the **blocking-FP proxy** for a criterion is the fraction of that criterion's BLOCKING findings, over a trailing window of reviews, that are subsequently adjudicated false-positive / not-block-worthy \u2014 measured by R7's instrumentation against E1's committed finding-adjudication ground-truth corpus; 10% is the demotion threshold), its registry posture is demoted to advisory by an ordinary criteria_routing.json change (precedent: calibration 3 demoted T5e to advisory on FP evidence, task relishable-ammonitic-hoverfly; T3/T10 are the precedent for keeping routinely-ignored criteria non-blocking in the first place).\n- [ ] The plan-review methodology remains documented: docs/plan-review-gate.md reflects every landed change.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Implement plan-review decomposition recommendations R1-R7 from task-decomposition SOTA report"
+      },
       "created_at": "2026-08-15T15:01:31Z",
       "jira_key": "REB-1190",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:31Z"
     },
@@ -15770,8 +15889,30 @@
       "updated_at": "2026-08-15T15:01:45Z"
     },
     "6a89-1165-ea58-4be3": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "# op-cert: docs + ADR (env-attribution, postures, integrity, producer signing, HMAC removal)\n\n## Context\nDocument the operation-certificate model and its security contract as a named ADR artifact `docs/adr/NNNN-opcert-asymmetric.md` (pick the next free ADR number), cross-referencing ADR 0046 (security posture; L2 no-transparency-log and L4 single-environment/no-threshold are op-cert-scoped). The ADR documents the **settled** model from the epic's two design-resolution sections, including the round-6 producer-signing resolution: uniform producer signing (every environment signs with its own auto-generated Ed25519 key at `<tracker>/.opcert-key`; the trusted server is an ordinary environment whose key is pinned out-of-band and which fetches authoritative state), per-kind native verdict vocabularies with the transport-status/verdict split in the remote job API, signer identity as deployment config (no repo-config `env_id` key; consumer policy = `verify.require_environment` + `verify.opcert_enforce_since`; client routing = `verify.opcert_remote_url`), the cost-verified runtime choice \u2014 the existing trusted VM (compose service) behind an API Gateway HTTP API SigV4 front with an async job API (Lambda and a dedicated Fargate stack rejected, with reasons incl. the zero-fixed-monthly-cost constraint), the stateless store-read-only server (client persists the self-authenticating envelope), and HMAC removal via expand-contract (`docs/migrations/hmac-opcert-removal.md`).\n\n## Acceptance Criteria\n- [ ] `docs/adr/NNNN-opcert-asymmetric.md` exists and is non-empty, covering: the\n      environment-attribution model, low/high-security postures, the authoritative-state-fetch\n      integrity requirement, the out-of-band trust root (`.rebar/trusted_environments.yaml`),\n      merge-gate enforcement, the authoritative era anchor (storage-position key validity; rotation-with-pin vs kill-switch revocation), uniform producer signing + local key provenance, the trusted-server\n      runtime + async job API + stateless/read-only posture, and HMAC removal + migration.\n- [ ] The ADR cross-references ADR 0046 and contains the strings `rebar.opcert.v1`,\n      `trusted_environments.yaml`, and `ADR 0046`; a test asserts the file exists, is non-empty,\n      and contains those strings.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "op-cert: docs + ADR (env-attribution, postures, integrity, HMAC removal)"
+      },
       "created_at": "2026-08-15T15:01:46Z",
       "jira_key": "REB-964",
+      "peer_parent": "REB-965",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:46Z"
     },
@@ -15846,8 +15987,30 @@
       "updated_at": "2026-08-15T15:01:49Z"
     },
     "6b06-57ce-9791-4ee1": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe plan-review gate is a 742-LOC bespoke orchestrator (`orchestrator.py`, ThreadPoolExecutor fan-out) + a 663-LOC pass system (`passes.py`), running its 4-pass pipeline OFF the unified workflow engine. To converge on one substrate (and gain the visual editor + parity tooling), the pipeline must be re-expressed as a declarative engine workflow. The criteria-rubric prompts and pass-system prompts ALREADY exist as `.md` files in `src/rebar/llm/reviewers/` (`plan-review-finder`/`-verifier`/`-coach`/`-isf-finder`/`-container` + 33 criterion rubrics), so this is WIRING existing prompts into a workflow, not authoring prompts.\n\n## What\n\nAuthor a v3 engine workflow (e.g. `.rebar/workflows/plan-review.yaml`) that expresses the pipeline using existing step kinds + epic A's constructs: a `uses` DET precheck wrapping `det_floor.py` (P1\u2013P9; only P1/P5/P8 block) \u2192 an `overlay_triggers` precompute resolving the T1\u2013T12 overlays + proportionate-scrutiny filter \u2192 `batch` finders over the routed criteria (using B1's production batch-runner) \u2192 an aggregate `prompt` verify (Pass-2, ONE call) \u2192 a `uses`/`branch` deterministic decide (Pass-3) \u2192 a `prompt` coach (Pass-4). The criteria list + their `when` overlays are assembled from `registry.py` at workflow-render time (the deterministic `_criterion_block()` assembly stays deterministic).\n\n## Scope\n\n- The `plan-review` workflow YAML + any new `uses` ops it needs (DET-precheck wrapper, registry\u2192\n  criteria assembly, decide, coach rendering) registered with input/output contracts.\n- Reference existing library prompt ids; do NOT inline prompt text.\n- Depends on B1 (production batch-runner). This story delivers the workflow + ops that PRODUCE a\n  plan_review_verdict-shaped result OFFLINE (FakeAgentRunner); live cutover + signing is B5.\n\n## Acceptance Criteria\n\n- [ ] A v3 `plan-review` engine workflow expresses DET precheck (`uses`) \u2192 overlay resolution \u2192\n      `batch` finders \u2192 aggregate `prompt` verify (one call) \u2192 `uses`/`branch` decide \u2192 `prompt`\n      coach, referencing existing `reviewers/*.md` prompt ids.\n- [ ] The Pass-1 criteria + their overlay `when` predicates are assembled from `registry.py`\n      deterministically at render time; the production batch-runner (B1) drives the `batch` step.\n- [ ] The workflow validates + lints clean and runs end-to-end OFFLINE (FakeAgentRunner) producing\n      a plan_review_verdict-shaped result; a test exercises it.\n- [ ] `make lint` + the full test suite pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "B2: plan-review as an engine workflow (DET precheck -> batch finders -> verify -> decide -> coach)"
+      },
       "created_at": "2026-08-15T15:01:49Z",
       "jira_key": "REB-173",
+      "peer_parent": "REB-184",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:49Z"
     },
@@ -22181,9 +22344,17 @@
       "updated_at": "2026-08-15T15:06:48Z"
     },
     "9c90-9015-78ea-4d2c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / observed warning\nTracker writes repeatedly emit:\n\n`WARNING rebar.llm.enrich_drain: enrich drain gate check took 300\u2013500 ms (> 20 ms budget)`\n\nA closed ticket (`verymad-hard-weaverbird`) recorded the same observation at 300\u2013800 ms but explicitly left it separate. No open bug owns this warning. The warning occurs on ordinary write paths where the feature gate is intended to be cheap.\n\n## Investigation and repair protocol\n- Use `rebar-debug` in a fresh worktree from current `origin/main`.\n- Reproduce the latency with deterministic instrumentation or a bounded measurement that isolates the gate check from unrelated tracker work.\n- Build an evidence dossier, propose falsifiable causes, and confirm the runtime mechanism before changing production code.\n- Establish defect legitimacy against the documented 20 ms budget and run the caller-dependency gate.\n- If a defect is proven and remediation does not require a behavioral/design decision, repair via physically withheld RED-oracle TDD, run the relevant and full gates, send through Gerrit, and close only after both votes are green and the change lands.\n- If remediation changes when enrichment runs, its consistency guarantees, or another user-visible behavior, stop with a decision brief for operator approval.\n\n## Acceptance criteria\n- [ ] The warning is reproduced and its root cause is proven with runtime evidence and exact citations.\n- [ ] The ticket records whether the behavior is a defect against the 20 ms contract or needs an operator decision.\n- [ ] For an autonomous defect repair, a mechanism-level regression test is observed RED before the fix, physically withheld from the fixer, GREEN afterward, and shown to fail under a defect-seeded mutation.\n- [ ] The original warning scenario is replicated after remediation and meets the documented budget without weakening enrichment correctness.\n- [ ] Construct and surface-parity siblings receive explicit dispositions.\n- [ ] Any code change passes local gates, Gerrit LLM-Review +1 and Verified +1, lands, and only then is the ticket closed.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Enrich drain cheap gate exceeds its 20 ms latency budget"
+      },
       "created_at": "2026-08-16T19:33:47Z",
       "jira_id": "4588902",
       "jira_key": "REB-3063",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T19:33:49Z"
     },
@@ -26442,6 +26613,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:24Z"
     },
+    "bdd8-8cfb-a752-4edc": {
+      "created_at": "2026-08-16T20:36:36Z",
+      "jira_id": "4588907",
+      "jira_key": "REB-3068",
+      "state": "confirmed",
+      "updated_at": "2026-08-16T20:36:39Z"
+    },
     "bde5-2bdb-d658-4969": {
       "created_at": "2026-08-15T15:10:25Z",
       "jira_key": "REB-969",
@@ -30306,9 +30484,31 @@
       "updated_at": "2026-08-15T15:13:16Z"
     },
     "dd5a-bdec-f9a1-4b76": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nRP-01 proposes replacing Rebar\u2019s bespoke structured-output orchestration with authoritative Pydantic AI seams. The replacement is not behavior-preserving by default: historical bugs encode hard-won behavior around deterministic repair and extraction, refusal/truncation handling, retry and tool/request limits, per-operation output budgets, provider fallback, usage accounting, telemetry, and failure taxonomy. Before RP-01 can be approved or ticketized, reconstruct the behavioral contract from both ticket history and the existing test suite and exercise the worktree virtualenv\u2019s resolved Pydantic AI distribution. A behavior may be preserved or intentionally changed, but no observed delta may be accidental or left to the implementer.\n\nThe checkout-local probe path is `.joe-janitor/rp01-pydantic-native-probe.py`. The entire `.joe-janitor/` archive is intentionally excluded from repository snapshots, so an attested-source reviewer cannot see this path; use the existing local file when present and create it at that exact path if absent. The worktree virtualenv resolves `pydantic-ai-slim` to exactly 1.107.2, verified with `python -c \"import importlib.metadata; print(importlib.metadata.version('pydantic-ai-slim'))\"`; the probe must print and record that resolved version rather than infer it from the repository\u2019s `>=1.107,<2` range.\n\n## Plan\n- Deduplicate ticket-derived scenarios with behavioral cases from the structured runner, failure-matrix, budget, timeout, and agent-call seam test suites.\n- Record each scenario\u2019s current observable behavior and its authoritative ticket/test evidence.\n- Continue or create the checkout-local `.joe-janitor/rp01-pydantic-native-probe.py` to exercise Pydantic AI 1.107.2 native output, prompted output, output retry, usage limits, FallbackModel predicates, provider errors, truncation/refusal, telemetry, and artifact-capture feasibility without live model calls.\n- Classify each scenario as preserve, intentionally change, or requiring an explicit maintainer decision; do not infer an invariant from the current implementation alone.\n- Record the resulting evidence and experiment outputs in the local `.joe-janitor/` recovery archive and summarize the decision matrix on this ticket.\n\n## Verification\nThis is an investigation task. The behavior-crossing tier is an in-process integration probe using the real Pydantic AI 1.107.2 Agent/FunctionModel/output/limits/hooks seams while mocking only provider transport. The oracle is the exact call count, request mode, accepted semantic output, exception class, usage/accounting fields, and captured telemetry for each predeclared scenario. Existing unit tests provide the current-Rebar side of the comparison. Run the probe with `env PATH=\"$PWD/.venv/bin:$PATH\" python .joe-janitor/rp01-pydantic-native-probe.py`; it must report the resolved `pydantic-ai-slim` version as 1.107.2 before its scenario results.\n\n## Acceptance Criteria\n- [x] [operator-attested] The matrix maps every material ticket-derived scenario to exact ticket aliases.\n- [x] [operator-attested] The matrix maps every material test-derived scenario to exact test nodes or source locations.\n- [x] [operator-attested] The matrix states current Rebar behavior for every scenario.\n- [x] [operator-attested] The matrix states observed Pydantic AI 1.107.2 behavior for every exercised scenario.\n- [x] [operator-attested] Every outcome difference is labeled preserve, intentionally change, or explicit decision required; no difference is silently inherited from either implementation.\n- [x] [operator-attested] The offline probe executes the real Pydantic AI output/retry/fallback/limits/hook seams and records exact observable oracles without a live model call.\n- [x] [operator-attested] The RP-01 research note is stored under `.joe-janitor/` beside the recovered janitor report.\n- [x] [operator-attested] The Pydantic probe is stored at `.joe-janitor/rp01-pydantic-native-probe.py`.\n- [x] [operator-attested] A ticket comment records the artifact paths, probe command and result, scenario coverage totals, and the next unresolved behavior decision.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=production-equivalent; instrument=live-call \u2014 Read back the ticket comment and compare each recorded artifact path, command result, coverage total, and decision against the local research note.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Resolve RP-01 structured-output seam against historical behavior"
+      },
       "created_at": "2026-08-16T19:33:52Z",
       "jira_id": "4588903",
       "jira_key": "REB-3064",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T19:33:55Z"
     },
@@ -31249,7 +31449,7 @@
         },
         "description": "## Context\nPreserve the raw source transcript used for the 2026-08-16 rebar-janitor recovery. The tracked, repository-visible anchor for the historical project convention is `.joe-janitor/tools.md`. The rest of `.joe-janitor/` is deliberately local-only through this checkout\u2019s `.git/info/exclude`, so repository-snapshot reviewers will see only `tools.md`; they must not treat absence of the excluded files from a snapshot as evidence that local artifacts do not exist.\n\nOperator-attested local inventory before this task: `.joe-janitor/report-2026-07-07.md`, `.joe-janitor/report-2026-08-06.md`, `.joe-janitor/known-fine.md`, `.joe-janitor/report-2026-08-16-recovered.md`, and `.joe-janitor/tools.md`. `git check-ignore -v .joe-janitor/report-2026-08-16-recovered.md` reports `.git/info/exclude:26:.joe-janitor/`. A home-directory inventory found the comparable dated reports in this project-level directory; sibling worktrees mostly expose the shared tools file and no separate user-level archive with comparable reports was established. These local-only facts are execution evidence, not repository-snapshot premises.\n\nSource: `/Users/joeoakhart/Downloads/ChatGPT-Rebar janitor analysis-20260816-0915.md` Destination: `.joe-janitor/raw-chat-2026-08-16.md`\n\nThe copy must preserve the source bytes exactly. If the destination is absent, create it; if it already exists and is byte-identical, leave it unchanged; if it exists with different bytes, do not overwrite it\u2014stop and record both checksums for operator resolution. Do not modify the already-attested recovery report; instead record source/destination SHA-256, size, and line count on this ticket. This is a local artifact-preservation task and changes no tracked repository or production-code file.\n\n## Plan\n- Confirm the source exists and apply the explicit absent/identical/divergent destination policy above.\n- Copy the raw transcript byte-for-byte into the project-level `.joe-janitor/` archive only when the destination is absent.\n- Verify source and destination SHA-256, byte count, line count, and exact comparison.\n- Confirm via the checkout\u2019s own Git commands that the destination remains excluded and the tracked worktree remains clean.\n- Record the final artifact path and verification evidence on this ticket.\n\n## Acceptance Criteria\n- [x] [operator-attested] `.joe-janitor/raw-chat-2026-08-16.md` exists and is byte-identical to the Downloads source.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=production-equivalent; instrument=live-call \u2014 Compare source and destination and record both SHA-256 values, sizes, and line counts on this ticket.\n- [x] [operator-attested] The preserved transcript and `.joe-janitor/report-2026-08-16-recovered.md` are colocated in the checkout-local archive.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=production-equivalent; instrument=live-call \u2014 List the local archive directory and record both exact artifact paths on this ticket; repository-snapshot tools cannot observe intentionally excluded files.\n- [x] [operator-attested] Git reports the destination excluded by the checkout-local exclude configuration.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=production-equivalent; instrument=live-call \u2014 Record `git check-ignore -v` output for the destination on this ticket.\n- [x] No tracked repository file is modified.\n- [x] [operator-attested] A ticket comment records the archive path and integrity evidence.\n  provenance: environment=tickets-store-origin; principal=joeoakhart@navapbc.com; privilege_posture=production-equivalent; instrument=live-call \u2014 Read back the ticket comment containing destination, checksum, size, line count, comparison result, and git status.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Preserve raw 2026-08-16 janitor chat beside recovery artifacts"
       },
       "created_at": "2026-08-16T18:37:09Z",
@@ -36606,6 +36806,10 @@
     "REB-3062": "f380-19d4-4b2f-4bf8",
     "REB-3063": "9c90-9015-78ea-4d2c",
     "REB-3064": "dd5a-bdec-f9a1-4b76",
+    "REB-3065": "0024-fa99-d5bb-49bc",
+    "REB-3066": "0f8f-8178-96b4-4901",
+    "REB-3067": "10c8-9981-3877-4ed5",
+    "REB-3068": "bdd8-8cfb-a752-4edc",
     "REB-307": "c768-a0ad-0567-412c",
     "REB-308": "c799-3a71-3bcd-433e",
     "REB-309": "c7c5-12ea-ad68-4690",
