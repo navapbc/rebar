@@ -9920,8 +9920,16 @@
       "updated_at": "2026-08-15T14:57:34Z"
     },
     "42a0-25c8-7d97-4764": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add --output json to the report commands that today emit text/TSV/id-list. Shapes per epic inventory. Preserve list-epics exit 0/1/2. Reuse centralized helper. ready already JSON-capable via T2.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "T4: add --output to read/report commands (list-epics/ready/summary/check-ac/quality-check/fsck/bridge-fsck)"
+      },
       "created_at": "2026-08-15T14:57:34Z",
       "jira_key": "REB-106",
+      "peer_parent": "REB-348",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:34Z"
     },
@@ -9954,8 +9962,16 @@
       "updated_at": "2026-08-15T14:57:35Z"
     },
     "42d1-7784-9c82-43f5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nA project pins trusted-environment public keys out-of-band (never the tickets branch) and may require a specific environment's certificate for a gate; the check verifies against the pinned key, not the certificate's self-claimed keyid.\n\n**Config location + schema (from the epic's \"Trust config & era-validity protocol\").** Keys are pinned in a YAML file at **`.rebar/trusted_environments.yaml`** (repo-root, on the Gerrit-gated + CODEOWNERS-protected code branch \u2014 NEVER the auto-pushed `tickets` branch). Schema:\n\n```yaml\nenvironments:\n  - env_id: \"<string>\"            # logical environment name; MUST equal the DSSE principal (keyid)\n    keys:\n      - public_key: \"ssh-ed25519 AAAA\u2026\"       # one OpenSSH ed25519 authorized-keys line\n        added_at_commit: \"<git-sha-on-main>\"      # era start\n        revoked_at_commit: \"<git-sha-on-main>|null\"  # era end (null = still valid)\n```\n\nA per-gate `require_environment` names one `env_id` that must produce the certificate. An absent file (or no `require_environment`) is the low-security default: local certs are records, not controls. This story owns the loader + the required-environment check; the era-validity *rule* over `added_at_commit`/`revoked_at_commit` is implemented in child 368c and consumed here.\n\n## Acceptance Criteria\n- [ ] A config loader reads trusted-environment public keys from `.rebar/trusted_environments.yaml`\n      (the out-of-band, review-gated path \u2014 NOT the tickets branch), validating the schema above;\n      an absent file yields \"no required environment\" (opt-in default off).\n- [ ] A cert from an environment not in the pinned set fails the required-environment check (test),\n      and a cert whose `env_id` is pinned but whose signature does not verify against the pinned key\n      also fails (test).\n- [ ] The check verifies against the **pinned** key for the required `env_id`, never the\n      certificate's self-claimed `key_id`/keyid (test: a cert whose keyid claims a pinned env but\n      whose signature is by a different key FAILS).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "op-cert: out-of-band trusted-environment key config + required-environment policy"
+      },
       "created_at": "2026-08-15T14:57:36Z",
       "jira_key": "REB-958",
+      "peer_parent": "REB-965",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:36Z"
     },
@@ -10050,8 +10066,16 @@
       "updated_at": "2026-08-15T14:57:38Z"
     },
     "436f-1759-124e-43d9": {
+      "baseline": {
+        "assignee": null,
+        "description": "# README front door: first-30-seconds pass for evaluators\n\n## Why\n\nThe README serves a different persona than contributor docs: a prospective USER deciding in 30 seconds whether to try rebar (split from the onboarding story on review advice \u2014 independent actor, independently shippable). All six surveyed loved dev-tool READMEs (ruff, uv, httpx, rich, just, fzf) converge on: H1/logo \u2192 one badge row \u2192 one-sentence tagline within ~15 lines \u2192 an image within the first screen (~line 40) \u2192 highlight bullets \u2192 install \u2192 copy-pasteable quickstart, with \u2264200 words of prose before the first code block. rebar's current README is information-rich but insider-shaped. Caveat acknowledged: the six exemplars are single-surface tools while rebar is multi-surface (CLI + library + MCP) \u2014 the adaptation is httpx's move (show the API fast) applied per surface, not a claim the pattern transfers verbatim.\n\n## What\n\n- Top-of-README restructure (content below the fold is preserved, only re-ordered/trimmed):\n  1. `# rebar` \u2192 one badge row, exactly 4 badges: PyPI version, Python versions, CI status, license.\n  2. One-sentence tagline naming the differentiator: an event-sourced, git-backed ticket store + Jira reconciler built for agent swarms, exposed as a Python library, CLI, and MCP server.\n  3. Demo asset by ~line 40: a static terminal screenshot (decision: screenshot over gif/asciinema \u2014 zero-dependency to render on GitHub, versionable, no motion-accessibility concerns; recorded here and in the commit) of the core loop: `rebar ready` \u2192 `rebar claim` \u2192 `rebar transition \u2026 closed`. Asset committed under `docs/assets/` and referenced with a relative path.\n  4. 5\u20138 highlight bullets; the tri-surface is one explicit bullet; the two-gate Gerrit dogfooding is another (it is the project's most distinctive practice).\n  5. Install: `pipx install nava-rebar` (+ brew one-liner).\n  6. Quickstart \u226415 lines total covering all three surfaces: a 3-command CLI session, a 3-line Python snippet, a one-line MCP registration.\n- Keep prose before the first code block \u2264200 words (uv's ratio).\n- Contributor pointer near the bottom links CONTRIBUTING.md and `docs/your-first-change.md` (this story depends_on the onboarding story so the link is never dangling).\n\n## Scope\n\nIN: README.md top section, `docs/assets/` screenshot, badge row. OUT: docs/ restructuring; CONTRIBUTING/tutorial content (onboarding story); marketing site; benchmark charts (rebar's pitch is workflow, not speed \u2014 a screenshot, not a bench, per the just/fzf pattern).\n\n## Acceptance Criteria\n\n- [ ] Badge row present with exactly 4 badges \u2014 prove: `grep -c \"img.shields.io\\|badge\" README.md` in the first 10 lines = 4 (or equivalent count of badge images).\n- [ ] Tagline within the first 15 lines states event-sourced/git-backed + agent-oriented + the three surfaces \u2014 prove: head -15 contains \"MCP\" and \"CLI\".\n- [ ] Demo asset committed and referenced \u2014 prove: `test -f docs/assets/<asset>` and README references it within the first 40 lines.\n- [ ] Quickstart covers CLI + Python + MCP in \u226415 total code lines \u2014 prove: count the fenced block lines.\n- [ ] \u2264200 words of prose before the first fenced code block \u2014 prove: word count of the pre-fence region.\n- [ ] Asset-form decision (static screenshot; rationale) recorded in the commit message and a ticket comment.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "README front door: first-30-seconds pass for evaluators"
+      },
       "created_at": "2026-08-15T14:57:39Z",
       "jira_key": "REB-873",
+      "peer_parent": "REB-870",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:39Z"
     },
@@ -10084,8 +10108,16 @@
       "updated_at": "2026-08-15T14:57:39Z"
     },
     "4387-8fae-9c8b-444b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nTier E is the LAST tier of the bash->Python strangler-fig migration (story adult-oxide-slave, 8784-c2d7-c395-4478). Tiers A-D are DONE/retired; Python is the sole live impl for reads, leaf writes, compute, and the write/sync core. The story's end-state AC is literally \"no _engine/*.sh\": one implementation + three facades (lib/CLI/MCP), zero standalone shell tests, no embedded heredocs.\n\nGrounding against the live tree (2026-06-12) shows this requires porting ~20 STILL-LIVE bash commands the dispatcher routes to (init, fsck, fsck-recover, transition, reopen, claim, compact, compact-all, scratch, clarity-check, check-ac, quality-check, summary, exists, resolve, format, list-descendants, delete, get-file-impact, get-verify-commands, bridge-status, purge-bridge) -- not just deleting dead wrappers -- plus rewiring the reconciler off the compat shims + engine_env, relocating ticket_txn.py off the bare _engine/event_append.py, deleting the dispatcher + compat shims, and translating all 107 .sh test files to pytest. Plan reviewed by opus subagent (REVISE->APPROVE).\n\n## What\nExecute the approved cluster plan, ONE COMMAND AT A TIME (the established \u00a72 per-command protocol: characterize -> port reusing rebar.reducer/graph/_commands/_store/_engine_support -> byte-parity goldens -> cut library+argparse to in-process -> dogfood soak -> delete bash + translate suite), each in a clean green commit. Tier E has NO kill-switch; rollback is git revert. Clusters:\n- E0: argparse cli.py skeleton + help/usage/error goldens (byte-identical to the bash dispatcher via a\n  golden-as-package-data help action) + the auto-init/freshness middleware (port _ensure_initialized).\n  Transitional subprocess fallback for not-yet-ported commands. NO deletions.\n- E1: cut the console_scripts entrypoint over to argparse (dispatcher still exists for fallbacks).\n- E2: port read-ish/quality cmds (clarity-check, check-ac, quality-check, summary, exists, resolve,\n  format, list-descendants, get-file-impact, get-verify-commands, delete).\n- E3: port write/lifecycle cmds (transition, reopen, claim, compact, compact-all, scratch).\n- E4: port init / fsck / fsck-recover (highest risk; isolated soak each).\n- E5: port bridge-status / purge-bridge.\n- E5b: rewire rebar_reconciler off ticket_reducer/bare event_append/engine_env.\n- E5c: relocate ticket_txn.py; delete the bare _engine/event_append.py.\n- E6: rewire remaining compat-shim importers; delete the shims; assert-gone tests.\n- E7: delete the dispatcher _engine/rebar + engine_env/PYTHONPATH machinery + engine_dir zipimport\n  assertion + jq prereq + flock(1)/mkdir discovery; retire machinery tests in the same commit.\n- E8: translate the 107 .sh suites to pytest; delete suite-engine.sh/assert.sh/collector.\n- E9: docs (architecture.md offender table -> empty; bash-migration.md \u00a77 DONE) + exhaustive\n  live-dogfood validation + soak-evidence comment + close adult-oxide-slave.\n\n## Scope\nThe whole remaining bash engine, one command/cluster at a time over multiple sessions; each cluster independently green + revertible. NOT in scope: store/locking/event-schema changes (ratified sound); dropping the dual-leg mkdir lock (release-level follow-up, see Tier D note).\n\n## Acceptance Criteria\n- [ ] cli.py is a real argparse CLI over rebar._commands/_reads/_engine_support (three facades, one impl)\n- [ ] Help/usage/error output byte-identical to the bash dispatcher (goldens pinned before cutover)\n- [ ] All ~20 live commands ported in-process; library no longer subprocesses the dispatcher\n- [ ] reconciler + ticket_txn.py rewired off compat shims / bare event_append / engine_env\n- [ ] Zero _engine/*.sh; compat shims deleted with assert-gone tests; dispatcher + machinery deleted\n- [ ] Zero standalone shell tests (tests/**/*.sh == 0); suites translated to pytest, suite green\n- [ ] Exhaustive live-dogfood validation passed; soak-evidence recorded; adult-oxide-slave closed",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Tier E: delete the bash dispatcher -> argparse cli.py + port ~20 live cmds + zero _engine/*.sh"
+      },
       "created_at": "2026-08-15T14:57:40Z",
       "jira_key": "REB-108",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:40Z"
     },
@@ -10176,8 +10208,30 @@
       "updated_at": "2026-08-15T14:57:46Z"
     },
     "44b7-2f9e-26ee-4835": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe concurrency contract promises compaction is recoverable if the process dies after the snapshot is written and partway through source retirement. Existing tests only monkeypatch Python exceptions (which still run `except`/cleanup code) or construct orphan states by hand \u2014 none kill an actual compactor process. `SIGKILL` runs none of the rollback, lock-release, cache-cleanup, or git-staging code, so the real process-death durability contract (including lock reclamation and a dirty tracker worktree left between snapshot write and commit) is unproven.\n\n## What\n\n- Add a deterministic subprocess test that kills a real `rebar compact` process\n  mid-retirement and verifies recovery from a fresh CLI process.\n- Use a test-only failpoint / filesystem barrier to pause after the first source\n  rename, rather than a timing-based race window.\n\n## Scope\n\n- `tests/interfaces/lifecycle/` (new process-death test)\n- Possibly a small test-only failpoint hook in `src/rebar/_commands/compact.py`\n  (guarded so it is inert in production).\n\n## Acceptance Criteria\n\n- [ ] Test seeds foldable events, launches `rebar compact` in a subprocess, pauses after\n      the first source rename via a barrier, and `SIGKILL`s it.\n- [ ] From a fresh CLI process: the write lock is recoverable, the ticket reads at its\n      exact pre-crash semantic state, no source UUID is lost, `fsck` returns the\n      documented clean/repairable result, and re-running compaction is idempotent or\n      performs the documented repair (after which `fsck` is clean).\n- [ ] The test is deterministic (no reliance on a narrow timing window).\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Add real compactor process-death (SIGKILL) recovery test"
+      },
       "created_at": "2026-08-15T14:57:47Z",
       "jira_key": "REB-1061",
+      "peer_parent": "REB-1064",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:47Z"
     },
