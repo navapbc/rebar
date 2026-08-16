@@ -10346,8 +10346,16 @@
       "updated_at": "2026-08-15T14:57:51Z"
     },
     "453c-2fe2-9743-46c8": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add the third motivating op: scan open epics related to a spec using batched API calls (a batch evaluator rather than a single agent loop), reusing the findings contract and a non-agent runner behind the same protocol.\n\n## Acceptance Criteria\n- [ ] Op selects candidate epics for a spec and evaluates them in batches\n- [ ] Reuses `review_result`/findings contract\n- [ ] Bounded cost (batch size + caps); offline test",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "Batch epic-vs-spec scan operation"
+      },
       "created_at": "2026-08-15T14:57:51Z",
       "jira_key": "REB-111",
+      "peer_parent": "REB-164",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:51Z"
     },
@@ -10464,8 +10472,16 @@
       "updated_at": "2026-08-15T14:57:54Z"
     },
     "458f-5b67-961e-4e80": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nImplementing this epic's session-provenance fold (`_fold_claimed_session`, stories 68ef + c557) added the claiming-session/harness fold to `src/rebar/reducer/_processors.py`, which was already at EXACTLY the 800-LOC module-size soft cap on `main`. The additions pushed it to 832, tripping the CI module-size gate. Rather than allowlist it (grow the grandfathered over-cap set), split the file along the clean seam that already exists: the per-event **processors** vs the two-pass **replay engine**.\n\n## What\n- **New module `src/rebar/reducer/_replay.py`** \u2014 move the replay ENGINE out of\n  `_processors.py`: `scan_for_latest_snapshot`, `_ReplayCtx`, the flat `_EVENT_HANDLERS`\n  dispatch table, and `replay_events`. This is a one-way dependency (the engine imports the\n  `process_*` processors; the processors never call the engine), so it is a clean seam.\n- **`_processors.py`** keeps ONLY the per-event `process_*` fold functions; drop the\n  now-unused imports (`Callable`, `NamedTuple`, `KNOWN_EVENT_TYPES`, `TAG_DELTA` \u2014 all were\n  used solely by the engine/handler-table). Result: `_processors.py` drops from 832 to ~652\n  LOC, back under the 800 soft cap with no allowlist change.\n- **Importers** \u2014 `reducer/_api.py` and `reducer/__init__.py` import `replay_events` /\n  `scan_for_latest_snapshot` from `._replay` instead of `._processors` (and the `__init__`\n  module docstring's provenance note is updated).\n- **Test** \u2014 `tests/scripts/reducer/test_reducer_tag_delta.py::test_downgraded_clone_preserves_and_ignores`\n  monkeypatches `KNOWN_EVENT_TYPES` / `TAG_DELTA`; retarget those patches from `_processors`\n  to `_replay` (the module the replay loop now reads them from).\n- Pure move \u2014 NO behavior change; the reducer's public API (`reduce_ticket`, `replay_events`,\n  `scan_for_latest_snapshot`, the `process_*` functions) is unchanged.\n\n## Scope\n- IN: the file move (`_replay.py`), the `_processors.py` trim + import cleanup, the two\n  importer updates, and the one test monkeypatch retarget.\n- OUT: any behavior change; further reducer decomposition; the session-provenance feature\n  itself (stories 68ef / c557 / 199b).\n\n## Acceptance Criteria\n- [ ] `src/rebar/reducer/_processors.py` is under the 800-LOC soft cap (no allowlist/ceilings\n      entry added). Proof: `[ \"$(wc -l < src/rebar/reducer/_processors.py)\" -lt 800 ]` exits 0\n      (the file prints fewer than 800 lines).\n- [ ] `src/rebar/reducer/_replay.py` exists and holds all four engine symbols: `replay_events`,\n      `scan_for_latest_snapshot`, `_ReplayCtx`, and `_EVENT_HANDLERS`. Proof: each of\n      `grep -q \"def replay_events\"`, `grep -q \"def scan_for_latest_snapshot\"`,\n      `grep -q \"class _ReplayCtx\"`, and `grep -q \"_EVENT_HANDLERS\"` on\n      `src/rebar/reducer/_replay.py` succeeds.\n- [ ] The public reducer API still imports and works: `replay_events` /\n      `scan_for_latest_snapshot` resolve from `rebar.reducer`, and `reduce_ticket` is unchanged.\n      Proof: `python -c \"from rebar.reducer import replay_events, scan_for_latest_snapshot, reduce_ticket\"`.\n- [ ] The module-size CONTRACT test passes (no over-cap drift). Proof:\n      `pytest tests/unit/test_module_size_contract.py -q`.\n- [ ] The reducer test suite (incl. the retargeted downgraded-clone test) stays green. Proof:\n      `pytest tests/scripts/reducer/test_reducer_tag_delta.py -q` and the full\n      `tests/scripts/reducer/` directory.\n\n## Depends on\n- (none \u2014 a mechanical extraction; lands as the BASE of the session-provenance stack so the\n  fold-bearing commits stay under the cap.)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Refactor: extract reducer replay engine to _replay.py (module-size seam)"
+      },
       "created_at": "2026-08-15T14:57:55Z",
       "jira_key": "REB-830",
+      "peer_parent": "REB-544",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:55Z"
     },
@@ -10624,8 +10640,16 @@
       "updated_at": "2026-08-15T14:57:59Z"
     },
     "466f-9764-cd9c-450e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe reconcile-bridge outage (bug 8002-a92f-0999-45dd) was an *unparseable* workflow: `f2bde8d3b5` put `${{ runner.temp }}` in a job-level `env:` of `reconcile-bridge.yml` (and its canary) \u2014 a GitHub Actions startup failure (0 jobs) that stopped Jira sync for ~2 days. **CI never caught it** because `make lint` (the gate the Gerrit `Verified` vote runs) scopes actionlint to `release.yml` ONLY (`Makefile`, `RELEASE_WORKFLOW`; comment line 101: \"Scoped to release.yml \u2014 NOT repo-wide\"). Every other workflow \u2014 including the bridge + canary \u2014 is unvalidated, so an invalid-workflow change merges green and silently disables the workflow.\n\n## What\nWiden the CI **actionlint** coverage in `make lint` from `release.yml` to **all** `.github/workflows/*.{yml,yaml}`, so a parse-error / bad-context change is blocked at the `Verified` gate. Cost is zero today: `actionlint .github/workflows/*.yml .github/workflows/*.yaml` already exits 0 with 0 findings (post-8002-fix). **zizmor stays scoped to `release.yml`** \u2014 widening the security audit is a separate concern, out of scope.\n\n## Scope\n- `Makefile` lint target: invoke actionlint over ALL workflows (actionlint auto-discovers\n  `.github/workflows` when given no path arg), keeping `zizmor $(RELEASE_WORKFLOW)` unchanged\n  and preserving the macOS-skip + pinned-binary install logic. Update the actionlint-scope\n  comments (lines ~19, 97, 101, 107, 115) that say \"release.yml only\"/\"NOT repo-wide\" so they\n  describe the widened actionlint scope (noting zizmor remains release.yml-scoped).\n- `docs/releasing.md:129`: correct \"zizmor + actionlint scoped to `release.yml`\" \u2192\n  \"zizmor scoped to `release.yml`; actionlint covers all workflows\".\n- `tests/unit/test_ci_actionlint_scope.py` (new): assert the Makefile lint recipe runs\n  actionlint over all workflows (not `$(RELEASE_WORKFLOW)`-only), guarding a silent re-narrow.\n\n## How it is guarded (accurate \u2014 corrects the prior plan)\nBoth `gerrit-verify.yaml:303` (pre-merge Verified) and `test.yml:55` (post-merge branch CI) run `make lint`, so widening the Makefile target covers both legs automatically; a reintroduced bad workflow fails that `make lint` step. NOTE: the existing `tests/unit/test_ci_workflow_parity.py` only asserts both legs invoke the *string* `make lint` \u2014 it does NOT verify actionlint's scope, so it is NOT the guard for this change. The new `test_ci_actionlint_scope.py` is that guard.\n\n## Acceptance Criteria\n- [ ] `make lint` runs actionlint against every `.github/workflows/*.yml`/`*.yaml`, not just\n  `release.yml`. Proof: `sed -n '/^lint:/,/^actionlint-bin:/p' Makefile` shows the actionlint\n  invocation is not restricted to `$(RELEASE_WORKFLOW)`.\n- [ ] `make lint` passes on the current tree. Proof: `make lint` exits 0.\n- [ ] Reintroducing a `${{ runner.temp }}` job-level env into any workflow makes `make lint`\n  FAIL for the runner-context reason. Proof: add the line, run `make lint` \u2192 non-zero exit\n  citing `runner`, then `git checkout` to revert.\n- [ ] A regression test asserts the Makefile actionlints all workflows and fails if re-scoped\n  to `release.yml` only. Proof: `.venv/bin/pytest tests/unit/test_ci_actionlint_scope.py -q`.\n- [ ] No stale \"actionlint scoped to release.yml\" wording remains. Proof:\n  `grep -rniE 'actionlint[^.]*scoped to .?release\\.yml|actionlint[^.]*release\\.yml only' Makefile docs/`\n  returns nothing (accurate zizmor-scoped references may remain).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Harden CI: extend actionlint coverage to ALL workflows (not just release.yml) \u2014 the gap that let the reconcile-bridge startup failure merge"
+      },
       "created_at": "2026-08-15T14:58:00Z",
       "jira_key": "REB-1247",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:00Z"
     },
@@ -10650,8 +10674,30 @@
       "updated_at": "2026-08-15T14:58:01Z"
     },
     "46f0-4e09-b8ed-4a4e": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe enriched sidecars (stories 4e19/7c84/e7e0) and the existing attestations are reachable today only via scattered internal helpers; there is no single call that returns a ticket's FULL retained review history or resolves its associated code reviews. The follow-on audit UI epic and any script need one documented read surface.\n\n## What\n\nA read layer that, for a ticket id, returns: (a) the full retained history (not just latest) of plan-review sidecars; (b) the completion attestation plus any completion sidecar record; (c) the associated code reviews, resolved via the ticket's inbound `relates_to` links from `code_review` tickets, each with its full sidecar history. Exposed as a library function, a CLI command, and a read-only MCP tool.\n\n## Data contract (the returned typed dict)\n\n`audit_trail(ticket_id)` returns a `TypedDict` with EXACT key names and nullability:\n\n```python\nclass CompletionRecord(TypedDict):\n    attestation: dict | None   # the ticket's completion-verifier attestation (from show/keyring); None if unsigned\n    sidecar: dict | None       # the latest completion sidecar record \u2014 a PASS (completion_verifier_pass_v1)\n                               # or FAIL (completion_verifier_fail_v1) record; None if no sidecar event\n\nclass AuditTrail(TypedDict):\n    ticket: dict                    # the ticket's current details (from rebar.show)\n    plan_reviews: list[dict]        # full retained plan-review sidecar history, newest-first; [] if none\n    completion: CompletionRecord | None  # None ONLY when BOTH attestation AND sidecar are absent\n    code_reviews: list[dict]        # each: {ticket_id, sidecars: list[dict]} \u2014 a linked code_review\n                                    # ticket + its own newest-first sidecar history; [] if none\n```\n\n- `plan_reviews` is ALWAYS a list (empty `[]` when the ticket has no plan-review sidecars), newest first.\n- `completion` is a `CompletionRecord` dict when EITHER a completion-verifier attestation OR a\n  completion sidecar record exists; it is `None` ONLY when BOTH are absent. The two sub-fields come\n  from two DISJOINT sources (the attestation lives on the ticket; the sidecar is a `COMPLETION_VERDICT`\n  event), so each is independently nullable inside the record.\n- `code_reviews` is ALWAYS a list (empty `[]` when no `code_review` ticket links to this ticket via\n  `relates_to`); each entry carries its OWN sidecar history list.\n\n## Scope\n\n- `src/rebar/llm/plan_review/sidecar.py` and `src/rebar/llm/code_review/sidecar.py` \u2014 add\n  `all_review_results(ticket)` history enumerators (walk the ticket's `REVIEW_RESULT` events\n  newest\u2192oldest, schema-tolerant, returning the list of payload dicts; `[]` on missing/error),\n  complementing the existing `latest_*` readers.\n- `src/rebar/llm/completion_sidecar.py` \u2014 the completion sidecar reader for the `completion.sidecar`\n  field: reuse `latest_pass_record` (PASS) and `latest_fail_verdict` (FAIL) \u2014 the aggregator returns\n  whichever is newest/present (no new reader needed unless a \"latest of either kind\" helper is\n  cleaner; if added, keep it schema-tolerant over both `completion_verifier_pass_v1` and `_fail_v1`).\n- New `src/rebar/audit/read.py` \u2014 an `audit_trail(ticket_id, *, repo_root=None)` aggregator composing\n  the plan / completion / code-review histories, resolving code reviews via the ticket's inbound\n  `relates_to` links from `code_review` tickets (reusing `rebar.show` / `rebar.list_tickets`),\n  returning the `AuditTrail` typed dict above. Also add `__init__.py` for the new `rebar.audit`\n  package.\n- CLI registration (owns-its-own-`--help` intercept pattern used by `_workflow`/`_llm`/`_criteria`):\n  - add an `audit` intercept in `src/rebar/_cli/__init__.py::main`, dispatching to an\n    `audit_cli(rest)` handler in a new `src/rebar/_cli/_audit_commands.py` (parses\n    `show <ticket> [--output json]` and prints the `AuditTrail`).\n  - **create `src/rebar/_cli/help/audit.txt`** (the usage text for `rebar audit show`). This is what\n    makes `audit` a recognized subcommand: `known_subcommands()` is NOT a hardcoded set \u2014 it is\n    DERIVED from the `.txt` files under `src/rebar/_cli/help/` (every `<name>.txt` except\n    `overview.txt`). So adding the help file registers the subcommand; do NOT edit `known_subcommands`.\n- MCP read-tool registration: add a read-only `audit_trail(ticket_id)` tool inside\n  `src/rebar/_mcp_reads.py::register_read_tools` (decorated with `@mcp.tool(annotations=_ANN\n  [\"READ_ONLY\"])`, like the other read tools), so it is available even under `REBAR_MCP_READONLY=1`.\n\n## Approach rationale\n\nA single aggregator over the existing readers + the existing `relates_to` links reuses the linkage the reviewbot already writes (`emit_code_review_artifact` links each code-review artifact `relates_to` its work ticket), so no new linking mechanism is introduced \u2014 the read layer only traverses links that already exist. The MCP tool is read-only so it is available regardless of `REBAR_MCP_READONLY`.\n\n## Compatibility & rollback\n\nPure addition (new readers + new command + new read-only tool); no existing behavior changes. Schema-tolerant readers accept both v1 and v2 records. Reverting removes the new surface (delete `rebar.audit`, `_audit_commands.py`, `help/audit.txt`, the intercept, the MCP tool, the `all_review_results` readers) with no data impact.\n\n## Acceptance Criteria\n\n- [ ] `audit_trail(ticket_id)` returns a dict with EXACTLY the keys `ticket`, `plan_reviews`,\n      `completion`, `code_reviews`; `plan_reviews` and `code_reviews` are lists (newest-first,\n      `[]` when none), `completion` is `CompletionRecord | None` (`None` only when both attestation\n      and sidecar are absent). Oracle: an integration test seeding a ticket with multiple plan-review\n      sidecars, a completion record, and a `relates_to`-linked `code_review` ticket with its own\n      sidecar, then asserting the exact key set, the newest-first ordering of `plan_reviews`, that\n      `completion` is a dict, and that `code_reviews[0]` carries its own sidecar history; plus a\n      companion assertion that a bare ticket yields `plan_reviews == []`, `completion is None`,\n      `code_reviews == []`.\n- [ ] `rebar audit show <ticket> --output json` prints the same structure. Oracle: a CLI subprocess\n      test asserting on the emitted JSON's key set.\n- [ ] The MCP `audit_trail` tool returns the structure and is read-only (available even with\n      `REBAR_MCP_READONLY=1`). Oracle: a test invoking the tool handler under that env.\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "audit read layer (full-history readers + relates_to resolution + CLI/MCP)"
+      },
       "created_at": "2026-08-15T14:58:02Z",
       "jira_key": "REB-1180",
+      "peer_parent": "REB-1215",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:02Z"
     },
@@ -10662,8 +10708,30 @@
       "updated_at": "2026-08-15T14:58:02Z"
     },
     "46f8-cd08-7bf5-4508": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "# Generalize the example skills: rename claude-skills -> agent-skills and de-brand\n\n## Why\n\nThe example skills already use the SKILL.md format, which is now a cross-provider OPEN standard (Anthropic's Agent Skills, adopted by Codex, Copilot, Cursor, Gemini CLI, JetBrains Junie, and more) \u2014 so the format is the right portable bet and should be KEPT. What is Claude-locked is the packaging: the directory name `examples/claude-skills/`, the README's \"Claude Code\" branding and docs.claude.com link, some Claude-Code-specific phrasing (\"the Task tool\"), and internal references to `CLAUDE.md`/`CLAUDE.local.md`. Generalizing these makes the examples usable as illustrative material for any harness.\n\n## What\n\nRename `examples/claude-skills/` \u2192 `examples/agent-skills/`. Update the README to de-brand: state that SKILL.md is a cross-provider standard, note which harnesses read skills and from where (paths differ per tool), and drop the Claude-only framing. Generalize Claude-Code-specific orchestration phrasing to provider-neutral wording (\"subagent\" is fine; replace \"the Task tool\" and similar). Repoint internal references from `CLAUDE.md`/`CLAUDE.local.md` to `AGENTS.md`. Update the shared/ sync test (`tests/unit/test_skill_shared_sync.py`) and any code/docs that reference the old path, so `make test` stays green. Keep each SKILL.md's `name`/`description` frontmatter (the portable core).\n\n## Scope\n\nIn: `examples/agent-skills/**`, `tests/unit/test_skill_shared_sync.py`, and any references to the old dir path. Out: rewriting the skills' substantive logic. Depends on: the AGENTS.md story (so the `CLAUDE.md \u2192 AGENTS.md` reference repoint targets the real new file).\n\n## Acceptance Criteria\n\n- [ ] Directory renamed to `examples/agent-skills/`; no stale path references remain.\n  - Proving: `rg -l 'examples/claude-skills' . | wc -l` == 0.\n- [ ] README de-branded: no \"Claude Code\"-only framing; states SKILL.md portability and where\n  each harness looks for skills.\n  - Proving: reviewer confirms; `rg -c 'Claude Code' examples/agent-skills/README.md` reduced to\n    only accurate, non-exclusive mentions.\n- [ ] Skill bodies use provider-neutral phrasing and reference `AGENTS.md` (not `CLAUDE.md`).\n  - Proving: `rg -c 'the Task tool|CLAUDE\\.local\\.md' examples/agent-skills/` == 0.\n- [ ] `make lint && make test` pass (shared-sync test updated to the new path).\n\n## De-risking results (exact rename surface)\n\nRenaming `examples/claude-skills` \u2192 `examples/agent-skills` is low-risk and CI-safe. Exact surface confirmed by sweep: `tests/unit/test_skill_shared_sync.py` (`SKILLS_DIR` line 25 + docstring lines 3, 9-10) and `examples/claude-skills/README.md:44` (the cp example). **No `.github/workflows` reference** \u2014 nothing in CI depends on the path. Skill-body `CLAUDE.md` references to repoint to `AGENTS.md`: `rebar-implement/SKILL.md` and `rebar-janitor/phases/discovery.md`. SKILL.md is confirmed as the cross-provider open standard (keep the format). The provider-neutral phrasing sweep still applies (drop \"the Task tool\", etc.).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Generalize the example skills: rename claude-skills -> agent-skills and de-brand"
+      },
       "created_at": "2026-08-15T14:58:03Z",
       "jira_key": "REB-1242",
+      "peer_parent": "REB-1245",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:03Z"
     },
@@ -10842,8 +10910,16 @@
       "updated_at": "2026-08-15T14:58:09Z"
     },
     "47fb-678a-ad4b-49f7": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add the second motivating op: review code over commits + tickets with deterministic reviewer selection (the `select_reviewers` rule layer exists) and multi-reviewer aggregation.\n\n## Acceptance Criteria\n- [ ] `review_code`-style op assembles commit+ticket context deterministically\n- [ ] Runs each selected reviewer as a pass; reuses the findings contract\n- [ ] Aggregation: cluster -> consensus -> rank by severity x agreement\n- [ ] Exposed over library/CLI/MCP; offline tests via FakeRunner",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Code-review operation + multi-reviewer aggregation"
+      },
       "created_at": "2026-08-15T14:58:09Z",
       "jira_key": "REB-114",
+      "peer_parent": "REB-164",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:09Z"
     },
@@ -10910,8 +10986,16 @@
       "updated_at": "2026-08-15T14:58:12Z"
     },
     "4819-5f75-d931-4b44": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\nThe `rebar-brainstorm` skill (examples/agent-skills/rebar-brainstorm/SKILL.md) tells the author to run the plan-review gate on *each* ticket immediately after creating them, before any dependency links exist and regardless of blocked state. This contradicts the actual gate behavior documented in AGENTS.md / docs/plan-review-gate.md: `rebar review-plan` fast-fails with no LLM (unsigned INDETERMINATE, exit 2) on a ticket that is not yet claimable \u2014 one still `open` but blocked by an unclosed dependency \u2014 and reviews are dependency-scoped so they must run in dependency order (prerequisites/children before dependents), never in parallel.\n\n## Approach\nRewrite the \"Before recording tickets, read the project's plan-review gate\" section of rebar-brainstorm/SKILL.md so that, after creating tickets, the author FIRST establishes the dependency graph between children (link via blocks/depends_on), then runs plan-review ONLY on unblocked tickets (identified by `rebar ready`), in dependency order, reviewing later tickets as their dependencies close and they become unblocked. Include a fallback: if `rebar ready` returns an empty set, the graph likely has a cycle/authoring error \u2014 inspect and resolve before proceeding. Rationale: authoring to the real gate protocol avoids a guaranteed no-LLM fast-fail and matches AGENTS.md's dependency-order review rule; it is far cheaper than discovering the exit-2 at review time.\n\nAlso assess rebar-implement/SKILL.md: it is an executor of an already-decomposed epic and already claims/reviews only the unblocked, dependency-ordered set via `rebar ready`/ `next-batch`, treating the dependency graph as a precondition \u2014 so it needs no change. This assessment is part of the ticket's scope (documented outcome: no edit, rationale recorded).\n\n## Acceptance Criteria\n- [ ] rebar-brainstorm/SKILL.md's plan-review section states plan-review is run only on\n  unblocked tickets, after the child dependency graph (blocks/depends_on links) is established,\n  in dependency order \u2014 verified by reading the edited section (grep shows \"unblocked\" and\n  \"dependency order\" in the section).\n- [ ] The section references the no-LLM fast-fail (exit 2 / INDETERMINATE) on still-blocked\n  tickets and names `rebar ready` for identifying the unblocked set \u2014 verified by reading the\n  section.\n- [ ] The section specifies a fallback for when `rebar ready` returns an empty set (diagnose\n  the dependency graph for a cycle/authoring error and resolve before proceeding) \u2014 verified by\n  reading the section.\n- [ ] rebar-implement/SKILL.md is left byte-for-byte unchanged (verified by\n  `git diff --stat origin/main -- examples/agent-skills/rebar-implement/SKILL.md` showing no\n  change), and the no-edit assessment rationale is recorded as a comment on this ticket.\n- [ ] [operator-attested] Change lands on main through Gerrit \u2014 proven by recording the Gerrit\n  change number and the LLM-Review +1 / Verified +1 vote outcomes as a comment on this ticket\n  before close.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "rebar-brainstorm: run plan-review only on unblocked tickets after dependency graph is established"
+      },
       "created_at": "2026-08-15T14:58:12Z",
       "jira_key": "REB-1533",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:12Z"
     },
@@ -10972,8 +11056,16 @@
       "updated_at": "2026-08-15T14:58:14Z"
     },
     "48c8-5375-f883-462d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n\nA reconcile pass with silently-failed sub-ops still reports `OK: applied N of N` / exit 0 (\"converged\"). Two gaps make sync failures invisible: (1) the silent-no-op canary (`apply_handlers.py` ~line 218) only hard-fails behind `RECONCILER_FAIL_SILENT_NOOP` (default \"0\" = warn-only); (2) `comment_errors` (swallowed partial comment failures, `apply_handlers.py:117-118,195-196`) are recorded NON-fatally and never counted in `mutation_failures` (`reconcile.py` ~line 1051), so a partial comment drop yields exit 0. Confirmed by the /rebar-debug (b) audit: acli exit-0-on-failure IS detected at the transport floor (`acli_subprocess._check_mutation_failure`), then demoted to non-fatal `comment_errors`.\n\n## What (gate fatality behind the existing flag; keep default OFF)\n\n- `apply_handlers.py`: when `comment_errors` is present AND `_rebar_env(\"RECONCILER_FAIL_SILENT_NOOP\")==\"1\"`,\n  set `outcome[\"error\"]` (so partial comment failures count), mirroring the existing total-no-op\n  canary flag check. Default off \u21d2 landing is behavior-neutral.\n- Optional: a per-pass telemetry summary line (silent-no-op count + comment-error count) \u2014\n  always-on, non-fatal (pure visibility).\n\n## Sequencing (CRITICAL)\n\nDo NOT activate fail-loud before the Jira comment cleanup (sibling ticket). The 13 capped tickets still have ~7 genuinely-unsynced comments each that bounce off Jira's 5000 cap until cleanup; flipping fail-loud first makes the reconciler FAIL every pass on them. Land the gated machinery NOW (safe); ACTIVATE (set `REBAR_RECONCILER_FAIL_SILENT_NOOP=1` in `.github/workflows/reconcile-bridge.yml` env) only AFTER the cleanup.\n\n## Acceptance Criteria\n\n- [ ] With the flag ON, an outcome carrying `comment_errors` counts toward `mutation_failures`\n      and drives a non-zero pass exit. Proving command: a unit test in\n      `tests/unit/rebar_reconciler/apply/` (extend `test_silent_noop_canary.py` / add one) \u2014\n      RED before the change (comment_errors \u2192 exit 0).\n- [ ] With the flag OFF (default), behavior is unchanged (comment_errors non-fatal). Regression\n      test asserts this.\n- [ ] The silent-no-op canary already covers TOTAL no-ops for links/comments/labels (verify + a\n      test for comments/labels, not just links \u2014 the (b) audit noted links-only coverage).\n- [ ] `make test` green; no new dependency.\n- [ ] [operator-attested] Flag activated in reconcile-bridge.yml AFTER the Jira cleanup lands.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Observability: fail-loud on silent sub-op no-ops + count comment_errors (gated; activate after cleanup)"
+      },
       "created_at": "2026-08-15T14:58:15Z",
       "jira_key": "REB-1317",
+      "peer_parent": "REB-1303",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:15Z"
     },
@@ -10984,8 +11076,16 @@
       "updated_at": "2026-08-15T14:58:16Z"
     },
     "48d7-6e80-41f9-4204": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nJobs 2 + 3 are the same machine: run declarative patterns over the repo, emit matches. Job 2 = deterministic overlay-applicability triggers (better than naive grep); job 3 = low-threshold smell/decay scans that flag areas for an LLM. This is where rebar owns common detectors AND lets projects extend \u2014 the extension mechanism is the product.\n\n## What\n- **Engine B = OpenGrep** (permissive LGPL-2.1 Semgrep fork; 30+ langs; JSON+SARIF) as the primary matcher and\n  its rule-loading as the registry substrate; ast-grep optional lighter secondary; scc/lizard as a metric\n  matcher type (size/complexity; feeds smell + plan-review P4). Do NOT invent a match DSL.\n- **Detector registry, thin-envelope + verbatim native payload** (Trivy model): a detector =\n  `{id, metadata, languages/applicability, severity-hint, backend, evidence-mapping}` + a native matcher payload.\n  The envelope rides in the rule's `metadata.rebar_envelope` (spike-validated, preserved verbatim). **`evidence-mapping`\n  is concrete (spike E5):** a match \u2192 the normalized record `{outcome, detector_id, reason, provenance_tier, job,\n  location, coverage}` (namespace + envelope fields read from `rule.properties`); a skipped backend uses the SAME\n  shape with `outcome=abstain, coverage.status=skipped`.\n- **Built-in (official) + project-local** detectors auto-discovered from `.rebar/detectors/`, unioned at load;\n  namespaced IDs; last-wins/explicit override; deltas-only project config; absent dir = no error. The registry is\n  **process-local, built-once-and-cached, keyed by the detector-dir mtime** (rebuild on change); read-only in-memory\n  state (not the shared git store), so concurrent scans share one immutable snapshot.\n- **Loader PRE-VALIDATES (ENGINE-FAITHFULLY) + quarantines each detector** before the scan \u2014 spike E1: the engine\n  ABORTS the whole run on a schema-invalid rule (exit 7), and `opengrep/semgrep --validate` (good\u21920, bad\u21922, NO scan\n  target needed) is the engine's OWN checker, so the loader validates with `--validate` (+ ast-grep's own per-rule\n  check) \u2014 NOT a divergent rebar-side schema \u2014 and drops a bad detector with `abstain(invalid_detector)`.\n- **Self-declared applicability + file-presence routing** (a detector's applicability IS the job-2 trigger). A\n  detector declares its `dimension` from the **closed dimension-ID vocabulary owned by S5** (e.g. `web_frontend`,\n  `has_iac`, `touches_auth`); S4 does not invent dimension IDs ad-hoc.\n- **Configurable metric thresholds (R-6):** scc/lizard oversize/complexity cutoffs are fields on the metric\n  detector's envelope with shipped defaults, project-overridable via the same `.rebar/` delta mechanism \u2014 DISTINCT\n  from per-ID severity/enable deltas (the cutoff value itself is tunable per project / per consumer like P4).\n- **Custom-language detectors (R-7):** a project tree-sitter custom grammar (ast-grep `customLanguages` style)\n  declared in the `.rebar/` slot is honored for structural detectors; unsupported language \u2192 skipped + coverage.\n- Each backend in a recover boundary (prefer the CLI form; in-process bindings behind a worker subprocess);\n  output normalized to S1's evidence model; version pinned/recorded (mismatch \u2192 `abstain(version_skew)`).\n  **Per-backend invalid-detector (spike E1):** OpenGrep `--validate` + ast-grep's own per-rule check pre-validate;\n  scc/lizard are metric tools with NO rule schema \u2192 `invalid_detector` is N/A there (only missing-binary /\n  unparseable-file \u2192 abstain). The OpenGrep+quarantine path is the FIRST vertical slice; ast-grep + metric land after.\n\n## Scope\n- `src/rebar/grounding/detectors/` (registry + loader) + `engine_b.py` (OpenGrep/ast-grep/metric backends).\n- Bundled built-ins authored by us / from permissive sources (NOT Semgrep registry rules \u2014 licensing).\n- Discovery owned here; `.rebar/detectors/` file convention coordinated with `55de`. Not a dup of `3156`.\n\n## Acceptance Criteria\n- [ ] OpenGrep integrated as primary matcher; ast-grep secondary; scc/lizard metric matcher; outputs normalized to the evidence model.\n- [ ] Thin-envelope detector format + registry; built-in + project-local `.rebar/detectors/` discovery; namespaced IDs + override precedence.\n- [ ] Loader pre-validates ENGINE-FAITHFULLY (`opengrep/semgrep --validate`; ast-grep's own check) + quarantines an invalid detector (`abstain(invalid_detector)`) BEFORE the scan \u2014 never aborts on a bad rule (spike E1).\n- [ ] Self-declared applicability + file-presence routing; detector `dimension` drawn from S5's closed vocabulary; absent language/files \u2192 skipped + coverage recorded.\n- [ ] `evidence-mapping` concretely defined (match & abstain share `{outcome,detector_id,reason,provenance_tier,job,location,coverage}`, spike E5; envelope read from `rule.properties`). Metric thresholds project-configurable (shipped defaults, distinct from per-ID severity deltas); project tree-sitter custom grammar honored.\n- [ ] Fail-open tested per backend (missing binary / version skew / unsupported lang / crash \u2192 abstain; invalid-detector \u2192 abstain for OpenGrep+ast-grep, N/A for metric tools); registry build process-local + cached + mtime-invalidated; bundled built-ins permissively licensed.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Engine B \u2014 detector registry + OpenGrep evaluator (+ast-grep/metrics) for applicability + smell scans"
+      },
       "created_at": "2026-08-15T14:58:16Z",
       "jira_key": "REB-118",
+      "peer_parent": "REB-234",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:16Z"
     },
