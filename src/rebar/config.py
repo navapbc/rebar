@@ -62,6 +62,11 @@ from rebar._config_sources import _map_legacy_env as _map_legacy_env
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
+from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
+from rebar._operation_config import SHADOW_ENV as SHADOW_ENV
+from rebar._operation_config import OperationSnapshot as OperationSnapshot
+from rebar._operation_config import compose_operation_snapshot as compose_operation_snapshot
+from rebar._operation_config import shadow_enabled as shadow_enabled
 
 # Plan-review criteria authoring-guide deep-links (epic cite-stone-sea / WS10). A NARROW env-read
 # — the base URL for the generated guide's per-criterion anchors — NOT a typed TOML config key

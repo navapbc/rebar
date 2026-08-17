@@ -528,6 +528,13 @@ def append_event(
     if not (Path(tracker) / ".env-id").is_file():
         raise CommandError("Error: ticket system not initialized. Run 'ticket init' first.")
 
+    # Shadow-mode operation snapshot (RP-04 S1): one diagnostic snapshot for the shared
+    # command write seam, composed before the event is appended. Guarded and
+    # side-effect-free apart from the DEBUG diagnostic — it does NOT gate the write.
+    from rebar._operation_config import emit_shadow_snapshot
+
+    emit_shadow_snapshot(repo_root=repo_root, surface="command-write")
+
     # The audited force override for the write-time secret screen (bug e7a9). The refusal
     # itself is enforced in ``finalize_event`` below — the ONE seam every writer routes
     # through — so all this does is stamp the payload as deliberately forced BEFORE that
