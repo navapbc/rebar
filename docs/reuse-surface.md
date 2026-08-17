@@ -188,6 +188,7 @@ class RunRequest:
     execution_mode: str = "agentic"    # "agentic" (tool loop) | "single_turn" (ONE call, no tools)
     extra_tools: list | None = None
     thinking: bool = False
+    structured_retry_limit: int | None = None  # cap the output-retry allowance (0 ⇒ single-shot)
 
 @runtime_checkable
 class Runner(Protocol):
@@ -205,6 +206,17 @@ runner drives the model*: `agentic` gives the full filesystem + rebar (+ MCP) to
 surface in a tool loop; `single_turn` is exactly **one** model call with **no**
 tools (the structured-output path). Set `mode="structured"` + `output_schema=<name>`
 together for a structured single-turn extraction.
+
+**Structured is one bounded operation.** Every `mode="structured"` request routes through the
+single `get_runner(...).run(...)` facade into one `_pai_structured` operation that issues
+**exactly one outer `Agent.run_sync`** per output mode — no bespoke retry loop. Output repair is
+the *in-Agent* bounded retry (`retries={"output": N}`): it adds a model request but not a second
+`run_sync`, and its allowance N is single-sourced with the `UsageLimits` request budget by
+`output_retry_allowance = min(OUTPUT_RETRIES, max(0, structured_retry_limit))`. So
+`structured_retry_limit=0` means **single-shot** (zero output-repair retries — the overlap/judge
+and contracts batch abstain fail-safe); the only sanctioned *second* outer run is the bug-895c
+native→prompted downgrade. Full retry-layer/accounting contract:
+[llm-framework.md](llm-framework.md) §"The structured retry layers and their accounting".
 
 **Runners.** `PydanticAIRunner` (default; provider-agnostic — the provider is
 chosen by the model string `anthropic:` / `openai:` / `google-gla:`; needs the

@@ -688,6 +688,44 @@ ship a same-named schema (parallel to "adding a reviewer").
 > + `json-repair` + bounded retry), which is provider-portable. Optional `None`s are dropped
 > (`model_dump(exclude_none=True)`) so they don't surface as schema-invalid `null`s.
 
+### The structured retry layers and their accounting (one bounded operation)
+
+A structured call is **one bounded operation**, not a hand-rolled scheduler. `_pai_structured`
+(`rebar.llm.structured_run`) issues **exactly one outer `Agent.run_sync`** per output mode, and
+`runner.py` dispatches every `mode="structured"` request to it through the single
+`get_runner(...).run(...)` facade — there is no bespoke fresh-`Agent`-per-attempt loop. Three
+distinct retry layers stack underneath it, each with its own accounting, and they must not be
+conflated:
+
+1. **Transport retry** (the httpx/botocore layer) — resends a *failed HTTP request*
+   (`REBAR_LLM_RETRY_MAX_ATTEMPTS`, default 4). It re-establishes the same turn; it does not add
+   a model request to the usage tally.
+2. **Output repair** (the in-`Agent` bounded retry, `retries={"output": N}`) — when a *completed*
+   response fails schema validation or is transient-error/oversize, the Agent re-prompts **inside
+   the same `run_sync`**. This adds a model request to the usage tally but **never** a second
+   `run_sync`. The allowance N is single-sourced by `output_retry_allowance(req)` =
+   `min(OUTPUT_RETRIES, max(0, structured_retry_limit))`; the same N seeds **both** the Agent
+   `retries={"output": N}` **and** the matching `UsageLimits` request addend, so the request
+   budget and the retry allowance can never drift. **`structured_retry_limit=0` ⇒ allowance 0 ⇒
+   single-shot**: zero output-repair retries — the abstain/fail-safe `overlap/judge.py` and the
+   `contracts.py` batch depend on. Raising a starved allowance is a **plan-reviewed follow-up**,
+   never an ad-hoc bump.
+3. **The native→prompted downgrade** (bug 895c) — the *only* sanctioned **second outer
+   `run_sync`**. When the provider rejects native structured output at grammar-compile time
+   (`translate_schema_complexity_rejection` matches a grammar-rejection phrase), the operation
+   falls back from `_run_native_output` to `_run_prompted_output` once. So the outer-run count is
+   **exactly one** on a well-formed first response and **exactly two** (native then prompted) only
+   on the 895c downgrade — never a third.
+
+**Complete-or-omit history.** A failed intermediate response is projected onto the retry wire
+**only when it fits**; an over-budget failed response is **omitted whole**, never truncated, so
+the model never sees a half-message it might complete-by-continuation.
+
+**Trace, not usage, for candidates.** Provider *candidates* (fallbacks that were attempted and
+discarded) are recorded in the run **trace** for provenance, but their tokens are **not** folded
+into the aggregate successful-run usage tally — usage accounts the winning run, the trace
+accounts the attempts.
+
 ## Completion verification + the close gate (`verify_completion`)
 
 The shipped `verify_completion` op (library `rebar.llm.verify_completion`, CLI `rebar
