@@ -20,6 +20,7 @@ pytest.importorskip("pydantic_ai")
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from rebar.llm import structured as _structured
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMRunnerError, UnretryableOutputError
 from rebar.llm.runner import PydanticAIRunner, RunRequest
@@ -120,9 +121,14 @@ def test_prompted_structured_retry_aggregates_terminal_failure_telemetry():
             model_override=FunctionModel(malformed_then_truncated),
         ).run(request)
 
+    # RP-01 S2: on the PROMPTED branch a truncation (finish_reason=length) is reclassified as a
+    # concision retry, so it now CONSUMES the shared output-retry allowance instead of aborting
+    # after the first truncated turn. The invalid reply (call 1) and two truncated retries
+    # (calls 2, 3) exhaust the allowance (N=OUTPUT_RETRIES=2), and the exhaustion is translated
+    # to the SAME terminal UnretryableOutputError whose telemetry still records the last turn.
     diagnostic = caught.value.diagnostic
-    assert calls["n"] == 2
-    assert diagnostic["requests"] == 2
+    assert calls["n"] == 1 + _structured.OUTPUT_RETRIES
+    assert diagnostic["requests"] == 1 + _structured.OUTPUT_RETRIES
     assert diagnostic["finish_reason"] == "length"
 
 
