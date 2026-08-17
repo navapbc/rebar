@@ -10,16 +10,19 @@ project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold``
 ``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
 index — the analog of the reviewers' ``index.json``, which likewise separates prompt
 TEXT (library) from selection/routing metadata. :func:`load_criteria` MERGES the two
-into a descriptor (44: the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF).
+into a descriptor (e.g. the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF,
+and the advisory ac-text-quality / scope criteria).
 
 This registry provides the generic routing the orchestrator needs:
 
 * :func:`load_criteria` — merge each criterion's library prompt + routing entry (cached).
 * :func:`applies` — proportionate-scrutiny filter (``applies_at``: container/leaf
   ``scope`` / suppress-by-type / suppress-when-test-or-mechanical).
-* :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into chunks of
-  ``base_chunk(model) × size_factor(ticket)`` (the RUBRIC is the lever that fits a
-  context window — the ticket content is NEVER chunked).
+* :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into
+  ``ceil(total/n)`` near-equal balanced chunks (``n = base_chunk(model) ×
+  size_factor(ticket)``, floored at 2), never a wasteful singleton for ``total >= 2``
+  (the RUBRIC is the lever that fits a context window — the ticket content is NEVER
+  chunked).
 * :func:`overlay_triggers` / :func:`leaf_gate_triggers` — deterministic criterion
   pre-gates (T5a/T5d/T7/T12 + the ticket-4ee2 T13/T14 and leaf-criterion pre-filters,
   tables in :mod:`.det_gate_rules`); the rest are LLM-routed at Pass-1.
@@ -197,6 +200,19 @@ CANONICAL_LLM = frozenset(
         # Advisory sanity check for explicit no-file-impact declarations. A plan that
         # requires source/tests/config/docs contradicts `none`; external-only work does not.
         "no-file-impact",
+        # AC process-gate redundancy probe (task sombre-corrective-cob) — an advisory, single-turn
+        # (1-TURN) `ac-text-quality` criterion (container+leaf) that flags an acceptance criterion
+        # whose ENTIRE completion predicate is a GENERIC development-process / tooling gate CI or
+        # rebar already enforces mechanically for every ticket (children-closed, tests/CI/lint
+        # pass, plan-review passes, merged, commit-trailer) — so the completion verifier can only
+        # focus on ACs that meaningfully represent THIS ticket's delivered work. Accepts an AC
+        # naming the ticket's specific deliverable even when tests/CI/plan-review are its subject
+        # (e.g. "E2E tests written covering feature X", "plan-review criteria updated to rubric Y").
+        # Distinct from evidence-kind (WHERE proof lives) / E1 (coverage) / E2 (ambiguity) /
+        # ac-satisfiability (joint satisfiability). Ships advisory; promotion to blocking is a
+        # future dogfood-gated criteria_routing.json change (see the promotion gate in
+        # docs/plan-review-gate.md).
+        "ac-process-gate",
         # Cross-cutting
         "COH",
     }
@@ -469,15 +485,42 @@ def size_factor(ticket_size: str) -> float:
 def chunk_by_facet(
     crits: list[dict[str, Any]], *, model: str = "claude-sonnet-4-6", ticket_size: str = "moderate"
 ) -> list[list[dict[str, Any]]]:
-    """Pack same-``facet`` criteria into chunks of ``base_chunk × size_factor``
-    (clamped to [2, n]). Single-turn / 2-step tier only — AGENT criteria run one
+    """Pack facet-ordered criteria into ``ceil(total/n)`` contiguous, near-equal
+    balanced chunks (sizes ``total//k`` and ``total//k + 1``, where ``n`` is
+    ``base_chunk × size_factor`` clamped to a floor of 2). For ``total >= 2`` no chunk
+    is ever a wasteful singleton — a trailing remainder is redistributed, and in the
+    ``n == 2`` degenerate (haiku/local + halved) where an odd total cannot split into
+    all-size-2 chunks, the forced trailing singleton is merged back into the previous
+    chunk (making it size 3). Chunks are within ``[2, n]`` for ``n >= 3``; only that
+    ``n == 2`` merge can reach ``n + 1``, and only the degenerate ``total == 1`` yields
+    a lone 1-element chunk. Single-turn / 2-step tier only — AGENT criteria run one
     per call (not chunked). The ticket CONTENT is never split; only the rubric."""
     n = max(2, round(base_chunk(model) * size_factor(ticket_size)))
     by_facet: dict[str, list] = {}
     for c in crits:
         by_facet.setdefault(c.get("facet", "misc"), []).append(c)
     ordered = [c for facet in sorted(by_facet) for c in by_facet[facet]]
-    return [ordered[i : i + n] for i in range(0, len(ordered), n)] or []
+    total = len(ordered)
+    if total == 0:
+        return []
+    # Balance into ceil(total/n) contiguous chunks of near-equal size (differ by <=1) rather
+    # than fixed n-slices, so a trailing remainder never lands in a wasteful singleton chunk
+    # (a count total%n == 1 would otherwise strand one criterion in its own LLM call). Facet
+    # adjacency is preserved because the split stays contiguous over the facet-ordered list.
+    k = (total + n - 1) // n
+    base, extra = divmod(total, k)
+    chunks: list[list[dict[str, Any]]] = []
+    start = 0
+    for j in range(k):
+        size = base + (1 if j < extra else 0)
+        chunks.append(ordered[start : start + size])
+        start += size
+    # n == 2 with an odd total cannot make every chunk size 2 without exceeding n; fold the
+    # unavoidable trailing singleton into its predecessor (size 3) so no lone 1-criterion call
+    # is ever emitted for total >= 2.
+    if len(chunks) >= 2 and len(chunks[-1]) == 1:
+        chunks[-2].extend(chunks.pop())
+    return chunks
 
 
 # ── overlay triggering (deterministic where low-FP; else LLM-routed) ────────────

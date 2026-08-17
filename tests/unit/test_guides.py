@@ -154,7 +154,7 @@ def test_rebar_explain_plan_cli_explains_out_of_loop_proof_move() -> None:
     assert "before it enters the slow delivery loop" in rendered
 
 
-def test_hand_authored_docs_name_current_overlay_range_and_count() -> None:
+def test_hand_authored_docs_name_current_overlay_range() -> None:
     repo_root = Path(__file__).parents[2]
     gate_doc = re.sub(
         r"\s+",
@@ -168,7 +168,9 @@ def test_hand_authored_docs_name_current_overlay_range_and_count() -> None:
             encoding="utf-8"
         ),
     )
-    expected_count = len(CANONICAL_LLM)
+    # The hand-authored docs name the OVERLAY RANGE (Txx) but deliberately NOT a criterion
+    # COUNT: a hard-coded total goes stale on every criterion addition and carries minimal
+    # value, so it is not pinned here.
     overlay_numbers = [
         int(match.group(1))
         for criterion in CANONICAL_LLM
@@ -177,10 +179,7 @@ def test_hand_authored_docs_name_current_overlay_range_and_count() -> None:
     expected_range = f"T{min(overlay_numbers)}–T{max(overlay_numbers)}"
 
     for surface, text in (("gate docs", gate_doc), ("registry docstring", registry_doc)):
-        documented_count = re.search(r"(?:Each of the |descriptor \()(\d+)(?: criteria|:)", text)
         documented_range = re.search(r"\b(T\d+–T\d+)(?: triggered)? overlays\b", text)
-        assert documented_count is not None, f"{surface} is missing the criterion count"
-        assert int(documented_count.group(1)) == expected_count
         assert documented_range is not None, f"{surface} is missing the overlay range"
         assert documented_range.group(1) == expected_range
 

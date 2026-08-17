@@ -103,6 +103,9 @@ EXPECTED_ROUTING: dict[str, tuple[float, str]] = {
     "evidence-kind": (0.95, "blocking"),
     "decomp-shape": (0.95, "advisory"),
     "necessity": (0.95, "advisory"),
+    # AC process-gate redundancy (task sombre-corrective-cob) ships ADVISORY: it coaches removal
+    # of a tautological process-gate AC; promotion to blocking is a future dogfood-gated change.
+    "ac-process-gate": (0.95, "advisory"),
     # Joint AC satisfiability (bug creamy-cocksure-elkhound) ships ADVISORY: promoting it to
     # blocking needs replay calibration evidence, which this change does not yet have.
     "ac-satisfiability": (0.95, "advisory"),
