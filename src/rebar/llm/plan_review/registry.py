@@ -10,16 +10,19 @@ project overrides). Its ROUTING (``exec`` / ``applies_at`` / ``block_threshold``
 ``default_posture`` / ``checklist``) lives in the derived ``criteria_routing.json``
 index — the analog of the reviewers' ``index.json``, which likewise separates prompt
 TEXT (library) from selection/routing metadata. :func:`load_criteria` MERGES the two
-into a descriptor (44: the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF).
+into a descriptor (e.g. the Layer-2 judgment F/E/G/A, the T1–T15 overlays, COH, ISF,
+and the advisory ac-text-quality / scope criteria).
 
 This registry provides the generic routing the orchestrator needs:
 
 * :func:`load_criteria` — merge each criterion's library prompt + routing entry (cached).
 * :func:`applies` — proportionate-scrutiny filter (``applies_at``: container/leaf
   ``scope`` / suppress-by-type / suppress-when-test-or-mechanical).
-* :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into chunks of
-  ``base_chunk(model) × size_factor(ticket)`` (the RUBRIC is the lever that fits a
-  context window — the ticket content is NEVER chunked).
+* :func:`chunk_by_facet` — pack same-``facet`` single-turn criteria into
+  ``ceil(total/n)`` near-equal balanced chunks (``n = base_chunk(model) ×
+  size_factor(ticket)``, floored at 2), never a wasteful singleton for ``total >= 2``
+  (the RUBRIC is the lever that fits a context window — the ticket content is NEVER
+  chunked).
 * :func:`overlay_triggers` / :func:`leaf_gate_triggers` — deterministic criterion
   pre-gates (T5a/T5d/T7/T12 + the ticket-4ee2 T13/T14 and leaf-criterion pre-filters,
   tables in :mod:`.det_gate_rules`); the rest are LLM-routed at Pass-1.
@@ -53,6 +56,17 @@ from typing import Any
 from rebar.llm import criteria as _criteria
 from rebar.llm.criteria import overlay as _overlay_core
 
+# The guide-rendering cluster (extracted along a call-graph seam so this module stays under the
+# size cap) — re-exported so every historical ``registry.<name>`` reference (guide_parity, the
+# MCP read tool, the CLI, the library, the explain tests) resolves unchanged. criteria_guide
+# imports THIS module only lazily inside its functions, so this top-level import is never
+# circular; ``ExplainError`` / ``explain_guide`` / ``AUTHOR_GUIDES`` stay here (below).
+from .criteria_guide import _guide_path as _guide_path
+from .criteria_guide import _guide_section_body as _guide_section_body
+from .criteria_guide import _guide_sections as _guide_sections
+from .criteria_guide import explain_criterion as explain_criterion
+from .criteria_guide import regenerate_criteria_guide as regenerate_criteria_guide
+from .criteria_guide import validate_criteria_guide as validate_criteria_guide
 from .det_gate_rules import _DET_LEAF_GATE_RULES as _DET_LEAF_GATE_RULES
 from .det_gate_rules import _DET_OVERLAY_RULES as _DET_OVERLAY_RULES
 
@@ -197,6 +211,19 @@ CANONICAL_LLM = frozenset(
         # Advisory sanity check for explicit no-file-impact declarations. A plan that
         # requires source/tests/config/docs contradicts `none`; external-only work does not.
         "no-file-impact",
+        # AC process-gate redundancy probe (task sombre-corrective-cob) — an advisory, single-turn
+        # (1-TURN) `ac-text-quality` criterion (container+leaf) that flags an acceptance criterion
+        # whose ENTIRE completion predicate is a GENERIC development-process / tooling gate CI or
+        # rebar already enforces mechanically for every ticket (children-closed, tests/CI/lint
+        # pass, plan-review passes, merged, commit-trailer) — so the completion verifier can only
+        # focus on ACs that meaningfully represent THIS ticket's delivered work. Accepts an AC
+        # naming the ticket's specific deliverable even when tests/CI/plan-review are its subject
+        # (e.g. "E2E tests written covering feature X", "plan-review criteria updated to rubric Y").
+        # Distinct from evidence-kind (WHERE proof lives) / E1 (coverage) / E2 (ambiguity) /
+        # ac-satisfiability (joint satisfiability). Ships advisory; promotion to blocking is a
+        # future dogfood-gated criteria_routing.json change (see the promotion gate in
+        # docs/plan-review-gate.md).
+        "ac-process-gate",
         # Cross-cutting
         "COH",
     }
@@ -469,15 +496,42 @@ def size_factor(ticket_size: str) -> float:
 def chunk_by_facet(
     crits: list[dict[str, Any]], *, model: str = "claude-sonnet-4-6", ticket_size: str = "moderate"
 ) -> list[list[dict[str, Any]]]:
-    """Pack same-``facet`` criteria into chunks of ``base_chunk × size_factor``
-    (clamped to [2, n]). Single-turn / 2-step tier only — AGENT criteria run one
+    """Pack facet-ordered criteria into ``ceil(total/n)`` contiguous, near-equal
+    balanced chunks (sizes ``total//k`` and ``total//k + 1``, where ``n`` is
+    ``base_chunk × size_factor`` clamped to a floor of 2). For ``total >= 2`` no chunk
+    is ever a wasteful singleton — a trailing remainder is redistributed, and in the
+    ``n == 2`` degenerate (haiku/local + halved) where an odd total cannot split into
+    all-size-2 chunks, the forced trailing singleton is merged back into the previous
+    chunk (making it size 3). Chunks are within ``[2, n]`` for ``n >= 3``; only that
+    ``n == 2`` merge can reach ``n + 1``, and only the degenerate ``total == 1`` yields
+    a lone 1-element chunk. Single-turn / 2-step tier only — AGENT criteria run one
     per call (not chunked). The ticket CONTENT is never split; only the rubric."""
     n = max(2, round(base_chunk(model) * size_factor(ticket_size)))
     by_facet: dict[str, list] = {}
     for c in crits:
         by_facet.setdefault(c.get("facet", "misc"), []).append(c)
     ordered = [c for facet in sorted(by_facet) for c in by_facet[facet]]
-    return [ordered[i : i + n] for i in range(0, len(ordered), n)] or []
+    total = len(ordered)
+    if total == 0:
+        return []
+    # Balance into ceil(total/n) contiguous chunks of near-equal size (differ by <=1) rather
+    # than fixed n-slices, so a trailing remainder never lands in a wasteful singleton chunk
+    # (a count total%n == 1 would otherwise strand one criterion in its own LLM call). Facet
+    # adjacency is preserved because the split stays contiguous over the facet-ordered list.
+    k = (total + n - 1) // n
+    base, extra = divmod(total, k)
+    chunks: list[list[dict[str, Any]]] = []
+    start = 0
+    for j in range(k):
+        size = base + (1 if j < extra else 0)
+        chunks.append(ordered[start : start + size])
+        start += size
+    # n == 2 with an odd total cannot make every chunk size 2 without exceeding n; fold the
+    # unavoidable trailing singleton into its predecessor (size 3) so no lone 1-criterion call
+    # is ever emitted for total >= 2.
+    if len(chunks) >= 2 and len(chunks[-1]) == 1:
+        chunks[-2].extend(chunks.pop())
+    return chunks
 
 
 # ── overlay triggering (deterministic where low-FP; else LLM-routed) ────────────
@@ -582,13 +636,13 @@ def validate_packaged_routing() -> list[str]:
 
 
 # ── Criteria authoring guide (R-5, epic cite-stone-sea / WS10) ───────────────────
-# A GENERATED, section-keyed Markdown guide (docs/plan-review-criteria-guide.md): one `## <id>`
-# section per criterion, DERIVED from the registry (the rubric a plan author must satisfy).
-# Regenerated in place (`... registry regenerate-criteria-guide`) and kept honest by
-# validate_criteria_guide (folded into the validate-routing gate) — the same regenerate-in-place +
-# parity-diff contract as reviewers/index.json. `explain_criterion` is the ONE shared lookup that
-# `rebar explain`, the MCP read tool, and the library all wrap.
-_GUIDE_RELPATH = ("docs", "plan-review-criteria-guide.md")
+# The guide-rendering cluster (``_guide_path`` / ``_guide_section_body`` /
+# ``regenerate_criteria_guide`` / ``_guide_sections`` / ``validate_criteria_guide`` /
+# ``explain_criterion``) lives in the sibling :mod:`.criteria_guide` module (registry sits at
+# the module-size cap) and is RE-EXPORTED at the bottom of this module, so every
+# ``registry.<name>`` call site is unchanged. ``ExplainError`` and the author-facing prose
+# guides (``explain_guide`` / ``AUTHOR_GUIDES``) stay here — the latter is the
+# ``registry.resources`` monkeypatch surface the explain tests pin.
 
 
 class ExplainError(RegistryError):
@@ -598,105 +652,6 @@ class ExplainError(RegistryError):
     def __init__(self, kind: str, message: str) -> None:
         super().__init__(message)
         self.kind = kind
-
-
-def _guide_path(repo_root_path: str | None = None):  # -> Path
-    from rebar import config
-
-    return config.repo_root(repo_root_path).joinpath(*_GUIDE_RELPATH)
-
-
-def _guide_section_body(criterion: dict[str, Any]) -> str:
-    posture = criterion.get("default_posture", "advisory")
-    header = f"**{criterion.get('name', '')}** — exec:{criterion.get('exec', '1-TURN')}, {posture}"
-    facet = criterion.get("facet", "")
-    if facet:
-        header += f", facet:{facet}"
-    lines = [f"## {criterion['id']}", header, "", (criterion.get("scenario") or "").strip()]
-    checklist = criterion.get("checklist") or []
-    if checklist:
-        lines += ["", "Checklist:"]
-        lines += [f"- {c.get('check', c) if isinstance(c, dict) else c}" for c in checklist]
-    return "\n".join(lines).rstrip()
-
-
-def regenerate_criteria_guide(repo_root_path: str | None = None) -> str:
-    """Generate docs/plan-review-criteria-guide.md for the canonical built-in registry.
-
-    ``repo_root_path`` selects the output checkout only.  Project-local overlays remain
-    available through :func:`explain_criterion`, but are intentionally excluded from this
-    tracked, package-wide guide so regeneration inside a configured project stays parity-clean.
-    """
-    criteria = sorted(load_criteria(repo_root=""), key=lambda c: c["id"])
-    header = (
-        "# Plan-review criteria authoring guide\n\n"
-        "GENERATED from the criteria registry (`python -m rebar.llm.plan_review.registry "
-        "regenerate-criteria-guide`) — do not hand-edit. One `## <criterion-id>` section per "
-        "criterion; `rebar explain <criterion-id>` prints a section, and coach deep-links anchor "
-        "to `#<criterion-id lower-cased>` (the heading slug).\n"
-    )
-    body = "\n\n".join(_guide_section_body(c) for c in criteria)
-    path = _guide_path(repo_root_path)
-    path.write_text(header + "\n" + body + "\n", encoding="utf-8")
-    return str(path)
-
-
-def _guide_sections(text: str) -> dict[str, str]:
-    """Parse a guide into ``{criterion-id: section-text}`` keyed by ``## <id>`` headings."""
-    out: dict[str, str] = {}
-    cur_id: str | None = None
-    buf: list[str] = []
-    for line in text.split("\n"):
-        m = re.match(r"^## (\S+)\s*$", line)
-        if m:
-            if cur_id is not None:
-                out[cur_id] = "\n".join(buf).strip()
-            cur_id, buf = m.group(1), [line]
-        elif cur_id is not None:
-            buf.append(line)
-    if cur_id is not None:
-        out[cur_id] = "\n".join(buf).strip()
-    return out
-
-
-def validate_criteria_guide(repo_root_path: str | None = None) -> list[str]:
-    """Parity: every ``CANONICAL_LLM`` criterion has a ``## <id>`` guide section and the guide
-    has no ORPHAN section. Returns problems (empty == in sync). Folded into the routing gate so a
-    removed/renamed section fails ``validate-routing``."""
-    path = _guide_path(repo_root_path)
-    if not path.exists():
-        return [f"criteria guide missing at {path} (run regenerate-criteria-guide)"]
-    sections = set(_guide_sections(path.read_text(encoding="utf-8")))
-    problems = [
-        f"criterion {cid!r} has no `## {cid}` section in the criteria guide"
-        for cid in sorted(CANONICAL_LLM - sections)
-    ]
-    problems += [
-        f"criteria guide has an ORPHAN section `## {cid}` (not in CANONICAL_LLM)"
-        for cid in sorted(sections - CANONICAL_LLM)
-    ]
-    return problems
-
-
-def explain_criterion(criterion_id: str, *, repo_root_path: str | None = None) -> str:
-    """The ONE shared lookup behind ``rebar explain``, the MCP ``explain_criterion`` tool, and the
-    library — returns a criterion's authoring-guide section, RENDERED from the packaged registry
-    (via :func:`_guide_section_body`, the same content ``regenerate_criteria_guide`` writes into
-    the docs guide). Rendering from the registry rather than reading ``docs/`` makes the lookup
-    work from any installation (an installed rebar has no ``docs/`` tree). ``repo_root_path`` still
-    flows to :func:`load_criteria` so a project overlay's ``project.<name>`` criteria resolve.
-    Raises :class:`ExplainError` with a ``kind`` of ``malformed-registry`` / ``unknown-id``."""
-    try:
-        by_id = {c["id"]: c for c in load_criteria(repo_root=repo_root_path)}
-    except Exception as exc:
-        raise ExplainError("malformed-registry", f"criteria registry is malformed: {exc}") from exc
-    criterion = by_id.get(criterion_id)
-    if criterion is None:
-        raise ExplainError(
-            "unknown-id",
-            f"unknown criterion {criterion_id!r}; known: {', '.join(sorted(by_id))}",
-        )
-    return _guide_section_body(criterion)
 
 
 # ── Author-facing prose guides (the on-ramp, distinct from the generated criterion registry) ──
