@@ -12997,6 +12997,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:29Z"
     },
+    "52bf-bc40-3fcb-4729": {
+      "created_at": "2026-08-17T22:37:44Z",
+      "jira_id": "4589134",
+      "jira_key": "REB-3106",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T22:37:47Z"
+    },
     "5308-585b-169f-4a35": {
       "baseline": {
         "assignee": null,
@@ -19750,7 +19757,7 @@
         },
         "description": "## Context / Problem\nAcceptance criteria that merely restate a GENERIC development-process gate \u2014 one CI or rebar already enforces MECHANICALLY for every ticket regardless of subject \u2014 add no signal the completion verifier can act on. Examples seen in real tickets: \"all child tickets are closed\" (rebar's open-children guard enforces this structurally), \"all tests pass\" / \"CI is green\" (CI's Verified gate), \"plan review passes\" (the rebar/Gerrit plan-review gate). Such an AC would read identically on an ARBITRARY unrelated ticket. It cannot be truthfully evaluated by the completion verifier as ticket-specific work, wastes verifier effort, and can mislead it into gating close on a tautology. Plan review is the right place to catch these: an author-facing finding at plan time keeps them out of the accepted AC set, so the completion verifier is left with only ACs that meaningfully represent the delivered work.\n\nNo existing criterion covers this. `evidence-kind` classifies WHERE an AC's proof lives (codebase vs operator-attested) and would even ACCEPT \"all tests pass\" if tagged `[operator-attested]`; `E2` judges ambiguity; `ac-satisfiability` judges joint satisfiability; `E1` judges coverage/duplication. None asks whether an AC is a redundant mechanical gate.\n\n## Approach\nAdd ONE new plan-review LLM criterion, `ac-process-gate`, via the established built-in-criterion pattern (mirrors `necessity`, epic 6982/R4) \u2014 a 1-TURN, non-code-grounded, single-turn plan-text judgment, shipped ADVISORY (author-coaching) with promotion to blocking left as the documented dogfood-gated `criteria_routing.json` change in docs/plan-review-gate.md, exactly like the R1/R3/R4 family. The criterion visits every acceptance-criterion checkbox and FIRES on an AC whose ENTIRE completion predicate is a generic, ticket-agnostic process/tooling gate CI or rebar enforces for every ticket (children-closed; tests/CI/build/lint/typecheck pass; plan-review passes; completion-verifier passes; change merged/landed; commit-trailer/DCO present). It ACCEPTS (no finding) an AC that names or turns on THIS ticket's SPECIFIC deliverable \u2014 the artifact, behavior, contract, test, doc, config, or criterion the ticket produces \u2014 EVEN when tests/CI/plan-review are its subject (e.g. \"E2E tests are written covering feature X\", \"the plan-review criteria are updated to the new rubric Y\"). Discriminator/litmus: would this exact AC read and be satisfied IDENTICALLY on an arbitrary unrelated ticket? Yes -> generic gate -> FIRE; names/depends-on this ticket's specific deliverable -> PASS. Anti-FP: err toward SILENCE; an AC carrying any ticket-specific deliverable content passes.\n\nWiring follows the packaged pattern with no new machinery: (a) a rubric prompt file loaded by the existing da27 prompt library; (b) a routing entry in the packaged routing index; (c) membership in `CANONICAL_LLM`; (d) the regenerated tracked guide; (e) a committed bounded-sanity eval spec (the R4-style proving artifact). The criterion is in-process plan-review logic with no CI-provider trigger, so it is portable across environments with any or no CI provider.\n\n## Scope\n- `src/rebar/llm/reviewers/plan_review_ac_process_gate.md` (NEW) \u2014 the rubric prompt (front-matter contract + discrimination body).\n- `src/rebar/llm/plan_review/criteria_routing.json` \u2014 add the `ac-process-gate` routing entry (exec/facet/applies_at/posture/checklist).\n- `src/rebar/llm/plan_review/registry.py` \u2014 add `ac-process-gate` to `CANONICAL_LLM` (NOT to `CODEBASE_GROUNDED`/`AGENT_TIER`).\n- `docs/plan-review-criteria-guide.md` \u2014 regenerated (adds the `## ac-process-gate` section); regenerate-in-place, not hand-edited.\n- `src/rebar/llm/eval_specs/plan-review-ac-process-gate.eval.yaml` (NEW) \u2014 the committed bounded-sanity fire/no-fire corpus.\n- `tests/unit/test_ac_process_gate_criterion.py` (NEW) \u2014 deterministic registration/routing/front-matter/guide/eval-shape invariants.\n\n## Testing\n- The new deterministic unit module pins: canonical/1-TURN/not-grounded registration; non-orphan advisory routing with the container+leaf scope and the two-key checklist; the prompt front-matter contract; the regenerated guide section (`validate_criteria_guide == []`); the eval-spec shape (>=2 fire, >=2 no-fire, <=8 cases); and zero-wiring effectiveness-recorder auto-inclusion.\n- `make lint`, `make typecheck`, and the focused unit module run clean; the packaged-routing and criteria-guide parity gates stay green.\n- Live bounded-sanity: `rebar criteria eval ac-process-gate --output json` fires on the process-gate ACs and passes the deliverable ACs; the result is committed as the run artifact.\n\n## Acceptance Criteria\n- [x] A new plan-review criterion id `ac-process-gate` is a member of `registry.CANONICAL_LLM` and is absent from both `registry.CODEBASE_GROUNDED` and `registry.AGENT_TIER`, so `registry.exec_tier` resolves it to `1-TURN`.\n- [x] `registry.validate_packaged_routing()` returns `[]` with the new criterion present, i.e. `criteria_routing.json` carries an `ac-process-gate` entry whose `exec` is `1-TURN`, `default_posture` is `advisory`, `facet` is `ac-text-quality`, and `applies_at.scope` is `[\"container\",\"leaf\"]`.\n- [x] The `ac-process-gate` routing checklist has exactly two criterion-local sub-answers: a gate key that is not-applicable->PASS when the plan has no acceptance-criterion checkboxes, and a judgment key deciding whether each AC is a ticket-specific deliverable rather than a generic mechanical gate.\n- [x] `src/rebar/llm/reviewers/plan_review_ac_process_gate.md` exists with front-matter `execution_mode: single_turn`, `category: plan-review-criterion`, and `dimension: ac-text-quality`, and its body both documents the ADVISORY posture and references `docs/plan-review-gate.md`.\n- [x] The rubric body enumerates the reject-set (children-closed; tests/CI/build/lint pass; plan-review passes; completion-verifier passes; merged/landed; commit-trailer/DCO) and the accept-set (an AC naming this ticket's specific deliverable, e.g. tests written covering a named feature, or a named criterion/rubric update), and states the \"reads identically on an arbitrary unrelated ticket\" litmus and the err-toward-silence anti-false-positive rule.\n- [x] `docs/plan-review-criteria-guide.md` contains a `## ac-process-gate` section and `registry.validate_criteria_guide(<checkout>)` returns `[]`; `registry.explain_criterion(\"ac-process-gate\")` starts with `## ac-process-gate`.\n- [x] `src/rebar/llm/eval_specs/plan-review-ac-process-gate.eval.yaml` declares `prompt: plan-review-ac-process-gate` and a dataset of at most 8 cases with at least two `expect: finding` process-gate-AC positives and at least two `expect: pass` deliverable-AC negatives.\n- [x] `tests/unit/test_ac_process_gate_criterion.py` asserts the registration, routing, checklist, front-matter, guide-section, eval-spec-shape, and effectiveness-recorder-auto-inclusion invariants above (existence and content of these invariants, independent of any CI run).\n- [x] [operator-attested] The live bounded-sanity eval (`rebar criteria eval ac-process-gate`) is run and its JSON result committed as `docs/experiments/plan-review-gate/runs/ac_process_gate_sanity.json`, with every must-fire case surfacing an `ac-process-gate` finding and every must-not-fire case surfacing none.\n  provenance: environment=rebar repo worktree (impl-ac-process-gate) with live AWS Bedrock access; principal=RebarBotNava (joeoakhart+bot@navapbc.com); privilege_posture=production-equivalent; instrument=live-call \u2014 the eval invokes the same Bedrock plan-review model production plan-review uses over the committed fire/no-fire corpus; result kappa=1.0 committed as the run artifact.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Plan-review criterion: flag mechanical process-gate ACs"
       },
       "created_at": "2026-08-17T17:38:22Z",
@@ -26315,6 +26322,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:41Z"
     },
+    "acf9-154e-ca76-4aac": {
+      "created_at": "2026-08-17T22:37:50Z",
+      "jira_id": "4589135",
+      "jira_key": "REB-3107",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T22:37:53Z"
+    },
     "ad0d-6338-bc8c-43b6": {
       "baseline": {
         "assignee": {
@@ -27861,8 +27875,16 @@
       "updated_at": "2026-08-15T15:09:44Z"
     },
     "b642-c3ed-0e6c-4090": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nCode review (M2) found contract input-schema resolution duplicated across modules, risking edit-time vs runtime divergence.\n\n## What / Scope\nConsolidate the \"resolve a step/prompt's INPUT schema name\" logic currently repeated in `interpreter._consumer_input_schema`, `editor._config_input_schema`, and the field extraction in `editor._schema_fields` into ONE shared helper, used by both the runtime validator (interpreter) and the edit-time validator (editor).\n\n## Acceptance Criteria\n- [ ] A single shared helper resolves a step/prompt input schema name (scripted via contract_for, agent via get_prompt.inputs).\n- [ ] `interpreter.validate_consumer_input` and `editor.validate_node_config` both use it (no parallel reimplementations).\n- [ ] Existing validation tests stay green; behavior unchanged.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Consolidate duplicated contract input-schema resolution (editor + interpreter)"
+      },
       "created_at": "2026-08-15T15:09:45Z",
       "jira_key": "REB-287",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:45Z"
     },
@@ -27951,8 +27973,16 @@
       "updated_at": "2026-08-15T15:09:46Z"
     },
     "b6c5-3461-a6da-4eda": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n`_do_reconverge` measures local-ahead by **HEAD**, not the branch ref (`src/rebar/_store/sync.py:95`, `rev-list {remote}..HEAD`; the ff-adopt `reset --hard {remote}` at `:97` runs only when that is empty). This is the WS3 data-loss fix: a tracker worktree can be in a **detached-HEAD-local-ahead** state (a local commit advances `HEAD` but not `refs/heads/tickets`). The previous guard tested the lagging *branch ref*, read empty in that state, and `reset --hard`'d away the un-pushed local commit (`docs/concurrency.md`). VALIDATED: this specific edge has no dedicated regression test (the historical shell test was retired in the bash\u2192Python migration without a like-for-like successor).\n\n## What\nAdd a regression test in `tests/unit/test_sync_union_recovery.py` that reproduces the detached-HEAD-local-ahead state and asserts the local commit survives reconvergence:\n1. `origin` tickets repo with a shared **base** event; the tracker is cloned from it (so they\n   share history and `refs/heads/tickets` starts at base).\n2. `origin` advances with a new event (its `tickets` moves ahead of base).\n3. The tracker goes **detached** at base (`git checkout --detach`) and commits a LOCAL event \u2014\n   so `HEAD` advances past base while `refs/heads/tickets` still points at base (lagging).\n4. `sync.reconverge(tracker)` runs (it fetches `origin`, then reconverges under the lock). With\n   the base as a common ancestor and both sides ahead, this is a DIVERGED case \u2192 union merge.\n5. Assert the local event's commit is still reachable from `HEAD` (NOT orphaned by a\n   `reset --hard`), the remote event's commit is reachable too, and BOTH event dirs are present\n   in the working tree.\n\nTeeth: were local-ahead measured by the lagging `refs/heads/tickets` (the pre-WS3 bug) instead of `HEAD`, it would read empty, `reset --hard {remote}` would run, and the local commit would be orphaned \u2014 failing the reachability assertion.\n\nSetup mechanics: `origin` is built with the file's existing `_new_tickets_repo` + `_commit_event` helpers. The **tracker is created by `git clone -b tickets <origin>`** (NOT `_new_tickets_repo`, which only `git init`s an unrelated repo) so it shares the base history and starts with an `origin` remote + `origin/tickets` tracking ref; `_commit_event` and `_git` are reused for the subsequent local commit and assertions. A small clone helper may be added if clearer.\n\n## Scope\n- `tests/unit/test_sync_union_recovery.py` \u2014 add the detached-HEAD-local-ahead test. Reuses\n  `_commit_event` / `_git`; builds `origin` via `_new_tickets_repo`; creates the tracker via\n  `git clone` (shared history) rather than `_new_tickets_repo`.\n\n## Acceptance Criteria\n- [ ] A test `test_sync_preserves_detached_head_local_ahead_commit` reproduces the state (HEAD\n      detached and ahead; `refs/heads/tickets` lagging; `origin/tickets` advanced).\n- [ ] After `sync.reconverge`, both the local event commit and the remote event commit are\n      reachable from `HEAD`, and both event dirs exist in the working tree.\n- [ ] The local commit is not orphaned \u2014 it remains reachable (an aggressive `gc --prune=now`\n      would not collect it).\n- [ ] `make test` green.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "Add detached-HEAD local-ahead sync preservation regression test"
+      },
       "created_at": "2026-08-15T15:09:47Z",
       "jira_key": "REB-991",
+      "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:47Z"
     },
@@ -28074,8 +28104,16 @@
       "updated_at": "2026-08-15T15:09:52Z"
     },
     "b7e6-d8b8-29e7-40ad": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nE2 cluster: port the read-ish / quality category-B commands to in-process Python, one command (or tight sibling pair) at a time, following the revised flow (port -> route argparse in-process -> rewire library off _run -> golden parity test python==bash; NO bash deletion \u2014 that consolidates in E7/E8). Commands: get-file-impact, get-verify-commands, exists, resolve, format, list-descendants, clarity-check, check-ac, quality-check, summary, delete. Each reuses rebar.reducer / rebar.graph / rebar._engine_support (resolver, output, reads) \u2014 never re-implemented. Byte-parity (stdout/stderr/exit, text + --output json) captured from the bash dispatcher arm before routing, pinned by a test.\n\n## Acceptance Criteria\n- [ ] All 11 E2 commands dispatch in-process via rebar._cli (added to an in-process router set)\n- [ ] Each command's library function (where one exists) no longer subprocesses the dispatcher (_run)\n- [ ] Per-command golden parity test pins python==bash (stdout/stderr/exit; text + json where applicable)\n- [ ] Single-reducer show==list==search shape (f026) + exit-code + schema contracts preserved\n- [ ] Full non-integration suite green after each command; isolated probe still 141/141\n- [ ] No bash deleted in E2 (deletion is E7/E8); bash stays as the parity-pinned second impl",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "E2: port read-ish/quality category-B commands in-process (port+route+rewire+parity)"
+      },
       "created_at": "2026-08-15T15:09:52Z",
       "jira_key": "REB-291",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:52Z"
     },
@@ -28094,14 +28132,44 @@
       "updated_at": "2026-08-15T15:09:53Z"
     },
     "b80d-ba60-afe7-42a4": {
+      "baseline": {
+        "assignee": null,
+        "description": "Rec 8 of session-logs/2026-06-09-architecture-review.md (risk R9). The store/locking design is ratified as sound \u2014 no redesign. Two tunings: (a) Every write currently does a synchronous best-effort push; for an agent claiming a batch this serializes network latency per write. Add REBAR_PUSH=always|async|off with default ALWAYS (real-time propagation is a first-order requirement); async pushes after returning, still best-effort, fsck still reports PUSH_PENDING. (b) The mkdir-lock fallback (no-flock platforms, ticket-lib.sh) has unmeasured starvation behavior under many concurrent local agents on macOS. Add a CI stress test (N concurrent writers, assert no lost events, bounded wait).\n\n## Acceptance Criteria\n- [ ] REBAR_PUSH honored by all write paths across CLI/library/MCP; default unchanged (always)\n- [ ] Convergence semantics unchanged (PUSH_PENDING reporting, pre-push merge retry) under async\n- [ ] mkdir-lock stress test in CI; results documented in docs/concurrency.md",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "Auto-push policy: REBAR_PUSH=always|async|off (default always) + lock-fallback stress test"
+      },
       "created_at": "2026-08-15T15:09:54Z",
       "jira_key": "REB-292",
+      "peer_parent": "REB-156",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:54Z"
     },
     "b825-a233-97d4-45c2": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\nThe agent landing contract only works if agents adopt it: the old \"watch the 2 votes\" model is now broken (two green votes no longer means \"it will land\" \u2014 a conflict blocks it while votes stay green). Docs must teach the new contract or the conflict case silently reintroduces babysitting.\n\n## What\nRewrite this repo's landing section in `CLAUDE.md` + `CONTRIBUTING.md` to the new contract, and record the design in `docs/adr/0042-*.md`.\n\n## Dependencies\nDepends on **S1** (`sterilized-papery-horse`, 843b-801f-9ef9-442d) \u2014 the `Autosubmit` label \u2014 and **S4** (`brightish-growable-dodo`, 73f5-4df7-4fac-4738) \u2014 the `land` command: the docs must not merge to `main` until the label and command they instruct agents to use are actually live \u2014 otherwise the guide points at tooling that does not yet exist.\n\n## Scope\nDocs + ADR only.\n\n## Acceptance Criteria\n- [ ] `CLAUDE.md` + `CONTRIBUTING.md` landing section rewritten: \"set `Autosubmit` / run `land`; act on the single typed outcome; do NOT watch votes or treat two green votes as 'it will land'.\"\n- [ ] **Grep the whole repo** for the deprecated \"two green votes\" / \"watch votes\" pattern (e.g. in `docs/your-first-change.md`) and update **ALL** occurrences to the new contract \u2014 not only `CLAUDE.md`/`CONTRIBUTING.md`.\n- [ ] `docs/adr/0042-*.md` records the auto-lander design AND the rationale behind the key decisions, so future idea-epics inherit the \"why\", not just the \"what\". It MUST capture: the agent contract + outcome enum; the R5 safety invariant (tested tree = merged tree) and how each mechanism preserves it; the **eight key design decisions with their prior-art grounding** (Zuul / LUCI CV-Chromium CQ / Gerrit primitives / Prow-Tide) \u2014 the `Autosubmit`\u2194`CQ+2` label, the two-channel status surface, the CQ-reset hand-back, the raw time-to-land timer, the autoheal hang-recovery, the stdlib-not-pygerrit2 client choice, `rebase_on_behalf_of_uploader`, and the sentinel+drain stop; the separation-of-concerns boundary (project infra, not `rebar` core); the reliability posture + accepted single-instance SPOF tradeoff; and the **deferrals with their promotion triggers** \u2014 the provider-seam (idea `1701-8bc1-e3b7-4984`, promote on a 2nd landing platform), bounded-speculation batching (idea `c3a9-5f4c-bdc6-4e27`, promote only on MEASURED serial-treadmill pain), and HA/external-state (promote if single-instance availability is insufficient). **Confirm both idea ids resolve in the store** and anchor ADR-0042 to them. (A full drafted record is attached as a comment on this ticket \u2014 land that content.)\n- [ ] Docs cross-reference ADR-0040 (FFO) + ADR-0041 (LLM-Review `TRIVIAL_REBASE` carry) as the gate substrate the lander sits on.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "S6 Docs (CLAUDE.md/CONTRIBUTING.md landing-contract rewrite) + ADR-0042"
+      },
       "created_at": "2026-08-15T15:09:54Z",
       "jira_key": "REB-943",
+      "peer_parent": "REB-939",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:54Z"
     },
@@ -39271,6 +39339,8 @@
     "REB-3103": "bbdc-5cc9-097a-4f06",
     "REB-3104": "e042-4780-6c63-4b09",
     "REB-3105": "f643-db7d-3d9c-4bd3",
+    "REB-3106": "52bf-bc40-3fcb-4729",
+    "REB-3107": "acf9-154e-ca76-4aac",
     "REB-311": "c9be-211c-7c4e-4528",
     "REB-312": "ca03-5f3e-df5d-45c2",
     "REB-313": "ca73-856c-e5e0-4771",
