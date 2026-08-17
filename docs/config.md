@@ -504,6 +504,25 @@ standard names.)
   invocation-specific runtime override, so it stays an env var and is **not** a
   persistent `[tool.rebar]` setting.
 
+### `REBAR_OPERATION_SNAPSHOT_SHADOW` — temporary shadow-mode switch (RP-04, removed in S7)
+
+A **temporary** operational env var (not a `[tool.rebar]` config key). While the RP-04
+per-operation configuration authority (`rebar.config.OperationSnapshot`, see
+[reuse-surface.md](reuse-surface.md#6-the-operation-snapshot--rebarconfigoperationsnapshot-rp-04))
+is wired in **shadow mode** — composed once per operation and logged as a REDACTED
+diagnostic, but NOT controlling execution — this switch gates that shadow construction.
+
+- **Default: enabled.** Unset ⇒ shadow snapshots are composed (the default). The
+  canonical true spellings (`true`/`1`/`yes`/`on`) also enable it.
+- **Rollback:** set it to a canonical false spelling (`false`/`0`/`no`/`off`/empty) to
+  disable shadow construction entirely — the safe kill-switch if the diagnostic ever
+  misbehaves. Because shadow mode is diagnostic-only and self-guarded (any
+  non-`ConfigError` failure is caught and the legacy operation continues untouched),
+  disabling it changes nothing an operation depends on.
+- **Lifecycle:** this switch and all shadow wiring are **removed in S7**, once a real
+  behaviour-bearing consumer is cut over to the snapshot. Do not build durable config
+  on it.
+
 ## `ticket.default_assignee` — applied at CLAIM, not at create
 
 `ticket.default_assignee` (default `""`) is the assignee `rebar claim` uses **when no
