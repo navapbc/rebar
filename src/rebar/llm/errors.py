@@ -40,6 +40,14 @@ class LLMBudgetExhaustedError(LLMRunnerError):
     ``except LLMRunnerError`` / ``except LLMError`` handler still catches it."""
 
 
+class ContextWindowExceededError(LLMRunnerError):
+    """The next request's authoritative input (system/user/tool content) plus the output
+    reserve exceeds every viable candidate model's context window, so the call cannot run at
+    all — rebar failing closed rather than SHORTENING authoritative input to make it fit
+    (RP-01 S2). A strict :class:`LLMRunnerError` subclass, so every existing
+    ``except LLMRunnerError`` / ``except LLMError`` handler still catches it."""
+
+
 class RunawayToolLoopError(LLMRunnerError):
     """A detected repeating tool-call cycle (one signature or a k-cycle dominating the
     trailing window), aborted MID-RUN so bounded recovery can still land a verdict —
