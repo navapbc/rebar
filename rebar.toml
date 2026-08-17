@@ -80,7 +80,11 @@ project = "REB"                              # env JIRA_PROJECT; the "Rebar" pro
 # [reconciler]: the convergence-rollout flags baseline_dual_write /
 # baseline_consumer_swap were retired (story d6bd) — the per-binding baseline is
 # now ALWAYS dual-written and ALWAYS consumed as the outbound field differ's
-# arbitration ancestor (ADR 0026). No reconciler keys remain to configure here.
+# arbitration ancestor (ADR 0026).
+[reconciler]
+# Enable Markdown↔ADF for this project's Jira Cloud bridge. Set to "off" to roll back
+# to the plain-text wire without changing stored ticket content.
+rich_text_cutover = "cloud"
 
 # ── Code-health analysis: THIS project's stack, not the adapter's ────────────────
 #
