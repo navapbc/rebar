@@ -1333,5 +1333,28 @@
       }
     ],
     "routing": "base"
+  },
+  "ac-process-gate": {
+    "exec": "1-TURN",
+    "facet": "ac-text-quality",
+    "applies_at": {
+      "scope": [
+        "container",
+        "leaf"
+      ]
+    },
+    "block_threshold": 0.95,
+    "default_posture": "advisory",
+    "checklist": [
+      {
+        "key": "has_acceptance_criteria",
+        "check": "GATE: the plan has at least one acceptance-criterion checkbox. If none, this criterion is not-applicable and PASSES (there is no AC to judge)."
+      },
+      {
+        "key": "criteria_are_deliverable_not_process_gate",
+        "check": "Every acceptance criterion names or turns on THIS ticket-specific deliverable rather than merely restating a generic development-process / tooling gate CI or rebar already enforces mechanically for every ticket (children-closed, tests/CI/lint pass, plan-review passes, merged, commit-trailer). Litmus: an AC that would read and be satisfied IDENTICALLY on an arbitrary unrelated ticket is a process gate (the finding); an AC naming this ticket deliverable passes even when tests/CI/plan-review are its subject."
+      }
+    ],
+    "routing": "base"
   }
 }
