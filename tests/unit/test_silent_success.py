@@ -3,7 +3,8 @@ epic jira-reb-687). Offline, no billable call.
 
 Covers: NativeOutput stop-reason parity (a truncated/refused NativeOutput turn raises
 UnretryableOutputError → INDETERMINATE, not a hollow verdict); schema-guided json-repair
-with a safe fallback; and the bounded faulty-prior-output echoed into the reask.
+with a safe fallback; and the RP-01 S2 wire projection carrying a faulty prior reply onto
+the retry wire (carried whole when it fits the window, omitted whole when it does not).
 """
 
 from __future__ import annotations
@@ -114,11 +115,15 @@ def test_repair_json_falls_back_when_schema_call_raises(monkeypatch):
 
 
 # ── Bounded faulty prior output in the reask ──────────────────────────────────
-def _capturing_model(texts):
+def _capturing_model(texts, usages=None):
     """A FunctionModel that returns ``texts[i]`` on the i-th call (clamping to the last)
     and CAPTURES the user-visible prompt text it received on each call. ``state["i"]``
     counts model calls; ``state["prompts"][i]`` is the concatenated prompt text of call i.
-    Offline — no network, no billable call."""
+
+    ``usages`` (optional, parallel to ``texts``) attaches an ``(input_tokens, output_tokens)``
+    ``RequestUsage`` to the i-th response so the RP-01 S2 wire-projection fit rule can be
+    driven from a test; a ``None`` entry (or omitting ``usages``) leaves the response's usage
+    at the FunctionModel default. Offline — no network, no billable call."""
     from pydantic_ai.messages import ModelResponse, TextPart
     from pydantic_ai.models.function import FunctionModel
 
@@ -134,7 +139,14 @@ def _capturing_model(texts):
         state["prompts"].append("\n".join(chunks))
         idx = min(state["i"], len(texts) - 1)
         state["i"] += 1
-        return ModelResponse(parts=[TextPart(texts[idx])])
+        kwargs: dict = {"parts": [TextPart(texts[idx])]}
+        usage = usages[min(idx, len(usages) - 1)] if usages is not None else None
+        if usage is not None:
+            from pydantic_ai.usage import RequestUsage
+
+            inp, out = usage
+            kwargs["usage"] = RequestUsage(input_tokens=inp, output_tokens=out)
+        return ModelResponse(**kwargs)
 
     return FunctionModel(gen), state
 
@@ -154,8 +166,9 @@ def _structured_req():
 
 
 def test_reask_echoes_the_models_own_faulty_prior_reply():
-    """Behavioral: a turn-1 reply that fails structured parse triggers a SECOND model call
-    whose prompt echoes the model's OWN faulty prior reply, and the run then recovers."""
+    """Behavioral (RP-01 S2 contract): a turn-1 reply that fails structured parse triggers a
+    SECOND model call, and because the faulty reply provably fits the candidate window it is
+    carried onto the retry wire (as a projected ModelResponse), then the run recovers."""
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import PydanticAIRunner
 
@@ -177,23 +190,34 @@ def test_reask_echoes_the_models_own_faulty_prior_reply():
 
 
 def test_reask_bounds_a_huge_faulty_prior_reply():
-    """Behavioral: an oversized turn-1 faulty reply is echoed BOUNDED (truncated) into the
-    reask — the full blob is not passed back whole, and a ``[truncated]`` marker appears."""
+    """Behavioral (RP-01 S2 contract): an oversized faulty turn-1 reply whose projected size
+    overflows the candidate window is BOUNDED by whole-omission from the retry wire — never
+    carried partially — and the run still recovers on the good turn-2. S2 replaced the old
+    fixed-char truncation-with-``[truncated]``-marker echo with this principled window-fit
+    projection (a reply that fits is carried whole; one that does not is omitted whole)."""
+    from rebar.llm import model_classes
     from rebar.llm.config import LLMConfig
-    from rebar.llm.runner import PydanticAIRunner
+    from rebar.llm.runner import PydanticAIRunner, _pai_model
 
-    # A distinctive, clearly-non-JSON blob far longer than the echo bound, using a rare
-    # char so we can count how much of it survives into the reask.
-    huge = "Z" * 5000
-    model, state = _capturing_model([huge, '{"verdict": "PASS", "findings": [], "summary": "ok"}'])
-    out = PydanticAIRunner(LLMConfig(repo_path="."), model_override=model).run(_structured_req())
+    cfg = LLMConfig(repo_path=".")
+    window = model_classes.own_window_tokens(_pai_model(cfg))
+    # The sentinel sits well past the parse-error's bounded input snippet, so it can reach the
+    # retry wire ONLY via the carried faulty ModelResponse — never via the short reask error
+    # text. With a projected usage that overflows the window, that whole response is omitted, so
+    # the deep sentinel is absent. (With a fitting usage it would be present — the fit rule's
+    # teeth.)
+    sentinel = "DEEP_OMIT_SENTINEL_9Q"
+    blob = "not valid json " * 400 + sentinel
+    model, state = _capturing_model(
+        [blob, '{"verdict": "PASS", "findings": [], "summary": "ok"}'],
+        usages=[(window // 2, window), None],
+    )
+    out = PydanticAIRunner(cfg, model_override=model).run(_structured_req())
 
     assert state["i"] == 2
     reask = state["prompts"][1]
-    # 3. The echo is BOUNDED: the full 5000-char blob is NOT passed back whole, the echoed
-    # portion is capped (~2000 chars + marker), and a truncation marker is present.
-    assert huge not in reask
-    assert reask.count("Z") <= 2500  # bounded near the ~2000 cap, nowhere near the 5000 blob
-    assert "[truncated]" in reask
-    # 4. The call still recovers to a valid parsed result on the good turn-2.
+    # The oversized reply is omitted WHOLE from the retry wire (bounded by the window-fit rule),
+    # never carried partially — so the deep sentinel does not survive onto the reask.
+    assert sentinel not in reask
+    # The call still recovers to a valid parsed result on the good turn-2.
     assert out["verdict"] == "PASS"

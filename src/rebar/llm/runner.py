@@ -52,6 +52,7 @@ from rebar.llm.structured_run import (
     _pai_check_config,
     _pai_structured,
     _warn_if_zeroed_usage,
+    apply_structured_seams,
     build_model_settings,
     build_usage_limits,
     effective_max_iterations,  # noqa: F401  (re-exported: tests import it from `runner`)
@@ -494,6 +495,8 @@ class PydanticAIRunner:
             kwargs = build_agent_kwargs(
                 cfg, req, tools, toolsets, model_settings=model_settings, web_caps=web_caps
             )
+            # RP-01 S2: merge shared bounded-op seams (wire projection + output-retry counter).
+            apply_structured_seams(kwargs, req, candidates, model_settings)
             usage_limits, req_limit, eff_max_iter = build_usage_limits(cfg, req, UsageLimits)
             # Observability (one structured record per LLM call): which reviewer/criterion,
             # execution mode, model, and wall-clock — so a slow/serial fan-out (e.g. the
