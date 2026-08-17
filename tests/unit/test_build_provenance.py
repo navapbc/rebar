@@ -127,6 +127,9 @@ def test_sdist_ships_build_info(built_artifacts: tuple[Path, Path]) -> None:
         )
 
 
+@pytest.mark.filterwarnings(
+    r"error:Python 3\.14 will, by default, filter extracted tar archives.*:DeprecationWarning"
+)
 def test_install_from_sdist_preserves_commit(
     tmp_path: Path, built_artifacts: tuple[Path, Path]
 ) -> None:
@@ -140,7 +143,7 @@ def test_install_from_sdist_preserves_commit(
     extracted = tmp_path / "extracted"
     extracted.mkdir()
     with tarfile.open(sdist) as tf:
-        tf.extractall(extracted)
+        tf.extractall(extracted, filter="data")
     inner = next(extracted.iterdir())
     out2 = tmp_path / "dist2"
     cp = _build(inner, out2, {})  # no REBAR_BUILD_COMMIT, no .git
