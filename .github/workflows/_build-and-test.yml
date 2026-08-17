@@ -333,11 +333,14 @@ jobs:
       # already resolves (uvicorn/httpx/boto3 arrive transitively today), and nothing
       # they unlock needs network or AWS credentials — the suite's own network guard
       # holds. REBAR_REQUIRE_EXTRAS=1 on the pytest steps below turns "an extra went
-      # missing again" into a hard failure instead of a silent skip.
-      - name: Install rebar from the committed lock (dev + reviewbot + ui extras)
+      # missing again" into a hard failure instead of a silent skip. `tracing` joins them
+      # because the candidate-tracing oracle (RP-01 S4) runs a real OpenTelemetry SDK
+      # nesting assertion behind `pytest.importorskip("opentelemetry.sdk")`; the SDK is
+      # another small pure-python wheel already pinned in the lock.
+      - name: Install rebar from the committed lock (dev + reviewbot + ui + tracing extras)
         shell: bash
         run: |
-          uv sync --locked --extra dev --extra reviewbot --extra ui --python '${{ matrix.python-version }}'
+          uv sync --locked --extra dev --extra reviewbot --extra ui --extra tracing --python '${{ matrix.python-version }}'
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       # Git identity is required by the suites that build throwaway commit stores.
