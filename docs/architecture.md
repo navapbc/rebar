@@ -96,6 +96,17 @@ over one git-backed store.
   git-canonical (packaged `reviewers/*.md` or project `.rebar/prompts/`). See
   [llm-framework.md](llm-framework.md).
 
+### Proposed configuration and provider-composition boundary (RP-04)
+
+[ADR 0098](adr/0098-operation-scoped-config-and-provider-composition.md) proposes one
+immutable, serializable, non-secret snapshot per operation, composed at the application
+boundary with separate live `GitRuntime`, `LLMRuntime`, and selected `BridgeRuntime`
+bindings. Provider SDKs/helpers remain responsible for credential issuance, storage,
+refresh, and invalidation; Rebar-owned factories retain Rebar's retry, timeout, cache,
+output, error, and lifecycle policy. Static material is provider-specific and unwrapped
+only at the sending adapter. The proposed migration is not yet implemented; current
+ambient/per-consumer configuration paths remain until RP-04's expand/contract cutover.
+
 ### Two writers, one store
 
 rebar's git-backed event store has **two independent writers** that must not be
