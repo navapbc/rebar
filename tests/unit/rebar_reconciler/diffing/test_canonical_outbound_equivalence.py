@@ -108,8 +108,11 @@ def od() -> ModuleType:
     return _load("outbound_differ_canonical_equiv", "outbound_differ.py")
 
 
-@pytest.fixture(scope="module")
-def backend():
+@pytest.fixture
+def backend(monkeypatch: pytest.MonkeyPatch):
+    """Pin the pre-refactor plain-wire golden independently of project rollout config."""
+    monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "off")
+
     from rebar_reconciler.adapters.jira.backend import JiraBackend
 
     return JiraBackend(transport=object())
