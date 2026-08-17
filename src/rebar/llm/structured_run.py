@@ -40,6 +40,7 @@ from rebar.llm.cache_diagnostics import (
 from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.errors import (
     LLMConfigError,
+    StructuredOutputError,
     UnretryableOutputError,
 )
 from rebar.llm.run_failure import (
@@ -267,24 +268,44 @@ def _last_reply_text(messages) -> str:
     return ""
 
 
+def _find_structured_output_error_on_chain(
+    exc: BaseException | None,
+) -> StructuredOutputError | None:
+    """Walk ``exc``'s ``__cause__``/``__context__`` chain to arbitrary depth and return the
+    nearest :class:`StructuredOutputError`, or ``None``. Cycle-safe (tracks visited ``id()``);
+    prefers ``__cause__`` over ``__context__`` at each node."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, StructuredOutputError):
+            return exc
+        seen.add(id(exc))
+        exc = exc.__cause__ or exc.__context__
+    return None
+
+
 def _exhausted_output_retries(
     exc, messages, model, req: RunRequest, artifact_dir: str | None, attempts: int
-) -> UnretryableOutputError:
+) -> StructuredOutputError:
     """Translate a pydantic-ai output-retry exhaustion into a rebar-typed
-    :class:`UnretryableOutputError`, writing the opt-in raw-reply artifact when configured."""
-    err = UnretryableOutputError(str(exc))
-    if not artifact_dir:
-        return err
-    path = _write_parse_failure_artifact(
-        artifact_dir,
-        reply=_last_reply_text(messages),
-        model=getattr(model, "model_name", None) or str(model),
-        contract=req.output_schema or "",
-        attempts=attempts,
-    )
+    :class:`StructuredOutputError`, re-raising the original object preserved on the cause chain
+    when present, and writing the opt-in raw-reply artifact when configured."""
+    restored = _find_structured_output_error_on_chain(exc)
+    path: str | None = None
+    if artifact_dir:
+        path = _write_parse_failure_artifact(
+            artifact_dir,
+            reply=_last_reply_text(messages),
+            model=getattr(model, "model_name", None) or str(model),
+            contract=req.output_schema or "",
+            attempts=attempts,
+        )
+    if restored is not None:
+        if path is not None:
+            restored.args = (f"{restored} [raw reply captured: {path}]",)
+        return restored
     if path is not None:
         return UnretryableOutputError(f"{exc} [raw reply captured: {path}]")
-    return err
+    return UnretryableOutputError(str(exc))
 
 
 def build_model_settings(
