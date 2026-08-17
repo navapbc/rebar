@@ -2293,6 +2293,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:20Z"
     },
+    "10a3-7dd0-1b3d-47cc": {
+      "created_at": "2026-08-17T00:42:00Z",
+      "jira_id": "4588913",
+      "jira_key": "REB-3074",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:02Z"
+    },
     "10ae-aa24-3fdc-4f0b": {
       "baseline": {
         "assignee": {
@@ -6830,6 +6837,13 @@
       "peer_parent": "REB-2574",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:17Z"
+    },
+    "2e1b-6517-eb1e-4309": {
+      "created_at": "2026-08-17T00:42:07Z",
+      "jira_id": "4588914",
+      "jira_key": "REB-3075",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:09Z"
     },
     "2e47-ae62-c0cf-48a0": {
       "baseline": {
@@ -13205,6 +13219,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:41Z"
     },
+    "558e-d9bd-e285-40a1": {
+      "created_at": "2026-08-17T00:42:14Z",
+      "jira_id": "4588915",
+      "jira_key": "REB-3076",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:16Z"
+    },
     "5590-1c13-004c-47e1": {
       "baseline": {
         "assignee": null,
@@ -13957,6 +13978,13 @@
       "peer_parent": "REB-296",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:11Z"
+    },
+    "5a90-ec98-af5a-48d0": {
+      "created_at": "2026-08-17T00:42:21Z",
+      "jira_id": "4588916",
+      "jira_key": "REB-3077",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:24Z"
     },
     "5ab2-355e-6c23-4e0b": {
       "created_at": "2026-08-15T15:00:11Z",
@@ -15498,6 +15526,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:16Z"
+    },
+    "66b3-4214-c70b-4a9a": {
+      "created_at": "2026-08-17T00:42:27Z",
+      "jira_id": "4588917",
+      "jira_key": "REB-3078",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:29Z"
     },
     "66ff-5dfb-bb36-4a57": {
       "baseline": {
@@ -17496,8 +17531,16 @@
       "updated_at": "2026-08-15T15:02:46Z"
     },
     "75a9-01c2-304d-4532": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe gate returns FINDINGS (what's wrong) but never coaches a productive MOVE (here's a play to address this class) \u2014 so a caller's next revision isn't primed with best practice. This Pass-4 \"coach\" adds affirmative, forward coaching over the surviving findings: it primes the caller toward a de-risking/clarifying move, without handing a ready-made solution. It is ADVISORY (never blocks) and is the shared coaching layer for `9da1` too.\n\n## What\n- A **single-turn, structured-output LLM call (NOT an agent, no tooling)** \u2014 the same cheap shape as the Pass-2\n  aggregate verifier \u2014 running AFTER Pass-3 over ONLY the surviving (advisory, not-dropped) findings.\n- It does TWO things only: (a) map each finding to a `move_id` from the fixed MOVE REGISTRY, (b) extract a short\n  `subject` noun-phrase (what the move targets, drawn from the finding) that is VALIDATED by a deterministic\n  SUBJECT VALIDATOR (v1 default: bounded = \u2264 8 words / \u2264 60 chars; REJECT if it contains code tokens \u2014 backticks,\n  parentheses, `;`/`=`, or an `import`/`def`/`class` keyword \u2014 or a leading imperative verb; on REJECT, emit NO\n  coaching for that finding \u2014 best-effort drop, never a retry-into-prose loop). Output schema:\n  `[{move_id, subject, finding_refs[]}]`, CLUSTERED by move. The LLM authors NO free prose.\n- **Deterministic rendering:** the coaching note is rendered from the move's LOCKED template + `subject`; the\n  \"name-the-move-not-the-answer\" property is baked into the human-authored template, not the LLM's judgment.\n- **MOVE REGISTRY (declarative, project-extensible \u2014 same pattern as the criteria/detector registries):** each\n  move = `{id, triggers (criteria/finding-class), template, source}`. v1 moves: 1 spike/tracer-bullet \u00b7\n  2 prior-art/OSS-research/build-vs-buy \u00b7 3 pre-mortem \u00b7 4 riskiest-assumption-test \u00b7 5 weigh-alternatives\n  (set-based) \u00b7 6 specification-by-example (observable \"done\") \u00b7 7 thin-vertical-slice \u00b7 8 ADR/one-way-door \u00b7\n  9 plan-the-verification \u00b7 11 propagate-revisions-to-children (fires when the ticket has children) \u00b7\n  12 generalize-the-finding-across-the-work (fires per review). Templates are IMPERATIVE actionable guidance.\n- **C1-C4 authoring guardrails (LLM-recipient, positive-by-construction):** C1 actionable GUIDANCE (a move to\n  pursue), NOT executable code/commands or the solution \u2014 enforced by the SUBJECT VALIDATOR above (not merely the\n  template), since `subject` is the one free-text field the template interpolates; C2 reference findings BY ID, never restated;\n  C3 select-from-registry + fill-subject (template enforces); C4 cap/cluster/front-load.\n- **Caller-visible finding `id` contract:** the stable per-finding `id` is MINTED by the orchestrator (`ca03`)\n  at result assembly (the content fingerprint) \u2014 its SOLE owner; this coach CONSUMES it (`finding_refs` point at\n  that id) and the `REVIEW_RESULT` sidecar (`db7b`) records the same id; findings + coaching ship in ONE result\n  so the reference resolves locally (no circular alignment).\n\n## Scope\n- INPUT is the CAPPED surfaced advisory set (Pass-3 surfaces the top-N advisory by priority score, config\n  default 10); BLOCKING findings are surfaced UNCAPPED and may also be coached. The coach never alters the cap or\n  the block decision.\n- `src/rebar/` (in the gate's review pipeline) + a move-registry prompt-library entry. Reuses the rebar.llm\n  single-turn structured-output path. Advisory only \u2014 coaching never affects the block/advisory decision (Pass-3).\n- Grounded in LLM-feedback research (external-grounded feedback > self-reflection \u2014 Huang/DeepMind; anti-\n  sycophancy; lost-in-the-middle; specific-actionable > Socratic). NOT human-pedagogy (no productive-struggle).\n- Project-extensible: a project may add its own moves to the registry. Convergence expected in ~2-3 revisions.\n\n## Acceptance Criteria\n- [ ] Single-turn structured-output call over the surviving (advisory) findings; emits `{move_id, subject, finding_refs}` clustered by move; the LLM authors no free prose.\n- [ ] Move registry (declarative, project-extensible) with moves 1-9,11,12 and LOCKED imperative templates; rendering is deterministic from template + subject.\n- [ ] C1-C4 guardrails enforced by construction \u2014 INCLUDING a SUBJECT VALIDATOR (bounded noun-phrase; code/imperative/solution rejected) so C1 holds mechanically, not just via the template; plus reference-by-id, select-from-registry, cap/cluster/front-load.\n- [ ] Coaching `finding_refs` reference the stable per-finding `id` MINTED by the orchestrator (`ca03`) at assembly (this coach is a CONSUMER, not the owner); findings + coaching ship in one result so the reference resolves locally.\n- [ ] Advisory only \u2014 coaching never blocks and never alters the Pass-3 decision. Shared with `9da1`.\n- [ ] Tested: finding\u2192move mapping on a labelled set; deterministic render; reference resolution; a finding matching no move yields no coaching (best-effort).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Pass-4 affirmative coach: single-turn structured-output coaching pass + move registry"
+      },
       "created_at": "2026-08-15T15:02:46Z",
       "jira_key": "REB-190",
+      "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:46Z"
     },
@@ -17508,8 +17551,16 @@
       "updated_at": "2026-08-15T15:02:47Z"
     },
     "75d9-582d-9a82-4763": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n`test_completion_floor_e2e.py::test_non_regression_floor_is_review_only` (`:178-198`) asserts, via `inspect.getsource` over the floor functions, that tokens like `sign_manifest`, `transition`, `reopen(` are ABSENT from their source, and that `completion_floor` does not appear in `rebar.llm.completion`. A pure change-detector: a rename / helper / indirect call evades it, and it exercises no runtime behavior. VALIDATED.\n\nContext on what is testable: the floor's DECISION logic (which findings drop / are preserved / resurface on reopen) is ALREADY behaviorally covered by the sibling tests in this file (`test_floor_drops_and_preserves_per_gold_labels`, `test_floor_inactive_is_byte_identical`, `test_reopen_resurfaces_dropped_finding`). And `_apply_completion_floor_to_verdict` is a PURE verdict\u2192verdict transform (no `repo_root`, no store/LLM I/O), so \"it doesn't sign/transition\" cannot be shown by a store snapshot or by spying a close-path function it structurally never calls \u2014 those tests are vacuous. The genuine, non-vacuous, non-duplicative behavioral content the old test was reaching for is the floor's **observable purity contract**: it only re-partitions findings and never emits any signing/attestation side-output.\n\n## What\nReplace the source-token test with a behavioral **purity-contract** test that runs the real floor over the existing gold fixture (a case that drops a finding) and asserts on OBSERVABLE state:\n1. **Findings conserved (no create/lose/rewrite):** the multiset of finding ids across\n   `advisory \u222a dropped` after the floor equals the set before \u2014 the floor only moves findings\n   between the two lists (this is the observable analogue of \"never signs/transitions/reopens\";\n   a floor that fabricated or dropped-without-recording a finding would fail it).\n2. **No signing/attestation side-output:** the returned/mutated verdict grows NO\n   `signature` / `attestation` / `attestations` key, and no new attestation KIND \u2014 the floor's\n   only additions are the `dropped` list and the `coverage` narrowing annotation. (Assert the\n   set of top-level verdict keys added by the floor \u2286 {`dropped`, and coverage sub-keys}.)\n3. **Inputs not mutated:** the `cmap` argument and each finding's own content dict are unchanged\n   by identity/value \u2014 the floor re-partitions list membership only, it does not rewrite the\n   caller's inputs. (Deep-copy the inputs before the call; assert equal after.)\n4. Keep the genuine artifact-contract assertion `attest._MANIFEST_PREFIX == \"plan-review\"`\n   (no NEW attestation kind exists) \u2014 a real invariant, not a source grep.\n\nDelete the `inspect.getsource` token-absence assertions (for the floor functions and for `rebar.llm.completion`). The confinement-of-the-floor-to-plan-review property is NOT asserted behaviorally, because it is a negative over a pure, structurally-separated function (any such test is vacuous against the current code); it is left to the module structure, and this ticket converts the false-confidence source grep into the real, observable purity assertions above.\n\n## Scope\n- `tests/unit/test_completion_floor_e2e.py` \u2014 replace `test_non_regression_floor_is_review_only`.\n\n## Acceptance Criteria\n- [ ] A behavioral test runs the floor over the gold fixture and asserts findings are CONSERVED\n      (the id set across `advisory \u222a dropped` is identical before/after \u2014 nothing fabricated or\n      silently lost).\n- [ ] The test asserts the floor adds NO `signature`/`attestation`/`attestations` key to the\n      verdict (its only additions are `dropped` + the coverage narrowing).\n- [ ] The test asserts the floor does not mutate its `cmap` input or the finding content dicts\n      (pure re-partition) \u2014 verified against deep copies taken before the call.\n- [ ] No `inspect.getsource` token-absence assertion remains; the\n      `attest._MANIFEST_PREFIX == \"plan-review\"` artifact contract is retained.\n- [ ] `make test` green.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Replace completion-floor review-only source-token test with a spy-based side-effect test"
+      },
       "created_at": "2026-08-15T15:02:48Z",
       "jira_key": "REB-984",
+      "peer_parent": "REB-993",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:48Z"
     },
@@ -17536,9 +17587,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\nDiscovered while landing abasic-doddering-harrier. Annotating `repo_root` parameters caused formatter-required wrapping and moved `src/rebar/attest/authorship.py` from 784 to 793 LOC against the hard 800 cap in `.github/module-size-limit.txt`. The prior change is correct and merged; this task buys back module-size headroom through a behavior-preserving split.\n\nRe-wrapping is not an alternative because `ruff format --check` enforces the current layout. Raising the cap is prohibited by project policy.\n\n## Plan\n- Create `src/rebar/attest/authorship_resolution.py` for the existing git-ancestry/commit-resolution cluster: `resolve_event_commit`, `resolve_position_commit`, `build_ticket_position_commit_map`, `build_introducing_commit_map`, and `build_position_commit_map`. This is an existing call-graph seam of roughly 330 LOC, so the new module is above the 100-LOC floor while `authorship.py` returns to the 200-500 target band.\n- Import and re-export all five names from `authorship_resolution.py` in `authorship.py`, preserving the current `rebar.attest.authorship.<name>` paths used by production callers and tests.\n- Preserve the established subprocess monkeypatch seam explicitly without an import-time cycle. Each moved function that invokes git performs a lazy in-function `import rebar.attest.authorship as _authorship` immediately before the call, then uses `_authorship.subprocess.run(...)`. `authorship_resolution.py` has no top-level import back to `authorship.py`; the lazy lookup occurs only after package initialization and mirrors the existing lazy `tracker_dir` import pattern. Therefore `monkeypatch.setattr(authorship, \"subprocess\", ...)` still intercepts every moved git path. This is compatibility indirection only; git arguments, branches, timeouts, fallbacks, return values, and exception handling remain unchanged.\n- Preserve the internal spy path explicitly: `verify_authorship_at_commit._resolve` remains in `authorship.py` and continues its module-global lookup of `resolve_event_commit`. The module-level imported binding is the re-export, and replacing `authorship.resolve_event_commit` updates that same module dictionary entry, so existing counting spies remain observable.\n- Use Serena `find_referencing_symbols` on all five definitions, then use repository-wide `rg` for string-based `setattr`/`getattr`/parametrization sites that the LSP cannot resolve. The semantic census confirms production callers in `opcert.py`, `verify_authorship.py`, `verify_opcert.py`, `compact_txn.py`, and `compact.py`; direct test/helper callers include the authorship resolver/batching/performance suites, `_opcert_helpers.py`, and `test_opcert_storage.py`. The string sweep covers monkeypatch consumers in `test_authorship_batched_ticket_map_7084.py`, `test_authorship_resolver_git_flags.py`, `test_authorship_resolver_git_flags_heldout.py`, `test_identity_perf_1cc0.py`, `test_identity_ts2_09f9_heldout.py`, `test_verify_identity_a2c7_perf.py`, `test_identity_gate_scope_and_ledger.py`, `test_compact_sweep_perf.py`, plus the integration bulk-parity test.\n- Move code without changing decision logic. The only edited lookup is the lazy compatibility indirection required to preserve the existing subprocess test seam.\n\n## Acceptance Criteria\n- [ ] `test \"$(wc -l < src/rebar/attest/authorship.py)\" -le 500` exits 0.\n- [ ] `test \"$(wc -l < src/rebar/attest/authorship_resolution.py)\" -ge 100` exits 0.\n- [ ] `python -c \"from rebar.attest import authorship; [getattr(authorship, n) for n in (\\\"resolve_event_commit\\\", \\\"resolve_position_commit\\\", \\\"build_ticket_position_commit_map\\\", \\\"build_introducing_commit_map\\\", \\\"build_position_commit_map\\\")]\"` exits 0.\n- [ ] `pytest -q tests/unit/test_authorship_resolver_git_flags.py tests/unit/test_authorship_resolver_git_flags_heldout.py tests/integration/test_authorship_resolver_bulk_parity.py` passes, proving the `authorship.subprocess` monkeypatch still intercepts every moved resolver path.\n- [ ] `pytest -q tests/unit/test_authorship_batched_ticket_map_7084.py tests/unit/test_identity_perf_1cc0.py tests/unit/test_identity_ts2_09f9_heldout.py tests/unit/test_verify_identity_a2c7_perf.py tests/unit/test_identity_gate_scope_and_ledger.py tests/unit/test_compact_sweep_perf.py tests/unit/test_opcert_storage.py` passes, proving `authorship.<name>` consumers still exercise the re-exported production paths.\n- [ ] `mypy src/rebar/attest --disallow-untyped-defs` reports no errors.\n- [ ] `test \"$(grep -rhE \":\\s*Any\\b|->\\s*Any\\b\" src/rebar/attest/*.py | wc -l | tr -d \" \")\" -eq 2` exits 0, preserving the two explicit trust-root boundary annotations.\n- [ ] `make lint` passes.\n- [ ] `make typecheck` passes.\n- [ ] `make test` passes.\n- [ ] `REBAR_REQUIRE_EXTRAS=1 pytest -m \"not integration and not external\"` passes after installing the locked dev/reviewbot/ui extras, matching the CI pytest selection.\n\n## Non-overlap\nTouches `src/rebar/attest/authorship.py`, the new `src/rebar/attest/authorship_resolution.py`, and focused tests only if the RED-first compatibility oracle requires one. The prerequisite abasic-doddering-harrier is merged.",
+        "description": "## Context\nDiscovered while landing abasic-doddering-harrier. Annotating `repo_root` parameters caused formatter-required wrapping and moved `src/rebar/attest/authorship.py` from 784 to 793 LOC against the hard 800 cap in `.github/module-size-limit.txt`. The prior change is correct and merged; this task buys back module-size headroom through a behavior-preserving split.\n\nRe-wrapping is not an alternative because `ruff format --check` enforces the current layout. Raising the cap is prohibited by project policy.\n\n## Plan\n- Create `src/rebar/attest/authorship_resolution.py` for the existing git-ancestry/commit-resolution cluster: `resolve_event_commit`, `resolve_position_commit`, `build_ticket_position_commit_map`, `build_introducing_commit_map`, and `build_position_commit_map`. This is an existing call-graph seam of roughly 330 LOC, so the new module is above the 100-LOC floor while `authorship.py` returns to the 200-500 target band.\n- Import and re-export all five names from `authorship_resolution.py` in `authorship.py`, preserving the current `rebar.attest.authorship.<name>` paths used by production callers and tests.\n- Preserve the established subprocess monkeypatch seam explicitly without an import-time cycle. Each moved function that invokes git performs a lazy in-function `import rebar.attest.authorship as _authorship` immediately before the call, then uses `_authorship.subprocess.run(...)`. `authorship_resolution.py` has no top-level import back to `authorship.py`; the lazy lookup occurs only after package initialization and mirrors the existing lazy `tracker_dir` import pattern. Therefore `monkeypatch.setattr(authorship, \"subprocess\", ...)` still intercepts every moved git path. This is compatibility indirection only; git arguments, branches, timeouts, fallbacks, return values, and exception handling remain unchanged.\n- Preserve the internal spy path explicitly: `verify_authorship_at_commit._resolve` remains in `authorship.py` and continues its module-global lookup of `resolve_event_commit`. The module-level imported binding is the re-export, and replacing `authorship.resolve_event_commit` updates that same module dictionary entry, so existing counting spies remain observable.\n- Use Serena `find_referencing_symbols` on all five definitions, then use repository-wide `rg` for string-based `setattr`/`getattr`/parametrization sites that the LSP cannot resolve. The semantic census confirms production callers in `opcert.py`, `verify_authorship.py`, `verify_opcert.py`, `compact_txn.py`, and `compact.py`; direct test/helper callers include the authorship resolver/batching/performance suites, `_opcert_helpers.py`, and `test_opcert_storage.py`. The string sweep covers monkeypatch consumers in `test_authorship_batched_ticket_map_7084.py`, `test_authorship_resolver_git_flags.py`, `test_authorship_resolver_git_flags_heldout.py`, `test_identity_perf_1cc0.py`, `test_identity_ts2_09f9_heldout.py`, `test_verify_identity_a2c7_perf.py`, `test_identity_gate_scope_and_ledger.py`, `test_compact_sweep_perf.py`, plus the integration bulk-parity test.\n- Move code without changing decision logic. The only edited lookup is the lazy compatibility indirection required to preserve the existing subprocess test seam.\n\n## Acceptance Criteria\n- [x] `test \"$(wc -l < src/rebar/attest/authorship.py)\" -le 500` exits 0.\n- [x] `test \"$(wc -l < src/rebar/attest/authorship_resolution.py)\" -ge 100` exits 0.\n- [x] `python -c \"from rebar.attest import authorship; [getattr(authorship, n) for n in (\\\"resolve_event_commit\\\", \\\"resolve_position_commit\\\", \\\"build_ticket_position_commit_map\\\", \\\"build_introducing_commit_map\\\", \\\"build_position_commit_map\\\")]\"` exits 0.\n- [x] `pytest -q tests/unit/test_authorship_resolver_git_flags.py tests/unit/test_authorship_resolver_git_flags_heldout.py tests/integration/test_authorship_resolver_bulk_parity.py` passes, proving the `authorship.subprocess` monkeypatch still intercepts every moved resolver path.\n- [x] `pytest -q tests/unit/test_authorship_batched_ticket_map_7084.py tests/unit/test_identity_perf_1cc0.py tests/unit/test_identity_ts2_09f9_heldout.py tests/unit/test_verify_identity_a2c7_perf.py tests/unit/test_identity_gate_scope_and_ledger.py tests/unit/test_compact_sweep_perf.py tests/unit/test_opcert_storage.py` passes, proving `authorship.<name>` consumers still exercise the re-exported production paths.\n- [x] `mypy src/rebar/attest --disallow-untyped-defs` reports no errors.\n- [x] `test \"$(grep -rhE \":\\s*Any\\b|->\\s*Any\\b\" src/rebar/attest/*.py | wc -l | tr -d \" \")\" -eq 2` exits 0, preserving the two explicit trust-root boundary annotations.\n- [x] `make lint` passes.\n- [x] `make typecheck` passes.\n- [x] `make test` passes.\n- [x] `REBAR_REQUIRE_EXTRAS=1 pytest -m \"not integration and not external\"` passes after installing the locked dev/reviewbot/ui extras, matching the CI pytest selection.\n\n## Non-overlap\nTouches `src/rebar/attest/authorship.py`, the new `src/rebar/attest/authorship_resolution.py`, and focused tests only if the RED-first compatibility oracle requires one. The prerequisite abasic-doddering-harrier is merged.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Split authorship.py: 793/800 LOC, 7 lines of module-size headroom"
       },
       "created_at": "2026-08-15T15:02:49Z",
@@ -17568,20 +17619,58 @@
       "updated_at": "2026-08-15T15:02:50Z"
     },
     "7656-0a67-e881-4131": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nBeyond Claude Code (S4) and OpenCode, the portable `REBAR_SESSION_ID` / `AI_AGENT` provenance must be populated by each harness's own mechanism or the feature no-ops there. This story ships copy-paste capture shims for **Codex CLI** and **Cursor** cloud agents.\n\n**Design correction (the epic's S6 premise was partly wrong \u2014 verified against vendor docs).** The epic sketched \"a Codex SessionStart hook exports `REBAR_SESSION_ID`\" and \"a Cursor start-script exports `REBAR_SESSION_ID`\", but:\n- A Codex `SessionStart` hook **cannot export env vars** into the shell commands Codex later runs\n  (a hook's only structured effect is `additionalContext`) \u2014 there is no `CLAUDE_ENV_FILE`\n  equivalent. Codex also exposes **no readable session-id env var** (rollout files live at\n  `~/.codex/sessions/\u2026/rollout-*-<id>.jsonl`). Source:\n  https://developers.openai.com/codex/config-reference + /codex/hooks.\n- Cursor's `.cursor/environment.json` has **no `env` field**, and Cursor exposes no readable\n  session/agent-id env var; the first-class env mechanism is the dashboard **Secrets** tab.\n  Source: https://cursor.com/docs/cloud-agent/setup + the environment.schema.json.\n\nSo both shims reliably set the **harness TAG** (`AI_AGENT`) via each harness's real injection point, and DOCUMENT the session-id limitation (set `REBAR_SESSION_ID` via profile / Secrets when a value is available). A Codex/Cursor `rebar claim` then records `claim_harness` even when the session id is not natively capturable.\n\n## What\n- **Codex (`scripts/session-shims/codex-config.toml`).** A `~/.codex/config.toml` fragment using\n  `shell_environment_policy.set = { AI_AGENT = \"codex\" }` \u2014 the one reliable static injection\n  point (applied to every Codex subprocess). Comments document that hooks can't export env, the\n  rollout-file location, and the `experimental_use_profile` route for `REBAR_SESSION_ID`\n  (`experimental_use_profile = true`, a documented `shell_environment_policy` bool per the cited\n  Codex config reference, sources the user's shell profile into subprocesses).\n- **Cursor (`scripts/session-shims/cursor-environment.json` + `cursor-provenance.sh`).** An\n  example `.cursor/environment.json` whose `install` command runs `cursor-provenance.sh`, which\n  idempotently (guarded by `grep -qF`) appends `export AI_AGENT=cursor` to the ephemeral,\n  single-session cloud-agent VM's shell profile \u2014 specifically `~/.bashrc` and `~/.profile`\n  (the default login/interactive-shell rc files; creating an empty one if absent). Both files\n  document the Secrets-tab path for `REBAR_SESSION_ID` and that the G3 not-in-profile caveat\n  does not apply to a throwaway VM. Fail-safe (`exit 0`).\n- **Docs (`docs/session-id-shims.md`).** New \"Codex CLI\" and \"Cursor cloud agents\" sections with\n  the real mechanisms, the limitations, and the cited vendor source URLs.\n\n## Scope\n- IN: the Codex `config.toml` fragment, the Cursor `environment.json` + `cursor-provenance.sh`,\n  the two new `docs/session-id-shims.md` sections, and a NEW `tests/unit/test_harness_shims.py`\n  (valid TOML/JSON/shell; the harness tag is set; Cursor idempotency; docs document both with\n  citations).\n- OUT: Gemini CLI / other harnesses (follow-up); the record/read core (S1-S3, S5); the Claude\n  Code shim (S4). Dynamic per-session-id capture for Codex/Cursor is not possible from these\n  harnesses today and is explicitly documented as a limitation, not delivered.\n\n## Acceptance Criteria\n(All proofs are in a NEW `tests/unit/test_harness_shims.py` \u2014 the existing `test_session_shims.py` is S4's; S6 does not modify it.)\n- [ ] `scripts/session-shims/codex-config.toml` is valid TOML and sets\n      `shell_environment_policy.set.AI_AGENT == \"codex\"` (asserted by `tomllib.loads`). Proof:\n      `pytest tests/unit/test_harness_shims.py -k codex -q`.\n- [ ] `scripts/session-shims/cursor-environment.json` is valid JSON whose `install` runs\n      `cursor-provenance.sh`, and the script is valid shell that, run TWICE against a temp\n      `$HOME`, leaves exactly one `export AI_AGENT=cursor` line in EACH targeted profile\n      (`~/.bashrc` AND `~/.profile`) \u2014 idempotent, no accumulation in either. Proof:\n      `pytest tests/unit/test_harness_shims.py -k cursor -q`.\n- [ ] `docs/session-id-shims.md` documents both harnesses' real mechanism + limitation with\n      cited vendor URLs (`developers.openai.com/codex`, `cursor.com/docs/cloud-agent`) and the\n      `Secrets` tab. Proof: `pytest tests/unit/test_harness_shims.py -k docs -q`.\n\n## Depends on\n- S5 (c557) \u2014 the `AI_AGENT` \u2192 `claim_harness` record path; landed in this stack.",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "Per-harness capture shims: Codex SessionStart hook + Cursor start-script snippet"
+      },
       "created_at": "2026-08-15T15:02:51Z",
       "jira_key": "REB-801",
+      "peer_parent": "REB-544",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:51Z"
     },
     "7657-4ba6-bcd4-4698": {
+      "baseline": {
+        "assignee": null,
+        "description": "Keep verbose `session_log` bodies out of the dependency-graph and store-health hot paths, and out of default `list`, while keeping them in `search` and `show`.\n\n## Why\n\n`reduce_all_tickets()` compiles full bodies with no lazy-loading and backs `ready`, `next_batch`, `deps`, `validate`, and `list`. Verbose logs must not tax those. The requester chose \"searchable, hidden from list\": logs appear in keyword `search` and `show` but nowhere that would slow the constant graph/health work.\n\n## What\n\n- Add an `exclude_ticket_types` (or `exclude_session_logs`) parameter to\n  `reduce_all_tickets()` in `src/rebar/reducer/_api.py`, mirroring the existing\n  `exclude_archived` / `exclude_deleted` pattern.\n- Default it on for graph/health callers: `src/rebar/graph/_ready.py`\n  (`find_ready_tickets`), `src/rebar/graph/_graph.py` (`build_dep_graph`),\n  `src/rebar/_engine_support/next_batch.py` (`compute`), and\n  `src/rebar/_engine_support/validate.py` (`validate_state` health checks).\n- Exclude `session_log` from default `list` (surface only on explicit\n  `--type=session_log`) in `src/rebar/_engine_support/reads.py` /\n  `src/rebar/reducer/_filters.py`.\n- Keep `session_log` in the `search` corpus (`src/rebar/reducer/search.py`) and in\n  `show` (single-ticket reduce path unchanged).\n\n## Scope\n\nRead-path visibility and graph/health isolation only. The recent-logs command is a separate story.\n\n## Acceptance Criteria\n\n- [ ] `ready`, `next_batch`, `deps`, and `validate` never include `session_log`\n      tickets and their timings are unaffected by log count/size (asserted).\n- [ ] Default `list` omits `session_log`; `list --type=session_log` returns them.\n- [ ] `search <keywords>` matches `session_log` bodies; `show` returns a\n      `session_log` fully.\n- [ ] `validate` does not flag `session_log` tickets as orphaned/empty/etc.\n- [ ] Tests assert both the exclusions and the inclusions.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Isolate session_log from graph/health compile paths and default list"
+      },
       "created_at": "2026-08-15T15:02:52Z",
       "jira_key": "REB-192",
+      "peer_parent": "REB-193",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:52Z"
     },
     "76d2-00c3-88e8-4654": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "# op-cert: AWS IaC + deploy of the trusted gate service (zero fixed-cost: existing VM + API Gateway SigV4) + live authenticated integrity test\n\n## Why\nThe trusted gate service (the sibling service story) is only a trust anchor once it runs in the controlled environment with SigV4-authenticated access and a key nobody else can read. This story declares that as code, **actually deploys it** (an authenticated AWS CLI is provided \u2014 the deploy is in scope), and proves the deployed endpoint end-to-end. Deployment decisions are settled in the epic's \"Producer-signing & compute-runtime design resolution\", **cost-verified against the live account**: rebar's entire AWS footprint is the one t4g.large `rebar-gerrit` box (+ Route 53 + free SSM parameters), so the binding constraint is **zero increase in fixed monthly cost** \u2014 the service rides the existing box (the compose slot freed by the autolander's retirement, ADR 0047) behind an API Gateway HTTP API (pay-per-request, no fixed fee), with the key in free SSM Parameter Store. A dedicated Fargate/NLB/Secrets-Manager/KMS-CMK stack was rejected (~$50+/mo new spend for isolation ADR 0046 L4 does not require).\n\n**Hard dependency (not yet on `main`):** the sibling service story provides `src/rebar/opcert_service/` and `infra/compose/Dockerfile.opcert` \u2014 neither exists on `main` yet; this story starts only after that story lands (enforced by the `depends_on` link).\n\n## What\n- **Terraform \u2014 extend the existing `infra/terraform/`** (the module that already declares the\n  Gerrit EC2, its IAM instance profile, and the data volume):\n  - an **API Gateway HTTP API** (v2) whose routes set `authorization_type = \"AWS_IAM\"` (SigV4\n    \u2014 a ROUTE attribute; HTTP API v2 has NO separate `aws_apigatewayv2_authorizer` resource for\n    IAM), over TLS. The integration URI is **`https://` to the box's HOST-nginx TLS origin**\n    (nginx + certbot run as HOST services on the box \u2014 `infra/scripts/compose-up.sh` header \u2014\n    with TLS on 443 at the Elastic-IP-bound hostname; NOT `http://\u2026:80`, which the existing\n    config 301-redirects and would break the integration) for the `/opcert/` routes, injecting a shared origin-guard header. Caller restriction is\n    identity-policy-based (an HTTP API has no resource policy): `AWS_IAM` auth requires SigV4,\n    and the IaC CREATES the admin role it restricts to \u2014 `aws_iam_role` **`rebar-opcert-admin`**\n    (no such role pre-exists in `infra/terraform/`), trust policy limited to the principal ARNs\n    supplied via a new variable `opcert_admin_principal_arns` (set at deploy to the operator's\n    IAM principals), with an inline policy granting `execute-api:Invoke` scoped to exactly this\n    API's execution ARN \u2014 and no other principal/policy in the IaC grants Invoke;\n  - an **SSM Parameter Store SecureString** `/rebar/prod/opcert-ed25519-key` (declared with a\n    placeholder `value` + `lifecycle { ignore_changes = [value] }`, so the out-of-band-seeded\n    key is never reverted or clobbered by a later `terraform apply`) holding the\n    **passphrase-free Ed25519 private key**. NO new IAM\n    grant: the parameter lives under `/rebar/prod/`, which the instance profile's existing\n    `rebar-gerrit-ssm-params-read` policy (`infra/terraform/iam.tf`) already covers \u2014 and\n    nothing broader is added;\n  - the **origin-guard header provisioning path**: Terraform generates the guard value with\n    `random_password` \u2014 the `hashicorp/random` provider is ADDED to\n    `infra/terraform/versions.tf` `required_providers` (today it pins only `hashicorp/aws\n    ~> 5.0`; `terraform init` refreshes `.terraform.lock.hcl`) \u2014 stores it as SSM SecureString\n    `/rebar/prod/opcert-origin-guard` (also under the existing grant), and maps it as a static\n    request-header parameter (`X-Opcert-Guard`) on the API Gateway integration. Unlike the KEY\n    parameter, the guard parameter is fully Terraform-managed and carries NO\n    `lifecycle ignore_changes` (its value IS `random_password.result`; rotation =\n    `terraform apply -replace=` on the random resource, which updates the SSM value and the\n    integration header together) \u2014 the `ignore_changes = [value]` guard applies ONLY to the\n    operator-seeded Ed25519 key parameter;\n  - NO new fixed-monthly-cost resources: no Fargate/ECS service, no load balancer/VPC link, no\n    Secrets Manager secret, no customer KMS CMK, and no `kms:Sign` anywhere (SSHSIG signing is\n    performed by the service itself; AWS KMS has no Ed25519 signing).\n- **Compose \u2014 extend `infra/compose/docker-compose.yml`**: an `opcert` service on\n  `infra/compose/Dockerfile.opcert` (sibling story) with env `REBAR_OPCERT_ENV_ID` and the SSM\n  parameter names; an nginx route `/opcert/` \u2192 the service that rejects requests whose\n  `X-Opcert-Guard` header does not match. On the box the guard value is materialized from its\n  SSM parameter by `infra/scripts/materialize-opcert-guard.sh` into a HOST-nginx map entry\n  (nginx runs as a host service, not a container) with NAMED files and NO install-step\n  ownership problem: `infra/nginx/rebar.conf.template` \u2014 which today has NO `/opcert/`\n  location \u2014 gains, IN THE TEMPLATE ITSELF, the guard map with a fail-closed default and a\n  GLOB include (`map $http_x_opcert_guard $opcert_guard_ok { default 0; include\n  /etc/nginx/opcert-guard*.conf; }` \u2014 nginx accepts a zero-match glob include, unlike a\n  missing literal include) plus the `location /opcert/ { if ($opcert_guard_ok = 0) { return\n  403; } proxy_pass \u2026 }` block routing to the compose service. The DENY-ALL default is\n  therefore STRUCTURAL in the template: a fresh boot with no materialized file serves 403 on\n  /opcert/ and nginx starts cleanly \u2014 no separate default-file install step exists to own.\n  `infra/scripts/materialize-opcert-guard.sh` writes only the one-line map entry\n  `/etc/nginx/opcert-guard.map.conf` (`\"<value>\" 1;`) from the SSM parameter and reloads\n  nginx; the guard value also lands in the service env. It is WIRED INTO the boot orchestrator\n  `infra/scripts/compose-up.sh` alongside the existing materialize/.env-regeneration calls,\n  running BEFORE `docker compose up` (the precedent ordering), and it finishes with\n  `nginx -s reload` so a guard rotation re-run takes effect (at first boot the reload is a\n  no-op-safe refresh). Rotation hazard closed explicitly; (b) ROTATION \u2014 the documented\n  runbook is two steps in order: `terraform apply -replace=random_password.opcert_guard`\n  (updates the SSM value + the API Gateway static header), then re-run\n  `materialize-opcert-guard.sh` (rewrites the nginx map + `nginx -s reload`); between the two\n  steps /opcert/ serves 403 \u2014 fail-closed, a brief and acceptable rotation window following the existing\n  precedent (`infra/gerrit/materialize-deploy-key.sh` / `materialize-g2p-config.sh` \u2014 SSM \u2192\n  file). It is WIRED INTO the boot orchestrator `infra/scripts/compose-up.sh` alongside the\n  existing materialize/.env-regeneration calls, running BEFORE `docker compose up` (the\n  precedent ordering), and it finishes with `nginx -s reload` so a guard rotation re-run takes\n  effect on the host nginx (at first boot the reload is a no-op-safe refresh) \u2014 the same value Terraform maps onto the API Gateway integration, closing\n  the loop.\n- **Deploy + prove** (authenticated AWS CLI): `terraform apply`; generate the key locally\n  (`ssh-keygen -t ed25519 -N \"\"`) and seed the SecureString (the key exists nowhere else).\n  **Key-loss recovery runbook (documented in the story's deploy notes):** if the SSM parameter\n  is deleted or state is lost, the trust anchor is NOT recoverable and is not meant to be \u2014\n  recovery = mint a NEW keypair, re-seed the parameter, and pin the new public key as a NEW\n  era entry in `.rebar/trusted_environments.yaml` (`added_at_log_position` = current tickets\n  tip) while the lost key's entry is revoked with a grandfather pin at the loss point \u2014 certs\n  already stored under the lost key stay valid (the era-anchor model), and only new certs\n  require the new key. No historical re-certification is needed;\n  deploy the compose service on the box; pin the environment's public key + `env_id` into\n  `.rebar/trusted_environments.yaml` per the epic's \"Authoritative era anchor\" resolution\n  (`added_at_log_position`, operator-stamped at the current tickets tip); then the live checks \u2014 a\n  SigV4-signed job round-trip (submit \u2192 poll \u2192 terminal status), an unsigned request rejected\n  (401/403 at API Gateway), and a direct-to-origin request without the guard header rejected.\n## Scope\n- In: the Terraform extension, compose/nginx wiring, key generation + SSM seeding procedure,\n  the real deploy, the live round-trip evidence, the trusted-env pinning.\n- Out: the service code and Dockerfile (sibling story); any change to rebar library code; the\n  merge-gate consumer (shipped, 4214); resizing or re-homing the existing box.\n\n## Acceptance Criteria\n- [ ] `infra/terraform/` declares: the API Gateway HTTP API (v2) with\n      `authorization_type = \"AWS_IAM\"` on its routes over TLS,\n      `execute-api:Invoke` granted only to the IaC-created `rebar-opcert-admin` role (trust policy\n      from `opcert_admin_principal_arns`; the assertion method is STRUCTURED and SELF-FAILING \u2014\n      the literal command the test runs exits non-zero on any violation:\n      `terraform plan -out=tf.plan && terraform show -json tf.plan | jq -e\n      '[.planned_values.root_module.resources[] | select(.type == \"aws_iam_role_policy\" or\n      .type == \"aws_iam_policy\") | {label: .name, s: (.values.policy | fromjson | .Statement[])}\n      | select([.s.Action] | flatten | any(. == \"execute-api:Invoke\"))] | length == 1 and\n      .[0].label == \"opcert_admin_invoke\"'` \u2014 where `.name` in `terraform show -json` is the\n      Terraform RESOURCE LABEL, so the invoke policy is declared with the pinned label\n      `aws_iam_role_policy.opcert_admin_invoke` on the `rebar-opcert-admin` role; exactly one\n      statement grants Invoke and it is that resource, else the command exits non-zero), the `hashicorp/random` provider in `required_providers`,\n      the box-origin integration with the static `X-Opcert-Guard` request-header mapping; and\n      the two SecureString parameters (the key parameter guarded by\n      `lifecycle { ignore_changes = [value] }`)\n      (`/rebar/prod/opcert-ed25519-key`, `/rebar/prod/opcert-origin-guard`) under the existing\n      `rebar-gerrit-ssm-params-read` path grant with NO new/broader IAM grant. EVERY AC1 sub-claim is asserted with its own literal `jq -e` query against the one\n      `terraform show -json tf.plan` output, each exiting non-zero on violation:\n      (a) https URI \u2014 `.planned_values.root_module.resources[] |\n      select(.type==\"aws_apigatewayv2_integration\") | .values.integration_uri |\n      startswith(\"https://\")`;\n      (b) guard header \u2014 `... select(.type==\"aws_apigatewayv2_integration\") |\n      .values.request_parameters | has(\"append:header.X-Opcert-Guard\")`;\n      (c+d) parameters \u2014 `[.planned_values.root_module.resources[] |\n      select(.type==\"aws_ssm_parameter\") | {n:.values.name, t:.values.type}] | (map(.n) |\n      contains([\"/rebar/prod/opcert-ed25519-key\",\"/rebar/prod/opcert-origin-guard\"])) and\n      all(.t==\"SecureString\")`;\n      (e) route auth \u2014 `[.planned_values.root_module.resources[] |\n      select(.type==\"aws_apigatewayv2_route\") | .values.authorization_type] | length > 0 and\n      all(. == \"AWS_IAM\")` (aggregated with `all()` \u2014 a per-route stream would let `jq -e`\n      pass on the last route alone);\n      (f) key-param `lifecycle.ignore_changes` \u2014 `.configuration.root_module.resources[] |\n      select(.address==\"aws_ssm_parameter.opcert_ed25519_key\") |\n      .lifecycle_meta_arguments.ignore_changes? // empty | length > 0` (in `terraform show\n      -json`'s `configuration` section lifecycle meta-arguments nest under\n      `.lifecycle_meta_arguments`, not `.lifecycle`, and are absent from `planned_values`);\n      (g) provider \u2014 `.configuration.provider_config | has(\"random\")`.\n- [ ] `terraform fmt -check` and `terraform validate` pass (asserted by a test or CI step);\n      `terraform plan` against the provided account succeeds.\n- [ ] `infra/compose/docker-compose.yml` + nginx config gain the `opcert` service and the\n      guarded `/opcert/` route; a test asserts the service entry, the env wiring\n      (`REBAR_OPCERT_ENV_ID`, parameter names), that the nginx route requires the\n      `X-Opcert-Guard` header, and that the materialize script (per the `infra/gerrit/materialize-*.sh`\n      precedent) renders the guard value from its SSM parameter \u2014 tested hermetically with a\n      stub `aws` executable prepended to `PATH` that returns a fixture value (no live SSM or\n      account access in unit tests). The test also asserts `infra/scripts/compose-up.sh` calls\n      the materialize script before `docker compose up`, that the script ends with\n      `nginx -s reload` (host nginx), that the TEMPLATE itself contains the fail-closed guard\n      map (`default 0;` + the zero-match-safe glob include) and the guarded `/opcert/`\n      location, and that the Terraform integration URI uses the `https://` scheme.\n- [ ] The deployed environment's public key and `env_id` are pinned in\n      `.rebar/trusted_environments.yaml` (with `added_at_log_position` per the epic's SUPERSEDING \"Authoritative era anchor\" resolution \u2014 the tickets-branch log-position era fields, not the superseded `added_at_commit` main-SHA form); a\n      test asserts the entry parses and the `env_id` matches the compose service's\n      `REBAR_OPCERT_ENV_ID`.\n- [ ] [operator-attested] The service is deployed from `infra/` via the authenticated AWS CLI\n      and the live checks pass: a SigV4-signed job round-trip succeeds; an unsigned request is\n      rejected at API Gateway; a direct-to-origin request without the guard header is rejected \u2014\n      evidence: a comment recording the `terraform apply` outputs (API endpoint id/URL) and the\n      captured round-trip + both rejections.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "op-cert: AWS IaC + deploy of the trusted gate service (zero fixed-cost: existing VM + API Gateway SigV4) + live authenticated integrity test"
+      },
       "created_at": "2026-08-15T15:02:52Z",
       "jira_key": "REB-1127",
+      "peer_parent": "REB-965",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:52Z"
     },
@@ -17642,8 +17731,16 @@
       "updated_at": "2026-08-15T15:02:54Z"
     },
     "7738-cbb6-6628-4f2c": {
+      "baseline": {
+        "assignee": null,
+        "description": "Add a `session_log` ticket type so agents can store verbose, durable session logs in the rebar store and surface them later via keyword search \u2014 without the verbose bodies degrading the dependency-graph / health hot paths that run constantly during the parallel-agent workflow.\n\n## Context\n\nrebar has one compile path (`reduce_all_tickets()` in `src/rebar/reducer/_api.py`) with **no lazy-loading**: it folds the full body (description + every comment) of every ticket into memory. That path backs `search`, `list`, `ready`, `next_batch`, `validate`, and `deps`. A verbose log stored as an ordinary ticket would therefore tax every graph/health operation. The design intent is that `session_log` tickets are compiled from JSONL **only for query operations** (`search` / `show` / the new recent-logs command) and are **excluded** from the operations that compile all tickets to build the dependency graph and run store-health checks.\n\nTicket types are enumerated in `src/rebar/schemas/common.schema.json` (the `enum`) and `src/rebar/_commands/composer.py` (`_TYPES`), with type-aware behavior in `src/rebar/graph/_hierarchy.py` (tiers) and `src/rebar/_engine_support/gates.py` (clarity heuristics). Jira sync has no per-type exclusion today but already filters by status in `src/rebar/_engine/rebar_reconciler/outbound_differ.py`. All three interfaces (CLI / MCP / library) funnel reads through the single shared impl in `src/rebar/_engine_support/reads.py`, so one library function auto-flows to CLI and MCP. Every compiled state carries `created_at` (ns) for recency ordering.\n\n## Decisions (locked with the requester)\n\n- **Query visibility \u2014 searchable, hidden from `list`.** Included in keyword\n  `search` results and the recent-logs command + `show`; **excluded** from default\n  `list` (surfaced only via explicit `--type=session_log`) and from all\n  graph/health ops.\n- **Content model \u2014 two approaches in scope.** (1) the type plus normal\n  `create` / `edit` / `comment`; (2) a convenience capture helper that creates a\n  log on first use and appends entries, via the shared write path. An automatic\n  per-session hook was considered and **explicitly removed from scope** (no honest\n  cross-interface trigger exists \u2014 the CLI has no long-lived process \u2014 and it adds\n  write amplification).\n- **Linking \u2014 non-blocking only.** No `blocks` / `depends_on` (and excluded from\n  the dependency graph), but `relates_to` / `discovered_from` permitted so a log\n  can reference the work it documents.\n- **Gates & lifecycle \u2014 exempt, no transitions.** Skipped by\n  `clarity_check` / `check_ac` / `quality_check` and by `validate`'s orphan/health\n  checks; cannot be `claim`ed or `transition`ed. `show`, `comment`, and `edit`\n  work as normal.\n- **Title guidance \u2014 documented, not enforced.** Titles should carry a short\n  summary of the work (not merely date / time / session id); this lives in the\n  ticket docs but is never validated.\n\n## Acceptance Criteria\n\n- [ ] `session_log` is a valid ticket type accepted by `create` across schema +\n      `_TYPES`, and rejected nowhere it should be accepted.\n- [ ] Session logs are excluded from `reduce_all_tickets()` for graph/health\n      callers (`ready`, `next_batch`, `deps`, `validate`) and from default `list`,\n      but included in `search` and `show`.\n- [ ] `claim` / `transition` on a `session_log` are refused with a clear message;\n      `blocks` / `depends_on` links are refused while `relates_to` /\n      `discovered_from` succeed.\n- [ ] `clarity_check`, `check_ac`, and `quality_check` treat `session_log` as\n      exempt, and `validate` does not flag session logs as orphans/empty/etc.\n- [ ] A \"last 5 session logs\" capability (ordered by `created_at` desc, default\n      limit 5) is reachable identically from the library, the CLI, and an MCP tool\n      with a documented `outputSchema`.\n- [ ] `session_log` tickets are never emitted to Jira by `reconcile` (outbound\n      filter + absent from the local\u2192Jira type map) and never appear in\n      `bridge_fsck` output.\n- [ ] A capture helper can create/append a session log from all three interfaces,\n      and `CLAUDE.md` + `docs/` document the type, its exemptions, and the\n      title-summary convention.\n- [ ] Tests cover the type across all three interfaces and assert the graph/health\n      performance isolation; full suite passes.\n- [ ] A `session_log` ticket type exists end to end (schema, validation, all three\n- [ ] Session logs are discoverable via `search` keywords and a \"last 5 session logs\"\n- [ ] Graph/health operations (`ready`, `next_batch`, `deps`, `validate`) are provably\n- [ ] Session logs are gate- and lifecycle-exempt, support non-blocking links only,\n- [ ] A capture helper lets agents record verbose logs without hand-assembling",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Add a session_log ticket type for verbose, queryable session logs"
+      },
       "created_at": "2026-08-15T15:02:54Z",
       "jira_key": "REB-193",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:54Z"
     },
@@ -18025,9 +18122,17 @@
       "updated_at": "2026-08-15T15:03:15Z"
     },
     "7a03-74f2-e812-4104": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n`make lint` deterministically prints: `WARN audit: zizmor is running in offline mode by default; some audits and auto-fixes will not be available.` The gate still exits successfully, so contributors can report a clean lint run while the tool says part of its audit surface is unavailable. A tracker search for `zizmor offline mode` found no open bug owning the warning. Discovered while verifying `treelike-unamusing-grosbeak`.\n\n## Reproduction\nFrom a provisioned checkout, run `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` and inspect the zizmor step.\n\n## Plan\nUse `rebar-debug` to identify exactly which audits are disabled offline, whether Gerrit CI has network/capabilities to run them, and whether the current invocation is deliberate. If changing online/offline policy affects portability, network access, or CI behavior, return an evidence-backed decision brief rather than silently choosing.\n\n## Acceptance Criteria\n- [ ] Root cause and the exact unavailable audit capabilities are proven against the pinned zizmor version.\n- [ ] Local/no-network and Gerrit CI behavior are both evaluated.\n- [ ] The warning is eliminated by a reviewed policy or explicitly documented/suppressed only if the warning is proven intentional and coverage-equivalent safeguards are cited.\n- [ ] `make lint` and relevant workflow gates remain green.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "make lint runs zizmor offline and leaves online audits unavailable"
+      },
       "created_at": "2026-08-16T23:36:41Z",
       "jira_id": "4588912",
       "jira_key": "REB-3073",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-16T23:36:44Z"
     },
@@ -20960,6 +21065,13 @@
       "jira_key": "REB-843",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:36Z"
+    },
+    "905d-1287-effc-4a83": {
+      "created_at": "2026-08-17T00:42:34Z",
+      "jira_id": "4588918",
+      "jira_key": "REB-3079",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:37Z"
     },
     "9064-46cf-75dd-4f85": {
       "baseline": {
@@ -27071,6 +27183,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:31Z"
     },
+    "bf6b-dbdd-8b35-4a78": {
+      "created_at": "2026-08-17T00:42:42Z",
+      "jira_id": "4588919",
+      "jira_key": "REB-3080",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:44Z"
+    },
     "bf7c-333e-29b0-4ee4": {
       "baseline": {
         "assignee": {
@@ -29985,6 +30104,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:39Z"
     },
+    "d74a-6a76-c846-4710": {
+      "created_at": "2026-08-17T00:42:48Z",
+      "jira_id": "4588920",
+      "jira_key": "REB-3081",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:52Z"
+    },
     "d751-4e52-9ee4-4a66": {
       "created_at": "2026-08-15T15:12:40Z",
       "jira_key": "REB-334",
@@ -31174,10 +31300,24 @@
     },
     "e06a-1450-5e1b-42fc": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nThe default test suite passes but `tests/unit/test_build_provenance.py::test_install_from_sdist_preserves_commit` emits Python's `DeprecationWarning` at line 143: Python 3.14 will filter extracted tar archives by default and may reject files or modify metadata. The test calls `TarFile.extractall(extracted)` without an explicit `filter=` policy.\n\n## Reproduction\nRun the named test with warnings enabled under the repository virtualenv. The warning is deterministic on Python 3.12 and identifies the future 3.14 behavior change.\n\n## Plan\nUse rebar-debug to establish the intended safe extraction policy and prove whether the test fixture requires metadata that a standard filter changes. Apply the smallest compatibility repair with a RED warning-as-error oracle; do not weaken archive-safety behavior.\n\n## Acceptance Criteria\n- [ ] The named build-provenance test runs with its tar extraction warning promoted to an error and passes.\n- [ ] The selected extraction filter is explicit and justified against the fixture's required metadata.\n- [ ] Existing build-provenance assertions remain unchanged or stronger.\n- [ ] The focused test and repository gates pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Python 3.14 tar extraction warning in build-provenance test"
       },
       "created_at": "2026-08-16T21:34:20Z",
@@ -32640,6 +32780,13 @@
       "jira_key": "REB-374",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:14:36Z"
+    },
+    "ea16-dd54-3a8f-4293": {
+      "created_at": "2026-08-17T00:42:55Z",
+      "jira_id": "4588921",
+      "jira_key": "REB-3082",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T00:42:58Z"
     },
     "ea28-020e-8215-4eb9": {
       "baseline": {
@@ -37141,7 +37288,16 @@
     "REB-3071": "c7d5-8fe8-91e3-418a",
     "REB-3072": "e06a-1450-5e1b-42fc",
     "REB-3073": "7a03-74f2-e812-4104",
+    "REB-3074": "10a3-7dd0-1b3d-47cc",
+    "REB-3075": "2e1b-6517-eb1e-4309",
+    "REB-3076": "558e-d9bd-e285-40a1",
+    "REB-3077": "5a90-ec98-af5a-48d0",
+    "REB-3078": "66b3-4214-c70b-4a9a",
+    "REB-3079": "905d-1287-effc-4a83",
     "REB-308": "c799-3a71-3bcd-433e",
+    "REB-3080": "bf6b-dbdd-8b35-4a78",
+    "REB-3081": "d74a-6a76-c846-4710",
+    "REB-3082": "ea16-dd54-3a8f-4293",
     "REB-309": "c7c5-12ea-ad68-4690",
     "REB-31": "1400-0c9f-5bb2-4ee1",
     "REB-310": "c8cc-68b8-a51c-47cd",
