@@ -41,6 +41,16 @@ from rebar._mcp_models import (
 )
 
 
+def _shadow(surface: str) -> None:
+    """Emit ONE diagnostic shadow snapshot for an MCP operation (RP-04 S1).
+
+    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT gate
+    or alter the tool. A malformed config surfaces as ``ConfigError`` (fail-fast)."""
+    from rebar._operation_config import emit_shadow_snapshot
+
+    emit_shadow_snapshot(surface=surface)
+
+
 def _gate_value(gate: object) -> bool:
     """Read either a live gate callback or its legacy boolean value."""
     return bool(gate() if callable(gate) else gate)
@@ -57,6 +67,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
     def bridge_run(profile: str = "dry-run") -> BridgeRunOut:
         """Run one scheduled bridge profile and strictly deliver its ticket events."""
+        _shadow("mcp.read.bridge_run")
         if _gate_value(ctx.readonly):
             raise ValueError(
                 "bridge run is disabled: this server is read-only (REBAR_MCP_READONLY)"
@@ -72,6 +83,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
         max_changes: int | None = None,
     ) -> BridgeRunOut:
         """Apply proposed Jira changes, optionally with an explicit change limit."""
+        _shadow("mcp.read.bridge_sync")
         if _gate_value(ctx.readonly):
             raise ValueError(
                 "bridge sync is disabled: this server is read-only (REBAR_MCP_READONLY)"
@@ -85,6 +97,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
     def bridge_pause(reason: str) -> BridgeControlOut:
         """Persist a durable reconciliation pause with its operator reason."""
+        _shadow("mcp.read.bridge_pause")
         if _gate_value(ctx.readonly):
             raise ValueError(
                 "bridge pause is disabled: this server is read-only (REBAR_MCP_READONLY)"
@@ -96,6 +109,7 @@ def _register_bridge_mutation_tools(mcp, ctx, annotations) -> None:
     @mcp.tool(annotations=annotations["MUTATE_OPEN_WORLD"])
     def bridge_resume() -> BridgeControlOut:
         """Clear the durable reconciliation pause."""
+        _shadow("mcp.read.bridge_resume")
         if _gate_value(ctx.readonly):
             raise ValueError(
                 "bridge resume is disabled: this server is read-only (REBAR_MCP_READONLY)"
@@ -114,6 +128,7 @@ def register_bridge_tools(mcp, ctx) -> None:
         only: list[str] | None = None, exclude: list[str] | None = None
     ) -> BridgeRunOut:
         """Compute proposed Jira changes without applying them."""
+        _shadow("mcp.read.bridge_preview")
         kwargs = {
             key: value
             for key, value in {"only": only, "exclude": exclude}.items()
@@ -127,6 +142,7 @@ def register_bridge_tools(mcp, ctx) -> None:
         max_age_seconds: int | None = None,
     ) -> BridgeStatusOut:
         """Read the durable bridge status snapshot and optional freshness assertion."""
+        _shadow("mcp.read.bridge_status")
         values = {
             "target_environment_id": target_environment_id,
             "max_age_seconds": max_age_seconds,
@@ -137,6 +153,7 @@ def register_bridge_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=annotations["READ_ONLY_OPEN_WORLD"])
     def bridge_check_access() -> BridgeAccessCheckOut:
         """Run the six-step live Jira capability check and return its typed verdict."""
+        _shadow("mcp.read.bridge_check_access")
         return BridgeAccessCheckOut.model_validate(rebar.bridge_check_access())
 
     if not _gate_value(ctx.readonly):
@@ -170,6 +187,7 @@ def _register_plan_review_tools(mcp, annotations) -> None:
         and `signed_at` the sign timestamp; both are null when no readable certified
         attestation exists. Use it to answer "should I re-gate before I implement?"
         without provoking a claim refusal."""
+        _shadow("mcp.read.plan_review_status")
         import rebar.llm
 
         return PlanReviewStatusOut.model_validate(rebar.llm.plan_review_status(ticket_id))
@@ -189,6 +207,7 @@ def _register_bridge_projects_read(mcp, ann) -> None:
 
         The projects key set IS the store's sync list; each entry names the repos its
         tickets belong to. A pure store READ (no LLM)."""
+        _shadow("mcp.read.bridge_projects_list")
         import rebar
 
         return rebar.bridge_projects_list()
@@ -213,6 +232,7 @@ def register_read_tools(mcp, ctx) -> None:
         Includes the computed ``inbound_deps`` (inbound edges: other tickets
         linking TO this one, with the source's status) alongside the stored
         outgoing ``deps``."""
+        _shadow("mcp.read.show_ticket")
         from rebar.audit.read import plan_review_health
 
         ticket = dict(rebar.show_ticket(ticket_id, include_inbound=True))
@@ -228,6 +248,7 @@ def register_read_tools(mcp, ctx) -> None:
         registry/guide READ (no LLM, so it is NOT gated on REBAR_MCP_ALLOW_LLM); the SAME shared
         lookup as the `rebar explain` CLI. On failure returns a structured error
         ``{error, kind, message}`` (kind ∈ unknown-id / malformed-registry / missing-file)."""
+        _shadow("mcp.read.explain_criterion")
         from rebar.llm.plan_review import registry
 
         try:
@@ -277,6 +298,7 @@ def register_read_tools(mcp, ctx) -> None:
         ``full=True`` for the complete ticket shape (or use ``show_ticket`` for a
         single ticket's body).
         """
+        _shadow("mcp.read.list_tickets")
         return [
             TicketStateOut.model_validate(t)
             for t in rebar.list_tickets(
@@ -299,6 +321,7 @@ def register_read_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def ticket_deps(ticket_id: str) -> DepsGraphOut:
         """Show the dependency graph for a ticket."""
+        _shadow("mcp.read.ticket_deps")
         return DepsGraphOut.model_validate(rebar.deps(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
@@ -310,6 +333,7 @@ def register_read_tools(mcp, ctx) -> None:
         aggregation over the observability sidecars — individual reader failures degrade to
         ``[]`` / ``None`` rather than raising. Always available (a read tool, so it is served
         even under ``REBAR_MCP_READONLY=1``)."""
+        _shadow("mcp.read.audit_trail")
         from rebar.audit.read import audit_trail as _audit_trail
 
         return _audit_trail(ticket_id)
@@ -319,11 +343,13 @@ def register_read_tools(mcp, ctx) -> None:
         """List tickets ready to work (all blockers closed). ``sort`` orders by
         ``priority|created|updated|id|status`` (prefix ``-`` for descending;
         unset values sort last)."""
+        _shadow("mcp.read.ready_tickets")
         return [TicketStateOut.model_validate(t) for t in rebar.ready(sort=sort)]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def next_batch(epic_id: str) -> NextBatchOut:
         """Next parallel batch of unblocked tickets under an epic's hierarchy."""
+        _shadow("mcp.read.next_batch")
         return NextBatchOut.model_validate(rebar.next_batch(epic_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
@@ -343,6 +369,7 @@ def register_read_tools(mcp, ctx) -> None:
         negation; an unknown ``field:`` degrades to a literal substring. ``sort``
         orders by ``priority|created|updated|id|status`` (``-`` prefix = descending;
         unset values last)."""
+        _shadow("mcp.read.search")
         return [
             SearchResultOut.model_validate(t)
             for t in rebar.search(
@@ -360,12 +387,14 @@ def register_read_tools(mcp, ctx) -> None:
         """The newest session_log tickets, newest first (by created_at; default
         limit 5). session_logs are hidden from list_tickets; this is the
         type-specific read that surfaces them."""
+        _shadow("mcp.read.recent_session_logs")
         return [TicketStateOut.model_validate(t) for t in rebar.recent_session_logs(limit=limit)]
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
     def fsck(recover: bool = False) -> str:
         """Check ticket-store integrity (JSON validity, CREATE presence, lock
         cleanup). Set recover=True to run the recovery path."""
+        _shadow("mcp.read.fsck")
         if recover and _readonly():
             raise ValueError(
                 "fsck recover=True is a write operation and is disabled: this "
@@ -379,34 +408,40 @@ def register_read_tools(mcp, ctx) -> None:
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def clarity_check(ticket_id: str) -> ClarityResultOut:
         """Score ticket clarity (score / verdict / threshold / passed)."""
+        _shadow("mcp.read.clarity_check")
         return ClarityResultOut.model_validate(rebar.clarity_check(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def check_ac(ticket_id: str) -> GateResultOut:
         """Check the ticket has an Acceptance Criteria block
         ({verdict, criteria_count, reason, passed})."""
+        _shadow("mcp.read.check_ac")
         return GateResultOut.model_validate(rebar.check_ac(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def quality_check(ticket_id: str) -> GateResultOut:
         """Check ticket dispatch readiness ({verdict, line_count, keyword_count,
         ac_items, file_impact, reason, passed})."""
+        _shadow("mcp.read.quality_check")
         return GateResultOut.model_validate(rebar.quality_check(ticket_id))
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def validate() -> ValidateReportOut:
         """Repo-wide quality health check (JSON report: score, critical/major/
         minor issues, warnings, suggestions). Takes no ticket id."""
+        _shadow("mcp.read.validate")
         return ValidateReportOut.model_validate(rebar.validate())
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_file_impact(ticket_id: str) -> list[FileImpactItemOut]:
         """Get the file-impact array (consumed by next-batch conflict scheduling)."""
+        _shadow("mcp.read.get_file_impact")
         return [FileImpactItemOut.model_validate(e) for e in rebar.get_file_impact(ticket_id)]
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def get_verify_commands(ticket_id: str) -> list[VerifyCommandItemOut]:
         """Get the DD-level verify-commands array for a ticket."""
+        _shadow("mcp.read.get_verify_commands")
         return [
             VerifyCommandItemOut.model_validate(e) for e in rebar.get_verify_commands(ticket_id)
         ]
@@ -418,6 +453,7 @@ def register_read_tools(mcp, ctx) -> None:
         abstain-reason enum (+ outcome/job/tier vocabularies), and the available
         backends with their detected availability/version. A fast, deterministic,
         repo-independent discovery surface (no repo is scanned). Takes no args."""
+        _shadow("mcp.read.grounding_info")
         return GroundingInfoOut.model_validate(rebar.grounding_info())
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
@@ -427,11 +463,13 @@ def register_read_tools(mcp, ctx) -> None:
         ticket_id preserves the caller token; alias is the exact resolved
         human-friendly alias, or null when resolution fails closed.
         """
+        _shadow("mcp.read.summary")
         return rebar.summary(*ticket_ids)
 
     @mcp.tool(annotations=_ANN["READ_ONLY"])
     def bridge_fsck() -> BridgeFsckOut:
         """Offline bridge audit -> {unknown_event_types, binding_drift, store_integrity}."""
+        _shadow("mcp.read.bridge_fsck")
         return BridgeFsckOut.model_validate(rebar.bridge_fsck())
 
     register_bridge_tools(mcp, ctx)
@@ -451,6 +489,7 @@ def register_read_tools(mcp, ctx) -> None:
         the most-recent signature (back-compatible); an explicit kind (e.g. 'plan-review' /
         'completion-verifier') verifies that kind strictly. The full per-kind set is on the
         ticket-state `attestations` field via show_ticket."""
+        _shadow("mcp.read.verify_signature")
         return VerifySignatureResultOut.model_validate(rebar.verify_signature(ticket_id, kind=kind))
 
     @mcp.tool(annotations=_ANN["MUTATE_OPEN_WORLD"])
@@ -461,6 +500,7 @@ def register_read_tools(mcp, ctx) -> None:
         require REBAR_MCP_ALLOW_JIRA_SYNC=1 and are blocked under REBAR_MCP_READONLY.
         reconcile-check / dry-run are non-mutating.
         """
+        _shadow("mcp.read.reconcile")
         # MODE_CAPS / Mode are imported once at module load (see top of file).
         # Unknown mode -> ValueError -> clean tool error.
         parsed = Mode.from_str(mode)
@@ -486,6 +526,7 @@ def register_read_tools(mcp, ctx) -> None:
 
         Typed read tool (mirrors src/rebar/schemas/workflow_run.schema.json), always
         available. ``ticket_id`` is resolved from the local run index when omitted."""
+        _shadow("mcp.read.get_workflow_status")
         return WorkflowRunOut.model_validate(
             _cap_workflow_payload(rebar.get_workflow_status(run_id, ticket_id))
         )
@@ -499,6 +540,7 @@ def register_read_tools(mcp, ctx) -> None:
         Typed read tool (workflow_run schema), always available. Bulky outputs are
         elided to stay under the MCP token budget (``truncated: true``); read the
         full result via the library/CLI."""
+        _shadow("mcp.read.get_workflow_result")
         return WorkflowRunOut.model_validate(
             _cap_workflow_payload(rebar.get_workflow_result(run_id, ticket_id))
         )
@@ -509,6 +551,7 @@ def register_read_tools(mcp, ctx) -> None:
         read-only Mermaid flowchart (TEXT; the host renders it to SVG, never
         committed). Large graphs degrade to a text outline. Read tool, always
         available."""
+        _shadow("mcp.read.render_workflow")
         from rebar.llm.workflow import render
 
         return render.render_workflow(workflow)

@@ -615,6 +615,20 @@ def _acquire_or_adopt_pass_lock(advisory, pass_id: str, repo_root: Path, adopted
     return advisory.acquire_pass_lock(pass_id, repo_root)
 
 
+def _emit_operation_shadow(repo_root) -> None:
+    """Compose ONE diagnostic shadow snapshot for the reconcile pass (RP-04 S1).
+
+    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT control
+    the pass. Import + composition errors are swallowed at this compatibility boundary
+    so a shadow fault can never break reconciliation."""
+    try:
+        from rebar._operation_config import emit_shadow_snapshot
+
+        emit_shadow_snapshot(repo_root=repo_root, surface="reconciler")
+    except Exception:  # noqa: BLE001 — the compatibility boundary must never break on shadow
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for ``python -m rebar_reconciler``.
 
@@ -642,6 +656,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     repo_root = request.repo_root
     route = getattr(request, "route", None)
+
+    # Shadow-mode operation snapshot (RP-04 S1): one diagnostic snapshot from the
+    # resolved request root at this compatibility boundary. Guarded and side-effect-free
+    # apart from the DEBUG diagnostic — it does NOT control the reconcile pass.
+    _emit_operation_shadow(repo_root)
 
     # This compatibility path remains before mode and advisory-lock checks.
     enumeration_exit = _dry_run_enumeration_exit(request)

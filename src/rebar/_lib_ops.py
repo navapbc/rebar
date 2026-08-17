@@ -25,6 +25,18 @@ from rebar import config
 from rebar._engine import engine_dir, engine_env
 from rebar._errors import RebarError
 
+
+def _shadow(repo_root, surface: str) -> None:
+    """Emit ONE diagnostic shadow snapshot for a public library operation (RP-04 S1).
+
+    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT control
+    the operation. A malformed config surfaces as ``ConfigError`` (fail-fast) exactly
+    as the operation's own config read would."""
+    from rebar._operation_config import emit_shadow_snapshot
+
+    emit_shadow_snapshot(repo_root=repo_root, surface=surface)
+
+
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
     from rebar.types import (
@@ -54,6 +66,7 @@ def run_workflow(
     See :mod:`rebar.llm.workflow.runs`."""
     from rebar.llm.workflow import runs
 
+    _shadow(repo_root, "lib.run_workflow")
     return runs.run(
         source,
         inputs,
@@ -71,6 +84,7 @@ def get_workflow_status(
     """A workflow run's current status, read via replay (no execution)."""
     from rebar.llm.workflow import runs
 
+    _shadow(repo_root, "lib.get_workflow_status")
     return cast("WorkflowRun", runs.status(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -80,6 +94,7 @@ def get_workflow_result(
     """A workflow run's outputs (the terminal step's output is the result)."""
     from rebar.llm.workflow import runs
 
+    _shadow(repo_root, "lib.get_workflow_result")
     return cast("WorkflowRun", runs.result(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -95,6 +110,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
 
     from rebar._engine_support.bridge_fsck import audit_bridge_mappings
 
+    _shadow(repo_root, "lib.bridge_fsck")
     tracker = config.tracker_dir(repo_root)
     findings = audit_bridge_mappings(Path(tracker))
     return cast("BridgeFsck", findings)
@@ -102,6 +118,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
 
 def bridge_projects_list(*, repo_root=None) -> dict:
     """Return the store's bridge-projects mapping ``{key: {"repos": [...]}}``."""
+    _shadow(repo_root, "lib.bridge_projects_list")
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     return store.read_projects(root)
@@ -122,6 +139,7 @@ def bridge_projects_set(key, repos, *, repo_root=None) -> None:
     tracker = config.tracker_dir(repo_root)
     try:
         with lock.write_lock(tracker):
+            _shadow(repo_root, "lib.bridge_projects_set")
             store.set_project(root, key, list(repos))
     except ValueError as exc:
         raise _invalid_bridge(str(exc)) from exc
@@ -142,6 +160,7 @@ def bridge_projects_remove(key, *, repo_root=None) -> None:
     tracker = config.tracker_dir(repo_root)
     try:
         with lock.write_lock(tracker):
+            _shadow(repo_root, "lib.bridge_projects_remove")
             store.remove_project(root, key)
     except KeyError as exc:
         message = f"bridge project {key!r} is not in the mapping"
@@ -211,6 +230,7 @@ def _bridge_run(
 ) -> BridgeRun:
     _validate_positive("max_changes", max_changes)
     _validate_selection_args(only, exclude)
+    _shadow(repo_root, f"lib.bridge_{route}")
     root = Path(config.repo_root(repo_root))
     selection_kind, selection_ids = _bridge_selection(root, only, exclude)
     orchestrator = _engine_module("rebar_reconciler.__main__")
@@ -250,6 +270,7 @@ def bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun:
     """Run one scheduled bridge profile with captured output and strict delivery."""
     from rebar._bridge_runner import run_bridge
 
+    _shadow(repo_root, "lib.bridge_run")
     return run_bridge(profile, repo_root=repo_root)
 
 
@@ -274,6 +295,7 @@ def bridge_status(
 ) -> BridgeStatus:
     """Read the durable last-pass, pause, and live-lock status snapshot."""
     _validate_positive("max_age_seconds", max_age_seconds)
+    _shadow(repo_root, "lib.bridge_status")
     root = Path(config.repo_root(repo_root))
     last_pass = _engine_module("rebar_reconciler.last_pass")
     try:

@@ -523,3 +523,46 @@ The prerequisites are deliberately split:
 
 Neither `scc` nor `jscpd` is a pip dependency of rebar. Their adapters resolve executables
 from `PATH`; a missing or failing tool is reported as `Unavailable`, never as fabricated zero.
+
+## 6. The operation snapshot — `rebar.config.OperationSnapshot` (RP-04)
+
+`rebar._operation_config` (re-exported from `rebar.config`) is the supported seam for
+composing **one immutable, serializable, NON-SECRET configuration authority per
+operation**. It delegates rather than reimplements: root selection to
+`rebar._config_sources.repo_root`, precedence + provenance to
+`rebar.config.resolve_with_sources` (defaults < user < project < env < cli), and
+canonical serialization/fingerprinting to `rebar._store.canonical`.
+
+Construction:
+
+- `compose_operation_snapshot(*, cli_overrides=None, repo_root=None) -> OperationSnapshot`
+  — the central composer. A malformed selected config makes `resolve_with_sources`
+  raise `ConfigError`, which propagates (fail-fast, before any effect).
+- `OperationSnapshot.build(*, envelope_version, repo_root, values, sources)` — the
+  validating constructor. Every leaf in `values` must be a JSON primitive (or a nested
+  list/dict of primitives); a pydantic `SecretStr`/`SecretBytes` or any live object is
+  rejected with `TypeError`, so a snapshot can never carry secret material.
+- `OperationSnapshot.from_document(doc)` — rebuild from `canonical_document()`; a
+  mismatched `envelope_version` raises `rebar.config.ConfigError`.
+
+Serialization / projection (all read-only):
+
+- `.canonical_document() -> dict` — the hashed document (plain nested dicts).
+- `.canonical_bytes() -> bytes` / `.fingerprint() -> str` — delegate to
+  `rebar._store.canonical` (a 64-hex sha256 fingerprint).
+- `.project(*sections) -> OperationProjection` — an immutable view restricted to the
+  named sections (`KeyError` for an unknown section).
+
+`ENVELOPE_VERSION` is the current schema version. The `values`/`sources` mappings are
+frozen (`types.MappingProxyType`) at both levels, so a composed snapshot is safe to
+share across an operation without defensive copies.
+
+**Shadow mode (temporary, S1–S6).** `shadow_enabled()` reads
+`REBAR_OPERATION_SNAPSHOT_SHADOW` (default enabled; see
+[config.md](config.md#rebar_operation_snapshot_shadow)). While the walking skeleton is
+in place, `emit_shadow_snapshot(*, cli_overrides=None, repo_root=None, surface=...)`
+composes one snapshot per operation and logs a REDACTED diagnostic (envelope version,
+source kinds, truncated fingerprint — never values, secrets, or paths). It is
+**diagnostic only**: it does NOT control execution, and any non-`ConfigError` failure is
+caught so the legacy operation continues untouched. The switch and the shadow wiring are
+removed in S7 once a real consumer is cut over.
