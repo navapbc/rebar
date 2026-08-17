@@ -23,6 +23,7 @@ pytest.importorskip("pydantic_ai")
 
 from pydantic_ai.usage import UsageLimits
 
+from rebar.llm import structured as _structured
 from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.config import LLMConfig
 from rebar.llm.runner import PydanticAIRunner, RunRequest, _effective_config
@@ -76,8 +77,11 @@ def test_usage_limits_returns_the_limits_object_and_both_counters():
     limits, req_limit, eff_max_iter = build_usage_limits(cfg, _req(cfg), UsageLimits)
     assert isinstance(limits, UsageLimits)
     assert eff_max_iter == 10
-    assert req_limit == 5, "request_limit halves max_iterations (~2 steps per tool-call cycle)"
-    assert limits.request_limit == 5
+    assert req_limit == 5, "the RETURNED req_limit stays the bare base (banking inverse)"
+    assert limits.request_limit == 5 + _structured.OUTPUT_RETRIES, (
+        "the CONSTRUCTED request_limit adds the RP-01 S2 output-retry allowance, so the "
+        "request budget can never trip before the output-retry counter"
+    )
 
 
 # ── §B the temperature-withdrawal matrix, and the PURITY it must not break ───────────────
