@@ -23952,14 +23952,58 @@
       "updated_at": "2026-08-15T15:07:09Z"
     },
     "9df3-b461-9a06-49c0": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nA review pipeline runs N criteria-prompts in budgeted BATCHES (one LLM call per batch), with runtime fallback (split -> one-per-call -> escalate model) on a context-limit. No surveyed engine makes adaptive cost-budgeted batching first-class \u2014 it is app code everywhere \u2014 and encoding it in the IR would break replay determinism (batch composition depends on a runtime token estimate + which call hit a context limit). So the IR gets a THIN step that delegates the adaptive work to a runner.\n\n## What\n\nAdd a `batch` step kind whose IR surface is purely declarative parameters: `group` (the prompt set), `usd_budget`, `model_ladder`. A batch-runner SEAM (protocol) performs the adaptive packing / token-estimation / context-limit fallback / model-escalation / shed-to-INDETERMINATE / fingerprint- checkpoint, and JOURNALS its batch-plan + fallback transitions as OPAQUE events. The interpreter STORES the journaled plan as an output but NEVER branches on its internals (thin-interpreter / Burr- tripwire preserved). Ship a reference/default batch-runner; epic B supplies the production runner (extracted from the gate's sizing.py) behind this seam.\n\n## Scope\n\n- src/rebar/llm/workflow/schema.py + JSON Schema: the `batch` step kind + its params + validation.\n- A batch-runner protocol/seam (alongside AgentStepRunner in executor.py) + a reference default runner.\n- The journaled batch-plan / fallback event vocabulary (recorded decisions, not recomputed).\n- src/rebar/llm/workflow/interpreter.py: invoke the batch-runner, store the opaque plan as the step\n  output; the interpreter must not interpret batch internals.\n\n## Acceptance Criteria\n\n- [ ] A `batch` step parses + schema-validates with `group`/`usd_budget`/`model_ladder`; bad params\n      are validation errors.\n- [ ] A batch-runner SEAM exists with a reference default runner; the runner journals its batch-plan\n      + fallback transitions as opaque recorded events.\n- [ ] The interpreter stores the journaled plan as the step output and NEVER branches on its\n      internals (a test asserts this); replay reads the recorded plan rather than recomputing it.\n- [ ] The Burr-tripwire stays green (no asyncio/threading/concurrent leaks outside the confined\n      fan-out path).\n- [ ] make lint + the workflow test suite pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Batch step: a thin delegating step kind + batch-runner seam + reference runner (journaled batch-plan)"
+      },
       "created_at": "2026-08-15T15:07:10Z",
       "jira_key": "REB-253",
+      "peer_parent": "REB-142",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:10Z"
     },
     "9e76-deb8-13c6-486c": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## GHA reconcile-bridge: sign inbound writes inline + inject key\n\nCRITICAL: the reconciler's inbound writer (`_engine/rebar_reconciler/inbound_translate.py` `_write_event_file`, ~214-259) calls the `rebar._store` primitives DIRECTLY, bypassing `_seam.append_event`, and stamps only `author` (no `author_email`/`author_id`/`author_sig`). So Jira-sourced events classify `unknown-author`/`unsigned` under `verify-identity`. Config alone is insufficient \u2014 this needs a code fix.\n\n### Chosen approach: stamp + sign INLINE (not via `_seam.append_event`)\n\nEnrich the event dict in `_write_event_file` BEFORE it is serialized/written:\n1. `event.update(_seam.attribution_fields(repo_root))` \u2014 adds `author_email` and (when a\n   current identity resolves) `author_id`.\n2. `_seam._apply_authorship(event, ticket_id, event_type, data, str(tracker_dir), repo_root)`\n   \u2014 when `author_id` + `identity.signing_key` are present, signs the canonical event bytes\n   and stores the DSSE envelope under `author_sig` (best-effort; a miss writes unsigned).\n\n**Rationale (why inline, NOT `_seam.append_event`):** `append_event` calls `write_and_push()`, which COMMITS + PUSHES per event; `_write_event_file` intentionally writes an uncommitted file so the reconciler's own orchestration can batch-commit the pass. Routing through `append_event` would break that batch-commit model and thread `repo_root`/`tracker` through 12+ call sites. Inline stamping reuses the exact seam helpers, preserves the uncommitted-file model, and is minimal blast radius. The added author fields are additive (older readers ignore unknown keys \u2014 no store-format break). `_write_event_file` will need `repo_root` available (derive from `tracker_dir.parent` or `config.repo_root()`).\n\n### Prerequisite (SATISFIED)\n\nSigning resolves `author_id` only if a Rebar Bot identity ticket with `email=joeoakhart+bot@navapbc.com` exists \u2014 it does (task bffe created identity `594c-9dcf-5ad6-4e6d`, public key registered). So with `BRIDGE_BOT_EMAIL` = that address the git-email resolver maps reconciler writes to the bot identity.\n\n### Workflow wiring\n\nIn `.github/workflows/reconcile-bridge.yml`: write `secrets.REBAR_BOT_SIGNING_KEY` to a job-local file (`mktemp`, `chmod 600`, `::add-mask::` the value), set `identity.signing_key` (or `REBAR_IDENTITY_SIGNING_KEY`) to that path, and set `BRIDGE_BOT_EMAIL=joeoakhart+bot@navapbc.com` (currently `rebar-bridge@users.noreply.github.com`) so git-email resolution maps to the bot.\n\n## Acceptance Criteria\n\n- [ ] `_write_event_file` stamps `author_email`/`author_id` (via `_seam.attribution_fields`) and signs `author_sig` (via `_seam._apply_authorship`) inline before writing; a reconciler-authored event written with the bot identity + a signing key verifies as `verified` under `rebar verify-authorship` (proven by a unit test that configures a bot identity + signing key, drives `_write_event_file`, and asserts the written event carries `author_id`/`author_email`/`author_sig` and verifies).\n- [ ] Additive-fields regression test: a unit test constructs an event WITHOUT the new author fields (older-format) and asserts the reducer / `rebar show` still round-trips it cleanly (unknown/absent keys ignored, no format break). The batch-commit orchestration is unchanged (no eager commit/push added to the inbound path).\n- [ ] `reconcile-bridge.yml` writes the key to a `chmod 600` job-local file, `::add-mask::`s it, and sets `identity.signing_key`/`REBAR_IDENTITY_SIGNING_KEY` to that path. For the committer email: the existing \"Configure git identity\" step reads `BRIDGE_BOT_EMAIL: ${{ vars.BRIDGE_BOT_EMAIL || 'rebar-bridge@users.noreply.github.com' }}` \u2014 CHANGE that fallback default to `joeoakhart+bot@navapbc.com` (so resolution maps to the bot identity without depending on a repo variable being set; the `vars.BRIDGE_BOT_EMAIL` override still wins if present). The key is never logged or committed.\n- [ ] `make lint && make typecheck && make test` pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "GHA reconcile-bridge: route inbound writes through signing seam + inject key"
+      },
       "created_at": "2026-08-15T15:07:10Z",
       "jira_key": "REB-1099",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:10Z"
     },
@@ -24108,8 +24152,30 @@
       "updated_at": "2026-08-15T15:07:16Z"
     },
     "9f5b-f0cd-5031-45de": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\nThe core driver of the visual-editing goal is letting developers ADD / REMOVE / EDIT individual CRITERIA. With the A2 shape, the batch step's `criteria` list is a static authored list of prompt-library-backed entries \u2014 discrete nodes the editor can represent and modify. Proving the add/remove-criterion round-trip end-to-end is the editability deliverable AND part of A's de-risking of B (the criteria-library <-> prompt-library <-> editor wiring).\n\n## What\n\nExtend the workflow visual editor (docs/workflow-editor.md) to render and edit a `batch` step's `criteria` list \u2014 each entry a prompt-library-backed criterion with its optional `when` overlay \u2014 and support ADD / REMOVE / EDIT of a criterion. Also render/edit the `batch` params (prompt/finder, usd_budget, model_ladder) and a prompt step's `if:` overlay predicate (the existing field; confirm + extend only as needed). Preserve the engine invariants: clean git diffs + schema-validated text round-trip (the e6d9 editor invariant). The demo workflow is the refinement sample.\n\n## Scope\n\n- The workflow editor surface (bpmn-js / editor assets + the Python render/round-trip; see\n  docs/workflow-editor.md + tests/e2e/test_editor_* / tests/unit/workflow/test_bpmn.py).\n- Render + edit the `batch` step (criteria list + params) and the `if:` overlay predicate;\n  ADD/REMOVE/EDIT a prompt-backed criterion in the criteria list.\n- Round-trip keeps clean git diffs + schema validation.\n\n## Acceptance Criteria\n\n- [ ] The editor renders a `batch` step's `criteria` list (each a prompt-library-backed entry + its\n      `when`) and supports ADD / REMOVE / EDIT of a criterion; it also renders the batch params and a\n      prompt step's `if:` overlay predicate.\n- [ ] Editor round-trip preserves clean git diffs + schema-validated text (the e6d9 invariant) \u2014 an\n      add/remove-criterion round-trips losslessly.\n- [ ] An editor test covers rendering + add/remove/edit of a criterion in the batch criteria list.\n- [ ] make lint + the relevant editor/workflow tests pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Visual editing for the new constructs (overlay predicate + batch step) in the workflow editor"
+      },
       "created_at": "2026-08-15T15:07:17Z",
       "jira_key": "REB-255",
+      "peer_parent": "REB-142",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:17Z"
     },
@@ -24182,8 +24248,16 @@
       "updated_at": "2026-08-15T15:07:20Z"
     },
     "9f84-bc2c-6f8b-4b09": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nExisting review operations should become the first workflows without breaking their public API, proving the engine end-to-end and removing the contradictory Langflow REST stub.\n\n## What\n- Characterization/golden-master tests on the public surface FIRST; reframe review_ticket /\n  review_code / scan_spec as built-in workflows via forwarding shims; parallel-run-and-diff\n  before cutover.\n- Ship an end-to-end code_review example (scripted -> agent -> gate(unsecured) -> comment).\n- Retire the LangflowRunner REST stub.\n\n## Scope\n- In: built-in workflows + migration safety.\n- Out: new public APIs.\n\n## Acceptance Criteria\n- [ ] Characterization tests freeze lib/CLI/MCP behavior before refactor.\n- [ ] review_ticket/review_code/scan_spec reframed as workflows; public API preserved via shims.\n- [ ] code_review example workflow snapshot-tested; LangflowRunner removed.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "WS-K: Built-in example workflows (strangler-fig; retire LangflowRunner)"
+      },
       "created_at": "2026-08-15T15:07:20Z",
       "jira_key": "REB-256",
+      "peer_parent": "REB-268",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:20Z"
     },
@@ -24250,8 +24324,30 @@
       "updated_at": "2026-08-15T15:07:23Z"
     },
     "a010-aec8-c088-4314": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## What\nEnrich the performance overlay prompt with dso content: recall patterns AND FP-guards (both halves), per the locked principle that domain rubric lives in the overlay, not the generic Pass-2 verifier. Recall: 8 AI-advantaged concerns (N+1 in loops, unbounded accumulation, blocking ops in async, over-fetch, cache stampede, needless materialization, pool misuse, non-linear complexity on user input). Bright-line reasoning (breaks-under-load / worse-with-scale) recorded as EVIDENCE for Pass-2 to score, not as severity.\n\n## Files\n- src/rebar/llm/reviewers/code-review-performance.md\n- eval spec + fixtures for the performance overlay (recall + no-fire cases)\n\n## Acceptance Criteria\n- [ ] performance overlay carries both recall patterns and FP-discrimination guards.\n- [ ] Lands with a passing recall + no-fire eval; does not over-suppress valid patterns.\n- [ ] Overlay remains advisory; no domain rubric leaks into code-review-verify.md.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "performance overlay enrichment"
+      },
       "created_at": "2026-08-15T15:07:24Z",
       "jira_key": "REB-676",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:24Z"
     },
@@ -24314,8 +24410,16 @@
       "updated_at": "2026-08-15T15:34:37Z"
     },
     "a060-e873-2e0c-4721": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\nRunning `rebar metrics` with NO `--since/--until` (the default invocation) silently breaks every ticket-derived (agent_process) metric. The CLI defaults the flags to empty strings and passes them into the readers; `metrics.event_metrics._bounds(\"\")` calls `datetime.fromisoformat(\"\")` which raises `ValueError: Invalid isoformat string: ''`. The CLI's per-metric fault isolation catches it and renders each metric as `unavailable` with reason=\"Invalid isoformat string: ''\", so the failure is silent.\n\n## Reproduced (in the rebar repo itself)\n`rebar metrics --output json` -> attempts_per_ticket / first_pass_rate / revert_recovery / reopen_recovery / rework_within_7_days all report `{unavailable: {reason: \"Invalid isoformat string: ''\"}}`. With explicit dates (`--since 2026-01-01 --until 2026-12-31`) they compute correctly (e.g. first_pass_rate -> 0.9984). The git readers guard the empty string (churn returns data); the event/sidecar readers do not \u2014 an inconsistency.\n\n## Expected\nWith no `--since/--until`, default the window to the **last 30 days** (until=today, since=today-30d) rather than passing empty strings. Empty/whitespace date values should normalize to this default (or to `None` open bounds) at the CLI boundary so no reader ever receives an unparseable string.\n\n## Acceptance criteria\n- [ ] `rebar metrics` with no date flags returns real values for the agent_process metrics over a last-30-days window (no 'Invalid isoformat' unavailable).\n- [ ] Default window documented in `rebar metrics --help`, user-guide, and the help text file.\n- [ ] Explicit `--since/--until` still override the default; explicit empty-string values are handled gracefully.\n- [ ] Unit/interface test covering the no-flags invocation (regression: currently masked as unavailable).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "rebar metrics with no --since/--until fails ticket-derived metrics; default to last 30 days"
+      },
       "created_at": "2026-08-15T15:07:24Z",
       "jira_key": "REB-1399",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:07:24Z"
     },
@@ -35569,6 +35673,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:53Z"
     },
+    "f94e-cf09-fed7-422d": {
+      "created_at": "2026-08-17T13:40:08Z",
+      "jira_id": "4589064",
+      "jira_key": "REB-3092",
+      "state": "confirmed",
+      "updated_at": "2026-08-17T13:40:10Z"
+    },
     "f96b-3498-8f04-40b0": {
       "baseline": {
         "assignee": {
@@ -38325,6 +38436,7 @@
     "REB-3082": "ea16-dd54-3a8f-4293",
     "REB-3083": "2704-39ae-16f5-4e96",
     "REB-309": "c7c5-12ea-ad68-4690",
+    "REB-3092": "f94e-cf09-fed7-422d",
     "REB-31": "1400-0c9f-5bb2-4ee1",
     "REB-310": "c8cc-68b8-a51c-47cd",
     "REB-311": "c9be-211c-7c4e-4528",
