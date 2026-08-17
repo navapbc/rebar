@@ -145,8 +145,9 @@ The gate has **two layers**:
   cases fire — NO LLM runs in the lint or the eval.
 
 * **Layer 2 — the advisory coaching review (the four passes)** — never blocks by
-  default. Each of the 44 criteria (the F/E/G/A judgment criteria, the T1–T15
-  triggered overlays, COH, and ISF) ships as a **contract-bearing prompt in the
+  default. Each criterion (e.g. the F/E/G/A judgment criteria, the T1–T15
+  triggered overlays, COH, ISF, and the advisory `ac-text-quality` / scope
+  criteria) ships as a **contract-bearing prompt in the
   prompt library** (`src/rebar/llm/reviewers/plan_review_<id>.md`, `category:
   plan-review-criterion`), loaded via `get_prompt` with `.rebar/prompts/` project
   overrides; its routing (exec/applies_at/block_threshold/posture/checklist) is the
