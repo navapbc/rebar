@@ -1,0 +1,113 @@
+# Standing eval / bounded-sanity corpus for the plan-review criterion `ac-process-gate` (task
+# sombre-corrective-cob). This is the "bounded sanity check" gate artifact: HAND-AUTHORED
+# process-gate positives (an acceptance criterion whose ENTIRE predicate is a generic
+# development-process / tooling gate CI or rebar already enforces mechanically — children-closed,
+# tests/CI pass, plan-review passes) that must FIRE, plus ticket-specific-deliverable negatives
+# (an AC naming this ticket's work — E2E tests written for feature X, plan-review criteria updated
+# to a new rubric) that must NOT fire. It is deliberately small (<=8 live single-criterion runs) —
+# NOT an E2/E3 batch eval (those are permanently rejected on cost). Run live with
+# `rebar criteria eval ac-process-gate --output json`; the committed result is
+# docs/experiments/plan-review-gate/runs/ac_process_gate_sanity.json. Offline spec-shape
+# validation is in tests/unit/test_ac_process_gate_criterion.py.
+prompt: plan-review-ac-process-gate
+model: anthropic:claude-sonnet-4-6
+epochs: 1
+gate: at_least(1)
+coverage_threshold: 1.0
+scorers:
+  # Deterministic GATE: the finder emits a schema-valid finding set — >=1 finding on a fire
+  # case, none on a pass case — scored independently of any judge.
+  - type: deterministic
+    name: emits_valid_findings
+    description: >
+      Output validates plan_review_findings; a fire case surfaces at least one
+      ac-process-gate finding, a pass case surfaces none.
+
+dataset:
+  # ── must-fire: ACs whose ENTIRE predicate is a generic mechanical process gate ────────────
+  - id: APG-F1-children-closed
+    corpus: rebar
+    criterion: ac-process-gate
+    expect: finding
+    note: >-
+      Process-gate positive: "all child tickets are closed" is rebar's open-children guard,
+      enforced structurally at close for EVERY container ticket — it reads and is satisfied
+      identically on an arbitrary unrelated epic, so it carries no ticket-specific signal.
+    input: >
+      ## What
+
+      Deliver the reconcile-metrics epic by completing its decomposed children.
+
+      ## Acceptance Criteria
+
+      - [ ] All child tickets are closed.
+      - [ ] The reconcile-metrics dashboard renders the outbound-latency histogram.
+  - id: APG-F2-tests-and-review-pass
+    corpus: rebar
+    criterion: ac-process-gate
+    expect: finding
+    note: >-
+      Process-gate positive: "all tests pass" is enforced by CI's Verified gate and "plan review
+      passes" by the rebar plan-review gate, for every change — both would read identically on
+      any unrelated ticket. The deliverable-specific AC in the same plan is not the target.
+    input: >
+      ## What
+
+      Add a `--json` output mode to `rebar metrics`.
+
+      ## Acceptance Criteria
+
+      - [ ] `rebar metrics --json` emits the documented schema for each lens.
+      - [ ] All tests pass and the build is green.
+      - [ ] Plan review passes.
+
+  # ── must-not-fire: ACs naming THIS ticket's specific deliverable (no false-fire) ──────────
+  - id: APG-N1-e2e-tests-for-feature
+    corpus: rebar
+    criterion: ac-process-gate
+    expect: pass
+    note: >-
+      Deliverable negative: "E2E tests are written covering the claim->close flow" names the
+      tests as THIS ticket's deliverable (they must EXIST and cover the specific flow) — it is
+      NOT the generic "the suite passes", so it must not fire even though it mentions tests.
+    input: >
+      ## What
+
+      Add end-to-end coverage for the claim->close ticket lifecycle.
+
+      ## Acceptance Criteria
+
+      - [ ] E2E tests are written that exercise the full claim -> in_progress -> closed flow
+        through the CLI, including the completion-verifier close gate.
+  - id: APG-N2-criteria-updated-to-rubric
+    corpus: rebar
+    criterion: ac-process-gate
+    expect: pass
+    note: >-
+      Deliverable negative: "the plan-review criteria are updated to reflect the new rubric" IS
+      the work this ticket delivers — plan-review is its SUBJECT, not a generic gate it must
+      clear — so it must not fire.
+    input: >
+      ## What
+
+      Update the plan-review criteria so acceptance criteria that merely restate a mechanical
+      process gate are surfaced.
+
+      ## Acceptance Criteria
+
+      - [ ] The plan-review criteria registry is updated to add the `ac-process-gate` rubric and
+        its routing entry.
+      - [ ] A new CI job runs the criterion's bounded-sanity eval spec.
+
+# Frozen human-gold labels (judge kappa alignment, WS-G3). One condensed statement per
+# dataset scenario — balanced process-gate (finding) / ticket-deliverable (pass) — so a candidate
+# judge can be scored for agreement against the same positives/controls the live corpus exercises.
+gold_set:
+  - input: "An AC 'all child tickets are closed' merely restates rebar's open-children close guard, enforced structurally for every container — no ticket-specific signal."
+    label: finding
+  - input: "ACs 'all tests pass and the build is green' and 'plan review passes' restate the CI Verified gate and the rebar plan-review gate — both read identically on any ticket."
+    label: finding
+  - input: "An AC 'E2E tests are written covering the full claim->close flow' names the tests as this ticket's deliverable that must exist and cover the specific flow, not a generic 'suite passes'."
+    label: pass
+  - input: "An AC 'the plan-review criteria registry is updated to add the ac-process-gate rubric' is the deliverable this ticket ships — plan-review is its subject, not a gate to clear."
+    label: pass
