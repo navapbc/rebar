@@ -61,6 +61,7 @@ from pydantic_ai.exceptions import (
 from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models.function import FunctionModel
 
+from rebar.llm import structured as _structured
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import (
     LLMRunnerError,
@@ -338,7 +339,10 @@ def test_runner_computes_derived_usage_limits(
         pass
     assert captured, "runner must construct a UsageLimits"
     kw = captured[-1]
-    assert kw["request_limit"] == exp_request_limit
+    assert kw["request_limit"] == exp_request_limit + _structured.OUTPUT_RETRIES, (
+        "RP-01 S2: the CONSTRUCTED request_limit is the base (ceil(mi/2)) PLUS the "
+        "output-retry allowance, so it never trips before the output-retry counter"
+    )
     assert kw["tool_calls_limit"] == exp_tool_calls_limit
     assert kw["request_limit"] != 50  # not the inherited pydantic-ai default
 

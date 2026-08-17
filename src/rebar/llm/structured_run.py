@@ -40,7 +40,6 @@ from rebar.llm.cache_diagnostics import (
 from rebar.llm.capabilities import ModelCapabilities
 from rebar.llm.errors import (
     LLMConfigError,
-    StructuredOutputError,
     UnretryableOutputError,
 )
 from rebar.llm.run_failure import (
@@ -65,6 +64,7 @@ __all__ = [
     "_pai_structured",
     "_warn_if_zeroed_usage",
     "_write_parse_failure_artifact",
+    "apply_structured_seams",
     "build_model_settings",
     "build_usage_limits",
     "cache_write_never_read",
@@ -72,16 +72,12 @@ __all__ = [
     "effective_max_tokens",
     "estimate_marked_prefix_tokens",
     "interpret_failure",
+    "output_retry_allowance",
     "warn_if_cache_ineffective",
     "warn_if_cache_write_never_read",
 ]
 
 logger = logging.getLogger(__name__)
-
-
-# Max chars of the model's faulty prior reply echoed back in the bounded-retry reask
-# (story drake) — enough to diff a near-miss, bounded so a huge blob can't balloon the prompt.
-_FAULTY_OUTPUT_SNIPPET_CHARS = 2000
 
 
 def _pai_structured(
@@ -107,16 +103,18 @@ def _pai_structured(
 
     ``caps`` is resolved ONCE by the caller (``run()``) and threaded through rather than
     re-derived here — see its ``caps =`` assignment for why a real run reads the model
-    OBJECT's profile but a ``model_override`` run reads the config-resolved STRING instead."""
+    OBJECT's profile but a ``model_override`` run reads the config-resolved STRING instead.
+
+    RP-01 S2: the manual per-attempt scheduler is replaced by ONE bounded Pydantic ``Agent``
+    run. Both branches share the wire projection + one output-retry counter (already wired into
+    ``kwargs`` as ``capabilities`` / ``retries`` by ``build_agent_kwargs``); this function only
+    selects the output mode and attaches the PER-BRANCH guard."""
     from pydantic_ai import NativeOutput
 
     from rebar.llm import contracts, structured
 
     model_cls = contracts.response_model_for(req.output_schema)
     mode_obj = structured.output_mode(model_cls, caps, thinking=req.thinking)
-    output_retries = structured.OUTPUT_RETRIES
-    if req.structured_retry_limit is not None:
-        output_retries = min(output_retries, max(0, int(req.structured_retry_limit)))
     if isinstance(mode_obj, NativeOutput):
         # Bug 895c: the provider compiles this contract's JSON Schema into a decoding grammar
         # and can 400 outright ("Grammar compilation timed out." / "Schema is too complex.").
@@ -125,16 +123,7 @@ def _pai_structured(
         # back to the PROMPTED path below (measured to return the same verdict in ~11s) rather
         # than losing this step to a request that can never succeed as configured.
         try:
-            agent = Agent(model, output_type=mode_obj, retries={"output": output_retries}, **kwargs)
-            with usage_log.capture_attempt_messages():
-                run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
-            # Silent-success parity (story drake): the PromptedOutput path below already checks
-            # the stop reason; the NativeOutput path previously returned output DIRECTLY, so a
-            # truncated/refused NativeOutput turn was returned as a hollow verdict. Run the same
-            # check here — a length/max_tokens/content_filter/refusal finish_reason raises
-            # UnretryableOutputError → the gate degrades to INDETERMINATE, never a hollow PASS.
-            structured.check_response(run_result.response)
-            return run_result.output, _extract_usage(run_result)
+            return _run_native_output(Agent, model, mode_obj, req, kwargs, usage_limits)
         except Exception as exc:
             from rebar.llm.failure import translate_schema_complexity_rejection
 
@@ -149,57 +138,153 @@ def _pai_structured(
                 exc,
             )
 
-    # PromptedOutput case: free-text + deterministic parse/validate + bounded retry. The
-    # schema directive is appended so the model knows the EXACT output keys (the json-repair
-    # path generates free text, so — unlike NativeOutput/PromptedOutput-as-output_type — the
-    # schema is not otherwise conveyed; without it the model guesses keys and tolerant parsing
-    # drops them to an empty object).
-    agent = Agent(model, **kwargs)  # free text (output_type defaults to str)
-    schema_hint = structured.schema_directive(model_cls)
-    prompt = f"{req.instructions}\n\n{schema_hint}"
-    last: Exception | None = None
-    for _ in range(output_retries + 1):
-        with usage_log.capture_attempt_messages():
-            result = agent.run_sync(prompt, usage_limits=usage_limits)
-        try:
-            # A refused / TRUNCATED turn is surfaced as a clear error BEFORE the tolerant
-            # parse — else json-repair would "fix" a truncated fragment into a
-            # plausible-but-wrong object (the false-accept the stop-reason guard prevents).
-            structured.check_response(result.response)
-            parsed = structured.parse_structured(str(result.output), model_cls)
-            return parsed, _extract_usage(result)
-        except UnretryableOutputError:
-            # A truncation (hit the output cap), refusal, or content-filter is a complete,
-            # unusable turn — re-running the same call reproduces it. FAST-FAIL instead of
-            # re-paying this (often agentic, multi-minute) call OUTPUT_RETRIES more times.
-            raise
-        except StructuredOutputError as exc:
-            last = exc
-            # Feed the model its OWN faulty prior reply (bounded) so it can diff its mistake
-            # — the LangChain RetryWithErrorOutputParser / Instructor pattern (story drake).
-            faulty = str(result.output)
-            if len(faulty) > _FAULTY_OUTPUT_SNIPPET_CHARS:
-                faulty = faulty[:_FAULTY_OUTPUT_SNIPPET_CHARS] + " …[truncated]"
-            prompt = (
-                f"{req.instructions}\n\n{schema_hint}\n\nYour previous reply could not be "
-                f"parsed/validated ({exc}). Your previous reply was:\n{faulty}\n\n"
-                f"Reply with ONLY the JSON object matching the schema above. "
-                f"{structured.SENTINEL_DIRECTIVE}"
-            )
-    assert last is not None  # the loop only exits here after a failed parse set `last`
-    if artifact_dir:
-        from rebar.llm import structured
+    return _run_prompted_output(
+        Agent, model, model_cls, req, kwargs, usage_limits, artifact_dir=artifact_dir
+    )
 
-        path = _write_parse_failure_artifact(
-            artifact_dir,
-            reply=str(result.output),  # the LAST attempt's raw reply
-            model=getattr(model, "model_name", None) or str(model),
-            contract=req.output_schema or "",
-            attempts=output_retries + 1,
-        )
-        if path is not None:
-            raise type(last)(f"{last} [raw reply captured: {path}]") from last
-    raise last  # exhausted the bounded retry; surface the last validation error
+
+def output_retry_allowance(req: RunRequest) -> int:
+    """The output-retry allowance ``N`` for this request — the ONE value that seeds BOTH the
+    Agent's ``retries={"output": N}`` and the ``UsageLimits.request_limit`` addend (RP-01 S2).
+
+    ``structured.OUTPUT_RETRIES`` (2) is the default, lowered by ``req.structured_retry_limit``
+    when the caller sets it (never raised above the default, never below zero). Seeding both
+    budgets from this single value is what guarantees the shared request budget can NEVER trip
+    before the shared output-retry counter."""
+    from rebar.llm import structured
+
+    allowance = structured.OUTPUT_RETRIES
+    if req.structured_retry_limit is not None:
+        allowance = min(allowance, max(0, int(req.structured_retry_limit)))
+    return allowance
+
+
+def apply_structured_seams(kwargs: dict, req: RunRequest, candidates, model_settings) -> None:
+    """Merge the RP-01 S2 shared seams into an already-built Agent ``kwargs`` dict, in place.
+
+    The wire-projection capability (seam 1) is APPENDED to any web capabilities already in
+    ``kwargs`` so both ride one ``capabilities`` list, and the shared output-retry allowance N
+    seeds ``retries={"output": N}`` — the counter that BOTH the concision-guard ``ModelRetry``
+    and the ``TextOutput``-validator ``ModelRetry`` decrement. A ``text``-mode request runs no
+    output retry, so it is left byte-identical (no wire projection, no ``retries``).
+
+    Wiring only — the allowance is derived by :func:`output_retry_allowance` and the wire
+    projection is built in :mod:`rebar.llm.pai_retry`; nothing is computed here. ``candidates``
+    is the viable candidate-model set; the output reserve is the effective ``max_tokens``
+    already computed into ``model_settings``."""
+    if req.mode == "text":
+        return
+    from rebar.llm import pai_retry
+
+    reserve = model_settings.get("max_tokens") if model_settings else None
+    wire_cap = pai_retry.wire_history_processor(candidates, reserve)
+    kwargs["capabilities"] = [*kwargs.get("capabilities", []), wire_cap]
+    kwargs["retries"] = {"output": output_retry_allowance(req)}
+
+
+def _agent_kwargs_with_guard(kwargs: dict, guard) -> dict:
+    """A copy of ``kwargs`` with ``guard`` appended to its (already wire-seeded) capabilities —
+    the per-branch guard (native terminal vs prompted concision-aware) is the only difference
+    between the two output-mode Agents."""
+    merged = dict(kwargs)
+    merged["capabilities"] = [*merged.get("capabilities", []), guard]
+    return merged
+
+
+def _run_native_output(Agent, model, mode_obj, req: RunRequest, kwargs: dict, usage_limits):
+    """The NativeOutput (constrained-decoding) branch as ONE bounded Agent run.
+
+    Attaches ``pai_output.guard_capability()`` (terminal truncation — a fixed decoding grammar,
+    not verbosity, drives a native turn's size, so a truncated native turn stays TERMINAL, no
+    concision retry) alongside the shared wire projection and output-retry counter carried in
+    ``kwargs``. Silent-success parity (story drake): ``check_response`` still runs so a
+    truncated/refused turn degrades to INDETERMINATE rather than returning a hollow verdict."""
+    from rebar.llm import pai_output, structured
+
+    agent = Agent(
+        model,
+        output_type=mode_obj,
+        **_agent_kwargs_with_guard(kwargs, pai_output.guard_capability()),
+    )
+    with usage_log.capture_attempt_messages():
+        run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
+    structured.check_response(run_result.response)
+    return run_result.output, _extract_usage(run_result)
+
+
+def _run_prompted_output(
+    Agent,
+    model,
+    model_cls,
+    req: RunRequest,
+    kwargs: dict,
+    usage_limits,
+    *,
+    artifact_dir: str | None = None,
+):
+    """The PROMPTED branch as ONE bounded Agent run (RP-01 S2).
+
+    Composes the S1 output-policy adapter (``output_type=TextOutput(pai_output.output_function
+    (model_cls))`` — the deterministic tolerant parse + validators) with the concision-aware
+    guard (:func:`rebar.llm.pai_retry.concision_guard`), the shared wire projection, and the
+    shared output-retry counter. The schema directive is appended so the model knows the EXACT
+    output keys (free text otherwise conveys no schema). On output-retry exhaustion pydantic-ai
+    raises ``UnexpectedModelBehavior``; it is translated to :class:`UnretryableOutputError`
+    (still caught by every ``except StructuredOutputError`` / ``LLMRunnerError`` handler), and
+    the LAST raw reply is captured to the opt-in parse-failure artifact (story 2fd6)."""
+    from pydantic_ai import TextOutput, capture_run_messages
+    from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+    from rebar.llm import pai_output, pai_retry, structured
+
+    agent = Agent(
+        model,
+        output_type=TextOutput(pai_output.output_function(model_cls)),
+        **_agent_kwargs_with_guard(kwargs, pai_retry.concision_guard()),
+    )
+    prompt = f"{req.instructions}\n\n{structured.schema_directive(model_cls)}"
+    with capture_run_messages() as messages, usage_log.capture_attempt_messages():
+        try:
+            result = agent.run_sync(prompt, usage_limits=usage_limits)
+        except UnexpectedModelBehavior as exc:
+            if "Exceeded maximum output retries" not in str(exc):
+                raise
+            raise _exhausted_output_retries(
+                exc, messages, model, req, artifact_dir, output_retry_allowance(req) + 1
+            ) from exc
+    return result.output, _extract_usage(result)
+
+
+def _last_reply_text(messages) -> str:
+    """The text of the LAST model response in ``messages`` (the exhausted run's final reply)."""
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    for msg in reversed(messages):
+        if isinstance(msg, ModelResponse):
+            texts = [p.content for p in getattr(msg, "parts", []) if isinstance(p, TextPart)]
+            if texts:
+                return "".join(texts)
+    return ""
+
+
+def _exhausted_output_retries(
+    exc, messages, model, req: RunRequest, artifact_dir: str | None, attempts: int
+) -> UnretryableOutputError:
+    """Translate a pydantic-ai output-retry exhaustion into a rebar-typed
+    :class:`UnretryableOutputError`, writing the opt-in raw-reply artifact when configured."""
+    err = UnretryableOutputError(str(exc))
+    if not artifact_dir:
+        return err
+    path = _write_parse_failure_artifact(
+        artifact_dir,
+        reply=_last_reply_text(messages),
+        model=getattr(model, "model_name", None) or str(model),
+        contract=req.output_schema or "",
+        attempts=attempts,
+    )
+    if path is not None:
+        return UnretryableOutputError(f"{exc} [raw reply captured: {path}]")
+    return err
 
 
 def build_model_settings(
@@ -314,8 +399,15 @@ def build_usage_limits(cfg: LLMConfig, req: RunRequest, UsageLimits) -> tuple[An
     # logs report it directly instead of reading it back off the UsageLimits object (which a
     # test may stub) — and so the step-usage line reports the EFFECTIVE per-request budget.
     req_limit = max(1, math.ceil(eff_max_iter / 2))
+    # RP-01 S2: the CONSTRUCTED request_limit adds the output-retry allowance N so the shared
+    # request budget can NEVER trip before the shared output-retry counter (both seeded from
+    # the SAME `output_retry_allowance(req)`). The RETURNED `req_limit` stays the BARE base —
+    # telemetry and `completion_banking.iteration_limit_for`'s `2*B` inverse read it, and the
+    # allowance is an addend ONLY inside the constructed UsageLimits. A `text`-mode call runs no
+    # output retry, so it gets the bare base (no addend) — byte-identical to the pre-S2 budget.
+    allowance = 0 if req.mode == "text" else output_retry_allowance(req)
     usage_limits = UsageLimits(
-        request_limit=req_limit,
+        request_limit=req_limit + allowance,
         tool_calls_limit=max(8, eff_max_iter),
     )
     return usage_limits, req_limit, eff_max_iter
