@@ -543,6 +543,14 @@ def _main_dispatch(argv: list[str]) -> int:
             sys.stderr.write(f"Error: {exc}\n")
             return 1
 
+    # Shadow-mode operation snapshot (RP-04 S1): compose ONE diagnostic snapshot per
+    # invocation, after config is resolvable but before any dispatch/effects. Guarded
+    # and side-effect-free apart from the DEBUG diagnostic — it does NOT control
+    # execution, alter output, or change exit codes.
+    from rebar._operation_config import emit_shadow_snapshot
+
+    emit_shadow_snapshot(surface="cli")
+
     # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the pure
     # intercepts below (verify-commit-ticket, ...) that historically bypassed the per-arm
     # ensure_initialized — mounts the store ONCE here, before dispatch, so none can silently skip
