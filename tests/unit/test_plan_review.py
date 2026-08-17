@@ -612,6 +612,18 @@ def test_chunk_by_facet_packs_and_never_empty_for_input() -> None:
     assert sorted(flat) == sorted(c["id"] for c in crits)
 
 
+@pytest.mark.parametrize("count", list(range(2, 40)))
+def test_chunk_by_facet_never_strands_a_singleton(count: int) -> None:
+    # Regression (task sombre-corrective-cob): a criterion count where count % n == 1 (e.g. a
+    # 25-criterion effective set with the sonnet chunk size of 6) must NOT strand one criterion
+    # in its own chunk. Balanced packing keeps every chunk within [2, n] and covers all inputs.
+    crits = [{"id": f"C{i}", "facet": "ac-text-quality"} for i in range(count)]
+    chunks = registry.chunk_by_facet(crits, model="claude-sonnet-4-6", ticket_size="moderate")
+    assert all(2 <= len(ch) <= 6 for ch in chunks), [len(ch) for ch in chunks]
+    flat = [c["id"] for ch in chunks for c in ch]
+    assert sorted(flat) == sorted(c["id"] for c in crits)
+
+
 def test_only_code_grounding_set_greps() -> None:
     assert registry.CODEBASE_GROUNDED <= registry.AGENT_TIER
 
