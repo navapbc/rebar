@@ -431,6 +431,12 @@ def build_fallback_model(
         session.model_for(candidate, endpoint=endpoint)
         for candidate, endpoint in zip(candidates, endpoints, strict=True)
     ]
+    from rebar.llm.tracing import wrap_candidate
+
+    models = [
+        wrap_candidate(m, i, candidate)
+        for i, (m, candidate) in enumerate(zip(models, candidates, strict=True))
+    ]
     return FallbackModel(*models, fallback_on=should_fall_back), candidates
 
 
