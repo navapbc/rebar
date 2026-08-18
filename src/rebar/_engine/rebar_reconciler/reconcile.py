@@ -75,8 +75,25 @@ _NoOpSyncLogger = _helpers._NoOpSyncLogger
 # reconcile_helpers holds — re-bound here so the bare-name calls in _persist_and_log and
 # the ``reconcile._advance_baselines`` import in the A3 oracle both keep resolving.
 _accepts_synced_fields_out = _helpers._accepts_synced_fields_out
+_accepts_client = _helpers._accepts_client
 _advance_baselines = _helpers._advance_baselines
 _advance_peer_parent = _helpers._advance_peer_parent
+# RP-04 S3 (AC1/AC6): the runtime-binding cluster lives in reconcile_helpers (no back-edge
+# to this spine); re-bound here so reconcile_once calls them as bare names and tests that
+# load this module by path can reach them as ``reconcile.<name>``.
+_write_facade_enabled = _helpers._write_facade_enabled
+_resolve_pass_transport = _helpers._resolve_pass_transport
+bind_operation_runtime = _helpers.bind_operation_runtime
+
+# RP-04 S3 (AC1): the reconcile operation runtime (S2). Bound as a MODULE attribute
+# ``reconcile.compose_reconciler_runtime`` so a pass composes ONE runtime whose backend
+# CAPTURES scope at compose time (no ambient re-resolution per apply), and so tests can
+# monkeypatch this exact attribute. Loaded by the same by-path sibling loader the rest of
+# this module uses (runtime.py resolves its heavy deps lazily) so it resolves whether or not
+# the engine dir is importable as a package.
+compose_reconciler_runtime = _load(
+    "rebar_reconciler.runtime", "runtime.py"
+).compose_reconciler_runtime
 
 
 @dataclass
@@ -138,6 +155,13 @@ class _PassContext:
     # (bug e6e9), so _advance_baselines records the last-SYNCED value, not the pass-start
     # fetch. Empty degrades that advance to its pre-e6e9 fetch-only behaviour exactly.
     synced_fields: dict[str, dict] = field(default_factory=dict)
+    # RP-04 S3 (AC1): the composed operation runtime's already-built backend and its
+    # captured transport, threaded into _apply_mutations so the apply phase forwards the
+    # transport as applier.apply(client=...) instead of re-resolving config ambiently via
+    # _load_acli. None when the write facade is disabled (AC6) or composition was skipped
+    # for a no-write pass whose scope is absent.
+    runtime_backend: Any = None
+    runtime_transport: Any = None
 
 
 def reconcile_once(
@@ -196,6 +220,11 @@ def reconcile_once(
         abort_check=abort_check,
     )
     _load_snapshots(ctx)
+    # RP-04 S3 (AC1): compose the ONE operation runtime for this pass and thread its
+    # already-built backend's transport into the apply phase (AC6 toggle honored inside).
+    # Pass the module-level ``compose_reconciler_runtime`` seam (monkeypatched by tests)
+    # so the helper stays free of a back-edge to this spine.
+    bind_operation_runtime(ctx, compose_reconciler_runtime)
     # Diff phase lives in the sibling run_differs.py (loaded lazily by file path,
     # matching the sibling-loader convention). It holds no back-edge to reconcile.py.
     run_differs_mod = _load("reconcile_run_differs", "run_differs.py")
@@ -479,6 +508,15 @@ def _apply_mutations(ctx: _PassContext) -> None:
             if _accepts_synced_fields_out(applier.apply)
             else {}
         )
+        # AC1: forward the composed runtime's captured transport as client= so the applier
+        # skips ambient _load_acli. Forwarded ONLY when present (compose succeeded / facade
+        # ON) AND the resolved applier accepts it, mirroring the narrow-signature tolerance
+        # above so a stubbed applier.apply is never handed an unexpected kwarg.
+        _client_kw = (
+            {"client": ctx.runtime_transport}
+            if ctx.runtime_transport is not None and _accepts_client(applier.apply)
+            else {}
+        )
         if target_mode is None:
             manifest_path = applier.apply(
                 mutations,
@@ -487,6 +525,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 binding_store=binding_store,
                 **_abort_kw,
                 **_synced_kw,
+                **_client_kw,
             )
         else:
             _max_kw = {"max_changes": ctx.max_changes} if ctx.max_changes is not None else {}
@@ -502,6 +541,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
                 **_route_kw,
                 **_abort_kw,
                 **_synced_kw,
+                **_client_kw,
             )
     finally:
         # In no-write mode, apply() returns the computed plan dict instead of

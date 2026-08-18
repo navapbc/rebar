@@ -599,6 +599,89 @@ def _accepts_synced_fields_out(fn: Any) -> bool:
     )
 
 
+def _accepts_client(fn: Any) -> bool:
+    """Whether ``fn`` accepts the ``client`` kwarg (RP-04 S3, AC1).
+
+    True for the real ``applier.apply`` and any stub declaring ``**kwargs``; False for a
+    stub with a fixed narrower signature, so the composed runtime's transport is
+    forwarded only where it is accepted — mirroring the ``synced_fields_out`` tolerance
+    so a narrow test stub is never handed an unexpected kwarg. An un-introspectable
+    signature counts as NOT accepting it, leaving the applier's ambient ``_load_acli``
+    fallback exactly as today.
+    """
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return "client" in params or any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _write_facade_enabled() -> bool:
+    """Whether the reconciler write facade (AC1 runtime threading) is ON.
+
+    AC6 rollback toggle: setting ``REBAR_RECONCILER_WRITE_FACADE`` to a falsey value
+    (``0``/``false``/``off``/``no``) restores the legacy ambient apply path — the pass
+    skips composing/threading the runtime and ``applier.apply`` falls back to its own
+    ambient ``_load_acli`` resolution. Default (unset) is ON, behavior-preserving.
+    """
+    raw = os.environ.get("REBAR_RECONCILER_WRITE_FACADE")
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "off", "no"}
+
+
+def _resolve_pass_transport(ctx: Any):
+    """Resolve the transport to hand the composed backend, honoring the applier's
+    ``_load_acli`` seam so a test that patches it (or a stubbed transport) still drives
+    the apply path. Returns ``None`` when the applier exposes no such seam (the composed
+    runtime then builds the real provider transport from captured scope). A resolution
+    failure re-raises for a persisting pass and degrades to ``None`` for a no-write pass.
+    """
+    loader = getattr(ctx.applier, "_load_acli", None)
+    if not callable(loader):
+        return None
+    try:
+        return loader()
+    except Exception:  # a no-write pass tolerates absent scope; a write pass re-raises below
+        if ctx.persist:
+            raise
+        return None
+
+
+def bind_operation_runtime(ctx: Any, compose: Any) -> None:
+    """Compose the ONE operation runtime for this pass and capture its backend + transport.
+
+    The composed backend CAPTURES scope at compose time; threading its transport into the
+    apply phase (as ``applier.apply(client=...)``) resolves the transport ONCE per pass
+    rather than letting each apply re-resolve config ambiently via ``_load_acli``. The
+    ``compose`` callable is passed in by the ``reconcile_once`` spine (the module-level
+    ``reconcile.compose_reconciler_runtime`` seam tests monkeypatch), keeping this helper
+    free of a back-edge to reconcile.py. The transport handed to ``build_backend`` comes
+    from the applier's ``_load_acli`` seam so an existing test that patches it keeps
+    controlling the client; when that seam is absent the composed runtime builds the real
+    provider transport from captured scope.
+
+    Composition must not crash a read-only pass whose Jira scope is absent: on a
+    compose/build failure we re-raise for a persisting (write) pass (fail closed) but fall
+    back to the ambient path (``client=None``) for a no-write pass, so dry-run /
+    reconcile-check passes keep working. Disabled entirely by AC6's toggle.
+    """
+    if not _write_facade_enabled():
+        return
+    try:
+        transport = _resolve_pass_transport(ctx)
+        runtime = compose(repo_root=ctx.repo_root)
+        backend = runtime.build_backend(transport=transport)
+    except Exception:  # no-write pass tolerates absent scope; a write pass re-raises below
+        if ctx.persist:
+            raise
+        return
+    ctx.runtime_backend = backend
+    ctx.runtime_transport = getattr(backend, "transport", None)
+
+
 def _advance_baselines(
     binding_store: Any,
     curr_snapshot: Mapping[str, Any],

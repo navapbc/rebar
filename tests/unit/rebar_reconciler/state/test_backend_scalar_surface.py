@@ -54,10 +54,11 @@ def _backend() -> JiraBackend:
 
 # ── project (write/create scope, DIG-defaulted) ──────────────────────────────
 def test_project_applies_create_default(tmp_path: Path, monkeypatch) -> None:
-    """``project`` returns the create-time default ("DIG") when nothing configures it,
-    matching the applier's cross-project guard scope."""
+    """``project`` is UN-defaulted when nothing configures it — RP-04 S3 (AC2) removed
+    the implicit create-time "DIG" default so an unset write scope stays "" and fails
+    closed before any mutation, never silently targeting DIG."""
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
-    assert _backend().project == "DIG"
+    assert _backend().project == ""
 
 
 def test_project_reads_configured_value(tmp_path: Path, monkeypatch) -> None:
