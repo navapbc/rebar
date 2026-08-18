@@ -123,6 +123,22 @@ the tool version, so version skew is visible); `status=skipped` records what did
 NOT run and **why** (the closed reason). A scan's record list is therefore the
 complete account: matches plus every skip's coverage.
 
+### Worker-process callable contract
+
+`rebar.grounding.harness.run_in_worker` isolates in-process bindings in a
+subprocess and uses Python's `spawn` multiprocessing context by default. The
+callable must therefore be defined at module scope and importable by the child;
+the positional arguments, keyword arguments, and result must all be pickleable.
+Pass plain data into the worker and construct C-extension or other process-local
+state inside the child instead of attempting to serialize that state.
+
+Advanced callers may pass an explicit multiprocessing context with
+`mp_context=...`. This includes a `fork` context on platforms that provide it,
+but the caller then owns fork's thread-safety and inherited-state risks. Rebar
+does not select `fork` implicitly. Context setup, process start/serialization,
+and result receive/unpickling failures all preserve the oracle's fail-open
+contract by returning `abstain(other)` rather than raising.
+
 ## Detectors
 
 ### The detector envelope format
