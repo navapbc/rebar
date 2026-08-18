@@ -190,6 +190,13 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# checked-in .github/complexity-baseline.json. Fails on new/increased complexity;
 	@# the ruff/format checks above still cover both src and tests.
 	python scripts/check_complexity_baseline.py --check
+	@# Config-ownership + field-consumption gates (RP-04 S7.2, ticket 735b): the portable,
+	@# no-CI-required trigger for both config-boundary gates. CI inherits them via this
+	@# `make lint` step, so neither is a standalone CI step (no double-run). A patchset
+	@# predating this slice has a Makefile without these lines, so the tree-skew case needs
+	@# no if-present guard — `make lint` runs the patchset's own Makefile.
+	python scripts/check_config_ownership.py
+	python scripts/check_config_reads.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

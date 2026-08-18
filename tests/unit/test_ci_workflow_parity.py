@@ -1188,3 +1188,60 @@ def test_ci_redundant_hooks_skipped_in_precommit() -> None:
             f"the {hook!r} hook is skipped in the pre-commit run — the linter would run ZERO times "
             f"in CI. Keep the direct `{_direct_step_sig[hook]}` step in the reusable."
         )
+
+
+# --------------------------------------------------------------------------- #
+# Config-ownership + config-read gates run through the portable `make lint`    #
+# trigger (RP-04 S7.2, ticket 735b). Both gates live in exactly one place —    #
+# the Makefile `lint` target — and CI inherits them via its existing          #
+# `make lint` step, so neither runs twice and the trigger needs no CI provider.#
+# --------------------------------------------------------------------------- #
+
+_MAKEFILE = _ROOT / "Makefile"
+_CONFIG_GATE_SCRIPTS = (
+    "scripts/check_config_ownership.py",
+    "scripts/check_config_reads.py",
+)
+
+
+def _lint_target_body(makefile_text: str) -> str:
+    """The recipe lines of the `lint:` target — from the `lint:` header up to the next
+    top-level `target:` header. Isolating the target keeps the assertions from matching a
+    gate invocation that lives in some OTHER target."""
+    lines = makefile_text.splitlines()
+    body: list[str] = []
+    in_target = False
+    for line in lines:
+        if re.match(r"^lint:", line):
+            in_target = True
+            continue
+        if in_target and re.match(r"^[A-Za-z0-9_.-]+:", line):
+            break
+        if in_target:
+            body.append(line)
+    return "\n".join(body)
+
+
+def test_makefile_lint_runs_both_config_gates() -> None:
+    """The portable, no-CI-required `make lint` path runs BOTH the ownership-direction gate
+    and the field-consumption gate, so the trigger is operation-linked, not CI-only."""
+    body = _lint_target_body(_read(_MAKEFILE))
+    for script in _CONFIG_GATE_SCRIPTS:
+        assert script in body, (
+            f"`make lint` no longer invokes {script} in its `lint` target — the portable "
+            "config gate would stop running for contributors without a CI provider."
+        )
+
+
+def test_ci_runs_the_config_gates_through_make_lint_not_a_duplicate_step() -> None:
+    """CI inherits both gates via its `make lint` step; the field-consumption gate is no
+    longer ALSO a standalone workflow step (which would run it twice per job)."""
+    bat = _read(_BAT_YML)
+    assert "make lint" in bat, "the reusable workflow must still run `make lint` (runs the gates)"
+    assert "scripts/check_config_reads.py" not in bat, (
+        "the field-consumption gate is still a standalone step in _build-and-test.yml — it now "
+        "runs via `make lint`, so the standalone step double-runs it; remove the standalone step."
+    )
+    assert "scripts/check_config_ownership.py" not in bat, (
+        "the ownership gate must run via `make lint`, not as a duplicate standalone workflow step."
+    )

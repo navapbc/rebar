@@ -290,9 +290,12 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
     (scripts / "criteria-vocabulary-allowlist.txt").write_text("", encoding="utf-8")
     (scripts / "check_dco_identity.py").write_text("", encoding="utf-8")
-    # `make lint` also runs the complexity-baseline gate (story c9f7) before the
-    # vocabulary guard under test; stub it as a no-op so this sandbox reaches the guard.
+    # `make lint` also runs the complexity-baseline gate (story c9f7) and the
+    # config-ownership + config-read gates (RP-04 S7.2) before the vocabulary guard
+    # under test; stub them as no-ops so this sandbox reaches the guard.
     (scripts / "check_complexity_baseline.py").write_text("", encoding="utf-8")
+    (scripts / "check_config_ownership.py").write_text("", encoding="utf-8")
+    (scripts / "check_config_reads.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"
