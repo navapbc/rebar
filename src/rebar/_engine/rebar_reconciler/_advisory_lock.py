@@ -80,7 +80,8 @@ def _lock_remote(repo_root: Path) -> str | None:
     """The sync remote the ref lock is authoritative on, or None if it is not a
     configured remote of *repo_root* (single-clone / test → pure-local CAS)."""
     from rebar.config import ConfigError, load_config
-    from rebar_reconciler import git_adapter
+
+    git_adapter = lazy_load("rebar_reconciler.git_adapter", "git_adapter.py")
 
     try:
         remote = load_config().sync.remote or "origin"

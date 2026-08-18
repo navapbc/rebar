@@ -191,7 +191,7 @@ def _git(  # raw-git-ok: write seam internal
     toggles str vs raw-bytes capture (blob content is read as bytes); ``stdin``
     feeds ``git hash-object`` its payload.
     """
-    from rebar_reconciler import git_adapter
+    git_adapter = lazy_load("rebar_reconciler.git_adapter", "git_adapter.py")
 
     try:
         return git_adapter.run_git(

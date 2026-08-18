@@ -126,6 +126,40 @@ def test_ref_backend_acquire_release_roundtrip(
     assert gone.returncode != 0, "release must delete the ref"
 
 
+def test_git_adapter_patches_are_shared_across_package_and_by_path_loaders(
+    advisory_lock: ModuleType,
+    tmp_git_repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both standalone lock seams reuse the canonical package module object."""
+    from rebar_reconciler import git_adapter
+
+    remote_calls: list[tuple[Path, str]] = []
+    git_calls: list[tuple[str, ...]] = []
+
+    def remote_get_url(repo_root: Path, remote: str) -> subprocess.CompletedProcess:
+        remote_calls.append((repo_root, remote))
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
+
+    def run_git(repo_root: str, *args: str, **_kwargs) -> subprocess.CompletedProcess:
+        git_calls.append((repo_root, *args))
+        return subprocess.CompletedProcess(args=["git"], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(git_adapter, "remote_get_url", remote_get_url)
+    monkeypatch.setattr(git_adapter, "run_git", run_git)
+
+    assert advisory_lock._lock_remote(tmp_git_repo) == "origin"
+    advisory_lock._load_ref_lock()._git(
+        tmp_git_repo,
+        ["status", "--porcelain"],
+        timeout=1,
+        check=False,
+    )
+
+    assert remote_calls == [(tmp_git_repo, "origin")]
+    assert git_calls == [(str(tmp_git_repo), "status", "--porcelain")]
+
+
 def test_double_acquire_convergence_single_winner(
     advisory_lock: ModuleType, tmp_git_repo: Path, _ref_backend: None
 ) -> None:
