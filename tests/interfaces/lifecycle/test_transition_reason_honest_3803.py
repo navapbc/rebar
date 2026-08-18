@@ -18,8 +18,9 @@ free-text close rationale with the bounded ``--class`` vocabulary — see the ti
 - AC3: passing ``--reason`` on a plain (non-force) transition is REFUSED, not silently
   accepted and dropped — except (fc20) on a close whose ``--class`` is obsolete/wontfix,
   where the reason is REQUIRED and recorded as ``close_reason``.
-- AC5: ``--force`` / ``--force=<reason>`` behaviour is unchanged — ``--reason`` still
-  serves as the audit-note fallback under ``--force``.
+- AC5's historical flag-coexistence remains: ``--reason`` is not rejected merely because
+  ``--force`` is present. Ticket blusterous-earthly-kitten later removed its audit-note
+  fallback role; force audit text now rides only on ``--force=<reason>``.
 
 ``open -> blocked`` is used as the neutral probe: it is neither a start-work
 (``in_progress``, plan-review gate) nor a close (completion gate) edge, so it isolates the
@@ -61,8 +62,7 @@ def test_reason_on_plain_transition_is_refused(rebar_repo: Path, capsys) -> None
 
 
 def test_reason_allowed_under_force(rebar_repo: Path) -> None:
-    """AC5: under ``--force`` the ``--reason`` text is the audit-note fallback, so it must
-    NOT be refused — the transition proceeds."""
+    """AC5 compatibility: the flags may coexist, although reason is no longer a force note."""
     tid = rebar.create_ticket("task", "T", repo_root=str(rebar_repo))
 
     rc = _cli.main(["transition", tid, "open", "blocked", "--force", "--reason=hatch"])

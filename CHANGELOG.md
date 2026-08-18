@@ -10,6 +10,17 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Changed
+
+- **Library `transition` now uses the same reason-carrying force shape as `claim`.** Pass
+  `force="<reason>"` to bypass whichever lifecycle gate the operation reaches; `None` alone
+  means no bypass, and an explicitly empty string records `(no reason given)`. The former
+  boolean `force=True` and close-only `force_close="<reason>"` spellings remain temporary
+  warning aliases, with an explicitly supplied canonical `force` taking precedence. The
+  free-text `reason` parameter is now only an administrative close reason. Automated NDJSON
+  replay remains an ordinary close and does not gain authority to bypass a target repository's
+  completion-verification gate.
+
 ## [0.12.0] - 2026-08-15
 
 ### Removed
@@ -124,10 +135,11 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   `--force-close`; there is no compatibility shim to fall back on. To back the change out
   entirely, revert the rename commit.
 
-  Unchanged: `--force --reason="x"` on `open -> in_progress` still records `x` as the audit
-  note, the library kwarg `rebar.transition(..., force_close=...)` keeps its name, the
-  unresolved-children close guard remains unbypassable, and no force bypass is exposed over
-  MCP.
+  At the time of the 0.12.0 CLI rename, `--force --reason="x"` on `open -> in_progress` still
+  recorded `x` as the audit note and the library kwarg
+  `rebar.transition(..., force_close=...)` kept its name. The Unreleased normalization above
+  supersedes both library behaviors. The unresolved-children close guard remains
+  unbypassable, and 0.12.0 exposed no force bypass over MCP.
 
 ## [0.11.0] - 2026-08-06
 

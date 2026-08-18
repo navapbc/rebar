@@ -89,6 +89,17 @@ _ENTRIES: tuple[Deprecation, ...] = (
     # Same shape as the env renames above, for a TOML key. `coerce_sparse` builds the
     # `cfg:<section>.<old>` key from rebar._config_schema._ALIASES, so the two must agree.
     _permanent("cfg", "verify.overlap_enabled", "verify.suggest_duplicate_tickets"),
+    # ── library aliases: the retired split force-bypass surface on transition ───
+    # Ticket blusterous-earthly-kitten unified the force-bypass surface so
+    # `rebar.transition(force="<reason>")` (a reason-carrying `str | None`, matching
+    # `rebar.claim`) is the single approved pattern. The two pre-unification spellings —
+    # the separate `force_close="<reason>"` close-bypass parameter and the boolean
+    # `force=True` start-work bypass — are honored as ALIASES (warn + map) rather than
+    # hard-removed: this is the sanctioned retirement path (there is no lib tombstone
+    # kind). `force_close="<r>"` maps to `force="<r>"`; `force=True` maps to
+    # `force="(no reason given)"`.
+    _scheduled("lib", "rebar.transition(force_close=...)", 'rebar.transition(force="<reason>")'),
+    _scheduled("lib", "rebar.transition(force=True)", 'rebar.transition(force="<reason>")'),
     # ── removed scheduled surfaces (historical record) ─────────────────────────
     # NOTE (DE7): the first pre-1.0 breaking removal dropped the scheduled env
     # aliases REBAR_PUSH / TICKETS_TRACKER_DIR / REBAR_MCP_ALLOW_RECONCILE_LIVE, the

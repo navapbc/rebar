@@ -364,15 +364,23 @@ def import_tickets(
                     cc = "undetermined"
                 closes.append((local, _rec_sid(rec), cc))
 
-        # Close children before parents so the open-children guard is satisfied;
-        # force=True is a safety net for a genuinely-non-closed child in the source.
+        # Close children before parents so the open-children guard is satisfied.
         closes.sort(key=lambda triple: _local_depth(triple[0], parent_local), reverse=True)
         for local, _sid, close_class in closes:
             # Every closeable ticket is still 'open' here (only in_progress/blocked/
-            # archived were set above); force is a safety net for non-closed children.
+            # archived were set above). This is deliberately a PLAIN close: before force
+            # unification the importer passed ``force=True``, which armed only the start-work
+            # bypass and never the completion close bypass (then keyed on ``force_close``).
+            # Supplying unified force here would silently expand import authority and skip the
+            # target repository's completion gate. Per-row fail-open below preserves replay's
+            # tolerance when that ordinary close is legitimately refused.
             try:
                 transition_compute(
-                    local, "open", "closed", force=True, close_class=close_class, repo_root=rr
+                    local,
+                    "open",
+                    "closed",
+                    close_class=close_class,
+                    repo_root=rr,
                 )
             except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad close never aborts the import run; collected via warn()
                 warn(f"could not close {local}: {exc}")

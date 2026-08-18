@@ -8,6 +8,25 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## Library force bypass carries its audit reason on `force`
+
+The public library lifecycle operations now share one force contract:
+`force: str | None`, where `None` alone means the operation is not forced and a supplied
+string is the audit reason. An explicitly empty string is still a supplied force and is
+recorded as `(no reason given)`, matching a bare CLI `--force`. This applies to both
+`rebar.claim()` and `rebar.transition()`.
+
+For migration, `rebar.transition(force=True)` and
+`rebar.transition(force_close="<reason>")` still work temporarily, emit the registered
+deprecation warning, and map to the unified value. If a caller supplies both the canonical
+string `force` and deprecated `force_close`, the canonical value wins. `reason` no longer
+doubles as a force note; it is only the justification for a reason-required administrative
+close.
+
+This does not grant automated import a new bypass: an NDJSON replay close remains an ordinary
+close and respects the target repository's completion-verification policy. The durable reduced
+state key `force_close_reason` is unchanged for event-schema compatibility.
+
 ## BREAKING (pre-1.0) — the `resolved_statuses` config keys removed
 
 Operator-approved early removal (**pre-1.0 pass #3**), 2026-08-12, same window and same
@@ -285,8 +304,10 @@ explicitly rejected with a non-zero exit and an error naming `--force`. Agents a
 that still emit `--force-close` will fail loudly rather than silently closing through the
 gate. Update stored agent instructions and automation accordingly.
 
-The library kwarg `rebar.transition(..., force_close=...)` is unchanged, and no force
-bypass is exposed over MCP (unchanged).
+That 0.12.0 release changed only the CLI: at that release the library kwarg
+`rebar.transition(..., force_close=...)` was unchanged, and no force bypass was exposed over
+MCP. The newer library-normalization note above supersedes the first statement for current
+callers.
 
 ## Project policy cutover — plan-review material pins and close reviews
 

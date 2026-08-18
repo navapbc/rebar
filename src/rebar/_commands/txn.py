@@ -247,7 +247,7 @@ def transition_core(
     author: str,
     close_class: str = "",
     close_reason: str = "",
-    force_close_reason: str = "",
+    force_reason: str = "",
     repo_root=None,
     pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> None:
@@ -315,7 +315,7 @@ def transition_core(
             ticket_type,
             close_class,
             close_reason=close_reason,
-            force_close_reason=force_close_reason,
+            force_close_reason=force_reason,
             target_status=target_status,
             from_idea=from_idea,
             ticket_id=ticket_id,
@@ -360,16 +360,20 @@ def transition_core(
             and close_class in close_disposition.REASON_REQUIRED_CLASSES
         ):
             status_data["close_reason"] = close_reason
-        # The operator's `--force=<reason>` for bypassing the close gates. Same present-only
+        # The operator's `--force=<reason>` for bypassing the close gates (the unified
+        # ``force_reason`` in memory — ticket blusterous-earthly-kitten). Same present-only
         # discipline as `close_class` above, so an ordinary close omits the key and stays
-        # byte-identical to the pre-feature event. This parameter was previously accepted and
+        # byte-identical to the pre-feature event. The PERSISTED status key stays
+        # ``force_close_reason``: it is durable reduced state (the reducer + schema fold it),
+        # so renaming it would be an out-of-scope event-schema migration — only the in-memory
+        # parameter was unified to ``force_reason``. This parameter was previously accepted and
         # DISCARDED (bug defiant-orthoclase-buck): the only durable trace of a bypass reason
         # was a best-effort FORCE_CLOSE audit comment written afterwards via a SECOND lock
         # acquisition and swallowed on failure — least reliable under exactly the contention
         # that makes force-closing attractive. Recording it here costs no extra lock: this
         # write already holds one.
-        if target_status == "closed" and force_close_reason:
-            status_data["force_close_reason"] = force_close_reason
+        if target_status == "closed" and force_reason:
+            status_data["force_close_reason"] = force_reason
         event = {
             "timestamp": timestamp,
             "uuid": event_uuid,

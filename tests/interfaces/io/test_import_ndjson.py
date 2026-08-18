@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import rebar
+import rebar.llm
 
 
 def _fresh_repo(tmp_path: Path, name: str) -> Path:
@@ -166,3 +167,29 @@ def test_import_rematerializes_closed_bug_with_class(tmp_path: Path) -> None:
     imported = _by_title(tgt)["Closed bug"]
     assert imported["status"] == "closed"
     assert imported.get("close_class") == "regression"
+
+
+def test_imported_close_respects_completion_verification_gate(tmp_path: Path, monkeypatch) -> None:
+    """Import replay must not turn its old child-order safety bool into a close bypass."""
+    src = _fresh_repo(tmp_path, "src")
+    task = rebar.create_ticket(
+        "task", "Gated imported close", description="d" * 60, repo_root=str(src)
+    )
+    rebar.transition(task, "open", "closed", repo_root=str(src))
+    assert rebar.show_ticket(task, repo_root=str(src))["status"] == "closed"
+
+    dst = _fresh_repo(tmp_path, "dst")
+    (dst / "rebar.toml").write_text("[verify]\nrequire_completion_verification_for_close = true\n")
+    verifier_calls: list[str] = []
+
+    def unavailable(ticket_id: str, **_kwargs) -> dict:
+        verifier_calls.append(ticket_id)
+        raise RuntimeError("VERIFIER_MARKER")
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", unavailable)
+    meta = rebar.import_tickets(_export_str(src).splitlines(), repo_root=str(dst))
+
+    imported = _by_title(dst)["Gated imported close"]
+    assert verifier_calls == [imported["ticket_id"]]
+    assert imported["status"] == "open"
+    assert any("VERIFIER_MARKER" in warning for warning in meta["warnings"])

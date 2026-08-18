@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar import config
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
+from rebar._deprecations import warn_deprecated
 from rebar._errors import ConcurrencyError, RebarError
 
 # ── Re-exports of the concerns split out of this module ──────────────────────
@@ -225,12 +226,40 @@ def idea(
     return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
 
 
+def _normalize_transition_force(force: str | bool | None, force_close: str | None) -> str | None:
+    """Collapse the retired split force-bypass surface onto the unified ``force``.
+
+    The single approved shape is ``force: str | None`` — the audit reason — exactly like
+    :func:`claim`: ``None`` means "not forcing"; any string forces, bypassing whichever gate
+    this transition hits (start-work OR completion-verify close). An empty supplied string is
+    still a present force and is rendered as ``"(no reason given)"`` by the command core.
+
+    The two pre-unification spellings are honored as deprecation ALIASES (ticket
+    blusterous-earthly-kitten): the boolean ``force=True`` maps to ``"(no reason given)"``,
+    and the separate ``force_close="<reason>"`` close-bypass parameter maps to
+    ``force="<reason>"`` only when no canonical string was supplied. Thus an explicit
+    canonical ``force`` — including ``""`` — wins over the deprecated alias. Both aliases
+    WARN through the central registry."""
+    canonical_force_supplied = isinstance(force, str)
+    result: str | None
+    if isinstance(force, bool):
+        warn_deprecated("lib:rebar.transition(force=True)", via="warning")
+        result = "(no reason given)" if force else None
+    else:
+        result = force
+    if force_close:
+        warn_deprecated("lib:rebar.transition(force_close=...)", via="warning")
+        if not canonical_force_supplied:
+            result = force_close
+    return result
+
+
 def transition(
     ticket_id: str,
     current_status: str,
     target_status: str,
     *,
-    force: bool = False,
+    force: str | None = None,
     reason: str = "",
     force_close: str | None = None,
     close_class: str = "",
@@ -244,30 +273,32 @@ def transition(
     matches ``current_status`` (engine exit code 10), and :class:`RebarError`
     for other failures.
 
-    ``open -> in_progress`` is a start-work transition gated by the plan-review
-    gate (``verify.require_plan_review_for_claim``) exactly like :func:`claim`;
-    pass ``force=True`` (optionally with a ``reason`` recorded in the audit
-    comment) to bypass it. ``force`` bypasses GATES generally — including any
-    gate added in the future — but it does **not** waive the unresolved-children
-    close prohibition: that is a ticket-system invariant, not a gate, and no
-    ``force``/``force_close`` combination can close a ticket while any child
+    ``force`` is the single force-bypass surface, shaped exactly like :func:`claim`'s:
+    ``force: str | None`` where the value IS the audit reason. ``None`` means "not
+    forcing"; any string forces (an empty string is recorded as ``"(no reason given)"``),
+    bypassing whichever gate THIS transition hits — the start-work plan-review gate on
+    ``* -> in_progress`` OR the completion-verification close gate on ``* -> closed`` —
+    and is recorded in the audit comment. Forcing a close leaves the ticket
+    closed-without-signature (the durable "validation did not pass" signal). ``force``
+    bypasses GATES generally — including any gate added in the future — but it does
+    **not** waive the unresolved-children close prohibition: that is a ticket-system
+    invariant, not a gate, and no ``force`` value can close a ticket while any child
     remains non-closed.
 
-    ``force_close="<reason>"`` is the library counterpart of the CLI
-    ``--force``: when closing a work ticket under the completion-verification
-    close gate (``verify.require_completion_verification_for_close``), it closes
-    WITHOUT running the verifier or signing, leaving the ticket
-    closed-without-signature (the durable "validation did not pass" signal). It is
-    threaded to the same command-layer seam the CLI uses; ``None`` means "not a
-    forced close" (the verifier runs normally). ``close_class`` is the library
-    counterpart of the CLI ``--class``: the REQUIRED bounded classification enum when
-    closing a ``bug`` (one of the ``close_class`` vocabulary), folded into reduced state;
-    ignored for non-bug transitions. ``caused_by`` is the library counterpart of the CLI
-    ``--caused-by``: on a bug close it draws a best-effort ``caused_by`` link from the
-    (now-closed) bug to the given culprit change/ticket, overriding git-blame
-    auto-derivation; ignored for non-bug transitions. ``ref`` is the library
-    counterpart of the CLI ``--ref``: the git ref whose committed tree the completion
-    close gate verifies (and signs against); ``None`` means HEAD (today's behavior).
+    ``reason`` is ONLY the close_reason for a reason-required administrative close
+    (``--class obsolete``/``wontfix``, and — absent a live replacement link —
+    ``not_a_bug``/``escalated``): it persists as the ``close_reason`` key and is signed
+    into the disposition attestation. It no longer doubles as the force-bypass note (that
+    is ``force``'s value). ``close_class`` is the REQUIRED bounded classification enum when
+    closing a ``bug``; ignored for non-bug transitions. ``caused_by`` on a bug close draws a
+    best-effort ``caused_by`` link from the (now-closed) bug to the given culprit
+    change/ticket, overriding git-blame auto-derivation; ignored for non-bug transitions.
+    ``ref`` is the git ref whose committed tree the completion close gate verifies (and
+    signs against); ``None`` means HEAD (today's behavior).
+
+    The boolean ``force=True`` and the separate ``force_close="<reason>"`` parameter are
+    DEPRECATED aliases (they WARN and map onto ``force``); see
+    :func:`_normalize_transition_force`.
     """
     # In-process (Tier E E3): resolve the id, then run the shared transition core
     # (ticket-transition.sh was retired from this path). The structured result
@@ -278,12 +309,13 @@ def transition(
     from rebar._commands.txn import ConcurrencyMismatch
     from rebar._engine_support.resolver import resolve_ticket_id
 
+    force = _normalize_transition_force(force, force_close)
+
     # Mirror the CLI's admission rule (tickets 3803 + fc20 + bug d54b): the free-text
     # ``reason`` is persisted as ``close_reason`` ONLY on a non-force close whose class can
     # require one (obsolete/wontfix/not_a_bug/escalated). Any other combination discards it
-    # here exactly as the CLI
-    # refuses it, so the library and CLI paths cannot drift.
-    admits_close_reason = not (force or force_close) and (
+    # here exactly as the CLI refuses it, so the library and CLI paths cannot drift.
+    admits_close_reason = force is None and (
         close_class in close_disposition.REASON_REQUIRED_CLASSES
     )
 
@@ -300,10 +332,9 @@ def transition(
             resolved,
             current_status,
             target_status,
-            force=force,
             reason=reason,
             close_reason=(reason if admits_close_reason else ""),
-            force_close=force_close or "",
+            force_reason=force,
             close_class=close_class,
             caused_by=caused_by,
             ref=ref,
@@ -336,7 +367,9 @@ def transition(
     return out
 
 
-def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> ClaimResult:
+def claim(
+    ticket_id: str, *, assignee=None, force: str | None = None, repo_root=None
+) -> ClaimResult:
     """Atomically claim an OPEN ticket: move it to ``in_progress`` and set its
     assignee in one locked critical section.
 
@@ -348,7 +381,8 @@ def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> Claim
     When the plan-review claim gate is enabled
     (``verify.require_plan_review_for_claim``), a non-bug/non-session_log claim
     requires a fresh certified plan-review attestation; pass ``force="<reason>"``
-    to bypass the gate with an audit comment.
+    to bypass the gate with an audit comment. ``None`` means no force; an empty supplied
+    string is a present force and records the audit-safe ``"(no reason given)"`` placeholder.
     """
     # In-process (Tier E E3): resolve the id, then run the shared claim core
     # (ticket-claim.sh was retired from this path). Returns the structured result
@@ -373,7 +407,10 @@ def claim(ticket_id: str, *, assignee=None, force=None, repo_root=None) -> Claim
         return cast(
             "ClaimResult",
             _transition.claim_compute(
-                resolved, assignee=assignee, force_plan_review=force or "", repo_root=repo_root
+                resolved,
+                assignee=assignee,
+                force_reason=(force or "(no reason given)") if force is not None else "",
+                repo_root=repo_root,
             ),
         )
     except ConcurrencyMismatch as exc:

@@ -219,9 +219,9 @@ def test_transition_to_in_progress_force_bypasses_with_audit(rebar_repo: Path) -
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)
-    rebar.transition(
-        tid, "open", "in_progress", force=True, reason="urgent hotfix", repo_root=str(rebar_repo)
-    )
+    # The force-bypass reason is carried by `force` itself (unified surface, ticket
+    # blusterous-earthly-kitten); `reason` no longer doubles as the force note.
+    rebar.transition(tid, "open", "in_progress", force="urgent hotfix", repo_root=str(rebar_repo))
     assert _status(tid, rebar_repo) == "in_progress"
     comments = " ".join(
         c.get("body", "")
@@ -290,7 +290,9 @@ def test_non_startwork_transition_is_not_gated(rebar_repo: Path) -> None:
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)
-    rebar.transition(tid, "open", "in_progress", force=True, repo_root=str(rebar_repo))
+    rebar.transition(
+        tid, "open", "in_progress", force="(no reason given)", repo_root=str(rebar_repo)
+    )
     # Closing is unaffected by the plan-review (start-work) gate; the completion-close
     # gate is not enabled in this repo, so a plain close succeeds.
     rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
@@ -351,9 +353,7 @@ def test_transition_cascade_force_propagates_up_the_chain(rebar_repo: Path) -> N
     child = rebar.create_ticket(
         "task", "child task", description=_DESC, parent=parent, repo_root=str(rebar_repo)
     )
-    rebar.transition(
-        child, "open", "in_progress", force=True, reason="urgent", repo_root=str(rebar_repo)
-    )
+    rebar.transition(child, "open", "in_progress", force="urgent", repo_root=str(rebar_repo))
     assert _status(child, rebar_repo) == "in_progress"
     assert _status(parent, rebar_repo) == "in_progress"  # cascade preserved + force propagated
 
@@ -400,12 +400,13 @@ def test_transition_cli_start_work_gate_blocks_exit_1(rebar_repo: Path, capsys) 
 
 
 def test_transition_cli_force_reason_bypasses_exit_0_with_audit(rebar_repo: Path) -> None:
-    # Over the CLI, `--force` bypasses the gate (exit 0) and the `--reason` text becomes the
+    # Over the CLI, `--force=<reason>` bypasses the gate (exit 0) and the reason becomes the
     # FORCE_CLAIM audit note — the full flag→force_reason conversion exercised end-to-end.
+    # `--reason` no longer feeds the force note (ticket blusterous-earthly-kitten).
     _commit(rebar_repo)
     _enable(rebar_repo)
     tid = _make(rebar_repo)
-    rc = _cli.main(["transition", tid, "open", "in_progress", "--force", "--reason=urgent cli"])
+    rc = _cli.main(["transition", tid, "open", "in_progress", "--force=urgent cli"])
     assert rc == 0
     assert _status(tid, rebar_repo) == "in_progress"
     comments = " ".join(
