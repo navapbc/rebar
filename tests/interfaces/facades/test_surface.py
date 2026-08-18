@@ -80,18 +80,26 @@ def test_mcp_create_accepts_assignee() -> None:
     assert "assignee" in _tool_params(_mcp_tools()["create_ticket"])
 
 
-def test_mcp_start_work_tools_expose_no_force_bypass() -> None:
-    """Negative contract: the plan-review start-work gate cannot be self-bypassed over
-    MCP. Neither ``claim_ticket`` nor ``transition_ticket`` exposes a ``force``/``reason``
-    parameter — an autonomous MCP agent that hits the gate must earn an attestation
-    (``review_plan``), it cannot authorize its own override. The audited ``--force``
-    bypass is deliberately CLI/library-only. (If a future change adds force over MCP,
-    this fails — the bypass posture is a real surface contract, not an accident.)"""
+def test_mcp_transition_and_claim_expose_library_write_parameters() -> None:
+    """The MCP schema exposes the approved reason-carrying force contract."""
     tools = _mcp_tools()
-    for name in ("claim_ticket", "transition_ticket"):
-        params = _tool_params(tools[name])
-        assert "force" not in params, f"{name} must not expose a force bypass over MCP"
-        assert "reason" not in params, f"{name} must not expose a reason override over MCP"
+    transition = tools["transition_ticket"].inputSchema
+    claim = tools["claim_ticket"].inputSchema
+    assert set(transition["properties"]) == {
+        "ticket_id",
+        "current_status",
+        "target_status",
+        "close_class",
+        "force",
+        "caused_by",
+        "ref",
+    }
+    assert transition["properties"]["force"] == claim["properties"]["force"]
+    assert transition["properties"]["force"]["default"] is None
+    assert {entry.get("type") for entry in transition["properties"]["force"]["anyOf"]} == {
+        "string",
+        "null",
+    }
 
 
 def test_mcp_list_accepts_all_filters() -> None:
