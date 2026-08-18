@@ -35,10 +35,11 @@ def test_conflicting_anthropic_auth_fails_before_client_build(monkeypatch):
     error BEFORE AsyncAnthropic is ever constructed (no anonymous/ambient fallback)."""
     import anthropic
 
-    def _boom(**_kw):
-        raise AssertionError("AsyncAnthropic constructed despite conflicting auth")
+    class _Boom:
+        def __init__(self, **_kw):
+            raise AssertionError("AsyncAnthropic constructed despite conflicting auth")
 
-    monkeypatch.setattr(anthropic, "AsyncAnthropic", _boom)
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _Boom)
 
     cfg = _cfg(model="claude-sonnet-4-6", model_provider="anthropic")
     runtime = LLMRuntime(anthropic=AnthropicAuth(api_key="a", auth_token="b"))
@@ -54,10 +55,11 @@ def test_empty_anthropic_carrier_fails_closed(monkeypatch):
     fail closed rather than silently degrade to the ambient environment credential."""
     import anthropic
 
-    def _boom(**_kw):
-        raise AssertionError("AsyncAnthropic constructed despite empty explicit carrier")
+    class _Boom:
+        def __init__(self, **_kw):
+            raise AssertionError("AsyncAnthropic constructed despite empty explicit carrier")
 
-    monkeypatch.setattr(anthropic, "AsyncAnthropic", _boom)
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _Boom)
 
     cfg = _cfg(model="claude-sonnet-4-6", model_provider="anthropic")
     runtime = LLMRuntime(anthropic=AnthropicAuth())
@@ -122,7 +124,11 @@ def test_secret_absent_from_conflict_error_message(monkeypatch):
     """A fail-closed error must not echo the secret material it rejected."""
     import anthropic
 
-    monkeypatch.setattr(anthropic, "AsyncAnthropic", lambda **k: None)
+    class _Boom:
+        def __init__(self, **_kw):
+            raise AssertionError("AsyncAnthropic constructed despite conflicting auth")
+
+    monkeypatch.setattr(anthropic, "AsyncAnthropic", _Boom)
     cfg = _cfg(model="claude-sonnet-4-6", model_provider="anthropic")
     runtime = LLMRuntime(anthropic=AnthropicAuth(api_key=_SENTINEL, auth_token=_SENTINEL + "b"))
     from rebar.llm.providers import ProviderSession
