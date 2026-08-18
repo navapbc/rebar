@@ -382,14 +382,14 @@ def close_ticket(
             count = len(open_children)
             # The child-closure relationship is a STRUCTURAL INTEGRITY invariant (a parent is
             # not complete while its children are open), NOT a quality gate — so it is enforced
-            # UNCONDITIONALLY: neither --force (which bypasses any enabled start-work gate) nor
-            # --force (which bypasses the signature/completion-verifier requirement) can
+            # UNCONDITIONALLY: --force (which bypasses any enabled start-work gate AND the
+            # signature/completion-verifier requirement) cannot
             # close a parent over open children. Resolve/close the children first, or detach
             # (re-home) them, then close the parent.
             raise CommandError(
                 f"Error: cannot close ticket '{ticket_id}' while it has {count} unresolved "
                 "(non-closed) child ticket(s) — the child-closure invariant cannot be bypassed "
-                "(not with --force or --force). Close or resolve these children first, or "
+                "(not even with --force). Close or resolve these children first, or "
                 "detach them (re-home), then close:\n" + "\n".join(open_children),
                 returncode=1,
             )
@@ -478,7 +478,7 @@ def close_ticket(
         author=author,
         close_class=close_class,
         close_reason=close_reason,
-        force_close_reason=force_close,
+        force_reason=force_close,
         repo_root=repo_root,
         pre_status_check=plan_review_recheck,
     )

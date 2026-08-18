@@ -241,7 +241,7 @@ def test_force_close_skips_verify_and_sign(rebar_repo: Path, monkeypatch) -> Non
         _rid(tid, rebar_repo),
         "in_progress",
         "closed",
-        force_close="manual override",
+        force_reason="manual override",
         repo_root=str(rebar_repo),
     )
     assert _status(tid, rebar_repo) == "closed"
@@ -403,7 +403,7 @@ def test_force_close_skips_file_impact_check(rebar_repo: Path, monkeypatch) -> N
         _rid(tid, rebar_repo),
         "in_progress",
         "closed",
-        force_close="manual override",
+        force_reason="manual override",
         repo_root=str(rebar_repo),
     )
     assert _status(tid, rebar_repo) == "closed"

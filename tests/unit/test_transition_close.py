@@ -330,7 +330,7 @@ def test_transition_core_does_not_accept_a_parameter_it_discards():
     signature = inspect.signature(txn.transition_core)
     body = source.split(":", 1)[1]  # drop the def line so params are not counted as reads
 
-    for name in ("close_class", "force_close_reason"):
+    for name in ("close_class", "force_reason"):
         assert name in signature.parameters, f"{name} should still be a parameter"
         assert body.count(name) > 1, (
             f"{name} is declared but never read in transition_core's body — the "

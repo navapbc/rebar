@@ -39,12 +39,11 @@ _USAGE = (
     "       ticket transition <ticket_id> <target_status> [--class=<value>] [--reason=<text>] "
     "[--force[=<reason>]]  (auto-detects current status)\n"
     "  current_status / target_status: idea | open | in_progress | closed | blocked\n"
-    "  --reason=<text>          With --force: supplies the gate-bypass audit note when no "
-    "--force=<reason> is given. Without --force it is admitted only on a close whose --class "
-    "is reason-required — obsolete or wontfix (REQUIRED there), or not_a_bug or escalated "
-    "(REQUIRED unless a live replacement link stands in) — the reason is recorded as "
-    "close_reason on the "
-    "close event and signed into the disposition attestation. Refused on any other plain "
+    "  --reason=<text>          Admitted only on a close whose --class is reason-required — "
+    "obsolete or wontfix (REQUIRED there), or not_a_bug or escalated (REQUIRED unless a live "
+    "replacement link stands in) — the reason is recorded as close_reason on the "
+    "close event and signed into the disposition attestation. It does NOT double as the "
+    "force-bypass audit note (that is the --force=<reason> value). Refused on any other plain "
     "transition. To record rationale on a ticket, use `rebar comment <id>`.\n"
     "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
     "  parent is transitioned first (recursively); a parent failure aborts the child\n"
@@ -59,9 +58,9 @@ _USAGE = (
     "  --force[=<reason>]       Bypass whichever gate this transition would hit "
     "(spelled exactly as `claim --force[=<reason>]`). Starting work (open->in_progress): "
     "bypasses any enabled start-work gate — the plan-review gate today, and any gate added "
-    "in the future; the audit note is the --force=<reason> value, else the --reason text, "
-    "else (no reason given). Closing: bypasses the completion-verification / signature "
-    "requirement for story/epic (requires user approval via hook). Does NOT bypass the "
+    "in the future. Closing: bypasses the completion-verification / signature "
+    "requirement for story/epic (requires user approval via hook). The audit note is the "
+    "--force=<reason> value, else (no reason given). Does NOT bypass the "
     "unresolved-children close guard (a structural invariant — close/detach children first).\n"
     "  --caused-by=<id>         On a bug close, draw a caused_by link to the culprit "
     "change/ticket (overrides git-blame auto-derivation).\n"
@@ -233,9 +232,7 @@ def transition_compute(
     *,
     reason: str = "",
     close_reason: str = "",
-    force: bool = False,
-    force_reason: str = "",
-    force_close: str = "",
+    force_reason: str | None = None,
     close_class: str = "",
     caused_by: str = "",
     ref: str | None = None,
@@ -256,16 +253,17 @@ def transition_compute(
     parent's own explicit transition. ``_cascade_seen`` is the internal recursion guard
     (the ids already on the cascade stack) — callers leave it ``None``.
 
-    ``force`` / ``force_reason`` / ``force_close`` are the three faces of the one CLI
-    ``--force[=<reason>]`` flag (ticket 24f7): ``force`` arms the start-work gate bypass,
-    ``force_reason`` carries the explicit ``--force=<reason>`` text for that bypass's audit
-    note (it takes precedence over ``reason``), and ``force_close`` carries the reason for
-    the close-gate bypass. The CLI derives all three from the single flag; library callers
-    may still set them independently. ``close_reason`` (ticket fc20) is the NON-force
-    justification for a reason-only administrative close (``--class obsolete``/``wontfix``):
-    it persists as the ``close_reason`` key on the close STATUS event and is signed into the
-    disposition attestation — distinct from ``force_close``/``force_close_reason``, which
-    record a gate bypass."""
+    ``force_reason`` is the single face of the one CLI ``--force[=<reason>]`` flag and the
+    library ``force`` parameter (ticket blusterous-earthly-kitten): ``None`` means "not
+    forcing"; any string (the audit reason, ``"(no reason given)"`` for a bare bypass)
+    forces, bypassing BOTH the start-work plan-review gate AND the completion-verify close
+    gate — whichever this transition hits — recording the reason in the audit trail. It
+    replaces the former three-way ``force`` (bool) / ``force_reason`` / ``force_close``
+    split. ``close_reason`` (ticket fc20) is the NON-force justification for a reason-only
+    administrative close (``--class obsolete``/``wontfix``): it persists as the
+    ``close_reason`` key on the close STATUS event and is signed into the disposition
+    attestation — distinct from the force-bypass reason, which records why a gate was
+    bypassed."""
     tracker = str(config.tracker_dir(repo_root))
     repo_root_str = os.path.dirname(tracker)
 
@@ -321,8 +319,8 @@ def transition_compute(
     # Plan-review START-WORK gate. ANY entry into `in_progress` starts work on the
     # ticket's plan, so it goes through the SAME consolidated gate as `claim` (see
     # _commands/gates.py): blocks (fail-closed) on a missing/stale attestation when
-    # enabled, exempts bug/session_log, and --force bypasses with an audit note (the
-    # bypass reason is the --reason text). Keying on the TARGET (not `current=="open"`)
+    # enabled, exempts bug/session_log, and a non-None `force_reason` bypasses with an
+    # audit note. Keying on the TARGET (not `current=="open"`)
     # closes every side-door into in_progress — `open`, a `blocked` resume, or a
     # `closed`-then-reactivate — so un-reviewed work can't slip past via an alternate
     # edge. A same-status no-op was already short-circuited above, so reaching here with
@@ -334,11 +332,12 @@ def transition_compute(
 
         # Gate THIS ticket first (mirrors claim_compute's order); the recursive parent
         # transition below gates the parent in turn, so every ticket in the chain that
-        # starts work is gated. The --force bypass propagates up the cascade so a forced
+        # starts work is gated. The force bypass propagates up the cascade so a forced
         # start does not stall on an un-reviewed ancestor (claim/transition parity).
-        # An explicit `--force=<reason>` wins; otherwise fall back to `--reason` text (the
-        # pre-24f7 behaviour of a valueless `--force`), then to the placeholder.
-        note = (force_reason or reason or "(no reason given)") if force else ""
+        # The audit note is the `--force=<reason>` value, or `"(no reason given)"` for a
+        # bare bypass — identical to `claim` (the `--reason` fallback was dropped in
+        # blusterous-earthly-kitten so `--reason` feeds only close_reason).
+        note = _force_note(force_reason)
         gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=note)
 
     # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
@@ -350,7 +349,6 @@ def transition_compute(
         target_status,
         tracker,
         reason=reason,
-        force=force,
         force_reason=force_reason,
         repo_root=repo_root,
         cascade=cascade,
@@ -361,7 +359,9 @@ def transition_compute(
     # verification precheck (ordered verify -> close -> sign), the locked write,
     # post-close signing / force-close audit, and compact-on-close + scratch
     # cleanup + best-effort push. Lives in the sibling module (module-size seam);
-    # see :func:`rebar._commands.transition_close.close_ticket`.
+    # see :func:`rebar._commands.transition_close.close_ticket`. The single
+    # ``force_reason`` (None = not forcing) drives the close-gate bypass too: normalize it
+    # to the audit-note string the close path records (empty = no bypass).
     return close_ticket(
         ticket_id,
         current_status,
@@ -371,11 +371,22 @@ def transition_compute(
         repo_root,
         reason=reason,
         close_reason=close_reason,
-        force_close=force_close,
+        force_close=_force_note(force_reason),
         close_class=close_class,
         caused_by=caused_by,
         ref=ref,
     )
+
+
+def _force_note(force_reason: str | None) -> str:
+    """The audit-note string for a force bypass: ``""`` when not forcing (``force_reason``
+    is ``None``), the reason when given, or ``"(no reason given)"`` for a bare bypass — the
+    same placeholder ``claim`` uses (ticket blusterous-earthly-kitten). This is the single
+    normalization point that turns the unified ``force_reason: str | None`` into the truthy
+    audit string the start-work gate and the close path both consume."""
+    if force_reason is None:
+        return ""
+    return force_reason or "(no reason given)"
 
 
 def _cascade_open_parent(
@@ -385,8 +396,7 @@ def _cascade_open_parent(
     tracker: str,
     *,
     reason: str,
-    force: bool,
-    force_reason: str = "",
+    force_reason: str | None = None,
     repo_root,
     cascade: bool,
     cascade_seen: frozenset[str] | None,
@@ -415,7 +425,6 @@ def _cascade_open_parent(
                 "open",
                 "in_progress",
                 reason=reason,
-                force=force,
                 force_reason=force_reason,
                 repo_root=repo_root,
                 _cascade_seen=seen | {ticket_id},
@@ -525,13 +534,15 @@ def _resolve_id_or_report(raw_id: str, tracker: str, fmt: str) -> str | None:
 def _plain_reason_refused(reason: str, force: bool, target_status: str, close_class: str) -> bool:
     """Whether a ``--reason`` given WITHOUT ``--force`` must be refused.
 
-    ``--reason`` is admitted in exactly two shapes (tickets 24f7 + fc20 + bug d54b): with
-    ``--force`` it supplies the gate-bypass audit note; without it, only on a close carrying a
-    reason-required class (``obsolete``/``wontfix``/``not_a_bug``/``escalated``), where it
-    records the disposition's ``close_reason`` (``txn.close_class_refusal`` REQUIRES it unless
-    a live replacement link stands in for the bug-only pair). Any other plain
-    transition silently discarding the text would be worse than refusing it. A guard function
-    so ``transition_cli`` stays under its shrink-only complexity ceiling."""
+    Post-unification (ticket blusterous-earthly-kitten) ``--reason`` records ONLY a
+    reason-required disposition's ``close_reason`` — a close carrying
+    ``--class obsolete``/``wontfix``/``not_a_bug``/``escalated`` (``txn.close_class_refusal``
+    REQUIRES it unless a live replacement link stands in for the bug-only pair). It no longer
+    doubles as the gate-bypass audit note; that note rides on ``--force``'s own value
+    (``--force="<reason>"``). With ``--force`` present ``--reason`` is permissively ignored
+    (not refused). Any OTHER plain transition silently discarding the text would be worse than
+    refusing it. A guard function so ``transition_cli`` stays under its shrink-only complexity
+    ceiling."""
     if not reason or force:
         return False
     from rebar._commands import close_disposition
@@ -636,17 +647,18 @@ def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "tra
 
     try:
         reason, force_reason, close_class, caused_by, ref = _parse_flags(flag_args)
-        # One `--force[=<reason>]` flag, two gate bypasses (ticket 24f7). `force` arms the
-        # start-work gate bypass; `force_close` (which the close path tests for truthiness)
-        # arms the close-gate bypass, defaulting a bare `--force` to the same placeholder
-        # `claim --force` uses so the two commands behave identically.
+        # One `--force[=<reason>]` flag, one unified bypass (ticket
+        # blusterous-earthly-kitten). `force_reason` is None when `--force` is absent, "" for a
+        # bare `--force` (normalized to "(no reason given)" downstream), or the `--force=<reason>`
+        # text — and it bypasses BOTH the start-work and completion-verify close gates, exactly
+        # as `claim --force[=<reason>]`. `--reason` no longer stands in as the force note; it
+        # feeds only close_reason.
         force = force_reason is not None
         if _plain_reason_refused(reason, force, target_status, close_class):
             raise CommandError(
-                "Error: --reason is only meaningful with --force, or on a close whose "
-                "--class is reason-required (obsolete, wontfix, not_a_bug, or escalated — "
-                "where it records the disposition's "
-                "close_reason). A plain transition discards it. Use "
+                "Error: --reason is only meaningful on a close whose --class is "
+                "reason-required (obsolete, wontfix, not_a_bug, or escalated — where it "
+                "records the disposition's close_reason). A plain transition discards it. Use "
                 '--force="<reason>" to record a gate-bypass audit note, '
                 "or `rebar comment <id>` to record rationale on the ticket.",
                 returncode=1,
@@ -657,9 +669,7 @@ def transition_cli(argv: list[str], *, repo_root=None, _confirm_verb: str = "tra
             target_status,
             reason=reason,
             close_reason=("" if force else reason),
-            force=force,
-            force_reason=force_reason or "",
-            force_close=(force_reason or "(no reason given)") if force else "",
+            force_reason=force_reason,
             close_class=close_class,
             caused_by=caused_by,
             ref=(ref or None),
