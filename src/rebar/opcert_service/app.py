@@ -39,7 +39,7 @@ from rebar.opcert_service.config import (
     DEFAULT_SHUTDOWN_CANCEL_SECONDS,
     OpcertServiceConfig,
 )
-from rebar.opcert_service.ssm import boto3_ssm_fetcher
+from rebar.opcert_service.keyprov import compose_signer
 
 logger = logging.getLogger("rebar.opcert_service")
 
@@ -49,7 +49,11 @@ WORKER_COUNT = 1
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start the in-process job queue + the single background worker; stop them on shutdown."""
+    """Compose the ONE startup op-cert signer (fail-closed BEFORE serving), then start the
+    in-process job queue + the single background worker; stop them and clean up on shutdown."""
+    # AC1 (story 6f14): validate + compose the signer BEFORE any queue/worker/network/workspace
+    # creation. An invalid key source raises OpcertKeyError here, so the app never begins serving.
+    app.state.signer = compose_signer(app.state.config)
     app.state.queue = asyncio.Queue()
     app.state.jobs = {}
     # An app-OWNED executor, not the event loop's default one (bug c89f). ``asyncio.to_thread``
@@ -84,6 +88,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # force-cancelled, so waiting here would reintroduce the unbounded join this fix removes.
         # ``cancel_futures=True`` drops work that never started.
         app.state.executor.shutdown(wait=False, cancel_futures=True)
+        # Remove ONLY rebar's process-owned key copy (dir + file); never the deployment source.
+        signer = getattr(app.state, "signer", None)
+        if signer is not None:
+            signer.cleanup()
 
 
 def _shutdown_cancel_seconds(app: FastAPI) -> float:
@@ -106,7 +114,7 @@ async def _offload(app: FastAPI, rec: dict) -> dict:
             ticket_id=rec["ticket_id"],
             kind=rec["kind"],
             cfg=cfg,
-            ssm_fetcher=app.state.ssm_fetcher,
+            signer=app.state.signer,
         ),
     )
 
@@ -161,8 +169,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.config = OpcertServiceConfig.from_env()
-#: The SSM key-fetch seam (tests replace this with a fake — no boto3/AWS/network).
-app.state.ssm_fetcher = boto3_ssm_fetcher
 
 
 @app.get("/health")

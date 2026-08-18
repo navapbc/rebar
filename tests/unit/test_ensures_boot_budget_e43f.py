@@ -67,7 +67,7 @@ def _cfg(source_url: str) -> OpcertServiceConfig:
         review_branch="main",
         guard="secret",
         env_id="nava-opcert-test-1",
-        ssm_key_param="/rebar/prod/opcert-ed25519-key",
+        key_path="/run/secrets/opcert-ed25519-key",
         job_timeout_seconds=900.0,
         port=8080,
     )

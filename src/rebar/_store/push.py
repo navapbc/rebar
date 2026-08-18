@@ -44,7 +44,18 @@ def _push_mode(root: str | None = None) -> str:
     holding the tracker) so resolution is pure stat-based discovery — it never shells
     out to ``git`` for root detection, which would conflict with callers that mock
     subprocess. Best-effort: a malformed config falls back to the ``always`` default —
-    a bad config must never break (or silently disable) the auto-push."""
+    a bad config must never break (or silently disable) the auto-push.
+
+    STARTUP BINDING (story 6f14): when a bound op-cert gate is active it threads a
+    context-local push policy (:func:`rebar._opcert_binding.current_push_mode`, ``off``
+    for the gate service), which takes precedence over the env/config so the trusted gate
+    never pushes a per-job SIGNATURE write — without patching ``REBAR_SYNC_PUSH`` in the
+    process env."""
+    from rebar._opcert_binding import current_push_mode
+
+    bound = current_push_mode()
+    if bound is not None:
+        return bound
     from rebar._store._push_policy import normalize_push_mode
     from rebar.config import ConfigError, load_config
 

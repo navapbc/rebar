@@ -8,26 +8,26 @@ extra; the async HTTP shell in ``app.py`` calls :func:`run_job` in a worker thre
   (``merged_log_commit`` = the review remote's ``main`` tip; ``material_fingerprint`` recomputed
   from the fetched ticket state). The reported/bound fields are read back from the SIGNED
   envelope, so a doctored request field is simply never consulted.
-* **The server never pushes.** The whole job runs with ``REBAR_SYNC_PUSH=off``, and the workspace
-  has no git remote — a gate's ``sign=True`` SIGNATURE append lands only in the discarded clone.
+* **The server never pushes.** The whole job runs under a context-local ``off`` push policy
+  (:func:`rebar._opcert_binding.bound_signer`), and the workspace has no git remote — a gate's
+  ``sign=True`` SIGNATURE append lands only in the discarded clone.
 * **Per-kind native verdicts, no unified enum.** ``plan-review`` → ``review_plan`` (PASS|BLOCK|
   INDETERMINATE; degrades in-band, never raises on an LLM outage → job COMPLETES). ``completion-
   verifier`` → ``verify_completion`` (PASS|FAIL; RAISES LLM errors → job ``error``). ``envelope``
   is non-null ONLY on PASS.
 * **Signing is the producer seam, once.** ``review_plan`` signs internally; a completion PASS is
   signed via :func:`rebar._commands.transition_close.sign_completion_verdict` — the SAME producer
-  the close gate uses. The key is the SSM-provisioned temp key (see :mod:`.keyprov`).
+  the close gate uses. The key + principal come from the startup-composed :class:`OpcertSigner`
+  (see :mod:`.keyprov`), threaded context-locally into signing — NOT from the process env.
 """
 
 from __future__ import annotations
 
-import contextlib
-import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
+from rebar._opcert_binding import bound_signer
 from rebar.opcert_service.config import OpcertServiceConfig
-from rebar.opcert_service.keyprov import provisioned_signing_key
-from rebar.opcert_service.ssm import SsmKeyFetcher
+from rebar.opcert_service.keyprov import OpcertSigner
 from rebar.opcert_service.workspace import Workspace, discard, prepare_workspace
 
 #: A gate op seam: ``(ticket_id, repo_root) -> result mapping``. `review_plan` and
@@ -64,7 +64,7 @@ def run_job(
     ticket_id: str,
     kind: str,
     cfg: OpcertServiceConfig,
-    ssm_fetcher: SsmKeyFetcher,
+    signer: OpcertSigner,
     review_plan_fn: GateFn | None = None,
     verify_completion_fn: GateFn | None = None,
     workspace_factory: Callable[[OpcertServiceConfig], Workspace] | None = None,
@@ -74,7 +74,13 @@ def run_job(
     NEVER raises for an expected failure (LLM outage/error, workspace/internal problem) — it maps
     those to ``status="error"`` with the closed ``error.class`` enum. ``review_plan_fn`` /
     ``verify_completion_fn`` / ``workspace_factory`` are test seams (defaults call the real LLM
-    ops / fetch a real ephemeral clone); tests inject fakes so no network / AWS / LLM call runs.
+    ops / fetch a real ephemeral clone); tests inject fakes so no network / LLM call runs.
+
+    ``signer`` is the ONE startup-composed :class:`OpcertSigner` (story 6f14): it is bound
+    context-locally for the whole dispatch so both the completion path
+    (:func:`sign_completion_verdict`) and the plan-review path sign from ``signer.key_path`` /
+    ``signer.principal`` — WITHOUT setting ``REBAR_OPCERT_KEY_PATH`` / ``REBAR_OPCERT_ENV_ID`` in
+    the process env. The binding also carries the ``off`` push policy, so no gate write is pushed.
     """
     factory = workspace_factory or prepare_workspace
     llm_error, llm_unavailable = _llm_error_classes()
@@ -82,15 +88,14 @@ def run_job(
     fields.pop("job_id")
     ws: Workspace | None = None
     try:
-        with _sync_push_off():
+        with bound_signer(signer, push_mode="off"):
             ws = factory(cfg)
             fields["merged_log_commit"] = ws.merged_log_commit
             fields["material_fingerprint"] = _server_material(ticket_id, ws.repo_root)
-            with provisioned_signing_key(cfg, ssm_fetcher):
-                if kind == "plan-review":
-                    _dispatch_plan_review(fields, ticket_id, ws, review_plan_fn)
-                else:
-                    _dispatch_completion(fields, ticket_id, ws, verify_completion_fn)
+            if kind == "plan-review":
+                _dispatch_plan_review(fields, ticket_id, ws, review_plan_fn)
+            else:
+                _dispatch_completion(fields, ticket_id, ws, verify_completion_fn, signer)
         fields["status"] = "completed"
     except llm_unavailable as exc:
         _mark_error(fields, ERR_LLM_UNAVAILABLE, exc)
@@ -104,7 +109,9 @@ def run_job(
     return fields
 
 
-def _dispatch_completion(fields: dict, ticket_id: str, ws: Workspace, fn: GateFn | None) -> None:
+def _dispatch_completion(
+    fields: dict, ticket_id: str, ws: Workspace, fn: GateFn | None, signer: OpcertSigner
+) -> None:
     """``completion-verifier``: run ``verify_completion`` (PASS|FAIL, RAISES on LLM error) and, on a
     PASS, sign the completion verdict through the shared producer seam, then read back the cert."""
     result = (fn or _default_verify_completion)(ticket_id, ws.repo_root)
@@ -113,7 +120,7 @@ def _dispatch_completion(fields: dict, ticket_id: str, ws: Workspace, fn: GateFn
     if verdict == "PASS":
         from rebar._commands.transition_close import sign_completion_verdict
 
-        sign_completion_verdict(result, ticket_id, ws.repo_root)
+        sign_completion_verdict(result, ticket_id, ws.repo_root, signer=signer)
         _attach_envelope(fields, ticket_id, ws.repo_root, "completion-verifier")
 
 
@@ -195,17 +202,3 @@ def _llm_error_classes() -> tuple[type[BaseException], type[BaseException]]:
             pass
 
         return _NeverRaised, _NeverRaised
-
-
-@contextlib.contextmanager
-def _sync_push_off() -> Iterator[None]:
-    """Force ``REBAR_SYNC_PUSH=off`` for the job so no gate write is ever pushed."""
-    prior = os.environ.get("REBAR_SYNC_PUSH")
-    os.environ["REBAR_SYNC_PUSH"] = "off"
-    try:
-        yield
-    finally:
-        if prior is None:
-            os.environ.pop("REBAR_SYNC_PUSH", None)
-        else:
-            os.environ["REBAR_SYNC_PUSH"] = prior
