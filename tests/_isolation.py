@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import subprocess
 
+_run_process = subprocess.run
+
 # Volatile REPO_ROOT state dirs a test must never write into, but which exist
 # locally because this checkout dogfoods rebar (so ``.rebar/`` is always present).
 # Watched ONE level deep so a leak INTO them is caught locally — not only on a
@@ -21,6 +23,7 @@ import subprocess
 # legitimate per-test churn (``.git/``, ``.tickets-tracker/``, ``.venv/``) are
 # deliberately NOT watched.
 LEAK_WATCH_SUBDIRS = (".rebar",)
+GIT_PROBE_TIMEOUT_SECONDS = 5
 
 
 def repo_leak_snapshot(root) -> set[str]:
@@ -41,12 +44,15 @@ def repo_leak_snapshot(root) -> set[str]:
 def head(root) -> str | None:
     """The repo's current HEAD sha, or ``None`` if *root* is not a git repo."""
     try:
-        return subprocess.run(
+        return _run_process(
             ["git", "-C", str(root), "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
+            timeout=GIT_PROBE_TIMEOUT_SECONDS,
         ).stdout.strip()
+    except subprocess.TimeoutExpired:
+        raise
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -56,12 +62,15 @@ def porcelain(root) -> set[str] | None:
     or ``None`` if *root* is not a git repo. Compare two snapshots to find what a
     run added to the working tree."""
     try:
-        out = subprocess.run(
+        out = _run_process(
             ["git", "-C", str(root), "status", "--porcelain"],
             capture_output=True,
             text=True,
             check=True,
+            timeout=GIT_PROBE_TIMEOUT_SECONDS,
         ).stdout
+    except subprocess.TimeoutExpired:
+        raise
     except (OSError, subprocess.SubprocessError):
         return None
     return {line for line in out.splitlines() if line.strip()}
