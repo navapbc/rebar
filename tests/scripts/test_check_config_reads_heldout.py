@@ -21,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts" / "check_config_reads.py"
 _REAL_SCHEMA = REPO_ROOT / "src" / "rebar" / "_config_schema.py"
 _WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
+_MAKEFILE = REPO_ROOT / "Makefile"
 
 
 @pytest.fixture(scope="module")
@@ -336,5 +337,7 @@ def test_the_real_schema_parks_no_markers_against_a_ticket(gate):
 
 @pytest.mark.repo_policy
 def test_ci_wires_the_gate(gate):
-    body = _WORKFLOW.read_text(encoding="utf-8")
+    # RP-04 S7.2 (ticket 735b): the gate moved from a standalone workflow step into the
+    # portable `make lint` target, which CI inherits — so assert the Makefile wires it.
+    body = _MAKEFILE.read_text(encoding="utf-8")
     assert "check_config_reads.py" in body
