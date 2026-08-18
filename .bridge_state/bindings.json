@@ -1422,6 +1422,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:40Z"
     },
+    "09ae-e827-1cac-452d": {
+      "created_at": "2026-08-18T16:42:53Z",
+      "jira_id": "4589209",
+      "jira_key": "REB-3171",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:42:57Z"
+    },
     "09ae-eeda-daef-4c84": {
       "created_at": "2026-08-15T14:51:41Z",
       "jira_key": "REB-16",
@@ -2087,10 +2094,24 @@
     },
     "0f8f-8178-96b4-4901": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\nThe original failure recorded on innovative-dandruffy-deer remains a distinct unresolved symptom: in Gerrit Verified run 31775418405, the authorship fixture merge reported an invalid object for a freshly committed loose blob and git write-tree failed. Direct deletion reproduced the byte-for-byte signature, but the organic deleter was not identified. Gerrit 1769 added object-store forensics for the next occurrence.\n\nThe later Gerrit 1827 failure did not reproduce this class: deleting the implicated blob left both broad and narrow history reads healthy. That later batched-empty / narrow-success recurrence was a separate fixture-contract defect fixed by merged Gerrit 1828. This ticket preserves the unresolved ENOENT work so the repaired recurrence ticket does not falsely claim to solve it.\n\n## Plan\n- On the next organic recurrence, collect the Gerrit 1769 forensic block (fsck, count-objects, object listing with mtimes, and GIT_* environment).\n- Identify and deterministically reproduce the process or environment mechanism that removes or hides a freshly committed reachable loose object.\n- Add a RED regression for the proven mechanism, fix the mechanism class without weakening the fixture topology, and prove GREEN plus exact-defect mutation coverage.\n- Run the repository gates and land through Gerrit before closing.\n\n## Acceptance Criteria\n- [ ] An organic recurrence supplies the captured object-store forensic block, or an equivalent deterministic local reproduction identifies the deleter.\n- [ ] The deleting or object-hiding mechanism is proven rather than inferred from the invalid-object signature alone.\n- [ ] A behavioral regression is observed RED before the class fix and GREEN afterward.\n- [ ] The exact-defect mutation returns the regression to RED.\n- [ ] Repository lint, typecheck, full tests, Gerrit LLM-Review, and Verified gates pass.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nThe original failure recorded on innovative-dandruffy-deer remained a distinct unresolved symptom: in Gerrit Verified run 31775418405, the authorship fixture merge reported an invalid object for a freshly committed loose blob and git write-tree failed. Direct deletion reproduced the byte-for-byte signature, but the organic deleter was not identified. Gerrit 1769 added object-store forensics for the next occurrence.\n\nThe later Gerrit 1827 failure did not reproduce this class: deleting the implicated blob left both broad and narrow history reads healthy. That later batched-empty / narrow-success recurrence was a separate fixture-contract defect fixed by merged Gerrit 1828. This ticket preserved the unresolved ENOENT work until the organic recurrence in Change 1855 exposed the detached-maintenance mechanism.\n\n## Plan\n- On the next organic recurrence, collect the Gerrit 1769 forensic block (fsck, count-objects, object listing with mtimes, and GIT_* environment).\n- Identify and deterministically reproduce the process or environment mechanism that removes or hides a freshly committed reachable loose object.\n- Add a RED regression for the proven mechanism, fix the mechanism class without weakening the fixture topology, and prove GREEN plus exact-defect mutation coverage.\n- Run the repository gates and land through Gerrit before closing.\n\n## Acceptance Criteria\n- [x] An organic recurrence supplies the captured object-store forensic block, or an equivalent deterministic local reproduction identifies the deleter.\n- [x] The deleting or object-hiding mechanism is proven rather than inferred from the invalid-object signature alone.\n- [x] A behavioral regression is observed RED before the class fix and GREEN afterward.\n- [x] The exact-defect mutation returns the regression to RED.\n- [x] Repository lint, typecheck, full tests, Gerrit LLM-Review, and Verified gates pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Root-cause unresolved loose-object ENOENT in authorship fixture merge"
       },
       "created_at": "2026-08-16T20:36:24Z",
@@ -3356,9 +3377,31 @@
       "updated_at": "2026-08-15T14:52:54Z"
     },
     "17fd-b1b1-7eed-4383": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nChange 1855 patchset 2 CI run 32130591202, Ubuntu Python 3.12 job 95691543683, passed 13,821 tests and then errored in `test_ledger_attribution_is_unchanged_by_the_batching`. The fixture diagnostics added by prior bug `warmthless-dermal-oropendola` captured the first actionable recurrence: `git merge -q --no-edit side` failed rc=128 because blob `66842fd006b2fdc95ff55a33a263f1cb216bc7d6` referenced by `1005-cccc2222-COMMENT.json` was missing. `git fsck --full` reported the same missing blob; `.git/objects/pack/tmp_pack_53R4Hl` existed with size 0. The current Gerrit patch only changes the Anthropic test isolation subprocess and does not touch this fixture or Git object operations.\n\n## Plan\nRun the full chronic-issue rebar-debug protocol with independent code-tracer, historical, and empirical investigators. Reproduce or deterministically force the object-loss mechanism, discriminate concurrent Git maintenance/repack from fixture logic and filesystem/environment causes, record a proven runtime RCA, then design a held-out RED oracle at the real Git seam. Only after the cause is proven, implement the smallest class-level repair, verify RED\u2192GREEN with exact-defect mutation, run the affected fixture under CI-parity xdist stress, and sweep sibling Git-fixture operations.\n\n## Acceptance Criteria\n- [ ] The exact missing-blob/tmp-pack failure is explained by a runtime-confirmed, cited mechanism.\n- [ ] Competing fixture-content, hook, ref-resolution, environment, and filesystem hypotheses are explicitly confirmed or rejected.\n- [ ] A held-out test deterministically fails through the real Git object-store seam before the repair and passes after it.\n- [ ] Reintroducing the exact confirmed defect returns the held-out test to RED.\n- [ ] The original authorship fixture passes under CI-parity xdist stress without weakening its ledger-attribution assertions.\n- [ ] Sibling instances of the confirmed Git-operation pattern are swept and dispositioned.\n- [ ] The final RCA, proof, scope/safety audit, and replication evidence are recorded on this ticket.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Authorship batching fixture loses Git blob during concurrent CI"
+      },
       "created_at": "2026-08-18T15:43:05Z",
       "jira_id": "4589201",
       "jira_key": "REB-3163",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:09Z"
     },
@@ -4033,7 +4076,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nPydantic AI 1.107 warns that `openai:` will change from Chat Completions to Responses in v2. Rebar currently relies on Chat Completions for hosted OpenAI and OpenAI-compatible endpoints, so leaving the ambiguous prefix would silently change the wire contract on upgrade. The operator approved preserving Chat Completions with `openai-chat:`; story `upbeat-illadvised-springtail` owns the eventual deliberate Responses migration.\n\n## Approach\nNormalize every rebar-composed or legacy `openai:` Pydantic AI model target to the explicit `openai-chat:` qualifier at the shared primary and model-class/fallback resolution seams. Update both independent ProviderSession gates: the cfg.base_url builder registration and the per-candidate endpoint-override guard must recognize `openai-chat`, so local OpenAI-compatible endpoints keep their provider/profile override. Preserve other provider qualifiers unchanged and document `openai-chat:` as the supported Chat Completions spelling.\n\n## Scope\n- Update `src/rebar/llm/anthropic_model.py` and `src/rebar/llm/model_classes.py` so inferred, explicitly qualified, primary, and fallback OpenAI targets resolve to `openai-chat:`.\n- Update both `openai`-keyed gates in `src/rebar/llm/providers.py`: cfg.base_url builder registration and the per-candidate endpoint-override guard.\n- Strengthen provider-resolution, custom-endpoint, fallback, and library-contract tests in `tests/unit/test_pydantic_ai_runner.py`, `tests/unit/test_openai_compatible_provider.py`, `tests/unit/test_provider_qualifier.py`, `tests/unit/test_model_classes.py`, and `tests/interfaces/store/test_llm_framework.py`.\n- Update `docs/llm-framework.md`, `docs/llm-example-configs.md`, and `docs/workflow-authoring-v2.md` to recommend `openai-chat:` while leaving the future Responses migration to `upbeat-illadvised-springtail`.\n- The nine `src/rebar/llm/eval_specs/*.eval.yaml` grader strings are out of scope: current `run_eval` executes only deterministic scorers and never constructs those report-only grader models, so they cannot emit this warning; the deliberate Responses migration story can revisit them if an executable judge path is added.\n\n## Testing\n- Run a warning-as-error oracle through real `infer_model` for inferred, explicit, custom-endpoint, and fallback paths; it must fail before the repair and pass without `PydanticAIDeprecationWarning` afterward.\n- Run real loopback custom-endpoint tests and provider/fallback parity tests to prove Chat Completions payloads, endpoint routing, and structured-output profile behavior are preserved.\n- Sweep all unit tests with `PydanticAIDeprecationWarning` promoted to error, then run repository lint and typecheck.\n\n## Acceptance Criteria\n- [ ] Inferred OpenAI targets resolve to `openai-chat:`; verified by provider-resolution tests.\n- [ ] Legacy-explicit `openai:` targets resolve to `openai-chat:`; verified by interface tests.\n- [ ] Primary and fallback model-class targets resolve to `openai-chat:`; verified by model-class tests.\n- [ ] Real model construction emits no `PydanticAIDeprecationWarning` with that warning promoted to error.\n- [ ] Loopback custom endpoints still receive Chat Completions payloads; verified by real-seam provider tests.\n- [ ] The custom-endpoint profile override remains active on cfg.base_url and per-candidate endpoint paths.\n- [ ] Non-OpenAI targets and provider-conflict checks remain unchanged; verified by provider-parity tests.\n- [ ] User-facing LLM examples use `openai-chat:` for Chat Completions.\n- [ ] Focused tests, repository lint, and typecheck pass.",
+        "description": "## Context / Problem\nPydantic AI 1.107 emits `pydantic_ai._warnings.PydanticAIDeprecationWarning` when `infer_model(\"openai:<model>\")` constructs a model: in v2 the ambiguous prefix will switch from Chat Completions to Responses. A pinned-environment runtime probe captured that exact category and message. Rebar currently relies on Chat Completions for hosted OpenAI and OpenAI-compatible endpoints, so leaving the ambiguous prefix would silently change the wire contract on upgrade. The operator approved preserving Chat Completions with `openai-chat:`; story `upbeat-illadvised-springtail` owns the eventual deliberate Responses migration.\n\n## Approach\nNormalize every rebar-composed or legacy `openai:` Pydantic AI model target to the explicit `openai-chat:` qualifier at the shared primary and model-class/fallback resolution seams. Update both independent ProviderSession gates: the cfg.base_url builder registration and the per-candidate endpoint-override guard must recognize `openai-chat`, so local OpenAI-compatible endpoints keep their provider/profile override. Preserve other provider qualifiers unchanged and document `openai-chat:` as the supported Chat Completions spelling.\n\n## Scope\n- Update `src/rebar/llm/anthropic_model.py` and `src/rebar/llm/model_classes.py` so inferred, explicitly qualified, primary, and fallback OpenAI targets resolve to `openai-chat:`.\n- Update both `openai`-keyed gates in `src/rebar/llm/providers.py`: cfg.base_url builder registration and the per-candidate endpoint-override guard.\n- Strengthen provider-resolution, custom-endpoint, fallback, and library-contract tests in `tests/unit/test_pydantic_ai_runner.py`, `tests/unit/test_openai_compatible_provider.py`, `tests/unit/test_provider_qualifier.py`, `tests/unit/test_model_classes.py`, and `tests/interfaces/store/test_llm_framework.py`.\n- Update canonical operator/developer examples in `.github/llm-providers/openai.toml`, `docs/llm-framework.md`, `docs/llm-example-configs.md`, `docs/workflow-authoring-v2.md`, `docs/reuse-surface.md`, the model examples in `src/rebar/llm/config.py` and `src/rebar/llm/capabilities.py`, and their packaged `src/rebar/schemas/workflow.v{1,2,3}.schema.json` descriptions.\n- Keep legacy `openai:` spellings in tests that explicitly prove backward-compatible normalization.\n- The nine `src/rebar/llm/eval_specs/*.eval.yaml` grader strings are out of scope: current `run_eval` executes only deterministic scorers and never constructs those report-only grader models, so they cannot emit this warning; the deliberate Responses migration story can revisit them if an executable judge path is added.\n\n## Testing\n- The held-out oracle imports `PydanticAIDeprecationWarning` from `pydantic_ai._warnings` and promotes it to error around real `infer_model` calls for inferred, explicit, custom-endpoint, and fallback paths. Before repair, `infer_model(\"openai:gpt-4o\")` was observed RED with the exact warning; after repair, every rebar-resolved target constructs without it.\n- Run real loopback custom-endpoint tests and provider/fallback parity tests to prove Chat Completions payloads, endpoint routing, and structured-output profile behavior are preserved.\n- Sweep the focused unit tests with the exact warning category promoted to error, then run repository lint and typecheck.\n- Search canonical examples for ambiguous `openai:` spellings while excluding intentional legacy-compatibility tests and report-only eval graders.\n\n## Acceptance Criteria\n- [ ] Inferred OpenAI targets resolve to `openai-chat:`; verified by provider-resolution tests.\n- [ ] Legacy-explicit `openai:` targets resolve to `openai-chat:`; verified by interface tests.\n- [ ] Primary and fallback model-class targets resolve to `openai-chat:`; verified by model-class tests.\n- [ ] Real model construction emits no `pydantic_ai._warnings.PydanticAIDeprecationWarning` with that exact category promoted to error.\n- [ ] Loopback custom endpoints still receive Chat Completions payloads; verified by real-seam provider tests.\n- [ ] The custom-endpoint profile override remains active on cfg.base_url and per-candidate endpoint paths.\n- [ ] Non-OpenAI targets and provider-conflict checks remain unchanged; verified by provider-parity tests.\n- [ ] Canonical operator and developer LLM examples use `openai-chat:` for Chat Completions.\n- [ ] Focused tests pass.\n- [ ] Repository lint passes.\n- [ ] Repository typecheck passes.",
         "priority": "High",
         "status": "In Progress",
         "summary": "OpenAI-compatible provider uses pydantic-ai prefix with announced v2 semantic change"
@@ -5656,6 +5699,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:26Z"
+    },
+    "2635-4aa3-5c14-4b12": {
+      "created_at": "2026-08-18T16:43:01Z",
+      "jira_id": "4589210",
+      "jira_key": "REB-3172",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:04Z"
     },
     "263d-e96c-80b4-4c84": {
       "baseline": {
@@ -9208,9 +9258,17 @@
       "updated_at": "2026-08-15T14:56:36Z"
     },
     "3a52-2d79-320d-4fed": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nAWS account 896586841071, us-east-1: `rebar-root-disk-pressure` changed OK\u2192ALARM at 2026-08-17 21:51:56 PDT and ALARM\u2192OK at 22:12:56 PDT on the `rebar-gerrit` host (`i-00880b2c7f13527c5`, 30-GiB gp3 root `vol-0270fcf13709cf472`). Root usage climbed from 71% at 20:55 through the 85% alarm floor to 90% at 21:55/22:00, then dropped abruptly to 48% at 22:05. The review-bot health metric dipped to 0 at 22:05 while Gerrit remained healthy; `deploy_deferrals` emitted 2/3/1 at 21:55/22:00/22:05, with zero `voter_errors` and `deploy_errors`. Both SNS state actions succeeded.\n\nThis is the first recurrence after commit 32992f2b6c / closed story `sour-plugugly-rhino`, whose stated intent was to prevent `root-disk-pressure` by pruning Docker caches on pressure during no-op deploy ticks. Recovery was automatic and much faster than the prior 39-hour incident, but the alarm still breached and the review bot became briefly unhealthy, so prevention/headroom remains incomplete.\n\n## Phase 1 status\nRoot cause is not yet proven. Read-only AWS evidence rules out an AWS Run Command/operator cleanup and shows an on-host reclaim aligned with the 90%\u219248% drop. Two leading, discriminating hypotheses remain:\n\n1. Snapshot GC defaults to pruning only below 2 GiB free (~93.3% used on this disk), later than the CloudWatch alarm floor of ~4.5 GiB free (85%), so review snapshot churn can page before GC acts.\n2. Autodeploy prunes Docker caches after successful build or on a deployed no-op tick, leaving pending/deferred/build windows able to cross the alarm threshold before reclaim.\n\nBounded host journald and disk-consumer evidence is required to distinguish Docker/build cache from review snapshots or another consumer before repair.\n\n## Plan\n- Capture bounded, read-only host evidence for the incident window and/or a safe local reproduction to identify which bytes grew and what reclaimed them.\n- Form falsifiable hypotheses from that evidence and prove the dominant mechanism dynamically before changing code.\n- Build a RED oracle at the smallest tier crossing the proven growth/reclaim path, then repair under held-out RED\u2192GREEN and exact-defect mutation.\n- Ensure reclaim occurs before the 85% alarm floor on every reachable growth path, with hysteresis, while preserving tagged rollback images, live/grace snapshot entries, and fail-safe behavior.\n- Verify Gerrit/review-bot remain healthy and update the operations/config documentation for the selected mechanism.\n\n## Acceptance Criteria\n- [ ] Bounded host evidence or a faithful local reproduction identifies the dominant disk consumer and the component responsible for the 90%\u219248% reclaim.\n- [ ] A discriminating runtime experiment proves the root cause and rules out the surviving Docker-vs-snapshot alternative.\n- [ ] A test is observed RED on the proven mechanism, GREEN after repair, and RED again under the exact-defect mutation.\n- [ ] The repaired path reclaims with hysteresis before a 30-GiB root crosses the 85% alarm floor.\n- [ ] Tagged rollback images and live/grace snapshot entries are preserved.\n- [ ] Gerrit/review-bot health and existing fail-safe deploy/review semantics remain intact.\n- [ ] Relevant runbook/config documentation and the final rebar-debug report are updated.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "[root-disk-pressure] Root disk reaches 90% and review-bot drops unhealthy after automated-reclaim mitigation"
+      },
       "created_at": "2026-08-18T15:43:14Z",
       "jira_id": "4589202",
       "jira_key": "REB-3164",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:17Z"
     },
@@ -10720,6 +10778,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:45Z"
     },
+    "448e-3c6d-9e01-45cc": {
+      "created_at": "2026-08-18T16:43:06Z",
+      "jira_id": "4589211",
+      "jira_key": "REB-3173",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:10Z"
+    },
     "449f-f9bf-be90-47fe": {
       "baseline": {
         "assignee": null,
@@ -11867,6 +11932,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:24Z"
+    },
+    "4afa-216b-4b16-4b6b": {
+      "created_at": "2026-08-18T16:43:12Z",
+      "jira_id": "4589212",
+      "jira_key": "REB-3174",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:16Z"
     },
     "4afc-33cc-9e4f-4fe2": {
       "baseline": {
@@ -13510,6 +13582,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:36Z"
     },
+    "5452-3077-b34a-4157": {
+      "created_at": "2026-08-18T16:43:18Z",
+      "jira_id": "4589213",
+      "jira_key": "REB-3175",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:21Z"
+    },
     "549c-032f-6cb0-4258": {
       "baseline": {
         "assignee": {
@@ -13720,9 +13799,17 @@
       "updated_at": "2026-08-15T14:59:42Z"
     },
     "559b-b7cd-6552-437d": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Client report\nWhile one rebar gate invocation was running, a sibling agent executed `uv tool install --force`. uv garbage-collected the release directory backing the active process, and the gate later crashed with `ImportError` / `FileNotFoundError`. Expected behavior: an invocation resolves one installed release and keeps all code/resources it needs reachable for its entire lifetime, even when another process force-reinstalls the tool.\n\nThe reported explanation is a hypothesis until reproduced and traced. Investigation must distinguish uv installation semantics, Python import timing, subprocess/module resource lookup, and any rebar-controlled launcher or snapshot seam.\n\n## Plan\n- Reproduce with two synchronized real processes: pause an invocation after startup but before a late import/resource read, force-reinstall from the sibling process, then release the gate.\n- Trace the exact path removed and the first late read/import that reaches it; compare against a no-reinstall control and uv upstream behavior.\n- Establish the authoritative lifecycle contract and bounded caller/deployment impact before repair.\n- After confirmed RCA, create a held-out parent/child subprocess RED oracle and implement lifetime pinning at the narrowest owned seam; prove GREEN and exact-defect mutation RED.\n- Sweep CLI, library, MCP, review-bot, and spawned gate-worker entry paths for parity.\n\n## Acceptance Criteria\n- [ ] A deterministic synchronized-process reproduction proves the changeable root cause and rules out unrelated import/cache races.\n- [ ] A cited contract defines which release/resources remain valid for one invocation.\n- [ ] A real parent/child subprocess test is observed RED before repair, GREEN afterward, and RED under exact-defect mutation.\n- [ ] A force reinstall during an active gate cannot cause that invocation to raise `ImportError` or `FileNotFoundError` from its resolved release.\n- [ ] The next invocation uses the newly installed release; lifetime pinning does not permanently retain obsolete releases.\n- [ ] CLI, library, MCP, automated gate callers, and child-process parity are dispositioned.\n- [ ] Cleanup behavior and operator setup documentation are updated where the proven mechanism requires it.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Concurrent uv tool reinstall can delete the active rebar release during a gate invocation"
+      },
       "created_at": "2026-08-18T15:43:20Z",
       "jira_id": "4589203",
       "jira_key": "REB-3165",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:23Z"
     },
@@ -14036,7 +14123,7 @@
         },
         "description": "## Context\nWith an out-of-worktree `REBAR_TRACKER_DIR` and a code worktree at a commit carrying the ticket trailer, `rebar verify-commit-ticket --rev HEAD` correctly resolved the trailer but CLI `rebar transition ... closed --ref HEAD` falsely reported that no commit referenced the ticket. `close_precheck.py` derived `code_root = os.path.dirname(tracker)`, so a tracker override made it scan the checkout containing tracker storage instead of the current code worktree. The public library call succeeded when passed the actual repo root, proving the defect and workaround.\n\n## Plan\n- Add a regression test with a code worktree and a separate custom tracker directory.\n- Resolve the code root from the explicit/current repository context while continuing to resolve ticket state from `REBAR_TRACKER_DIR`.\n- Preserve the fail-fast no-referencing-commit behavior and default in-repo tracker behavior.\n- Run RED to GREEN, defect-seeded mutation, focused lifecycle tests, gates, and Gerrit.\n\n## Acceptance Criteria\n- [x] CLI close with an out-of-worktree `REBAR_TRACKER_DIR` finds a matching trailer reachable from the current code worktree HEAD.\n- [x] A true missing referencing commit still fails before the completion LLM call.\n- [x] Default in-repo tracker behavior is unchanged.\n- [x] The regression test is RED before the fix and GREEN after reintroducing the correct code-root seam.\n- [x] Focused tests, lint, typecheck, LLM-Review +1, and Verified +1 pass before merge.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "CLI close precheck misroots code repo for custom tracker directories"
       },
       "created_at": "2026-08-15T14:59:52Z",
@@ -14053,10 +14140,24 @@
     },
     "5851-51d7-fda8-4966": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nLong-running MCP and review-bot processes mix startup deployment policy with per-operation config and ambient auth reads. Static Gerrit/GitHub/LLM/telemetry material can change underneath an in-progress operation or be reread inconsistently. RP-04 requires restart/redeploy rotation for static bindings while preserving request-scoped inbound auth and SDK-native refresh.\n\n## Outcome\nCompose non-secret startup policy and live runtime bindings once when MCP/review-bot services start; create a fresh non-secret `OperationSnapshot` for each operation/request. Review-bot Gerrit/GitHub/LLM capabilities are typed and adapter-local. Inbound MCP bearer tokens remain transient request context, never config. Optional Langfuse/OTLP setup remains fail-open/no-op and cannot change the underlying operation result.\n\n## Plan\n1. Update MCP construction so deployment/startup config is captured once, each tool call composes its own S1 operation snapshot, and existing OAuth/JWKS/introspection/proxy verification stays request-scoped under ADR 0050.\n2. Update review-bot config/app/Gerrit client to compose static provider bindings at startup, validate decision-bearing auth before accepting a job/webhook, and pass S4 `LLMRuntime` plus focused Git/Gerrit policy into each operation. Do not expose stronger server identity through CLI/MCP inputs.\n3. Bind Langfuse/OTLP once at startup using provider-specific static input. Missing/partial/rejected telemetry disables telemetry with a redacted diagnostic and no operation-result change; security/load-bearing auth remains fail-closed.\n4. Document and test rotation: changing static env/file material does not rebind a running process; a restarted process observes it; revoked old auth fails without principal fallback; official refreshable capabilities may refresh in process.\n\n## Testing (RED -> GREEN)\n- Service/component tests run two operations around environment/file mutation and assert static runtime identity is unchanged while operation-scoped non-secret config is freshly composed where intended.\n- MCP auth interface suites prove inbound tokens die with the request and never enter startup/operation snapshots, logs, caches, schemas, or subprocess environments.\n- Review-bot verified-fake tests cover valid/missing/conflicting/revoked Gerrit/GitHub auth, webhook acceptance, one selected integration, LLM runtime forwarding, and no fallback principal.\n- Observability tests use partial/rejected credentials and exporter failure; the exact operation result remains equal and only telemetry is disabled.\n- [operator-attested] AWS review-bot deploy/E2E canary records change/run ids, startup binding kinds, vote/result, retry counts, timestamp, and redacted diagnostics.\n\n## Compatibility / rollback\nDuring expansion, service constructors accept optional runtime bindings and may use the legacy startup composition facade. Rollback before cutover selects that facade and restarts/redeploys. MCP wire/tool schemas, webhook auth protocol, Gerrit vote schema, and LLM result schemas remain unchanged.\n\n## Acceptance Criteria\n- [ ] MCP and review-bot tests prove startup bindings stay stable across ambient mutation while each new operation receives the intended fresh non-secret snapshot.\n- [ ] MCP inbound bearer/OAuth material remains request-local and absent from startup/operation snapshots, serialization, logs, caches, child environments, and tool schemas.\n- [ ] Review-bot decision-bearing auth is validated before job/provider work, only the selected integration is constructed, and revoked/missing/conflicting auth never falls back to another principal.\n- [ ] Static binding replacement is observed only after process restart/redeploy; native refreshable capability behavior remains SDK-owned.\n- [ ] Partial/rejected Langfuse/OTLP auth disables telemetry without changing the underlying operation result, while security/load-bearing auth remains fail-closed.\n- [ ] [operator-attested] The AWS review-bot deploy/E2E canary passes and records the required redacted provenance.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-04 S5 \u2014 Bind MCP and review-bot config/auth at startup"
       },
       "created_at": "2026-08-17T19:40:32Z",
@@ -16271,6 +16372,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:18Z"
     },
+    "6755-d43c-b962-45a8": {
+      "created_at": "2026-08-18T16:43:21Z",
+      "jira_id": "4589214",
+      "jira_key": "REB-3176",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:25Z"
+    },
     "6758-26b8-c9ea-4c5d": {
       "baseline": {
         "assignee": {
@@ -16610,6 +16718,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:36Z"
+    },
+    "69d3-3f7a-8deb-46fc": {
+      "created_at": "2026-08-18T16:43:27Z",
+      "jira_id": "4589215",
+      "jira_key": "REB-3177",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:30Z"
     },
     "6a65-25b5-b5c3-436d": {
       "baseline": {
@@ -17166,9 +17281,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nAfter S2, read/check paths use operation bindings, but live apply, Git push, ACLI/delivery, and bridge orchestration still rebuild config or reuse broad parent environments. Jira Cloud scope still has implicit `DIG` fallbacks (write path, the live access-check probe, the runtime default, and the create-time default). These paths can write under an unintended scope or leak a Rebar-materialized credential to an unrelated sibling child.\n\n## Outcome\nCut write/apply and subprocess paths over to the S2 runtime. Add one shared child-environment builder: trusted same-capability children start from ambient inheritance, owning children receive their adapter overlay, unrelated siblings remove exact secret names declared by other Rebar adapters, unknown native Git/SSH/AWS/proxy/CA variables survive, and Rebar never mutates global `os.environ`.\n\n## Plan\n1. Thread `ReconcilerSettings`, `GitRuntime`, selected `BridgeRuntime`, and the already-constructed backend through applier, mutation planning/dispatch, inbound/outbound handlers, binding updates, Git adapter/ref/lock/push, and `_bridge_runner` delivery paths. Remove their ambient `load_config`/cwd/default fallbacks.\n2. Add `src/rebar/_child_env.py` with a pure environment projection API and a checked-in registry of exact secret names owned by each Rebar adapter. The registry contains names, never values; native SDK/helper chains remain ambient.\n3. Ensure CLI `-c` tracker/Jira/reconciler selections cross the reconciler subprocess boundary as non-secret snapshot material. Pass static adapter material only to the exact owning process/adapter.\n4. Eliminate every implicit `DIG` Jira-project default so no request (write OR live probe) uses `DIG` unless it is explicitly configured: (a) the write path `resolve_jira_settings(project_default=\"DIG\")` in `adapters/jira/backend.py` (:200/:230/:316); (b) the live access-check probe `JIRA_PROJECT` `or \"DIG\"` in `access_check.py` (:72/:77/:262); (c) the `_CLOUD_PROJECT_DEFAULT = \"DIG\"` constant in `rebar_reconciler/runtime.py` (:46); and (d) the create-time `_DEFAULT_PROJECT = \"DIG\"` in `_store/project_ensures.py` (:50). Each unset case fails closed with a typed/redacted pre-mutation (or pre-probe) error; `DIG` is used only when `JIRA_PROJECT`/config is explicitly `DIG`. Preserve existing retry, rate-limit, TLS, output, partial-failure, idempotency, and ticket-delivery behavior unless a test names the approved delta.\n\n## Testing (RED -> GREEN)\n- End-to-end verified-fake Cloud/DC runs cover create/update/comment/link/delete/inbound apply plus Git commit/push/delivery under custom tracker dir/branch/remote with ambient resolvers poisoned after composition.\n- Child-process contract tests assert unknown ambient/native-chain variables survive; the owning overlay appears only for its child; unrelated siblings lose other adapters' exact declared names; argv/URL/log/output contain no secret sentinel.\n- Concurrency tests run distinct operations with different overlays and timeouts, asserting `os.environ` is byte-equal before/during/after and no cross-operation value is observed.\n- Failure-injection tests cover missing project/auth, revoked credential, TLS error, retry/rate-limit exhaustion, provider partial failure, and delivery failure; existing provider-neutral output and recovery/idempotency oracles remain authoritative.\n- A red test demonstrates each current `DIG` default (write path AND the live access-check probe); green asserts zero provider mutation and no probe request targeting `DIG` when write scope is absent.\n\n## Compatibility / rollback\nUntil bounded-live validation, a compatibility facade may invoke the legacy write path. Before cutover, rollback selects it. After any new snapshot-aware caller ships, rollback requires the S1 envelope-compatible floor. Ticket, event, bridge, and binding formats remain unchanged.\n\n## Acceptance Criteria\n- [ ] Verified-fake Cloud/DC apply plus Git/delivery paths complete with ambient resolvers poisoned and use the configured tracker directory/branch/remote and explicit project scope.\n- [ ] Missing Cloud write scope produces a typed/redacted pre-mutation failure and no request uses `DIG` unless `DIG` was explicitly configured.\n- [ ] Same-capability child tests preserve unknown Git/SSH/AWS/proxy/CA variables, owning children receive only their overlay, and unrelated siblings omit every other adapter's exact declared secret name.\n- [ ] Concurrent-operation tests prove no global environment mutation and no cross-operation credential/config observation.\n- [ ] Existing retry, rate-limit, TLS, output, partial-failure, recovery, and idempotency scenarios retain their provider-neutral behavior except explicitly approved deltas.\n- [ ] Disabling the write facade restores the legacy path before cutover; no stored ticket/event/bridge/binding format changes.",
+        "description": "## Context / Problem\nAfter S2, read/check paths use operation bindings, but live apply, Git push, ACLI/delivery, and bridge orchestration still rebuild config or reuse broad parent environments. Jira Cloud scope still has implicit `DIG` fallbacks (write path, the live access-check probe, the runtime default, and the create-time default). These paths can write under an unintended scope or leak a Rebar-materialized credential to an unrelated sibling child.\n\n## Outcome\nCut write/apply and subprocess paths over to the S2 runtime. Add one shared child-environment builder: trusted same-capability children start from ambient inheritance, owning children receive their adapter overlay, unrelated siblings remove exact secret names declared by other Rebar adapters, unknown native Git/SSH/AWS/proxy/CA variables survive, and Rebar never mutates global `os.environ`.\n\n## Plan\n1. Thread `ReconcilerSettings`, `GitRuntime`, selected `BridgeRuntime`, and the already-constructed backend through applier, mutation planning/dispatch, inbound/outbound handlers, binding updates, Git adapter/ref/lock/push, and `_bridge_runner` delivery paths. Remove their ambient `load_config`/cwd/default fallbacks.\n2. Add `src/rebar/_child_env.py` with a pure environment projection API and a checked-in registry of exact secret names owned by each Rebar adapter. The registry contains names, never values; native SDK/helper chains remain ambient.\n3. Ensure CLI `-c` tracker/Jira/reconciler selections cross the reconciler subprocess boundary as non-secret snapshot material. Pass static adapter material only to the exact owning process/adapter.\n4. Eliminate every implicit `DIG` Jira-project default so no request (write OR live probe) uses `DIG` unless it is explicitly configured: (a) the write path `resolve_jira_settings(project_default=\"DIG\")` in `adapters/jira/backend.py` (:200/:230/:316); (b) the live access-check probe `JIRA_PROJECT` `or \"DIG\"` in `access_check.py` (:72/:77/:262); (c) the `_CLOUD_PROJECT_DEFAULT = \"DIG\"` constant in `rebar_reconciler/runtime.py` (:46); and (d) the create-time `_DEFAULT_PROJECT = \"DIG\"` in `_store/project_ensures.py` (:50). Each unset case fails closed with a typed/redacted pre-mutation (or pre-probe) error; `DIG` is used only when `JIRA_PROJECT`/config is explicitly `DIG`. Preserve existing retry, rate-limit, TLS, output, partial-failure, idempotency, and ticket-delivery behavior unless a test names the approved delta.\n\n## Testing (RED -> GREEN)\n- End-to-end verified-fake Cloud/DC runs cover create/update/comment/link/delete/inbound apply plus Git commit/push/delivery under custom tracker dir/branch/remote with ambient resolvers poisoned after composition.\n- Child-process contract tests assert unknown ambient/native-chain variables survive; the owning overlay appears only for its child; unrelated siblings lose other adapters' exact declared names; argv/URL/log/output contain no secret sentinel.\n- Concurrency tests run distinct operations with different overlays and timeouts, asserting `os.environ` is byte-equal before/during/after and no cross-operation value is observed.\n- Failure-injection tests cover missing project/auth, revoked credential, TLS error, retry/rate-limit exhaustion, provider partial failure, and delivery failure; existing provider-neutral output and recovery/idempotency oracles remain authoritative.\n- A red test demonstrates each current `DIG` default (write path AND the live access-check probe); green asserts zero provider mutation and no probe request targeting `DIG` when write scope is absent.\n\n## Compatibility / rollback\nUntil bounded-live validation, a compatibility facade may invoke the legacy write path. Before cutover, rollback selects it. After any new snapshot-aware caller ships, rollback requires the S1 envelope-compatible floor. Ticket, event, bridge, and binding formats remain unchanged.\n\n## Acceptance Criteria\n- [x] Verified-fake Cloud/DC apply plus Git/delivery paths complete with ambient resolvers poisoned and use the configured tracker directory/branch/remote and explicit project scope.\n- [x] Missing Cloud write scope produces a typed/redacted pre-mutation failure and no request uses `DIG` unless `DIG` was explicitly configured.\n- [x] Same-capability child tests preserve unknown Git/SSH/AWS/proxy/CA variables, owning children receive only their overlay, and unrelated siblings omit every other adapter's exact declared secret name.\n- [x] Concurrent-operation tests prove no global environment mutation and no cross-operation credential/config observation.\n- [x] Existing retry, rate-limit, TLS, output, partial-failure, recovery, and idempotency scenarios retain their provider-neutral behavior except explicitly approved deltas.\n- [x] Disabling the write facade restores the legacy path before cutover; no stored ticket/event/bridge/binding format changes.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "RP-04 S3 \u2014 Cut reconciler apply and child processes to scoped runtimes"
       },
       "created_at": "2026-08-17T19:40:41Z",
@@ -17336,6 +17451,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:09Z"
+    },
+    "6f2e-58a5-dfac-42f3": {
+      "created_at": "2026-08-18T16:43:32Z",
+      "jira_id": "4589216",
+      "jira_key": "REB-3178",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:35Z"
     },
     "6faf-f1ca-1ed2-44da": {
       "baseline": {
@@ -18849,10 +18971,24 @@
     },
     "79c6-eaf3-38af-4ce9": {
       "baseline": {
-        "assignee": null,
-        "description": "## Context\nWhile broadening verification for runty-effectible-bluewhale on current origin/main, `tests/interfaces/store/test_bridge_preview_under_sync_contention_heldout.py::test_preview_is_complete_while_sync_locks_are_held` failed deterministically, both in the 443-test store suite and alone. `_advisory_lock._lock_remote` imports `from rebar_reconciler import git_adapter`, but that top-level package is not importable in the normal repo virtualenv, raising `ModuleNotFoundError` before the lock behavior executes. This is unrelated to attach-commits code-root changes.\n\n## Plan\n- Reproduce under the supported test/install environment.\n- Trace the intended packaged/lazy reconciler import seam.\n- Restore the test and production lock path without test-only sys.path pollution.\n\n## Acceptance Criteria\n- [ ] The exact held-out contention test passes in isolation.\n- [ ] The broader store suite passes.\n- [ ] The reconciler import uses a supported packaged path.",
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nWhile broadening verification for runty-effectible-bluewhale on current origin/main, `tests/interfaces/store/test_bridge_preview_under_sync_contention_heldout.py::test_preview_is_complete_while_sync_locks_are_held` failed deterministically, both in the 443-test store suite and alone. `_advisory_lock._lock_remote` imports `from rebar_reconciler import git_adapter`, but that top-level package is intentionally unavailable in the normal installed in-process environment, raising `ModuleNotFoundError` before the lock behavior executes. This is unrelated to attach-commits code-root changes.\n\n## Confirmed Root Cause\nCommit `d9e0f0e733` introduced unconditional top-level `git_adapter` imports at `_advisory_lock.py:83` and `_ref_lock.py:194`, breaking the explicit standalone by-path loading contract in `_advisory_lock.py` and `_loader.py`. Runtime experiments confirmed both failure sites; the pre-refactor parent succeeds with the same absent top-level package; supported package-seeded paths remain green. The full proof is recorded in the Phase 1 RCA comment.\n\n## Repair Plan\n- At both confirmed seams, load the sibling with exactly `git_adapter = lazy_load(\"rebar_reconciler.git_adapter\", \"git_adapter.py\")`. The dotted key is mandatory: it is the same `sys.modules` key registered by unchanged package-context imports in `_concurrency.py`, `reconcile_helpers.py`, `apply_outbound.py`, and `__main__.py`, so the repaired and unchanged paths share one module object.\n- Preserve package-loaded behavior, adapter API identity, lock semantics, and intentional wheel packaging.\n- Do not use a mangled cache key, change the interface oracle, or add test-only `sys.path`/package seeding.\n\n## Testing\n- Use the existing failing held-out interface test as the RED oracle because it crosses both real standalone load seams and exercises a real ref-lock acquire/check/release around bridge preview.\n- Hold the oracle out from the fixer, then require GREEN; mutate each repaired seam back to the exact absolute import and require RED; restore and require GREEN.\n- Add a package-context identity assertion that package import and both repaired lazy-load seams resolve the same `sys.modules[\"rebar_reconciler.git_adapter\"]` module object, including a module-qualified monkeypatch observed by the repaired seam.\n- Run the exact original reproduction, advisory/ref-lock tests, the broader store interface suite, and project lint/typecheck gates.\n\n## Acceptance Criteria\n- [x] The exact held-out contention test passes in isolation without test-only path pollution.\n- [x] Both standalone seams use exactly `lazy_load(\"rebar_reconciler.git_adapter\", \"git_adapter.py\")`.\n- [x] A package-context test proves the repaired seams and unchanged importers share one git_adapter module object and observe the same module-qualified monkeypatch.\n- [x] [operator-attested] Defect-seeded mutation of either seam returns the held-out oracle to RED.\n  provenance: environment=isolated-local-debug-worktree; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=simulation \u2014 exact defect-seeded import mutations exercised the held-out interface oracle before restoration\n- [x] The broader store suite passes.\n- [x] Lint and typecheck pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Bridge preview lock test cannot import reconciler package"
       },
       "created_at": "2026-08-18T09:42:20Z",
@@ -20112,6 +20248,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:01Z"
+    },
+    "820d-6c54-412e-4470": {
+      "created_at": "2026-08-18T16:43:36Z",
+      "jira_id": "4589217",
+      "jira_key": "REB-3179",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:39Z"
     },
     "8214-9e1c-5042-49e2": {
       "baseline": {
@@ -21747,6 +21890,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:00Z"
+    },
+    "8b86-fe08-16ea-4875": {
+      "created_at": "2026-08-18T16:43:40Z",
+      "jira_id": "4589218",
+      "jira_key": "REB-3180",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:43Z"
     },
     "8b96-83de-0878-4a0b": {
       "baseline": {
@@ -23996,7 +24146,7 @@
         },
         "description": "## Context\nA deterministic relocated-store experiment confirmed that `src/rebar/_engine_support/commit_impact.py::code_root_for` conflates tracker storage with the code repository. `attach_commits` reaches it through `_lib_mutations.py`; with an absolute `REBAR_TRACKER_DIR` outside the code checkout, valid code commit SHAs are checked against the tracker parent and rejected. Runtime tracing observed `git -C <tracker-parent> rev-parse` while the same SHA resolved at the code root.\n\n## Plan\n- Add a real-git held-out regression oracle with a code repository and independently relocated ticket store.\n- Resolve commit validation from `config.repo_root(repo_root)` (explicit root, then `REBAR_ROOT`, then cwd Git top-level), while retaining tracker reads/writes through `REBAR_TRACKER_DIR`.\n- Remove the obsolete tracker-parent code-root helpers so the invalid derivation cannot remain as unused prior art.\n- Preserve all-or-nothing rejection for unknown SHAs and the default in-repo tracker path.\n- Run RED to GREEN, exact-defect mutation, focused store and attach suites, lint, typecheck, and original CLI replication.\n\n## Acceptance Criteria\n- [x] A valid code commit is accepted when the ticket store is outside the code worktree.\n- [x] An unknown SHA remains rejected without recording a partial COMMITS event.\n- [x] Default in-repo tracker behavior remains unchanged.\n- [x] The held-out relocated-store test is observed RED before repair and GREEN after repair.\n- [x] The exact tracker-parent mutation returns the held-out test to RED.\n- [x] `code_root_for` and `unresolvable_shas` have no remaining production definitions or references, checked by repository search.\n- [x] Focused tests pass.\n- [x] `make lint` passes.\n- [x] `make typecheck` passes.\n\n## Testing\n- `pytest tests/interfaces/store/test_commits_on_ticket.py tests/unit/test_attach_commits.py`\n- `grep -R \"code_root_for\\|unresolvable_shas\" src/rebar` must return no matches.\n- `make lint`\n- `make typecheck`",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Resolve attach-commits code root independently from relocated tracker storage"
       },
       "created_at": "2026-08-18T04:42:51Z",
@@ -26480,6 +26630,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-18T05:39:28Z"
     },
+    "a8ce-8ffa-54d7-432f": {
+      "created_at": "2026-08-18T16:43:44Z",
+      "jira_id": "4589219",
+      "jira_key": "REB-3181",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:47Z"
+    },
     "a8e5-6876-dcde-4d3d": {
       "created_at": "2026-08-15T15:08:14Z",
       "jira_key": "REB-1055",
@@ -27857,9 +28014,31 @@
       "updated_at": "2026-08-15T15:09:04Z"
     },
     "b0a8-5496-d178-40a9": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nThe rebar-debug construct sweep for `fibrous-fabulous-dungbeetle` found a third live instance of the same centralization regression. `applier._load_concurrency()` executes `_concurrency.py` by file path under the non-package key `_concurrency`, but `snapshot_head()` unconditionally executes `from rebar_reconciler import git_adapter`. In a supported installed in-process environment, the top-level package is intentionally absent.\n\n## Runtime Evidence\nA fresh process with `find_spec(\"rebar_reconciler\") is None` loaded `_concurrency.py` by file path, initialized a real temporary git repository, and called `snapshot_head(repo)`. It deterministically raised `ModuleNotFoundError: No module named rebar_reconciler` at `_concurrency.py:55`. `applier.py:268-278` is the production by-path loader.\n\n## Plan\n- Run rebar-debug independently to confirm legitimacy, loader identity requirements, and affected callers.\n- Add a RED oracle through the real `applier._load_concurrency()` path.\n- Restore standalone-safe git_adapter loading with the canonical dotted cache key, preserving package identity and snapshot semantics.\n\n## Acceptance Criteria\n- [ ] A by-path-loaded concurrency module resolves the current snapshot from a real temporary git repository without package-path seeding.\n- [ ] Package-context and standalone execution share one canonical git_adapter module object.\n- [ ] Existing concurrency and applier suites pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Standalone concurrency loader cannot import git adapter"
+      },
       "created_at": "2026-08-18T15:43:28Z",
       "jira_id": "4589204",
       "jira_key": "REB-3166",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:31Z"
     },
@@ -28136,6 +28315,13 @@
       "peer_parent": "REB-164",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:09:16Z"
+    },
+    "b2ff-03f7-a223-4900": {
+      "created_at": "2026-08-18T16:43:50Z",
+      "jira_id": "4589220",
+      "jira_key": "REB-3182",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:53Z"
     },
     "b300-aaab-611b-4394": {
       "baseline": {
@@ -29306,6 +29492,13 @@
       "peer_parent": "REB-601",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:04Z"
+    },
+    "ba48-a88a-92bd-45d0": {
+      "created_at": "2026-08-18T16:43:55Z",
+      "jira_id": "4589221",
+      "jira_key": "REB-3183",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:43:58Z"
     },
     "ba7d-a412-bbc0-45cb": {
       "baseline": {
@@ -31688,7 +31881,7 @@
         },
         "description": "## Context\nA serial full-suite run failed after 13,914 passing tests at `tests/unit/rebar_reconciler/test_rich_text_cutover.py::...\n## Phase 1 plan\n- Reproduce a minimal predecessor/test ordering and capture the divergent runtime module identities.\n- Compare isolated behavior, inspect the codec/function call graph, test fixtures, module cache state, and recent his...\n- Obtain independent falsifiable hypotheses and run discriminating runtime experiments until one changeable mechanism...\n- Establish defect legitimacy and complete the bounded caller-dependency gate before repair.\n- Write the proven RCA and evidence back before Phase 2.\n## Phase 2 plan\n- Freeze a minimal runtime identity oracle and observe it RED before repair.\n- Keep the oracle held out from the fixer.\n- Validate GREEN, exact-defect mutation RED, focused/broader gates, original ordering replication, and sibling/parity...\n## Testing\n- `pytest -q tests/integration/rebar_reconciler/test_reconcile_roundtrip.py::test_by_path_loader_preserves_module_ide...\n- `pytest -q tests/integration/rebar_reconciler/test_reconcile_roundtrip.py::test_description_survives_outbound_adf_i...\n- `make lint` and `make typecheck` are the repository gates.\n## Acceptance Criteria\n- [x] A deterministic minimal reproduction is recorded with its exact `pytest` command.\n- [x] The isolated working case is compared with the ordered failing case using runtime identity evidence.\n- [x] Relevant git history is inspected and cited in the RCA.\n- [x] Prior related tickets are inspected and cited in the RCA.\n- [x] A proven root cause is recorded before repair.\n- [x] Defect legitimacy is recorded before repair.\n- [x] The caller-dependency conclusion is recorded before repair.\n- [x] The held-out runtime identity test is observed RED before repair and GREEN afterward.\n- [x] Deleting the cache-first guard returns the held-out test to RED.\n- [x] The focused rich-text and round-trip suites pass.\n- [x] The exact integration-before-unit ordering passes.\n- [x] `make lint` passes.\n- [x] `make typecheck` passes.\n- [x] Construct and parity sibling sweeps receive explicit dispositions.\n[full output: \"$HOME/Library/Application Support/rtk/tee/1787045374_jq_-r__description___gsub__-____________.log\"]",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Rich-text cutover test leaks marklas state under serial full-suite ordering"
       },
       "created_at": "2026-08-18T08:43:20Z",
@@ -31992,10 +32185,25 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:38Z"
     },
+    "cd12-2815-d2ab-430a": {
+      "created_at": "2026-08-18T16:44:01Z",
+      "jira_id": "4589222",
+      "jira_key": "REB-3184",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:44:04Z"
+    },
     "cd53-c62e-7bac-4ed2": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Client report\n`AGENTS.md` and the setup/onboarding documentation do not tell a new contributor to run `rebar identity create --self` before using gates that sign attestations. A correctly installed checkout can therefore reach a signing gate without the local identity prerequisite and fail only at gate time.\n\nThe documentation gap is reported by a client project. Investigation must first confirm which supported bootstrap flows create an identity automatically, which gates require one, and whether `identity create --self` is universally correct or conditional on repository policy.\n\n## Plan\n- Reproduce onboarding from a clean temporary home/config using the documented setup path and the first signing gate.\n- Trace the identity lookup/error path and inventory every authoritative setup surface (`AGENTS.md`, local-dev/setup guides, contributor guide, packaged explanations).\n- Confirm the intended prerequisite and placement before editing docs.\n- Add a documentation/CLI contract test or rendered-help assertion at the smallest tier that fails when all setup paths omit the prerequisite.\n- Update each authoritative onboarding surface without duplicating contradictory guidance.\n\n## Acceptance Criteria\n- [ ] A clean-environment reproduction identifies the first signing operation that fails and the exact missing identity state.\n- [ ] The intended use and scope of `rebar identity create --self` are cited from implementation/help or an approved identity contract.\n- [ ] Every authoritative setup/onboarding path either creates the identity or instructs the user when and how to run `rebar identity create --self`.\n- [ ] The guidance explains how to verify the identity and distinguishes repository-local versus user-global state as applicable.\n- [ ] A gating test detects regression of the prerequisite guidance without asserting incidental prose formatting.\n- [ ] Existing install/bootstrap flows that already provision identity remain accurate and are not duplicated or contradicted.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Setup docs omit rebar identity create --self before signing gates"
+      },
       "created_at": "2026-08-18T15:43:36Z",
       "jira_id": "4589205",
       "jira_key": "REB-3167",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:39Z"
     },
@@ -32561,9 +32769,31 @@
       "updated_at": "2026-08-15T15:11:56Z"
     },
     "cfe1-3572-4536-49d3": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\n`reconcile_helpers.py` explicitly supports standalone file-path execution and bootstraps the shared sibling loader, but `_commit_binding_store_snapshot()` unconditionally imports `git_adapter` through the absent top-level package. `reconcile.py` loads the helper by path under flat key `reconcile_helpers`, so the supported standalone path raises `ModuleNotFoundError` before the helper can return its documented `True`/`False` result.\n\n## Confirmed Root Cause\nCommit `d9e0f0e733` replaced package-independent subprocess calls with `from rebar_reconciler import git_adapter`. Runtime tracing proves the import fails at `reconcile_helpers.py:200` with no parent package and before the no-file or fail-open branches. Exact historical probes are green at d9^ and red from d9 through current HEAD. `reconcile_helpers.py:10-16,30-46`, `reconcile.py:20-36,51-58`, and `_loader.py:1-29` are the authoritative standalone contract.\n\n## Repair Plan\n- Replace the package-dependent import with the existing sibling loader using canonical key `rebar_reconciler.git_adapter` and file `git_adapter.py`.\n- Preserve the helper\u2019s current no-file `True`, successful-commit `True`, and operational-failure `False` plus diagnostic semantics.\n- Preserve module identity: a package-context/pre-seeded adapter and the standalone helper must resolve the same canonical `sys.modules` object.\n- Keep the change confined to the helper import seam and one held-out regression module; add no dependency and do not alter git operation behavior.\n\n## Testing\n- Add `tests/unit/rebar_reconciler/state/test_reconcile_helpers_standalone_git_adapter.py` and first run it RED on the current source with `pytest -q tests/unit/rebar_reconciler/state/test_reconcile_helpers_standalone_git_adapter.py`.\n- After the blind repair, rerun that held-out file GREEN, seed the exact old absolute-import defect and require it to return RED, then restore the repair and require GREEN.\n- Run `pytest -q tests/unit/rebar_reconciler/state/test_commit_binding_store_failure.py tests/unit/rebar_reconciler/state/test_binding_retired_commit.py tests/unit/rebar_reconciler/state/test_reconcile_helpers_standalone_git_adapter.py`.\n- Run `make lint` and `make typecheck` with this worktree\u2019s `.venv/bin` first on `PATH`.\n- Replicate the original fresh-process, package-free `reconcile.py` call against a temporary repository and confirm the helper returns through its documented contract.\n\n## Acceptance Criteria\n- [x] A package-free by-path load of `reconcile.py` calls the re-exported commit helper without `ModuleNotFoundError`.\n- [x] A no-state standalone commit-back returns `True`.\n- [x] A standalone commit-back with state files reaches the canonical adapter\u2019s git operations.\n- [x] Package-context and standalone execution reuse one `sys.modules[\"rebar_reconciler.git_adapter\"]` module object.\n- [x] A simulated git failure returns `False` and emits the documented binding-store diagnostic.\n- [x] The focused helper/state suite passes under the stated `pytest` command.\n- [x] `make lint` passes.\n- [x] `make typecheck` passes.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Standalone reconcile helpers cannot import git adapter"
+      },
       "created_at": "2026-08-18T15:43:44Z",
       "jira_id": "4589206",
       "jira_key": "REB-3168",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:47Z"
     },
@@ -33139,7 +33369,7 @@
         },
         "description": "## Reproduction Steps\n\nDiscovered while validating epic ce0e (xdist parallelization). The live-Jira reconciler E2E `test_delete_permission_probe` flakes on Jira's search-index eventual consistency when the *whole* live group runs (it self-skips in CI, so this only bites a local live run with creds).\n\n- `pytest tests/integration/test_reconcile_live_e2e.py` (all 12, SERIAL, no xdist)\n  \u2192 `test_delete_permission_probe` FAILS: `AssertionError: created issue REB-NNNN\n  never became index-visible` (observed REB-1105 and REB-1107 on two runs).\n- `pytest \"\u2026::test_delete_permission_probe\"` in ISOLATION (serial) \u2192 PASSES.\n\nSo the failure is load/timing dependent (many live tests hammering the shared test project's index in one run outrun the test's index-visibility poll timeout), NOT caused by xdist \u2014 it reproduces with `-n0`. Independent of epic ce0e's change.\n\n## Expected vs Actual\n\n- Expected: the index-visibility wait polls long enough (or backs off) to absorb\n  Jira's eventual-consistency lag even when the full live group has just created\n  many issues.\n- Actual: the fixed poll budget in the visibility helper (`test_reconcile_live_e2e.py:347`)\n  times out under group load and the test fails.\n\n## Acceptance Criteria\n\n- [ ] The index-visibility wait in `tests/integration/test_reconcile_live_e2e.py`\n  is made robust to group-load lag (e.g. longer/adaptive backoff, or a\n  create\u2192visible retry helper) so the full live group passes reliably.\n- [ ] `pytest tests/integration/test_reconcile_live_e2e.py` (all 12, serial) passes\n  repeatedly against the live test project (no `never became index-visible`).\n- [ ] No change to CI behavior (these tests still self-skip without live creds).",
         "priority": "Medium",
-        "status": "Done",
+        "status": "To Do",
         "summary": "Live reconciler E2E test_delete_permission_probe flakes on Jira index-visibility under live-group load"
       },
       "created_at": "2026-08-15T15:12:17Z",
@@ -33955,6 +34185,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:45Z"
     },
+    "d890-e711-156e-444b": {
+      "created_at": "2026-08-18T16:44:06Z",
+      "jira_id": "4589223",
+      "jira_key": "REB-3185",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:44:09Z"
+    },
     "d893-e003-0539-47fc": {
       "baseline": {
         "assignee": null,
@@ -34249,8 +34486,30 @@
       "updated_at": "2026-08-16T00:39:44Z"
     },
     "da8a-75f5-ccb2-4b5f": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\nSpecialist overlays are where domain expertise belongs. Per the locked principle, each overlay carries BOTH halves \u2014 recall patterns and FP-discrimination \u2014 so the generic Pass-2 verifier stays domain-blind.\n\n## What\nEnrich six overlays with dso content (tests first to prove the pattern, then the five):\n- tests: full behavioral-testing standard \u2014 recall (change-detector, tautological, over/under-mocking,\n  source-grepping, existence-only) AND FP-guards (Four-Criterion test, Rule-5 structural-artifact\n  exception, the VALID-patterns-not-to-flag). NOT-flag base rules do not apply to test-correctness.\n- security: dso's 8 red-team concerns + hard exclusions deferring to the gitleaks/opengrep DET criteria\n  by name + rationalizations-to-reject.\n- performance: 8 AI-advantaged concerns; bright-line reasoning captured as evidence for Pass-2.\n- api-compat: asymmetric-change / producer-consumer drift.\n- db-migrations: delete+replace symmetry, destructive/backfill/lock-duration.\n- llm-prompts: ui-artifact + domain-mismatch + contract-drift for rebar's own prompt seam.\n\n## Scope\nsrc/rebar/llm/reviewers/code-review-{tests,security,performance,api-compat,db-migrations,llm-prompts}.md. Each task lands with its overlay's eval (recall + no-fire).\n\n## Acceptance Criteria\n- [ ] Each of the six overlays enriched with both recall patterns and FP-guards.\n- [ ] Each overlay lands with a passing recall + no-fire eval; overlays do not over-suppress.\n- [ ] Overlays remain advisory; Pass-2 verifier receives no domain-specific rubric.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Specialist overlay enrichment (tests + five)"
+      },
       "created_at": "2026-08-15T15:12:55Z",
       "jira_key": "REB-680",
+      "peer_parent": "REB-677",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:55Z"
     },
@@ -34317,8 +34576,16 @@
       "updated_at": "2026-08-15T15:12:58Z"
     },
     "db34-9db9-3c73-4ae6": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nnext-batch never reads recorded file_impact; the documented conflict-aware scheduling contract is dead code (conflict seeds are scraped from title + comment text only).\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD, temp store)\n1. Create an epic with two child tasks.\n2. rebar set-file-impact <t1> '[{\"path\":\"src/shared.py\",\"reason\":\"edit\"}]' and the same for <t2>.\n3. rebar next-batch <epic> --output json -> BOTH tasks in the same batch, \"files\": [] each, skipped_overlap: [], conflict matrix all '.'.\n4. Control: put the same backticked path in a COMMENT on each ticket -> conflict IS detected (SKIPPED_OVERLAP).\n\n## Expected vs Actual\n- Expected (CLAUDE.md + set-file-impact help): next-batch uses the recorded {path,reason} array to avoid scheduling file-conflicting tickets together.\n- Actual: file_impact is never read by the scheduler; description handling is also dead (the ready_tasks dict drops it, so raw.get(\"description\") is always None).\n\n## Source\nsrc/rebar/_engine/ticket-next-batch.sh \u2014 :627-634 ready_tasks dict (drops description/file_impact); :455-481 _load_ticket_body (title+comments only); :768 Candidate.files construction.\n\n## Fix direction\nCarry file_impact (and description) through the ready_tasks dict; union the recorded paths into Candidate.files. Exact validated diff in the implementation-notes comment on this ticket. Related: bug jaded-sled-pyre (element validation) keeps junk out of the same array.\n\n## Suggested RED test\nTwo epic children with identical set-file-impact paths -> exactly one in batch, the other in skipped_overlap; no-file-impact case still batches both; JSON output keys unchanged.\n\n## Acceptance Criteria\n- [ ] Recorded file_impact paths participate in overlap detection (RED test first)\n- [ ] No-impact tickets co-schedule as before; next_batch JSON schema keys unchanged\n- [ ] test-ticket-next-batch-dispatcher.sh + reducer batch suites green",
+        "priority": "High",
+        "status": "Done",
+        "summary": "next-batch ignores recorded file-impact: conflict detection reads title+comments only"
+      },
       "created_at": "2026-08-15T15:12:59Z",
       "jira_key": "REB-340",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:59Z"
     },
@@ -34329,8 +34596,16 @@
       "updated_at": "2026-08-15T15:12:59Z"
     },
     "db7b-c8fd-190f-4506": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nOffline FP/remediation analysis without taxing rebar's hot paths.\n\n## What\n- A reducer-IGNORED REVIEW_RESULT event capturing per-criterion verdicts + finding fingerprints + metadata +\n  override justifications; the reducer skips the type; offline replay+join yields per-criterion fire/FP/FN rates.\n\n- CALLER-VISIBLE FINDING ID: the stable per-finding `id` is MINTED by the orchestrator (`ca03`) at result assembly (the content fingerprint, sole owner); the sidecar RECORDS that same id/fingerprint and the Pass-4 coach (`75a9` crusty-herb-stand) references it (reference-not-restate) \u2014 one owner, no circular alignment, so the caller-facing reference and the offline-analysis record line up.\n## Scope\n- Capture only; analysis is offline; no human-feedback requirement.\n- RETENTION/CLEANUP (T9/T5b): bound sidecar growth WITHOUT interfering with passive data-gathering. NOTE\n  (corrected): because REVIEW_RESULT is reducer-IGNORED, rebar's event COMPACTION intentionally PRESERVES\n  it (it never snapshots/absorbs a non-KNOWN type) \u2014 so compaction CANNOT bound it. Retention is instead a\n  dedicated PRUNE (`rebar.llm.plan_review.sidecar.prune`) that keeps the most-recent RETAIN_PER_TICKET\n  sidecars per ticket (recent history for offline FP/FN analysis) and removes older ones, run best-effort\n  after each emit \u2014 off the reducer/compaction hot paths. The sidecar is intentionally APPEND-ONLY per\n  review run (every run recorded for analysis \u2014 NOT idempotent, by design); idempotency lives on the\n  ATTESTATION (head-state): re-running a review yields ONE current valid signature, not duplicates.\n\n## Acceptance Criteria\n- [ ] REVIEW_RESULT sidecar emitted with finding fingerprints; the reducer skips the type.\n- [ ] head / .cache / deps / validate are unaffected by sidecar size/count.\n- [ ] Offline reconstruction of per-criterion FP/remediation is possible.\n- [ ] A retention/cleanup path bounds sidecar growth while preserving recent history for offline analysis: a dedicated `sidecar.prune` (keep most-recent RETAIN_PER_TICKET per ticket, remove older), run best-effort after emit \u2014 NOT compaction (which preserves reducer-ignored events by design). Passive gathering uninterrupted.\n\n## Acceptance Criteria (added \u2014 close G3 coverage)\n- [ ] Capture per-pass LATENCY + a COST proxy in the sidecar metadata (`coverage.metrics` / payload `metrics`: det_ms, llm_ms, total_ms, llm_calls; the fast claim-path check is structurally LLM/network-free, recorded as a constant marker), so latency/cost targets set from UX/timeout projections are refined PASSIVELY from dogfood data (no upfront benchmark).\n- [ ] ROLLOUT / cross-clone coexistence: the new `REVIEW_RESULT` sidecar + the attestation head-state event follow rebar's preserved-and-ignored-by-older-clones pattern \u2014 an older clone predating the feature PRESERVES-and-IGNORES the event (never mis-reduces it), `fsck` WARNs on event types newer than the running binary, and reconcile hosts upgrade first (readers-before-writers).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "REVIEW_RESULT reducer-ignored sidecar (observability substrate)"
+      },
       "created_at": "2026-08-15T15:13:00Z",
       "jira_key": "REB-341",
+      "peer_parent": "REB-155",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:00Z"
     },
@@ -34363,8 +34638,16 @@
       "updated_at": "2026-08-15T15:13:00Z"
     },
     "db8c-4ae1-4598-446b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe rebar-brainstorm skill (`examples/claude-skills/rebar-brainstorm/SKILL.md`) drives a design loop that ends by recording the design as rebar tickets. It does not instruct the agent to read the project's plan-review gate criteria first, so tickets are authored blind to the gate and then hit BLOCK findings that must be remediated after the fact. Beneficiary: agents (and their users) running the brainstorm skill, who currently pay that avoidable remediation tax.\n\n## What\nAdd a subsection to the skill instructing the agent, before recording tickets, to read the project's plan-review gate docs (`docs/plan-review-gate.md`, `docs/plan-review-criteria-guide.md`), author each ticket to the gate's blocking criteria + overlays, then run `rebar review-plan <id>` and remediate findings before claiming.\n\n## Scope\n- In: a docs-only addition to `examples/claude-skills/rebar-brainstorm/SKILL.md`.\n- Out: changes to the live `~/.claude/skills` copy (personal, not version-controlled); changes to\n  the gate itself or other skills.\n\n## Acceptance Criteria\n- [ ] `examples/claude-skills/rebar-brainstorm/SKILL.md` contains a new subsection instructing the\n      agent to read `docs/plan-review-gate.md` and `docs/plan-review-criteria-guide.md` before\n      recording tickets.\n- [ ] The subsection states the standard: read the gate first, author to its blocking criteria +\n      overlays, then run `rebar review-plan <id>` and remediate before claiming.\n- [ ] The change is docs-only: `git diff --stat origin/main` shows only that one SKILL.md file changed.\n- [ ] The change lands on `main` through Gerrit with LLM-Review +1 and Verified +1 (submitted).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "docs(brainstorm-skill): read plan-review gate docs before recording tickets"
+      },
       "created_at": "2026-08-15T15:13:01Z",
       "jira_key": "REB-951",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:01Z"
     },
@@ -35696,6 +35979,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:56Z"
     },
+    "e499-704e-fa13-4916": {
+      "created_at": "2026-08-18T16:44:10Z",
+      "jira_id": "4589224",
+      "jira_key": "REB-3186",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:44:13Z"
+    },
     "e4b6-052e-0e46-4de2": {
       "baseline": {
         "assignee": {
@@ -36672,11 +36962,40 @@
       "updated_at": "2026-08-15T15:14:39Z"
     },
     "eab8-2009-2c59-46c7": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context\nThe Reconciler Heartbeat Canary detected a persistent bridge outage. Three consecutive scheduled passes fail before config or network because the stdlib-only reconciler runtime imports optional `pydantic` at module scope. A separate preceding REB-3162 visibility failure remains tracked on `dutiable-shaded-honeyeater`.\n\n## Proven root cause\nCommit 557f8c16e35 introduced `runtime.py` with `from pydantic import SecretStr`; 40b8ac8295 eagerly loads that runtime from every pass. The bridge installs `.` with no extras, while `pyproject.toml` and `docs/config.md` require the engine/reconciler to remain stdlib-only and place Pydantic only in `[agents]`. Clean-venv, dependency-perturbation, and historical A/B runtime probes confirm this exact activation edge.\n\n## Repair plan\n- Replace the Pydantic SecretStr dependency in `runtime.py` with a frozen stdlib credential carrier. Preserve credential hiding from repr/equality/hash, exact reveal at adapter authentication, and accurate presence checks.\n- Strengthen the existing clean-runtime subprocess oracle in `tests/unit/test_core_optionality.py` to load the real reconciler runtime while Pydantic is explicitly unavailable.\n- Prove RED before repair, GREEN after a held-out fix, then RED again under the exact module-scope Pydantic mutation.\n- Sweep the reconciler engine for other module-scope optional imports and disposition every confirmed sibling.\n\n## Testing\n- Run `pytest tests/unit/test_core_optionality.py -q` for the clean-runtime subprocess oracle.\n- Run `pytest tests/unit/rebar_reconciler/test_operation_bindings_runtime.py tests/interfaces/store/test_reconciler_operation_bindings.py -q` for credential and runtime behavior.\n- Run `make lint` and `make typecheck`.\n- Build/install `.` in a fresh no-extras venv and import the packaged `rebar_reconciler.runtime` to replicate the original report.\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_core_optionality.py -q` executes the real reconciler runtime with Pydantic unavailable.\n- [ ] The clean-runtime subprocess imports no optional agents dependency.\n- [ ] Operation-binding tests prove credentials are absent from repr/equality/hash.\n- [ ] Operation-binding tests prove `reveal()` returns the exact credential.\n- [ ] The oracle is observed RED before repair.\n- [ ] The oracle is observed GREEN after repair.\n- [ ] Reintroducing the exact Pydantic import returns the oracle to RED.\n- [ ] `make lint` passes.\n- [ ] `make typecheck` passes.\n- [ ] A fresh no-extras install imports the packaged reconciler runtime successfully.\n- [ ] The sibling sweep and dispositions are recorded on this ticket.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "[heartbeat-canary] reconcile-bridge stale (2026-08-18T13:36:25Z) \u2014 no success within 4h"
+      },
       "created_at": "2026-08-18T15:43:53Z",
       "jira_id": "4589207",
       "jira_key": "REB-3169",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:43:56Z"
+    },
+    "eb0d-4c3d-5344-47d7": {
+      "created_at": "2026-08-18T16:44:15Z",
+      "jira_id": "4589225",
+      "jira_key": "REB-3187",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T16:44:18Z"
     },
     "eb26-9748-4108-4916": {
       "created_at": "2026-08-15T15:14:40Z",
@@ -38396,9 +38715,31 @@
       "updated_at": "2026-08-15T15:15:50Z"
     },
     "f89c-a724-981a-4416": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Context / Problem\nA supported full-suite run can fail in `tests/unit/test_rp04_s4_llm_runtime_heldout.py::test_secret_absent_from_conflict_error_message` when the test replaces `anthropic.AsyncAnthropic` with a lambda before `pydantic_ai.providers.anthropic` is first imported. The dependency constructs an import-time union containing that attribute and raises `TypeError: unsupported operand type(s) for |: function and type`. Determine whether this is a production defect or order-dependent test isolation, and sweep sibling monkeypatch-before-lazy-import cases.\n\n## Investigation and repair plan\n- Reproduce the failure on current `origin/main` both in the polluted lazy-import order and in an isolated control order.\n- Trace the runtime import path and test seam, inspect history and adjacent tests, and prove one falsifiable root cause before repair.\n- Cite the intended test contract and classify production versus test-isolation ownership.\n- Inventory existing coverage and create or strengthen the smallest in-process oracle that forces the lazy-import state and asserts the secret-redaction contract still reaches its intended conflict error.\n- Apply the minimal remediation at the owned seam, then prove RED to GREEN, exact-defect mutation sensitivity, original-report replication, and sibling coverage.\n\n## Acceptance Criteria\n- [x] Runtime evidence proves the import-order mechanism and distinguishes it from production secret-redaction behavior.\n- [x] The in-process unit oracle forces a fresh Anthropic provider import after the monkeypatch and observes the contractual redacted conflict error rather than a dependency import `TypeError`.\n- [x] The oracle is observed RED before repair, GREEN after repair, and RED again under an exact-defect mutation.\n- [x] A bounded sweep identifies and disposes every sibling test that replaces an SDK runtime class before the corresponding pydantic-ai provider module is imported.\n- [x] The original failing node and its supported relevant suite pass in both isolated and order-sensitive execution.\n- [x] The ticket records the final RCA, caller/safety assessment, sibling disposition, and replication evidence.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Anthropic class monkeypatch breaks lazy provider import"
+      },
       "created_at": "2026-08-18T15:44:00Z",
       "jira_id": "4589208",
       "jira_key": "REB-3170",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T15:44:03Z"
     },
@@ -41394,7 +41735,24 @@
     "REB-3169": "eab8-2009-2c59-46c7",
     "REB-317": "ce9b-c170-7a16-4478",
     "REB-3170": "f89c-a724-981a-4416",
+    "REB-3171": "09ae-e827-1cac-452d",
+    "REB-3172": "2635-4aa3-5c14-4b12",
+    "REB-3173": "448e-3c6d-9e01-45cc",
+    "REB-3174": "4afa-216b-4b16-4b6b",
+    "REB-3175": "5452-3077-b34a-4157",
+    "REB-3176": "6755-d43c-b962-45a8",
+    "REB-3177": "69d3-3f7a-8deb-46fc",
+    "REB-3178": "6f2e-58a5-dfac-42f3",
+    "REB-3179": "820d-6c54-412e-4470",
     "REB-318": "ceaa-80e7-62ee-41bf",
+    "REB-3180": "8b86-fe08-16ea-4875",
+    "REB-3181": "a8ce-8ffa-54d7-432f",
+    "REB-3182": "b2ff-03f7-a223-4900",
+    "REB-3183": "ba48-a88a-92bd-45d0",
+    "REB-3184": "cd12-2815-d2ab-430a",
+    "REB-3185": "d890-e711-156e-444b",
+    "REB-3186": "e499-704e-fa13-4916",
+    "REB-3187": "eb0d-4c3d-5344-47d7",
     "REB-319": "cf14-d845-075a-4f74",
     "REB-32": "1465-6362-092b-4ab4",
     "REB-320": "cf7c-1832-d5cd-4aa3",
