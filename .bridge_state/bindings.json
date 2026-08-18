@@ -2397,7 +2397,7 @@
         },
         "description": "## Context / Problem\nThe recovered 2026-08-16 janitor plan contains approved-but-lossy RP-02 through RP-06 decisions. Before these items become implementation stories, the maintainer needs evidence-backed discussions that preserve prior architectural intent, cover hard-won bug and test behavior, and resolve implementation-critical ambiguities. Durable recovery authority is the closed tracker record `irascible-clueless-basenji` (`ee98-a2c0-7d12-4c75`), whose description and comments record the recovered RP definitions and evidence. The checkout-local `.joe-janitor/report-2026-08-16-recovered.md` is an operator-supplied ignored working copy; if it is absent in another checkout, the durable ticket plus the source/ADR/test/ticket citations it names are sufficient to reconstruct it.\n\n## Approach\nResearch each RP independently against current source, focused behavioral tests, ticket/ADR/commit history, and relevant maintained-project prior art. Record a decision-ready brief per RP under the checkout-local `.joe-janitor/` archive, with the situation, intended end state, invariants versus intentional behavior changes, edge/failure scenarios, concrete implementation seams, migration/rollback considerations, and remaining maintainer-only decisions. Use read-only or checkout-local probes where framework behavior is uncertain. This fits the janitor approval phase because it reduces ambiguity without editing production code or prematurely creating implementation stories.\n\n## Scope\nNo tracked repository file changes. Read-only scope includes `src/rebar/_engine/rebar_reconciler/`, `src/rebar/_cli/`, `src/rebar/llm/plan_review/`, their focused tests, `docs/adr/`, exact historical tickets/commits, and the durable recovery ticket. Outputs live in checkout-local ignored `.joe-janitor/rp02-*.md` through `.joe-janitor/rp06-*.md` when available and in durable comments on this ticket.\n\n## Verification\nThis is an investigation task. Evidence crosses source boundaries through focused existing tests and narrowly scoped checkout-local probes. The oracles are exact current outcomes, failure modes, ownership boundaries, call/reference inventories, and cited historical decisions. Any behavior change is labeled as a maintainer decision rather than silently treated as an invariant. Each local brief is read back and summarized durably on this ticket; the ticket summary is the portable completion record when ignored artifacts are unavailable to an attested reviewer.\n\n## Acceptance Criteria\n- [ ] [operator-attested] RP-02 has a decision-ready brief mapping BindingStore responsibilities, atomicity constraints, prior ADR/ticket intent, focused test oracles, extraction seams, migration hazards, and remaining choices; verified by read-back of its local note and durable ticket summary.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 read back the ignored local note and compare its citations and decisions to repository evidence and the live tracker.\n- [ ] [operator-attested] RP-03 has a decision-ready brief mapping outbound lifecycle protocol calls, lossy failure paths, resurrection/idempotency scenarios, prior ticket intent, focused test oracles, migration hazards, and remaining choices; verified by read-back of its local note and durable ticket summary.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 read back the ignored local note and compare its citations and decisions to repository evidence and the live tracker.\n- [ ] [operator-attested] RP-04 has a decision-ready brief mapping configured versus ambient tracker/Jira ownership, all bypass call sites, mixed-context failure scenarios, prior ADR/ticket intent, focused test oracles, migration hazards, and remaining choices; verified by read-back of its local note and durable ticket summary.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 read back the ignored local note and compare its citations and decisions to repository evidence and the live tracker.\n- [ ] [operator-attested] RP-05 has a decision-ready brief mapping CLI routing responsibilities and compatibility seams, prior split history, focused test oracles, extraction alternatives, migration hazards, and remaining choices; verified by read-back of its local note and durable ticket summary.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 read back the ignored local note and compare its citations and decisions to repository evidence and the live tracker.\n- [ ] [operator-attested] RP-06 has a decision-ready brief mapping plan-review policy ownership, registry/orchestrator/facade coupling, routing divergence, compatibility constraints, focused test oracles, extraction alternatives, migration hazards, and remaining choices; verified by read-back of its local note and durable ticket summary.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 read back the ignored local note and compare its citations and decisions to repository evidence and the live tracker.\n- [ ] [operator-attested] Every substantive claim cites repository, tracker, history, test, or maintained-project evidence, and every behavior delta is explicitly marked for maintainer approval; verified by a citation/decision-queue audit recorded on this ticket.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=static-analysis \u2014 compare all durable ticket summaries against their local briefs and cited evidence.\n- [ ] [operator-attested] The durable completion comment links the local RP-02-RP-06 brief paths, states their approval-readiness status, and identifies the recovery ticket that defines their scope; verified by live ticket read-back.\n  provenance: environment=local-checkout-b0aac2314; principal=joeoakhart@navapbc.com; privilege_posture=narrower; instrument=live-call \u2014 read the posted comment from the live tracker and compare it to the five local briefs and `irascible-clueless-basenji`.",
         "priority": "High",
-        "status": "Done",
+        "status": "In Progress",
         "summary": "Derisk RP-02-RP-06 approval decisions"
       },
       "created_at": "2026-08-16T20:36:30Z",
@@ -2899,9 +2899,17 @@
       "updated_at": "2026-08-15T14:52:41Z"
     },
     "155c-218b-c128-4700": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe deprecation repair on dragonish-sylphic-sheep preserves rebar\u2019s current Chat Completions wire behavior with the explicit `openai-chat:` prefix. Pydantic AI v2 makes the Responses API the default for `openai:`, so rebar should migrate deliberately after proving compatibility rather than inherit the semantic change implicitly.\n\n## Plan\n- Inventory every OpenAI and OpenAI-compatible endpoint, including custom base URLs, structured output, streaming, tool calls, retries, and provider-specific settings.\n- Define the supported Responses API contract and document any endpoints or features that remain Chat-Completions-only.\n- Add provider contract tests that compare current behavior with `openai-responses:` through production model construction.\n- Migrate eligible providers explicitly, add compatibility handling for ineligible custom endpoints, and document the operator-facing configuration change.\n\n## Acceptance Criteria\n- [ ] A provider capability matrix identifies each supported OpenAI-compatible endpoint as Responses-ready or Chat-Completions-only, with cited evidence.\n- [ ] Contract tests exercise real pydantic-ai model construction and assert structured output, streaming, tool-call, retry, and custom-base-URL behavior.\n- [ ] Eligible provider paths use `openai-responses:` explicitly; any retained `openai-chat:` path has a documented compatibility reason.\n- [ ] Configuration and migration documentation explain observable wire-semantic changes and rollback behavior.\n- [ ] Focused provider tests plus `make test`, `make lint`, and `make typecheck` pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Migrate OpenAI providers to the pydantic-ai Responses API"
+      },
       "created_at": "2026-08-18T02:02:10Z",
       "jira_id": "4589140",
       "jira_key": "REB-3108",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T02:02:13Z"
     },
@@ -11858,9 +11866,17 @@
       "updated_at": "2026-08-15T14:58:35Z"
     },
     "4bfe-2829-1c56-48d1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Concept\nAdd a first-class research ticket type for durable, lifecycle-managed investigation work that does not modify the codebase and should not pay software-delivery gate costs. It fills the gap between ephemeral/session-oriented session_log records and implementation-bearing task, story, bug, and epic tickets.\n\n## Proposed semantics\n- research tickets use the ordinary open -> in_progress -> closed lifecycle.\n- research tickets cannot be created in or transitioned to idea status.\n- plan review is inapplicable and cannot be invoked for research tickets.\n- completion verification is inapplicable and cannot be invoked for research tickets.\n- file impact and verification-command metadata cannot be set on research tickets.\n- research tickets cannot have a parent and cannot be made a child through parent-setting or child hierarchy links.\n- research tickets may use non-hierarchical links to other tickets so evidence, discoveries, and resulting implementation work remain connected.\n- research tickets appear in list/search/show operations and normal direct-id lookups.\n- research tickets are excluded from ready and next-batch because those commands enumerate executable implementation work.\n- research tickets retain comments, assignee/claim state, tags, priority, authorship, bridge-safe identity, and the normal audit history needed for collaborative investigation.\n\n## Safety boundary\nThis type is not a gate bypass for code-changing work. The product should define and enforce that a research ticket cannot declare file impact, carry implementation completion evidence, or serve as the claimed work item for a code commit. Research findings that authorize repository changes must create or promote separate ordinary gated tickets and link them to the research ticket.\n\n## Design work before promotion\n- Define the canonical event/schema representation, public Python type, CLI/MCP surface, reducer validation, transition matrix, and compatibility behavior for older readers.\n- Decide which existing non-hierarchical relations are allowed and reject every hierarchy-forming path consistently, including inverse link forms.\n- Define whether claim is allowed directly from open and how default assignee/session ownership works.\n- Define search/list filters and bridge/Jira representation without letting reconciled Jira hierarchy imply a local parent.\n- Add cross-surface behavioral tests proving plan-review, completion-verifier, file-impact, parent, ready, and next-batch prohibitions and proving normal lifecycle/search/link behavior.\n- Document when to use research versus session_log versus task/story/bug/epic.\n\n## Intended outcome\nInvestigations such as architecture research, historical CI-log analysis, OSS prior-art studies, and empirical probes get a durable collaborative work record with an honest lifecycle, while implementation tickets retain the full plan-review, file-impact, and completion-verification discipline.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Add a lightweight research ticket type"
+      },
       "created_at": "2026-08-18T02:02:16Z",
       "jira_id": "4589141",
       "jira_key": "REB-3109",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T02:02:19Z"
     },
@@ -13028,9 +13044,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\nThe project Jira target is Jira Cloud (`https://navasage.atlassian.net`), while `reconciler.rich_text_cutover` defaults to `off`. Enable the already-shipped and tested Markdown\u2194ADF bridge behavior for this project without enabling the unrelated Data Center wire. This ticket is configuration enablement only; codec correctness remains covered by the existing rich-text unit and live-integration suites.\n\n## Plan\n- Add a `[reconciler]` table to the project `rebar.toml`.\n- Set `rich_text_cutover = \"cloud\"`.\n- Run `rebar config` from the worktree. This loads the typed config, rejects invalid enum values, and reports each resolved value with its precedence source.\n- Check the exact `reconciler.rich_text_cutover` output line and run `git diff --check`.\n\n## Acceptance Criteria\n- [ ] `rebar.toml` contains `[reconciler]` with `rich_text_cutover = \"cloud\"`; verify by inspecting the focused git diff.\n- [ ] `rebar config` exits successfully, proving the typed loader accepts the value.\n- [ ] `rebar config` reports `reconciler.rich_text_cutover = cloud [project]`, proving both the resolved value and project-config provenance.\n- [ ] `git diff --check` reports no whitespace errors.",
+        "description": "## Context\nThe project Jira target is Jira Cloud (`https://navasage.atlassian.net`), while `reconciler.rich_text_cutover` defaults to `off`. Enable the already-shipped and tested Markdown\u2194ADF bridge behavior for this project without enabling the unrelated Data Center wire. Gerrit CI showed that one legacy plain-wire golden test implicitly inherited the project operational setting; its expected output is intentionally the pre-cutover plain form, so it must select `off` explicitly through the canonical environment override before constructing the real backend.\n\n## Plan\n- Add a `[reconciler]` table to the project `rebar.toml` and set `rich_text_cutover = \"cloud\"`, with an inline `off` rollback note.\n- Change `test_canonical_outbound_equivalence.py`\u2019s backend fixture to function scope, accept `monkeypatch`, and set `REBAR_RECONCILER_RICH_TEXT_CUTOVER=off` before constructing `JiraBackend`. Preserve the historical `\"LOCAL\"` golden expectation.\n- Run the exact formerly failing test both normally and with the project configuration active, then run the containing module.\n- Run `rebar config`, `git diff --check`, `make lint`, `make typecheck`, and the repository test gate.\n\n## Acceptance Criteria\n- [x] `rebar.toml` contains `[reconciler]` with `rich_text_cutover = \"cloud\"` and documents `off` as rollback.\n- [x] `rebar config` exits successfully and reports `reconciler.rich_text_cutover = cloud [project]`.\n- [x] The legacy equivalence backend fixture explicitly sets the canonical rich-text env override to `off` before backend construction; it does not inherit `rebar.toml`.\n- [x] `test_description_change_emits_description` passes with its historical `{description: \"LOCAL\"}` expectation under the project\u2019s Cloud cutover.\n- [x] The containing test module, lint, typecheck, and CI test matrix pass.\n- [x] `git diff --check` reports no whitespace errors.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Enable Jira Cloud rich-text reconciliation for rebar"
       },
       "created_at": "2026-08-17T22:37:44Z",
@@ -13587,10 +13603,24 @@
     },
     "5701-5e57-2e94-4b17": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nThe CI-equivalent default suite passes but 13 grounding tests emit `DeprecationWarning` from Python's `multiprocessing/popen_fork.py`: the process is multi-threaded and use of `fork()` may lead to deadlocks in the child. The warnings arise in `tests/unit/grounding/test_conformance.py` and `tests/unit/grounding/test_harness.py` under xdist worker execution.\n\n## Reproduction\nRun the default suite with `-n 4 --dist worksteal` and warnings enabled; the warning is emitted repeatedly while grounding harness subprocess tests execute.\n\n## Plan\nUse rebar-debug to trace the exact process-creation path and distinguish production harness behavior from test-only multiprocessing setup. Prove the root cause under a deterministic warning-as-error oracle before changing start methods or subprocess semantics. Any cross-platform process-model change requires explicit behavior review.\n\n## Acceptance Criteria\n- [ ] A deterministic focused reproduction identifies the exact fork call path and owning code.\n- [ ] The affected grounding tests pass with this warning class promoted to an error.\n- [ ] The repair preserves timeout, cleanup, and child-process isolation contracts across supported platforms.\n- [ ] Focused concurrency tests and repository gates pass.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Grounding harness tests fork from multithreaded workers and warn about deadlock risk"
       },
       "created_at": "2026-08-16T21:34:11Z",
@@ -23803,6 +23833,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:48Z"
     },
+    "9c72-c44a-3421-45ad": {
+      "created_at": "2026-08-18T02:49:20Z",
+      "jira_id": "4589143",
+      "jira_key": "REB-3111",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T02:49:23Z"
+    },
     "9c7c-4844-f53c-4eac": {
       "baseline": {
         "assignee": {
@@ -26374,10 +26411,24 @@
     },
     "acf9-154e-ca76-4aac": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n`rebar config validate` reports success for invalid typed configuration values because it scans only removed/tombstoned inputs from raw TOML and deliberately bypasses the coercing `load_config()` path. The command name and success message imply that the project configuration was validated, so operators can receive a false green result for malformed enum values.\n\n## Reproduction\n1. In `rebar.toml`, set `reconciler.rich_text_cutover = \"clould\"` (an invalid enum value).\n2. Run `rebar config validate`.\n3. Observe exit 0 / `OK \u2014 no removed inputs are set.`\n4. Run `rebar config` and observe that the typed loader correctly rejects the invalid value.\n\n## Expected\n`rebar config validate` should validate the full supported configuration surface, including typed coercion and enum constraints, while still reporting all tombstoned inputs in one run. It should exit non-zero and identify invalid values such as `reconciler.rich_text_cutover = \"clould\"`.\n\n## Actual\nThe command only calls the tombstone scan over raw TOML, so invalid enum values and potentially other malformed live keys pass.\n\n## Evidence\n- `src/rebar/_commands/show_config.py::_validate` only calls `scan_tombstones`.\n- `_raw_toml_tables` explicitly bypasses the coercing/raising `load_config` path.\n- `src/rebar/_config_sections.py` enforces `rich_text_cutover` via `_as_choice(..., {\"off\", \"cloud\", \"dc\", \"both\"})`, but that path is not reached by `config validate`.\n\n## Acceptance Criteria\n- [ ] `rebar config validate` returns non-zero for invalid values on live typed keys and reports each invalid key with an actionable diagnostic.\n- [ ] Tombstone aggregation behavior remains intact; a single run reports removed inputs and typed-value errors rather than aborting after the first issue.\n- [ ] Tests cover an invalid `reconciler.rich_text_cutover` value and at least one non-enum typed-value failure.\n- [ ] Documentation accurately defines the command as full config validation.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "rebar config validate does not reject invalid typed config values"
       },
       "created_at": "2026-08-17T22:37:50Z",
@@ -28822,9 +28873,17 @@
       "updated_at": "2026-08-15T15:10:14Z"
     },
     "bbb7-812e-4fe4-465d": {
+      "baseline": {
+        "assignee": null,
+        "description": "RP-04 S1 advisory review finding (change 1841 PS3): the AC1 cross-surface equivalence contract test (tests/interfaces/contracts/test_operation_snapshot_surfaces.py) asserts CLI/lib/MCP/reconciler snapshot equivalence, but the 'MCP surface' and 'reconciler surface' blocks call compose_operation_snapshot(...) directly again with identical args rather than driving the actual MCP tool and reconciler __main__ entry points. Strengthen so those two slots exercise the real surfaces (surface-parity: a surface that performs the op but does not route through the shared composer is exactly where a parity bug hides). Acceptance: the MCP and reconciler blocks invoke their real entry points; mutation-perturbing the composer makes the surface assertions RED.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Drive AC1 snapshot-equivalence contract through real MCP + reconciler entry points"
+      },
       "created_at": "2026-08-18T02:02:19Z",
       "jira_id": "4589142",
       "jira_key": "REB-3110",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T02:02:22Z"
     },
@@ -29609,8 +29668,30 @@
       "updated_at": "2026-08-15T15:10:45Z"
     },
     "c2c5-53a7-2ce0-4d98": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Finding\n\n`src/rebar/llm/review_kernel/verify.py`'s `verify_findings()` is the shared Pass-2 kernel entry point that chunks findings, runs each chunk via an injected `run_chunk` LLM callable, and tallies `outcome_counts` (`clean`/`recovered`/`empty_outcomes`/`unrecoverable`) plus `contract_violations`. It is fully implemented and unit-tested (`tests/unit/test_review_kernel.py`, `tests/unit/test_review_kernel_rules.py`), but neither live consumer pipeline calls it, and \u2014 per plan-review feedback on an earlier draft of this ticket \u2014 neither CAN call it as-is: both pipelines run their Pass-2 model call as a declarative workflow prompt step (one YAML step per token-budgeted chunk, merged by the executor), not as a procedural loop with a `run_chunk` callback in scope. `verify_findings()`'s per-chunk `outcome_counts` tally (which chunk was clean vs empty vs a `StructuredOutputError`) depends on being IN that per-chunk loop; by the time `plan_review_decide`/`code_review_decide` see the input, the workflow engine has already merged every chunk's output into one flat `verifications` list, and per-chunk boundaries (which chunk contributed what) are gone. So `empty_outcomes`/`unrecoverable` (chunk-level execution signals) are **not reconstructable** at the `*_decide` step boundary without a separate architecture change (the verify prompt step itself emitting per-chunk metadata as a named workflow output before the merge) \u2014 that is explicitly deferred as follow-on work, not this ticket's scope.\n\nWhat IS shared today, and inconsistently, between the two pipelines:\n\n- `src/rebar/llm/plan_review/workflow_ops.py`'s `plan_review_decide` (~line 425) calls\n  `review_kernel.reshape_verifications(...)` on the merged `verifications` list, and on\n  `reshape.has_violations` (malformed/duplicate/unexpected indices) calls\n  `orchestrator.record_contract_violation(reshape.summary())` \u2014 a run-scoped ContextVar sink\n  (`plan_review/orchestrator.py:321-357`: `collect_contract_violations`/\n  `record_contract_violation`/`drain_contract_violations`) activated in\n  `gate_dispatch.produce_plan_review_verdict` (~line 171) and drained into\n  `coverage[\"verification_contract_violations\"]` in `plan_review_coach` (~line 563).\n- `src/rebar/llm/code_review/workflow_ops.py`'s `code_review_decide` (~line 395) does the exact\n  same `reshape_verifications(...)` call and `has_violations` check, but only\n  `logger.error(...)`s \u2014 no sink exists for code-review, so the violation data never reaches\n  `finalize_code_review_verdict`'s coverage, and there is no `outcome_counts` telemetry there at\n  all.\n\n## Scope note\n\n`c2c5-53a7-2ce0-4d98` is a child of epic `6eca-183e-1cd2-4fb9` (Janitor Cleanup 2026-07-19), discovered mid-run (`discovered_from` -> `1aa8-cdde-4ff6-40d0`) after the epic's other 5 leaves had already been decomposed and were not in the epic's original plan/file_impact. It was left open and unworked when the other 5 leaves closed, per an explicit scoping decision recorded on the epic. It is now being completed under direct operator instruction (\"Complete this story\"), which supersedes that earlier deferral.\n\n## Remediation\n\nTwo concrete, single-path changes (no `run_chunk`/`verify_findings()` involvement \u2014 that kernel entry point stays reserved for callers that own the procedural chunk loop, e.g. a future non-workflow consumer):\n\n1. **Shared contract-violation sink.** Move the existing ContextVar-backed sink\n   (`collect_contract_violations`/`record_contract_violation`/`drain_contract_violations`,\n   currently private to `plan_review/orchestrator.py`) into `review_kernel` (e.g.\n   `review_kernel/verify.py` or a new `review_kernel/telemetry.py`) as the ONE implementation\n   both pipelines import \u2014 not a duplicate. Update `plan_review/orchestrator.py`'s and\n   `plan_review/workflow_ops.py`'s existing call sites to import it from its new home (a\n   mechanical rename, no behavior change for plan-review). Wire the equivalent into\n   `code_review`: activate `collect_contract_violations()` around the workflow run in\n   `gate_dispatch._run_code_review_gate` (mirroring `produce_plan_review_verdict`'s\n   `with assemble_context_cache(), collect_contract_violations(), gate_config(cfg):`), call\n   `record_contract_violation(reshape.summary())` in `code_review_decide` when\n   `reshape.has_violations` (replacing the bare `logger.error`, keeping the log too), and drain\n   it into `finalize_code_review_verdict`'s verdict coverage as\n   `coverage[\"verification_contract_violations\"]`, mirroring plan-review's\n   `coverage[\"verification_contract_violations\"]` write in `plan_review_coach`.\n\n2. **`outcome_counts` at the `*_decide` boundary (whole-run tally, not per-chunk).** Add a\n   small shared helper in `review_kernel` \u2014 e.g.\n   `decide_outcome_counts(raw_verifs: list, findings: list, reshape: VerificationReshape) ->\n   dict[str, int]` \u2014 that derives a single-run `{\"clean\": int, \"recovered\": int,\n   \"empty_outcomes\": int, \"unrecoverable\": int}` from data already available at the merged\n   `*_decide` boundary:\n   - `empty_outcomes = 1` if `findings` is non-empty but `raw_verifs` came back completely\n     empty, else `0`.\n   - `unrecoverable` is **always `0`** in this leaf \u2014 a `StructuredOutputError` inside one\n     chunk is swallowed by the workflow engine's own repair/retry layer before the merged\n     output ever reaches `*_decide`; a total verify-step failure already surfaces via the\n     existing `coverage[\"verify_failed\"]` signal (ticket 59bc/b24d), which this ticket does not\n     touch. Tracking true per-chunk `unrecoverable` counts requires the verify prompt step\n     itself to emit per-chunk metadata as a named workflow output before the merge \u2014 an\n     explicitly deferred follow-on, not this ticket.\n   - Otherwise (findings present and at least one verification came back):\n     `recovered = 1, clean = 0` if `reshape.has_violations` (some entries were malformed/\n     duplicate/unexpected but the run still produced usable verifications), else\n     `clean = 1, recovered = 0`.\n   Call this helper from both `plan_review_decide` and `code_review_decide` and add\n   `outcome_counts` to each step's output dict (additive \u2014 no existing output key removed).\n   Thread it into each pipeline's verdict coverage the same way `hierarchy_incomplete` was\n   threaded in ticket b24d: `coverage[\"outcome_counts\"]` set by `*_decide`'s output. No\n   downstream INDETERMINATE/PASS logic changes \u2014 this is additive observability, exactly like\n   the drop-in for `verification_contract_violations` above.\n\n## Acceptance Criteria\n\n- [ ] `plan_review_decide` and `code_review_decide` both emit an `outcome_counts` field (a\n      single-run `{clean, recovered, empty_outcomes, unrecoverable}` tally, `unrecoverable`\n      always `0` per the documented boundary limitation above) computed by ONE shared\n      `review_kernel` helper \u2014 no duplicated tallying logic between the two pipelines.\n- [ ] `code_review_decide` records contract violations via the SAME shared\n      `collect_contract_violations`/`record_contract_violation`/`drain_contract_violations`\n      sink `plan_review_decide` uses (moved into `review_kernel`), activated in\n      `gate_dispatch._run_code_review_gate` and drained into\n      `finalize_code_review_verdict`'s `coverage[\"verification_contract_violations\"]`.\n- [ ] Existing plan-review and code-review test suites continue to pass unmodified (the sink\n      move is a mechanical relocation \u2014 plan-review's behavior is byte-identical); new tests\n      cover code-review's `outcome_counts`/contract-violation propagation specifically, and at\n      least one test covers the moved sink from its new shared location for both pipelines.\n- [ ] No change to either pipeline's decision thresholds, impact functions, or verdict shape\n      (`outcome_counts` and `verification_contract_violations` are additive coverage keys only).\n\n## Verify commands\n\n- `pytest tests/unit/test_review_kernel.py tests/unit/test_review_kernel_rules.py -q`\n- `pytest tests/unit/plan_review -q`\n- `pytest tests/unit/code_review -q`\n- `pytest tests -q`",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Wire shared verify_findings outcome_counts telemetry into plan_review and code_review consumer pipelines"
+      },
       "created_at": "2026-08-15T15:10:46Z",
       "jira_key": "REB-1454",
+      "peer_parent": "REB-1433",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:46Z"
     },
@@ -29635,8 +29716,30 @@
       "updated_at": "2026-08-15T15:10:47Z"
     },
     "c366-ad18-5f44-4099": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Why\n\n`verify.completion_floor_active` was assessed as fully implemented (no stubs; wired live into `review_plan` at `llm/plan_review/__init__.py:536`) AND already calibrated: its gold-set story 77cf is CLOSED, and `docs/calibration/completion_floor.md` records 30/30 floor decisions correct (\u03ba=1.0) with zero must-never-suppress anchors dropped \u2014 stated verbatim as \"the evidence the operator needs before flipping the flag on\". It has only never been switched on. Enable it in THIS project to dogfood it on live reviews.\n\n## What\n\n- Set `verify.completion_floor_active = true` in this project's `rebar.toml` (schema\n  default in `_config_schema.py:303` STAYS False for clients). Keep the companion tunables\n  at their defaults (`completion_priority_floor = 0.4`, `completion_preserve_criteria =\n  T5c,T10`) unless dogfooding evidence says otherwise.\n- Identify + document the monitoring surface: every suppression is persisted to the\n  plan-review SIDECAR `dropped[]` tagged `drop_reason=\"completion\"` with full completion\n  answers + `coverage.completion_floored_finding_ids` (`llm/plan_review/__init__.py:263,\n  272-275`; `sidecar.py:342,358`). Document how to tail/audit it so a wrongly-suppressed\n  finding is recoverable.\n- OPTIONAL (judgment call, capture as a follow-up if declined): add a per-drop\n  `logger.info` line at the drop site so live suppressions are visible without opening the\n  sidecar \u2014 the successful-drop path currently logs nothing (only failures warn).\n\n## Scope\n\nConfig activation + monitoring only \u2014 NO logic change to the floor. Risk is bounded: advisory-only, container-only, 5-condition conjunction, fail-safe-to-keep everywhere. A wrong suppression cannot change a PASS/BLOCK verdict and is always recoverable from the sidecar. Rollback = set the key back to false.\n\n## Acceptance Criteria\n\n- [ ] `verify.completion_floor_active = true` present in this project's `rebar.toml`; schema default remains False.\n- [ ] A short operator note (in `docs/calibration/completion_floor.md` or the plan-review-gate doc) explains how to audit completion-floor suppressions via the sidecar `dropped[]` / `drop_reason=\"completion\"`.\n- [ ] The completion floor is live and enabled on real plan-reviews in this project, and it never changes a PASS/BLOCK verdict. Demonstrated: a live container plan-review (epic 8d27, run from the worktree where `load_config(repo_root).verify.completion_floor_active` is True) executed the floor entry `_maybe_apply_completion_floor` with the flag on and delivered/closed children present; the verdict stayed PASS and zero findings were floored (the documented \"none qualified\" case \u2014 the epic's remediated plan surfaces no low-priority delivered-child findings for the floor to drop, so it correctly no-ops, fail-safe-to-keep). The floor's DROP behavior (that it does drop qualifying findings) is proven by the calibration gold-set (30/30 floor decisions correct, \u03ba=1.0, zero must-never-suppress drops \u2014 docs/calibration/completion_floor.md) and the e2e test `tests/unit/test_completion_floor_e2e.py`.\n- [ ] `make lint && make typecheck && make test` pass (the floor's existing unit/e2e tests stay green).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Enable verify.completion_floor_active in this project (dogfood) + monitoring"
+      },
       "created_at": "2026-08-15T15:10:48Z",
       "jira_key": "REB-1102",
+      "peer_parent": "REB-1093",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:48Z"
     },
@@ -29697,8 +29800,16 @@
       "updated_at": "2026-08-15T15:10:49Z"
     },
     "c3c9-fd78-55aa-409e": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\n\nA cluster of low-severity hygiene items from the 2026-06-18 audit: a confirmed dead parallel implementation (~207 LOC), a latent boolean trap, an inconsistent HTTP-status access pattern, a missing `__all__` entry, and two stale internal annotations. Grouped into one low-risk pass.\n\n## What\n\nDelete confirmed dead code; make `reduce_all_tickets`'s booleans keyword-only; consolidate the inconsistent HTTP-status access in the reconciler; add `attach_commits` to `rebar.__all__`; and annotate two previously-flagged (benign) sites.\n\n## Scope\n\n- `_engine_support/bridge_fsck.py` (delete dead `enumerate_*`).\n- `reducer/_api.py` (`reduce_all_tickets` keyword-only).\n- `_engine/rebar_reconciler/_errors.py`, `apply_outbound.py`, `batch_dispatch.py` (HTTP status).\n- `__init__.py` (`attach_commits` in `__all__`).\n- `config.py`, `_engine_support/resolver.py` (annotations).\n\n## Delivery notes (deviations recorded honestly)\n\n- **HTTP status:** consolidated the genuine cross-convention inconsistency (the\n  `JiraAPIError` sites + the ad-hoc `getattr(status_code) or getattr(code)` normalizer)\n  via `_errors.http_status`/`is_not_found`. Left `outbound_differ.py:107` as-is \u2014 it\n  catches `urllib.HTTPError` specifically (so `.code` is correct) and deliberately has\n  no top-level reconciler imports. A broader \"name every HTTP literal everywhere\" sweep\n  is left as an optional future cleanup.\n- **`__all__` sort:** added `attach_commits`, but did NOT blanket-sort the `__all__`\n  lists \u2014 `rebar.__all__` is intentionally grouped with section comments and RUF022 is\n  not in the project's ruff gate, so a forced alphabetical sort would harm curation for\n  no gated benefit.\n\n## Acceptance Criteria\n\n- [x] The four `bridge_fsck.enumerate_*` functions are deleted (~207 LOC);\n  `audit_bridge_mappings` and the bridge tests still pass; no dangling references.\n- [x] `reduce_all_tickets`'s three booleans are keyword-only (`*` added); full reducer\n  suite green.\n- [x] Reconciler HTTP-status checks at the inconsistent `JiraAPIError`/normalizer sites\n  use the shared `http_status`/`is_not_found` helpers (one consistent access form);\n  reconciler apply/orchestrate suites pass.\n- [x] `attach_commits` is in `rebar.__all__` (blanket RUF022 sort intentionally skipped\n  \u2014 see delivery notes).\n- [x] `config._CLI_OVERRIDES` carries a \"CLI-only, not set under MCP\" note;\n  `resolver.py`'s function-local `_alias` import carries the circular-dep note.\n- [x] ruff clean on all changed files; affected suites green.\n</content>",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "Dead-code removal + low-severity hygiene cleanups"
+      },
       "created_at": "2026-08-15T15:10:50Z",
       "jira_key": "REB-304",
+      "peer_parent": "REB-365",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:50Z"
     },
@@ -29862,14 +29973,44 @@
       "updated_at": "2026-08-15T15:10:56Z"
     },
     "c557-8f46-0c16-4bf5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe record/fold path (S2) and read surface (S3) handle a single opaque session id, but a bare session id collides across tools (Claude Code, OpenCode, Codex, Cursor). To make the feature genuinely multi-harness, claims must also record WHICH harness produced the id, and the resolver must recognise the other OSS harness session vars.\n\n## What\n- **Resolver var-list extension (`src/rebar/_commands/session_id.py`).** Extend\n  `_SESSION_ID_VARS` with the OSS harness var OpenCode ships, in popularity order between the\n  Claude and ambient vars:\n  `REBAR_SESSION_ID -> CLAUDE_CODE_SESSION_ID -> OPENCODE_SESSION_ID -> SESSION_ID`.\n  **Codex is deliberately NOT added as a native var:** story 7656 establishes that Codex\n  exposes no supported readable session env var, so it is covered by its SessionStart shim\n  exporting `REBAR_SESSION_ID` (not a `CODEX_THREAD_ID`). SAFETY: an absent or unrecognised var\n  simply falls through (the resolver skips unset vars), so it degrades to a lower-precedence\n  var or `None` \u2014 never an error.\n- **Harness provenance tag.** Add `resolve_harness()` returning the opaque, rebar-owned\n  `AI_AGENT` env var (verbatim, never interpolated) or `None`. `AI_AGENT` is rebar's\n  harness-provenance convention, holding e.g. `claude-code_<ver>` / `opencode` / `codex` /\n  `cursor`. **Population contract (closes the DOA gap):** the capture shims in stories S4\n  (ec5c) and S6 (7656) are extended by THIS epic to export `AI_AGENT` alongside\n  `REBAR_SESSION_ID`; until then `AI_AGENT` may also be set directly by an operator/hook. When\n  unset, `claim_harness` folds to `None` (no error) \u2014 the feature degrades gracefully.\n  On an `open -> in_progress` STATUS, stamp `data[\"harness\"]` when present; fold to\n  `state[\"claim_harness\"]`. Each provenance field folds `data.get(<its key>)` INDEPENDENTLY on\n  the edge (same fork-winner gating as `claimed_session`), so a re-claim clears `claim_harness`\n  to `None` iff `AI_AGENT` is absent for THAT claim \u2014 independent of whether a session id is\n  present.\n- **Secondary remote session.** Add `resolve_remote_session()` returning\n  `CLAUDE_CODE_REMOTE_SESSION_ID` or `None`; stamp `data[\"remote_session\"]` and fold to\n  `state[\"claim_remote_session\"]` (same gating). This is a secondary field, independent of the\n  primary `claimed_session`.\n- **State + schema + read surface.** Default `claim_harness` and `claim_remote_session` to\n  `None` in `make_initial_state`; enumerate both in `ticket_state.schema.json` and (as compact\n  keys `chn` / `rsn`) in `ticket_state_llm.schema.json` + `KEY_MAP` (+ docstring); add both to\n  the MCP `TicketStateOut` model; regenerate `types.py`. `rebar show` JSON includes them\n  automatically (state keys).\n- **Existing-test updates.** Update `tests/unit/test_session_id.py` for the extended list:\n  broaden its hardcoded `_ALL_VARS` tuple + autouse clear fixture to the 4 vars, and update\n  `test_docs_document_unified_contract`'s exact-string assertion to the extended ordered\n  contract (normalising whitespace so doc line-wrapping is irrelevant). Add an\n  `OPENCODE_SESSION_ID` precedence case, and a case asserting `CODEX_THREAD_ID` is NOT\n  recognised (Codex has no native var).\n- **Docs.** Extend `docs/config.md` (the ordered var list + `AI_AGENT` +\n  `CLAUDE_CODE_REMOTE_SESSION_ID`) and `docs/event-schema.md` (the `harness` / `remote_session`\n  data keys -> `claim_harness` / `claim_remote_session` state). Env-var name provenance:\n  `OPENCODE_SESSION_ID` (OpenCode-shipped) and `CODEX_THREAD_ID` (Codex convention) come from\n  the epic OSS survey (Codex has no readable var, hence no `CODEX_THREAD_ID`); because an\n  unrecognised name simply falls through, a wrong guess degrades to a lower-precedence var or\n  `None` with no runtime error.\n\n## Scope\n- IN: resolver var-list extension + `resolve_harness` / `resolve_remote_session`; the write\n  stamps + reducer folds for `claim_harness` / `claim_remote_session`; state defaults; both\n  JSON schemas + `types.py` regen + `to_llm` keys + MCP model; docs; the existing\n  `test_session_id.py` updates AND a NEW `tests/unit/test_harness_provenance.py` module.\n- OUT: the per-harness CAPTURE shims that POPULATE `REBAR_SESSION_ID` / `AI_AGENT` \u2014 Claude\n  Code (S4 / ec5c) and Codex + Cursor (S6 / 7656), both extended by this epic to also export\n  `AI_AGENT`. This story is the store/record side only.\n\n## Acceptance Criteria\n- [ ] `resolve_session_id()` recognises `OPENCODE_SESSION_ID` at its precedence, and does NOT\n      recognise `CODEX_THREAD_ID` (Codex has no native var). Proof:\n      `pytest tests/unit/test_session_id.py -k \"opencode or codex\" -q`.\n- [ ] A claim records `claim_harness` (from `AI_AGENT`) in compiled state, distinguishing the\n      source tool; absent `AI_AGENT` -> `None`. Proof:\n      `pytest tests/unit/test_harness_provenance.py -k harness -q`.\n- [ ] `CLAUDE_CODE_REMOTE_SESSION_ID`, when set, is captured as `claim_remote_session`. Proof:\n      `pytest tests/unit/test_harness_provenance.py -k remote -q`.\n- [ ] Both fields default to `None` in `make_initial_state`, are enumerated in\n      `ticket_state.schema.json` + `ticket_state_llm.schema.json` (`chn` / `rsn`), and appear\n      in `TicketStateOut`; `types.py` is not stale. Proof:\n      `pytest tests/unit/test_harness_provenance.py -k \"schema or read\" -q` and\n      `pytest tests/interfaces/contracts/test_public_types.py -q`.\n- [ ] Fork-winner + session-less-clear semantics apply to both new fields (never the loser's;\n      cleared to `None` on a provenance-less re-claim). Proof:\n      `pytest tests/unit/test_harness_provenance.py -k fork -q`.\n- [ ] `docs/config.md` and `docs/event-schema.md` document the extended var list, `AI_AGENT`,\n      and the two new fields. Proof: `pytest tests/unit/test_harness_provenance.py -k docs -q`\n      asserts `docs/config.md` contains `AI_AGENT` and `OPENCODE_SESSION_ID` (Codex has no\n      readable var, so there is intentionally no `CODEX_THREAD_ID`), AND `docs/event-schema.md`\n      contains `claim_harness` and `claim_remote_session`.\n- [ ] The existing `test_session_id.py` is updated for the extended list and stays green\n      (4-var `_ALL_VARS` + clear fixture; unified-contract doc assertion updated). Proof:\n      `pytest tests/unit/test_session_id.py -q`.\n- [ ] A NEW `tests/unit/test_harness_provenance.py` module is created covering the resolvers,\n      write-stamp/fold, fork-winner + provenance-less-clear, schemas + read surface, and docs.\n\n## Depends on\n- S2 (68ef) record/fold path + S3 (199b) read surface \u2014 landed in this stack.",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "Multi-harness session capture: extend resolver var-list + record harness provenance tag"
+      },
       "created_at": "2026-08-15T15:10:57Z",
       "jira_key": "REB-802",
+      "peer_parent": "REB-544",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:57Z"
     },
     "c593-f058-c488-406c": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Reproduction Steps\nDiscovered during the fix for dying-verastile-quelea (the observability probe going stale). `install-certbot-timer.sh` materializes a host artifact (systemd timer + any /usr/local/bin helper) OUTSIDE the compose build context, exactly like `install-observability.sh`. The autodeploy loop only rebuilds the review-bot container (BOT_PATHS) and now re-materializes the observability probe (OBS_PATHS); it does NOT refresh the certbot timer when `infra/scripts/install-certbot-timer.sh` changes.\n\n1. Change `infra/scripts/install-certbot-timer.sh` and land it.\n2. autodeploy advances `main` on the box but never re-runs the certbot installer.\n\n## Expected vs Actual\n- **Expected:** a change to the certbot-timer installer is materialized on the box on next deploy.\n- **Actual:** the installed certbot timer silently goes stale (same class as the observability bug).\n\n## Acceptance Criteria\n- [ ] autodeploy re-materializes the certbot timer when `infra/scripts/install-certbot-timer.sh`\n      (or its inputs) change between deployed..target \u2014 e.g. add it to a host-materialize trigger.\n- [ ] A hermetic regression test asserts the installer is re-invoked on a certbot-source change.\n- [ ] Decide + document whether `install-autodeploy.sh` (autodeploy's own installer / self-update)\n      should also be covered, or is deliberately excluded.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "autodeploy does not re-materialize the certbot-timer host artifact on source change (sibling of dying-verastile-quelea)"
+      },
       "created_at": "2026-08-15T15:10:57Z",
       "jira_key": "REB-933",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:57Z"
     },
@@ -39616,6 +39757,7 @@
     "REB-3109": "4bfe-2829-1c56-48d1",
     "REB-311": "c9be-211c-7c4e-4528",
     "REB-3110": "bbb7-812e-4fe4-465d",
+    "REB-3111": "9c72-c44a-3421-45ad",
     "REB-312": "ca03-5f3e-df5d-45c2",
     "REB-313": "ca73-856c-e5e0-4771",
     "REB-314": "cd73-6b68-3806-4bf8",
