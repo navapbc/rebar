@@ -99,16 +99,13 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     # Seed deployed-sha so this is neither first-run nor up-to-date.
     (state / "deployed-sha").write_text(_DEPLOYED + "\n")
 
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    env.update(
-        {
-            "STATE_DIR": str(state),
-            "DEPLOY_REPO": str(deploy_repo),
-            "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
-            "MIRROR_DIR": str(mirror),
-        }
-    )
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "STATE_DIR": str(state),
+        "DEPLOY_REPO": str(deploy_repo),
+        "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
+        "MIRROR_DIR": str(mirror),
+    }
     return {
         "env": env,
         "cmd_log": cmd_log,

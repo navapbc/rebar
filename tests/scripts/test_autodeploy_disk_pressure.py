@@ -104,16 +104,13 @@ def box(tmp_path: Path) -> dict[str, object]:
     _stub(bin_dir, "flock", "exit 0")
     _stub(bin_dir, "timeout", 'shift; exec "$@"')
 
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    env.update(
-        {
-            "STATE_DIR": str(state),
-            "DEPLOY_REPO": str(deploy_repo),
-            "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
-            "MIRROR_DIR": str(mirror),
-        }
-    )
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "STATE_DIR": str(state),
+        "DEPLOY_REPO": str(deploy_repo),
+        "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
+        "MIRROR_DIR": str(mirror),
+    }
     return {
         "env": env,
         "cmd_log": cmd_log,
