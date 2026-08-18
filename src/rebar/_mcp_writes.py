@@ -226,41 +226,69 @@ def register_write_tools(mcp, ctx) -> None:
         current_status: str,
         target_status: str,
         close_class: str = "",
+        force: str | None = None,
+        caused_by: str = "",
+        ref: str | None = None,
     ) -> dict:
         """Transition a ticket's status (optimistic concurrency). Returns the
         engine result {ticket_id, from, to, newly_unblocked}.
 
         ``open -> in_progress`` starts work and is gated by the plan-review gate
         (``verify.require_plan_review_for_claim``) exactly like ``claim_ticket``.
-        As with ``claim_ticket``, there is intentionally NO ``force`` bypass over
-        MCP — an agent that hits the gate must earn an attestation
-        (``review_plan``); the audited ``--force`` override is CLI/library-only.
+        ``force`` supplies the operator's audit reason while bypassing whichever gate
+        applies to this transition: the start-work gate or the completion-close gate.
+        Only ``null`` means no bypass; an empty string is a present bypass and the
+        shared core records its audit-safe placeholder. When force replaces otherwise-
+        required certification, the absent certified attestation is the durable audit
+        signal.
 
         ``close_class`` is REQUIRED to close a ``bug`` ticket (any ``*->closed``
         from a non-``idea`` status): pass one of the bounded classification values
         (``regression``, ``plan_defect``, ``env_integration``, ``flaky``,
         ``preexisting``, ``not_a_bug``, ``duplicate``, ``escalated``,
         ``undetermined``). It is IGNORED for non-bug closes and for non-closing
-        transitions. There is deliberately NO ``force`` bypass — the no-force MCP
-        policy stays; a bug close without a valid ``close_class`` is refused."""
+        transitions. Force does not relax this classification invariant: a bug
+        close without a valid ``close_class`` is refused.
+
+        ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects
+        the committed tree used by completion verification; it defaults to HEAD."""
         _shadow("mcp.write.transition_ticket")
         return _with_push(
             cast(
                 "dict[str, Any]",
-                rebar.transition(ticket_id, current_status, target_status, close_class=close_class),
+                rebar.transition(
+                    ticket_id,
+                    current_status,
+                    target_status,
+                    close_class=close_class,
+                    force=force,
+                    caused_by=caused_by,
+                    ref=ref,
+                ),
             )
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def claim_ticket(ticket_id: str, assignee: str | None = None) -> ClaimResultOut:
+    def claim_ticket(
+        ticket_id: str,
+        assignee: str | None = None,
+        force: str | None = None,
+    ) -> ClaimResultOut:
         """Atomically claim an OPEN ticket (-> in_progress + assignee).
 
         Raises a tool error (ConcurrencyError) if the ticket is not open —
-        i.e. another agent already claimed it.
+        i.e. another agent already claimed it. ``force`` supplies the reason for
+        bypassing the plan-review gate; when it replaces certification, the absent
+        certified attestation is the durable audit signal.
         """
         _shadow("mcp.write.claim_ticket")
         return ClaimResultOut.model_validate(
-            _with_push(cast("dict[str, Any]", rebar.claim(ticket_id, assignee=assignee)))
+            _with_push(
+                cast(
+                    "dict[str, Any]",
+                    rebar.claim(ticket_id, assignee=assignee, force=force),
+                )
+            )
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])

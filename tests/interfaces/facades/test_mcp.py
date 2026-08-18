@@ -16,7 +16,10 @@ pytest.importorskip("mcp")
 import asyncio
 import importlib.util
 
+from mcp.server.fastmcp.exceptions import ToolError
+
 import rebar
+import rebar.llm
 from rebar.mcp_server import build_server
 
 
@@ -535,3 +538,172 @@ def test_mcp_transition_closes_bug_with_close_class(rebar_repo) -> None:
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["status"] == "closed"
     assert state.get("close_class") == "regression"
+
+
+def test_mcp_transition_records_explicit_caused_by_edge(rebar_repo) -> None:
+    culprit = rebar.create_ticket("task", "culprit", repo_root=str(rebar_repo))
+    bug = rebar.create_ticket("bug", "attributed bug", repo_root=str(rebar_repo))
+    asyncio.run(
+        build_server().call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": bug,
+                "current_status": "open",
+                "target_status": "closed",
+                "close_class": "preexisting",
+                "caused_by": culprit,
+            },
+        )
+    )
+    deps = rebar.show_ticket(bug, repo_root=str(rebar_repo))["deps"]
+    assert any(dep["relation"] == "caused_by" and dep["target_id"] == culprit for dep in deps)
+
+
+def test_mcp_transition_ref_targets_and_signs_requested_commit(rebar_repo, monkeypatch) -> None:
+    from interfaces.lifecycle.test_close_ref_target_80af import (
+        _enable_completion_gate,
+        _make_stack,
+        _stub_verifier,
+    )
+
+    _enable_completion_gate(rebar_repo)
+    story, story_sha, head_sha = _make_stack(rebar_repo)
+    assert story_sha != head_sha
+    calls: list[dict] = []
+    _stub_verifier(monkeypatch, calls)
+
+    asyncio.run(
+        build_server().call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": story,
+                "current_status": "in_progress",
+                "target_status": "closed",
+                "ref": story_sha,
+            },
+        )
+    )
+    assert calls and calls[-1]["ref"] == story_sha
+    signature = rebar.verify_signature(story, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert signature["verdict"] == "certified"
+    assert signature["verified_at_sha"] == story_sha
+
+
+@pytest.mark.parametrize(
+    ("force", "forced", "audit_reason"),
+    [
+        (None, False, None),
+        ("operator bypass", True, "operator bypass"),
+        ("", True, "(no reason given)"),
+    ],
+)
+def test_mcp_start_work_force_matches_claim_semantics(
+    rebar_repo, force: str | None, forced: bool, audit_reason: str | None
+) -> None:
+    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    server = build_server()
+    transition_ticket = rebar.create_ticket("task", "transition force", repo_root=str(rebar_repo))
+    claim_ticket = rebar.create_ticket("task", "claim force", repo_root=str(rebar_repo))
+
+    def transition_call():
+        return server.call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": transition_ticket,
+                "current_status": "open",
+                "target_status": "in_progress",
+                "force": force,
+            },
+        )
+
+    def claim_call():
+        return server.call_tool(
+            "claim_ticket",
+            {"ticket_id": claim_ticket, "force": force},
+        )
+
+    if forced:
+        asyncio.run(transition_call())
+        asyncio.run(claim_call())
+    else:
+        with pytest.raises(ToolError):
+            asyncio.run(transition_call())
+        with pytest.raises(ToolError):
+            asyncio.run(claim_call())
+
+    transition_state = rebar.show_ticket(transition_ticket, repo_root=str(rebar_repo))
+    claim_state = rebar.show_ticket(claim_ticket, repo_root=str(rebar_repo))
+    expected_status = "in_progress" if forced else "open"
+    assert transition_state["status"] == claim_state["status"] == expected_status
+    transition_comments = " ".join(c["body"] for c in transition_state["comments"])
+    claim_comments = " ".join(c["body"] for c in claim_state["comments"])
+    if audit_reason is None:
+        assert "FORCE_CLAIM" not in transition_comments
+        assert "FORCE_CLAIM" not in claim_comments
+    else:
+        assert "FORCE_CLAIM" in transition_comments and audit_reason in transition_comments
+        assert "FORCE_CLAIM" in claim_comments and audit_reason in claim_comments
+
+
+@pytest.mark.parametrize(
+    ("force", "forced", "audit_reason"),
+    [
+        (None, False, None),
+        ("completion override", True, "completion override"),
+        ("", True, "(no reason given)"),
+    ],
+)
+def test_mcp_transition_force_drives_completion_bypass(
+    rebar_repo,
+    monkeypatch: pytest.MonkeyPatch,
+    force: str | None,
+    forced: bool,
+    audit_reason: str | None,
+) -> None:
+    verifier_calls: list[str] = []
+
+    def fail_verification(ticket_id: str, **_kwargs):
+        verifier_calls.append(ticket_id)
+        return {
+            "verdict": "FAIL",
+            "runner": "fake",
+            "model": "fake",
+            "findings": [
+                {
+                    "criterion": "AC1",
+                    "detail": "missing",
+                    "severity": "high",
+                    "dimension": "completion",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(rebar.llm, "verify_completion", fail_verification)
+    ticket = rebar.create_ticket("task", "completion force", repo_root=str(rebar_repo))
+    rebar.claim(ticket, repo_root=str(rebar_repo))
+    (rebar_repo / "rebar.toml").write_text(
+        "[verify]\nrequire_completion_verification_for_close = true\n"
+    )
+    call = build_server().call_tool(
+        "transition_ticket",
+        {
+            "ticket_id": ticket,
+            "current_status": "in_progress",
+            "target_status": "closed",
+            "force": force,
+        },
+    )
+    if forced:
+        asyncio.run(call)
+    else:
+        with pytest.raises(ToolError):
+            asyncio.run(call)
+
+    state = rebar.show_ticket(ticket, repo_root=str(rebar_repo))
+    assert state["status"] == ("closed" if forced else "in_progress")
+    assert verifier_calls == ([] if forced else [ticket])
+    audit = " ".join(c["body"] for c in state["comments"])
+    if audit_reason is None:
+        assert "FORCE_CLOSE" not in audit
+    else:
+        assert "FORCE_CLOSE" in audit and audit_reason in audit
