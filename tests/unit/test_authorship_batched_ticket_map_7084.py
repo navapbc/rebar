@@ -198,6 +198,26 @@ def _fixture_batched_map(
     )
 
 
+def _fixture_per_event_commit(
+    position: str,
+    ticket_dir: str,
+    *,
+    repo_root: str | None = None,
+    resolve: Callable[..., str | None] | None = None,
+) -> str:
+    """Resolve one fixture event, recovering from a transient fail-closed Git read."""
+    resolver = resolve or authorship.resolve_event_commit
+    for _attempt in range(5):
+        commit = resolver(position, ticket_dir, repo_root=repo_root)
+        if commit is not None:
+            return commit
+    repo = Path(ticket_dir).parent
+    raise AssertionError(
+        f"per-event commit for {position} remained unresolved after 5 attempts\n"
+        f"object-store forensics:\n{_forensics(repo)}"
+    )
+
+
 def test_batched_map_matches_the_per_event_resolver_for_every_event(tracker: Path) -> None:
     """The equivalence property: identical commit attribution for every event of a
     realistic ticket."""
@@ -208,8 +228,7 @@ def test_batched_map_matches_the_per_event_resolver_for_every_event(tracker: Pat
     assert len(positions) == 8  # 2 base + 2 side + 2 mainline + 1 shared + 1 post-merge
 
     for position in positions:
-        expected = authorship.resolve_event_commit(position, ticket_dir)
-        assert expected is not None, position
+        expected = _fixture_per_event_commit(position, ticket_dir)
         assert batched.get(position) == expected, position
 
 
@@ -220,14 +239,21 @@ def test_fixture_batched_map_recovers_from_one_transient_git_read(
     """A one-shot process/Git transient must not fail the fixture equivalence oracle."""
     real_run = subprocess.run
     broad_calls = 0
+    narrow_calls = 0
 
     def transient_once(cmd, *args, **kwargs):
-        nonlocal broad_calls
+        nonlocal broad_calls, narrow_calls
         is_broad = isinstance(cmd, list) and "--format=%x1e%H" in cmd
-        if not is_broad:
+        is_narrow = isinstance(cmd, list) and "--format=%H" in cmd and "--format=%x1e%H" not in cmd
+        if not is_broad and not is_narrow:
             return real_run(cmd, *args, **kwargs)
-        broad_calls += 1
-        if broad_calls == 1:
+        if is_broad:
+            broad_calls += 1
+            transient = broad_calls == 1
+        else:
+            narrow_calls += 1
+            transient = narrow_calls == 1
+        if transient:
             if mode == "rc128":
                 return subprocess.CompletedProcess(
                     cmd, 128, stdout="", stderr="fatal: transient read"
@@ -246,7 +272,8 @@ def test_fixture_batched_map_recovers_from_one_transient_git_read(
     assert broad_calls == 2
     assert set(batched) == set(positions)
     for position in positions:
-        assert batched[position] == authorship.resolve_event_commit(position, ticket_dir)
+        assert batched[position] == _fixture_per_event_commit(position, ticket_dir)
+    assert narrow_calls == len(positions) + 1
 
 
 def test_fixture_batched_map_persistent_failure_is_bounded_and_diagnostic(
@@ -270,6 +297,30 @@ def test_fixture_batched_map_persistent_failure_is_bounded_and_diagnostic(
     assert "count-objects -v:" in str(exc.value)
 
 
+def test_fixture_per_event_failure_is_bounded_and_diagnostic(tracker: Path) -> None:
+    """Persistent per-event failure stays finite and retains object-store evidence."""
+    calls = 0
+
+    def always_unresolved(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return None
+
+    with pytest.raises(
+        AssertionError,
+        match="per-event commit for 1000-aaaa1111 remained unresolved after 5 attempts",
+    ) as exc:
+        _fixture_per_event_commit(
+            "1000-aaaa1111",
+            str(tracker / TICKET),
+            resolve=always_unresolved,
+        )
+
+    assert calls == 5
+    assert "fsck --full:" in str(exc.value)
+    assert "count-objects -v:" in str(exc.value)
+
+
 def test_the_off_first_parent_add_is_resolved_to_the_older_side_branch_commit(
     tracker: Path,
 ) -> None:
@@ -280,7 +331,7 @@ def test_the_off_first_parent_add_is_resolved_to_the_older_side_branch_commit(
     position = "1500-shared01"
 
     batched = _fixture_batched_map(ticket_dir)[position]
-    per_event = authorship.resolve_event_commit(position, ticket_dir)
+    per_event = _fixture_per_event_commit(position, ticket_dir)
     assert batched == per_event
 
     # It is genuinely off the first-parent chain: the simplified history answers with a
@@ -334,11 +385,8 @@ def test_ledger_attribution_is_unchanged_by_the_batching(
     # The OLD attribution, computed the way the pre-R1 loop did it.
     for entry in ledger:
         position = entry["position"]["position"]
-        expected = authorship.resolve_event_commit(position, str(ticket_dir))
-        if expected is None:
-            expected = authorship.resolve_position_commit(position, str(tracker))
+        expected = _fixture_per_event_commit(position, str(ticket_dir))
         assert entry["position"]["commit_sha"] == expected, position
-        assert expected is not None
 
 
 def test_batching_costs_one_git_walk_not_one_per_event(
