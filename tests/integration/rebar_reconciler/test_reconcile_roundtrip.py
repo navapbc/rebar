@@ -46,12 +46,39 @@ RECONCILER_DIR = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler"
 
 
 def _load_module(name: str, path: Path) -> ModuleType:
+    cached = sys.modules.get(name)
+    if cached is not None and getattr(cached, "__file__", None) == str(path):
+        return cached
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
     return mod
+
+
+def test_by_path_loader_preserves_module_identity_for_the_same_source(tmp_path: Path) -> None:
+    """One module object per canonical name/source pair; a different source replaces it."""
+    key = "_roundtrip_loader_identity_probe"
+    first_path = tmp_path / "first.py"
+    second_path = tmp_path / "second.py"
+    first_path.write_text("MARKER = 'first'\n", encoding="utf-8")
+    second_path.write_text("MARKER = 'second'\n", encoding="utf-8")
+
+    try:
+        first = _load_module(key, first_path)
+        same = _load_module(key, first_path)
+
+        assert same is first
+        assert sys.modules[key] is first
+
+        replacement = _load_module(key, second_path)
+
+        assert replacement is not first
+        assert replacement.MARKER == "second"
+        assert sys.modules[key] is replacement
+    finally:
+        sys.modules.pop(key, None)
 
 
 # Ticket 4af8: the Jira->remote field mapper (``_map_local_to_jira_fields``) is no longer
