@@ -170,10 +170,16 @@ class JiraBackend:
         """This deployment's identity for ``remote_id``. Reads constructor state only."""
         return RemoteRef(vendor=self.vendor, instance=self.instance, remote_id=remote_id)
 
-    def __init__(self, transport: Any, instance: str = "") -> None:
+    def __init__(self, transport: Any, instance: str = "", *, scope: Any | None = None) -> None:
         self.transport = transport
-        #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``.
-        self.instance = instance
+        #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``
+        #: or derived from the captured scope's base URL (RP-04 S2) when not given.
+        self.instance = instance or (instance_from_base_url(scope.url) if scope is not None else "")
+        #: The CAPTURED reconciler settings (RP-04 S2). When present, the project
+        #: accessors and ``assert_env_ready`` answer from this frozen scope instead of
+        #: re-resolving ambient env/config on each access. ``None`` keeps the legacy
+        #: ambient-resolution behaviour (the read-only rollback facade).
+        self._scope = scope
         self.outbound = _JiraOutbound()
         self.inbound = _JiraInbound()
         self.sanitizer = _JiraSanitizer()
@@ -184,7 +190,11 @@ class JiraBackend:
     def project(self) -> str:
         """Effective write/create project, DIG-defaulted to match the create
         client (bug 4fa9). Resolved from settings, never the transport, so a
-        JiraBackend built with a fake transport still answers."""
+        JiraBackend built with a fake transport still answers. When the backend was
+        composed with a captured scope (RP-04 S2) that scope is authoritative and no
+        ambient re-resolution happens."""
+        if self._scope is not None:
+            return self._scope.project
         from rebar_reconciler.adapters.jira import acli_subprocess
 
         return acli_subprocess.resolve_jira_settings(project_default="DIG").project
@@ -192,7 +202,10 @@ class JiraBackend:
     @property
     def query_project(self) -> str:
         """Configured read/query project WITHOUT the create-time default — empty
-        when unset so the fetcher fails closed (bug 626d)."""
+        when unset so the fetcher fails closed (bug 626d). Answered from the captured
+        scope (RP-04 S2) when present, else re-resolved from ambient config."""
+        if self._scope is not None:
+            return self._scope.query_project
         from rebar_reconciler.adapters.jira import acli_subprocess
 
         return acli_subprocess.resolve_jira_settings().project
@@ -203,7 +216,14 @@ class JiraBackend:
         execution. Preserves the pre-97f2 bootstrap env-check contract (the
         historical env-driven client builder, since deleted): a clear error naming
         the missing var(s) rather than a cryptic downstream failure — raises the
-        neutral :class:`BackendEnvError` (subclasses ``RuntimeError``)."""
+        neutral :class:`BackendEnvError` (subclasses ``RuntimeError``). When composed
+        with a captured scope (RP-04 S2), the readiness check runs against that scope
+        rather than re-resolving ambient state."""
+        if self._scope is not None:
+            from rebar_reconciler.runtime import assert_cloud_scope_ready
+
+            assert_cloud_scope_ready(self._scope)
+            return
         from rebar_reconciler._backend import BackendEnvError
         from rebar_reconciler.adapters.jira import acli_subprocess
 
