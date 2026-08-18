@@ -61,10 +61,49 @@ def _cfg(**kw):
 
 def test_model_string_provider_inference():
     assert _pai_model(_cfg(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
-    assert _pai_model(_cfg(model="gpt-4o")) == "openai:gpt-4o"
+    assert _pai_model(_cfg(model="gpt-4o")) == "openai-chat:gpt-4o"
     # an explicit provider-qualified string is used verbatim
     assert _pai_model(_cfg(model="anthropic:claude-sonnet-4-6")) == "anthropic:claude-sonnet-4-6"
     assert _pai_model(_cfg(model="google-gla:gemini-2.5-flash")) == "google-gla:gemini-2.5-flash"
+
+
+@pytest.mark.parametrize(
+    ("model", "provider"),
+    [("gpt-4o", "openai"), ("openai:gpt-4o", None)],
+)
+def test_openai_targets_preserve_chat_completions_without_deprecation(model, provider):
+    """Inferred and legacy-explicit OpenAI inputs keep the current Chat Completions API."""
+    import warnings
+
+    from pydantic_ai._warnings import PydanticAIDeprecationWarning
+    from pydantic_ai.models import infer_model
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    from rebar.llm.providers import ProviderSession
+
+    cfg = _cfg(
+        model=model,
+        model_provider=provider,
+        base_url="http://localhost:1234/v1",
+        api_key="not-needed",
+    )
+    target = _pai_model(cfg)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", PydanticAIDeprecationWarning)
+        with ProviderSession(cfg) as session:
+            resolved = infer_model(target, provider_factory=session.provider_factory)
+
+    assert target == "openai-chat:gpt-4o"
+    assert isinstance(resolved, OpenAIChatModel)
+    assert str(resolved.provider.base_url).startswith("http://localhost:1234/v1")
+
+
+def test_model_class_openai_target_uses_explicit_chat_completions_prefix():
+    """Model-class and fallback composition share the unambiguous Chat target."""
+    from rebar.llm.model_classes import _resolve_target
+
+    assert _resolve_target("gpt-4o", "openai") == "openai-chat:gpt-4o"
+    assert _resolve_target("openai:gpt-4o", None) == "openai-chat:gpt-4o"
 
 
 # ── Runner selection ───────────────────────────────────────────────────────────

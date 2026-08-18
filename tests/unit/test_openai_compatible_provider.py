@@ -215,7 +215,7 @@ def test_missing_openai_extra_raises_naming_the_install_command(monkeypatch):
     cfg = _cfg(model="local-model", model_provider="openai", base_url="http://localhost:1234/v1")
     with ProviderSession(cfg) as session:
         with pytest.raises(LLMConfigError) as excinfo:
-            session.provider_factory("openai")
+            session.provider_factory("openai-chat")
     assert "openai" in str(excinfo.value)
 
 
@@ -279,15 +279,15 @@ def test_bare_openai_string_without_base_url_builds_no_provider():
     With no base_url rebar has nothing to inject, so it must NOT interpose a builder: the
     model stays a lazy STRING on S1's deferred path. Registering unconditionally would make
     the opt-in openai SDK a de facto requirement and would break the existing parameterized
-    ``openai:gpt-4o`` case that stubs ``_pai_structured`` so no provider is constructed."""
+    ``openai-chat:gpt-4o`` case that stubs ``_pai_structured`` so no provider is constructed."""
     from rebar.llm.providers import ProviderSession
 
     cfg = _cfg(model="gpt-4o", model_provider="openai")  # NO base_url
     with ProviderSession(cfg) as session:
-        assert session.supports("openai") is False, (
-            "without base_url the openai builder must not be registered"
+        assert session.supports("openai-chat") is False, (
+            "without base_url the openai-chat builder must not be registered"
         )
-        assert session.is_resolvable("openai") is True, (
+        assert session.is_resolvable("openai-chat") is True, (
             "it must still be resolvable, so it keeps S1's lazy model-string path"
         )
     assert list(getattr(session, "_closeables", [])) == []

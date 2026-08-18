@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # map (NOT per-provider behaviour) so the provider is chosen purely by the model string.
 _PAI_PROVIDER_PREFIX = {
     "anthropic": "anthropic",
-    "openai": "openai",
+    "openai": "openai-chat",
     "google_genai": "google-gla",
     "google": "google-gla",
 }
@@ -190,11 +190,14 @@ def _build_retrying_anthropic_model(
 
 def _pai_model(cfg: LLMConfig):
     """The Pydantic AI model string for ``cfg`` (provider-qualified). If ``cfg.model``
-    already carries a ``provider:`` prefix it is used verbatim; otherwise the provider
-    is inferred (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's
-    prefix — no per-provider code, the string is the only switch."""
+    already carries a ``provider:`` prefix it is preserved, except that legacy
+    ``openai:`` is made explicit as ``openai-chat:``. Otherwise the provider is inferred
+    (or taken from ``cfg.model_provider``) and mapped to Pydantic AI's prefix — no
+    per-provider construction code, the string is the only switch."""
     m = cfg.model
     if ":" in m:
+        if m.startswith("openai:"):
+            return f"openai-chat:{m.split(':', 1)[1]}"
         return m
     from rebar.llm.config import infer_provider
 

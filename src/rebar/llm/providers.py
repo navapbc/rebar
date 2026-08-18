@@ -94,7 +94,7 @@ class ProviderSession:
             "anthropic": self._build_anthropic,
             "bedrock": self._build_bedrock,
         }
-        # The `openai` builder is registered ONLY when `cfg.base_url` is set (story S4):
+        # The OpenAI Chat builder is registered ONLY when `cfg.base_url` is set (story S4):
         # with no base_url, rebar has nothing to contribute (no endpoint to inject, no key
         # to place, no profile to override), so it must NOT interpose — the model stays a
         # lazy STRING on the deferred path `is_resolvable()` already provides, exactly as
@@ -103,6 +103,7 @@ class ProviderSession:
         # `_pai_structured` so no provider is ever constructed there.
         if cfg.base_url:
             self._builders["openai"] = self._build_openai
+            self._builders["openai-chat"] = self._build_openai
 
     def supports(self, provider_name: str) -> bool:
         """True if ``provider_name`` has a rebar builder registered on this session."""
@@ -127,7 +128,7 @@ class ProviderSession:
         2. Otherwise, if pydantic-ai itself recognizes the name (``is_resolvable``),
            delegate to its OWN default resolution (``pydantic_ai.providers.infer_provider``
            — the same function ``infer_model``'s ``provider_factory`` parameter
-           defaults to). This is what keeps ``openai:``/``google-gla:``/... working:
+           defaults to). This is what keeps ``openai-chat:``/``google-gla:``/... working:
            rebar registers no builder for them, so they get exactly what pydantic-ai
            would have built anyway — no new capability, no regression.
         3. Neither resolves it -> a genuine unknown/misspelled provider name, which
@@ -147,7 +148,11 @@ class ProviderSession:
         builder = self._builders.get(provider_name)
         # A per-candidate endpoint (task cc33) is rebar's to inject, so it registers the
         # OpenAI-compatible builder for this build even when `cfg.base_url` is unset.
-        if builder is None and provider_name == "openai" and self._endpoint_override:
+        if (
+            builder is None
+            and provider_name in {"openai", "openai-chat"}
+            and self._endpoint_override
+        ):
             builder = self._build_openai
         if builder is not None:
             return builder(provider_name)

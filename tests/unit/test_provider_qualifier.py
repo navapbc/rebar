@@ -74,9 +74,10 @@ def test_the_class_table_end_to_end_qualifies_a_bedrock_id(model):
 )
 def test_an_already_qualified_string_is_returned_unchanged(already):
     provider = already.split(":", 1)[0]
-    assert _resolve_target(already, provider) == already
+    expected = already.replace("openai:", "openai-chat:", 1) if provider == "openai" else already
+    assert _resolve_target(already, provider) == expected
     # …and also when NO provider is configured, so inference cannot double-prefix either.
-    assert _resolve_target(already, None) == already
+    assert _resolve_target(already, None) == expected
 
 
 # ── infer_provider must agree with the qualifier on every shape ──────────────────────────────
@@ -116,7 +117,7 @@ def test_infer_provider_does_not_mistake_a_version_suffix_for_a_qualifier(model)
     ("model", "expected"),
     [
         ("claude-opus-4-8", "anthropic:claude-opus-4-8"),  # inferred by name prefix
-        ("gpt-4o", "openai:gpt-4o"),
+        ("gpt-4o", "openai-chat:gpt-4o"),
     ],
 )
 def test_inference_still_qualifies_a_bare_known_model(model, expected):
@@ -151,6 +152,12 @@ def test_a_matching_inline_qualifier_is_not_a_conflict():
     """The control: agreement must stay silent and must not double-prefix."""
     assert _resolve_target(f"bedrock:{_VERSIONED}", "bedrock") == f"bedrock:{_VERSIONED}"
     assert _resolve_target("anthropic:claude-opus-4-8", "anthropic") == "anthropic:claude-opus-4-8"
+
+
+@pytest.mark.parametrize("provider", ["openai", "openai-chat"])
+@pytest.mark.parametrize("model", ["openai:gpt-4o", "openai-chat:gpt-4o"])
+def test_openai_provider_aliases_resolve_to_explicit_chat_completions(model, provider):
+    assert _resolve_target(model, provider) == "openai-chat:gpt-4o"
 
 
 def test_the_conflict_is_raised_not_silently_resolved():
