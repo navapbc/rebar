@@ -88,6 +88,106 @@ def attempts_note(result: dict[str, Any]) -> str:
     )
 
 
+def _manifest_value(manifest: list, field: str) -> str | None:
+    """Return a value from an authenticated ``field: value`` manifest step."""
+    prefix = field + ":"
+    for step in manifest:
+        text = str(step)
+        if text.startswith(prefix):
+            return text.split(":", 1)[1].strip() or None
+    return None
+
+
+def _reusable_attested_pass(ticket_id: str, *, ref: str | None, repo_root) -> dict[str, Any] | None:
+    """Return a close-compatible PASS for a still-current same-ref completion op-cert.
+
+    This is deliberately stricter than completion validity-on-read: a close may reuse only a
+    cryptographically certified op-cert carrying an explicit authenticated SHA and material
+    fingerprint, both of which still exactly match the close input.  Any absent, legacy,
+    malformed, stale, or unreadable input returns ``None`` so the normal verifier runs.
+    """
+    try:
+        from rebar import _reads, signing
+        from rebar._snapshot.repo_snapshot import resolve_ref
+        from rebar.llm.plan_review import attest
+
+        state = _reads.show_ticket(ticket_id, repo_root=repo_root)
+        if state.get("status") != "in_progress":
+            return None
+
+        certified = signing.verify_signature(
+            ticket_id, kind="completion-verifier", repo_root=repo_root
+        )
+        if certified.get("verified") is not True or certified.get("opcert") is not True:
+            return None
+
+        # Legacy op-certs predate manifest binding; their plaintext mirror is not enough to
+        # prove a PASS assertion.  Reuse requires the manifest extracted from the signed DSSE
+        # predicate itself, never ``_authoritative_manifest``'s compatibility fallback.
+        if not isinstance(certified.get("signed_manifest"), list):
+            return None
+        manifest = attest._authoritative_manifest(certified)
+        if not manifest or str(manifest[0]).strip() != "completion-verifier: PASS":
+            return None
+
+        # Require the explicit pin from the authenticated manifest.  The op-cert's signed
+        # merged-log commit must agree too; accepting its implicit HEAD fallback would let an
+        # old/missing verified-at-sha manifest qualify accidentally.
+        signed_sha = signing.verified_at_sha_from_manifest(manifest)
+        authenticated_head = attest._authoritative_head(certified)
+        if not signed_sha or signed_sha != authenticated_head:
+            return None
+        root = str(repo_root) if repo_root is not None else None
+        target_sha = resolve_ref(ref or "HEAD", root, fetch=False)
+        if target_sha != signed_sha:
+            return None
+
+        signed_material = attest._authoritative_material(certified)
+        if not signed_material:
+            return None
+        current_material = attest.current_material_fingerprint(ticket_id, repo_root=repo_root)
+        if not current_material or current_material != signed_material:
+            return None
+
+        last_reopened = state.get("last_reopened_at")
+        signed_at = certified.get("signed_at")
+        if last_reopened is not None and (signed_at is None or signed_at <= last_reopened):
+            return None
+
+        resolved_id = str(state.get("ticket_id") or ticket_id)
+        result: dict[str, Any] = {
+            "verdict": "PASS",
+            "ticket_id": resolved_id,
+            "criteria": [],
+            "findings": [],
+            "summary": "Reused a certified completion PASS for the unchanged close ref.",
+            "target": {"kind": "ticket", "ticket_ids": [resolved_id]},
+            "reviewers": ["completion-verifier"],
+            "runner": "reused",
+            "model": _manifest_value(manifest, "model"),
+            "source": "attested",
+            "certifiable": True,
+            "verified_at_sha": target_sha,
+            "coverage": {"llm_ran": False, "attestation_reused": True},
+        }
+        prior_runner = _manifest_value(manifest, "runner")
+        if prior_runner:
+            result["reuse_provenance"] = {"runner": prior_runner, "model": result["model"]}
+        logger.info(
+            "completion verification reused for %s: certified PASS remains current at %s",
+            ticket_id,
+            target_sha,
+        )
+        return result
+    except Exception:  # any unreadable reuse input must run the verifier
+        logger.warning(
+            "completion attestation reuse check failed for %s; running a full verification",
+            ticket_id,
+            exc_info=True,
+        )
+        return None
+
+
 def verify_with_auto_resume(
     ticket_id: str, *, ref: str | None, repo_root, cfg_root: str | None
 ) -> dict[str, Any]:
@@ -106,6 +206,10 @@ def verify_with_auto_resume(
     verdict keeps its exact prior shape (no trail key)."""
     from rebar import llm  # LAZY — preserves the core optionality contract
     from rebar.llm import completion_reconcile
+
+    reused = _reusable_attested_pass(ticket_id, ref=ref, repo_root=repo_root)
+    if reused is not None:
+        return reused
 
     max_resumes = _max_resumes(cfg_root)
     trail: list[dict[str, Any]] = []
