@@ -37,7 +37,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -52,6 +52,10 @@ from rebar.review_bot.config import (
     shutdown_cancel_seconds,
     shutdown_drain_seconds,
 )
+from rebar.review_bot.startup import compose_startup_binding
+
+if TYPE_CHECKING:
+    from rebar.llm.auth import LLMRuntime
 
 logger = logging.getLogger("rebar.review_bot")
 
@@ -111,9 +115,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     the snapshot-cache janitor; stop them cleanly on shutdown."""
     cfg = app.state.config
     app.state.queue = asyncio.Queue()
+    runtime = app.state.startup_binding.llm_runtime
     tasks: list[asyncio.Task] = []
     for _ in range(WORKER_COUNT):
-        tasks.append(asyncio.create_task(_worker(app.state.queue, cfg)))
+        tasks.append(asyncio.create_task(_worker(app.state.queue, cfg, runtime)))
     # Re-arm the reconciler's cooperative-stop flag (module state, so a process that already
     # ran a lifespan would otherwise start this one already shutting down).
     _reconcile.clear_stop()
@@ -211,7 +216,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _reconcile.clear_stop()
 
 
-async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
+async def _worker(
+    queue: asyncio.Queue, cfg: ReceiverConfig, runtime: LLMRuntime | None = None
+) -> None:
     """Drain the review queue, running one review→vote per event under a bounded timeout.
 
     A per-event FAILURE is logged and a per-event HANG (a review exceeding
@@ -241,7 +248,7 @@ async def _worker(queue: asyncio.Queue, cfg: ReceiverConfig) -> None:
             # voter bypasses the dedup + existing-vote short-circuits and re-reviews.
             force = bool(event.pop("_rebar_force", False)) if isinstance(event, dict) else False
             await asyncio.wait_for(
-                _voter.review_and_vote(event, config=cfg, force=force),
+                _voter.review_and_vote(event, config=cfg, force=force, runtime=runtime),
                 timeout=review_timeout,
             )
         except asyncio.CancelledError:
@@ -291,6 +298,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.config = _config()
+app.state.startup_binding = compose_startup_binding(app.state.config)
 
 
 @app.get("/health")

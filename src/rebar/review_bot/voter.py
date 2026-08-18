@@ -31,14 +31,30 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rebar.review_bot import adapter
+from rebar.review_bot import startup as _startup
 from rebar.review_bot.artifact_emit import emit_code_review_artifact
 from rebar.review_bot.config import ReceiverConfig
 from rebar.review_bot.dedup import DedupStore
 from rebar.review_bot.finding_publish import post_review
 from rebar.review_bot.gerrit_client import GerritClient, GerritError
+from rebar.review_bot.voter_merge import (
+    assemble_merge_diff as _assemble_merge_diff,
+)
+from rebar.review_bot.voter_merge import (
+    merge_change_error as _merge_change_error,
+)
+from rebar.review_bot.voter_merge import (
+    merge_coverage_gap_decision as _merge_coverage_gap_decision,
+)
+from rebar.review_bot.voter_merge import (
+    render_diff_info as _render_diff_info,  # noqa: F401 — re-exported for tests
+)
+
+if TYPE_CHECKING:
+    from rebar.llm.auth import LLMRuntime
 
 logger = logging.getLogger("rebar.review_bot.voter")
 
@@ -150,53 +166,6 @@ def _publish_voter_error_metric() -> None:
         pass
 
 
-# ── merge-change review path (epic 88ab / S2) ────────────────────────────────
-# Bounded sequential REST fan-out per merge review: 1 commit GET (detection) + 1 files GET
-# + 1 mergelist GET + N per-file diff GETs, N bounded by DIFF_CHAR_CAP (per-file diffs are
-# fetched only until the assembled string reaches the cap). Latency budget: the extra
-# per-review overhead is a small constant (~3 REST round-trips) plus at most a handful of
-# per-file diff GETs before the char cap short-circuits the loop — well inside the review's
-# existing multi-second LLM budget. Any REST failure on this path fails CLOSED.
-
-
-def _publish_merge_change_error_metric(reason: str) -> None:
-    """Best-effort publish of ``rebar/host:review_bot_merge_change_errors`` (reason-tagged),
-    mirroring :func:`_publish_voter_error_metric`. The journald marker + the host probe
-    (observability.sh) is the reliable path; in-container boto3 may not reach IMDS, so any
-    failure is swallowed."""
-    try:
-        import boto3
-
-        boto3.client("cloudwatch").put_metric_data(
-            Namespace="rebar/host",
-            MetricData=[
-                {
-                    "MetricName": "review_bot_merge_change_errors",
-                    "Value": 1,
-                    "Unit": "Count",
-                    "Dimensions": [{"Name": "reason", "Value": reason}],
-                }
-            ],
-        )
-    except Exception:  # noqa: BLE001 — IMDS hop limit / no creds / offline: journald is the fallback
-        pass
-
-
-def _merge_change_error(event: str, reason: str, **fields: Any) -> None:
-    """Structured ERROR marker for a merge-path REST failure. Writes a greppable
-    ``MERGE_CHANGE_ERROR`` line to stderr (the host observability probe greps it to publish
-    ``rebar/host:review_bot_merge_change_errors``, reason-tagged) with the specific event name
-    (``merge_commit_error`` / ``merge_files_error`` / ``mergelist_fetch_error`` /
-    ``merge_diff_error``) AND publishes the reason-tagged merge metric. The voter turns the
-    failure into a fail-closed ``-1`` coverage-gap vote (see :func:`_merge_coverage_gap_decision`)
-    so the merge change is BLOCKED and visibly flagged as an INFRA veto, not silently no-voted."""
-    record = {"event": event, "reason": reason, "timestamp": time.time(), **fields}
-    line = "MERGE_CHANGE_ERROR " + json.dumps(record, default=str)
-    logger.error(line)
-    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
-    _publish_merge_change_error_metric(reason)
-
-
 # ── token-usage observability (ticket clayish-basaltine-bug) ─────────────────
 # Names of the token fields the runner records on each call's `_usage` and that the
 # code-review metrics assembler sums into `coverage['metrics']` (see
@@ -257,102 +226,6 @@ def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) ->
         logger.warning("token-usage emission failed; continuing", exc_info=True)
 
 
-def _merge_coverage_gap_decision(note: str) -> dict[str, Any]:
-    """A fail-closed BLOCK decision for a merge-path infra failure — cast as a ``-1`` with a
-    coverage-gap tag so the merge change is BLOCKED and the operator sees an INFRA veto (the
-    merge review could not run), NOT a code finding. Mirrors the adapter's coverage-gap shape;
-    the tag carries the ``coverage-gap`` marker so it is unmistakable from a real ``-1``."""
-    return {
-        "decision": "BLOCK",
-        "message": (
-            "[LLM-Review: BLOCK — coverage-gap (merge-review)]\n"
-            f"rebar could not review the merge change — {note}. Fail-closed veto "
-            "(infrastructure, not your code); re-run once the merge-path is healthy."
-        ),
-        "findings": [],
-        "coverage_gap": True,
-    }
-
-
-def _assemble_merge_diff(
-    gc: GerritClient, change_id: str, revision: str
-) -> tuple[str, int, dict[str, Any]]:
-    """Assemble the merge-change review context (auto-merge delta + integrated-commit list)
-    for a MERGE revision and return ``(diff_text, integrated_commit_count, stats)``. NEVER
-    calls the bare ``/patch`` (409 on a merge). Per-file diffs are fetched only until the
-    assembled string reaches ``DIFF_CHAR_CAP`` (bounds the sequential REST fan-out). ANY REST
-    failure raises ``GerritError`` (the caller fails closed).
-
-    ``stats`` is a small dict the caller logs on ``merge_change_review`` so an operator can
-    debug WHAT the reviewer actually saw without re-running: how many real (non-magic)
-    conflict files the auto-merge had, how many diffs were fetched before the cap, whether the
-    auto-merge delta was empty (a clean merge), whether the REST fan-out was truncated by the
-    char cap, and the assembled context size."""
-    from rebar.llm.code_review.assemble import (
-        DIFF_CHAR_CAP,
-        assemble_merge_change_context,
-    )
-
-    try:
-        merge_files = gc.get_merge_files(change_id, revision)
-    except GerritError as exc:
-        _merge_change_error("merge_files_error", "files", change_id=change_id, error=str(exc))
-        raise
-    try:
-        mergelist = gc.get_mergelist(change_id, revision)
-    except GerritError as exc:
-        _merge_change_error(
-            "mergelist_fetch_error", "mergelist", change_id=change_id, error=str(exc)
-        )
-        raise
-
-    # Fetch per-file diffs for REAL files (skip magic pseudo-paths) until the combined cap.
-    real_files = [p for p in merge_files if p not in GerritClient.MAGIC_PATHS]
-    file_diffs: dict[str, str] = {}
-    running = 0
-    cap_hit = False
-    for path in real_files:
-        if running >= DIFF_CHAR_CAP:
-            cap_hit = True  # remaining files skipped — the reviewer sees a truncated fan-out
-            break
-        try:
-            info = gc.get_file_diff(change_id, path, revision)
-        except GerritError as exc:
-            _merge_change_error(
-                "merge_diff_error", "diff", change_id=change_id, file=path, error=str(exc)
-            )
-            raise
-        text = _render_diff_info(info)
-        file_diffs[path] = text
-        running += len(text)
-    diff_text = assemble_merge_change_context(merge_files, file_diffs, mergelist)
-    stats = {
-        "real_files": len(real_files),
-        "files_fetched": len(file_diffs),
-        "auto_diff_empty": len(file_diffs) == 0,
-        "diff_cap_hit": cap_hit,
-        "assembled_chars": len(diff_text),
-    }
-    return diff_text, len(mergelist), stats
-
-
-def _render_diff_info(info: dict) -> str:
-    """Flatten a Gerrit ``DiffInfo`` (``content`` list of ``{ab|a|b}`` segments) into unified
-    diff-ish text for the reviewer. Only changed segments (``a``/``b``) are emitted with
-    ``-``/``+`` prefixes; unchanged ``ab`` context is summarized to keep the delta focused."""
-    lines: list[str] = []
-    for seg in info.get("content") or []:
-        if "ab" in seg:
-            n = len(seg["ab"])
-            lines.append(f"  … {n} unchanged line(s) …")
-            continue
-        for ln in seg.get("a") or []:
-            lines.append(f"-{ln}")
-        for ln in seg.get("b") or []:
-            lines.append(f"+{ln}")
-    return "\n".join(lines)
-
-
 def _extract(event: dict) -> dict[str, Any] | None:
     """Pull the fields the voter needs out of a Gerrit ``patchset-created`` payload.
 
@@ -386,6 +259,7 @@ async def review_and_vote(
     gerrit: GerritClient | None = None,
     dedup: DedupStore | None = None,
     force: bool = False,
+    runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
     """Review the patchset described by ``event`` and cast the ``LLM-Review`` vote.
 
@@ -400,7 +274,9 @@ async def review_and_vote(
     every review that a container recreation could kill (bug 34cd).
     """
     with _counting_in_flight():
-        return await _review_and_vote(event, config=config, gerrit=gerrit, dedup=dedup, force=force)
+        return await _review_and_vote(
+            event, config=config, gerrit=gerrit, dedup=dedup, force=force, runtime=runtime
+        )
 
 
 async def _decision_for_clone(
@@ -411,6 +287,7 @@ async def _decision_for_clone(
     is_merge: bool,
     parent_count: int,
     commit_message: str,
+    runtime: LLMRuntime | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Fetch the diff for the ALREADY-CLONED tree at ``repo_root`` and run the
     ``adapter.code_review_decision`` seam, taking the merge or non-merge diff path.
@@ -432,6 +309,7 @@ async def _decision_for_clone(
             revision=revision,  # binds the reviewed tree to the voted revision
             commit_message=commit_message,  # scope-intent overlay (non-merge path)
             change_id=change_id,  # change:<id> novelty keyspace (finding-memory)
+            runtime=runtime,  # forwarded composed startup runtime (S5)
         )
         return decision, diff_text
     # 409 guard (S2): a merge (>=2 parents) 409s the bare /patch, so route it through the
@@ -473,8 +351,89 @@ async def _decision_for_clone(
         revision=revision,  # binds the reviewed tree to the voted revision
         merge_commits=merge_commits,
         change_id=change_id,  # change:<id> novelty keyspace
+        runtime=runtime,  # forwarded composed startup runtime (S5)
     )
     return decision, diff_text
+
+
+def _guard_decision_auth(cfg: ReceiverConfig) -> dict[str, Any] | None:
+    """AC3 fail-closed guard: the decision-bearing Gerrit auth MUST be present before any
+    dedup/clone/provider work. Returns an error-status dict (and emits the VOTER_ERROR marker)
+    when the auth is missing/blank — the caller then casts NO vote and NEVER falls back to
+    another principal — or ``None`` when a real token is present."""
+    try:
+        _startup.validate_decision_auth(cfg)
+    except _startup.DecisionAuthError as exc:
+        _voter_error(error=f"decision_auth: {exc}")
+        return {"status": "error", "stage": "decision_auth"}
+    return None
+
+
+def _handle_retryable_gap(
+    decision: dict[str, Any],
+    store: DedupStore,
+    cfg: ReceiverConfig,
+    change_id: str,
+    revision: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Handle a retryable coverage-gap decision (ticket 0347; ADR 0069).
+
+    Returns ``(decision, deferred_result)``. When the decision's ``gap_reason`` is retryable
+    and the per-revision attempt budget is NOT yet spent, the review is DEFERRED (cast NO vote,
+    so the vote-less change stays visible to the backfill reconciler) and ``deferred_result`` is
+    a ``{"status": "deferred", ...}`` dict the caller returns immediately. Otherwise
+    ``deferred_result`` is ``None``: either the gap is not retryable (vote as-is) or the budget
+    is spent (``decision`` is returned with the retries-exhausted note appended and the
+    escalation VOTER_ERROR fired, so the caller casts the fail-closed -1)."""
+    gap_reason = decision.get("gap_reason")
+    if gap_reason not in adapter.RETRYABLE_GAP_REASONS:
+        return decision, None
+    try:
+        attempts = store.record_attempt(change_id, revision)
+    except Exception as exc:  # noqa: BLE001 — fail-open on the COUNTER, never the vote
+        # An uncounted attempt only delays escalation by one reconcile cycle.
+        _voter_error(
+            change_id=change_id,
+            revision_id=revision,
+            vote_value=None,
+            error=f"record_attempt: {exc}",
+        )
+        attempts = 0
+    if attempts < cfg.retryable_gap_max_attempts:
+        # Genuinely vote-less: nothing is posted to the change (a provisional comment would still
+        # leave it vote-less, but the deferral must stay invisible to Gerrit entirely — the
+        # reconciler pre-filters on "no LLM-Review vote").
+        _emit(
+            logging.WARNING,
+            "REVIEW_RETRY_DEFERRED",
+            change_id=change_id,
+            revision_id=revision,
+            gap_reason=gap_reason,
+            attempt=attempts,
+            max_attempts=cfg.retryable_gap_max_attempts,
+        )
+        return decision, {
+            "status": "deferred",
+            "change_id": change_id,
+            "revision": revision,
+            "gap_reason": gap_reason,
+            "attempt": attempts,
+        }
+    # Budget spent: cast the fail-closed -1 (message body gains the exhausted note; the
+    # first-line tag vocabulary is unchanged) and fire the VOTER_ERROR marker so the
+    # voter_errors alarm surface sees the escalation.
+    decision = adapter.append_retries_exhausted_note(decision, attempts)
+    _voter_error(
+        change_id=change_id,
+        revision_id=revision,
+        vote_value=cfg.llm_review_block_value,
+        error=(
+            f"retryable coverage gap '{gap_reason}' exhausted its "
+            f"{cfg.retryable_gap_max_attempts}-attempt budget — escalating to the "
+            "fail-closed -1"
+        ),
+    )
+    return decision, None
 
 
 async def _review_and_vote(
@@ -484,10 +443,14 @@ async def _review_and_vote(
     gerrit: GerritClient | None = None,
     dedup: DedupStore | None = None,
     force: bool = False,
+    runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
     """The review itself. Call :func:`review_and_vote` instead — it maintains the
     in-flight count the deploy loop reads."""
     cfg = config or ReceiverConfig.from_env()
+    auth_error = _guard_decision_auth(cfg)
+    if auth_error is not None:
+        return auth_error
     info = _extract(event)
     if info is None:
         _emit(logging.INFO, "voter_skip", reason="malformed_event")
@@ -606,6 +569,7 @@ async def _review_and_vote(
                         is_merge=is_merge,
                         parent_count=parent_count,
                         commit_message=commit_message,
+                        runtime=runtime,
                     )
             except adapter.ReviewedTreeMismatch as exc:
                 # The cloned tree is provably NOT the revision this vote would attach to, so
@@ -636,60 +600,9 @@ async def _review_and_vote(
                 )
                 return {"status": "error", "change_id": change_id, "stage": "review_setup"}
 
-        # Retryable coverage gap (ticket 0347; ADR 0069): defer — cast NO vote, so the vote-LESS
-        # change stays visible to the backfill reconciler, which re-drives it within its interval.
-        # Keys STRICTLY on the adapter's machine-readable gap_reason: a real finding and an
-        # indeterminate-that-ran-to-completion carry a non-retryable reason, and the merge-path
-        # _merge_coverage_gap_decision carries no gap_reason at all — all still vote. Escalate
-        # to the fail-closed -1 once the bounded per-revision attempt budget is spent (the
-        # budget is shared with the bb9b contributor re-trigger, whose reset re-arms it).
-        gap_reason = decision.get("gap_reason")
-        if gap_reason in adapter.RETRYABLE_GAP_REASONS:
-            try:
-                attempts = store.record_attempt(change_id, revision)
-            except Exception as exc:  # noqa: BLE001 — fail-open on the COUNTER, never the vote
-                # An uncounted attempt only delays escalation by one reconcile cycle.
-                _voter_error(
-                    change_id=change_id,
-                    revision_id=revision,
-                    vote_value=None,
-                    error=f"record_attempt: {exc}",
-                )
-                attempts = 0
-            if attempts < cfg.retryable_gap_max_attempts:
-                # Genuinely vote-less: nothing is posted to the change (a provisional comment
-                # would still leave it vote-less, but the deferral must stay invisible to
-                # Gerrit entirely — the reconciler pre-filters on "no LLM-Review vote").
-                _emit(
-                    logging.WARNING,
-                    "REVIEW_RETRY_DEFERRED",
-                    change_id=change_id,
-                    revision_id=revision,
-                    gap_reason=gap_reason,
-                    attempt=attempts,
-                    max_attempts=cfg.retryable_gap_max_attempts,
-                )
-                return {
-                    "status": "deferred",
-                    "change_id": change_id,
-                    "revision": revision,
-                    "gap_reason": gap_reason,
-                    "attempt": attempts,
-                }
-            # Budget spent: cast the fail-closed -1 (message body gains the exhausted note;
-            # the first-line tag vocabulary is unchanged) and fire the VOTER_ERROR marker so
-            # the voter_errors alarm surface sees the escalation.
-            decision = adapter.append_retries_exhausted_note(decision, attempts)
-            _voter_error(
-                change_id=change_id,
-                revision_id=revision,
-                vote_value=cfg.llm_review_block_value,
-                error=(
-                    f"retryable coverage gap '{gap_reason}' exhausted its "
-                    f"{cfg.retryable_gap_max_attempts}-attempt budget — escalating to the "
-                    "fail-closed -1"
-                ),
-            )
+        decision, deferred = _handle_retryable_gap(decision, store, cfg, change_id, revision)
+        if deferred is not None:
+            return deferred
 
         # Map decision → vote value. BLOCK (incl. adapter fail-closed) → block value;
         # PASS → max value. A MAX is cast ONLY on an explicit PASS.
