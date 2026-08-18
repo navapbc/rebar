@@ -1966,6 +1966,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:07Z"
     },
+    "0eb8-08bd-f9cb-4798": {
+      "created_at": "2026-08-18T04:42:09Z",
+      "jira_id": "4589155",
+      "jira_key": "REB-3123",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:12Z"
+    },
     "0ec1-bb62-2fd8-4350": {
       "baseline": {
         "assignee": {
@@ -4606,6 +4613,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:48Z"
     },
+    "2048-d289-e55f-4595": {
+      "created_at": "2026-08-18T04:42:17Z",
+      "jira_id": "4589156",
+      "jira_key": "REB-3124",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:19Z"
+    },
     "209b-ab0b-21de-49db": {
       "baseline": {
         "assignee": {
@@ -5221,6 +5235,13 @@
       "peer_parent": "REB-1580",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:14Z"
+    },
+    "2419-2804-c181-4bc0": {
+      "created_at": "2026-08-18T04:42:20Z",
+      "jira_id": "4589157",
+      "jira_key": "REB-3125",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:23Z"
     },
     "2422-f748-d49a-4e5d": {
       "baseline": {
@@ -5900,9 +5921,17 @@
       "updated_at": "2026-08-15T14:54:39Z"
     },
     "28a3-a62d-6345-44a0": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nS1 proves one atomic update executor and S2 produces pure plans, but legacy batch dispatch still replays compound methods, conflates deferred and applied work, and uses a rolling breaker that cannot distinguish physical attempts from exhausted logical outcomes. One ticket-local or permanent failure can distort batch behavior.\n\n## Outcome\nMake the typed coordinator authoritative for non-create plans: update, delete, probe, clean-label, repair-property, and conflict handling. Execute atomic desired postconditions in dependency order; after partial success, re-observe and plan only remaining drift. Produce exact ticket/pass outcomes and apply the approved endpoint/provider finite-pass fuse only to normalized exhausted logical failures.\n\n## Plan\n1. Add a coordinator that consumes immutable plans, enforces dependencies, and calls adapter atomic operations through S1s budget. Preserve successful earlier postconditions and never replay the whole compound mutation after a late failure.\n2. Normalize auto-healed, success, deferred, permanent, commit-unknown, exhausted transient, and skipped dispositions with ticket/endpoint/tenant/provider/global scope.\n3. Replace the rolling 5-of-10 breaker. Endpoint scope opens after three consecutive eligible exhausted logical outcomes across at least two tickets; provider scope additionally spans two endpoint families. A matching success resets consecutive state.\n4. Exclude physical attempts, recovered warnings, permanent failures, ticket-local 404, and opaque diagnostics from inferred fuse counters. Retain direct authoritative credential, configuration, quota, rate, issue, endpoint, tenant, and global behavior.\n5. When a fuse opens, defer remaining matching plans with reason/scope/retry metadata while independent scopes continue. Preserve exact applied/failed/deferred/skipped tallies and nonzero degraded-pass signaling.\n\n## Testing (RED \u2192 GREEN)\n- Coordinator tables cover dependency success/failure, partial compound update, idempotent already-gone delete, ticket-local 404 isolation, permanent 4xx, auth/quota/rate scopes, and mixed endpoint families.\n- Fuse sequences assert threshold, two-ticket/two-family requirements, success reset, exclusions, and independent-scope continuation.\n- Replay fixtures derived from historical GitHub Actions outcomes assert zero premature stop in the completed 1,200-run slice; raw warning/grep text is never classified as a terminal outcome.\n- Verified-fake Cloud/DC batches assert wire order, maximum calls, exact tallies, logs, and exit status.\n\n## Compatibility / rollback\nCut over by non-create operation family and never dual-send. Before legacy removal, an operation-family flag can select the old dispatcher. Rollback preserves successful Jira effects and resumes from re-observation. The intentional differences are three-call shared budgeting, explicit deferral, exact partial outcomes, and replacement of the rolling breaker.\n\n## Acceptance Criteria\n- [ ] Non-create plans execute atomic postconditions once in dependency order; a late failure preserves earlier success and re-observes only remaining drift within the same logical budget.\n- [ ] Ticket-local/permanent failures isolate the ticket, authoritative broad scopes stop only their declared scope, and independent tickets/endpoints continue.\n- [ ] Endpoint fuse opens only after three consecutive eligible exhausted logical outcomes across two tickets; provider fuse additionally requires two endpoint families; matching success resets state.\n- [ ] Physical attempts, recovered warnings, permanent failures, ticket-local 404s, and opaque diagnostics never increment inferred fuse counters.\n- [ ] Remaining matching work is explicitly deferred with reason/scope/`retry_not_before`; applied, failed, deferred, skipped, and recovered tallies plus exit status are exact.\n- [ ] Historical replay fixtures and verified-fake Cloud/DC batches show no premature termination of observed successful/partially successful work.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 S3 \u2014 Coordinate non-create operations with deferral and the scoped fuse"
+      },
       "created_at": "2026-08-18T03:44:03Z",
       "jira_id": "4589144",
       "jira_key": "REB-3112",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:06Z"
     },
@@ -6601,6 +6630,13 @@
       "jira_key": "REB-66",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:05Z"
+    },
+    "2c81-7119-fb6b-44b1": {
+      "created_at": "2026-08-18T04:42:27Z",
+      "jira_id": "4589158",
+      "jira_key": "REB-3126",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:30Z"
     },
     "2c87-80d5-755b-4026": {
       "baseline": {
@@ -7994,9 +8030,17 @@
       "updated_at": "2026-08-15T14:55:55Z"
     },
     "3350-90b1-2651-4c50": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nAfter operation-family cutovers, leaving generic `_call_with_retry`, `_best_effort`, duck-typed production dispatch, or legacy write routes active would preserve retry multiplication and allow future code to bypass the coordinator. Preview/log consumers also need a stable versioned contract for lifecycle and deferred outcomes before expand can contract.\n\n## Outcome\nFinish the expand/contract migration: route every supported live mutation through typed plans/coordinator/adapters, remove obsolete physical-retry and write fallbacks, fail loudly for unsupported production paths, and seal manifests, logs, pass cursor/tallies, documentation, and local verified-fake validation. Preserve existing mutation shape while making lifecycle/retry/fuse outcomes explicit and observable.\n\n## Plan\n1. Inventory every Cloud/DC mutation leaf and prove it reaches the typed coordinator. Remove generic whole-operation retry, `_best_effort` write swallowing, production class-name/duck fallbacks, and duplicate SDK/adapter retry owners.\n2. Keep compatibility only at serialized/public read boundaries. An unsupported live action raises a typed pre-effect error; tests may use explicit fakes implementing the declared protocol.\n3. Finalize versioned preview/manifest sections for lifecycle intents, logical/physical attempts, delay source/value, budgets, scope, disposition, `retry_not_before`, fuse state, and exact per-ticket/pass outcomes. Redact secrets and bound diagnostic size.\n4. Advance cursor/baseline/binding state only for proven postconditions. Deferred, failed, skipped, and commit-unknown work remains eligible for later re-observation and is never reported as applied.\n5. Add ADR/docs for retry ownership, failure taxonomy, scoped fuse, label-first create containment, explicit behavior deltas, expand/contract rollback, and future adapter obligations. Run portable verified-fake Cloud/DC end-to-end tests; retain bounded live probes as optional operator evidence.\n\n## Testing (RED \u2192 GREEN)\n- A dispatch census test enumerates every `MutationDirection`/`MutationAction` and provider route, asserting one typed owner or an intentional pre-effect unsupported error.\n- End-to-end fake Cloud/DC passes cover mixed success, transient recovery, long-delay deferral, permanent ticket failure, auth/provider stop, fuse open/reset, create containment, restart, and delivery failure.\n- Golden preview/log/manifest tests pin existing mutation fields plus additive versioned sections, redaction, bounded diagnostics, and exact tally/exit semantics.\n- Static/string and runtime poison tests fail if removed legacy helpers or hidden retries are reachable from production.\n\n## Compatibility / rollback\nContract only after shadow parity and each family cutover test passes. A pre-contract release can revert per-family routing; after removal, rollback is a code revert that re-observes remote state and never compensates by deleting successful Jira work. Stored ticket/binding/event formats are unchanged; additive manifest fields are versioned and ignorable.\n\n## Acceptance Criteria\n- [ ] A route census proves every supported Cloud/DC mutation uses exactly one typed coordinator/adapter path and no hidden SDK, generic wrapper, `_best_effort`, or duck-typed production fallback remains reachable.\n- [ ] Unsupported production actions fail before local/remote effects with a typed provider-neutral error.\n- [ ] Preview, manifest, and logs preserve existing mutation fields and add versioned redacted logical-attempt, lifecycle, delay/budget, disposition, fuse, and `retry_not_before` data.\n- [ ] Cursor, baseline, and binding state advance only for proven postconditions; deferred/failed/skipped/commit-unknown work is never counted as applied and remains recoverable next pass.\n- [ ] Portable verified-fake Cloud/DC end-to-end suites cover the approved taxonomy, retry envelope, fuse, create containment, restart, and partial-outcome behavior without external credentials.\n- [ ] ADR and operator docs record ownership, intentional behavior changes, future adapter contract, no-dual-write cutover, and rollback that never deletes successful Jira work.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 S5 \u2014 Complete coordinator cutover and remove legacy write fallbacks"
+      },
       "created_at": "2026-08-18T03:44:11Z",
       "jira_id": "4589145",
       "jira_key": "REB-3113",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:14Z"
     },
@@ -8085,9 +8129,17 @@
       "updated_at": "2026-08-15T14:55:57Z"
     },
     "3402-7143-2e14-4d1a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe RCA for broadish-permanent-condor found seven additional pytest fixtures that return a full `dict(os.environ)` directly or nested inside a rendered fixture value. Under pytest default long tracebacks, early ambient credentials can be printed verbatim through function-argument `saferepr`. Confirmed locations: `tests/scripts/test_autodeploy_materialize_probe.py`, `test_autodeploy_fetch_secrets.py`, `test_autodeploy_disk_pressure.py`, `test_autodeploy_health_gate.py`, `test_autodeploy_signals_gerrit_config.py`, `test_observability_exit.py`, and `tests/interfaces/facades/test_cli.py`.\n\n## Plan\n- Build a parametrized real-pytest RED oracle using insertion-ordered synthetic sentinels and deterministic failures for each fixture surface.\n- Replace broad ambient copies with the minimal required environment for each harness while preserving explicit per-test mutations.\n- Prove every sentinel is absent, existing suites remain green, and the exact broad-copy mutation returns the oracle to RED.\n\n## Acceptance Criteria\n- [ ] Each listed fixture has a deterministic RED failure-rendering probe.\n- [ ] No listed fixture returns arbitrary ambient values.\n- [ ] Synthetic sentinel values are absent from default pytest failure output on every surface.\n- [ ] Existing fixture consumers retain required PATH and explicit environment behavior.\n- [ ] Focused suites, lint, and typecheck pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Prevent sibling pytest fixtures from rendering ambient credentials"
+      },
       "created_at": "2026-08-18T03:44:18Z",
       "jira_id": "4589146",
       "jira_key": "REB-3114",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:21Z"
     },
@@ -8242,6 +8294,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:56:03Z"
+    },
+    "34f2-8d32-029c-400b": {
+      "created_at": "2026-08-18T04:42:33Z",
+      "jira_id": "4589159",
+      "jira_key": "REB-3127",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:36Z"
     },
     "352b-5097-9971-4dc1": {
       "baseline": {
@@ -10118,9 +10177,17 @@
       "updated_at": "2026-08-15T14:57:31Z"
     },
     "4217-d1d6-370b-4e98": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nRebar currently decides and performs Jira work across the differ, generic apply wrapper, Cloud ACLI/REST, Jira DC SDK, handlers, and batch orchestration. Retry ownership is multiplied: one logical postcondition can cross nested loops, whole compound updates can replay after a late failure, provider delay can be capped and retried early, and terminal failures do not have a stable per-ticket versus batch scope. The rolling batch breaker does not model these outcomes.\n\n## Outcome\nBuild one provider-neutral coordinator around immutable observation and pure per-ticket `TicketPlan` values. Each plan carries existing `Mutation` values, lifecycle intents, dependencies, diagnostics, and disposition. Global selection/filter/caps run before any lifecycle or remote effect. Concrete adapters own physical replay, timeouts, cleanup, SDK retry disablement, and provider decoding; core owns commit-unknown recovery, re-observation/replanning, dependency deferral, the finite-pass fuse, and exact ticket/pass outcomes.\n\n## Approved policy\n- At most three physical invocations and 15 seconds cumulative sleep per logical postcondition, including one observe/replan cycle; fallback delays are approximately 2s then 4s with nonnegative jitter.\n- `Retry-After` or equivalent is a lower bound. If it cannot fit, return `retry_not_before` for a later pass rather than retrying early.\n- Remove the rolling 5-of-10 breaker. An endpoint family opens after three consecutive exhausted eligible logical outcomes across at least two tickets. Provider scope additionally requires two endpoint families. Matching success resets the scope. Attempts, recovered warnings, permanent failures, and opaque diagnostics do not count.\n- Authoritative credential, configuration, quota, rate, issue, endpoint, tenant, and global scopes retain their direct classified behavior.\n- Create containment is label-first (`rebar-id:<local_id>`), optional property second, then safety-abort with the known key if local persistence fails.\n\n## Delivery slices\n1. Prove one Cloud/DC operation end to end through normalized outcomes and the single retry budget with deterministic fake transports.\n2. Produce immutable shadow plans and versioned preview lifecycle intents from one observation with zero remote/local effects.\n3. Cut non-create operations to the coordinator with dependency deferral, exact partial outcomes, retry deferral, and scoped fuse.\n4. Cut create and lifecycle recovery to the RP-02 transaction seam with commit-unknown containment.\n5. Finish expand/contract cutover, remove legacy retry/write fallbacks, and seal manifests, observability, cursor behavior, documentation, and bounded live validation.\n\n## Compatibility / rollback\nShadow planning first compares existing mutation shape and provider-neutral outcomes without writes. Cutover is by operation family and never dual-writes. Before contract removal, an operation can return to the legacy dispatcher. Rollback never deletes a successful Jira effect; commit-unknown work is re-observed. Existing ticket/event/binding shapes remain readable, and preview adds versioned lifecycle intent fields without changing the existing mutation shape.\n\n## Acceptance Criteria\n- [ ] One observation deterministically produces per-ticket plans whose selection, caps, dependencies, diagnostics, dispositions, mutations, and lifecycle intents are testable without Jira or filesystem writes.\n- [ ] Cloud ACLI/REST and Jira DC execute each logical postcondition within one three-call/15-second budget, disable hidden SDK retry, honor provider lower bounds, and defer long waits with `retry_not_before`.\n- [ ] The coordinator classifies auto-healed, retryable, permanent, commit-unknown, ticket-local, endpoint, tenant, provider, and global outcomes with exact per-ticket and pass tallies.\n- [ ] The approved three-consecutive scoped fuse triggers only from normalized exhausted logical outcomes and does not stop historically successful/partially successful replay fixtures prematurely.\n- [ ] Create tests prove label-first containment, optional property enrichment, known-key safety-abort, and no duplicate create after timeout or persistence failure.\n- [ ] Shadow/cutover tests prove no dual-write, safe fallback before legacy removal, versioned preview compatibility, fail-loud unsupported production paths, and no rollback deletion of successful Jira work.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 \u2014 Coordinate Jira mutations with typed plans, bounded retry, and scoped fuse"
+      },
       "created_at": "2026-08-18T03:44:23Z",
       "jira_id": "4589147",
       "jira_key": "REB-3115",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:26Z"
     },
@@ -10467,7 +10534,7 @@
         },
         "description": "## Context\nDiscovered while debugging grindable-deviant-angwantibo. `tests/unit/test_ci_workflow_parity.py::_collect_node_ids` launches a real nested pytest collection subprocess without `--basetemp`. The confirmed sibling mechanism is pytest session shutdown traversing the shared numbered temp root in `cleanup_numbered_dir`/`rmtree`, which can delete or stall on another run's temp tree. The fixed `_store_isolation` helper does not cover this independent caller.\n\n## Plan\n- Add a RED regression that gives the nested collection subprocess a poisoned shared numbered temp root and proves a pre-existing sentinel survives unchanged.\n- Pass a caller-owned private `--basetemp` directory to `_collect_node_ids` without changing its collection selection, stdout parsing, return-code contract, or timeout.\n- Prove GREEN, seed the omitted-basetemp mutation back to RED, and run focused plus repository gates.\n\n## Acceptance Criteria\n- [ ] The regression fails on the current implementation because nested collection removes or traverses the shared numbered-root sentinel.\n- [ ] `_collect_node_ids` runs nested pytest with a private basetemp owned by the caller.\n- [ ] The held-out regression passes and the exact-defect mutation returns it to RED.\n- [ ] Existing workflow-parity tests pass.\n- [ ] `make lint`, `make typecheck`, and `make test` pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Give parity collection subprocess a private pytest basetemp"
       },
       "created_at": "2026-08-16T17:33:34Z",
@@ -10963,6 +11030,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:01Z"
     },
+    "4698-d85c-b1a3-40d3": {
+      "created_at": "2026-08-18T04:42:40Z",
+      "jira_id": "4589160",
+      "jira_key": "REB-3128",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:43Z"
+    },
     "46a2-9c1a-d855-4706": {
       "baseline": {
         "assignee": null,
@@ -11304,9 +11378,17 @@
       "updated_at": "2026-08-15T14:58:12Z"
     },
     "486a-69ef-6370-48ff": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nCurrent recovery lives inside the facade and only repairs interrupted creates. A crash after the retired tombstone replacement but before the live replacement leaves the same exact identity live and retired. That partial state is detectable and safely completable, but construction-time or preview-time repair would violate read-only operations. The rich-text handler also still mutates an entry obtained from `all_bindings()`.\n\n## Outcome\nExtract incomplete-operation recovery behind the facade, cut the production rich-text caller to S2s narrow operation, and add journal-free interrupted-retirement completion at the validated write-bearing reconcile boundary. A durable tombstone is the authoritative retirement intent. Recovery removes the redundant live forward/reverse pair only when tombstone, forward, and reverse identities agree exactly; repeat is a no-op, and all ambiguity safety-aborts. Only explicit `unretire` removes that intent; a later automatic 200/`clear_absent`/same-key confirm does not implicitly resurrect a tombstoned identity.\n\n## Plan\n1. Move keyed/keyless create recovery into `binding_recovery.py` without changing label forms, immutable known-key handling, three-miss plus 3600-second conjunction, per-entry failure collection, or continue behavior.\n2. Add a pure classifier for interrupted retirement states and a repository-backed completion operation. Require exact local id and Jira key agreement in tombstone, forward entry, and reverse entry.\n3. Invoke completion after the immutable configuration operation snapshot, provider/config preflight, exclusive pass ownership, and under-lock staleness validation, but before any remote issue fetch, binding walk, differ, or lifecycle mutation in that pass. Load, construction, reconcile-check, dry-run, preview, selection, and filtered operations remain read-only.\n4. Treat the tombstone as the committed side of the retired-first protocol. `absent_404_count`, a later 200, `clear_absent`, or same-key `bind_confirm` in a historical overlap is not a revocation signal; explicit `unretire` removes the tombstone, after which no completion candidate exists. If live replacement fails, retain the overlap and safety-abort for a later retry.\n5. Replace `apply_handlers.py` mutation-through-`all_bindings()` with S2s facade operation after RP-04 S3 has landed its scoped-runtime changes to that file.\n6. Finalize `docs/adr/0099-binding-store-internal-ownership.md` when the behavior lands: record tombstone authority versus explicit unretire, the before-observation repair boundary, intentional behavior change, rollback, and the explicit ban on broad tickets-branch staging.\n\n## Dependencies / coordination\nThis story depends directly on RP-02 S1 and S2. Its `apply_handlers.py` and live-boundary edits must be rebased after RP-04 S3 (`talismanic-profitable-isopod`) closes. That cross-root execution condition is recorded as a soft relation because Rebars hierarchy resolver would otherwise promote a child edge into an unnecessarily broad RP-02-epic \u2192 RP-04-epic blocker; overlapping file impact remains visible.\n\n## Testing (RED \u2192 GREEN)\n- Fault-cut tests create the real retired-first/live-failed overlap, reopen a fresh store, execute pre-observation live recovery, and assert coherent retired-only bytes and repeat no-op.\n- Mismatch tables vary each identity, missing reverse/live entries, corrupt live bytes, and replacement failure; the oracle is zero guessed deletion plus a typed safety abort.\n- Intent-order tests cover a historical overlap whose stale live record was cleared/reconfirmed to the same key: the tombstone still completes. An explicit `unretire` removes the tombstone and prevents repair.\n- Read-only surface tests spy on `os.replace`/repository save across construction, check, dry-run, preview, selection, and filter modes and assert zero calls.\n- Existing create recovery/index-lag and rich-reemit suites remain exact behavior oracles.\n\n## Compatibility / rollback\nDisabling the pre-observation recovery call restores the prior detectable overlap; coherent stores are never rewritten. The public recovery method and failure tally remain compatible. Rollback of the rich-text call returns to the shallow query path without a format change. No journal, eager recovery, broad publication, automatic resurrection, or remote rollback is added.\n\n## Acceptance Criteria\n- [ ] Given the real retired-first/live-replace fault cut, the next validated write-bearing pass completes repair before remote issue observation and retains the tombstone.\n- [ ] Repeating completion is a no-op; any tombstone/forward/reverse mismatch, corrupt live file, or replace failure leaves recoverable evidence and safety-aborts without unrelated mutation.\n- [ ] Construction, load, reconcile-check, dry-run, preview, selection, and filtered runs perform zero recovery writes.\n- [ ] A later automatic 200/`clear_absent`/same-key confirm does not override a durable tombstone; explicit `unretire` removes the tombstone and prevents completion.\n- [ ] Keyed pending recovery performs no search; keyless pending requires both three misses and 3600 seconds before unbind; per-entry failures remain loud and nonfatal to other entries.\n- [ ] `apply_handlers.py` uses the narrow rich-emission facade and no production code mutates a binding through `all_bindings()`.\n- [ ] ADR 0099 records the realized repair rule, pre-observation boundary, explicit-unretire reversal, rollback, and prohibition on broad tickets-branch staging.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-02 S3 \u2014 Recover exact retirement overlaps at the live operation boundary"
+      },
       "created_at": "2026-08-18T03:44:30Z",
       "jira_id": "4589148",
       "jira_key": "REB-3116",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:33Z"
     },
@@ -12837,9 +12919,17 @@
       "updated_at": "2026-08-15T14:59:20Z"
     },
     "5142-4dbf-9469-4672": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`binding_store.py` is at the 800-line hard boundary because file loading, unknown-field preservation, tempfile cleanup, JSON encoding, GET-rotation ordering, retired-state replacement, and alert persistence live beside identity policy. Moving those branches without direct byte/fault oracles could turn known recoverable partial states into silent data loss.\n\n## Outcome\nExtract a private `BindingRepository`/unit-of-work behind the unchanged public `BindingStore` facade. The repository owns paths and the original dictionaries, returns open typed views over those same dictionaries, and preserves every existing load/save byte and exception contract. `peer_state.py` and `get_rotation.py` remain independent owners. Record the internal ownership and recovery/cutover constraints in the binding-lifecycle ADR.\n\n## Plan\n1. Add a cohesive repository module for live, retired, rotation, and alert paths; current load/corruption rules; JSON tempfiles; per-file `os.replace`; and dirty/change gating. Do not introduce a multi-file atomicity claim.\n2. Move persistence calls behind facade delegates without changing `BindingStore` construction, loader, public signatures, shared inner dictionaries, or caller-visible exceptions.\n3. Preserve rotation-before-live order and the inline rotation floor, retired-first move ordering, best-effort alert writes, and exact sorted/indented/newline serialization.\n4. Keep tickets publication in `reconcile_helpers.py` as an external five-file allowlisted seam. Add no broad staging and no publish at each local checkpoint.\n5. Add an ADR that distinguishes repository unit-of-work durability from tickets publication and records the later exact-match recovery boundary.\n\n## Testing (RED \u2192 GREEN)\n- A direct-repository suite loads legacy/unknown-field fixtures and asserts byte-equal round trips and no eager rewrite.\n- Failure cuts inject tempfile, rotation replace, retired replace, live replace, alert write, and selective commit failures. Oracles are exact surviving files/bytes, raised versus swallowed outcome, alert/tally, and unchanged HEAD where applicable.\n- Public-facade regressions assert pending/confirmed/reverse lookup and the current shallow `all_bindings()` compatibility.\n- Existing GET-rotation and selective-publication suites remain the cross-seam oracle.\n\n## Compatibility / rollback\nThis is an internal delegation only. Reverting the facade delegation restores the previous implementation over identical files. No format migration, eager rewrite, public import change, deep copy, general journal, or `git add -A` is permitted.\n\n## Acceptance Criteria\n- [ ] Given legacy records and unknown fields, direct repository and public-facade load/save preserve semantic fields and exact sorted/indented/trailing-newline bytes without an eager write.\n- [ ] Given each named fault cut, tests observe the documented old/new file combination and the same raise/swallow/alert behavior as before extraction.\n- [ ] GET rotation is durably attempted before live replacement; a failed sidecar save retains the newest inline floor and a later retry converges.\n- [ ] `BindingStore` import, constructor, loader, signatures, shared inner-entry behavior, and existing peer/get-rotation delegates remain compatible.\n- [ ] Tickets publication still stages only the existing five bridge-state files and an unchanged pass creates no commit.\n- [ ] The ADR states repository ownership, ordered partial-state behavior, selective publication, rollback, and the no-journal/no-format-migration decision.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-02 S1 \u2014 Extract the byte-preserving binding repository"
+      },
       "created_at": "2026-08-18T03:44:37Z",
       "jira_id": "4589149",
       "jira_key": "REB-3117",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:39Z"
     },
@@ -13758,10 +13848,24 @@
     },
     "57b6-90b7-87bb-45e7": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nWith REBAR_TRACKER_DIR=/Users/joeoakhart/rebar/.tickets-hotpath-sign2 and code worktree /Users/joeoakhart/ci-hoist-bridge-schedule at merged commit 4c4225c3dd, `rebar verify-commit-ticket --rev HEAD` correctly resolved trailer f936-a0b9-e5f8-4def, but CLI `rebar transition ... closed --ref HEAD` falsely reported that no commit referenced the ticket. `close_precheck.py` derives `code_root = os.path.dirname(tracker)`, so an out-of-worktree tracker override makes it scan the checkout containing the tracker instead of the current worktree. The public library call succeeds when passed the actual repo_root, proving the defect and workaround.\n\n## Plan\n- Add a regression test with a code worktree and a separate custom tracker directory.\n- Resolve the code root from the explicit/current repository context while continuing to resolve ticket state from REBAR_TRACKER_DIR.\n- Preserve the fail-fast no-referencing-commit behavior and default in-repo tracker behavior.\n- Run RED to GREEN, defect-seeded mutation, focused lifecycle tests, gates, and Gerrit.\n\n## Acceptance Criteria\n- [ ] CLI close with an out-of-worktree REBAR_TRACKER_DIR finds a matching trailer reachable from the current code worktree HEAD.\n- [ ] A true missing referencing commit still fails before the completion LLM call.\n- [ ] Default in-repo tracker behavior is unchanged.\n- [ ] The regression test is RED before the fix and GREEN after reintroducing the correct code-root seam.\n- [ ] Focused tests, lint, typecheck, LLM-Review +1, and Verified +1 pass before merge.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "CLI close precheck misroots code repo for custom tracker directories"
       },
       "created_at": "2026-08-15T14:59:52Z",
@@ -14132,9 +14236,17 @@
       "updated_at": "2026-08-15T15:00:05Z"
     },
     "59b0-d1b9-ad94-4339": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nCreate is the highest-risk operation: a timeout or local key-persistence failure can leave a real Jira issue without durable local identity, and replay can duplicate it. Existing write-ahead pending/keyed recovery contains many cases, but lifecycle writes occur across handlers rather than as plan intents. The new coordinator must use RP-02s single facade/recovery seam without inventing another identity owner.\n\n## Outcome\nMake the coordinator authoritative for outbound and inbound create plus their binding lifecycle intents. Preserve pre-create pending durability and index-lag grace. After Jira returns a key, attach the canonical `rebar-id:<local_id>` label first, attempt the optional entity property second, then persist/confirm through RP-02. If any containment/persistence step fails, safety-abort with the known key and never delete the successful Jira issue.\n\n## Plan\n1. Execute the plans pending-binding intent durably before any create call. A failure here makes zero provider calls and returns an item-scoped persistence failure.\n2. Send create once within the shared logical budget. On commit-unknown timeout, re-observe only through replay-safe identity/query seams and otherwise defer; never blind-replay.\n3. Once a key is returned, add the canonical label first. Treat the entity property as optional enrichment whose unsupported/permission failure is visible but cannot erase the label floor.\n4. Persist the known key and confirmation through the RP-02 facade/repository unit-of-work. On failure, return a typed known-key safety abort; later keyed/keyless recovery converges without a duplicate.\n5. Execute other lifecycle intents only after their remote postcondition is proven. Preserve create-before-link and hierarchy deferral, tombstone suppression, filtered/read-only behavior, and exact per-ticket tallies.\n\n## Testing (RED \u2192 GREEN)\n- Failure cuts run before pending save, during create disconnect/timeout, after returned key, during label/property, and during known-key live replacement. Oracles include provider call count, remote labels/properties, exact local bytes, terminal disposition, and next-pass recovery.\n- Duplicate probes run the whole crash/restart sequence twice for Cloud/DC fakes and assert one Jira issue.\n- Index-lag fixtures retain the three-miss plus 3600-second conjunction and keyed recovery performs zero search.\n- Dependency tests prove links/children wait for a proven create and independent tickets continue.\n\n## Compatibility / rollback\nCut over create as one operation family; never run legacy and coordinator creates together. Before contract removal, a flag can return future creates to legacy behavior. Rollback never deletes remote issues. The explicit approved behavior change is label-first/property-second containment before local confirmation; preview/stored mutation shape remains compatible.\n\n## Acceptance Criteria\n- [ ] A failed pre-create pending save produces zero Jira calls and an item-scoped persistence outcome.\n- [ ] After a returned Jira key, the canonical label is attempted before optional property and local confirmation; every failure reports the known key without deleting the issue.\n- [ ] Create timeout/connection-loss cases never blind-replay; observation or a deferred pending record prevents duplicate creation across restart.\n- [ ] Cloud/DC crash-restart fixtures produce exactly one remote issue and converge to one confirmed forward/reverse binding.\n- [ ] Keyed recovery performs no search; keyless negative search requires both three misses and 3600 seconds; per-entry recovery failure does not stop unrelated tickets.\n- [ ] Lifecycle intents execute only after proven remote postconditions, while tombstones, filters, read-only modes, hierarchy, and create-before-link rules remain effective.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 S4 \u2014 Coordinate create and binding lifecycle with label-first containment"
+      },
       "created_at": "2026-08-18T03:44:44Z",
       "jira_id": "4589150",
       "jira_key": "REB-3118",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:46Z"
     },
@@ -14625,9 +14737,17 @@
       "updated_at": "2026-08-15T15:00:25Z"
     },
     "5e64-d9cd-2dd4-4036": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\n`BindingStore` is the authoritative local-id \u2194 Jira identity aggregate and must remain so, but its 799-line module now owns byte persistence, live/reverse lifecycle policy, retirement, recovery, peer-state delegates, comment identity, and GET rotation. New safety rules have no cohesive owner, and production code mutates an inner entry returned by the shallow `all_bindings()` compatibility query. A mechanical split could regress hard-won crash, index-lag, identity, serialization, and selective-publication behavior.\n\n## Outcome\nKeep one public `BindingStore` facade and existing import/method compatibility while extracting three internal owners: a byte-preserving repository/unit-of-work, lifecycle policy, and incomplete-operation recovery. Typed views remain open over the original dictionaries so unknown fields and exact JSON behavior survive. Add the approved journal-free retirement completion rule: a durable tombstone is authoritative intent, and a live forward/reverse pair is removed only when tombstone, forward, and reverse identities all agree. Only explicit `unretire` revokes that intent; automatic liveness observations never resurrect a tombstoned identity.\n\n## Delivery slices\n1. Extract repository/unit-of-work persistence behind the facade with byte, fault-cut, corruption, rotation-order, and selective-publication regression oracles; establish ADR 0099 with the complete approved target design.\n2. Extract lifecycle policy and add narrow facade operations so new production code no longer needs mutation-through-query while `all_bindings()` remains shallow-compatible.\n3. Extract recovery, cut the live caller to the narrow mutation seam, complete exact-match interrupted retirements before remote issue observation, and finalize ADR 0099 to describe the realized behavior.\n\n## Architectural constraints\n- Preserve `peer_state.py`, `get_rotation.py`, pending \u2192 confirmed \u2192 reversible retired lifecycle, numeric-ID re-key, comment identity, and the existing five-file selective tickets publication.\n- Preserve unknown fields, `indent=2`, sorted keys, trailing newline, legacy additive reads, and unchanged-pass byte/HEAD idempotency.\n- Corrupt live state still fails closed; retired/rotation/alert/commit failure behavior changes only when this plan names it.\n- Construction, load, check, dry-run, preview, selection, and filtered operations do not perform recovery writes.\n- Live recovery runs after configuration snapshot/preflight and exclusive lock/staleness validation but before remote issue fetch, binding walk, differ, or lifecycle mutation. This ordering prevents an upgraded pass from interleaving new liveness evidence with completion.\n- In a historical overlap, stale `absent_404_count`, automatic 200/`clear_absent`, or same-key confirm cannot revoke the durable tombstone; only explicit `unretire` removes it and thereby eliminates the completion candidate.\n- No general journal, format migration, eager rewrite, broad `git add -A`, deep-copy change to `all_bindings()`, or new identity writer.\n\n## Compatibility / rollback\nEach slice is an internal facade delegation with unchanged stored formats and public signatures. A slice can be reverted independently to the preceding facade implementation. The exact-match repair is additive and idempotent: disabling its pre-observation live-operation call restores the prior detectable overlap without rewriting coherent stores. Rollback never deletes a remote issue or implies automatic unretire.\n\n## Acceptance Criteria\n- [ ] Existing `BindingStore` imports, signatures, shallow `all_bindings()` behavior, unknown-field preservation, and exact serialization remain compatible through direct-loader and public-facade tests.\n- [ ] Repository fault-cut tests preserve current rotation-before-live ordering, per-file atomic replacement, selective five-file publication, and explicit failure outcomes.\n- [ ] Lifecycle tests preserve both-index identity guards, pending/confirmed/retired rules, 404 grace/reset, immutable-ID re-key, tombstone suppression/unretire, and append-only comment identity.\n- [ ] Recovery tests prove keyed/keyless create recovery and exact-match retirement completion are idempotent; repair runs before remote observation, identities must agree, and ambiguity/replace failure safety-aborts.\n- [ ] Automatic liveness signals do not override durable retirement intent; explicit `unretire` removes the tombstone and prevents completion.\n- [ ] Load/check/dry-run/preview/selection/filtered tests prove zero recovery writes; only a validated write-bearing operation may repair an interrupted retirement.\n- [ ] ADR 0099 identifies preserved behavior, the intentional repair behavior, explicit-unretire reversal, pre-observation ordering, rollback, and the prohibition on broad tickets-branch staging.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-02 \u2014 Decompose binding persistence, lifecycle, and recovery behind BindingStore"
+      },
       "created_at": "2026-08-18T03:44:50Z",
       "jira_id": "4589151",
       "jira_key": "REB-3119",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:53Z"
     },
@@ -14950,6 +15070,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:40Z"
+    },
+    "6083-b802-e90a-416e": {
+      "created_at": "2026-08-18T04:42:44Z",
+      "jira_id": "4589161",
+      "jira_key": "REB-3129",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:47Z"
     },
     "60a0-3aee-98e8-4094": {
       "created_at": "2026-08-15T15:00:41Z",
@@ -23451,6 +23578,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:06:28Z"
     },
+    "9918-a5d6-8fb5-42e8": {
+      "created_at": "2026-08-18T04:42:51Z",
+      "jira_id": "4589162",
+      "jira_key": "REB-3130",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:42:54Z"
+    },
     "992d-9d17-c6ac-4492": {
       "baseline": {
         "assignee": null,
@@ -28967,10 +29101,24 @@
     },
     "bbdc-5cc9-097a-4f06": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nRP-01 is now landed on `origin/main`. It made `PydanticAIRunner.run()` -> one per-run `ProviderSession` -> one `_pai_structured`/Pydantic `Agent` operation authoritative and pinned request-budget, output repair, cache, exhaustion, artifact, tracing, usage, and failure behavior. RP-04 must add provider-native auth injection without forking that path.\n\n## Outcome\nAdd an `LLMRuntime` capability assembled at the trusted operation boundary and consumed only by existing `ProviderSession` builders. Accept provider-native pre-client auth/session capabilities (for example boto3 Session, Anthropic access-token provider, OpenAI callable/workload identity, or provider-specific static input); Rebar still constructs/owns/closes the official client and retains RP-01 policy. Arbitrary constructed clients/runners and a second Agent/retry scheduler remain out of scope.\n\n## Plan\n1. Add `src/rebar/llm/auth.py` with typed provider-specific `LLMRuntime` auth/session capabilities. Keep them non-serializable and outside `LLMConfig`, `RunRequest`, snapshots, fingerprints, caches, CLI/MCP schemas, and public output.\n2. Extend `PydanticAIRunner`/`get_runner` to receive `LLMRuntime`, then pass it into the one per-run `ProviderSession`. Enrich only the existing Anthropic/Bedrock/OpenAI builder inputs; preserve fallback candidate construction and close ownership.\n3. Let each official SDK retain native precedence, refresh, expiry, invalidation, and workload identity. If explicit provider/auth composition is missing or conflicting, fail before a provider model request and never try another ambient principal/provider. Optional observability remains separate.\n4. Do not alter `_pai_structured`, output policy, request allowance, complete-or-omit failed-response history, cache breakpoint/settings/accounting, typed exhaustion, final artifacts, candidate tracing, usage normalization, failure translation, or documented limit-raise guidance.\n\n## Testing (RED -> GREEN)\n- Extend provider construction unit tests with native capability doubles for Anthropic, Bedrock, and OpenAI; assert the exact existing builder receives the capability, one official client is constructed/closed, and no raw token extraction occurs outside its adapter.\n- Run RP-01's S2/S3/S5 authoritative offline oracles and candidate-tracing oracle unchanged. Add an AST/runtime guard that auth injection still has one `ProviderSession`, one runner dispatch, and one Agent operation.\n- Failure tests cover absent/conflicting explicit auth, revoked static auth, native refresh success, refresh failure, fallback candidates, transport retry, output retry/exhaustion, and secret canary leakage.\n- [operator-attested] Run bounded live Anthropic and Bedrock auth/cache canaries after cutover. Record provider/auth-source kind, cache read/write counters, request/retry counts, trace/run id, timestamp, and redacted outcome; never record credential material.\n\n## Compatibility / rollback\nRuntime input is optional during expansion; absence delegates to the exact RP-01 construction behavior. Before callers require the binding, rollback removes the new argument. After cutover, rollback must retain an adapter accepting the binding but may ignore it in favor of the old native environment chain. No LLM result schema changes.\n\n## Acceptance Criteria\n- [ ] Anthropic, Bedrock, and OpenAI construction tests prove provider-native capability reaches only the existing `ProviderSession` builder and exactly one Rebar-owned official client lifecycle.\n- [ ] The unchanged RP-01 authoritative S2/S3/S5 and candidate-tracing suites pass, including one-Agent budget, complete-or-omit retry history, cache/accounting, typed exhaustion, artifacts, tracing, usage, and failure contracts.\n- [ ] Structural/runtime tests reject a second runner/client owner, Agent construction route, `_pai_structured` caller, or bespoke retry scheduler.\n- [ ] Missing/conflicting explicit auth fails before a provider model request without anonymous, alternate-principal, or cross-provider fallback; native refresh remains SDK-owned.\n- [ ] Secret sentinels are absent from config/request/snapshot/fingerprint/cache/schema/output/log/exception/tracing boundaries and unwrap only inside the selected provider builder.\n- [ ] [operator-attested] Bounded live Anthropic and Bedrock auth/cache canaries pass with the required redacted evidence recorded on this ticket.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-04 S4 \u2014 Inject LLM auth through the landed ProviderSession"
       },
       "created_at": "2026-08-17T19:41:17Z",
@@ -30008,6 +30156,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:55Z"
     },
+    "c4f7-82ff-1004-4da5": {
+      "created_at": "2026-08-18T04:42:57Z",
+      "jira_id": "4589163",
+      "jira_key": "REB-3131",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:43:00Z"
+    },
     "c50e-7326-9cac-45e4": {
       "baseline": {
         "assignee": {
@@ -30675,8 +30830,16 @@
       "updated_at": "2026-08-15T15:11:17Z"
     },
     "c96d-58b0-eede-4569": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nThe delivered epic (Gerrit stack 558/560/561/563/576/579/580/581, NOT landed) diverged from the APPROVED epic design on the authorship-payload format. bde5 (change 561, commit c31fc7eb5) signs the event's RAW canonical bytes; the approved epic AC requires an **in-toto Statement** payload whose `subject` binds `{event_uuid, content_hash}`. This story transitions the authorship *machinery* to the approved design. (User rejected the delivered design; full divergence record in session_log d7c0.)\n\n## Stack scoping (why this story is authorship.py ONLY)\nThis story AMENDS Gerrit change 561 = commit c31fc7eb5 (bde5), which touches `src/rebar/attest/authorship.py` and NOTHING else. At that commit the authorship functions have **no consumers yet**: the write-time signing call site (`_seam.py`), the merge-gate content-binding (`verify_authorship.py`), and the SNAPSHOT ledger (`compact.py`) are all introduced later in commit 721702e91 (3183). Therefore the consumer cutover to the in-toto payload \u2014 and the epic-AC-named `create_placeholder` alias (which wraps `ensure_identity_for`, introduced in commit ec3aff507 / 2f13) \u2014 is handled in **TS3 (117b, change 580)**, the story that reworks that commit. Keeping the edits in the commit where the symbols actually exist is what keeps every intermediate patchset internally green.\n\n## What (authorship.py machinery)\nAdd the in-toto Statement layer as NEW functions, and PRESERVE the existing low-level primitive so KEY-op signing (`identity.py._verify_keyop_signature`, which signs `keyop_payload` bytes, not events) and any other caller keep compiling unchanged:\n\n- KEEP `sign_authorship(payload, key_path, principal)` and `verify_authorship(envelope,\n  identity_id)` as the low-level SSHSIG-over-DSSE primitive (used by KEY-op signatures).\n- `authorship_content_hash(event: dict) -> str`: **SHA-256, lowercase hex** over the\n  event's canonical JSON with the `author_sig` key EXCLUDED (the signature never covers\n  itself).\n- `build_authorship_statement(event_uuid, content_hash) -> dict`: an in-toto Statement:\n  - `_type`: `\"https://in-toto.io/Statement/v1\"`\n  - `subject`: `[{ \"name\": \"<event_uuid>\", \"digest\": { \"sha256\": \"<content_hash>\" } }]`\n  - `predicateType`: `\"application/vnd.rebar.authorship.v1+json\"`\n  - `predicate`: `{}`\n- `sign_event_authorship(event: dict, key_path, principal) -> dsse.Envelope`: computes the\n  content_hash, builds the Statement, and signs its canonical JSON bytes via the primitive\n  (DSSE payloadType `application/vnd.rebar.authorship.v1+json`, PAE-signed under the pinned\n  authorship namespace). The Statement JSON is the DSSE payload.\n- `verify_event_authorship(event: dict, envelope, identity_id, *, repo_root=None) ->\n  Verdict`: (1) parse the DSSE payload as an in-toto Statement, (2) check\n  `subject[0].name == event['uuid']` AND `subject[0].digest.sha256 ==\n  authorship_content_hash(event)`, (3) THEN verify the DSSE signature against the identity's\n  in-band keys (reusing `resolve_trust_root`). Any parse/shape failure or subject/hash\n  mismatch yields a non-verified Verdict; it NEVER raises on a lookup problem (mirrors the\n  existing fail-closed contract).\n\n## Scope\nIn: the in-toto Statement authorship machinery in `src/rebar/attest/authorship.py` (content_hash + Statement build + `sign_event_authorship` + `verify_event_authorship`), with the low-level `sign_authorship`/`verify_authorship` primitive preserved for KEY-ops. Out: the write-seam stamping + merge-gate content-binding + SNAPSHOT ledger cutover to the new payload AND the `create_placeholder` alias (all TS3/3183, commit 721702e91); the era/validity model (TS2/e165); docs/ADR (TS4/b134).\n\n## Landing / sequencing\nTS1\u2013TS4 land as ONE ATOMIC Gerrit stack submit (relation chain), so there is no runtime window where a reworked commit is live without the others. Write-time signing is opt-in and the stack is unlanded, so no persisted event carries an old-format `author_sig` \u2014 no migration/backfill. Docs/ADR for this pivot are rewritten in TS4.\n\n## Acceptance Criteria\n- [ ] `sign_event_authorship` produces a DSSE envelope whose payload is an in-toto\n  Statement (`_type` https://in-toto.io/Statement/v1, `predicateType`\n  application/vnd.rebar.authorship.v1+json) with `subject[0] = {name: event_uuid,\n  digest: {sha256: content_hash}}`; a test asserts the structure + payloadType.\n- [ ] `authorship_content_hash` is SHA-256 hex over the canonical event with `author_sig`\n  EXCLUDED; a test proves adding/removing an `author_sig` key does not change the hash,\n  and mutating any other field DOES change it.\n- [ ] `verify_event_authorship` returns verified for an event signed by identity A against\n  A's in-band keys; a test asserts it does NOT verify against identity B, FAILS on a\n  tampered event body (content_hash mismatch), and FAILS on a tampered signature.\n- [ ] `verify_event_authorship` returns a non-verified Verdict (never raises) when the\n  envelope payload is not a valid in-toto Statement (malformed / missing subject) and when\n  the identity is unknown/keyless (test).\n- [ ] The low-level `sign_authorship(payload,...)` primitive is unchanged: a KEY-op-style\n  signature over `keyop_payload(...)` bytes still verifies via the primitive path (test),\n  proving the Statement layer did not break KEY-op signing.\n\n## file_impact\n- `src/rebar/attest/authorship.py` (in-toto Statement build/parse + content_hash + event sign/verify; primitive preserved)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "transition: authorship payload -> in-toto Statement (subject binds {event_uuid, content_hash})"
+      },
       "created_at": "2026-08-15T15:11:18Z",
       "jira_key": "REB-1038",
+      "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:18Z"
     },
@@ -30749,8 +30912,16 @@
       "updated_at": "2026-08-15T15:11:21Z"
     },
     "c9d8-eeb2-67a4-42fd": {
+      "baseline": {
+        "assignee": null,
+        "description": "# S4 \u2014 RFC 7662 token-introspection verifier\n\n## Why\nIntrospection completes the \"validate against an external Authorization Server\" story for providers that issue **opaque** access tokens (or where instant revocation matters) \u2014 Keycloak, Okta, Auth0, WorkOS all expose a standard `/introspect` endpoint. It is the pattern the SDK's own `simple-auth` example demonstrates.\n\n## What\nAdd an **`IntrospectionTokenVerifier`** to `src/rebar/_mcp_auth.py`, activated by including `introspection` in the `mcp.auth_strategies` list (the strategy-selection config key **introduced by S2**, this story's dependency \u2014 not a pre-existing seam), with flat config keys THIS story registers: `auth_introspection_endpoint`, `auth_introspection_client_id`, `auth_introspection_client_secret_env` (NAME of an env var holding the client secret \u2014 no plaintext secret in config), `auth_introspection_allow_private_host` (bool, default `false`), and `auth_introspection_allow_missing_aud` (bool, default `false`). It does not take a per-verifier audience \u2014 it validates against the single `auth_resource_server_url` (S2). It POSTs the token (RFC 7662) with client authentication, accepts only `active: true`, and maps the response into an `AccessToken` (all RFC 7662 response fields are OPTIONAL, so each has a defined fallback): `scope` (a space-delimited string per \u00a72.2) is split into the scopes list (absent \u2192 empty list), `exp`\u2192`expires_at` (absent \u2192 `None`, per Expiry below), `sub`\u2192`subject` (absent \u2192 `None`), and `client_id`\u2192`client_id` (absent \u2192 falls back to `sub`, else `\"unknown\"`); and stamps `resource=auth_resource_server_url` so the composite check passes. NOTE: the SDK's `IntrospectionTokenVerifier` is an **example, not an exported/hardened class** \u2014 this story WRITES its own (adapting the example), it does not import it. Adds the `auth_introspection_*` fields to the `McpConfig` dataclass + the `_SECTIONS['mcp']` coercer in `src/rebar/_config_schema.py`; these auto-derive the `REBAR_MCP_AUTH_INTROSPECTION_*` **env-var names**, which are added to `MCP_ENV_VARS` (in `src/rebar/mcp_server.py`) and `server.json`; `scripts/check_server_manifest.py` passes. (The generated `mcp-reference.md`/`env-vars.md` are regenerated for the full key set by S7; S1 fixes the generators to iterate `MCP_ENV_VARS`.)\n\n## Approach & rationale\nAdapt the SDK `simple-auth` example (the blessed reference) and add the production hardening its docstring says it lacks: client authentication on the introspection call, strict audience handling, and fail-closed transport errors. Reuse the already-present `httpx`.\n\n## Scope\nThe introspection verifier only, on the S2 seam. Subset of the epic. Depends on S2. Independent of S3/S5/S6.\n\n## Security\nBoundary-crossing. Requirements:\n- Call the introspection endpoint over authenticated TLS (`client_secret_basic`, secret from\n  `auth_introspection_client_secret_env`, which MUST be present and non-empty at startup or the\n  verifier refuses to start \u2014 fail-closed), **HTTPS-only** (an `http://` endpoint is rejected at\n  construction), a **bounded HTTP timeout (default connect 5s / read 10s)**. Private/link-local\nendpoint hosts (RFC 1918, loopback,\n  `169.254.0.0/16`) are **rejected by default**; an operator with a legitimate internal AS sets\n  `auth_introspection_allow_private_host=true` to opt out.\n- Accept only `active:true`. **Audience:** RFC 7662 \u00a72.2 permits `aud` to be a JSON string OR an\n  array of strings \u2014 the check passes if `auth_resource_server_url` equals the string form or is a\n  member of the array form. If the AS omits `aud` (many do), the default is to **reject**\n  (fail-closed); an operator whose AS scopes tokens to this resource by other means sets\n  `auth_introspection_allow_missing_aud=true` to accept aud-absent tokens (documented risk in S7).\n- **Fail-closed transport:** a non-200 status, a timeout, or a **malformed response** \u2014 a 200 whose\n  body is not valid JSON, or valid JSON lacking a boolean `active` field \u2014 **raises** (composite\n  treats as non-acceptance \u2192 deny); it never yields acceptance.\n- **No caching in v1:** every request re-introspects the token with the AS, giving instant\n  revocation. A positive-response cache (hashed key, bounded TTL) is a documented follow-on\n  optimization, deliberately out of scope here to avoid the revocation-delay tradeoff.\n- **Expiry:** when the response includes `exp`, set `AccessToken.expires_at` from it (a real\n  positive value). When `active:true` but `exp` is absent (RFC 7662 permits it), set\n  `expires_at=None` \u2014 validity is then bounded by re-introspection (every request re-checks the AS in v1). Never emit\n  `expires_at=0` (the SDK reads a falsy value as no-expiry while looking like a set value).\n- Tokens/secrets never logged.\n\n## Acceptance Criteria\n- [ ] The `auth_introspection_*` config fields exist in `McpConfig`/`_SECTIONS['mcp']`\n      (`src/rebar/_config_schema.py`); their derived `REBAR_MCP_AUTH_INTROSPECTION_*` env-var names are\n      present in `MCP_ENV_VARS` (`src/rebar/mcp_server.py`) and `server.json`; and\n      `scripts/check_server_manifest.py` passes (observable oracle: the manifest drift test is green\n      and both files contain the new env-var names).\n- [ ] Unit test (tier: unit against the real verifier; the irreducible boundary \u2014 the introspection\n      HTTP call \u2014 is a stateful fake fed production-shaped RFC 7662 responses) asserts an `active:true`\n      response with a matching `aud` and an `exp` \u2192 an `AccessToken` with expected scopes,\n      `resource==auth_resource_server_url`, and a positive `expires_at`; and that an `active:true`\n      response OMITTING `exp` yields `expires_at=None` (never 0), with validity bounded by\n      re-introspection (observable oracle: `expires_at is None`).\n- [ ] Unit tests assert rejection for: `active:false` (returns None); a response OMITTING `aud` when\n      `auth_introspection_allow_missing_aud=false` (fail-closed reject) \u2014 and acceptance of the same\n      response when the key is `true`; a mismatched `aud`; and an `aud` supplied as an ARRAY that\n      does/does not contain `auth_resource_server_url` (accept/reject respectively) \u2014 each a distinct\n      negative control. Also assert `scope` given as a space-delimited string is split into the\n      expected scopes list.\n- [ ] Unit test asserts a non-200 status, a timeout, and a malformed response (200 body that is not\n      valid JSON; and valid JSON lacking a boolean `active` field) each **raise** (\u2192 composite\n      non-acceptance/deny) and never yield acceptance, and that every request re-introspects with no\n      caching in v1 (observable oracle: the stateful fake's request count increments once per request\n      \u2014 two identical requests hit the fake twice).\n- [ ] Unit test asserts construction-time guards: the introspection request carries\n      `client_secret_basic` (secret sourced from `auth_introspection_client_secret_env`); an `http://`\n      endpoint is rejected; and a private/link-local host is rejected by default and accepted only\n      with `auth_introspection_allow_private_host=true` (observable oracle: the fake receives Basic\n      auth; rejection at construction for the http/private cases). Also assert the verifier refuses\n      to start when the env var named by `auth_introspection_client_secret_env` is absent or empty\n      (observable oracle: startup raises a clear message).\n- [ ] Component test (tier: component \u2014 the `IntrospectionTokenVerifier` inside a\n      `CompositeTokenVerifier`, invoked through the composite's verify path, with the external\n      `/introspect` endpoint as the SAME stateful fake) asserts an active, matching-audience token\n      \u2192 an accepted `AccessToken`, and an `active:false`/absent token \u2192 None (\u2192 composite deny).\n      End-to-end HTTP behavior (401/200 through the ASGI transport) is exercised once for all\n      verifiers by S2's transport harness, not re-tested here.\n- [ ] `make lint && make typecheck && make test` pass.\n\n## Compatibility\nAdditive verifier, opt-in via the `introspection` strategy. No change to other verifiers or stdio.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "S4 \u2014 RFC 7662 token-introspection verifier"
+      },
       "created_at": "2026-08-15T15:11:22Z",
       "jira_key": "REB-1219",
+      "peer_parent": "REB-1173",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:22Z"
     },
@@ -36628,10 +36799,25 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:35Z"
     },
+    "f59b-56c1-596d-422a": {
+      "created_at": "2026-08-18T04:43:03Z",
+      "jira_id": "4589164",
+      "jira_key": "REB-3132",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T04:43:06Z"
+    },
     "f5ac-6373-5e33-4374": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nToday one logical Jira update can pass through generic apply retry, Cloud ACLI or REST retry, Jira DC SDK retry, and recovery reads. Persistent faults can multiply wire calls; late failure can replay already-successful substeps; long `Retry-After` values can be capped and retried early. The coordinator needs a proven vertical contract before migrating every operation.\n\n## Outcome\nRoute one representative issue-update postcondition end to end for Jira Cloud and Jira DC through typed provider-neutral outcomes and one immutable retry budget. The concrete adapter owns physical execution, timeout/cleanup, provider decoding, and hidden SDK retry disablement. The budget covers the initial call, any safe recovery observation, and replanned call together.\n\n## Plan\n1. Add provider-neutral operation outcome/error metadata: logical operation id, atomic postcondition, physical attempt, terminal disposition, normalized scope, replay safety, provider delay, `retry_not_before`, and redacted diagnostics.\n2. Add one budget owner with at most three physical invocations and 15 seconds cumulative sleep. Fallback is approximately 2s then 4s plus nonnegative deterministic-injected jitter; provider delay is a lower bound.\n3. Adapt one Cloud update route and one DC update route. Disable nested client/SDK retry for those routes, set explicit timeouts, preserve ACLI child reaping, and classify TLS/auth/permanent 4xx without retry.\n4. On ambiguous write timeout, observe the atomic postcondition before any replay. A satisfied observation returns recovered success; remaining drift may replan only within the same budget.\n5. If an authoritative delay cannot fit, return deferred `retry_not_before` without sleeping early or consuming a fictional attempt.\n\n## Testing (RED \u2192 GREEN)\n- Deterministic fake ACLI plus a local HTTP server exercise Cloud REST/DC responses, disconnects, timeouts, 429/503, malformed delays, TLS/auth/permanent 4xx, and ambiguous commit.\n- A fake clock and injected jitter assert exact attempt/sleep/deadline accounting and zero real sleep.\n- Wire-call counters prove no nested retry; process fixtures prove every ACLI timeout terminates/reaps the child.\n- Existing provider error/output tests pin redaction and current intentional fast-fail behavior.\n\n## Coordination / portability\nImplement after RP-04 S2/S3 have made runtime/backend construction authoritative; record soft relations rather than a promoted whole-epic blocker. All mandatory tests run locally with fake process/HTTP transports and no CI-provider feature or live credential. Optional bounded live probes may add evidence but are never the acceptance oracle.\n\n## Compatibility / rollback\nOnly the selected update route uses the new executor during expand. A route flag can return it to legacy dispatch before later cutover; it never dual-sends. Rollback retains successful remote effects and re-observes ambiguous ones. This intentionally replaces nested retries and early capped-provider-delay replay for the migrated route.\n\n## Acceptance Criteria\n- [ ] Cloud and DC update fixtures expose one provider-neutral outcome contract with redacted provider metadata and a stable logical operation id.\n- [ ] No logical postcondition exceeds three physical invocations or 15 seconds cumulative sleep, including observation/replan; wire counters prove nested SDK/generic retry is disabled.\n- [ ] A provider delay is treated as a lower bound; when it cannot fit, the operation returns `retry_not_before` and performs no early replay.\n- [ ] TLS, credential, invalid request, permission, and other permanent classifications fast-fail; eligible network/429/5xx outcomes use injected backoff/jitter.\n- [ ] Ambiguous update timeout re-observes once, returns recovered success when satisfied, and replays only remaining drift within the same budget.\n- [ ] ACLI timeout tests prove process termination/reaping, and all mandatory validation runs against local deterministic transports without external credentials.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 S1 \u2014 Execute one Jira postcondition through a single retry budget"
+      },
       "created_at": "2026-08-18T03:44:57Z",
       "jira_id": "4589152",
       "jira_key": "REB-3120",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:44:59Z"
     },
@@ -36989,9 +37175,17 @@
       "updated_at": "2026-08-15T15:15:48Z"
     },
     "f828-6f5e-3b15-41f5": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nReconcile planning currently mixes snapshot reads, binding lifecycle decisions, global mode caps, and later handler assumptions. Preview exposes mutations but not the lifecycle effects a live pass would attempt. Without a pure plan value, retry recovery can recompute against different observations and global filters can be applied after decision-bearing work.\n\n## Outcome\nBuild one immutable observation per pass and pure `TicketPlan` values per local/remote identity. A plan contains the existing `Mutation` values plus lifecycle intents, ticket dependencies, diagnostics, disposition, and observation/version identity. Run selection, filter, mode cap, and global safety limits before any lifecycle or remote effect. Emit the new plan in shadow while legacy dispatch remains authoritative.\n\n## Plan\n1. Define immutable observation and plan value objects using open provider-neutral payloads. Keep the existing `Mutation` vocabulary/serialization unchanged.\n2. Refactor existing differ outputs into a pure planner that consumes local snapshot, remote snapshot, binding read view, mode, selection/filter, and caps without I/O.\n3. Represent bind/confirm/re-key/retire/baseline/comment identity changes as versioned lifecycle intents; do not execute them during planning.\n4. Encode inter-ticket dependencies such as create-before-link and parent-before-child explicitly in plans. A blocked prerequisite yields a deferred disposition rather than an out-of-order mutation.\n5. Extend dry-run/check preview with a versioned lifecycle-intents section while preserving the existing mutation array shape and hashes. Shadow-compare plan mutations/dispositions to legacy output and fail loudly on unexplained divergence in tests.\n\n## Testing (RED \u2192 GREEN)\n- Pure table tests feed frozen local/remote/binding snapshots and assert exact plans, dependencies, diagnostics, and dispositions with no patched filesystem/provider calls.\n- Ordering tests prove selection/filter/caps happen before lifecycle intent and that truncated scope cannot mutate or advance unselected tickets.\n- Preview golden tests preserve legacy mutation bytes/hash and add a versioned lifecycle-intent section.\n- Ticket-sourced cases cover tombstones, pending/index lag, moved keys, hierarchy/link ordering, impossible links, partial snapshots, and filtered passes.\n\n## Compatibility / rollback\nShadow mode has zero write authority. Removing the shadow planner returns to legacy differ/preview unchanged. Existing mutation fields and stored ticket/binding formats remain readable; consumers can ignore the additive versioned lifecycle-intent section. No adapter call or binding save is permitted from the planner.\n\n## Acceptance Criteria\n- [ ] Given the same frozen observation, planning is deterministic and produces immutable per-ticket mutations, lifecycle intents, dependencies, diagnostics, disposition, and version identity with zero I/O.\n- [ ] Selection, filter, mode cap, and global safety limits exclude work before any lifecycle intent or remote operation is eligible.\n- [ ] Create/link and hierarchy prerequisites are explicit; blocked work is deferred and never emitted out of order.\n- [ ] Preview preserves the existing mutation array and canonical hash while adding a versioned lifecycle-intents section that old consumers may ignore.\n- [ ] Shadow comparisons match existing provider-neutral mutation/disposition behavior for ticket-sourced regressions or name each approved behavioral delta.\n- [ ] Construction, check, dry-run, and shadow planning perform zero repository saves, ticket writes, Jira calls, or child-process launches.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-03 S2 \u2014 Shadow immutable per-ticket plans from one observation"
+      },
       "created_at": "2026-08-18T03:45:04Z",
       "jira_id": "4589153",
       "jira_key": "REB-3121",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:45:06Z"
     },
@@ -37542,9 +37736,17 @@
       "updated_at": "2026-08-15T15:16:08Z"
     },
     "fc1c-1b08-70c2-4afb": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context / Problem\nAfter S1, persistence has a cohesive owner but `BindingStore` still embeds forward/reverse identity transitions, pending/confirmed state, numeric-ID re-key, comment identity, absence grace, tombstones, and unretire policy. Production rich-text convergence also reaches through shallow `all_bindings()` and mutates an inner dictionary, bypassing any future policy seam.\n\n## Outcome\nExtract lifecycle decisions into a private policy owner operating on the repository original dictionaries, with the public facade retaining every existing method/signature. Add a narrow facade operation for rich-text emission state. Preserve shallow `all_bindings()` compatibility, but make the narrow operation the supported production mutation seam for the later caller cutover.\n\n## Plan\n1. Move cohesive forward/reverse, pending/confirmed, immutable-ID re-key, comment-map, absence/retirement, tombstone, suppression, and unretire call clusters into `binding_lifecycle.py`.\n2. Keep the facade authoritative: it coordinates the lifecycle owner and repository unit-of-work; no adapter or reconciler caller receives a writable repository object.\n3. Use open typed views over the same dictionaries. Unknown and legacy fields remain present and writable only through named policy operations.\n4. Add `BindingStore.note_rich_emit(local_id, wire)` (or an equivalently narrow name) that preserves the current counter/hash behavior and missing-binding fail-open result. Do not change `all_bindings()` copy depth.\n5. Preserve exact current failure choices: confirmed 404 grace/reset, moved-key repair, retired corruption fail-open, live corruption fail-closed, append-only comment identity, tombstone suppression, and explicit unretire.\n\n## Testing (RED \u2192 GREEN)\n- Direct policy tests exercise both-index transitions and reload through the real repository after each state change.\n- Table-driven tests cover duplicate bind, stale reverse cleanup, missing/corrupt forward state, three-404 retirement, 200 reset, numeric-ID move, legacy no-ID behavior, tombstone suppression/unretire, and changed/unchanged comment IDs.\n- A narrow-operation test compares rich-emission hashes/counters and save behavior to the existing production sequence.\n- Signature and shallow-query regression tests pin the facade compatibility surface.\n\n## Compatibility / rollback\nFacade delegates can be moved back without changing bytes or callers. This slice adds the narrow mutation operation but does not yet modify RP-04-owned apply files. No lifecycle thresholds, corruption disposition, copy-depth, stored schema, or identity-marker writer changes.\n\n## Acceptance Criteria\n- [ ] Given valid and corrupt forward/reverse combinations, every lifecycle operation preserves at-most-one identity, removes stale reverse entries when required, and safety-aborts ambiguous double binds.\n- [ ] Three confirmed 404s retire, a successful read resets absence, immutable numeric-ID lookup re-keys instead of retiring, and legacy entries retain current behavior.\n- [ ] Tombstoned issues suppress recreate with an alert until explicit unretire; retired corruption and alert-write failures retain their current fail-open boundaries.\n- [ ] Comment IDs remain append-only/change-gated and old records without the field remain readable without rewrite.\n- [ ] The narrow rich-emission operation matches current hash/counter/save behavior while missing bindings remain nonfatal.\n- [ ] Existing facade signatures and shallow `all_bindings()` semantics remain unchanged; no production adapter obtains direct repository mutation access.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "RP-02 S2 \u2014 Extract binding lifecycle policy and narrow mutation operations"
+      },
       "created_at": "2026-08-18T03:45:11Z",
       "jira_id": "4589154",
       "jira_key": "REB-3122",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T03:45:13Z"
     },
@@ -39953,7 +40155,17 @@
     "REB-3120": "f5ac-6373-5e33-4374",
     "REB-3121": "f828-6f5e-3b15-41f5",
     "REB-3122": "fc1c-1b08-70c2-4afb",
+    "REB-3123": "0eb8-08bd-f9cb-4798",
+    "REB-3124": "2048-d289-e55f-4595",
+    "REB-3125": "2419-2804-c181-4bc0",
+    "REB-3126": "2c81-7119-fb6b-44b1",
+    "REB-3127": "34f2-8d32-029c-400b",
+    "REB-3128": "4698-d85c-b1a3-40d3",
+    "REB-3129": "6083-b802-e90a-416e",
     "REB-313": "ca73-856c-e5e0-4771",
+    "REB-3130": "9918-a5d6-8fb5-42e8",
+    "REB-3131": "c4f7-82ff-1004-4da5",
+    "REB-3132": "f59b-56c1-596d-422a",
     "REB-314": "cd73-6b68-3806-4bf8",
     "REB-315": "cdd4-4349-4534-4473",
     "REB-316": "ce75-9119-5361-4fc7",
