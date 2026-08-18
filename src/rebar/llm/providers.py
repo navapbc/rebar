@@ -77,8 +77,13 @@ class ProviderSession:
     checkable fact instead of an assumption.
     """
 
-    def __init__(self, cfg: LLMConfig) -> None:
+    def __init__(self, cfg: LLMConfig, *, runtime=None) -> None:
         self._cfg = cfg
+        # Optional non-serializable provider-native auth carrier (RP-04 S4,
+        # `rebar.llm.auth.LLMRuntime`). Consulted ONLY by the builder for the SELECTED
+        # provider; None (or a runtime with no carrier for the provider being built) means
+        # byte-identical ambient (RP-01) construction.
+        self._runtime = runtime
         # Clients opened by a builder this run, closed in `close()` / `__exit__`.
         # Never shared/mutated across runs or threads, so no lock is needed.
         self._closeables: list[Any] = []
@@ -179,31 +184,32 @@ class ProviderSession:
         and ``REBAR_LLM_ALLOW_LOCAL_PROXY=1`` opts back in. ``http_timeout`` is the
         per-request READ timeout (story hoopoe), reusing ``cfg.timeout_s``.
 
-        ``_build_retrying_anthropic_model`` returns ``(model, client)``; the
+        ``_build_retrying_anthropic_provider`` returns ``(provider, client)``; the
         hook's contract is a ``Provider``, so the client is registered here for
-        teardown and only ``model.provider`` (the ``AnthropicProvider`` wrapping
-        the retrying ``AsyncAnthropic``) is returned.
+        teardown and the ``AnthropicProvider`` (wrapping the retrying ``AsyncAnthropic``)
+        is returned directly — no throwaway ``AnthropicModel`` is built just to read
+        ``.provider`` off it. RP-04 S4: ``self._runtime.anthropic`` (when present) is passed
+        through as the native pre-client auth carrier; ``None`` is byte-identical ambient.
         """
         import httpx
 
         from rebar.llm.anthropic_model import (
-            _build_retrying_anthropic_model,
+            _build_retrying_anthropic_provider,
             _local_proxy_bypass_base_url,
-            _pai_model,
         )
 
         cfg = self._cfg
-        resolved = _pai_model(cfg)
-        name = resolved.split(":", 1)[1] if ":" in resolved else resolved
         # A candidate's own `endpoint` wins over the loopback-bypass default: it was chosen
         # explicitly (a local proxy backing a hosted primary is the point of a chain).
         direct = self._endpoint_override or _local_proxy_bypass_base_url()
         http_timeout = httpx.Timeout(read=float(cfg.timeout_s), connect=10.0, write=30.0, pool=10.0)
-        model, client = _build_retrying_anthropic_model(
-            name, base_url=direct, cfg=cfg, http_timeout=http_timeout
+        # RP-04 S4: only THIS provider's carrier is consumed; None -> ambient (RP-01).
+        auth = self._runtime.anthropic if self._runtime is not None else None
+        provider, client = _build_retrying_anthropic_provider(
+            base_url=direct, cfg=cfg, http_timeout=http_timeout, auth=auth
         )
         self._closeables.append(client)
-        return model.provider
+        return provider
 
     def _build_bedrock(self, _provider_name: str) -> Any:
         """One-line delegation to the ``bedrock_model`` leaf builder (story S3/2932) — the
@@ -212,7 +218,16 @@ class ProviderSession:
         never a provider's construction body — belongs in ``ProviderSession``."""
         from rebar.llm.bedrock_model import build_bedrock_provider
 
-        return build_bedrock_provider(self._cfg)
+        # RP-04 S4: a supplied BedrockAuth carrier is fail-closed-validated (an empty carrier
+        # raises rather than silently using the ambient chain) and its session is used INSTEAD
+        # of constructing an ambient one; no carrier -> ambient (RP-01).
+        session = None
+        carrier = self._runtime.bedrock if self._runtime is not None else None
+        if carrier is not None:
+            from rebar.llm.auth import bedrock_session
+
+            session = bedrock_session(carrier)
+        return build_bedrock_provider(self._cfg, session=session)
 
     def _build_openai(self, _provider_name: str) -> Any:
         """Build an OpenAI-COMPATIBLE provider for ``cfg.base_url`` (story S4) — the seam
@@ -265,9 +280,13 @@ class ProviderSession:
             transport=httpx.AsyncHTTPTransport(), timeout=httpx.Timeout(float(cfg.timeout_s))
         )
         self._closeables.append(http_client)
+        # RP-04 S4: a runtime OpenAI key (str or callable) takes precedence, then cfg.api_key,
+        # then the local-server placeholder; only THIS provider's carrier is consulted.
+        runtime_openai = self._runtime.openai if self._runtime is not None else None
+        runtime_api_key = runtime_openai.api_key if runtime_openai is not None else None
         return _RebarOpenAICompatibleProvider(
             base_url=self._endpoint_override or cfg.base_url,
-            api_key=cfg.api_key or "not-needed",
+            api_key=runtime_api_key or cfg.api_key or "not-needed",
             http_client=http_client,
         )
 

@@ -30,7 +30,6 @@ from rebar.llm.anthropic_model import (
     _pai_model,
 )
 from rebar.llm.capabilities import (
-    ModelCapabilities,
     cache_settings_for,
     capabilities_for,
     provenance_for,
@@ -45,6 +44,13 @@ from rebar.llm.model_classes import (
     primary_endpoint_for,
 )
 from rebar.llm.providers import ProviderSession
+from rebar.llm.runner_support import (
+    _TOOL_CAPABILITY_CHECKED,  # noqa: F401  (re-exported for tests / back-compat)
+    _answering_model,
+    _check_tool_capability,
+    _intersect_capabilities,
+    _readonly_gate,
+)
 from rebar.llm.structured_run import (
     FailureContext,
     _extract_usage,
@@ -257,9 +263,13 @@ class PydanticAIRunner:
 
     name = "pydantic_ai"
 
-    def __init__(self, config: LLMConfig, *, model_override=None):
+    def __init__(self, config: LLMConfig, *, model_override=None, runtime=None):
         self._config = config
         self._model_override = model_override
+        # Optional non-serializable provider-native auth carrier (RP-04 S4). Threaded to the
+        # per-run ProviderSession and consumed ONLY by the selected provider's builder; None
+        # means byte-identical ambient (RP-01) construction.
+        self._runtime = runtime
 
     def preflight(self) -> None:
         """Fail fast if the ``agents`` extra (pydantic-ai-slim) is absent or the config
@@ -366,7 +376,11 @@ class PydanticAIRunner:
         # side recognizes raises the typed LLMConfigError HERE, so it can never be
         # misclassified by the broad `except Exception` further down as a provider OUTAGE.
         # `model_override` (the offline TestModel harness) bypasses all of this.
-        with ProviderSession(cfg) as provider_session:
+        # RP-04 S4: thread the optional native-auth runtime into the per-run session. Passed
+        # only when present so an ambient run stays byte-identical to `ProviderSession(cfg)`
+        # (the two are equivalent — `runtime` defaults to None).
+        session_kwargs = {} if self._runtime is None else {"runtime": self._runtime}
+        with ProviderSession(cfg, **session_kwargs) as provider_session:
             _provider_name = resolved.split(":", 1)[0] if ":" in resolved else resolved
             # The fallback chain (task cc33) of the model CLASS whose primary is `resolved` — empty
             # for a class with no `fallback` configured, which is every deployment until an operator
@@ -693,16 +707,18 @@ def _merge_success_run_shape(
         logger.warning("usage-log: run-shape capture failed for op=%s: %s", call_label, exc)
 
 
-def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
+def get_runner(config: LLMConfig, *, runtime=None, override: Runner | None = None) -> Runner:
     """Select the runner for ``config`` (or use an explicit ``override``, the test
     injection seam). ``pydantic_ai`` (default) requires the ``agents`` extra; ``fake``
-    is the offline test seam."""
+    is the offline test seam. ``runtime`` is the optional non-serializable provider-native
+    auth carrier (RP-04 S4), threaded into the ``pydantic_ai`` runner's per-run
+    ``ProviderSession``; it is inert for ``fake``/``override`` runners."""
     if override is not None:
         return override
     if config.runner == "fake":
         return FakeRunner()
     if config.runner == "pydantic_ai":
-        return PydanticAIRunner(config)
+        return PydanticAIRunner(config, runtime=runtime)
     # from_env only ever derives a valid runner; a bad value can only come from an
     # explicit library LLMConfig(runner=...). Fail loudly rather than silently
     # running the default, naming the valid set (RUNNERS).
@@ -712,89 +728,7 @@ def get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner:
 
 
 # ── lazy imports + helpers ────────────────────────────────────────────────────
-# Agent-build invariants (story sorry-clay-anole) — static guards, checked ONCE per model,
-# never per call.
-_TOOL_CAPABILITY_CHECKED: set[str] = set()
-
-
-def _check_tool_capability(model, resolved: str) -> None:
-    """Fail fast if a tool-using op is about to run on a model that does NOT support tool
-    calling (pydantic-ai #6186 silently drops the tools). Reads the CONCRETE, verified
-    signal ``model.profile.supports_tools`` (a bool on the AnthropicModel object). Cached per
-    resolved model string — a hot loop pays nothing. Defensive: a missing/None profile is a
-    safe skip (True/None passes; only an explicit False raises)."""
-    if resolved in _TOOL_CAPABILITY_CHECKED:
-        return
-    _TOOL_CAPABILITY_CHECKED.add(resolved)
-    supports = getattr(getattr(model, "profile", None), "supports_tools", None)
-    if supports is False:
-        raise LLMConfigError(
-            f"model {resolved!r} does not support tool calling, but a tool-using gate op "
-            "would silently drop its tools — choose a tool-calling model/provider"
-        )
-
-
-def _intersect_capabilities(per_candidate: list[ModelCapabilities]) -> ModelCapabilities:
-    """The CONSERVATIVE capability record for a fallback chain: a capability holds only if EVERY
-    candidate has it (task cc33).
-
-    Any candidate may be the one that answers, and which one that is depends on provider health
-    at call time. Reading the primary's capabilities would make the run succeed or fail by luck —
-    a chain containing a model MEASURED to reject `temperature` would 400 only once that model
-    answered, a failure reproducing solely under provider degradation. Disagreeing prompt-cache
-    styles collapse to "none" for the same reason: each style's keys are provider-specific and
-    would error on the candidate that does not share it."""
-    styles = {caps.prompt_cache_style for caps in per_candidate}
-    return ModelCapabilities(
-        native_structured_output=all(c.native_structured_output for c in per_candidate),
-        prompt_cache_style=per_candidate[0].prompt_cache_style if len(styles) == 1 else "none",
-        supports_thinking=all(c.supports_thinking for c in per_candidate),
-        # `all` like every sibling: a chain may claim native output UNDER THINKING only when EVERY
-        # candidate is MEASURED to support it (story 18ae) — any candidate could answer, so a
-        # mixed chain must fail closed to PromptedOutput rather than route native by luck.
-        native_output_with_thinking=all(c.native_output_with_thinking for c in per_candidate),
-        supports_temperature=all(c.supports_temperature for c in per_candidate),
-        # `all`, like every other field: web access is attached to the chain as a WHOLE, so the
-        # record may only claim the provider-side route when EVERY candidate can serve it —
-        # otherwise the answering model decides the route and provenance would attest by luck.
-        native_web_search=all(c.native_web_search for c in per_candidate),
-    )
-
-
-def _answering_model(messages: list[Any], candidates: list[str]) -> str | None:
-    """The candidate that actually produced the run's final response, or ``None``.
-
-    Read from ``ModelResponse.model_name`` — the model that answered — never from
-    ``FallbackModel.model_name``, which is the synthetic combined ``fallback:a,b`` string and
-    would attest a model that never ran. The bare name is mapped back onto the provider-qualified
-    candidate so provenance keeps naming a provider, and an unrecognized name is returned as-is
-    rather than dropped (an unattributable answer is still better evidence than the primary)."""
-    from pydantic_ai.messages import ModelResponse
-
-    for message in reversed(messages):
-        name = getattr(message, "model_name", None) if isinstance(message, ModelResponse) else None
-        if name:
-            return next((c for c in candidates if c.rpartition(":")[2] == name), name)
-    return None
-
-
-def _readonly_gate() -> bool:
-    """True if the READONLY gate is set — reused to withhold the comment tool, so a
-    read-only deployment grants the agent read-only ticket access.
-
-    Resolves the SAME config-aware way as the MCP server's write-tool gate: env
-    ``REBAR_MCP_READONLY`` wins over the ``[tool.rebar.mcp] readonly`` file key, and a
-    malformed config fails CLOSED (read-only). Previously this read ONLY the env var
-    (its own truthy parser) and ignored the file key, so a server set read-only via the
-    config FILE alone still handed the review agent a live ``comment_ticket`` write in
-    ``source=local`` mode — half-enforced read-only. Both this and ``mcp_server._readonly``
-    now route through the one ``rebar.config.mcp_readonly`` resolver so they can't drift.
-
-    Import edge: we call the resolver in ``rebar.config`` (a core LEAF), NOT
-    ``mcp_server``. Importing ``mcp_server`` from ``rebar.llm`` would invert the layering
-    AND pull the ``mcp`` extra's module-top imports into the LLM runtime, breaking the
-    ``import rebar.llm`` optionality contract. The import is kept lazy (inside the
-    function) to leave the hot-path module-import graph unchanged."""
-    import rebar.config
-
-    return rebar.config.mcp_readonly()
+# The stateless helper cluster (`_check_tool_capability` + its `_TOOL_CAPABILITY_CHECKED`
+# cache, `_intersect_capabilities`, `_answering_model`, `_readonly_gate`) lives in
+# `runner_support` (imported at module top) to keep this module under the size cap; those
+# names remain importable from `rebar.llm.runner` for callers and tests.
