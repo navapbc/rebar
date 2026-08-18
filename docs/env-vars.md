@@ -19,8 +19,8 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py` |  |
+| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
+| `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
 | `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
