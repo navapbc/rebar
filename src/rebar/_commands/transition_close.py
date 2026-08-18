@@ -150,7 +150,7 @@ def _verdict_manifest(result: dict, ticket_id: str, repo_root=None) -> list[str]
     return manifest
 
 
-def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None) -> dict:
+def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, signer=None) -> dict:
     """The completion-verifier PRODUCER STEP: build the deterministic PASS manifest for
     ``result`` (via :func:`_verdict_manifest`) and mint the ``completion-verifier`` op-cert
     through the signing seam (:func:`rebar.signing.sign_manifest`), appending the SIGNATURE
@@ -158,16 +158,17 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None) -> dic
 
     Extracted from the close gate so BOTH producers mint the completion op-cert the SAME way
     (story ee0b): the close path here and the trusted op-cert gate service's worker on a PASS
-    verdict. The service points ``REBAR_OPCERT_KEY_PATH`` / ``REBAR_OPCERT_ENV_ID`` at the
-    provisioned environment key before calling this, so the SEAM signs once with that key — the
-    caller never signs bespokely. Raises :class:`rebar.signing.SigningError` on the degrade path
+    verdict. ``signer`` (story 6f14): an OPTIONAL startup-composed op-cert binding; when the
+    service passes one, the SEAM signs from that binding's key + principal instead of the process
+    env — the caller never signs bespokely. Omitting it (the developer-local CLI close) keeps the
+    exact env/genesis behavior. Raises :class:`rebar.signing.SigningError` on the degrade path
     (OpenSSH < 8.9 / unwritable tracker), which the caller records as a closed-/completed-without
     -signature outcome."""
     from rebar import signing as _signing
 
     manifest = _verdict_manifest(result, ticket_id, repo_root)
     return _signing.sign_manifest(
-        ticket_id, manifest, kind="completion-verifier", repo_root=repo_root
+        ticket_id, manifest, kind="completion-verifier", repo_root=repo_root, signer=signer
     )
 
 

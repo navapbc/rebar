@@ -114,6 +114,29 @@ else
        "the review bot will write UNSIGNED events" >&2
 fi
 
+# OPTIONAL: the trusted op-cert gate service's passphrase-free Ed25519 PRIVATE signing key
+# (story 6f14). Materialized OUTSIDE the app so the app runtime needs no boto3/SSM — the same
+# materialize-to-file precedent as rebar-bot-signing-key above. Write the SSM value to a 0600
+# FILE next to the .env; the opcert compose service bind-mounts it read-only at the fixed
+# container target and points REBAR_OPCERT_KEY_PATH at it. ALWAYS create the file (empty when
+# the SSM slot is blank, bug beb1) so the bind-mount source exists — an absent source would make
+# docker create a DIRECTORY and break opcert start-up. (An empty file fails compose_signer's
+# validation, so a blank slot surfaces as a clear startup error rather than a silent mis-sign.)
+opcert_signing_key="$(get_param_optional opcert-ed25519-key)"
+opcert_key_path="$(dirname "${ENV_FILE}")/opcert-ed25519-key"
+opcert_key_tmp="$(mktemp "${opcert_key_path}.XXXXXX")"
+chmod 600 "${opcert_key_tmp}"
+printf '%s' "${opcert_signing_key}" > "${opcert_key_tmp}"
+[ -n "${opcert_signing_key}" ] && printf '\n' >> "${opcert_key_tmp}"
+mv -f "${opcert_key_tmp}" "${opcert_key_path}"
+chmod 600 "${opcert_key_path}"
+if [ -n "${opcert_signing_key}" ]; then
+  echo "fetch-secrets.sh: materialized op-cert signing key to ${opcert_key_path} (0600)" >&2
+else
+  echo "fetch-secrets.sh: opcert-ed25519-key is blank — wrote an EMPTY ${opcert_key_path};" \
+       "the op-cert gate service will fail startup key composition until the SSM slot is set" >&2
+fi
+
 # --- Write the .env atomically (0600), then move into place ----------------
 tmp="$(mktemp "${ENV_FILE}.XXXXXX")"
 chmod 600 "${tmp}"
