@@ -10,6 +10,7 @@ The IRONCLAD invariant: every failure mode becomes a recorded fail-open result
 
 from __future__ import annotations
 
+import multiprocessing
 import sys
 
 import pytest
@@ -193,9 +194,32 @@ def test_worker_version_skew_short_circuits() -> None:
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
 
 
-def test_worker_spawn_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Fork/pipe exhaustion (OSError on start) must become an abstain, never a raise.
-    real_ctx = harness._worker_context()
+def test_worker_defaults_to_spawn_context() -> None:
+    r = harness.run_in_worker(multiprocessing.get_start_method, backend="ts")
+    assert r.completed and r.value == "spawn"
+
+
+def test_worker_allows_explicit_context_injection() -> None:
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("fork context is unavailable")
+
+    r = harness.run_in_worker(
+        lambda: multiprocessing.get_start_method(),
+        backend="ts",
+        mp_context=multiprocessing.get_context("fork"),
+    )
+    assert r.completed and r.value == "fork"
+
+
+def test_unpickleable_worker_callable_fails_open() -> None:
+    r = harness.run_in_worker(lambda: "not importable", backend="ts")
+    assert r.abstained and r.abstain_reason == "other"
+    assert "spawn failed" in (r.detail or "")
+
+
+def test_worker_spawn_failure_fails_open() -> None:
+    # Pipe/process/start failures must become an abstain, never a raise.
+    real_ctx = multiprocessing.get_context("spawn")
 
     class _Boom:
         def Pipe(self, *a, **k):
@@ -211,11 +235,61 @@ def test_worker_spawn_failure_fails_open(monkeypatch: pytest.MonkeyPatch) -> Non
 
             return _P()
 
-    monkeypatch.setattr(harness, "_worker_context", lambda: _Boom())
-    r = harness.run_in_worker(wp.returns_value, 1, backend="ts")
+    r = harness.run_in_worker(wp.returns_value, 1, backend="ts", mp_context=_Boom())  # type: ignore[arg-type]
     assert r.abstained and r.abstain_reason == "other"
     assert "spawn failed" in (r.detail or "")
     ev.validate(r.as_abstain(job=ev.JOB_SMELL, provenance_tier=ev.TIER_T1))
+
+
+def test_worker_receive_failure_fails_open() -> None:
+    class _ParentConn:
+        def poll(self, timeout):
+            return True
+
+        def recv(self):
+            raise TypeError("cannot unpickle result")
+
+        def close(self):
+            pass
+
+    class _ChildConn:
+        def close(self):
+            pass
+
+    class _Process:
+        exitcode = 0
+        pid = 1
+
+        def start(self):
+            pass
+
+        def terminate(self):
+            pass
+
+        def join(self, timeout):
+            pass
+
+        def is_alive(self):
+            return False
+
+        def close(self):
+            pass
+
+    class _ReceiveFailureContext:
+        def Pipe(self, *, duplex):
+            return _ParentConn(), _ChildConn()
+
+        def Process(self, *, target, args):
+            return _Process()
+
+    r = harness.run_in_worker(
+        wp.returns_value,
+        1,
+        backend="ts",
+        mp_context=_ReceiveFailureContext(),  # type: ignore[arg-type]
+    )
+    assert r.abstained and r.abstain_reason == "other"
+    assert "receive failed" in (r.detail or "")
 
 
 def test_as_abstain_on_non_abstained_raises() -> None:
@@ -224,7 +298,7 @@ def test_as_abstain_on_non_abstained_raises() -> None:
         r.as_abstain(job=ev.JOB_REFUTE, provenance_tier=ev.TIER_T1)
 
 
-def test_signal_death_not_misclassified_as_timeout_under_reap_lag(monkeypatch) -> None:
+def test_signal_death_not_misclassified_as_timeout_under_reap_lag() -> None:
     """Bug 85c3: a signal-killed worker whose exit hasn't been reaped yet must map to
     parse_error, NOT timeout — even if ``proc.is_alive()`` transiently returns True.
 
@@ -237,7 +311,23 @@ def test_signal_death_not_misclassified_as_timeout_under_reap_lag(monkeypatch) -
     RED (pre-fix, is_alive()-gated classifier): returns abstain_reason=="timeout".
     GREEN (poll-gated classifier): returns abstain_reason=="parse_error".
     """
-    real_ctx = harness._worker_context()
+    real_ctx = multiprocessing.get_context("spawn")
+
+    class _ReapLagProcess:
+        """Parent-only proxy; the wrapped Process remains spawn-serializable."""
+
+        def __init__(self, proc):
+            self._proc = proc
+            self._forced = False
+
+        def is_alive(self):
+            if not self._forced:
+                self._forced = True
+                return True
+            return self._proc.is_alive()
+
+        def __getattr__(self, name):
+            return getattr(self._proc, name)
 
     class _ReapLagCtx:
         """Wrap the real context so the spawned proc reports is_alive()==True once."""
@@ -247,23 +337,13 @@ def test_signal_death_not_misclassified_as_timeout_under_reap_lag(monkeypatch) -
 
         def Process(self, *args, **kwargs):
             proc = real_ctx.Process(*args, **kwargs)
-            real_is_alive = proc.is_alive
-            forced = {"done": False}
+            return _ReapLagProcess(proc)
 
-            def fake_is_alive():
-                # First probe after the crash: pretend the killed child isn't reaped
-                # yet (the exact transient the bug misread as a live→timeout worker).
-                if not forced["done"]:
-                    forced["done"] = True
-                    return True
-                return real_is_alive()
-
-            proc.is_alive = fake_is_alive  # type: ignore[method-assign]
-            return proc
-
-    monkeypatch.setattr(harness, "_worker_context", lambda: _ReapLagCtx())
-
-    r = harness.run_in_worker(wp.hard_crash, backend="tree-sitter")
+    r = harness.run_in_worker(
+        wp.hard_crash,
+        backend="tree-sitter",
+        mp_context=_ReapLagCtx(),  # type: ignore[arg-type]
+    )
     assert r.abstained, "a signal-killed worker must fail open, not complete"
     assert r.abstain_reason == "parse_error", (
         f"signal death misclassified as {r.abstain_reason!r} under reap lag "

@@ -32,7 +32,8 @@ import signal
 import subprocess
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from multiprocessing.context import BaseContext
+from typing import Any, cast
 
 from rebar._proc import reap_process_group
 
@@ -251,20 +252,9 @@ def _worker_entry(conn: Any, func: Callable[..., Any], args: tuple, kwargs: dict
             pass
 
 
-def _worker_context() -> Any:
-    """Pick a multiprocessing context.
-
-    On POSIX prefer ``fork``: the worker inherits the (already-imported) bindings
-    with no pickling and no module re-import, which is both faster and avoids the
-    spawn re-import hazard for callables defined in test/consumer modules. Elsewhere
-    fall back to the platform default (``spawn`` on Windows).
-    """
-    if os.name == "posix":
-        try:
-            return multiprocessing.get_context("fork")
-        except ValueError:
-            pass
-    return multiprocessing.get_context()
+def _worker_context(mp_context: BaseContext | None = None) -> BaseContext:
+    """Return the caller's context, defaulting to the thread-safe spawn method."""
+    return mp_context if mp_context is not None else multiprocessing.get_context("spawn")
 
 
 def run_in_worker(
@@ -275,6 +265,7 @@ def run_in_worker(
     version: str | None = None,
     expected_version: str | None = None,
     kwargs: dict[str, Any] | None = None,
+    mp_context: BaseContext | None = None,
 ) -> RunResult:
     """Run an in-process binding ``func`` inside a worker subprocess, fail-open.
 
@@ -288,9 +279,16 @@ def run_in_worker(
     * the worker dies on a signal (e.g. SIGSEGV/SIGABRT from a bad C parse, or an
       OOM kill) → ``parse_error`` (recorded, never a host crash)
     * the worker raises → ``other`` (with the exception repr in ``detail``)
-    * spawning the worker fails (fork/pipe ``OSError`` under FD/process pressure) →
+    * spawning the worker fails (including serialization errors or resource pressure) →
       ``other`` (the fail-open invariant must hold even when the host is exhausted)
+    * receiving/unpickling the worker result fails → ``other``
     * the worker returns cleanly → ``completed=True`` with ``value`` set
+
+    The default multiprocessing context is ``spawn``, so ``func`` must be a
+    module-level importable callable and its arguments, keyword arguments, and
+    return value must be pickleable. A caller may explicitly supply ``mp_context``
+    (including a ``fork`` context on platforms that provide it) and thereby owns
+    that context's safety tradeoffs.
 
     The result pipe is drained CONCURRENTLY with the wait (via ``poll`` then
     ``recv``), so a worker returning a payload larger than the OS pipe buffer
@@ -307,16 +305,20 @@ def run_in_worker(
         )
 
     call_timeout = _resolve_timeout(timeout)
-    ctx = _worker_context()
     parent_conn = child_conn = None
     proc = None
     try:
+        ctx = _worker_context(mp_context)
         parent_conn, child_conn = ctx.Pipe(duplex=False)
-        proc = ctx.Process(target=_worker_entry, args=(child_conn, func, args, kwargs or {}))
+        # BaseContext gains Process dynamically; typeshed only declares it on
+        # concrete contexts even though every get_context() result provides it.
+        proc = cast(Any, ctx).Process(
+            target=_worker_entry, args=(child_conn, func, args, kwargs or {})
+        )
         proc.start()
-    except OSError as exc:
-        # Fork/pipe failure under resource pressure (EMFILE/EAGAIN/ENOMEM) must
-        # fail open, not propagate — this harness wraps every in-process backend.
+    except Exception as exc:  # noqa: BLE001 — process boundary: construction/start failures fail open
+        # Serialization and resource-pressure failures must fail open, not
+        # propagate — this harness wraps every in-process backend.
         _safe_close(parent_conn, child_conn)
         _safe_close_proc(proc)
         return RunResult(
@@ -326,7 +328,7 @@ def run_in_worker(
             version=version,
             detail=f"{backend} worker spawn failed: {exc}",
         )
-    child_conn.close()  # parent keeps only the read end
+    _safe_close(child_conn)  # parent keeps only the read end
 
     try:
         payload = None
@@ -343,6 +345,15 @@ def run_in_worker(
                 payload = parent_conn.recv()
         except EOFError:
             payload = None  # child closed the pipe without sending (exit/crash); polled is True
+        except Exception as exc:  # noqa: BLE001 — pipe/unpickle boundary must fail open
+            _reap_worker(proc)
+            return RunResult(
+                backend=backend,
+                completed=False,
+                abstain_reason="other",
+                version=version,
+                detail=f"{backend} worker receive failed: {exc}",
+            )
 
         if not polled and proc.is_alive():
             # The poll() timed out (nothing readable, no EOF) AND the worker is
@@ -437,7 +448,7 @@ def _safe_close(*conns: Any) -> None:
             continue
         try:
             conn.close()
-        except OSError:
+        except Exception:  # noqa: BLE001 — best-effort boundary cleanup must never mask the result
             pass
 
 
@@ -451,5 +462,5 @@ def _safe_close_proc(proc: Any) -> None:
         return
     try:
         proc.close()
-    except (ValueError, OSError):
+    except Exception:  # noqa: BLE001 — best-effort boundary cleanup must never mask the result
         pass
