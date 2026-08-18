@@ -20,6 +20,7 @@ import rebar
 from rebar.attest import dsse
 from rebar.opcert_service import jobs
 from rebar.opcert_service.config import OpcertServiceConfig
+from rebar.opcert_service.keyprov import compose_signer
 
 pytestmark = pytest.mark.unit
 
@@ -56,19 +57,19 @@ def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, 
     return str(src), tid, main_head
 
 
-def _key_fetcher(tmp_path: Path) -> object:
+def _signer(tmp_path: Path):
+    """Compose a startup signer from a fresh Ed25519 key (the post-6f14 seam that replaces the
+    old per-job ``ssm_fetcher``). Principal is the same ``nava-opcert-test-1`` env id ``_cfg``
+    signs under."""
     key = tmp_path / "envkey"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", "env"],
         check=True,
         capture_output=True,
     )
-    priv = key.read_text(encoding="utf-8")
-
-    def fetch(parameter_name: str) -> str:
-        return priv
-
-    return fetch
+    key.chmod(0o600)
+    kcfg = OpcertServiceConfig(env_id="nava-opcert-test-1", key_path=str(key))
+    return compose_signer(kcfg)
 
 
 def _cfg(source_url: str) -> OpcertServiceConfig:
@@ -78,7 +79,6 @@ def _cfg(source_url: str) -> OpcertServiceConfig:
         review_branch="main",
         guard="secret",
         env_id="nava-opcert-test-1",
-        ssm_key_param="/rebar/prod/opcert-ed25519-key",
         job_timeout_seconds=900.0,
         port=8080,
     )
@@ -98,7 +98,7 @@ def test_completion_pass_binds_server_derived_values(tmp_path, monkeypatch):
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         verify_completion_fn=_pass_completion,
     )
     assert fields["status"] == "completed"
@@ -128,7 +128,9 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
     seen: dict = {}
 
     def gate(tid_, rr):
-        seen["push"] = os.environ.get("REBAR_SYNC_PUSH")
+        from rebar._opcert_binding import current_push_mode
+
+        seen["push"] = current_push_mode()
         seen["remotes"] = subprocess.run(
             ["git", "-C", rr, "remote"], capture_output=True, text=True
         ).stdout.strip()
@@ -138,11 +140,11 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         verify_completion_fn=gate,
     )
     assert fields["status"] == "completed"
-    # The job workspace ran with REBAR_SYNC_PUSH=off and NO push remote (defense in depth).
+    # The job workspace ran with the context-local push policy = "off" and NO push remote.
     assert seen["push"] == "off"
     assert seen["remotes"] == ""
     # The shared store is byte-identical: the SIGNATURE event landed only in the discarded clone.
@@ -153,53 +155,62 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
 # ─────────────────────────── key materialization + cleanup ────────────────────
 
 
-def test_key_is_0600_and_removed_after_signing(tmp_path, monkeypatch):
+def test_key_is_0600_and_gate_sees_no_env_key(tmp_path, monkeypatch):
+    """Post-6f14: the composed signer key is 0600 and process-owned, and the gate runs WITHOUT
+    ``REBAR_OPCERT_KEY_PATH``/``REBAR_OPCERT_ENV_ID`` leaking into ``os.environ`` (the binding is
+    threaded context-locally, not via a process-global env patch)."""
+    monkeypatch.delenv("REBAR_OPCERT_KEY_PATH", raising=False)
+    monkeypatch.delenv("REBAR_OPCERT_ENV_ID", raising=False)
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
+    signer = _signer(tmp_path)
+    assert oct(os.stat(signer.key_path).st_mode & 0o777) == "0o600"
     seen: dict = {}
 
     def gate(tid_, rr):
-        path = os.environ["REBAR_OPCERT_KEY_PATH"]
-        seen["path"] = path
-        seen["mode"] = oct(os.stat(path).st_mode & 0o777)
+        # The per-job process env carries NO opcert key/principal — that is the isolation win.
+        seen["env_key"] = os.environ.get("REBAR_OPCERT_KEY_PATH")
         seen["env_id"] = os.environ.get("REBAR_OPCERT_ENV_ID")
-        assert Path(path).read_text().strip()  # the SSM value was materialized to the file
         return {"verdict": "PASS", "model": "m", "runner": "r"}
 
     fields = jobs.run_job(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=signer,
         verify_completion_fn=gate,
     )
     assert fields["status"] == "completed"
-    assert seen["mode"] == "0o600"
-    assert seen["env_id"] == "nava-opcert-test-1"
-    assert not os.path.exists(seen["path"])  # never persisted
+    assert seen["env_key"] is None
+    assert seen["env_id"] is None
+    # The signer key is PROCESS-owned (survives the job); cleanup is the owner of removal.
+    assert os.path.exists(signer.key_path)
+    signer.cleanup()
+    assert not os.path.exists(signer.key_path)
 
 
-def test_key_removed_even_on_raised_exception(tmp_path, monkeypatch):
+def test_signer_key_survives_a_raised_gate_and_cleanup_removes_it(tmp_path, monkeypatch):
+    """A gate raising mid-run maps to ``error`` and does NOT tear down the process-owned signer
+    key (the signer is composed once at startup, not per job); ``cleanup`` removes it."""
     src, tid, _main = _make_source(tmp_path, monkeypatch)
     cfg = _cfg(src)
-    captured: dict = {}
+    signer = _signer(tmp_path)
 
     def boom(tid_, rr):
-        captured["path"] = os.environ["REBAR_OPCERT_KEY_PATH"]
         raise RuntimeError("gate blew up mid-run")
 
     fields = jobs.run_job(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=signer,
         verify_completion_fn=boom,
     )
     assert fields["status"] == "error"
     assert fields["error"]["class"] == jobs.ERR_INTERNAL
-    # The `finally` removed the temp key file even though the gate raised.
-    assert not os.path.exists(captured["path"])
-    # And no key was left behind under the (discarded) tracker either.
+    assert os.path.exists(signer.key_path)  # process-owned, not torn down per job
+    signer.cleanup()
+    assert not os.path.exists(signer.key_path)
 
 
 # ─────────────────────────── per-kind verdict mapping ─────────────────────────
@@ -212,7 +223,7 @@ def test_completion_fail_completes_with_null_envelope(tmp_path, monkeypatch):
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         verify_completion_fn=lambda t, r: {"verdict": "FAIL", "findings": [{"criterion": "x"}]},
     )
     assert fields["status"] == "completed"
@@ -238,7 +249,7 @@ def test_completion_llm_raise_maps_to_error(tmp_path, monkeypatch, exc_name, err
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         verify_completion_fn=raiser,
     )
     assert fields["status"] == "error"
@@ -255,7 +266,7 @@ def test_plan_review_nonpass_completes_with_null_envelope(tmp_path, monkeypatch,
         ticket_id=tid,
         kind="plan-review",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         review_plan_fn=lambda t, r: {"verdict": verdict},
     )
     assert fields["status"] == "completed"
@@ -283,7 +294,7 @@ def test_plan_review_pass_signs_internally_and_returns_envelope(tmp_path, monkey
         ticket_id=tid,
         kind="plan-review",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         review_plan_fn=review_plan_signs,
     )
     assert fields["status"] == "completed"
