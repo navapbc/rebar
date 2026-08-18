@@ -13,8 +13,11 @@ actually fires, so the safety net itself can't rot unnoticed:
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _TESTS_DIR = Path(__file__).resolve().parents[1]
@@ -22,8 +25,82 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 import _isolation  # noqa: E402
+from _subprocess_env import subprocess_env  # noqa: E402
 
 pytest_plugins = ["pytester"]
+
+
+def _blocking_git(tmp_path: Path, operation: str) -> tuple[Path, dict[str, str]]:
+    real_git = shutil.which("git")
+    assert real_git is not None
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state = tmp_path / f"{operation}.count"
+    shim = bin_dir / "git"
+    shim.write_text(
+        f"#!{sys.executable}\n"
+        "import os\n"
+        "import sys\n"
+        "import time\n"
+        "from pathlib import Path\n"
+        "args = sys.argv[1:]\n"
+        "operation = os.environ['REBAR_BLOCK_GIT_OPERATION']\n"
+        "tail = ['status', '--porcelain'] if operation == 'status' else "
+        "['rev-parse', 'HEAD']\n"
+        "if args[-2:] == tail:\n"
+        "    state = Path(os.environ['REBAR_BLOCK_GIT_STATE'])\n"
+        "    count = int(state.read_text()) if state.exists() else 0\n"
+        "    state.write_text(str(count + 1))\n"
+        "    if count + 1 == 2:\n"
+        "        time.sleep(60)\n"
+        f"os.execv({real_git!r}, [{real_git!r}, *args])\n"
+    )
+    shim.chmod(0o755)
+    env = subprocess_env()
+    env["PATH"] = os.pathsep.join((str(bin_dir), env["PATH"]))
+    env["PYTHONPATH"] = os.pathsep.join((str(_TESTS_DIR), env.get("PYTHONPATH", "")))
+    env["REBAR_BLOCK_GIT_OPERATION"] = operation
+    env["REBAR_BLOCK_GIT_STATE"] = str(state)
+    return state, env
+
+
+def _run_real_guard_with_blocking_git(
+    tmp_path: Path, operation: str
+) -> subprocess.CompletedProcess:
+    state, env = _blocking_git(tmp_path, operation)
+    nested_test = tmp_path / "test_nested_guard.py"
+    nested_test.write_text("def test_body_finishes():\n    assert True\n")
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "conftest",
+                "--basetemp",
+                str(tmp_path / "nested-pytest"),
+                str(nested_test),
+            ],
+            cwd=_TESTS_DIR.parent,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AssertionError(
+            f"real repo-isolation {operation} probe kept pytest alive beyond 12 seconds"
+        ) from exc
+    elapsed = time.monotonic() - started
+    assert state.read_text() == "2", "the shim did not block the second real guard probe"
+    # timing: hang-guard — the 10s ceiling only proves the inner 5s watchdog beats 60s sleep.
+    assert elapsed < 10, f"watchdog did not bound the blocked probe: {elapsed:.2f}s"
+    return result
 
 
 def _init_repo(path: Path) -> None:
@@ -62,6 +139,20 @@ def test_porcelain_reports_a_new_working_tree_file(tmp_path):
     after = _isolation.porcelain(tmp_path)
     assert base is not None and after is not None
     assert any("stray.txt" in line for line in after - base)
+
+
+def test_session_finish_fails_explicitly_when_porcelain_times_out(tmp_path):
+    result = _run_real_guard_with_blocking_git(tmp_path, "status")
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "TimeoutExpired" in output, output
+
+
+def test_commit_guard_fails_explicitly_when_head_times_out(tmp_path):
+    result = _run_real_guard_with_blocking_git(tmp_path, "head")
+    output = result.stdout + result.stderr
+    assert result.returncode != 0, output
+    assert "TimeoutExpired" in output, output
 
 
 def test_leak_snapshot_catches_new_top_level_entry(tmp_path):
