@@ -132,21 +132,6 @@ def changed_paths(sha: str, repo_root: str) -> list[str] | None:
     return [normalize(line) for line in proc.stdout.splitlines() if line.strip()]
 
 
-def code_root_for(tracker: object) -> str:
-    """The code repo root that owns ``tracker``.
-
-    Mirrors the derivation the close precheck already uses: the tracker always resolves,
-    whereas a caller-supplied ``repo_root`` may be ``None`` (the CLI passes none), which
-    would turn into a literal ``git -C None``.
-    """
-    return os.path.dirname(str(tracker))
-
-
-def unresolvable_shas(shas: list[str], tracker: object) -> list[str]:
-    """:func:`invalid_commit_shas` against the code repo that owns ``tracker``."""
-    return invalid_commit_shas(shas, code_root_for(tracker))
-
-
 def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
     """Which of ``shas`` do NOT resolve to a commit object in ``repo_root``.
 

@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import rebar
 from rebar._commands import _seam
+from rebar._engine_support import commit_impact
 
 
 def _tracker(repo: Path) -> Path:
@@ -68,6 +72,32 @@ def test_attach_and_read_back(rebar_repo: Path) -> None:
     shas = [c["sha"] for c in state["commits"]]
     assert shas == [a, b]
     assert state["commits"][1]["message"] == "fix"
+
+
+def test_attach_resolves_code_repo_independently_from_relocated_tracker(
+    rebar_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ticket_id = rebar.create_ticket("task", "relocated tracker", repo_root=str(rebar_repo))
+    (head,) = _real_shas(rebar_repo, 1)
+    external_tracker = tmp_path / "external-store" / "tickets"
+    external_tracker.parent.mkdir()
+    shutil.move(str(rebar_repo / ".tickets-tracker"), external_tracker)
+    monkeypatch.setenv("REBAR_TRACKER_DIR", str(external_tracker))
+
+    # Prove the dangerous fixture state: HEAD belongs to the code checkout, not the
+    # independently relocated ticket store's parent.
+    assert commit_impact.invalid_commit_shas([head], str(rebar_repo)) == []
+    assert commit_impact.invalid_commit_shas([head], str(external_tracker.parent)) == [head]
+
+    assert rebar.attach_commits(ticket_id, [head]) == {
+        "ticket_id": ticket_id,
+        "attached": 1,
+    }
+    assert rebar.show_ticket(ticket_id)["commits"] == [{"sha": head}]
+
+    with pytest.raises(rebar.RebarError, match=r"deadbeef.*nothing was recorded"):
+        rebar.attach_commits(ticket_id, [head, "deadbeef"])
+    assert rebar.show_ticket(ticket_id)["commits"] == [{"sha": head}]
 
 
 def test_union_merge_dedups_by_sha(rebar_repo: Path) -> None:

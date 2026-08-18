@@ -248,6 +248,7 @@ def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
     (epic a88f / WS-H). ``commits`` is a list of SHA strings or {sha, message?,
     author?, …} records. Convergent (union by sha) and NOT synced to Jira. Returns
     ``{ticket_id, attached}``."""
+    from rebar import config
     from rebar._commands import _seam
     from rebar._commands._seam import CommandError
     from rebar._engine_support import commit_impact
@@ -266,7 +267,9 @@ def attach_commits(ticket_id: str, commits, *, repo_root=None) -> dict:
     # ALL-OR-NOTHING: the WHOLE batch is validated before anything is appended, so one bad
     # SHA never leaves a half-recorded attachment. The CLI and the MCP tool inherit this by
     # construction — they all route through THIS seam.
-    unresolvable = commit_impact.unresolvable_shas([r["sha"] for r in records], tracker)
+    unresolvable = commit_impact.invalid_commit_shas(
+        [r["sha"] for r in records], str(config.repo_root(repo_root))
+    )
     if unresolvable:
         raise RebarError(
             f"cannot attach commits: {', '.join(unresolvable)} did not resolve to a commit "
