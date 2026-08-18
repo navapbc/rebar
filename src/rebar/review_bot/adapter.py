@@ -40,9 +40,12 @@ import logging
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from rebar.review_bot.finding_publish import render_findings_block
+
+if TYPE_CHECKING:
+    from rebar.llm.auth import LLMRuntime
 
 logger = logging.getLogger("rebar.review_bot.adapter")
 
@@ -285,6 +288,7 @@ def code_review_decision(
     merge_commits: int | None = None,
     commit_message: str = "",
     change_id: str = "",
+    runtime: LLMRuntime | None = None,
 ) -> dict[str, Any]:
     """Review ``diff_text`` (at the cloned ``repo_root``) via the four-pass gate and return
     ``{decision, message, findings, coverage_gap}``. PASS only for a genuine full-coverage PASS;
@@ -313,6 +317,19 @@ def code_review_decision(
         logger.warning("adapter: gate import failed: %s", exc)
         return _block("review-error", {}, merge_commits=merge_commits)
 
+    # A composed startup runtime (RP-04 S5) is forwarded provider-native: build the runner WITH
+    # it and inject it on the request, instead of leaving the gate to resolve an ambient runner.
+    # ``runtime is None`` keeps the ambient path unchanged (runner stays None).
+    runner = None
+    if runtime is not None:
+        try:
+            from rebar.llm.runner import get_runner
+
+            runner = get_runner(LLMConfig.from_env(repo_root=repo_root), runtime=runtime)
+        except Exception as exc:  # noqa: BLE001 — a runner build failure is a fail-closed BLOCK
+            logger.warning("adapter: runner build failed: %s", exc)
+            return _block("review-error", {}, merge_commits=merge_commits)
+
     try:
         verdict = produce_code_review_verdict(
             CodeReviewRequest(
@@ -322,6 +339,7 @@ def code_review_decision(
                 change_id=change_id,  # selects the change:<id> novelty keyspace (finding-memory)
                 repo_root=repo_root,
                 enabled=True,  # voter activation is the authoritative gate (ADR 0015)
+                runner=runner,  # forwarded composed runtime (None → ambient, unchanged)
             )
         )
     except Exception as exc:  # noqa: BLE001 — ANY review failure is fail-closed
