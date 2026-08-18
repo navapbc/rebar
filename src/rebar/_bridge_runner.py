@@ -242,7 +242,13 @@ def run_bridge(
             reconcile_returncode=reconciled.returncode,
         )
 
-    delivery_environ = dict(active_environ)
+    # RP-04 S3 (AC4): the delivery child (git commit + push) needs NO Jira send credential,
+    # so project active_environ as an "unrelated" sibling — stripping every adapter-owned
+    # secret name (JIRA_API_TOKEN / JIRA_PAT) while preserving all native config. Pure: never
+    # mutates active_environ (which may be os.environ or a plain dict).
+    from rebar import _child_env
+
+    delivery_environ = _child_env.project_child_env(active_environ, relationship="unrelated")
     delivery_environ["REBAR_SYNC_PUSH"] = "always"
     try:
         delivered = _run(_delivery_command(active_environ), root=root, environ=delivery_environ)

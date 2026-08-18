@@ -58,6 +58,38 @@ def _retry_sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def _resolve_probe_scope(
+    env: dict[str, str] | None,
+) -> tuple[dict[str, str] | None, tuple[dict[str, object], list[str], int] | None]:
+    """Resolve the JIRA_* probe scope and fail closed when it is incomplete.
+
+    Returns ``(creds, None)`` when credentials AND an explicit project are present, or
+    ``(None, invalid_result)`` — an INVALID verdict + exit 2 — when either is missing.
+    There is NO implicit ``DIG`` project default (AC2): an unset ``JIRA_PROJECT`` fails
+    closed rather than silently probing a hard-coded project.
+    """
+    src = os.environ if env is None else env
+    creds = {
+        "jira_url": src.get("JIRA_URL", ""),
+        "jira_user": src.get("JIRA_USER", ""),
+        "jira_api_token": src.get("JIRA_API_TOKEN", ""),
+        "jira_project": src.get("JIRA_PROJECT", ""),
+    }
+    if not creds["jira_url"] or not creds["jira_user"] or not creds["jira_api_token"]:
+        return None, (
+            {"verdict": "INVALID", "steps": [], "reason": "missing_credentials"},
+            ["PROBE_FAIL reason=missing_credentials"],
+            2,
+        )
+    if not creds["jira_project"]:
+        return None, (
+            {"verdict": "INVALID", "steps": [], "reason": "missing_project"},
+            ["PROBE_FAIL reason=missing_project"],
+            2,
+        )
+    return creds, None
+
+
 def run_access_check(
     *,
     env: dict[str, str] | None = None,
@@ -65,22 +97,14 @@ def run_access_check(
     sleep_fn=_retry_sleep,
 ) -> tuple[dict[str, object], list[str], int]:
     """Run the six-step probe and return its result, legacy lines, and exit code."""
-    if env is None:
-        jira_url = os.environ.get("JIRA_URL", "")
-        jira_user = os.environ.get("JIRA_USER", "")
-        jira_api_token = os.environ.get("JIRA_API_TOKEN", "")
-        jira_project = os.environ.get("JIRA_PROJECT") or "DIG"
-    else:
-        jira_url = env.get("JIRA_URL", "")
-        jira_user = env.get("JIRA_USER", "")
-        jira_api_token = env.get("JIRA_API_TOKEN", "")
-        jira_project = env.get("JIRA_PROJECT") or "DIG"
-    if not jira_url or not jira_user or not jira_api_token:
-        return (
-            {"verdict": "INVALID", "steps": [], "reason": "missing_credentials"},
-            ["PROBE_FAIL reason=missing_credentials"],
-            2,
-        )
+    creds, invalid = _resolve_probe_scope(env)
+    if invalid is not None:
+        return invalid
+    assert creds is not None
+    jira_url = creds["jira_url"]
+    jira_user = creds["jira_user"]
+    jira_api_token = creds["jira_api_token"]
+    jira_project = creds["jira_project"]
 
     probe_uuid = str(uuid.uuid4())
     label = f"rebar-id:{probe_uuid}"
@@ -259,11 +283,16 @@ def _build_probe_client(env: dict[str, str] | None, client_cls) -> Any:
     jira_url = src.get("JIRA_URL", "")
     jira_user = src.get("JIRA_USER", "")
     jira_api_token = src.get("JIRA_API_TOKEN", "")
-    jira_project = src.get("JIRA_PROJECT") or "DIG"
+    jira_project = src.get("JIRA_PROJECT", "")
     if not jira_url or not jira_user or not jira_api_token:
         raise TransportUnavailableError(
             "project-visibility probe: missing Jira credentials "
             "(JIRA_URL / JIRA_USER / JIRA_API_TOKEN)"
+        )
+    if not jira_project:
+        raise TransportUnavailableError(
+            "project-visibility probe: missing Jira project (JIRA_PROJECT); refusing "
+            "to probe without an explicit target project"
         )
     return client_cls(
         jira_url=jira_url,

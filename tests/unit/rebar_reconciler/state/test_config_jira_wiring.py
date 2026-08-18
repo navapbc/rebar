@@ -229,10 +229,13 @@ def test_bootstrap_env_check_requires_resolved_url_user_token(tmp_path: Path, mo
     monkeypatch.setenv("JIRA_API_TOKEN", "tok")
     settings = resolve_jira_settings(project_default="DIG")
     assert settings.url == "https://j.example"
-    assert settings.project == "DIG"  # project_default applied (file left it empty)
+    assert settings.project == "DIG"  # explicit project_default applied (file left it empty)
     backend = JiraBackend(transport=None)
     backend.assert_env_ready()  # all three essentials resolved → no raise
-    assert backend.project == "DIG"
+    # RP-04 S3 (AC2): the backend no longer injects an implicit "DIG" default, so an
+    # unset project resolves to "" (the explicit resolve_jira_settings call above still
+    # honors an EXPLICIT project_default="DIG").
+    assert backend.project == ""
     # Missing the env-only token → RuntimeError naming JIRA_API_TOKEN
     # (BackendEnvError subclasses RuntimeError).
     monkeypatch.delenv("JIRA_API_TOKEN")
