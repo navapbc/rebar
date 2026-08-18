@@ -188,16 +188,16 @@ class JiraBackend:
     # --- project accessors (ticket 97f2/bbf1) ---
     @property
     def project(self) -> str:
-        """Effective write/create project, DIG-defaulted to match the create
-        client (bug 4fa9). Resolved from settings, never the transport, so a
-        JiraBackend built with a fake transport still answers. When the backend was
-        composed with a captured scope (RP-04 S2) that scope is authoritative and no
-        ambient re-resolution happens."""
+        """Effective write/create project WITHOUT any implicit create-time default
+        (AC2) — empty when unset so the readiness guard fails closed. Resolved from
+        settings, never the transport, so a JiraBackend built with a fake transport
+        still answers. When the backend was composed with a captured scope (RP-04 S2)
+        that scope is authoritative and no ambient re-resolution happens."""
         if self._scope is not None:
             return self._scope.project
         from rebar_reconciler.adapters.jira import acli_subprocess
 
-        return acli_subprocess.resolve_jira_settings(project_default="DIG").project
+        return acli_subprocess.resolve_jira_settings().project
 
     @property
     def query_project(self) -> str:
@@ -227,7 +227,7 @@ class JiraBackend:
         from rebar_reconciler._backend import BackendEnvError
         from rebar_reconciler.adapters.jira import acli_subprocess
 
-        settings = acli_subprocess.resolve_jira_settings(project_default="DIG")
+        settings = acli_subprocess.resolve_jira_settings()
         missing = [
             name
             for name, value in (
@@ -313,7 +313,7 @@ def _build_jira_backend(config: Any) -> JiraBackend:
     from rebar_reconciler._backend import BackendEnvError, assert_transport_conforms
     from rebar_reconciler.adapters.jira import acli, acli_subprocess
 
-    s = acli_subprocess.resolve_jira_settings(project_default="DIG")
+    s = acli_subprocess.resolve_jira_settings()
     # Fail LOUDLY at construction on absent/invalid Cloud credentials, at parity with the
     # DC JIRA_PAT guard (bug ad85). Cloud authenticates with HTTP Basic auth: the Atlassian
     # account EMAIL (JIRA_USER) + an API token (JIRA_API_TOKEN) against JIRA_URL. Without

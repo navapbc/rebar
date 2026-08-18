@@ -19,11 +19,11 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GERRIT_BOT_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `GERRIT_PROJECT` | `src/rebar/review_bot/config.py` |  |
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
-| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
+| `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/access_check.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_URL` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_USER` | `src/rebar/_cli/_jira_onboard.py`, `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
@@ -143,6 +143,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/__main__.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
+| `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/pass_io.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine/rebar_reconciler/request.py`, `src/rebar/_engine_support/reads.py`, `src/rebar/llm/workflow/completion_banking.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_snapshot/git_fetch.py` |  |
@@ -171,7 +172,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
-_161 variables._
+_162 variables._
 
 ## Dynamically-constructed reads (resolved at runtime — see source)
 

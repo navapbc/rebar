@@ -187,6 +187,7 @@ def test_probe_round_trip_passes_all_six_steps() -> None:
         "JIRA_URL": "https://jira.example.com",
         "JIRA_USER": "user@example.com",
         "JIRA_API_TOKEN": "secret-token",
+        "JIRA_PROJECT": "DIG",
     }
 
     exit_code, stdout = _run_probe_with_mocked_acli(
@@ -216,6 +217,7 @@ def test_probe_exits_2_on_missing_credentials() -> None:
         "JIRA_URL": "",
         "JIRA_USER": "user@example.com",
         "JIRA_API_TOKEN": "secret-token",
+        "JIRA_PROJECT": "DIG",
     }
 
     exit_code, stdout = _run_probe_no_acli(env=env, module_suffix="t2")
@@ -245,6 +247,7 @@ def test_probe_exits_1_on_property_read_mismatch_and_still_cleans_up() -> None:
         "JIRA_URL": "https://jira.example.com",
         "JIRA_USER": "user@example.com",
         "JIRA_API_TOKEN": "secret-token",
+        "JIRA_PROJECT": "DIG",
     }
 
     exit_code, stdout = _run_probe_with_mocked_acli(
@@ -276,6 +279,7 @@ def test_probe_retries_jql_search_three_times() -> None:
         "JIRA_URL": "https://jira.example.com",
         "JIRA_USER": "user@example.com",
         "JIRA_API_TOKEN": "secret-token",
+        "JIRA_PROJECT": "DIG",
     }
 
     # RECORD the backoff instead of sleeping it. `access_check.run_access_check`

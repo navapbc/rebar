@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 
 _CLOUD_BACKEND = "jira"
 _DC_BACKEND = "jira-datacenter"
-_CLOUD_PROJECT_DEFAULT = "DIG"
 _DEFAULT_TRACKER_DIR = ".tickets-tracker"
 _DEFAULT_TRACKER_BRANCH = "tickets"
 _DEFAULT_COMMENT_MAX_CHARS = 32767
@@ -300,14 +299,16 @@ def _runtime_from_snapshot(snapshot: Any) -> ReconcilerRuntime:
 def _resolve_provider_scope(backend_name: str, raw_project: str) -> tuple[StaticAuth, str, str]:
     """Provider-specific scope + static-auth carrier.
 
-    Cloud applies the create-time ``DIG`` default to the *write* project but leaves the
-    *read* (query) scope verbatim, so an unset read scope stays empty and fails closed
-    (bug 626d parity). Data Center has no create-time default — write and read scope are
-    the configured project verbatim.
+    No provider applies an implicit create-time project default (AC2): the *write* and
+    *read* (query) scope are BOTH the configured project verbatim, so an unset project
+    stays empty and fails closed in :func:`assert_cloud_scope_ready` /
+    :func:`assert_datacenter_scope_ready` before any transport is built. Only an
+    operator who EXPLICITLY configures a project (including the literal ``"DIG"``) gets a
+    non-empty scope.
     """
     if backend_name == _CLOUD_BACKEND:
         auth: StaticAuth = CloudStaticAuth(SecretStr(os.environ.get("JIRA_API_TOKEN", "")))
-        return auth, (raw_project or _CLOUD_PROJECT_DEFAULT), raw_project
+        return auth, raw_project, raw_project
     if backend_name == _DC_BACKEND:
         dc_auth = DataCenterStaticAuth(SecretStr(os.environ.get("JIRA_PAT", "")))
         return dc_auth, raw_project, raw_project
@@ -356,6 +357,12 @@ def assert_cloud_scope_ready(scope: ReconcilerSettings) -> None:
         raise BackendEnvError(
             "empty Jira Cloud read scope: the configured project (jira.project / "
             "JIRA_PROJECT) is unset, so the inbound query would target every project. "
+            "Set jira.project (or JIRA_PROJECT) to the project the reconciler owns."
+        )
+    if not scope.project.strip():
+        raise BackendEnvError(
+            "empty Jira Cloud write scope: the configured project (jira.project / "
+            "JIRA_PROJECT) is unset, so a create/write would have no target project. "
             "Set jira.project (or JIRA_PROJECT) to the project the reconciler owns."
         )
 

@@ -44,10 +44,10 @@ STAMP_ID = "projects-compat-stamp"
 _MULTI_PROJECT_CAPABILITY = "multi-project-bridge"
 
 # The committed tickets-branch path of the projects mapping, relative to the tracker
-# root, and the ACLI create-time default project a store with no configured Jira
-# project falls back to (mirrors ``Backend.project``'s ``project_default``).
+# root. A store with no configured Jira project records an EMPTY legacy_default — there
+# is NO implicit ``DIG`` fallback (AC2): the implicit default is gone, so only an
+# operator who EXPLICITLY configures ``jira.project`` seeds a non-empty mapping.
 _PROJECTS_REL_PATH = os.path.join(".bridge_state", "projects.json")
-_DEFAULT_PROJECT = "DIG"
 
 
 # raw-git-ok: ensure-registry store-maintenance seam (init/fsck), not a ticket event
@@ -59,14 +59,14 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _effective_project() -> str:
-    """The store's effective backend project: the configured ``jira.project`` or the
-    ACLI create-time default ``"DIG"`` when it is unset. This is the dependency-light
-    equivalent of ``Backend.project`` (which applies the same ``project_default``),
-    computed with a lazy :func:`rebar.config.load_config` so this leaf unit does not
-    pull config into a hot import path."""
+    """The store's effective backend project: the configured ``jira.project`` verbatim,
+    or the EMPTY string when it is unset. There is NO implicit ``DIG`` fallback (AC2) —
+    this mirrors ``Backend.project``, which likewise no longer applies a create-time
+    default. Computed with a lazy :func:`rebar.config.load_config` so this leaf unit does
+    not pull config into a hot import path."""
     from rebar.config import load_config
 
-    return load_config().jira.project or _DEFAULT_PROJECT
+    return load_config().jira.project or ""
 
 
 # raw-git-ok: store-maintenance command, seam-internal
@@ -77,8 +77,9 @@ def seed_projects_mapping_unit(tracker: str) -> EnsureOutcome:
     Tree-checks the committed blob first (like :func:`init._gitignore_unit`): if the
     mapping is already committed the store is converged, so this writes NOTHING and
     returns ``"ok"`` (a re-sweep on a seeded store makes zero git commits). Otherwise
-    it computes the store's effective backend project (``jira.project`` or the ``DIG``
-    fallback) and writes a mapping recording ONLY that ``legacy_default`` with an EMPTY
+    it computes the store's effective backend project (``jira.project`` verbatim, or an
+    EMPTY string when unset — no ``DIG`` fallback) and writes a mapping recording ONLY
+    that ``legacy_default`` with an EMPTY
     ``projects`` set — in the schema
     :mod:`rebar._engine.rebar_reconciler.projects_store` validates. The blob is a
     COMMITTED tickets-branch file (not gitignored), so the unit ``git add``s + commits

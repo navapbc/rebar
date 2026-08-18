@@ -198,7 +198,14 @@ def push_tickets_branch(
         # inherit — so put the rebar `src` dir on the child's PYTHONPATH and have the
         # -c stub re-insert it (parents[2] of this file == .../src).
         src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        child_env = {**os.environ, "REBAR_SYNC_PUSH": "always"}
+        # RP-04 S3 (AC4): a git-push child needs NO Jira send credential, so project the
+        # parent env as an "unrelated" sibling — stripping every adapter-owned secret name
+        # (JIRA_API_TOKEN / JIRA_PAT) while preserving all native git/ssh/proxy/CA config.
+        # project_child_env returns a fresh dict and never mutates os.environ.
+        from rebar import _child_env
+
+        child_env = _child_env.project_child_env(os.environ, relationship="unrelated")
+        child_env["REBAR_SYNC_PUSH"] = "always"
         child_env["PYTHONPATH"] = src + (
             os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
         )

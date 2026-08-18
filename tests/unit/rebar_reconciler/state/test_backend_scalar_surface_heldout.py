@@ -53,12 +53,13 @@ def _backend() -> JiraBackend:
 # ── query_project is UN-defaulted (fail-closed), unlike project ──────────────
 def test_query_project_undefaulted_when_unset(tmp_path: Path, monkeypatch) -> None:
     """The read scope is UN-defaulted: an unset project resolves to "" (fail-closed
-    downstream in ``jql_active``), NOT to the create-time "DIG" default — bug 626d
-    must never search all projects. This is the contrast vs ``project``."""
+    downstream in ``jql_active``), NOT to a create-time "DIG" default — bug 626d
+    must never search all projects. RP-04 S3 (AC2) also un-defaulted the WRITE scope,
+    so both now resolve to "" when unset."""
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
     b = _backend()
     assert b.query_project == ""  # un-defaulted read scope
-    assert b.project == "DIG"  # write scope still defaulted — the two differ
+    assert b.project == ""  # write scope also un-defaulted after S3 (AC2)
 
 
 # ── assert_env_ready raises the neutral error, naming exactly what's missing ─
