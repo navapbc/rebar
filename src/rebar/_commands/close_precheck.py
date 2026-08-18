@@ -547,11 +547,16 @@ def _completion_precheck(
         return None
     from rebar._commands import gates
 
+    # The tracker may be relocated outside the code checkout. Resolve code/config concerns
+    # from the caller's explicit root (or REBAR_ROOT / the cwd git toplevel), while tracker
+    # reads below continue to use the independently resolved tracker directory.
+    code_root = str(config.repo_root(repo_root))
+
     # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
     # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
     # LLM is unavailable (below).
     if not gates.gate_enabled(
-        cfg_root,
+        code_root,
         "require_completion_verification_for_close",
         ticket_id=ticket_id,
         gate_label="the completion-verification close gate",
@@ -616,11 +621,6 @@ def _completion_precheck(
     from rebar._engine_support.descendants import list_descendants
     from rebar._engine_support.resolver import resolve_ticket_id
 
-    # Derive the code repo root from the (always-resolved) tracker rather than the raw
-    # ``repo_root`` param — the CLI passes ``repo_root=None``, which would make ``git -C None``
-    # fail and the check spuriously report "no referencing commit". ``os.path.dirname(tracker)``
-    # is the same resolution ``transition_compute`` uses for ``repo_root_str``.
-    code_root = os.path.dirname(tracker)
     resolved_id = resolve_ticket_id(ticket_id, tracker) or ticket_id
     # Credit the ticket's ENTIRE descendant subtree: a parent (epic/story) whose code was
     # delivered by its children carries no commit referencing its OWN id, only the child ids.
@@ -646,7 +646,7 @@ def _completion_precheck(
         from rebar._commands import close_autoresume
 
         result = close_autoresume.verify_with_auto_resume(
-            ticket_id, ref=ref, repo_root=repo_root, cfg_root=cfg_root
+            ticket_id, ref=ref, repo_root=code_root, cfg_root=code_root
         )
     except Exception as exc:  # noqa: BLE001 — missing extra/key OR any verifier failure -> fail-closed (re-raise CommandError)
         from rebar.llm import failure as _failure
