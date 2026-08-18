@@ -14,7 +14,7 @@ Subcommands:
   comment     Add a comment to a ticket
   session-log Capture helper: append "<entry>" to the current session_log (start rotates to a fresh log)
   link        Link two tickets (relation REQUIRED: blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by)
-  unlink      Remove ONE link between an ordered <source> <target> pair (no relation arg; most-recent first)
+  unlink      Remove a link: unlink <source> <target> [relation] (no relation: most-recent for pair; relation: exactly that relation)
   doctor      Diagnose the store and heal what is safe to fix (--repair)
   deps        Show dependency graph for a ticket (<ticket_id>)
   edit          Edit ticket fields (--title, --priority, --assignee, --ticket_type, --description, --parent; tags via --add-tag/--remove-tag/--set-tags)
