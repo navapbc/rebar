@@ -339,11 +339,25 @@ class JiraDataCenterBackend:
         """This deployment's identity for ``remote_id``. Reads constructor state only."""
         return RemoteRef(vendor=self.vendor, instance=self.instance, remote_id=remote_id)
 
-    def __init__(self, transport: Any, client: Any | None = None, instance: str = "") -> None:
+    def __init__(
+        self,
+        transport: Any,
+        client: Any | None = None,
+        instance: str = "",
+        *,
+        scope: Any | None = None,
+    ) -> None:
         self.transport = transport
         #: The deployment label for :meth:`remote_ref`, supplied by ``build_backend``
-        #: from the resolved settings. NOT resolved at call time — see the port docstring.
-        self.instance = instance
+        #: from the resolved settings, or derived from the captured scope's base URL
+        #: (RP-04 S2) when not given. NOT resolved at call time — see the port docstring.
+        self.instance = instance or (
+            instance_from_base_url(scope.base_url) if scope is not None else ""
+        )
+        #: The CAPTURED reconciler settings (RP-04 S2). When present, the read scope and
+        #: ``assert_env_ready`` answer from this frozen scope instead of re-resolving
+        #: ambient env/config on each access; ``None`` keeps the legacy behaviour.
+        self._scope = scope
         # The underlying jira.JIRA client, threaded through so this deployment's LIVE
         # assignee search (``_search_users_by_username`` bound to it) reaches the outbound
         # mapper as a DECLARED constructor parameter (ticket 65d7 — it used to be assigned
@@ -365,6 +379,8 @@ class JiraDataCenterBackend:
 
     @property
     def project(self) -> str:
+        if self._scope is not None:
+            return self._scope.project
         return self.transport.project
 
     @property
@@ -373,13 +389,16 @@ class JiraDataCenterBackend:
         when unset so the inbound fetcher fails closed rather than querying every
         project (bug 626d; ticket 97f2).
 
-        Resolved from settings rather than the transport, mirroring Cloud's
+        Answered from the captured scope (RP-04 S2) when present, else resolved from
+        settings rather than the transport, mirroring Cloud's
         ``JiraBackend.query_project``: :attr:`project` answers the transport's
         write scope, but the read scope must reflect the CONFIGURED value alone.
         DC has no create-time default to strip — ``resolve_jira_datacenter_settings``
         returns ``[tool.rebar.jira].project`` (env override ``JIRA_PROJECT``)
         verbatim, so an unset project stays the empty string.
         """
+        if self._scope is not None:
+            return self._scope.query_project
         from rebar_reconciler.adapters.jira_datacenter.settings import (
             resolve_jira_datacenter_settings,
         )
@@ -398,8 +417,13 @@ class JiraDataCenterBackend:
         EVERY missing essential is named in one message, so an operator is not
         walked through a fix-one-rerun loop. Raises the neutral
         :class:`BackendEnvError` (subclasses ``RuntimeError``) rather than letting
-        a downstream connection attempt fail cryptically.
-        """
+        a downstream connection attempt fail cryptically. When composed with a
+        captured scope (RP-04 S2), the check runs against that scope."""
+        if self._scope is not None:
+            from rebar_reconciler.runtime import assert_datacenter_scope_ready
+
+            assert_datacenter_scope_ready(self._scope)
+            return
         from rebar_reconciler._backend import BackendEnvError
         from rebar_reconciler.adapters.jira_datacenter.settings import (
             resolve_jira_datacenter_settings,
