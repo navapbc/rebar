@@ -16,6 +16,8 @@ pytest.importorskip("mcp")
 import asyncio
 import importlib.util
 
+from mcp.server.fastmcp.exceptions import ToolError
+
 import rebar
 from rebar.mcp_server import build_server
 
@@ -535,3 +537,132 @@ def test_mcp_transition_closes_bug_with_close_class(rebar_repo) -> None:
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
     assert state["status"] == "closed"
     assert state.get("close_class") == "regression"
+
+
+def test_mcp_transition_reason_required_close_persists_reason(rebar_repo) -> None:
+    server = build_server()
+    accepted = rebar.create_ticket(
+        "bug", "MCP reason accepted", description="x" * 60, repo_root=str(rebar_repo)
+    )
+    rejected = rebar.create_ticket(
+        "bug", "MCP reason absent", description="x" * 60, repo_root=str(rebar_repo)
+    )
+
+    asyncio.run(
+        server.call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": accepted,
+                "current_status": "open",
+                "target_status": "closed",
+                "close_class": "not_a_bug",
+                "reason": "reported behavior is the documented contract",
+            },
+        )
+    )
+    accepted_state = rebar.show_ticket(accepted, repo_root=str(rebar_repo))
+    assert accepted_state["status"] == "closed"
+    assert accepted_state["close_reason"] == "reported behavior is the documented contract"
+
+    with pytest.raises(ToolError):
+        asyncio.run(
+            server.call_tool(
+                "transition_ticket",
+                {
+                    "ticket_id": rejected,
+                    "current_status": "open",
+                    "target_status": "closed",
+                    "close_class": "not_a_bug",
+                },
+            )
+        )
+    assert rebar.show_ticket(rejected, repo_root=str(rebar_repo))["status"] == "open"
+
+
+def test_mcp_transition_records_explicit_caused_by_edge(rebar_repo) -> None:
+    culprit = rebar.create_ticket("task", "culprit", repo_root=str(rebar_repo))
+    bug = rebar.create_ticket("bug", "attributed bug", repo_root=str(rebar_repo))
+    asyncio.run(
+        build_server().call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": bug,
+                "current_status": "open",
+                "target_status": "closed",
+                "close_class": "preexisting",
+                "caused_by": culprit,
+            },
+        )
+    )
+    deps = rebar.show_ticket(bug, repo_root=str(rebar_repo))["deps"]
+    assert any(dep["relation"] == "caused_by" and dep["target_id"] == culprit for dep in deps)
+
+
+def test_mcp_transition_ref_targets_and_signs_requested_commit(rebar_repo, monkeypatch) -> None:
+    from interfaces.lifecycle.test_close_ref_target_80af import (
+        _enable_completion_gate,
+        _make_stack,
+        _stub_verifier,
+    )
+
+    _enable_completion_gate(rebar_repo)
+    story, story_sha, head_sha = _make_stack(rebar_repo)
+    assert story_sha != head_sha
+    calls: list[dict] = []
+    _stub_verifier(monkeypatch, calls)
+
+    asyncio.run(
+        build_server().call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": story,
+                "current_status": "in_progress",
+                "target_status": "closed",
+                "ref": story_sha,
+            },
+        )
+    )
+    assert calls and calls[-1]["ref"] == story_sha
+    signature = rebar.verify_signature(story, kind="completion-verifier", repo_root=str(rebar_repo))
+    assert signature["verdict"] == "certified"
+    assert signature["verified_at_sha"] == story_sha
+
+
+def test_mcp_start_work_force_matches_library_semantics(rebar_repo) -> None:
+    (rebar_repo / "rebar.toml").write_text("[verify]\nrequire_plan_review_for_claim = true\n")
+    server = build_server()
+    transition_ticket = rebar.create_ticket("task", "transition force", repo_root=str(rebar_repo))
+    claim_ticket = rebar.create_ticket("task", "claim force", repo_root=str(rebar_repo))
+    blocked_ticket = rebar.create_ticket("task", "no force", repo_root=str(rebar_repo))
+
+    asyncio.run(
+        server.call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": transition_ticket,
+                "current_status": "open",
+                "target_status": "in_progress",
+                "force": True,
+                "reason": "operator transition bypass",
+            },
+        )
+    )
+    asyncio.run(
+        server.call_tool(
+            "claim_ticket",
+            {"ticket_id": claim_ticket, "force": "operator claim bypass"},
+        )
+    )
+    with pytest.raises(ToolError):
+        asyncio.run(server.call_tool("claim_ticket", {"ticket_id": blocked_ticket}))
+
+    transition_state = rebar.show_ticket(transition_ticket, repo_root=str(rebar_repo))
+    claim_state = rebar.show_ticket(claim_ticket, repo_root=str(rebar_repo))
+    blocked_state = rebar.show_ticket(blocked_ticket, repo_root=str(rebar_repo))
+    assert transition_state["status"] == claim_state["status"] == "in_progress"
+    assert blocked_state["status"] == "open"
+    transition_comments = " ".join(c["body"] for c in transition_state["comments"])
+    claim_comments = " ".join(c["body"] for c in claim_state["comments"])
+    assert "FORCE_CLAIM" in transition_comments
+    assert "operator transition bypass" in transition_comments
+    assert "FORCE_CLAIM" in claim_comments and "operator claim bypass" in claim_comments
