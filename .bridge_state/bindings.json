@@ -5899,6 +5899,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:39Z"
     },
+    "28a3-a62d-6345-44a0": {
+      "created_at": "2026-08-18T03:44:03Z",
+      "jira_id": "4589144",
+      "jira_key": "REB-3112",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:06Z"
+    },
     "28a6-d9b1-f0f3-4988": {
       "baseline": {
         "assignee": null,
@@ -7986,6 +7993,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:55Z"
     },
+    "3350-90b1-2651-4c50": {
+      "created_at": "2026-08-18T03:44:11Z",
+      "jira_id": "4589145",
+      "jira_key": "REB-3113",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:14Z"
+    },
     "3388-96e8-e14e-4221": {
       "baseline": {
         "assignee": {
@@ -8069,6 +8083,13 @@
       "peer_parent": "REB-430",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:57Z"
+    },
+    "3402-7143-2e14-4d1a": {
+      "created_at": "2026-08-18T03:44:18Z",
+      "jira_id": "4589146",
+      "jira_key": "REB-3114",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:21Z"
     },
     "341a-1ba5-b7e8-4e15": {
       "baseline": {
@@ -10096,6 +10117,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:31Z"
     },
+    "4217-d1d6-370b-4e98": {
+      "created_at": "2026-08-18T03:44:23Z",
+      "jira_id": "4589147",
+      "jira_key": "REB-3115",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:26Z"
+    },
     "424c-c66a-a5c0-49ab": {
       "baseline": {
         "assignee": null,
@@ -11275,6 +11303,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:58:12Z"
     },
+    "486a-69ef-6370-48ff": {
+      "created_at": "2026-08-18T03:44:30Z",
+      "jira_id": "4589148",
+      "jira_key": "REB-3116",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:33Z"
+    },
     "4878-c418-8643-46c5": {
       "baseline": {
         "assignee": null,
@@ -11870,7 +11905,7 @@
         "assignee": null,
         "description": "## Concept\nAdd a first-class research ticket type for durable, lifecycle-managed investigation work that does not modify the codebase and should not pay software-delivery gate costs. It fills the gap between ephemeral/session-oriented session_log records and implementation-bearing task, story, bug, and epic tickets.\n\n## Proposed semantics\n- research tickets use the ordinary open -> in_progress -> closed lifecycle.\n- research tickets cannot be created in or transitioned to idea status.\n- plan review is inapplicable and cannot be invoked for research tickets.\n- completion verification is inapplicable and cannot be invoked for research tickets.\n- file impact and verification-command metadata cannot be set on research tickets.\n- research tickets cannot have a parent and cannot be made a child through parent-setting or child hierarchy links.\n- research tickets may use non-hierarchical links to other tickets so evidence, discoveries, and resulting implementation work remain connected.\n- research tickets appear in list/search/show operations and normal direct-id lookups.\n- research tickets are excluded from ready and next-batch because those commands enumerate executable implementation work.\n- research tickets retain comments, assignee/claim state, tags, priority, authorship, bridge-safe identity, and the normal audit history needed for collaborative investigation.\n\n## Safety boundary\nThis type is not a gate bypass for code-changing work. The product should define and enforce that a research ticket cannot declare file impact, carry implementation completion evidence, or serve as the claimed work item for a code commit. Research findings that authorize repository changes must create or promote separate ordinary gated tickets and link them to the research ticket.\n\n## Design work before promotion\n- Define the canonical event/schema representation, public Python type, CLI/MCP surface, reducer validation, transition matrix, and compatibility behavior for older readers.\n- Decide which existing non-hierarchical relations are allowed and reject every hierarchy-forming path consistently, including inverse link forms.\n- Define whether claim is allowed directly from open and how default assignee/session ownership works.\n- Define search/list filters and bridge/Jira representation without letting reconciled Jira hierarchy imply a local parent.\n- Add cross-surface behavioral tests proving plan-review, completion-verifier, file-impact, parent, ready, and next-batch prohibitions and proving normal lifecycle/search/link behavior.\n- Document when to use research versus session_log versus task/story/bug/epic.\n\n## Intended outcome\nInvestigations such as architecture research, historical CI-log analysis, OSS prior-art studies, and empirical probes get a durable collaborative work record with an honest lifecycle, while implementation tickets retain the full plan-review, file-impact, and completion-verification discipline.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "IDEA",
         "summary": "Add a lightweight research ticket type"
       },
       "created_at": "2026-08-18T02:02:16Z",
@@ -12800,6 +12835,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:20Z"
+    },
+    "5142-4dbf-9469-4672": {
+      "created_at": "2026-08-18T03:44:37Z",
+      "jira_id": "4589149",
+      "jira_key": "REB-3117",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:39Z"
     },
     "5147-fa08-4953-4de5": {
       "created_at": "2026-08-15T14:59:20Z",
@@ -14089,6 +14131,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:05Z"
     },
+    "59b0-d1b9-ad94-4339": {
+      "created_at": "2026-08-18T03:44:44Z",
+      "jira_id": "4589150",
+      "jira_key": "REB-3118",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:46Z"
+    },
     "59b2-dd83-fa64-42ba": {
       "baseline": {
         "assignee": {
@@ -14574,6 +14623,13 @@
       "jira_key": "REB-1187",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:25Z"
+    },
+    "5e64-d9cd-2dd4-4036": {
+      "created_at": "2026-08-18T03:44:50Z",
+      "jira_id": "4589151",
+      "jira_key": "REB-3119",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:53Z"
     },
     "5e66-6566-d75b-4bf6": {
       "baseline": {
@@ -23834,9 +23890,17 @@
       "updated_at": "2026-08-15T15:06:48Z"
     },
     "9c72-c44a-3421-45ad": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Purpose\nDurable register of parentless open bugs whose rebar-debug investigation reaches the not-a-bug or design-choice escalation bar. Keep unresolved decisions here so the operator can resolve them together without losing root-cause context. Each bug retains its detailed evidence and RCA on its own ticket.\n\n## Pending decisions\n- `stumpy-cinnabar-basenji` \u2014 choose the `run_in_worker` callable contract. Recommended: fork only in single-threaded hosts; spawn in multithreaded hosts; convert spawn/pickling failures to the existing fail-open result. Alternative: preserve arbitrary callable execution in multithreaded hosts, which requires a larger serialization/worker design. Background prior-art and rebar payload research is in progress.\n\n## Resolved during sweep\n- `dragonish-sylphic-sheep` \u2014 preserve Chat Completions with `openai-chat:`; future Responses migration tracked by `upbeat-illadvised-springtail`.\n- `novel-unwasteful-stonefly` \u2014 user authorized broad typed validation, including enum and non-enum coercion, for this bug.\n\n## Acceptance Criteria\n- [ ] Every unresolved not-a-bug or design-choice escalation from the sweep is listed with the exact decision required.\n- [ ] Each listed bug is linked with `relates_to` and holds its evidence on the source ticket.\n- [ ] Operator decisions move entries from Pending to Resolved with the chosen contract recorded.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Decision register for parentless bug debug sweep"
+      },
       "created_at": "2026-08-18T02:49:20Z",
       "jira_id": "4589143",
       "jira_key": "REB-3111",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T02:49:23Z"
     },
@@ -24995,9 +25059,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nADR 0098 requires one immutable, non-secret configuration authority per operation, but current CLI, library, MCP, and direct reconciler entry points resolve overlapping environment/files/cwd state independently. This first slice establishes a walking skeleton in shadow mode without cutting behavior-bearing consumers over.\n\n## Outcome\nAdd a stdlib-core `OperationSnapshot` and central composer. The snapshot contains validated non-secret effective values, explicit source-kind provenance, the selected repository root, and an envelope version. It is immutable and serializable; live auth objects, secret wrappers/values, provider clients, source-file paths, and subprocess environments cannot be fields or fingerprint inputs. Subsystem projections expose only the fields their owner needs.\n\nComposition precedence is explicit operation input > environment > project config > user config > schema default. \u201cExplicit operation input\u201d is the surface-neutral contract mapped by CLI, MCP, and Python adapters into `resolve_with_sources(cli_overrides=...)`; it retains the existing `cli` provenance source kind and does not create a sixth layer. Repository root is selected independently as explicit `repo_root` > `REBAR_ROOT` > Git top-level/current directory; a winning relative path is interpreted against that root. CLI composes once after parsing and before effects for ordinary ticket/store, LLM-gate, and reconcile commands; Python and MCP compose once per corresponding operation; direct `python -m rebar_reconciler` uses the same compatibility composer once. Long-running process startup policy is not implemented in this slice.\n\n## Plan\n1. Add `src/rebar/_operation_config.py` with frozen snapshot/projection/provenance types, versioned canonical non-secret serialization, and the central composer. Delegate value/provenance loading to `config.resolve_with_sources()`, root selection to `_config_sources.repo_root()`, and serialization/fingerprinting to `_store.canonical.canonical_bytes()`/`content_hash()` with the envelope version inside the hashed document; adapt their results rather than reimplementing precedence, discovery, canonical JSON, or hashing. Re-export the supported library seam from `src/rebar/config.py`, document its supported construction/serialization/projection contract in `docs/reuse-surface.md`, and document the temporary rollback switch in `docs/config.md`; do not add pydantic-settings or a second schema.\n2. Make `src/rebar/_config_sources.py` expose layer inputs to the composer without changing unrelated callers. Move effective operator defaults needed by the slice into `src/rebar/_config_schema.py`; protocol constants remain adapter-owned. The temporary migration switch is `REBAR_OPERATION_SNAPSHOT_SHADOW`, read only at the approved composition boundary, boolean-parsed with the existing config coercion rules, enabled by default, and removed in S7.\n3. Thread one snapshot in shadow mode through the shared command seam, CLI, public library operations, MCP reads/writes/LLM tools, and the direct reconciler entry point. Exercise representative ordinary ticket/store, LLM-gate, and reconcile operations so the design is application-wide rather than a reconciler-only container. Existing execution remains authoritative; shadow comparison emits only version, source kinds, and a redacted fingerprint.\n4. Preserve current behavior except the approved fail-fast rule: malformed selected operation config raises the existing typed config error before lock/network/write. When shadow mode is enabled, catch any other snapshot assembly/fingerprint/diagnostic failure at the integration seam, emit a redacted warning containing no input values or paths, and continue the untouched authoritative legacy operation. Do not persist a snapshot or alter ticket/bridge formats.\n\n## Testing (RED -> GREEN)\n- Interface tests drive representative ordinary ticket/store, LLM-gate, and reconcile operations through CLI, public Python, and MCP plus direct reconciler compatibility with the same five input layers and assert one effective non-secret snapshot/fingerprint.\n- Component tests mutate environment, config file, and cwd after capture: the current snapshot/projection stays byte-stable and a newly composed operation observes the change.\n- Unit/property-table tests cover every precedence pair, root-A versus ambient-root-B resolution, relative-path interpretation, immutable projections, deterministic canonical serialization, and envelope-version rejection.\n- Secret sentinels in known credential environment names and injected capability doubles must be absent from snapshot fields, serialization, fingerprint, repr, equality/hash inputs, provenance, logs, exceptions, and CLI/MCP schemas.\n- Failure spies assert malformed config performs zero lock, subprocess, network, or store writes. Separate injected non-config failures in snapshot construction, serialization, fingerprinting, and warning emission assert that the authoritative operation retains its exact output/effects, a redacted diagnostic is attempted, and no secret/path sentinel escapes. The default-enabled and explicit-disabled switch cases prove the compatibility behavior through the real composition boundary. Existing config/tracker/Jira characterization suites remain green.\n\n## Compatibility / rollback\nShadow composition does not control execution. `REBAR_OPERATION_SNAPSHOT_SHADOW` is enabled by default; setting it to the existing canonical false spelling at the composition boundary disables shadow construction and returns entry points to legacy behavior, including when selected files are malformed. This temporary switch is not read by consumers and is removed in S7. This slice creates no stored-format dependency; rollback is file-level. Intentional precedence/backend cutovers belong to later stories.\n\n## Acceptance Criteria\n- [ ] Given identical five-layer inputs, representative ticket/store, LLM-gate, and reconcile operations through CLI, Python, MCP, and direct reconciler entry points produce the same immutable snapshot values, source kinds, root, version, and redacted fingerprint.\n- [ ] Given environment/file/cwd mutation after capture, the current operation's serialized snapshot is unchanged and a second operation observes the new values.\n- [ ] Explicit input wins each pairwise precedence case, and relative paths resolve against the independently selected repository root.\n- [ ] Snapshot/projection construction rejects secret wrappers and live capability/client objects; secret sentinels are absent from every named serialization/diagnostic/schema boundary.\n- [ ] Malformed selected config raises the typed config error before instrumented lock, subprocess, network, or store effects.\n- [ ] With `REBAR_OPERATION_SNAPSHOT_SHADOW` unset, shadow mode is enabled; every injected non-config shadow construction/serialization/fingerprint/diagnostic failure leaves the authoritative operation's exact output and effects unchanged and exposes no secret/path sentinel.\n- [ ] Setting `REBAR_OPERATION_SNAPSHOT_SHADOW` to canonical false at the composition boundary skips shadow construction and restores the legacy path, while neither switch state changes stored ticket/bridge formats.\n- [ ] `docs/reuse-surface.md` names the supported `OperationSnapshot` construction/serialization/projection contract, and `docs/config.md` records the temporary switch's default, rollback use, and S7 removal.",
+        "description": "## Context / Problem\nADR 0098 requires one immutable, non-secret configuration authority per operation, but current CLI, library, MCP, and direct reconciler entry points resolve overlapping environment/files/cwd state independently. This first slice establishes a walking skeleton in shadow mode without cutting behavior-bearing consumers over.\n\n## Outcome\nAdd a stdlib-core `OperationSnapshot` and central composer. The snapshot contains validated non-secret effective values, explicit source-kind provenance, the selected repository root, and an envelope version. It is immutable and serializable; live auth objects, secret wrappers/values, provider clients, source-file paths, and subprocess environments cannot be fields or fingerprint inputs. Subsystem projections expose only the fields their owner needs.\n\nComposition precedence is explicit operation input > environment > project config > user config > schema default. \u201cExplicit operation input\u201d is the surface-neutral contract mapped by CLI, MCP, and Python adapters into `resolve_with_sources(cli_overrides=...)`; it retains the existing `cli` provenance source kind and does not create a sixth layer. Repository root is selected independently as explicit `repo_root` > `REBAR_ROOT` > Git top-level/current directory; a winning relative path is interpreted against that root. CLI composes once after parsing and before effects for ordinary ticket/store, LLM-gate, and reconcile commands; Python and MCP compose once per corresponding operation; direct `python -m rebar_reconciler` uses the same compatibility composer once. Long-running process startup policy is not implemented in this slice.\n\n## Plan\n1. Add `src/rebar/_operation_config.py` with frozen snapshot/projection/provenance types, versioned canonical non-secret serialization, and the central composer. Delegate value/provenance loading to `config.resolve_with_sources()`, root selection to `_config_sources.repo_root()`, and serialization/fingerprinting to `_store.canonical.canonical_bytes()`/`content_hash()` with the envelope version inside the hashed document; adapt their results rather than reimplementing precedence, discovery, canonical JSON, or hashing. Re-export the supported library seam from `src/rebar/config.py`, document its supported construction/serialization/projection contract in `docs/reuse-surface.md`, and document the temporary rollback switch in `docs/config.md`; do not add pydantic-settings or a second schema.\n2. Make `src/rebar/_config_sources.py` expose layer inputs to the composer without changing unrelated callers. Move effective operator defaults needed by the slice into `src/rebar/_config_schema.py`; protocol constants remain adapter-owned. The temporary migration switch is `REBAR_OPERATION_SNAPSHOT_SHADOW`, read only at the approved composition boundary, boolean-parsed with the existing config coercion rules, enabled by default, and removed in S7.\n3. Thread one snapshot in shadow mode through the shared command seam, CLI, public library operations, MCP reads/writes/LLM tools, and the direct reconciler entry point. Exercise representative ordinary ticket/store, LLM-gate, and reconcile operations so the design is application-wide rather than a reconciler-only container. Existing execution remains authoritative; shadow comparison emits only version, source kinds, and a redacted fingerprint.\n4. Preserve current behavior except the approved fail-fast rule: malformed selected operation config raises the existing typed config error before lock/network/write. When shadow mode is enabled, catch any other snapshot assembly/fingerprint/diagnostic failure at the integration seam, emit a redacted warning containing no input values or paths, and continue the untouched authoritative legacy operation. Do not persist a snapshot or alter ticket/bridge formats.\n\n## Testing (RED -> GREEN)\n- Interface tests drive representative ordinary ticket/store, LLM-gate, and reconcile operations through CLI, public Python, and MCP plus direct reconciler compatibility with the same five input layers and assert one effective non-secret snapshot/fingerprint.\n- Component tests mutate environment, config file, and cwd after capture: the current snapshot/projection stays byte-stable and a newly composed operation observes the change.\n- Unit/property-table tests cover every precedence pair, root-A versus ambient-root-B resolution, relative-path interpretation, immutable projections, deterministic canonical serialization, and envelope-version rejection.\n- Secret sentinels in known credential environment names and injected capability doubles must be absent from snapshot fields, serialization, fingerprint, repr, equality/hash inputs, provenance, logs, exceptions, and CLI/MCP schemas.\n- Failure spies assert malformed config performs zero lock, subprocess, network, or store writes. Separate injected non-config failures in snapshot construction, serialization, fingerprinting, and warning emission assert that the authoritative operation retains its exact output/effects, a redacted diagnostic is attempted, and no secret/path sentinel escapes. The default-enabled and explicit-disabled switch cases prove the compatibility behavior through the real composition boundary. Existing config/tracker/Jira characterization suites remain green.\n\n## Compatibility / rollback\nShadow composition does not control execution. `REBAR_OPERATION_SNAPSHOT_SHADOW` is enabled by default; setting it to the existing canonical false spelling at the composition boundary disables shadow construction and returns entry points to legacy behavior, including when selected files are malformed. This temporary switch is not read by consumers and is removed in S7. This slice creates no stored-format dependency; rollback is file-level. Intentional precedence/backend cutovers belong to later stories.\n\n## Acceptance Criteria\n- [x] Given identical five-layer inputs, representative ticket/store, LLM-gate, and reconcile operations through CLI, Python, MCP, and direct reconciler entry points produce the same immutable snapshot values, source kinds, root, version, and redacted fingerprint.\n- [x] Given environment/file/cwd mutation after capture, the current operation's serialized snapshot is unchanged and a second operation observes the new values.\n- [x] Explicit input wins each pairwise precedence case, and relative paths resolve against the independently selected repository root.\n- [x] Snapshot/projection construction rejects secret wrappers and live capability/client objects; secret sentinels are absent from every named serialization/diagnostic/schema boundary.\n- [x] Malformed selected config raises the typed config error before instrumented lock, subprocess, network, or store effects.\n- [x] With `REBAR_OPERATION_SNAPSHOT_SHADOW` unset, shadow mode is enabled; every injected non-config shadow construction/serialization/fingerprint/diagnostic failure leaves the authoritative operation's exact output and effects unchanged and exposes no secret/path sentinel.\n- [x] Setting `REBAR_OPERATION_SNAPSHOT_SHADOW` to canonical false at the composition boundary skips shadow construction and restores the legacy path, while neither switch state changes stored ticket/bridge formats.\n- [x] `docs/reuse-surface.md` names the supported `OperationSnapshot` construction/serialization/projection contract, and `docs/config.md` records the temporary switch's default, rollback use, and S7 removal.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "RP-04 S1 \u2014 Compose immutable operation snapshots in shadow mode"
       },
       "created_at": "2026-08-17T19:40:58Z",
@@ -30147,8 +30211,16 @@
       "updated_at": "2026-08-15T15:11:01Z"
     },
     "c639-4122-58d9-4dc2": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nCode review reviews a DIFF fresh with NO memory across runs. The durable `code_review` artifact (per Gerrit change/revision) today persists SURFACED findings write-only (a calibration corpus). This story adds the READER + the content-addressed STATE the region-gated novelty floor (blameless-grindable-noctule) needs, and extends the `code_review_result_v1` payload with the two new fields that state.\n\n## What\n- **Payload extension (`code_review_result_v1`, `build_payload`).** Add two fields, both read\n  off the verdict dict so they are populated once and flow to EVERY emit path unchanged:\n  - `session_id`: TOP-LEVEL, nullable. `build_payload` reads `verdict.get(\"session_id\")`\n    (None for Gerrit reviews; set for local session-keyed reviews by the persistence story\n    paradoxal-balsamic-bubblefish). Makes local memory queryable by session.\n  - `deps`: a `{reviewed-file path: sha256}` content-hash map. `build_payload` reads\n    `verdict.get(\"deps\")` (defaulting to `{}`).\n- **deps collector + computation seam (`produce_code_review_verdict`).** A thin collector hashes\n  each reviewed-file path once and stashes the map on the verdict (`verdict[\"deps\"]`) in\n  `_run_code_review_gate`, computed UNCONDITIONALLY after the verdict is produced and BEFORE the\n  sidecar emit. This requires importing `code_review.sidecar` (for the collector +\n  `_cited_paths_code_review`) EARLIER in `_run_code_review_gate` \u2014 at the top of the finalize block\n  rather than only inside the existing `if request.target_ticket:` block (an explicit new import in\n  `gate_dispatch.py`, enumerated here). Because it lives on the verdict dict, BOTH\n  emit callers pick it up via `build_payload` with NO change to either call site:\n  - the produce-path emit (`_run_code_review_gate` \u2192 `sidecar.emit`), and\n  - the Gerrit voter emit (`voter.py::emit_code_review_artifact` \u2192 `sidecar.emit`), which passes\n    the SAME verdict object it received \u2014 so it inherits `deps`/`session_id` for free (voter.py\n    stays OUT of scope; it needs no edit).\n  - **Reuse boundary:** the collector REUSES the private `attest._hash_file(path, base=\u2026)`\n    primitive (raw file-bytes sha256; a missing/unreadable path \u2192 the `absent` sentinel, so a\n    create/delete is itself detectable) and `attest._hash_basis(repo_root)` for the base. This\n    reuse of a private symbol is EXPLICITLY sanctioned by the epic design (\"private `_hash_file`\n    primitive reused; NOT `dependency_hashes`, which is plan/ticket-coupled\"). It does NOT reuse\n    `dependency_hashes()` (that pulls ticket file_impact + plan-verdict citation buckets).\n  - **Scope of `deps`** = the review's `changed_files` UNION its cited-file paths. NOTE:\n    `attest._cited_paths(verdict)` is NOT reusable here \u2014 it reads a `citations` list with\n    `kind == \"file\"`, but code-review findings carry no such list (they only have a `location`\n    string, e.g. `path` or `path:line`). So define a small `_cited_paths_code_review(verdict)`\n    in `code_review/sidecar.py` that extracts the FILE path (strip any `:line` suffix) from each\n    finding's `location` across the `blocking` + `advisory` buckets, ignoring empty/non-file\n    locations. `deps` = `sorted(set(changed_files) | _cited_paths_code_review(verdict))`.\n  - **Basis:** hashed via `attest._hash_basis(repo_root)` at the emit point. Because deps are\n    computed AFTER the workflow's `gate_read_root` context has exited, `current_code_root()` is\n    already `None`, so `_hash_basis` resolves to the in-place WORKING TREE (`_config.repo_root`) \u2014\n    NOT the attested snapshot. This is correct for both keyspaces: a LOCAL `review-code` reviews the\n    working tree (so the working tree IS the reviewed basis), and the Gerrit voter bot checks out\n    the patchset revision (so its working tree IS the reviewed revision). The content-addressed\n    region gate only ever compares hashes WITHIN one keyspace, and each keyspace hashes its own\n    working-tree basis consistently across runs, which is all it needs.\n  - **Failure posture:** the collector is best-effort \u2014 a per-file hash failure yields the\n    `absent` sentinel (never raises); a total failure leaves `deps` empty and is logged. It must\n    NEVER fail the gate (mirrors the sidecar's best-effort posture).\n- **Artifact addressing (title schemes, TYPED keyspaces).** Local artifacts use title\n  `code-review: session:{session_id}`; Gerrit artifacts keep `code-review: {change_id} @ {revision}`\n  (unchanged). These are two disjoint keyspaces so a prior LOCAL review can never seed a change's\n  FIRST Gerrit review.\n- **Reader `latest_code_review_result(key, *, repo_root=None)`.** `key` is a TYPED string:\n  `session:<id>` or `change:<id>`. Resolution by artifact title:\n  - `session:<id>` \u2192 the artifact whose title == `code-review: session:{id}` (exact; one artifact).\n  - `change:<id>` \u2192 STRIP the `change:` tag to get the bare `change_id`, then match artifacts whose\n    title starts with `code-review: {change_id} @ ` (spans revisions of the same change; the change\n    is the memory key, the revision only makes each artifact idempotent). An unknown key kind \u2192 None.\n  Artifacts are enumerated via `rebar.list_tickets(ticket_type=\"code_review\")` and matched by title\n  in-process (no new list-filter API). Across the matched artifact(s), the reader returns the\n  most-recent usable `code_review_result_v1` sidecar payload's SURFACED findings + its `deps` map.\n  - **SURFACED-only (mandatory; see old-frilly-plankton).** `code_review_result_v1` stores findings\n    in SEPARATE top-level buckets (`blocking`, `advisory`, `coaching`) with NO per-finding\n    `decision` field (unlike `plan_review_result_v1`). Therefore \"surfaced\" is DEFINED as the union\n    of the `blocking` and `advisory` buckets; the reader returns ONLY those two buckets (never\n    `coaching`, never any future dropped bucket). Dropped findings are never persisted into\n    blocking/advisory, so they can never re-enter the novelty prior set.\n  - **Posture:** mirrors `plan_review.sidecar.latest_review_result` \u2014 best-effort, NEVER raises,\n    schema-guarded (only `code_review_result_v1` payloads), walks newest\u2192oldest over each artifact's\n    sidecar events tolerating a malformed/foreign newest file, returns None when nothing usable.\n    A reader/hash/compare error degrades to None (\u21d2 the floor runs un-narrowed = no drops).\n\n## Scope\n- `src/rebar/llm/code_review/sidecar.py` \u2014 payload extension (`build_payload`), the thin deps\n  collector, and the `latest_code_review_result` reader.\n- `src/rebar/llm/workflow/gate_dispatch.py` \u2014 the `deps` computation seam in\n  `produce_code_review_verdict` / `_run_code_review_gate` (stash on the verdict before emit).\n- OUT of scope: local persistence wiring / setting `session_id` (paradoxal-balsamic-bubblefish);\n  the region_gated_floor consumer (blameless-grindable-noctule); `voter.py` (inherits via the\n  verdict \u2014 no edit).\n\n## Acceptance Criteria\n- [ ] `build_payload` adds a nullable top-level `session_id` (read from `verdict.get(\"session_id\")`)\n      and a `deps` `{path: sha256}` map (read from `verdict.get(\"deps\")`, default `{}`).\n- [ ] A thin deps collector reuses `attest._hash_file` (NOT `dependency_hashes`) and the `absent`\n      sentinel; scope = `changed_files` \u222a `_cited_paths_code_review(verdict)` (paths parsed from\n      each finding's `location`, since code-review findings have no `citations[kind==file]` list).\n- [ ] The deps map is computed ONCE in `produce_code_review_verdict`, UNCONDITIONALLY (regardless of\n      `target_ticket`), and stashed on the verdict \u2014 importing `code_review.sidecar` earlier in\n      `_run_code_review_gate` \u2014 so both the produce emit and the Gerrit voter emit carry it via\n      `build_payload` (voter unchanged).\n- [ ] `latest_code_review_result(key)` resolves `session:<id>` (exact title `code-review: session:{id}`)\n      and `change:<id>` (strip `change:`, title prefix `code-review: {id} @`); unknown kind \u2192 None.\n- [ ] The reader returns SURFACED findings = union of the payload's `blocking` + `advisory` buckets\n      (never `coaching`/dropped) plus the `deps` map; schema-guarded to `code_review_result_v1`.\n- [ ] The reader is best-effort and NEVER raises; malformed/absent/foreign-schema \u2192 None (\u21d2 no drops).\n- [ ] Tests: payload carries `session_id` + `deps`; deps collector hashes changed+cited paths with\n      the `absent` sentinel for a missing file; reader resolves both typed keyspaces, returns\n      surfaced-only, and degrades to None on a malformed/absent artifact.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Code-review finding-memory reader + artifact payload (session_id + reviewed-file content-hash map)"
+      },
       "created_at": "2026-08-15T15:11:01Z",
       "jira_key": "REB-860",
+      "peer_parent": "REB-670",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:01Z"
     },
@@ -30159,14 +30231,44 @@
       "updated_at": "2026-08-15T15:11:02Z"
     },
     "c672-5111-8201-4fa7": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Summary\nThe reconciler preflight (`preflight_status_mapping`, `reconcile.py`) raises `StatusMappingError(\"local status {status!r} not in local_to_jira_status mapping ...\")`. But the same function's Bug-85a1 logic deliberately accepts a value that is EITHER a local-status KEY or a Jira-status VALUE, failing only when it is in neither. So the offending value is frequently a **Jira** workflow status (e.g. `IDEA`, added Jira-side), not a local status. Labeling it \"local status 'IDEA'\" is misleading and misdirects debugging toward a non-existent local `idea` ticket. The `StatusMappingError` docstring (reconcile.py) makes the same wrong \"references a local status\" assumption.\n\n## Reproduction Steps\n1. A Jira issue is in a workflow status with no reconciler mapping (e.g. `IDEA`).\n2. Reconcile \u2192 `ERROR: ... local status 'IDEA' not in local_to_jira_status mapping (target=REB-716)`.\n\nExpected: message accurately states the status is unmapped in `local_to_jira_status` in EITHER direction (could be a local-status key or a Jira-status value) \u2014 not that it is a \"local status\". Actual: message asserts it is a \"local status\", which is false for a Jira-origin status.\n\n## Scope\nLOGGING/ERROR-MESSAGE FIX ONLY. Does NOT add the `idea`->`IDEA` mapping (that is story 6173 / tawny-herb-bug, out of scope here).\n- `src/rebar/_engine/rebar_reconciler/reconcile.py` \u2014 the `StatusMappingError` message +\n  the `StatusMappingError` / `preflight_status_mapping` docstrings.\n- `tests/unit/rebar_reconciler/conflict/test_status_preflight.py` \u2014 assert the message.\n\n## Acceptance Criteria\n- [ ] The `StatusMappingError` message no longer calls the value a \"local status\"; it\n      states the status is not mapped in `local_to_jira_status` (neither a local-status\n      key nor a Jira-status value), and still includes the status value + target.\n- [ ] The `StatusMappingError` and `preflight_status_mapping` docstrings no longer assert\n      the value is a \"local status\".\n- [ ] A test asserts an unmapped Jira status (e.g. `IDEA`) is not reported as a \"local\n      status\" and the message acknowledges the Jira-status possibility.\n- [ ] No mapping/behavior change (the raise condition is unchanged); existing preflight\n      tests still pass.\n- [ ] make lint passes for the changed files.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "reconciler preflight mislabels an unmapped Jira status as a 'local status'"
+      },
       "created_at": "2026-08-15T15:11:03Z",
       "jira_key": "REB-728",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:03Z"
     },
     "c681-b7c5-d44d-495b": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nThe rebar-brainstorm skill (`examples/claude-skills/rebar-brainstorm/SKILL.md`) drives a design loop that ends by recording the design as rebar tickets. It does not instruct the agent to read the project's plan-review gate criteria first, so tickets are authored blind to the gate and then hit BLOCK findings that must be remediated after the fact. Beneficiary: agents (and their users) running the brainstorm skill, who currently pay that avoidable remediation tax.\n\n## What\nAdd a subsection to the skill instructing the agent, before recording tickets, to read the project's plan-review gate docs (`docs/plan-review-gate.md`, `docs/plan-review-criteria-guide.md`), author each ticket to the gate's blocking criteria + overlays, then run `rebar review-plan <id>` and remediate findings before claiming.\n\n## Scope\n- In: a docs-only addition to `examples/claude-skills/rebar-brainstorm/SKILL.md`.\n- Out: changes to the live `~/.claude/skills` copy (personal, not version-controlled); changes to\n  the gate itself or other skills.\n\n## Acceptance Criteria\n- [ ] `examples/claude-skills/rebar-brainstorm/SKILL.md` contains a new subsection instructing the\n      agent to read `docs/plan-review-gate.md` and `docs/plan-review-criteria-guide.md` before\n      recording tickets.\n- [ ] The subsection states the standard: read the gate first, author to its blocking criteria +\n      overlays, then run `rebar review-plan <id>` and remediate before claiming.\n- [ ] The change is docs-only: `git diff --stat origin/main` shows only that one SKILL.md file changed.\n- [ ] The change lands on `main` through Gerrit with LLM-Review +1 and Verified +1 (submitted).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "docs(brainstorm-skill): read plan-review gate docs before recording tickets"
+      },
       "created_at": "2026-08-15T15:11:03Z",
       "jira_key": "REB-950",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:03Z"
     },
@@ -30255,8 +30357,16 @@
       "updated_at": "2026-08-15T15:11:06Z"
     },
     "c768-a0ad-0567-412c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nCatch wiring bugs without a (near-undecidable, no-good-library) subsumption engine. Validated by spike E2.\n\n## What\n- Extend `src/rebar/llm/workflow/lint_refs.py` with a 3-state SHALLOW structural check: top-level\n  required-field presence + primitive kind compatibility -> OK / UNKNOWN / ERROR; ABSTAIN (UNKNOWN)\n  on `oneOf`/`anyOf`/`allOf`/`not`/`$ref` (no subsumption).\n- Add RUNTIME validation in `src/rebar/llm/workflow/executor.py`: a produced value is validated\n  against the downstream CONSUMER's input contract via the registry validator (the real safety net).\n- VALIDATOR-FAILURE handling (parity with S7's endpoint-failure fix): if the runtime validator itself\n  errors (unresolvable `$ref`, registry miss, validator exception) \u2014 as opposed to producing a\n  validation finding \u2014 the step run surfaces a distinct, visible \"validation unavailable / errored\"\n  signal and does NOT silently treat the value as valid (fail-loud, never false-pass).\n- Editor: render an \"unchecked\" badge for UNKNOWN/opaque sources (`editor.py`).\n\n## Scope\nIn: shallow static + runtime validation + validator-failure handling + badge. Out: MCP opaque handling (follow-on epic).\n\n## Acceptance Criteria\n- [ ] Shallow check returns ERROR on missing-required / kind-mismatch, UNKNOWN on `oneOf`, OK on a matching shape (port spike E2).\n- [ ] Runtime validation checks a produced value against the CONSUMER's input contract; a mismatch surfaces.\n- [ ] A runtime VALIDATOR failure (unresolvable `$ref` / registry miss / validator exception) surfaces a distinct \"validation errored\" signal and never silently passes the value (fail-loud), tested.\n- [ ] The inspector shows an \"unchecked\" badge for UNKNOWN/opaque-typed sources.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Validation depth: 3-state shallow static + runtime-against-consumer"
+      },
       "created_at": "2026-08-15T15:11:06Z",
       "jira_key": "REB-307",
+      "peer_parent": "REB-338",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:06Z"
     },
@@ -30281,8 +30391,16 @@
       "updated_at": "2026-08-15T15:11:07Z"
     },
     "c7d4-c020-748f-4951": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\n\nThree follow-ups spun out of dc3f (puzzling-obsidian-bunny) after its core gap \u2014 3 undeployed CloudWatch alarms \u2014 was fixed by a terraform apply: (1) confirm the alert SNS subscription actually delivers, (2) add terraform drift-detection CI so committed-but-unapplied HCL cannot sit unnoticed (the root cause of dc3f), and (3) bring a live-but-unmanaged alarm under IaC.\n\nThese are bundled deliberately: all three harden the SAME alerting/IaC chain for the rebar-gerrit host and are small. Each AC below names a single unambiguous disposition (no open design choice left to the executor).\n\n## Scope\n\n- rebar-gerrit-alerts SNS email subscription (the alert sink).\n- No terraform CI exists (apply is manual per infra/runbooks/provision-restore.md), so committed\n  HCL can silently sit unapplied \u2014 the dc3f root cause.\n- One live alarm (rebar-gerrit-data-disk-high) exists in AWS but is absent from HCL/state and has\n  an EMPTY alarm_actions list (never notifies).\n\n## Acceptance Criteria\n\n- [ ] [operator-attested] AC1 \u2014 SNS subscription delivers. The rebar-gerrit-alerts email\n  subscription to joeoakhart@navapbc.com is CONFIRMED (not PendingConfirmation) so alarms\n  actually deliver. Evidence: a ticket comment recording the get-subscription-attributes result\n  (PendingConfirmation=false) with the SubscriptionArn and date. NOTE: verified 2026-07-11 \u2014\n  PendingConfirmation=false; this AC is already met and needs NO destructive replacement sink.\n- [ ] AC2a \u2014 OIDC role (least-privilege, plan-only). The GitHub OIDC provider\n  (token.actions.githubusercontent.com) ALREADY EXISTS in account 896586841071 (verified); this\n  ticket adds a NEW IAM role `rebar-terraform-plan` in infra/terraform/iam.tf whose trust policy\n  is scoped to `repo:navapbc/rebar:*` (sub condition) with aud=sts.amazonaws.com, and whose\n  permissions are AWS-managed ReadOnlyAccess + one inline statement granting kms:Decrypt\n  constrained by kms:ViaService=ssm (for the alert-endpoint SecureString data source). No apply\n  or write permissions \u2014 plan-only, least privilege.\n- [ ] AC2b \u2014 drift-detection CI. `.github/workflows/terraform-drift.yml` runs\n  `terraform plan -input=false -lock=false -detailed-exitcode` in infra/terraform, authenticating\n  via GitHub OIDC to `rebar-terraform-plan`. `-detailed-exitcode` makes a non-empty plan (exit 2)\n  FAIL the check. Triggers: pull_request touching infra/terraform/**, push to main touching\n  infra/terraform/** (catches already-committed-but-unapplied drift, not just PR diffs), a daily\n  schedule, and workflow_dispatch.\n- [ ] AC3 \u2014 codify + import the orphan alarm (keep coverage; non-destructive). Add\n  `aws_cloudwatch_metric_alarm.gerrit_data_disk_high` (name rebar-gerrit-data-disk-high;\n  namespace rebar/host, metric disk_used_percent published by observability.sh, dims\n  InstanceId=data.aws_instance.gerrit.id + mount=/var/gerrit, threshold 85, GTE) to\n  infra/terraform/monitoring.tf WITH alarm_actions/ok_actions = the SNS topic (closing the\n  silent-alarm gap), then `terraform import` it into state so HCL/state/reality agree. The alarm\n  is KEPT (data-volume disk pressure is real coverage), not deleted.\n\n## Verification\n\n- AC1: `aws sns get-subscription-attributes` shows PendingConfirmation=false (recorded as a\n  comment).\n- AC2/AC3: `terraform validate` passes and `terraform plan` (ReadOnlyAccess creds) shows the new\n  role/policies/alarm apply cleanly with no errors \u2014 run pre-merge in the worktree.\n- Post-merge operator step (needs live creds): `terraform import\n  aws_cloudwatch_metric_alarm.gerrit_data_disk_high rebar-gerrit-data-disk-high` then\n  `terraform apply` to wire the alarm actions and create the role; the terraform-drift CI then\n  reports green (no drift) on the next run.\n\n## Notes / decisions (resolve prior plan-review BLOCKs)\n\n- Shared S3 state backend (rebar-tfstate-896586841071) means terraform writes (import/apply) MUST\n  follow the HCL merge \u2014 importing to shared state before merge would make an un-branched plan\n  read the alarm as \"to destroy\". So this ticket lands the reviewed HCL/CI via Gerrit; the\n  import/apply is the documented post-merge operator step above.\n- AC1's original \"OR replace with a confirmation-free sink\" option is dropped: the subscription is\n  already confirmed, so no destructive substitution (which risked dark alerting) is needed.",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "rebar-gerrit alerting hardening: confirm/replace SNS subscription + add terraform drift CI"
+      },
       "created_at": "2026-08-15T15:11:08Z",
       "jira_key": "REB-797",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:08Z"
     },
@@ -30433,14 +30551,30 @@
       "updated_at": "2026-08-15T15:11:13Z"
     },
     "c8cc-68b8-a51c-47cd": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nrebar forked from navapbc/digital-service-orchestra (DSO) and inherits DSO's Jira-reconciler design, but rebar currently has **no CI that runs the reconciler** \u2014 Jira sync only happens when a human runs `rebar reconcile` locally. We want the Jira <-> rebar sync to run automatically and observably, modeled on DSO's two GitHub Actions workflows (`reconcile-bridge.yml` + `reconcile-bridge-canary.yml`), translated to rebar's diverged surface, and documented so client projects can adopt it from templates we ship.\n\n### Confirmed divergences from DSO (drive the translation)\n- Invocation: `rebar reconcile --mode live` (== `python -m rebar_reconciler`).\n  Exit 75 = reschedule (re-run, NOT failure); exit 3 = another pass in flight.\n- **Reconciler does NOT push its event writes.** It writes inbound events as\n  uncommitted files into the `.tickets-tracker` worktree and bypasses the CLI\n  auto-push path, so a CI **commit-back + push to `origin/tickets`** step is\n  REQUIRED (DSO's loop is necessary, not redundant). `REBAR_SYNC_PUSH` does not\n  cover this.\n- No `BRIDGE_ENV_ID`; optional `REBAR_ENV_ID` (default author stamp \"reconciler\").\n- Env names are the new `REBAR_*` set; Jira creds stay `JIRA_URL/JIRA_USER/\n  JIRA_PROJECT` (vars) + `JIRA_API_TOKEN` (secret, env-only).\n- Canary ticket ops -> `rebar list --has-tag --output json`, `rebar create bug\n  ... --priority --tags --description`, `rebar comment`, `rebar transition <id>\n  open closed --reason \"Fixed: ...\"` (bug-close reason prefix enforced).\n- Do NOT wire `scripts/jira-pressure-test/` e2e probes into CI (explicitly manual,\n  live-mutating). Prefer `rebar bridge-probe` / `--mode reconcile-check`.\n\n## Acceptance Criteria\n\n- [ ] `.github/workflows/reconcile-bridge.yml`: schedule (~*/20) + workflow_dispatch\n      (mode choice incl. dry-run/reconcile-check/live); mounts the `tickets` orphan\n      branch as `.tickets-tracker` worktree; installs rebar + pinned acli (checksum\n      verified) and authenticates; runs `rebar reconcile --mode <mode>`; treats exit\n      75 as reschedule and 3 as benign \"pass in flight\"; commits reconciler events\n      back and pushes to `origin/tickets` via a fetch-rebase-push retry loop; single-\n      flight `concurrency`; failure surfaced to the run summary.\n- [ ] `.github/workflows/reconcile-bridge-canary.yml`: hourly schedule; checks the\n      last successful `reconcile-bridge.yml` run via the Actions API; when stale\n      beyond the window, opens (or comments on) a `heartbeat-alert`-tagged bug via\n      the `rebar` CLI and auto-closes it on recovery; treats API errors as transient\n      (no false alarms); commits ticket changes back to `origin/tickets`.\n- [ ] Necessary+sufficient validation written up: each workflow step justified\n      against rebar's actual reconciler surface (commit-back required, exit codes,\n      lock semantics, creds), with anything intentionally omitted called out.\n- [ ] `rebar.toml` carries the `[jira]` sync target (url/user/project=REB); the\n      `JIRA_API_TOKEN` secret stays env-only.\n- [ ] A setup doc (e.g. `docs/jira-sync-setup.md`) documents, for a CLIENT project,\n      exactly which repo **variables** (JIRA_URL/JIRA_USER/JIRA_PROJECT, ACLI_VERSION/\n      ACLI_SHA256, bridge-bot identity) and **secrets** (JIRA_API_TOKEN) to set, how\n      to mount the tickets branch, and how to copy the workflow templates; the two\n      workflow files double as the copy-paste templates.\n- [ ] Workflows lint/parse (actionlint or equivalent) and a dry-run/`reconcile-check`\n      dispatch path is described for safe first validation before enabling `live`.\n- [ ] A scheduled GitHub Actions workflow keeps the REB Jira project and the rebar\n- [ ] A heartbeat canary detects when the reconciler goes stale and files/auto-closes a\n- [ ] The set of workflows + repo vars/secrets is validated as NECESSARY and SUFFICIENT\n- [ ] Client projects can stand up the same sync by copying templates and following a\n\n## Plan-review remediations (advisory findings triaged \u2014 all valid)\n\n- **Canary staleness threshold (fd3a, E2).** Pin the window: alert when no\n  successful `reconcile-bridge.yml` run completed in the **last 60 minutes**\n  (3x the 20-min cadence); exposed as a `workflow_dispatch` override\n  (`alert_window_hours`, default 2 to match DSO) and validated as a positive int.\n- **Necessary+sufficient write-up location (f67d/T7, F1).** It lives as a\n  **`## Necessary & sufficient` section inside `docs/jira-sync-setup.md`** \u2014 ONE\n  doc, not a separate design doc (resolves the navigation-ambiguity finding). The\n  section maps each workflow step to the rebar reconciler fact that requires it.\n- **Rollback / disable path (f8f1, T4).** Document: disable via Actions UI (toggle\n  the workflow) or remove the `schedule:` trigger; an erroneous `origin/tickets`\n  push is revertable via normal git history on the orphan branch; the\n  `dry-run` / `reconcile-check` dispatch mode is the mandatory safe-first-validation\n  gate before enabling `live`.\n- **Least-privilege token + identity (f638, T10).** Each workflow pins an explicit\n  minimal `permissions:` block \u2014 reconcile-bridge: `contents: write`; canary:\n  `contents: write` + `actions: read`. The default `GITHUB_TOKEN` is sufficient for\n  both the `origin/tickets` push and the Actions API read (no PAT needed); the\n  commit identity is a configurable bridge-bot (`BRIDGE_BOT_NAME`/`_EMAIL` repo vars).\n- **AC-quality / observable outcomes (f607, P6).** \"Sufficient\" is operationalized:\n  the necessary+sufficient claim is checkable as the `docs/jira-sync-setup.md`\n  section that justifies every step against a cited reconciler fact (commit-back\n  required, exit 75/3 handling, lock semantics, env/creds), with omissions listed.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Automated Jira<->rebar sync via GitHub Actions (reconcile-bridge + heartbeat canary) + client setup docs"
+      },
       "created_at": "2026-08-15T15:11:13Z",
       "jira_key": "REB-310",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:13Z"
     },
     "c8ed-d52d-0c75-4b51": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nOutbound Jira link sync writes `depends_on` dependencies with **inverted endpoints**, because the apply seam drops the `swap_endpoints` flag. This produces backwards \"Blocks\" links in Jira and perpetual, non-fatal `rebar.link \u2026 \"would create a cycle\"` WARNINGs on every inbound pass.\n\n## Reproduction Steps\n1. Create rebar tickets A, B with `A depends_on B` (B blocks A).\n2. Reconcile outbound to Jira; observe Jira records **\"A Blocks B\"** (WRONG \u2014 should be \"B Blocks A\").\n3. Reconcile inbound; the reconciler reads the inverted link and tries `add_dependency(A, B, blocks)`,\n   which collides with the existing `A depends_on B` edge \u2192 `check_would_create_cycle` rejects it.\n   Observed live for the 6 closed sibling stories under epic `jira-reb-687` (30ff/a879/95a5/978d/9a82/fd1d).\n\n**Expected:** `A depends_on B` \u2192 Jira \"B Blocks A\"; inbound re-read is idempotent (no cycle). **Actual:** Jira \"A Blocks B\" (inverted); inbound re-read cycle-rejects on every pass forever.\n\n## Root Cause (verified, runtime-reproduced)\n`depends_on` maps to `(\"Blocks\", swap=True)` \u2014 \"A depends_on B\" must be written as \"B Blocks A\".\n- `src/rebar/_engine/rebar_reconciler/outbound_links.py:121`: `jira_type, _swap = mapped` \u2014 **`_swap`\n  is discarded**; the emitted mutation carries `type`/`to_key`/`relation` but no direction correction.\n- `src/rebar/_engine/rebar_reconciler/dispatch_one.py:831`: applies `set_relationship(issue_key,\n  to_key, link_type)` \u2014 always making `issue_key` the outward/blocker side; **`relation` is never read,\n  no swap anywhere in the apply path.** This violates the module's own documented contract\n  (`outbound_links.py:105`: \"swap_endpoints is handled by the applier when issuing the directional\n  Jira call\") and the intent of bug 3f04 (`f57cdcd2d`, \"sync issue-link relationships in both directions\").\n- Pre-existing since 3f04 (2026-06-26); unrelated to the reconcile-bridge outage fix.\n\n## Impact\n- **rebar store:** no divergence/data loss \u2014 the acyclic DAG is correct; the rejected inbound links are\n  the inverse edges that *should not* exist. The WARNINGs are cosmetic noise to rebar.\n- **Jira:** real, persistent, SILENT data-fidelity divergence \u2014 every `depends_on`-derived link points the\n  wrong way and never self-heals (outbound + inbound are both ADD-only and dedup \"either direction\").\n\n## Acceptance Criteria\n- [ ] Outbound apply honors `swap_endpoints`: a `depends_on` dep emits Jira \"B Blocks A\" (swap `--out`/`--in`),\n  while `blocks` is unchanged. Proof: unit test on the applier for both relations.\n- [ ] `tests/unit/rebar_reconciler/mutate/test_link_sync.py` gains a `depends_on` (swap=True) case (currently\n  only the `blocks`/swap=False path is tested \u2014 the gap that let this ship).\n- [ ] After the fix, an inbound pass over an A depends_on B pair applies idempotently (no cycle WARNING).\n- [ ] [operator-attested] one-time repair of the already-inverted Jira links (neither diff self-corrects them).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Outbound Jira link sync inverts depends_on direction (drops swap_endpoints) \u2014 backwards Jira links + perpetual cycle-warning noise"
+      },
       "created_at": "2026-08-15T15:11:14Z",
       "jira_key": "REB-1251",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:14Z"
     },
@@ -33626,10 +33760,24 @@
     },
     "e042-4780-6c63-4b09": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nThe S1 snapshot exists in shadow mode, but reconciler read/check paths still call `load_config()`, inspect environment/cwd, hard-code tracker layout, and build Jira backends whose properties can reload ambient settings. This can change read scope during one run or discard the supplied registry config.\n\n## Outcome\nCut `reconcile-check` and dry-run fetch/diff/preflight paths over to focused immutable `ReconcilerSettings`, `GitRuntime`, and selected `BridgeRuntime` projections. Construct exactly one selected Jira Cloud or Jira Data Center backend from those bindings; its project/query scope, TLS, timeout/limits, tracker layout, and auth capability remain stable for the operation.\n\n## Plan\n1. Add `src/rebar/_engine/rebar_reconciler/runtime.py` for the focused reconciler/Git/bridge projection and provider-specific Jira static-auth carriers, composed from the S1 snapshot seam. Static fields use non-serializable Pydantic `SecretStr`/`SecretBytes`, are excluded from repr/equality/hash/cache/fingerprint, and unwrap only in the selected Jira sending adapter.\n2. Change `src/rebar/_engine/rebar_reconciler/_backend_registry.py` and Jira Cloud/DC factories/settings to consume the supplied projection/binding. Do not construct the unselected backend. Preserve official Jira client/ACLI TLS, timeout, retry, error, and close behavior.\n3. Thread the same backend/runtime through preflight, access check, fetch, paging, inbound/outbound diff, mapper/sanitizer/property access, tracker/binding reads, and Git ref/layout owners. Remove ambient reloads from those read/check call paths.\n4. Apply approved deltas explicitly: supplied Python config remains authoritative; custom tracker directory/branch/remote reaches every read owner; empty Cloud read scope fails closed; malformed config/auth fails before provider request. No write/apply path is cut over here.\n\n## Testing (RED -> GREEN)\n- Component tests construct a backend, monkeypatch every ambient resolver to raise, then exercise project/query properties, access check, paged fetch, inbound/outbound diff, mapper, sanitizer, binding lookup, and custom tracker ref reads.\n- Interface tests run Cloud and DC `reconcile-check`/dry-run through CLI, Python, MCP, and direct-module paths against verified fake transports. The oracle is provider request parameters plus provider-neutral result, not private implementation shape.\n- Failure tests use missing/conflicting auth, empty project/query scope, malformed TLS/URL/config, and the unselected provider's poison constructor; assert zero Jira model request/local write and typed/redacted errors.\n- Secret canaries cover carriers, backend repr, exceptions, logs, provenance, request URL/query, cache/fingerprint, and the unselected adapter.\n- Existing Jira auth/TLS/retry/output fixtures and ticket-sourced regressions are a required baseline; any deliberate difference is named in the ticket comment before implementation changes it.\n\n## Compatibility / rollback\nKeep a read-only compatibility facade that can delegate the read/check call to legacy composition while S2 parity/deltas are measured. No stored format changes. Rollback selects that facade before S3 write cutover; secrets are never logged for comparison.\n\n## Acceptance Criteria\n- [ ] Cloud and DC read/check interface tests complete with all ambient resolvers poisoned after composition, proving one backend/settings authority for the operation.\n- [ ] Supplied config and custom tracker directory/branch/remote determine every observed read/ref/query owner; ambient root-B mutations cannot alter a root-A operation.\n- [ ] Backend project/query/TLS/timeout/limit properties remain unchanged after environment/file mutation and the next operation observes the new composition.\n- [ ] Exactly the selected Jira integration is constructed; missing/conflicting auth or decision-bearing scope fails before a Jira model request or local write with no anonymous/cross-provider/principal fallback.\n- [ ] Secret canaries are absent from every named carrier/backend/diagnostic/wire boundary, while the selected sending adapter can authenticate the verified fake request.\n- [ ] Existing read/check provider-neutral outputs stay equal except the approved explicit-input, fail-fast, and stable-property deltas; disabling the read facade restores legacy behavior.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "RP-04 S2 \u2014 Cut reconciler read/check paths to operation runtimes"
       },
       "created_at": "2026-08-17T19:41:25Z",
@@ -36480,6 +36628,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:35Z"
     },
+    "f5ac-6373-5e33-4374": {
+      "created_at": "2026-08-18T03:44:57Z",
+      "jira_id": "4589152",
+      "jira_key": "REB-3120",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:44:59Z"
+    },
     "f5c0-46ce-fab1-487a": {
       "created_at": "2026-08-15T15:15:36Z",
       "jira_key": "REB-1523",
@@ -36832,6 +36987,13 @@
       "peer_parent": "REB-1562",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:48Z"
+    },
+    "f828-6f5e-3b15-41f5": {
+      "created_at": "2026-08-18T03:45:04Z",
+      "jira_id": "4589153",
+      "jira_key": "REB-3121",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:45:06Z"
     },
     "f844-389c-88da-4cac": {
       "baseline": {
@@ -37379,6 +37541,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:08Z"
     },
+    "fc1c-1b08-70c2-4afb": {
+      "created_at": "2026-08-18T03:45:11Z",
+      "jira_id": "4589154",
+      "jira_key": "REB-3122",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T03:45:13Z"
+    },
     "fc20-2df1-426e-42ab": {
       "baseline": {
         "assignee": {
@@ -37423,10 +37592,24 @@
     },
     "fc43-3c50-ec6c-4a3e": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context\nThe box fixture in tests/scripts/test_autodeploy_review_drain.py constructs env = dict(os.environ) and returns that mapping inside the fixture value. When a test fails, pytest renders the fixture argument and can print ambient credential values into local or CI logs. This was directly observed during a deliberate defect-seeded RED run; no credential value is recorded on this ticket. The performance ticket must not absorb an unrelated security fix.\n\n## Plan\n- Reproduce with a synthetic sentinel secret in the ambient environment and a deliberate assertion failure.\n- Change the fixture boundary to pass only required environment variables or use a representation-safe wrapper while preserving the real bash subprocess environment needed by the tests.\n- Audit sibling subprocess fixtures for the same dict(os.environ)-inside-rendered-fixture shape.\n- Prove the synthetic sentinel never appears in pytest failure output while the autodeploy suite remains behaviorally green.\n\n## Acceptance Criteria\n- [ ] A deterministic regression test fails before the fix because a synthetic ambient secret appears in captured pytest failure rendering.\n- [ ] The synthetic secret is absent from failure output after the fix.\n- [ ] Required PATH and autodeploy environment behavior remains covered through the real bash subprocess.\n- [ ] Sibling occurrences are inventoried and either fixed or linked as follow-ups.\n- [ ] Repository gates and Gerrit votes pass before closure.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Prevent autodeploy test failures from printing ambient credentials"
       },
       "created_at": "2026-08-15T22:37:11Z",
@@ -39758,7 +39941,18 @@
     "REB-311": "c9be-211c-7c4e-4528",
     "REB-3110": "bbb7-812e-4fe4-465d",
     "REB-3111": "9c72-c44a-3421-45ad",
+    "REB-3112": "28a3-a62d-6345-44a0",
+    "REB-3113": "3350-90b1-2651-4c50",
+    "REB-3114": "3402-7143-2e14-4d1a",
+    "REB-3115": "4217-d1d6-370b-4e98",
+    "REB-3116": "486a-69ef-6370-48ff",
+    "REB-3117": "5142-4dbf-9469-4672",
+    "REB-3118": "59b0-d1b9-ad94-4339",
+    "REB-3119": "5e64-d9cd-2dd4-4036",
     "REB-312": "ca03-5f3e-df5d-45c2",
+    "REB-3120": "f5ac-6373-5e33-4374",
+    "REB-3121": "f828-6f5e-3b15-41f5",
+    "REB-3122": "fc1c-1b08-70c2-4afb",
     "REB-313": "ca73-856c-e5e0-4771",
     "REB-314": "cd73-6b68-3806-4bf8",
     "REB-315": "cdd4-4349-4534-4473",
