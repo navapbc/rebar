@@ -94,7 +94,7 @@ two gates' signatures apart on the same `state['signature']`.
 ### Sign + verify (library operations)
 
 ```python
-signing.sign_manifest(ticket_id, manifest, *, kind=None, repo_root=None) -> dict
+signing.sign_manifest(ticket_id, manifest, *, kind=None, repo_root=None, signer=None) -> dict
 # → {manifest, algorithm, signature, key_id, head_sha, signed_at, ticket_id}
 # Appends a SIGNATURE event through the single locked write path. Raises SigningError.
 # `kind` (e.g. "plan-review"/"completion-verifier") is recorded UNSIGNED as a routing

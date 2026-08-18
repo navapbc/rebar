@@ -532,16 +532,14 @@ def _sign_manifest_under_lock(
     kind: str | None = None,
     repo_root=None,
     under_lock_check=None,
+    signer=None,
 ) -> dict:
     """Sign a manifest of verified steps for a ticket; append a SIGNATURE event.
-    Delegates to :func:`rebar._opcert_signing.mint_opcert_record`, minting one Ed25519 DSSE
-    op-cert per verdict and persisting it through the locked write path. Validation and degraded
-    signing (OpenSSH < 8.9 or unwritable tracker) raise :class:`SigningError`; callers record it
-    as an in-band ``{signed: false}`` outcome.
-    ``kind`` (``"plan-review"`` / ``"completion-verifier"``) is recorded UNSIGNED as a routing hint
-    only; the authoritative kind comes from signed ``manifest[0]``. Omission signs a generic
-    op-cert.
-    """
+    Delegates to :func:`rebar._opcert_signing.mint_opcert_record` (one Ed25519 DSSE op-cert per
+    verdict, persisted through the locked write path); a degraded/invalid sign raises
+    :class:`SigningError`, recorded by callers as an in-band ``{signed: false}`` outcome. ``kind``
+    is an UNSIGNED routing hint (authoritative kind is signed ``manifest[0]``); ``signer`` (story
+    6f14) is an OPTIONAL startup op-cert binding forwarded to the mint (omit for env/genesis)."""
     from rebar._commands._seam import (
         CommandError,
         append_event,
@@ -564,7 +562,7 @@ def _sign_manifest_under_lock(
     # SigningError naming OpenSSH >= 8.9. Callers record it as an in-band {signed: false} outcome —
     # no local op is wedged by signing itself (the gate that needs it blocks with the remediation).
     try:
-        record = mint_opcert_record(resolved, steps, kind=kind, repo_root=repo_root)
+        record = mint_opcert_record(resolved, steps, kind=kind, repo_root=repo_root, binding=signer)
     except OpcertKeyUnavailable as exc:
         raise SigningError(
             f"{exc.message}. Install OpenSSH >= 8.9 and ensure the tracker directory is writable."
@@ -590,9 +588,13 @@ def sign_manifest(
     *,
     kind: str | None = None,
     repo_root=None,
+    signer=None,
 ) -> dict:
-    """Sign and persist a manifest through the stable public signing API."""
-    return _sign_manifest_under_lock(ticket_id, manifest, kind=kind, repo_root=repo_root)
+    """Sign and persist a manifest through the public API; forwards the OPTIONAL ``signer``
+    op-cert binding (story 6f14) to the seam (omit to keep the env/genesis behavior)."""
+    return _sign_manifest_under_lock(
+        ticket_id, manifest, kind=kind, repo_root=repo_root, signer=signer
+    )
 
 
 # ``retire_attested_pin`` was removed; reopen invalidation is computed on read. See ADR 0009.

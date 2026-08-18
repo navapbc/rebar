@@ -45,10 +45,17 @@ def _fake_completed(**kwargs):
     return fields
 
 
+def _fake_signer(_cfg):
+    """A no-op stand-in for the startup op-cert signer: this tier fakes ``jobs.run_job`` so no
+    real signing happens, and composing a real key is out of scope for the HTTP/queue plumbing."""
+    return types.SimpleNamespace(cleanup=lambda: None)
+
+
 @pytest.fixture
 def client(monkeypatch):
     from rebar.opcert_service import app as app_module
 
+    monkeypatch.setattr(app_module, "compose_signer", _fake_signer)
     app_module.app.state.config = OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0)
     with TestClient(app_module.app) as c:
         yield c
@@ -172,7 +179,7 @@ def test_worker_records_job_timeout(monkeypatch):
                 queue=queue,
                 jobs={"job": record},
                 config=OpcertServiceConfig(guard=GUARD, job_timeout_seconds=0.01),
-                ssm_fetcher=object(),
+                signer=object(),
             )
         )
         worker = asyncio.create_task(app_module._worker(fake_app))
@@ -221,7 +228,7 @@ def test_worker_cancellation_survives_job_completion_race(monkeypatch):
                 queue=queue,
                 jobs={"job": record},
                 config=OpcertServiceConfig(guard=GUARD, job_timeout_seconds=30.0),
-                ssm_fetcher=object(),
+                signer=object(),
             )
         )
         worker = asyncio.create_task(app_module._worker(fake_app))
@@ -291,6 +298,7 @@ def test_shutdown_does_not_wait_for_an_in_flight_job(monkeypatch):
         return _fake_completed(**kwargs)
 
     monkeypatch.setattr(jobs, "run_job", blocking_job)
+    monkeypatch.setattr(app_module, "compose_signer", _fake_signer)
     app_module.app.state.config = OpcertServiceConfig(
         guard=GUARD, job_timeout_seconds=30.0, shutdown_cancel_seconds=1.0
     )

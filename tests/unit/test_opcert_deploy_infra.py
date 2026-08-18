@@ -171,7 +171,10 @@ def test_compose_has_opcert_service_with_env_wiring() -> None:
     doc = yaml.safe_load(_COMPOSE.read_text())
     svc = doc["services"]["opcert"]
     env = svc["environment"]
-    assert env["REBAR_OPCERT_SSM_KEY_PARAM"] == "/rebar/prod/opcert-ed25519-key"
+    assert env["REBAR_OPCERT_KEY_PATH"], (
+        "the opcert service must be pointed at the deploy-materialized key file (story 6f14)"
+    )
+    assert "REBAR_OPCERT_SSM_KEY_PARAM" not in env  # AC5: app runtime no longer fetches SSM
     assert str(env["REBAR_SYNC_PUSH"]) == "off"
     assert "REBAR_OPCERT_ENV_ID" in env
     # reached via the HOST nginx /opcert/ proxy on loopback 8090 (Gerrit owns 8080)
@@ -371,11 +374,11 @@ def test_nginx_template_raises_map_hash_bucket_size_for_guard() -> None:
     assert 0 <= idx_size < idx_map, "map_hash_bucket_size must precede the guard map block"
 
 
-def test_opcert_compose_service_sets_aws_region() -> None:
-    """Regression (bug accc): the opcert service's boto3 SSM key fetch needs a region — the
-    instance profile supplies credentials via IMDS but the region is not auto-discovered inside
-    the container, so the compose service must set AWS_REGION (else every job fails 'You must
-    specify a region')."""
+def test_opcert_compose_service_is_aws_free() -> None:
+    """AC5 (story 6f14, supersedes bug accc): the op-cert APPLICATION runtime no longer does a
+    boto3 SSM key fetch, so the compose service must carry NO AWS region / SSM key parameter —
+    the key is materialized to a file OUTSIDE the app before start and bound via
+    ``REBAR_OPCERT_KEY_PATH``."""
     import yaml as _yaml
 
     compose = _yaml.safe_load(
@@ -384,7 +387,10 @@ def test_opcert_compose_service_sets_aws_region() -> None:
     env = compose["services"]["opcert"].get("environment", {})
     # environment may be a dict or a list of "K=V"; normalize to a key set
     keys = set(env) if isinstance(env, dict) else {e.split("=", 1)[0] for e in env}
-    assert "AWS_REGION" in keys, "opcert service must set AWS_REGION for the boto3 SSM client"
+    assert "AWS_REGION" not in keys, "opcert app runtime must be AWS-free after cutover"
+    assert "AWS_DEFAULT_REGION" not in keys
+    assert "REBAR_OPCERT_SSM_KEY_PARAM" not in keys
+    assert "REBAR_OPCERT_KEY_PATH" in keys, "the key must be bound from a materialized file"
 
 
 def test_terraform_ci_runs_fmt_check_and_validate() -> None:
