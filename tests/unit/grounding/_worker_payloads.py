@@ -9,6 +9,7 @@ standing in for a segfaulting C-extension parse).
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import time
 
@@ -20,6 +21,11 @@ def returns_value(x: int) -> int:
 
 def returns_kwarg(*, name: str) -> str:
     return f"hello {name}"
+
+
+def process_class_name() -> str:
+    """Identify the context that constructed this worker process."""
+    return type(multiprocessing.current_process()).__name__
 
 
 def returns_big(n: int) -> str:
