@@ -85,7 +85,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `sign_review` | Cheaply (re)persist the plan-review attestation for an already-computed, still-valid _(hybrid: in the LLM registrar, but write-gated (`REBAR_MCP_READONLY`) — it persists a signature event, not a billable LLM call)_ |
 | `tag_ticket` | Add a tag to a ticket. |
 | `transition_ticket` | Transition a ticket's status (optimistic concurrency). Returns the |
-| `unlink_tickets` | Remove a link between two tickets. |
+| `unlink_tickets` | Remove a link between two tickets, optionally selecting its relation. |
 | `untag_ticket` | Remove a tag from a ticket. |
 
 ## Gate environment variables
