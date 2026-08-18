@@ -576,13 +576,18 @@ distinct from the alias registry) that classifies each removed input:
 
 **`rebar config validate`** is a non-raising sweep that reports **every** tombstoned input
 (and its replacement + removed-in) currently set in the environment / parsed config / as the
-legacy file, then exits **non-zero iff any error-class input is present** (a clean
-environment exits 0). Use it to audit a config for removed inputs without aborting on the
-first one:
+legacy file, plus every invalid known core typed value across user, project, environment, and
+CLI layers. It applies the same coercion rules as the live loader but aggregates failures
+instead of aborting on the first one. Unknown keys retain their forward-compatibility policy,
+and optional-layer sections such as `llm` and `snapshot` remain owned by those layers. The
+command exits **non-zero iff an error-class tombstone or invalid typed value is present** (a
+clean environment exits 0). It does not mount or initialize the ticket store, because store
+discovery itself may depend on the invalid input being audited. Use it to audit a config
+without aborting on the first problem:
 
 ```console
 $ rebar config validate
-rebar config validate: OK — no removed inputs are set.
+rebar config validate: OK — no removed or invalid typed inputs are set.
 ```
 
 **Session provenance (one shared resolver).** rebar records "which coding-agent

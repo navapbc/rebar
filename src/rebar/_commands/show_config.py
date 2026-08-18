@@ -82,49 +82,95 @@ def _render_text(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _raw_toml_tables(root: str | None) -> dict:
-    """The RAW (uncoerced) merged nested TOML tables (user then project, project wins),
-    ``{section: {key: value}}`` — read directly, NOT through the coercing/raising
-    ``load_config`` path, so ``config validate`` can inspect keys (incl. tombstoned ones
-    that ``coerce_sparse`` would drop) without aborting on the first removed input."""
-    merged: dict[str, dict] = {}
-
-    def _merge(table: dict) -> None:
-        for sect, val in table.items():
-            if isinstance(val, dict):
-                merged.setdefault(sect, {}).update(val)
-
+def _raw_toml_layers(root: str | None) -> list[tuple[str, dict]]:
+    """Read the uncoerced user/project tables without taking the fail-fast load path."""
+    layers: list[tuple[str, dict]] = []
     try:
         up = _config.user_config_path()
         if up.is_file():
-            _merge(_config._read_toml_table(up, pyproject=False))
+            layers.append((str(up), _config._read_toml_table(up, pyproject=False)))
         proj = _config._discover_project_config(root)
         if proj is not None:
             path, kind = proj
-            _merge(_config._read_toml_table(path, pyproject=(kind == "pyproject")))
+            table = _config._read_toml_table(path, pyproject=(kind == "pyproject"))
+            layers.append((str(path), table))
     except _config.ConfigError:
         # An unreadable/malformed config file: validate should still report the env +
         # file tombstones it can, so treat the TOML side as empty rather than aborting.
-        return merged
+        return layers
+    return layers
+
+
+def _merge_raw_tables(layers: list[tuple[str, dict]]) -> dict[str, dict]:
+    """Merge raw TOML solely for the tombstone scanner's historical input shape."""
+    merged: dict[str, dict] = {}
+    for _, table in layers:
+        for sect, val in table.items():
+            if isinstance(val, dict):
+                merged.setdefault(sect, {}).update(val)
     return merged
 
 
+def _typed_config_errors(layers: list[tuple[str, dict]]) -> list[tuple[str, _config.ConfigError]]:
+    """Aggregate canonical per-key coercion failures across every config layer.
+
+    Calling ``coerce_sparse`` for a whole layer would stop at its first bad value.
+    Drive the same ``_SECTIONS`` coercers one key at a time instead, retaining the
+    live loader's typing rules while allowing ``config validate`` to report all
+    invalid values in one run. Unknown and optional-layer keys stay untouched.
+    """
+    from rebar._deprecations import tombstones
+
+    removed = {ri.name for ri in tombstones() if ri.kind == "cfg"}
+    errors: list[tuple[str, _config.ConfigError]] = []
+    for source, raw in layers:
+        for sect, val in raw.items():
+            if sect in _config._RESERVED_SECTIONS or sect not in _SECTIONS:
+                continue
+            if not isinstance(val, dict):
+                errors.append(
+                    (
+                        source,
+                        _config.ConfigError(
+                            f"[{sect}]: expected a table/section, got {type(val).__name__}"
+                        ),
+                    )
+                )
+                continue
+            values = dict(val)
+            for old, new in _config._ALIASES.get(sect, {}).items():
+                if old in values:
+                    if new not in values:
+                        values[new] = values[old]
+                    values.pop(old)
+            for key, coercer in _SECTIONS[sect].items():
+                if key not in values or f"{sect}.{key}" in removed:
+                    continue
+                try:
+                    coercer(values[key], f"{sect}.{key}")
+                except _config.ConfigError as exc:
+                    errors.append((source, exc))
+    return errors
+
+
 def _validate(root: str | None) -> int:
-    """``rebar config validate``: scan the live env + parsed TOML + the legacy config
-    file for REMOVED inputs, report every match, and exit non-zero iff any error-class
-    input is present (a clean environment exits 0). Non-raising — reports the whole
-    migration surface at once rather than aborting on the first removed input."""
+    """Report all tombstones and invalid known typed values without failing fast."""
     import os
 
     from rebar._deprecations import scan_tombstones
 
-    toml_tables = _raw_toml_tables(root)
+    toml_layers = _raw_toml_layers(root)
+    toml_tables = _merge_raw_tables(toml_layers)
     legacy = _config.repo_root(root) / ".rebar" / "config.conf"
     file_paths = [".rebar/config.conf"] if legacy.is_file() else []
 
     hits = scan_tombstones(env=dict(os.environ), toml_tables=toml_tables, file_paths=file_paths)
-    if not hits:
-        print("rebar config validate: OK — no removed inputs are set.")
+    typed_layers = [*toml_layers, ("env", _config.env_overrides())]
+    if _config._CLI_OVERRIDES:
+        typed_layers.append(("cli", _config._CLI_OVERRIDES))
+    typed_errors = _typed_config_errors(typed_layers)
+    if not hits and not typed_errors:
+        print("rebar config validate: OK — no removed or invalid typed inputs are set.")
         return 0
 
     has_error = False
@@ -133,13 +179,19 @@ def _validate(root: str | None) -> int:
         level = "ERROR" if ri.behavior == "error" else "WARN"
         repl = ri.replacement if ri.replacement else "(no replacement)"
         print(f"{level}: {ri.kind} {ctx} was removed in {ri.removed_in} — use {repl} instead")
+    for source, exc in typed_errors:
+        print(f"ERROR: invalid typed config ({source}): {exc}")
     if has_error:
         sys.stderr.write(
             "rebar config validate: one or more REMOVED inputs are still set "
             "(see above); migrate them.\n"
         )
-        return 1
-    return 0
+    if typed_errors:
+        sys.stderr.write(
+            "rebar config validate: one or more typed config values are invalid "
+            "(see above); fix them.\n"
+        )
+    return 1 if has_error or typed_errors else 0
 
 
 def config_cli(argv: list[str]) -> int:
@@ -149,8 +201,9 @@ def config_cli(argv: list[str]) -> int:
     if argv and argv[0] == "validate":
         vparser = argparse.ArgumentParser(
             prog="rebar config validate",
-            description="Scan the environment + config for REMOVED (tombstoned) inputs. "
-            "Exits non-zero if any load-bearing removed input is still set.",
+            description="Scan every config layer for invalid known typed values and "
+            "REMOVED (tombstoned) inputs. Exits non-zero on any typed failure or "
+            "load-bearing removed input.",
         )
         vparser.add_argument(
             "--root", default=None, help="repo root for config discovery (default: auto)"

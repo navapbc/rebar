@@ -225,6 +225,25 @@ def test_config_validate_reports_and_exits_nonzero(rebar_repo: Path) -> None:
     assert clean.returncode == 0, f"clean env config validate must exit 0: {clean.stderr}"
 
 
+def test_config_validate_aggregates_tombstones_and_typed_errors(rebar_repo: Path) -> None:
+    (rebar_repo / "rebar.toml").write_text(
+        '[reconciler]\nrich_text_cutover = "clould"\n\n[mcp]\nhttp_port = "not-a-port"\n'
+    )
+    cp = _cli(
+        "config",
+        "validate",
+        cwd=str(rebar_repo),
+        TICKETS_TRACKER_DIR="/tmp/legacy",
+    )
+    assert cp.returncode != 0
+    out = cp.stdout + cp.stderr
+    assert "TICKETS_TRACKER_DIR" in out
+    assert "reconciler.rich_text_cutover" in out
+    assert "mcp.http_port" in out
+    assert "expected one of" in out
+    assert "expected an integer" in out
+
+
 # ── genuinely-unknown TOML key keeps forward-compat policy (WARN, not error) ──
 def test_unknown_toml_key_keeps_forwardcompat_policy(rebar_repo: Path) -> None:
     (rebar_repo / "rebar.toml").write_text("[verify]\nsome_genuinely_unknown_future_key = true\n")
