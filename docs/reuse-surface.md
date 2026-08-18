@@ -196,7 +196,7 @@ class Runner(Protocol):
     def run(self, req: RunRequest) -> dict: ...
     def preflight(self) -> None: ...    # offline readiness check; raises LLMConfigError
 
-get_runner(config: LLMConfig, *, override: Runner | None = None) -> Runner
+get_runner(config: LLMConfig, *, runtime=None, override: Runner | None = None) -> Runner
 ```
 
 `mode` shapes the **output**: `findings` → the `review_result` pipeline;
