@@ -832,14 +832,27 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
     """
     import subprocess
     import sys
+    import tempfile
 
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-m", selection, *paths],
-        cwd=_ROOT,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    with tempfile.TemporaryDirectory(prefix="rebar-pytest-collect-") as temp_dir:
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "-m",
+                selection,
+                "--basetemp",
+                str(Path(temp_dir) / "pytest"),
+                *paths,
+            ],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
     # rc 0 = items collected; rc 5 = nothing collected (a full exclusion) — both are outcomes
     # this guard must be able to report on, so only an unexpected rc is an error.
     assert proc.returncode in (0, 5), (
