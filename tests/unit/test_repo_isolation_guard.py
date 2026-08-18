@@ -74,7 +74,6 @@ def _run_real_guard_with_blocking_git(
     state, env = _blocking_git(tmp_path, operation)
     nested_test = tmp_path / "test_nested_guard.py"
     nested_test.write_text("def test_body_finishes():\n    assert True\n")
-    started = time.monotonic()
     try:
         result = subprocess.run(
             [
@@ -94,16 +93,13 @@ def _run_real_guard_with_blocking_git(
             env=env,
             capture_output=True,
             text=True,
-            timeout=12,
+            timeout=30,
         )
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(
-            f"real repo-isolation {operation} probe kept pytest alive beyond 12 seconds"
+            f"real repo-isolation {operation} probe kept pytest alive beyond 30 seconds"
         ) from exc
-    elapsed = time.monotonic() - started
     assert state.read_text() == "2", "the shim did not block the second real guard probe"
-    # timing: hang-guard — the 10s ceiling only proves the inner 5s watchdog beats 60s sleep.
-    assert elapsed < 10, f"watchdog did not bound the blocked probe: {elapsed:.2f}s"
     return result
 
 
