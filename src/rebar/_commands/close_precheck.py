@@ -216,6 +216,8 @@ def _check_work_landed(
     declared impact."""
     from rebar._engine_support import field_reads
 
+    if not _union_file_impact(accepted_ids, tracker):
+        return
     referencing = _referencing_commits(accepted_ids, tracker, code_root)
     if field_reads.file_impact(ticket_id, tracker) and not referencing:
         raise CommandError(

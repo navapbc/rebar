@@ -105,6 +105,46 @@ def test_is_merge_commit_detects_two_parents(git_repo):
 
 
 # ── The DET close check ──────────────────────────────────────────────────────
+def test_work_landed_skips_commit_discovery_when_scope_has_no_impact(monkeypatch):
+    from rebar._engine_support import field_reads
+
+    monkeypatch.setattr(close_precheck, "_union_file_impact", lambda *a, **k: [])
+    monkeypatch.setattr(field_reads, "file_impact", lambda *a, **k: [])
+
+    def unexpected_discovery(*args, **kwargs):
+        raise AssertionError("empty accepted scope must not scan commit history")
+
+    monkeypatch.setattr(close_precheck, "_referencing_commits", unexpected_discovery)
+
+    close_precheck._check_work_landed("ticket", "ticket", {"ticket"}, "/tracker", "/code")
+
+
+def test_work_landed_still_discovers_commits_for_descendant_impact(monkeypatch):
+    from rebar._engine_support import field_reads
+
+    discovered: list[tuple[set[str], str, str]] = []
+    checked: list[tuple[set[str], list[str], str, str]] = []
+    accepted = {"parent", "child"}
+
+    monkeypatch.setattr(close_precheck, "_union_file_impact", lambda *a, **k: ["src/child.py"])
+    monkeypatch.setattr(field_reads, "file_impact", lambda *a, **k: [])
+    monkeypatch.setattr(
+        close_precheck,
+        "_referencing_commits",
+        lambda ids, tracker, root: discovered.append((ids, tracker, root)) or ["child-sha"],
+    )
+    monkeypatch.setattr(
+        close_precheck,
+        "_check_file_impact_vs_diff",
+        lambda ids, commits, tracker, root: checked.append((ids, commits, tracker, root)),
+    )
+
+    close_precheck._check_work_landed("parent", "parent", accepted, "/tracker", "/code")
+
+    assert discovered == [(accepted, "/tracker", "/code")]
+    assert checked == [(accepted, ["child-sha"], "/tracker", "/code")]
+
+
 @pytest.fixture
 def det(monkeypatch):
     """Drive `_check_file_impact_vs_diff` with injected impact/commit data."""
