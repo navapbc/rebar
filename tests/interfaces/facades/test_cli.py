@@ -43,11 +43,7 @@ def offline_acli_env(tmp_path: Path) -> dict[str, str]:
     acli = bindir / "acli"
     acli.write_text("#!/bin/sh\necho '[]'\nexit 0\n")
     acli.chmod(acli.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
-    env = dict(os.environ)
-    env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
-    for var in ("JIRA_URL", "JIRA_USER", "JIRA_API_TOKEN"):
-        env.pop(var, None)
-    return env
+    return {"PATH": str(bindir) + os.pathsep + os.environ.get("PATH", "")}
 
 
 def test_exit_10_passthrough(rebar_repo: Path) -> None:

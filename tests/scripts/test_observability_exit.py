@@ -65,19 +65,16 @@ def healthy_env(tmp_path: Path) -> dict[str, str]:
 
     off = tmp_path / "offsets"
     off.mkdir()
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
     # Redirect every persisted offset file away from the real host (/var/lib/rebar).
-    env.update(
-        {
-            "REPL_OFFSET_FILE": str(off / "repl"),
-            "VOTER_OFFSET_FILE": str(off / "voter"),
-            "MERGE_OFFSET_FILE": str(off / "merge"),
-            "DEPLOY_OFFSET_FILE": str(off / "deploy"),
-            "G2P_OFFSET_FILE": str(off / "g2p"),
-            "REPL_LOG": str(off / "nonexistent-replication-log"),
-        }
-    )
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "REPL_OFFSET_FILE": str(off / "repl"),
+        "VOTER_OFFSET_FILE": str(off / "voter"),
+        "MERGE_OFFSET_FILE": str(off / "merge"),
+        "DEPLOY_OFFSET_FILE": str(off / "deploy"),
+        "G2P_OFFSET_FILE": str(off / "g2p"),
+        "REPL_LOG": str(off / "nonexistent-replication-log"),
+    }
     return env
 
 

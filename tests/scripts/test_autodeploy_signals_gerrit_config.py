@@ -84,16 +84,13 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     for tool in ("docker", "curl", "rsync", "chown", "stat"):
         _stub(bin_dir, tool, "exit 0")
 
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    env.update(
-        {
-            "STATE_DIR": str(state),
-            "DEPLOY_REPO": str(deploy_repo),
-            "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
-            "MIRROR_DIR": str(mirror),
-        }
-    )
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "STATE_DIR": str(state),
+        "DEPLOY_REPO": str(deploy_repo),
+        "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
+        "MIRROR_DIR": str(mirror),
+    }
     return {"env": env}
 
 

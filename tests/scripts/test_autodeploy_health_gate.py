@@ -115,19 +115,16 @@ def deploy_box(tmp_path: Path) -> dict[str, object]:
     for tool in ("rsync", "chown", "stat"):
         _stub(bin_dir, tool, "exit 0")
 
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
-    env.update(
-        {
-            "STATE_DIR": str(state),
-            "DEPLOY_REPO": str(deploy_repo),
-            "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
-            "MIRROR_DIR": str(mirror),
-            # Prove the default stays env-overridable AND keep this test fast: without it the
-            # unhealthy path would burn the (deliberately large) default deadline.
-            "HEALTH_TIMEOUT": "1",
-        }
-    )
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "STATE_DIR": str(state),
+        "DEPLOY_REPO": str(deploy_repo),
+        "COMPOSE_DIR": str(deploy_repo / "infra" / "compose"),
+        "MIRROR_DIR": str(mirror),
+        # Prove the default stays env-overridable AND keep this test fast: without it the
+        # unhealthy path would burn the (deliberately large) default deadline.
+        "HEALTH_TIMEOUT": "1",
+    }
     return {"env": env, "cmd_log": cmd_log, "state": state}
 
 
