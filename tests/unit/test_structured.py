@@ -490,6 +490,26 @@ def test_selection_last_valid_wins_and_warns_when_two_validate(caplog):
     assert any(rec.levelno >= logging.WARNING for rec in caplog.records)
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '{"verdict": "PASS", "summary": "one answer"}',
+        (
+            '{"verdict": "PASS", "summary": "same answer"}\n'
+            '{"verdict": "PASS", "summary": "same answer"}'
+        ),
+    ],
+)
+def test_selection_identical_candidates_do_not_warn(reply, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="rebar.llm.structured"):
+        obj = structured.parse_structured(reply, _Verdict)
+
+    assert obj.verdict == "PASS"
+    assert not any("multiple candidates validated" in rec.getMessage() for rec in caplog.records)
+
+
 def test_selection_falls_back_byte_for_byte_when_no_candidate():
     # AC3: a reply with NO schema-valid candidate falls back to today's pipeline byte-for-byte
     # (same exception type AND message). The declined-entirely fixture has no parseable object,
