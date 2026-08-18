@@ -371,10 +371,15 @@ def register_write_tools(mcp, ctx) -> None:
         )
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def unlink_tickets(id1: str, id2: str) -> WriteAckOut:
-        """Remove a link between two tickets."""
+    def unlink_tickets(id1: str, id2: str, relation: str | None = None) -> WriteAckOut:
+        """Remove a link between two tickets, optionally selecting its relation.
+
+        Pass ``relation`` to remove that specific relation while preserving any
+        other active relation between the pair. When omitted, removes the pair's
+        most-recent active relation (the legacy pair-scoped behavior).
+        """
         _shadow("mcp.write.unlink_tickets")
-        rebar.unlink(id1, id2)
+        rebar.unlink(id1, id2, relation)
         return _ack()
 
     @mcp.tool(annotations=_ANN["MUTATE_IDEMPOTENT"])
