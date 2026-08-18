@@ -12,13 +12,13 @@ non-secret :class:`~rebar._operation_config.OperationSnapshot` (config values, t
 source provenance, the selected repo root). From its ``values`` we derive a frozen
 :class:`ReconcilerSettings` — the *scope* the built backend answers from — and pair it
 with a provider-specific static-auth carrier that holds the send credential in a
-pydantic :class:`~pydantic.SecretStr`.
+stdlib-only string field excluded from observable dataclass state.
 
 Secret hygiene (AC5). The static-auth carrier (Cloud ``JIRA_API_TOKEN`` / DC
-``JIRA_PAT``) is stored in a field marked ``repr=False, compare=False`` AND wrapped in a
-``SecretStr`` (whose own ``repr`` is ``**********``), so it can never enter a ``repr`` /
-``str`` / equality / hash / fingerprint of the runtime or its settings. The secret is
-unwrapped ONLY inside the selected sending adapter, when it actually authenticates —
+``JIRA_PAT``) is stored in a plain string field marked ``repr=False, compare=False``,
+so it can never enter a ``repr`` / ``str`` / equality / hash /
+fingerprint of the runtime or its settings. The secret is revealed ONLY inside the
+selected sending adapter, when it actually authenticates —
 Cloud's ``AcliClient`` construction and DC's lazily-built ``jira.JIRA`` client.
 
 Fail-closed (AC4). :meth:`ReconcilerRuntime.build_backend` (Cloud) and the built
@@ -36,8 +36,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import SecretStr
-
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
@@ -50,20 +48,19 @@ _DEFAULT_COMMENT_MAX_CHARS = 32767
 
 @dataclass(frozen=True)
 class StaticAuth:
-    """Base static-auth carrier: an immutable send credential wrapped in a
-    :class:`~pydantic.SecretStr`.
+    """Base static-auth carrier for an immutable send credential.
 
     The ``secret`` field is excluded from ``repr``/equality/hash (``repr=False,
-    compare=False``) AND the ``SecretStr`` masks its own ``repr`` — belt-and-suspenders
-    so the credential never leaks into a diagnostic, cache key, or fingerprint. It is
-    revealed ONLY by the selected sending adapter at authentication time.
+    compare=False``), so the credential never leaks into a diagnostic, cache key, or
+    fingerprint. It is revealed ONLY by the selected sending adapter at authentication
+    time.
     """
 
-    secret: SecretStr = field(default=SecretStr(""), repr=False, compare=False)
+    secret: str = field(default="", repr=False, compare=False)
 
     def reveal(self) -> str:
-        """Unwrap the credential — call ONLY where the adapter authenticates."""
-        return self.secret.get_secret_value()
+        """Reveal the credential — call ONLY where the adapter authenticates."""
+        return self.secret
 
     def present(self) -> bool:
         """Whether a non-empty credential was captured (a non-secret boolean)."""
@@ -307,10 +304,10 @@ def _resolve_provider_scope(backend_name: str, raw_project: str) -> tuple[Static
     non-empty scope.
     """
     if backend_name == _CLOUD_BACKEND:
-        auth: StaticAuth = CloudStaticAuth(SecretStr(os.environ.get("JIRA_API_TOKEN", "")))
+        auth: StaticAuth = CloudStaticAuth(os.environ.get("JIRA_API_TOKEN", ""))
         return auth, raw_project, raw_project
     if backend_name == _DC_BACKEND:
-        dc_auth = DataCenterStaticAuth(SecretStr(os.environ.get("JIRA_PAT", "")))
+        dc_auth = DataCenterStaticAuth(os.environ.get("JIRA_PAT", ""))
         return dc_auth, raw_project, raw_project
     return StaticAuth(), raw_project, raw_project
 

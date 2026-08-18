@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import rebar
@@ -48,18 +49,43 @@ _SRC = Path(rebar.__file__).resolve().parent
 
 
 def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
-    code = (
-        "import sys;"
-        "import rebar;"
-        "import rebar.llm.workflow.executor;"
-        "import rebar.llm.workflow.steps;"
-        "import rebar.llm.workflow.runs;"
-        "import rebar.llm.workflow.render;"
-        "import rebar.llm.workflow.lint;"
-        "import rebar.grounding;"  # grounding contract + harness must be import-clean
-        f"heavy={_HEAVY!r};"
-        "leaked=[m for m in heavy if m in sys.modules];"
-        "print('LEAK:' + ','.join(leaked) if leaked else 'CLEAN')"
+    code = textwrap.dedent(
+        f"""
+        import builtins
+        import sys
+
+        original_import = builtins.__import__
+
+        def block_optional_pydantic(name, *args, **kwargs):
+            if name == "pydantic" or name.startswith("pydantic."):
+                raise ModuleNotFoundError("pydantic blocked by clean-runtime oracle")
+            return original_import(name, *args, **kwargs)
+
+        builtins.__import__ = block_optional_pydantic
+
+        import rebar
+        import rebar.llm.workflow.executor
+        import rebar.llm.workflow.steps
+        import rebar.llm.workflow.runs
+        import rebar.llm.workflow.render
+        import rebar.llm.workflow.lint
+        import rebar.grounding
+        from rebar._engine import engine_dir
+
+        sys.path.insert(0, str(engine_dir()))
+        import rebar_reconciler.runtime as reconciler_runtime
+
+        first_auth = reconciler_runtime.StaticAuth("first-secret")
+        second_auth = reconciler_runtime.StaticAuth("second-secret")
+        assert "first-secret" not in repr(first_auth)
+        assert first_auth == second_auth
+        assert hash(first_auth) == hash(second_auth)
+        assert first_auth.reveal() == "first-secret"
+
+        heavy = {_HEAVY!r}
+        leaked = [module for module in heavy if module in sys.modules]
+        print("LEAK:" + ",".join(leaked) if leaked else "CLEAN")
+        """
     )
     cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert cp.returncode == 0, cp.stderr
