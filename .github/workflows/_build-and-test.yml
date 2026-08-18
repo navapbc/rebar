@@ -590,19 +590,12 @@ jobs:
         run: |
           python -m rebar.schemas.check_mcp_models --check
 
-      # Config-read gate (ticket 6754): every _config_schema.py dataclass field must
-      # have at least one attribute-read site outside the schema/config plumbing, or
-      # carry a ``# read-via: <pointer>`` escape marker.
-      # If-present guard per ticket ee2a (see raw-git-write gate above); bug 1909-c1a7-9f20-440f.
-      - name: Config-read gate
-        shell: bash
-        run: |
-          if [ ! -f scripts/check_config_reads.py ]; then
-            echo "scripts/check_config_reads.py not in checked-out tree (change predates the gate) — skipping;" \
-                 "the gate re-enforces on rebase and on every post-merge change"
-            exit 0
-          fi
-          python scripts/check_config_reads.py
+      # Config-boundary gates (config-read gate ticket 6754, config-ownership gate RP-04 S7.1)
+      # run through the `make lint` step above (RP-04 S7.2, ticket 735b) — the portable,
+      # no-CI-required trigger — so they are NOT standalone steps here (that would double-run
+      # them). The tree-skew case the old if-present guard covered is handled inherently:
+      # `make lint` runs the patchset's OWN Makefile, which for a change predating the slice
+      # lacks the invocations, so the gate re-enforces on rebase and every post-merge change.
 
       - name: Run the default suite (Python tiers; excludes integration + external)
         # Pin --basetemp under the runner temp (not /tmp): on long (10-16 min) runs
