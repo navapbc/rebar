@@ -197,7 +197,7 @@ def _commit_binding_store_snapshot(
     bindings as normal.  The caller must NOT abort on False — commit failure
     must never break the sync pass.
     """
-    from rebar_reconciler import git_adapter
+    git_adapter = _load("rebar_reconciler.git_adapter", "git_adapter.py")
 
     tracker_dir = repo_root / git_adapter.TRACKER_DIR
     # Stage the live, retired, and GET-rotation binding state files. The
