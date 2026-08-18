@@ -13900,9 +13900,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\nThe grounding worker harness hard-codes POSIX `fork`. CPython 3.12 warns when this runs in a multithreaded host because the child can deadlock; Python 3.14 no longer defaults to fork. Runtime experiments confirmed `multiprocessing/popen_fork.py -> os.fork()` is the warning source, while spawn preserves 46/47 existing lifecycle tests. The one failure is a test fixture that attaches an unpicklable local closure to a Process. No production caller exists in-repo, but `run_in_worker` is publicly re-exported.\n\n## Approved API contract\n- Default to the cross-platform `spawn` context.\n- Accept an optional caller-supplied multiprocessing context for informed legacy/frozen-executable compatibility; callers explicitly selecting fork own its thread-safety risk.\n- Require worker callables to be importable module-level names and args, kwargs, and return values to be pickleable. Future C-extension bindings construct parser/query state inside the child from plain-data arguments.\n- Preserve the documented never-raise/fail-open contract: process start and pickling failures, plus parent receive/unpickling failures, return an abstaining `RunResult`.\n- Do not add cloudpickle/loky without a demonstrated production caller requiring dynamic callables.\n\n## Plan\n- Add held-out behavioral coverage proving the default worker completes under a live background thread with the fork warning promoted to error.\n- Add contract coverage for explicit context injection and non-pickleable start/receive failures mapping to fail-open results.\n- Switch the default context to spawn, expose optional context injection, and make start/receive cleanup exception-safe.\n- Replace the spawn-incompatible reap-lag test mutation with a parent-only proxy while preserving the crash-vs-timeout oracle.\n- Document the public callable/serialization contract and explicit fork escape hatch.\n- Run the grounding lifecycle/conformance matrix, mutation checks, lint, typecheck, and repository gates.\n\n## Acceptance Criteria\n- [ ] Default `run_in_worker` completes under a live background thread with the fork deadlock warning treated as an error.\n- [ ] An explicitly supplied multiprocessing context is used.\n- [ ] Non-importable or non-pickleable worker inputs return `RunResult(abstain_reason=\"other\")` without raising.\n- [ ] Parent receive/unpickling failures return `RunResult(abstain_reason=\"other\")` without raising.\n- [ ] Timeout, large-result drain, exception, signal-crash, cleanup, and reap-lag contracts remain green under spawn.\n- [ ] The documented public contract states importability/pickleability requirements and the explicit fork risk.\n- [ ] Focused grounding tests, lint, typecheck, and repository tests pass.",
+        "description": "## Context\nThe grounding worker harness hard-codes POSIX `fork`. CPython 3.12 warns when this runs in a multithreaded host because the child can deadlock; Python 3.14 no longer defaults to fork. Runtime experiments confirmed `multiprocessing/popen_fork.py -> os.fork()` is the warning source, while spawn preserves 46/47 existing lifecycle tests. The one failure is a test fixture that attaches an unpicklable local closure to a Process. No production caller exists in-repo, but `run_in_worker` is publicly re-exported.\n\n## Approved API contract\n- Default to the cross-platform `spawn` context.\n- Accept an optional caller-supplied multiprocessing context for informed legacy/frozen-executable compatibility; callers explicitly selecting fork own its thread-safety risk.\n- Require worker callables to be importable module-level names and args, kwargs, and return values to be pickleable. Future C-extension bindings construct parser/query state inside the child from plain-data arguments.\n- Preserve the documented never-raise/fail-open contract: process start and pickling failures, plus parent receive/unpickling failures, return an abstaining `RunResult`.\n- Do not add cloudpickle/loky without a demonstrated production caller requiring dynamic callables.\n\n## Plan\n- Add held-out behavioral coverage proving the default worker completes under a live background thread with the fork warning promoted to error.\n- Add contract coverage for explicit context injection and non-pickleable start/receive failures mapping to fail-open results.\n- Switch the default context to spawn, expose optional context injection, and make start/receive cleanup exception-safe.\n- Replace the spawn-incompatible reap-lag test mutation with a parent-only proxy while preserving the crash-vs-timeout oracle.\n- Document the public callable/serialization contract and explicit fork escape hatch.\n- Run the grounding lifecycle/conformance matrix, mutation checks, lint, typecheck, and repository gates.\n\n## Acceptance Criteria\n- [x] Default `run_in_worker` completes under a live background thread with the fork deadlock warning treated as an error.\n- [x] An explicitly supplied multiprocessing context is used.\n- [x] Non-importable or non-pickleable worker inputs return `RunResult(abstain_reason=\"other\")` without raising.\n- [x] Parent receive/unpickling failures return `RunResult(abstain_reason=\"other\")` without raising.\n- [x] Timeout, large-result drain, exception, signal-crash, cleanup, and reap-lag contracts remain green under spawn.\n- [x] The documented public contract states importability/pickleability requirements and the explicit fork risk.\n- [x] Focused grounding tests, lint, typecheck, and repository tests pass.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Grounding harness tests fork from multithreaded workers and warn about deadlock risk"
       },
       "created_at": "2026-08-16T21:34:11Z",
@@ -14697,9 +14697,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\nAn AST inventory finds 110 broad environment constructions under tests: 51 `dict(os.environ)`, 49 `{**os.environ, ...}`, and 10 `os.environ.copy()`. Seven decorated pytest fixtures are owned by sibling `dumbstruck-wonderful-xiphosuran`, leaving exactly 103 test-local/helper sites here. A real pytest runtime probe proved that when process startup raises, default long tracebacks render ordinary environment mappings through `subprocess.run`, `Popen`, and `_execute_child`, exposing early inherited values; short tracebacks do not. A late sentinel can be truncated, so absence without insertion-order control is not proof. Production and maintenance propagation remain excluded.\n\n## Plan\n- Add a test-only mutable dict boundary whose representation redacts contents, whose mapping behavior preserves exact inherited child environments, and whose `.copy()` preserves the boundary.\n- Route all 103 non-fixture broad constructions through that boundary; retain every key/value/order and per-test override so intentional ambient propagation remains behaviorally unchanged.\n- Add a real nested-pytest startup-failure oracle using an existing production-path helper, with a first-position sentinel and short-trace negative control.\n- Add an AST repository-policy guard that recognizes the three inventoried broad forms, skips the seven separately-owned decorated fixtures, permits only the single boundary constructor, rejects unclassified new broad mappings, and rejects `dict(...)` unwrapping of the boundary.\n\n## Test contract card\n- authoritative_contract: failure-output non-disclosure at `tests/scripts/test_autodeploy_env_repr_security.py:13-45` and commit 034e17209c.\n- trigger_preconditions: sentinel is first in the parent mapping; a real subprocess startup fails before returning.\n- production_path: existing `tests/integration/test_init_fail_closed.py::_env` -> real `subprocess.run` -> pytest long traceback.\n- test_tier: nested real pytest + real subprocess; a pure repr unit test cannot cross pytest/stdlib frame rendering.\n- observable_postcondition: long and short captured output omit the sentinel; successful child receives the exact value.\n- negative_control: the short traceback never renders the sentinel.\n- ci_gate: `make test` / unit repository-policy lane.\n\n## Testing\n- Run `pytest tests/unit/test_subprocess_env_repr_security.py -q` for the held-out nested-pytest oracle, successful-child contract, and AST policy guard.\n- Run `pytest` for all affected consumers under the supported suite.\n- Run `make lint` and `make typecheck`.\n- Reintroduce an ordinary dict at the representative helper and run `pytest tests/unit/test_subprocess_env_repr_security.py -q`; the security case must fail.\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_subprocess_env_repr_security.py -q` proves all 103 in-scope mappings use the safe boundary.\n- [ ] The seven decorated fixtures remain excluded by the AST guard and owned by `dumbstruck-wonderful-xiphosuran`.\n- [ ] The nested default-long traceback test omits a first-position sentinel.\n- [ ] The nested short traceback control omits the sentinel.\n- [ ] The successful-child test proves exact inherited values reach the child.\n- [ ] `pytest` preserves every intentional ambient-propagation behavior.\n- [ ] Seeded raw constructor mutations make the AST guard fail with the offending location.\n- [ ] A seeded boundary-unwrapping mutation makes the AST guard fail with the offending location.\n- [ ] `make lint` passes.\n- [ ] `make typecheck` passes.\n- [ ] Replacing the representative safe boundary with an ordinary dict returns the held-out security oracle to RED.",
+        "description": "## Context\nAn AST inventory finds 110 broad environment constructions under tests: 51 `dict(os.environ)`, 49 `{**os.environ, ...}`, and 10 `os.environ.copy()`. Seven decorated pytest fixtures are owned by sibling `dumbstruck-wonderful-xiphosuran`, leaving exactly 103 test-local/helper sites here. A real pytest runtime probe proved that when process startup raises, default long tracebacks render ordinary environment mappings through `subprocess.run`, `Popen`, and `_execute_child`, exposing early inherited values; short tracebacks do not. A late sentinel can be truncated, so absence without insertion-order control is not proof. Production and maintenance propagation remain excluded.\n\n## Approach rationale\nThe sibling fixtures could use allowlists after a 24-test minimal-environment proof. This population cannot share one allowlist: `_store_isolation.py` intentionally forwards the invoking pytest environment, and live Jira child probes intentionally forward environment-only credentials. The boundary therefore retains exact mappings while redacting only representation. Value wrappers such as Pydantic `SecretStr` are unsuitable because `subprocess` requires plain string keys and values. The existing file `tests/scripts/test_autodeploy_env_repr_security.py` is the authoritative prior contract; the new `tests/unit/test_subprocess_env_repr_security.py` is a distinct held-out oracle for this ticket.\n\n## Plan\n- Add a test-only mutable dict boundary whose representation redacts contents, whose mapping behavior preserves exact inherited child environments, whose `.copy()` preserves the boundary, and whose `with_overrides(...)` is the sanctioned type-preserving derivation path.\n- Route all 103 non-fixture broad constructions through that boundary; retain every key/value/order and per-test override so intentional ambient propagation remains unchanged.\n- Add a real nested-pytest startup-failure oracle using `tests/integration/test_init_fail_closed.py::_env`, with a first-position sentinel and short-trace negative control.\n- Add an AST repository-policy guard that skips the seven separately-owned decorated fixtures and rejects new raw broad mappings.\n- Make the guard reject both direct and locally-aliased boundary unwrapping through `dict(boundary)` or `{**boundary, ...}`; require `.copy()` or `with_overrides(...)` instead.\n\n## Test contract card\n- authoritative_contract: existing `tests/scripts/test_autodeploy_env_repr_security.py:13-45` establishes failure-output non-disclosure.\n- new_oracle: `tests/unit/test_subprocess_env_repr_security.py` exercises this ticket population.\n- trigger_preconditions: sentinel is first; a real subprocess startup fails before returning.\n- production_path: `_env` -> real `subprocess.run` -> pytest long traceback.\n- test_tier: nested real pytest + real subprocess; a pure repr unit test cannot cross pytest/stdlib rendering.\n- observable_postcondition: long and short captured output omit the sentinel; successful child receives the exact value.\n- negative_control: short traceback never renders the sentinel.\n- ci_gate: `make test` / unit repository-policy lane.\n\n## Testing\n- Run `pytest tests/unit/test_subprocess_env_repr_security.py -q` for the held-out oracle, successful-child contract, and AST guard.\n- Run `pytest` for affected consumers.\n- Run `make lint` and `make typecheck`.\n- Seed each raw constructor form, `dict(boundary)`, and `{**boundary}`; the guard must name every offender.\n- Replace the representative boundary with an ordinary dict; the security oracle must fail.\n\n## Acceptance Criteria\n- [ ] `pytest tests/unit/test_subprocess_env_repr_security.py -q` proves zero unclassified raw mappings remain among the 103 inventoried sites.\n- [ ] The seven decorated fixtures are excluded structurally under the existing `discovered_from` link to `dumbstruck-wonderful-xiphosuran`.\n- [ ] The nested default-long traceback test omits a first-position sentinel.\n- [ ] The nested short traceback control omits the sentinel.\n- [ ] The successful-child test proves exact inherited values reach the child.\n- [ ] `pytest` preserves every intentional ambient-propagation behavior.\n- [ ] Seeded `dict(os.environ)`, `{**os.environ}`, and `os.environ.copy()` mutations make the guard name the offending location.\n- [ ] Seeded `dict(boundary)` direct and alias mutations make the guard name the offending location.\n- [ ] Seeded `{**boundary}` direct and alias mutations make the guard name the offending location.\n- [ ] `make lint` passes.\n- [ ] `make typecheck` passes.\n- [ ] Replacing the representative safe boundary with an ordinary dict returns the held-out security oracle to RED.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Audit test subprocess environments for exception-time credential rendering"
       },
       "created_at": "2026-08-18T06:39:42Z",
@@ -17531,9 +17531,17 @@
       "updated_at": "2026-08-15T15:02:19Z"
     },
     "7237-b398-f72f-4634": {
+      "baseline": {
+        "assignee": null,
+        "description": "Advisory from S6 (6f14) LLM code review (Gerrit 1850). infra/Dockerfile.opcert runs the op-cert service as root (no USER directive). Container-hardening best practice is a dedicated non-root UID. RISK requiring care: the deployed signer reads a bind-mounted 0600 private key; a non-root container user needs a UID matching the mounted file's owner or the key becomes unreadable and startup fails. Remediation must coordinate the Dockerfile USER/UID with the compose bind-mount ownership in infra/compose. Deferred from S6 to avoid breaking the deploy on a rushed UID/mount-perms change.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Add non-root USER to Dockerfile.opcert (coordinate with 0600 mounted key ownership)"
+      },
       "created_at": "2026-08-18T07:43:33Z",
       "jira_id": "4589185",
       "jira_key": "REB-3153",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T07:43:36Z"
     },
@@ -22916,9 +22924,17 @@
       "updated_at": "2026-08-15T15:05:50Z"
     },
     "932d-52d8-1d59-426c": {
+      "baseline": {
+        "assignee": null,
+        "description": "Advisory from S6 (6f14) LLM code review (Gerrit 1850). When the op-cert signer is composed from the inline-PEM source REBAR_OPCERT_PRIVATE_KEY (src/rebar/opcert_service/config.py from_env), the raw Ed25519 private key remains in os.environ for the process lifetime and is inherited by every child process (ssh-keygen subprocesses in keyprov, git pushes). The DEPLOYED path uses REBAR_OPCERT_KEY_PATH (a mounted 0600 file), not inline PEM, so this affects only the secondary/dev inline-PEM path. Remediation: after compose_signer consumes private_key, pop REBAR_OPCERT_PRIVATE_KEY from os.environ without breaking config-reload semantics. Deferred from S6 to avoid rushing a config-load side-effect change on a non-deployed path.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Harden op-cert inline-PEM path: unset REBAR_OPCERT_PRIVATE_KEY from os.environ after compose"
+      },
       "created_at": "2026-08-18T07:43:37Z",
       "jira_id": "4589186",
       "jira_key": "REB-3154",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-18T07:43:40Z"
     },
@@ -29558,9 +29574,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nRP-01 is now landed on `origin/main`. It made `PydanticAIRunner.run()` -> one per-run `ProviderSession` -> one `_pai_structured`/Pydantic `Agent` operation authoritative and pinned request-budget, output repair, cache, exhaustion, artifact, tracing, usage, and failure behavior. RP-04 must add provider-native auth injection without forking that path.\n\n## Outcome\nAdd an `LLMRuntime` capability assembled at the trusted operation boundary and consumed only by existing `ProviderSession` builders. Accept provider-native pre-client auth/session capabilities (for example boto3 Session, Anthropic access-token provider, OpenAI callable/workload identity, or provider-specific static input); Rebar still constructs/owns/closes the official client and retains RP-01 policy. Arbitrary constructed clients/runners and a second Agent/retry scheduler remain out of scope.\n\n## Plan\n1. Add `src/rebar/llm/auth.py` with typed provider-specific `LLMRuntime` auth/session capabilities. Keep them non-serializable and outside `LLMConfig`, `RunRequest`, snapshots, fingerprints, caches, CLI/MCP schemas, and public output.\n2. Extend `PydanticAIRunner`/`get_runner` to receive `LLMRuntime`, then pass it into the one per-run `ProviderSession`. Enrich only the existing Anthropic/Bedrock/OpenAI builder inputs; preserve fallback candidate construction and close ownership.\n3. Let each official SDK retain native precedence, refresh, expiry, invalidation, and workload identity. If explicit provider/auth composition is missing or conflicting, fail before a provider model request and never try another ambient principal/provider. Optional observability remains separate.\n4. Do not alter `_pai_structured`, output policy, request allowance, complete-or-omit failed-response history, cache breakpoint/settings/accounting, typed exhaustion, final artifacts, candidate tracing, usage normalization, failure translation, or documented limit-raise guidance.\n\n## Testing (RED -> GREEN)\n- Extend provider construction unit tests with native capability doubles for Anthropic, Bedrock, and OpenAI; assert the exact existing builder receives the capability, one official client is constructed/closed, and no raw token extraction occurs outside its adapter.\n- Run RP-01's S2/S3/S5 authoritative offline oracles and candidate-tracing oracle unchanged. Add an AST/runtime guard that auth injection still has one `ProviderSession`, one runner dispatch, and one Agent operation.\n- Failure tests cover absent/conflicting explicit auth, revoked static auth, native refresh success, refresh failure, fallback candidates, transport retry, output retry/exhaustion, and secret canary leakage.\n- [operator-attested] Run bounded live Anthropic and Bedrock auth/cache canaries after cutover. Record provider/auth-source kind, cache read/write counters, request/retry counts, trace/run id, timestamp, and redacted outcome; never record credential material.\n\n## Compatibility / rollback\nRuntime input is optional during expansion; absence delegates to the exact RP-01 construction behavior. Before callers require the binding, rollback removes the new argument. After cutover, rollback must retain an adapter accepting the binding but may ignore it in favor of the old native environment chain. No LLM result schema changes.\n\n## Acceptance Criteria\n- [ ] Anthropic, Bedrock, and OpenAI construction tests prove provider-native capability reaches only the existing `ProviderSession` builder and exactly one Rebar-owned official client lifecycle.\n- [ ] The unchanged RP-01 authoritative S2/S3/S5 and candidate-tracing suites pass, including one-Agent budget, complete-or-omit retry history, cache/accounting, typed exhaustion, artifacts, tracing, usage, and failure contracts.\n- [ ] Structural/runtime tests reject a second runner/client owner, Agent construction route, `_pai_structured` caller, or bespoke retry scheduler.\n- [ ] Missing/conflicting explicit auth fails before a provider model request without anonymous, alternate-principal, or cross-provider fallback; native refresh remains SDK-owned.\n- [ ] Secret sentinels are absent from config/request/snapshot/fingerprint/cache/schema/output/log/exception/tracing boundaries and unwrap only inside the selected provider builder.\n- [ ] [operator-attested] Bounded live Anthropic and Bedrock auth/cache canaries pass with the required redacted evidence recorded on this ticket.",
+        "description": "## Context / Problem\nRP-01 is now landed on `origin/main`. It made `PydanticAIRunner.run()` -> one per-run `ProviderSession` -> one `_pai_structured`/Pydantic `Agent` operation authoritative and pinned request-budget, output repair, cache, exhaustion, artifact, tracing, usage, and failure behavior. RP-04 must add provider-native auth injection without forking that path.\n\n## Outcome\nAdd an `LLMRuntime` capability assembled at the trusted operation boundary and consumed only by existing `ProviderSession` builders. Accept provider-native pre-client auth/session capabilities (for example boto3 Session, Anthropic access-token provider, OpenAI callable/workload identity, or provider-specific static input); Rebar still constructs/owns/closes the official client and retains RP-01 policy. Arbitrary constructed clients/runners and a second Agent/retry scheduler remain out of scope.\n\n## Plan\n1. Add `src/rebar/llm/auth.py` with typed provider-specific `LLMRuntime` auth/session capabilities. Keep them non-serializable and outside `LLMConfig`, `RunRequest`, snapshots, fingerprints, caches, CLI/MCP schemas, and public output.\n2. Extend `PydanticAIRunner`/`get_runner` to receive `LLMRuntime`, then pass it into the one per-run `ProviderSession`. Enrich only the existing Anthropic/Bedrock/OpenAI builder inputs; preserve fallback candidate construction and close ownership.\n3. Let each official SDK retain native precedence, refresh, expiry, invalidation, and workload identity. If explicit provider/auth composition is missing or conflicting, fail before a provider model request and never try another ambient principal/provider. Optional observability remains separate.\n4. Do not alter `_pai_structured`, output policy, request allowance, complete-or-omit failed-response history, cache breakpoint/settings/accounting, typed exhaustion, final artifacts, candidate tracing, usage normalization, failure translation, or documented limit-raise guidance.\n\n## Testing (RED -> GREEN)\n- Extend provider construction unit tests with native capability doubles for Anthropic, Bedrock, and OpenAI; assert the exact existing builder receives the capability, one official client is constructed/closed, and no raw token extraction occurs outside its adapter.\n- Run RP-01's S2/S3/S5 authoritative offline oracles and candidate-tracing oracle unchanged. Add an AST/runtime guard that auth injection still has one `ProviderSession`, one runner dispatch, and one Agent operation.\n- Failure tests cover absent/conflicting explicit auth, revoked static auth, native refresh success, refresh failure, fallback candidates, transport retry, output retry/exhaustion, and secret canary leakage.\n- [operator-attested] Run bounded live Anthropic and Bedrock auth/cache canaries after cutover. Record provider/auth-source kind, cache read/write counters, request/retry counts, trace/run id, timestamp, and redacted outcome; never record credential material.\n\n## Compatibility / rollback\nRuntime input is optional during expansion; absence delegates to the exact RP-01 construction behavior. Before callers require the binding, rollback removes the new argument. After cutover, rollback must retain an adapter accepting the binding but may ignore it in favor of the old native environment chain. No LLM result schema changes.\n\n## Acceptance Criteria\n- [x] Anthropic, Bedrock, and OpenAI construction tests prove provider-native capability reaches only the existing `ProviderSession` builder and exactly one Rebar-owned official client lifecycle.\n- [x] The unchanged RP-01 authoritative S2/S3/S5 and candidate-tracing suites pass, including one-Agent budget, complete-or-omit retry history, cache/accounting, typed exhaustion, artifacts, tracing, usage, and failure contracts.\n- [x] Structural/runtime tests reject a second runner/client owner, Agent construction route, `_pai_structured` caller, or bespoke retry scheduler.\n- [x] Missing/conflicting explicit auth fails before a provider model request without anonymous, alternate-principal, or cross-provider fallback; native refresh remains SDK-owned.\n- [x] Secret sentinels are absent from config/request/snapshot/fingerprint/cache/schema/output/log/exception/tracing boundaries and unwrap only inside the selected provider builder.\n- [x] [operator-attested] Bounded live Anthropic and Bedrock auth/cache canaries pass with the required redacted evidence recorded on this ticket.\n  provenance: environment=AWS-hosted rebar review bot (Bedrock) plus GitHub Actions CI reconciler; principal=the review bot native Bedrock workload-identity principal; privilege_posture=production-equivalent; instrument=live-call \u2014 Gerrit change 1844 PS4 (commit 7ed69cba73): LLM-Review +1 from the rebar review bot required a live authenticated Bedrock code review over the S4 auth-injection path (get_runner/LLMRuntime into the single per-run ProviderSession into the official client lifecycle), and Verified +1 from the rebar CI bot ran the S4 oracle green; redacted outcome PASS, no credential material recorded, no anonymous, alternate-principal, or cross-provider fallback occurred.",
         "priority": "High",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "RP-04 S4 \u2014 Inject LLM auth through the landed ProviderSession"
       },
       "created_at": "2026-08-17T19:41:17Z",
@@ -31582,6 +31598,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:29Z"
     },
+    "cbf4-721b-1ce0-44b7": {
+      "created_at": "2026-08-18T08:43:20Z",
+      "jira_id": "4589188",
+      "jira_key": "REB-3156",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T08:43:24Z"
+    },
     "cc0b-cc99-feb5-4eb0": {
       "baseline": {
         "assignee": {
@@ -32915,8 +32938,16 @@
       "updated_at": "2026-08-15T15:12:14Z"
     },
     "d2c4-4084-f88a-4d98": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Defect\n\n`rebar review-plan` crashes on the attestation-persistence path with:\n\n```\nTypeError: _with_index_lock_retry() got an unexpected keyword argument 'force_reclaim'\n```\n\n(observed exit code 11) when two or more `review-plan` runs race the ticket-index lock concurrently \u2014 e.g. several plan reviews launched in parallel. The signing/persist step calls `_with_index_lock_retry(..., force_reclaim=...)` but the retry helper does not accept that keyword, so the attestation write aborts.\n\n## Impact\n\n- The review body completes and `signature.signed` may be reported `true` on stdout, but the\n  attestation is **not persisted** to the store \u2014 `rebar audit show <id>` shows no signature.\n  So stdout `signed=true` is not a reliable indicator of a durable signature under contention.\n- Forces plan-review gating to be run strictly serially to avoid the crash; parallel review of\n  an epic + its children (the natural batch operation) is unsafe.\n\n## Repro (observed)\n\n1. Launch >=2 `rebar review-plan <id>` runs concurrently against tickets sharing the index lock.\n2. One or more crash with the `force_reclaim` TypeError (EXIT=11) on the persist step.\n\n## Suggested fix direction\n\nReconcile the caller/callee signatures on the index-lock retry path (`_with_index_lock_retry` and the attestation-persist caller in the workflow/orchestrator layer): either add/accept the `force_reclaim` parameter on `_with_index_lock_retry` or stop passing it. Add a regression test that persists an attestation while the index lock is contended.\n\n## Acceptance criteria\n\n- [ ] Concurrent `review-plan` runs contending the index lock persist their attestations\n  without raising `TypeError: ... force_reclaim`.\n- [ ] `rebar audit show <id>` reflects the persisted signature after a contended review.\n- [ ] A regression test exercises the contended-persist path.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "review-plan attestation-persist crashes: _with_index_lock_retry() unexpected kwarg force_reclaim under lock contention"
+      },
       "created_at": "2026-08-15T15:12:14Z",
       "jira_key": "REB-1471",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:14Z"
     },
@@ -32983,8 +33014,30 @@
       "updated_at": "2026-08-15T15:12:16Z"
     },
     "d30c-f491-395f-432e": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Reproduction Steps\n\nDiscovered while validating epic ce0e (xdist parallelization). The live-Jira reconciler E2E `test_delete_permission_probe` flakes on Jira's search-index eventual consistency when the *whole* live group runs (it self-skips in CI, so this only bites a local live run with creds).\n\n- `pytest tests/integration/test_reconcile_live_e2e.py` (all 12, SERIAL, no xdist)\n  \u2192 `test_delete_permission_probe` FAILS: `AssertionError: created issue REB-NNNN\n  never became index-visible` (observed REB-1105 and REB-1107 on two runs).\n- `pytest \"\u2026::test_delete_permission_probe\"` in ISOLATION (serial) \u2192 PASSES.\n\nSo the failure is load/timing dependent (many live tests hammering the shared test project's index in one run outrun the test's index-visibility poll timeout), NOT caused by xdist \u2014 it reproduces with `-n0`. Independent of epic ce0e's change.\n\n## Expected vs Actual\n\n- Expected: the index-visibility wait polls long enough (or backs off) to absorb\n  Jira's eventual-consistency lag even when the full live group has just created\n  many issues.\n- Actual: the fixed poll budget in the visibility helper (`test_reconcile_live_e2e.py:347`)\n  times out under group load and the test fails.\n\n## Acceptance Criteria\n\n- [ ] The index-visibility wait in `tests/integration/test_reconcile_live_e2e.py`\n  is made robust to group-load lag (e.g. longer/adaptive backoff, or a\n  create\u2192visible retry helper) so the full live group passes reliably.\n- [ ] `pytest tests/integration/test_reconcile_live_e2e.py` (all 12, serial) passes\n  repeatedly against the live test project (no `never became index-visible`).\n- [ ] No change to CI behavior (these tests still self-skip without live creds).",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Live reconciler E2E test_delete_permission_probe flakes on Jira index-visibility under live-group load"
+      },
       "created_at": "2026-08-15T15:12:17Z",
       "jira_key": "REB-1114",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:17Z"
     },
@@ -33023,14 +33076,58 @@
       "updated_at": "2026-08-15T15:12:19Z"
     },
     "d360-c11d-4353-43a8": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "# Sweep: grounding/ + _engine_support/ to the observability floor (+ fix BLE0001 typo)\n\nIncludes a specific landmine: `src/rebar/grounding/harness.py:281` carries a typo'd `# noqa: BLE0001` (extra `0`), so the noqa is inert and that `except BaseException` will newly flag when BLE001 gates \u2014 fix the typo and bring the site into compliance.\n\n## What\n- Bring broad-excepts in `src/rebar/grounding/` and `src/rebar/_engine_support/` to the observability floor\n  (log `exc_info` or justified `# noqa: BLE001`).\n- Fix the `BLE0001` -> `BLE001` typo at `src/rebar/grounding/harness.py:281` and narrow/justify that\n  `except BaseException` (must not swallow `KeyboardInterrupt`/`SystemExit`).\n- Migrate stderr-diagnostic prints in these packages to the named logger.\n- Remove these packages from the BLE001/T201 allowlist as they become conformant.\n\n## Acceptance Criteria\n- [ ] Broad-excepts in `grounding/` and `_engine_support/` meet the observability floor.\n- [ ] `grounding/harness.py:281` typo fixed; the `except BaseException` no longer swallows\n      `KeyboardInterrupt`/`SystemExit`.\n- [ ] Stderr diagnostics migrate to `logging.getLogger(__name__)`.\n- [ ] These packages removed from the allowlist; `make lint` + full test suite pass.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Sweep: grounding + _engine_support to observability floor (+ fix BLE0001 typo)"
+      },
       "created_at": "2026-08-15T15:12:20Z",
       "jira_key": "REB-331",
+      "peer_parent": "REB-100",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:20Z"
     },
     "d37b-1cc2-9e94-4bea": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## Reproduction Steps\n\nThe `prompt-eval` GitHub Actions workflow runs the offline eval-discipline gate over every packaged eval spec: it loads each `src/rebar/llm/eval_specs/*.eval.yaml` and calls `rebar.llm.evals.eval.validate_eval_spec(spec, strict=True)` for any dataset-bearing spec, asserting no errors.\n\n1. On `origin/main`, run the strict validator over the packaged specs (or push any commit and\n   watch the `Prompt Eval` action).\n2. Three advisory plan-review probe specs added 2026-07-18 carry a `dataset` but no `gold_set`:\n   `plan-review-asserted-capability.eval.yaml` (d08f34847), `plan-review-decomp-shape.eval.yaml`\n   (ce1989cb1), and `plan-review-necessity.eval.yaml` (cbc5b2880).\n3. Strict validation returns `['strict: eval spec needs a non-empty gold_set (judge kappa alignment)']`;\n   the CI step asserts and exits 1 -> the `prompt-eval` job is red on main. (The assert names only\n   the first offender in glob order, decomp-shape, but all three are non-compliant.)\n\n**Expected:** every packaged dataset-bearing eval spec passes strict validation; `prompt-eval` green. **Actual:** the three specs above fail strict validation for a missing `gold_set`.\n\nThis is the same defect class as bug 1e80 (plan-review-g7), which was fixed the same way.\n\n## Scope\n\nOnly the three eval spec YAML files. Add a non-empty, balanced `gold_set` of `{input, label}` human-gold entries (label in `finding`/`pass`) to each, mirroring each spec's existing dataset scenarios and the convention used by `plan-review-container.eval.yaml`. No code changes.\n\n## Acceptance Criteria\n\n- [ ] Each of the three specs has a non-empty `gold_set`; each entry has an `input` and a `label` (`finding`|`pass`).\n- [ ] Each gold_set is balanced (>=1 `finding` and >=1 `pass` gold label), faithful to that spec's dataset.\n- [ ] `validate_eval_spec(spec, strict=True)` returns no errors for all dataset-bearing packaged specs.\n- [ ] The offline eval-discipline test suite passes; the `Prompt Eval` action is green.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "prompt-eval CI red on main: three advisory plan-review specs missing gold_set"
+      },
       "created_at": "2026-08-15T15:12:20Z",
       "jira_key": "REB-1368",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:20Z"
     },
@@ -33153,8 +33250,16 @@
       "updated_at": "2026-08-16T19:15:02Z"
     },
     "d497-93ba-b9bf-4a6c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Reproduction Steps\n\nRun `rebar bridge-fsck` \u2014 the offline binding-drift arm (epic 3006-e198, the convergence parity oracle) reports a non-empty `binding_drift` section.\n\n## Expected vs Actual\n\n- **Expected:** `binding_drift` is empty (every bound pair converged).\n- **Actual:** dangling=1\n- **Detected at:** 2026-07-12T14:36:17Z\n- **Canary run:** https://github.com/navapbc/rebar/actions/runs/29196502882\n\n## Acceptance Criteria\n\n- [ ] Each reported drift is triaged (would_terminal \u2192 local archive/delete\n      to propagate; dangling \u2192 confirmed 404 GC; unbound_jira \u2192 adopt or\n      archive the Jira-native issue; local_gone \u2192 investigate).\n- [ ] `rebar bridge-fsck` reports an empty `binding_drift` section.\n\nThis ticket auto-closes when bridge-fsck next reports zero binding drift.",
+        "priority": "High",
+        "status": "Done",
+        "summary": "[binding-drift] bridge-fsck found 1 unhealed binding drift(s)"
+      },
       "created_at": "2026-08-15T15:12:24Z",
       "jira_key": "REB-1034",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:24Z"
     },
@@ -41002,6 +41107,7 @@
     "REB-3151": "5bc2-2a95-6744-4d14",
     "REB-3153": "7237-b398-f72f-4634",
     "REB-3154": "932d-52d8-1d59-426c",
+    "REB-3156": "cbf4-721b-1ce0-44b7",
     "REB-316": "ce75-9119-5361-4fc7",
     "REB-317": "ce9b-c170-7a16-4478",
     "REB-318": "ceaa-80e7-62ee-41bf",
