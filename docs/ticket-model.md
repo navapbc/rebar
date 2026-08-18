@@ -163,9 +163,11 @@ Use `discovered_from` to record **provenance**: when working one ticket surfaces
 `create` the new ticket and `link <new> <parent> discovered_from` so the emergent-work
 trail lives in the store.
 
-`unlink <source> <target>` takes **no** relation argument — it is pair-scoped and removes
-the **most-recently-created** link between that ordered pair, one per call. If a pair has
-multiple links, call `unlink` repeatedly.
+`unlink <source> <target> [relation]` removes one link between the ordered pair. Without a
+relation it removes the **most-recently-created** net-active link, preserving the historical
+pair-scoped fallback; call it repeatedly to remove multiple links. With an explicit canonical
+relation it removes exactly that relation's link and leaves the pair's other active relations
+untouched.
 
 **Direction and visibility.** A link is stored one-sided on the **source** ticket's record
 (`deps`: outgoing edges only). `show` additionally renders the computed **`inbound_deps`**
@@ -211,9 +213,9 @@ flight, and force-writes the tag `pre-doctor-repair` at the tracker's pre-run OI
 
 Two safety properties are worth knowing before you run it. It writes the replacement
 link **before** removing the stale one, so an interruption leaves *both* edges — a
-superset the next run converges — rather than losing a dependency. And because `unlink`
-is pair-scoped (it takes no relation argument), a pair whose `unlink` would cancel a
-*different* relation is reported `unrepairable` and left alone rather than guessed at.
+superset the next run converges — rather than losing a dependency. Doctor currently checks
+what `unlink`'s pair-scoped fallback would cancel; if that would cancel a *different*
+relation, the pair is reported `unrepairable` and left alone rather than guessed at.
 
 Re-resolving an already-escalated edge is a best-effort reconstruction: the recorded
 event does not preserve the author's original endpoints. Individual intent is not
