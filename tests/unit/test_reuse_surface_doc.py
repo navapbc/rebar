@@ -70,7 +70,7 @@ def test_runner_and_contract_signatures_match_doc() -> None:
     fields = RunRequest.__dataclass_fields__
     for f in ("system_prompt", "instructions", "config", "output_schema", "mode", "execution_mode"):
         assert f in fields
-    assert _params(get_runner) == ["config", "override"]
+    assert _params(get_runner) == ["config", "runtime", "override"]
     assert _params(contracts.register_contract) == ["name", "builder"]
     assert _params(contracts.response_model_for) == ["output_schema"]
     assert _params(findings.validate_structured) == ["data", "output_schema"]

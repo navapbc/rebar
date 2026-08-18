@@ -72,7 +72,7 @@ def resolve_bedrock_region(bedrock_region_name: str | None) -> tuple[str | None,
     return None, None
 
 
-def build_bedrock_provider(cfg: LLMConfig):
+def build_bedrock_provider(cfg: LLMConfig, *, session=None):
     """Build the ``BedrockProvider`` for ``ProviderSession``'s ``"bedrock"`` builder slot.
 
     Returns a bare ``Provider`` (not a Model) — exactly the contract
@@ -126,25 +126,31 @@ def build_bedrock_provider(cfg: LLMConfig):
     from botocore.config import Config as BotoConfig
 
     region, _region_source = resolve_bedrock_region(cfg.bedrock_region_name)
-    session = boto3.session.Session(region_name=region)
-    if not session.region_name:
-        # MEASURED in compose-review-bot-1 (ticket a574): the container has no region env vars
-        # and no profile, so boto3 resolves NOTHING and client construction raised a bare
-        # `NoRegionError` from deep inside botocore — a stack trace that names no rebar
-        # setting. Pre-check the combined resolution (rebar's chain above, then boto3's own —
-        # rather than inventing a default region, which would be a silent-until-call
-        # misconfiguration) and fail with a typed, actionable error instead.
-        raise LLMConfigError(
-            "a bedrock model/provider is configured but no AWS region could be resolved. "
-            "rebar resolves the region as REBAR_LLM_BEDROCK_REGION (rebar's own knob; the "
-            "value and its source are recorded in the verdict's provider provenance) > "
-            "AWS_DEFAULT_REGION > AWS_REGION > boto3's own resolution (the active profile's "
-            "config), and none of those supplied one. Set REBAR_LLM_BEDROCK_REGION, or "
-            "export AWS_DEFAULT_REGION or AWS_REGION. NOTE: instance-metadata (IMDS) "
-            "reachability does not supply a region — credential discovery and region "
-            "discovery are independent, so a working instance role does not remove the "
-            "need to set one."
-        )
+    # RP-04 S4: an injected caller-owned boto3 Session is used INSTEAD of constructing an
+    # ambient one — `boto3.session.Session(...)` is never called on this path. The caller owns
+    # the injected session's region resolution, so rebar's own region pre-check (which guards
+    # only the ambient construction) is skipped; rebar still applies its documented
+    # retry/timeout knobs to the client and never invents a default region.
+    if session is None:
+        session = boto3.session.Session(region_name=region)
+        if not session.region_name:
+            # MEASURED in compose-review-bot-1 (ticket a574): the container has no region env
+            # vars and no profile, so boto3 resolves NOTHING and client construction raised a
+            # bare `NoRegionError` from deep inside botocore — a stack trace that names no rebar
+            # setting. Pre-check the combined resolution (rebar's chain above, then boto3's own —
+            # rather than inventing a default region, which would be a silent-until-call
+            # misconfiguration) and fail with a typed, actionable error instead.
+            raise LLMConfigError(
+                "a bedrock model/provider is configured but no AWS region could be resolved. "
+                "rebar resolves the region as REBAR_LLM_BEDROCK_REGION (rebar's own knob; the "
+                "value and its source are recorded in the verdict's provider provenance) > "
+                "AWS_DEFAULT_REGION > AWS_REGION > boto3's own resolution (the active profile's "
+                "config), and none of those supplied one. Set REBAR_LLM_BEDROCK_REGION, or "
+                "export AWS_DEFAULT_REGION or AWS_REGION. NOTE: instance-metadata (IMDS) "
+                "reachability does not supply a region — credential discovery and region "
+                "discovery are independent, so a working instance role does not remove the "
+                "need to set one."
+            )
     attempts = max(1, int(cfg.llm_retry_max_attempts))
     boto_config = BotoConfig(
         retries={"max_attempts": attempts, "mode": "adaptive"},
