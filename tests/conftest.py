@@ -345,10 +345,25 @@ def _remove_readonly_run_snapshots(tmp_path: Path, _isolate_user_config: None) -
 
     from rebar.llm.workflow import snapshot
 
-    snapshot_roots = tuple(tmp_path.rglob(".rebar/run_snapshots"))
-    for snapshot_root in snapshot_roots:
-        if snapshot_root.is_dir():
-            snapshot._rmtree_writable(snapshot_root)
+    def raise_unless_disappeared(error: OSError) -> None:
+        if not isinstance(error, FileNotFoundError):
+            raise error
+
+    concrete_path = type(tmp_path)
+    snapshot_roots = tuple(
+        concrete_path(dirpath) / dirname
+        for dirpath, dirnames, _filenames in os.walk(
+            tmp_path,
+            onerror=raise_unless_disappeared,
+        )
+        if concrete_path(dirpath).name == ".rebar"
+        for dirname in dirnames
+        if dirname == "run_snapshots"
+    )
+    with patch.object(snapshot, "Path", concrete_path):
+        for snapshot_root in snapshot_roots:
+            if snapshot_root.is_dir():
+                snapshot._rmtree_writable(snapshot_root)
 
 
 @pytest.fixture(autouse=True)
