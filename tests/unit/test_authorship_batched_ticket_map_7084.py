@@ -149,6 +149,8 @@ def tracker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     _git(repo, "init", "-q", "-b", "tickets")
     _git(repo, "config", "user.email", "t@example.com")
     _git(repo, "config", "user.name", "T")
+    _git(repo, "config", "gc.autoDetach", "false")
+    _git(repo, "config", "maintenance.autoDetach", "false")
 
     _event(repo, "1000-aaaa1111", "CREATE")
     _event(repo, "1001-aaaa2222", "COMMENT")
