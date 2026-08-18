@@ -37,7 +37,7 @@ import logging
 import os
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -52,6 +52,10 @@ from rebar.review_bot.config import (
     shutdown_cancel_seconds,
     shutdown_drain_seconds,
 )
+from rebar.review_bot.startup import compose_startup_binding
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger("rebar.review_bot")
 
@@ -291,6 +295,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.state.config = _config()
+app.state.startup_binding = compose_startup_binding(app.state.config)
 
 
 @app.get("/health")
