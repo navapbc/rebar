@@ -138,7 +138,7 @@ def test_every_sibling_import_under_scripts_is_preceded_by_a_path_insert() -> No
     )
 
 
-def test_repro_module_passes_standalone() -> None:
+def test_repro_module_passes_standalone(tmp_path: Path) -> None:
     """The reported reproduction PASSES when run entirely on its own (bug 291e).
 
     Runs the BARE ``pytest`` console script from a cwd outside the repository, so neither
@@ -156,6 +156,7 @@ def test_repro_module_passes_standalone() -> None:
         pytest.skip("no `pytest` console script next to the running interpreter")
 
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    child_basetemp = tmp_path / "standalone-pytest"
     proc = subprocess.run(
         [
             str(console_script),
@@ -165,6 +166,8 @@ def test_repro_module_passes_standalone() -> None:
             "no:randomly",
             "-p",
             "no:cacheprovider",
+            "--basetemp",
+            str(child_basetemp),
         ],
         cwd=Path(os.environ.get("TMPDIR", "/tmp")).resolve(),
         env=env,
@@ -178,3 +181,4 @@ def test_repro_module_passes_standalone() -> None:
         f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
     )
     assert "ModuleNotFoundError" not in proc.stdout + proc.stderr
+    assert child_basetemp.is_dir(), "nested pytest did not use its parent-owned basetemp"

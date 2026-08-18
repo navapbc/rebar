@@ -145,7 +145,7 @@ def test_wheel_ships_author_guides(tmp_path):
         )
 
 
-def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active():
+def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active(tmp_path: Path):
     """bug dbb2: engine ``rebar_reconciler.*`` submodules must resolve in ANY session
     that collects ``tests/unit/**``, not only one that collects
     ``tests/unit/rebar_reconciler/**``.
@@ -183,6 +183,7 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active():
     )
 
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+    child_basetemp = tmp_path / "mixed-module-pytest"
     cp = subprocess.run(
         [
             sys.executable,
@@ -197,6 +198,8 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active():
             "no:randomly",
             "-p",
             "no:cacheprovider",
+            "--basetemp",
+            str(child_basetemp),
         ],
         cwd=repo_root,
         env=env,
@@ -210,3 +213,4 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active():
     assert cp.returncode == 0, (
         "a mixed tests/unit + tests/scripts/reducer selection failed:\n" + combined
     )
+    assert child_basetemp.is_dir(), "nested pytest did not use its parent-owned basetemp"
