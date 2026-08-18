@@ -440,7 +440,7 @@ def capabilities_for(model_or_model_string: Any) -> ModelCapabilities:
 
     1. an object exposing ``.profile`` -> read that profile; its ``.model_name`` (if any) is
        the exact id :data:`_MODEL_ID_CAPABILITY_OVERRIDES` matches against (story S3);
-    2. a provider-qualified model STRING (e.g. ``"openai:gpt-4o"``) -> resolve the vendor
+    2. a provider-qualified model STRING (e.g. ``"openai-chat:gpt-4o"``) -> resolve the vendor
        profile via :data:`_PROFILE_RESOLVERS` WITHOUT constructing a provider; the bare model
        name from the SAME ``partition(":")`` already used to pick the resolver is the exact id;
     3. anything else (unknown provider prefix, malformed string, ...) -> the conservative

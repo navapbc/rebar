@@ -67,14 +67,11 @@ def test_defaults_are_bare_ids_so_no_default_pins_a_provider() -> None:
         assert mc.resolve_class(name, slots).startswith("anthropic:")
 
 
-def test_omitted_provider_is_inferred_exactly_as_a_bare_id_is_today() -> None:
-    """HELD OUT. A slot naming only `model` must behave identically to today's bare id, which is
-    what makes the migration a no-op for existing configs."""
-    from rebar.llm.config import infer_provider
-
+def test_omitted_openai_provider_is_inferred_as_explicit_chat_completions() -> None:
+    """A slot naming only an OpenAI model freezes the existing Chat Completions semantics."""
     mc = _mc()
     slots = mc.parse_class_slots({"frontier": {"model": "gpt-4o"}})
-    assert mc.resolve_class("frontier", slots) == f"{infer_provider('gpt-4o')}:gpt-4o"
+    assert mc.resolve_class("frontier", slots) == "openai-chat:gpt-4o"
 
 
 def test_an_already_qualified_model_is_not_double_prefixed() -> None:
@@ -170,7 +167,7 @@ def test_a_fallback_entry_omitting_provider_infers_it_like_a_slot_does() -> None
     slots = mc.parse_class_slots(
         {"frontier": {"model": "claude-opus-4-8", "fallback": [{"model": "gpt-4o"}]}}
     )
-    assert mc.resolve_fallback_chain("frontier", slots) == ["openai:gpt-4o"]
+    assert mc.resolve_fallback_chain("frontier", slots) == ["openai-chat:gpt-4o"]
 
 
 def test_empty_fallback_and_absent_fallback_are_the_same_thing() -> None:

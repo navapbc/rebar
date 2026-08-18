@@ -127,7 +127,7 @@ library-arg-only, off the public env surface).
 ## Model providers (not Anthropic-only)
 
 Models are named in `provider:model` form (e.g. `anthropic:claude-opus-4-8`,
-`bedrock:us.anthropic.claude-sonnet-4-6`, `openai:gpt-4o`). The provider can also be
+`bedrock:us.anthropic.claude-sonnet-4-6`, `openai-chat:gpt-4o`). The provider can also be
 inferred from a bare model name or set explicitly with `REBAR_LLM_MODEL_PROVIDER`.
 
 **rebar owns provider resolution; pydantic-ai is the fallback.** `ProviderSession.provider_factory`
@@ -208,7 +208,7 @@ model can serve the decisive checks while a frontier model does the open-ended w
 
 ```toml
 [tool.rebar.llm.model_classes]
-frontier = { model = "openai:gpt-4o" }
+frontier = { model = "openai-chat:gpt-4o" }
 standard = { model = "google:gemini-2.5-pro" }
 # A per-class `endpoint` points that class's model at a local OpenAI-compatible server; rebar
 # routes it through its own builder (no key required) and records `tier=best_effort`.
@@ -227,7 +227,7 @@ The same slots are settable from the environment, one variable per class and fie
 
 ```bash
 # `frontier` drives the code-review Pass-1 finder (`gates/code-review.yaml`):
-REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o rebar review-code
+REBAR_LLM_FRONTIER_MODEL=openai-chat:gpt-4o rebar review-code
 # `standard` drives plan-review, the completion verifier, the code-review verify passes
 # and the overlap judge:
 REBAR_LLM_STANDARD_MODEL=google:gemini-2.5-pro rebar review-plan <id>
@@ -244,11 +244,11 @@ A class slot only takes effect for an operation that **declares** that class —
 workflows do so with a step-level `model: frontier` / `model: standard`. An operation that
 declares none resolves the **top-level** model instead
 (`[tool.rebar.llm].model`, else `DEFAULT_MODEL`), so a
-per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai:gpt-4o`
+per-class variable does not change it. MEASURED: with `REBAR_LLM_FRONTIER_MODEL=openai-chat:gpt-4o`
 set and this repo's own `[tool.rebar.llm].model` pinned to Bedrock,
 a classless op still ran — and stamped its provenance — as
 `bedrock:us.anthropic.claude-opus-4-8`, while `resolve_model(cfg, step="frontier")` returned
-`openai:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
+`openai-chat:gpt-4o`. Set the top-level `model` (or the matching `REBAR_LLM_<CLASS>_MODEL` for the
 class the operation declares) to move a classless operation.
 
 > **`REBAR_LLM_MODEL` was REMOVED** (pre-1.0 breaking pass #3). Setting it now fails loud

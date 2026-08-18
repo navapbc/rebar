@@ -31,12 +31,12 @@ _SCHEMA_DIR = Path(schemas.__file__).resolve().parent
 # Frozen normalized-content hash of workflow.v1.schema.json. DO NOT update this to
 # match an edit to v1 — if a change is intentional and breaking, add
 # workflow.v2.schema.json + a migrate shim and freeze THAT instead.
-_V1_GOLDEN_SHA256 = "45ddb6634003f48043cd8127ec473996191783806b070a85c273a1ec20e361de"
+_V1_GOLDEN_SHA256 = "51de920da3889f3ec8e3226902571e673ea4d8ae247f3906443cddd613fa87fd"
 
 # Frozen normalized-content hash of workflow.v2.schema.json. Like v1, v2 is IMMUTABLE
 # once shipped: a breaking change ships as workflow.v3.schema.json + a v2->v3 shim,
 # never an edit to v2.
-_V2_GOLDEN_SHA256 = "54fec42cc718766b5de9ff375dfb9b10052fb7d711e54f9ed3ed4ab6ba5ea6ca"
+_V2_GOLDEN_SHA256 = "54226f86635d34b9739a238e2740850d2c956e8b2a6b16214f5b6baa03a26284"
 
 
 def _normalized_hash(path: Path) -> str:

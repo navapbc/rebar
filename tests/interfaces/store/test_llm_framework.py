@@ -339,13 +339,15 @@ def test_infer_provider() -> None:
 
 def test_model_string_selection_is_provider_agnostic() -> None:
     """The runtime picks the provider purely from the model string (no per-provider
-    code): a bare name is provider-qualified, a qualified string is used verbatim."""
+    construction code): a bare name is provider-qualified, and legacy ``openai:`` is
+    normalized to the explicit Chat Completions qualifier."""
     pytest.importorskip("pydantic_ai")
     from rebar.llm.config import LLMConfig
     from rebar.llm.runner import _pai_model
 
     assert _pai_model(LLMConfig(model="claude-opus-4-8")) == "anthropic:claude-opus-4-8"
-    assert _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai:gpt-4o"
+    assert _pai_model(LLMConfig(model="gpt-4o", model_provider="openai")) == "openai-chat:gpt-4o"
+    assert _pai_model(LLMConfig(model="openai:gpt-4o")) == "openai-chat:gpt-4o"
     qualified = "google-gla:gemini-2.5-flash"
     assert _pai_model(LLMConfig(model=qualified)) == qualified
 

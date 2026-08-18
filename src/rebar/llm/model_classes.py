@@ -243,7 +243,11 @@ def _resolve_target(model: str, provider: str | None) -> str:
                 f"valid providers: {sorted(KNOWN_PROVIDER_NAMES)}"
             )
         qualifier, _ = split_provider_qualifier(model)
-        if qualifier == provider:
+        if qualifier == provider or {qualifier, provider} <= {"openai", "openai-chat"}:
+            # ``openai`` and ``openai-chat`` name the same provider family, but the latter
+            # freezes today's Chat Completions wire contract across pydantic-ai v2.
+            if qualifier == "openai":
+                return f"openai-chat:{model.split(':', 1)[1]}"
             return model  # already qualified with the SAME provider — never double-prefix
         if qualifier:
             # A contradiction, not a preference to resolve silently: the config names one provider
@@ -253,11 +257,16 @@ def _resolve_target(model: str, provider: str | None) -> str:
                 f"conflicting provider configuration: provider={provider!r} but the model id "
                 f"{model!r} is already qualified for {qualifier!r}. Remove one of them."
             )
-        return f"{provider}:{model}"
+        resolved_provider = "openai-chat" if provider == "openai" else provider
+        return f"{resolved_provider}:{model}"
     qualifier, _ = split_provider_qualifier(model)
     if qualifier:
+        if qualifier == "openai":
+            return f"openai-chat:{model.split(':', 1)[1]}"
         return model
     inferred = infer_provider(model)
+    if inferred == "openai":
+        inferred = "openai-chat"
     return f"{inferred}:{model}" if inferred else model
 
 

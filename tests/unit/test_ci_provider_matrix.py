@@ -68,6 +68,14 @@ _CLASSES = ("trivial", "standard", "frontier")
 #: Provider -> the env var carrying its API key. Bedrock is absent by design (ambient AWS chain).
 _PROVIDER_KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
+# The matrix dimension names the provider family; Pydantic AI's OpenAI provider has
+# protocol-specific model qualifiers. Rebar deliberately selects Chat Completions.
+_MODEL_QUALIFIER_BY_PROVIDER = {"openai": "openai-chat"}
+
+
+def _model_qualifier(provider: str) -> str:
+    return _MODEL_QUALIFIER_BY_PROVIDER.get(provider, provider)
+
 
 def _workflow() -> dict[str, Any]:
     return yaml.safe_load(_WORKFLOW.read_text(encoding="utf-8"))
@@ -167,9 +175,10 @@ def test_each_overlay_sets_only_the_model_selection_keys() -> None:
             f"{sorted(data['llm'])} — an arm must differ from siblings ONLY in provider, and it "
             f"must repoint BOTH the class table and the ambient cfg.model"
         )
-        assert data["llm"]["model"].startswith(f"{arm['provider']}:"), (
+        qualifier = _model_qualifier(arm["provider"])
+        assert data["llm"]["model"].startswith(f"{qualifier}:"), (
             f"{arm['config_file']} sets [llm] model = {data['llm']['model']!r}, which is not "
-            f"qualified with this arm's provider {arm['provider']!r}"
+            f"qualified with this arm's model protocol {qualifier!r}"
         )
         assert set(data["llm"]["model_classes"]) == set(_CLASSES), (
             f"{arm['config_file']} must set all three model classes, got "
@@ -229,9 +238,10 @@ def test_an_overlay_repoints_every_class_and_preserves_the_discovered_config(
     slots = model_classes.load_class_slots(str(project))
     for name in _CLASSES:
         resolved = model_classes.resolve_class(name, slots)
-        assert resolved.startswith(f"{arm['provider']}:"), (
+        qualifier = _model_qualifier(arm["provider"])
+        assert resolved.startswith(f"{qualifier}:"), (
             f"overlay {arm['config_file']} left class {name!r} on {resolved!r} instead of "
-            f"provider {arm['provider']!r}"
+            f"model protocol {qualifier!r}"
         )
 
     # (b) the rest of the discovered config SURVIVES the overlay.

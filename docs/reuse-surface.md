@@ -219,7 +219,7 @@ native→prompted downgrade. Full retry-layer/accounting contract:
 [llm-framework.md](llm-framework.md) §"The structured retry layers and their accounting".
 
 **Runners.** `PydanticAIRunner` (default; provider-agnostic — the provider is
-chosen by the model string `anthropic:` / `openai:` / `google-gla:`; needs the
+chosen by the model string `anthropic:` / `openai-chat:` / `google-gla:`; needs the
 `[agents]` extra) and `FakeRunner` (the offline/test seam — no model, no network):
 
 ```python
