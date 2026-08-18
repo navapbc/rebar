@@ -130,7 +130,7 @@ def claim_compute(
     ticket_id: str,
     *,
     assignee: str | None = None,
-    force_plan_review: str = "",
+    force_reason: str = "",
     review: bool = False,
     repo_root=None,
     _cascade_seen: frozenset[str] | None = None,
@@ -185,7 +185,7 @@ def claim_compute(
     # so the two start-work paths can't diverge. cfg_root is the REPO root (parent of
     # the tracker), where .rebar/config.conf lives.
     gates.plan_review_precheck(
-        ticket_id, os.path.dirname(tracker), repo_root, force_reason=force_plan_review
+        ticket_id, os.path.dirname(tracker), repo_root, force_reason=force_reason
     )
 
     # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first
@@ -202,7 +202,7 @@ def claim_compute(
             claim_compute(
                 parent_id,
                 assignee=assignee,
-                force_plan_review=force_plan_review,
+                force_reason=force_reason,
                 repo_root=repo_root,
                 _cascade_seen=seen | {ticket_id},
             )
@@ -293,7 +293,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
     except CommandError as exc:
         sys.stderr.write(exc.message + "\n")
         return exc.returncode
-    force_plan_review = _parse_force(rest[1:])
+    force_reason = _parse_force(rest[1:])
     review = "--review" in rest[1:]
 
     tracker = str(config.tracker_dir(repo_root))
@@ -305,7 +305,7 @@ def claim_cli(argv: list[str], *, repo_root=None) -> int:
         result = claim_compute(
             ticket_id,
             assignee=assignee,
-            force_plan_review=force_plan_review,
+            force_reason=force_reason,
             review=review,
             repo_root=repo_root,
         )

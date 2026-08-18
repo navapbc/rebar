@@ -372,7 +372,12 @@ def import_tickets(
             # archived were set above); force is a safety net for non-closed children.
             try:
                 transition_compute(
-                    local, "open", "closed", force=True, close_class=close_class, repo_root=rr
+                    local,
+                    "open",
+                    "closed",
+                    force_reason="ndjson import safety net",
+                    close_class=close_class,
+                    repo_root=rr,
                 )
             except Exception as exc:  # noqa: BLE001 — per-row fail-open: one bad close never aborts the import run; collected via warn()
                 warn(f"could not close {local}: {exc}")

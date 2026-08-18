@@ -300,6 +300,6 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
         f"    rebar review-plan {ticket_id}\n"
         f"    rebar claim {ticket_id}   (or: rebar transition {ticket_id} open in_progress)\n"
         '  Override (requires user approval): claim --force="<reason>", or '
-        'transition --force --reason="<reason>".',
+        'transition --force="<reason>".',
         returncode=1,
     )
