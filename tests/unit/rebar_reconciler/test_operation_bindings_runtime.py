@@ -1,0 +1,83 @@
+"""S2 (e042) happy-path oracle — reconciler operation-bindings runtime.
+
+Contract under test (the NEW public seam this story adds):
+
+    rebar_reconciler.runtime.compose_reconciler_runtime(
+        *, repo_root=None, cli_overrides=None) -> ReconcilerRuntime
+
+composes ONE immutable settings/runtime projection from the S1 operation
+snapshot (``rebar._operation_config.compose_operation_snapshot``) and builds
+exactly the *selected* Jira Cloud or Data Center backend. The composed
+settings are CAPTURED at composition time: ``backend.project`` /
+``backend.query_project`` return the composed scope and do NOT re-resolve
+ambient env/config on each access.
+
+Only the happy path lives here (this is the file the implementer sees). The
+poisoned-ambient stability, only-selected-construction, fail-closed, secret
+canary, and cloud/DC interface behaviors are the held-out oracle
+(``tests/interfaces/store/test_reconciler_operation_bindings.py`` and the
+edge cases there), run by the orchestrator against code the implementer never
+saw.
+
+The package conftest puts the engine dir on ``sys.path`` and autouse-poisons
+``JIRA_URL/JIRA_USER/JIRA_PROJECT/JIRA_API_TOKEN`` + ``REBAR_ROOT`` so a
+default compose selects the Cloud backend with project ``DIG``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from rebar_reconciler.runtime import compose_reconciler_runtime
+
+
+def test_compose_selects_cloud_backend_with_captured_project() -> None:
+    """Default config (reconciler.backend='jira') builds the Cloud backend and
+    exposes the composed project/query scope from the snapshot."""
+    runtime = compose_reconciler_runtime()
+    backend = runtime.build_backend()
+
+    assert backend.project == "DIG"
+    assert backend.query_project == "DIG"
+
+
+def test_compose_selects_datacenter_backend_when_configured() -> None:
+    """With reconciler.backend='jira-datacenter' (+ a valid base_url and PAT),
+    compose builds the DC backend, not the Cloud one."""
+    overrides = {
+        "reconciler.backend": "jira-datacenter",
+        "reconciler.base_url": "https://jira.example.internal",
+    }
+    runtime = compose_reconciler_runtime(cli_overrides=overrides)
+    backend = runtime.build_backend()
+
+    # DC backend project comes from jira.project (DIG, from the poisoned env).
+    assert backend.project == "DIG"
+
+
+def test_runtime_carries_tracker_layout() -> None:
+    """The composed reconciler settings expose the tracker dir and branch the
+    read/ref owners must use (default layout here)."""
+    runtime = compose_reconciler_runtime()
+
+    assert runtime.settings.tracker_dir.name == ".tickets-tracker"
+    assert runtime.settings.tracker_branch == "tickets"
+
+
+def test_build_backend_is_idempotent_selection() -> None:
+    """Building the backend twice from one runtime yields the same provider
+    selection and the same captured scope (composition is the authority)."""
+    runtime = compose_reconciler_runtime()
+    first = runtime.build_backend()
+    second = runtime.build_backend()
+
+    assert type(first) is type(second)
+    assert first.project == second.project == "DIG"
+
+
+def test_compose_returns_immutable_settings() -> None:
+    """The composed settings are frozen — an operation cannot mutate its own
+    binding mid-run."""
+    runtime = compose_reconciler_runtime()
+    with pytest.raises((AttributeError, TypeError, Exception)):
+        runtime.settings.tracker_branch = "mutated"  # type: ignore[misc]
