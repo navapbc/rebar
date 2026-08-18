@@ -264,14 +264,11 @@ services:
       # The environment's identity (the DSSE principal / SSHSIG key id). MUST equal the
       # env_id pinned in .rebar/trusted_environments.yaml. Operator overrides at deploy.
       REBAR_OPCERT_ENV_ID: "${REBAR_OPCERT_ENV_ID:-9f1c8e42-7a3b-4d5e-b6c1-2f0a9d8e7c65}"
-      # The SSM SecureString holding the passphrase-free Ed25519 op-cert PRIVATE key. The
-      # worker fetches + materializes it per-job to a 0600 temp file (rebar.opcert_service.keyprov).
-      REBAR_OPCERT_SSM_KEY_PARAM: "/rebar/prod/opcert-ed25519-key"
-      # boto3 (the SSM key fetch) needs a region; the instance profile supplies the credentials
-      # via IMDS, but the region is not auto-discovered inside the container -> set it explicitly
-      # (else the job fails "You must specify a region").
-      AWS_REGION: "${AWS_REGION:-us-east-1}"
-      AWS_DEFAULT_REGION: "${AWS_DEFAULT_REGION:-us-east-1}"
+      # The op-cert Ed25519 PRIVATE key, materialized OUTSIDE the app before start (story 6f14):
+      # fetch-secrets.sh writes the SSM value to a 0600 FILE next to .env and this service
+      # bind-mounts it read-only at the fixed container target below. compose_signer validates it
+      # at startup and copies it into a process-owned 0700 dir — the app never touches SSM/boto3.
+      REBAR_OPCERT_KEY_PATH: "/run/secrets/opcert-ed25519-key"
       # Authoritative-state sources the worker fetches ITSELF (never trusts the client): the
       # review remote's `main` tip becomes the signed merged_log_commit; the tickets branch is
       # mounted read-only as a rebar tracker worktree.
@@ -284,6 +281,13 @@ services:
       # Publish on host loopback for the HOST nginx /opcert/ proxy. Host port 8090 (Gerrit
       # owns 8080, review-bot owns REVIEW_BOT_PORT); container port is fixed 8080 (uvicorn).
       - "127.0.0.1:8090:8080"
+    volumes:
+      # The op-cert Ed25519 signing key materialized by fetch-secrets.sh next to this compose
+      # file (story 6f14; the rebar-bot-signing-key precedent). Read-only; the path MUST match
+      # REBAR_OPCERT_KEY_PATH above. fetch-secrets.sh ALWAYS creates this file (empty when the
+      # SSM slot is blank, bug beb1) because a missing bind-mount source would make docker create
+      # a DIRECTORY here and break start-up.
+      - ./opcert-ed25519-key:/run/secrets/opcert-ed25519-key:ro
     logging:
       driver: journald
 

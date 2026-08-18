@@ -130,12 +130,12 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_ENV_ID` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_GUARD` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_JOB_TIMEOUT_SECONDS` | `src/rebar/opcert_service/config.py` |  |
-| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py` |  |
+| `REBAR_OPCERT_KEY_PATH` | `src/rebar/_opcert_signing.py`, `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_PORT` | `src/rebar/opcert_service/config.py` |  |
+| `REBAR_OPCERT_PRIVATE_KEY` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_BRANCH` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_REVIEW_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
-| `REBAR_OPCERT_SSM_KEY_PARAM` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/llm/plan_review/sizing.py` |  |
 | `REBAR_PREVIEW_TIMEOUT` | `src/rebar/llm/workflow/criterion_preview.py` |  |
@@ -148,7 +148,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_snapshot/git_fetch.py` |  |
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_snapshot/git_fetch.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_snapshot/git_fetch.py` |  |
-| `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py`, `src/rebar/opcert_service/jobs.py` |  |
+| `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
 | `REBAR_USAGE_LOG` | `src/rebar/llm/usage_log.py` |  |
@@ -206,7 +206,6 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/llm/config.py:589` — `_llm_str(<non-literal>)`
 - `src/rebar/llm/gate_source.py:70` — `os.environ.get(<non-literal>)`
 - `src/rebar/mcp_server.py:646` — `os.environ.get(<non-literal>)`
-- `src/rebar/opcert_service/config.py:66` — `os.environ.get(<non-literal>)`
-- `src/rebar/opcert_service/keyprov.py:49` — `os.environ.get(<non-literal>)`
+- `src/rebar/opcert_service/config.py:70` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:228` — `os.environ.get(<non-literal>)`
 - `src/rebar/review_bot/config.py:238` — `os.environ.get(<non-literal>)`

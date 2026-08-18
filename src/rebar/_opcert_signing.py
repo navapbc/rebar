@@ -19,8 +19,12 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rebar import config
+
+if TYPE_CHECKING:
+    from rebar._opcert_binding import OpcertBinding
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +153,12 @@ def _generate_opcert_key(key_path: str) -> None:
         shutil.rmtree(staging, ignore_errors=True)
 
 
-def ensure_opcert_key(tracker: str | os.PathLike[str], *, create_if_missing: bool = True) -> str:
+def ensure_opcert_key(
+    tracker: str | os.PathLike[str],
+    *,
+    create_if_missing: bool = True,
+    binding: OpcertBinding | None = None,
+) -> str:
     """Resolve the environment's op-cert PRIVATE key path, generating it race-safely on first use.
 
     With ``create_if_missing=True`` (signing) a missing key is generated via
@@ -159,13 +168,23 @@ def ensure_opcert_key(tracker: str | os.PathLike[str], *, create_if_missing: boo
     read-only and must not write a secret to disk. Raises :class:`OpcertKeyUnavailable` when the key
     is absent and cannot be created (verify side, or an unwritable tracker).
 
-    ONE seam override (story ee0b, the trusted op-cert gate service hand-off): when
-    ``REBAR_OPCERT_KEY_PATH`` is set to an explicit private-key file path, it takes precedence
-    over the ``<tracker>/.opcert-key`` genesis and is returned verbatim. The trusted gate
-    materializes the environment's SSM-held key to a 0600 temp file, points this at it for the
-    single sign, and deletes it afterward — so the key is never persisted under the tracker.
-    A configured-but-missing override is a hard :class:`OpcertKeyUnavailable` (never silently
-    fall back to minting a fresh local key when an explicit key was requested)."""
+    STARTUP BINDING (story 6f14): when a bound op-cert signer is active — passed explicitly as
+    ``binding`` or threaded context-locally (:func:`rebar._opcert_binding.current_binding`) — its
+    process-owned key copy is used verbatim, WITHOUT reading ``REBAR_OPCERT_KEY_PATH`` from the
+    process environment. A bound-but-missing key file is a hard :class:`OpcertKeyUnavailable`.
+
+    When NOT bound the resolution is UNCHANGED: the legacy ``REBAR_OPCERT_KEY_PATH`` env override
+    takes precedence over the ``<tracker>/.opcert-key`` genesis and is returned verbatim; a
+    configured-but-missing override is a hard :class:`OpcertKeyUnavailable`."""
+    effective = binding if binding is not None else _current_binding()
+    if effective is not None:
+        bound_path = effective.key_path
+        if not bound_path or not os.path.exists(bound_path):
+            raise OpcertKeyUnavailable(
+                f"Error: the bound op-cert key {bound_path!r} does not exist "
+                "(the composed signer's key copy is absent)"
+            )
+        return bound_path
     override = os.environ.get("REBAR_OPCERT_KEY_PATH")
     if override and override.strip():
         override = override.strip()
@@ -187,15 +206,32 @@ def ensure_opcert_key(tracker: str | os.PathLike[str], *, create_if_missing: boo
     return key_path
 
 
-def opcert_principal(tracker: str | os.PathLike[str]) -> str:
-    """The DSSE principal (SSHSIG keyid) op-certs are signed under: ``REBAR_OPCERT_ENV_ID`` when set
-    (deployment override), else the store's ``.env-id`` (via ``_seam.env_id``)."""
+def opcert_principal(
+    tracker: str | os.PathLike[str], *, binding: OpcertBinding | None = None
+) -> str:
+    """The DSSE principal (SSHSIG keyid) op-certs are signed under.
+
+    STARTUP BINDING (story 6f14): when a bound signer is active (explicit ``binding`` or the
+    context-local one) and carries a non-empty principal, it is used WITHOUT reading
+    ``REBAR_OPCERT_ENV_ID`` from the process environment. When NOT bound (or the binding has no
+    principal) the resolution is UNCHANGED: ``REBAR_OPCERT_ENV_ID`` when set (deployment
+    override), else the store's ``.env-id`` (via ``_seam.env_id``)."""
+    effective = binding if binding is not None else _current_binding()
+    if effective is not None and effective.principal and effective.principal.strip():
+        return effective.principal.strip()
     override = os.environ.get("REBAR_OPCERT_ENV_ID")
     if override and override.strip():
         return override.strip()
     from rebar._commands._seam import env_id as _env_id
 
     return _env_id(Path(tracker))
+
+
+def _current_binding() -> OpcertBinding | None:
+    """The context-local op-cert signer binding, or ``None`` (the unbound env/genesis path)."""
+    from rebar._opcert_binding import current_binding
+
+    return current_binding()
 
 
 def _opcert_own_public_key(tracker: str | os.PathLike[str]) -> str | None:
@@ -231,14 +267,24 @@ def _manifest_material_fingerprint(manifest) -> str | None:
 
 
 # ── mint (write-new) ──────────────────────────────────────────────────────────
-def mint_opcert_record(resolved: str, steps: list[str], *, kind: str | None, repo_root) -> dict:
+def mint_opcert_record(
+    resolved: str,
+    steps: list[str],
+    *,
+    kind: str | None,
+    repo_root,
+    binding: OpcertBinding | None = None,
+) -> dict:
     """Build the envelope-bearing SIGNATURE record for ``resolved`` (NOT persisted here).
 
     Mints a ``rebar.opcert.v1`` DSSE op-cert with the environment's Ed25519 key, deriving the values
-    the caller does not supply: the DSSE ``principal`` (``REBAR_OPCERT_ENV_ID`` else ``.env-id``);
-    the material fingerprint from the manifest's ``material:`` line; the bound commit from the
-    manifest's ``verified-at-sha`` line, else current ``HEAD``. Raises :class:`OpcertKeyUnavailable`
-    on the degrade path (missing/too-old ssh-keygen, or an unwritable tracker)."""
+    the caller does not supply: the DSSE ``principal`` (the bound signer's principal, else
+    ``REBAR_OPCERT_ENV_ID``, else ``.env-id``); the material fingerprint from the manifest's
+    ``material:`` line; the bound commit from the manifest's ``verified-at-sha`` line, else
+    current ``HEAD``. When a startup signer is bound (``binding`` or context-local), the key +
+    principal come from that binding instead of the process env (story 6f14). Raises
+    :class:`OpcertKeyUnavailable` on the degrade path (missing/too-old ssh-keygen, or an
+    unwritable tracker)."""
     from rebar.attest import dsse, opcert, sshsig
     from rebar.reducer._processors import attestation_kind
     from rebar.signing import head_sha, verified_at_sha_from_manifest
@@ -248,9 +294,9 @@ def mint_opcert_record(resolved: str, steps: list[str], *, kind: str | None, rep
         sshsig.ensure_available()
     except sshsig.SshKeygenUnavailable as exc:
         raise OpcertKeyUnavailable(f"Error: cannot mint op-cert signature: {exc}") from None
-    key_path = ensure_opcert_key(str(tracker), create_if_missing=True)
+    key_path = ensure_opcert_key(str(tracker), create_if_missing=True, binding=binding)
 
-    principal = opcert_principal(str(tracker))
+    principal = opcert_principal(str(tracker), binding=binding)
     material_fingerprint = _manifest_material_fingerprint(steps) or ""
     # Bound commit: the manifest's signed `verified-at-sha:` when present (an attested review or
     # close), else current HEAD.

@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
 # Runtime deps:
 #  - git: rebar's engine shells out to git for the event store + the authoritative fetch.
 #  - openssh-client (OpenSSH >= 8.9): the op-cert producer signs via `ssh-keygen -Y sign`.
-#  - ca-certificates: TLS to the review/tickets remotes and SSM.
+#  - ca-certificates: TLS to the review/tickets remotes.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git openssh-client ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -31,8 +31,9 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install the package with the agents (rebar.llm gate runtime) + reviewbot (fastapi +
-# uvicorn[standard] ASGI server + boto3 for the SSM key fetch) extras THROUGH the
-# committed uv.lock (ticket ce5d) — same verified dependency set as CI/local dev.
+# uvicorn[standard] ASGI server) extras THROUGH the committed uv.lock (ticket ce5d) — same
+# verified dependency set as CI/local dev. The op-cert key is materialized OUTSIDE the app
+# (fetch-secrets.sh) and bind-mounted in, so the app runtime needs no boto3/SSM/AWS (story 6f14).
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY . /app
 RUN uv sync --locked --no-dev --extra agents --extra reviewbot

@@ -23,6 +23,7 @@ import rebar
 from rebar.attest import dsse
 from rebar.opcert_service import jobs
 from rebar.opcert_service.config import OpcertServiceConfig
+from rebar.opcert_service.keyprov import compose_signer
 
 pytestmark = pytest.mark.unit
 
@@ -56,15 +57,15 @@ def _make_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[str, 
     return str(src), tid, main_head
 
 
-def _key_fetcher(tmp_path: Path):
+def _signer(tmp_path: Path):
     key = tmp_path / "envkey"
     subprocess.run(
         ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "", "-q", "-C", "env"],
         check=True,
         capture_output=True,
     )
-    priv = key.read_text(encoding="utf-8")
-    return lambda _param: priv
+    key.chmod(0o600)
+    return compose_signer(OpcertServiceConfig(env_id="nava-opcert-test-1", key_path=str(key)))
 
 
 def _cfg(source_url: str) -> OpcertServiceConfig:
@@ -74,7 +75,6 @@ def _cfg(source_url: str) -> OpcertServiceConfig:
         review_branch="main",
         guard="secret",
         env_id="nava-opcert-test-1",
-        ssm_key_param="/rebar/prod/opcert-ed25519-key",
         job_timeout_seconds=900.0,
         port=8080,
     )
@@ -92,7 +92,7 @@ def test_signed_cert_binds_server_derived_commit_and_never_pushes(
         ticket_id=tid,
         kind="completion-verifier",
         cfg=cfg,
-        ssm_fetcher=_key_fetcher(tmp_path),
+        signer=_signer(tmp_path),
         verify_completion_fn=lambda _t, _r: {"verdict": "PASS", "model": "fake", "runner": "fake"},
     )
 

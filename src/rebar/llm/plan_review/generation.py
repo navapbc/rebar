@@ -264,8 +264,13 @@ def sign_manifest(
     initial_generation: PlanReviewGeneration,
     *,
     repo_root=None,
+    signer=None,
 ) -> dict:
-    """Sign only if one stable generation still equals the immutable initial baseline."""
+    """Sign only if one stable generation still equals the immutable initial baseline.
+
+    ``signer`` (story 6f14): an OPTIONAL startup-composed op-cert binding forwarded to the
+    under-lock seam; omitting it keeps the exact env/genesis behavior (the developer-local
+    ``review-plan`` caller passes nothing)."""
     from rebar import signing
     from rebar._store.lock import LockTimeout
 
@@ -337,6 +342,7 @@ def sign_manifest(
                 kind="plan-review",
                 repo_root=repo_root,
                 under_lock_check=under_lock_check,
+                signer=signer,
             )
         except _UnderLockMismatch:
             _log(
