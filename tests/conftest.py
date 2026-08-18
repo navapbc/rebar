@@ -339,6 +339,19 @@ def _isolate_user_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.fixture(autouse=True)
+def _remove_readonly_run_snapshots(tmp_path: Path, _isolate_user_config: None) -> Iterator[None]:
+    """Remove read-only workflow snapshots created below a test's temp root."""
+    yield
+
+    from rebar.llm.workflow import snapshot
+
+    snapshot_roots = tuple(tmp_path.rglob(".rebar/run_snapshots"))
+    for snapshot_root in snapshot_roots:
+        if snapshot_root.is_dir():
+            snapshot._rmtree_writable(snapshot_root)
+
+
+@pytest.fixture(autouse=True)
 def _bound_review_bot_shutdown_drain(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep tests from inheriting the review bot's 20-minute production drain."""
     monkeypatch.setenv("SHUTDOWN_DRAIN_SECONDS", "1.0")

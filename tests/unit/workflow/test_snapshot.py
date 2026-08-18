@@ -7,21 +7,12 @@ from __future__ import annotations
 
 import os
 import subprocess
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from rebar.llm.workflow import snapshot as snap
 from rebar.llm.workflow.snapshot import SnapshotError
-
-
-@pytest.fixture(autouse=True)
-def _remove_readonly_snapshot_after_test(tmp_path: Path) -> Iterator[None]:
-    yield
-    snapshot_root = tmp_path / "repo" / ".rebar" / "run_snapshots"
-    if snapshot_root.exists():
-        snap._rmtree_writable(snapshot_root)
 
 
 def _git(*args, cwd):
