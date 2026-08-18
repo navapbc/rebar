@@ -515,7 +515,7 @@ def _candidate_dicts(text: str, model_cls) -> list[dict]:
         if isinstance(probed, list):
             dict_elems = [item for item in probed if isinstance(item, dict)]
             probed = dict_elems[0] if len(dict_elems) == 1 else None
-        if isinstance(probed, dict) and fields & set(probed):
+        if isinstance(probed, dict) and fields & set(probed) and probed not in survivors:
             survivors.append(probed)
     return survivors
 
