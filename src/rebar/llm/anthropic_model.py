@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Any
 
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError
@@ -76,27 +77,44 @@ def _local_proxy_bypass_base_url() -> str | None:
 _RETRY_STATUSES = frozenset({429, 529, 500, 502, 503, 504})
 
 
-def _build_retrying_anthropic_model(
-    name: str, *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None
+def _build_retrying_anthropic_provider(
+    *, base_url: str | None, cfg: LLMConfig, http_timeout=None, _wrapped_transport=None, auth=None
 ):
-    """Build an ``AnthropicModel`` whose ``AsyncAnthropic`` client carries a retrying
-    ``AsyncTenacityTransport`` (story morbid-uncultured-arcticduck). Retry is owned SOLELY by
-    the transport (SDK ``max_retries=0``); a construction-time guard fails fast rather than
-    silently regress to SDK-managed retries. Returns ``(model, http_client)`` — the caller
-    closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``.
+    """Build the ``AnthropicProvider`` wrapping an ``AsyncAnthropic`` client that carries a
+    retrying ``AsyncTenacityTransport`` (story morbid-uncultured-arcticduck). Retry is owned
+    SOLELY by the transport (SDK ``max_retries=0``); a construction-time guard fails fast rather
+    than silently regress to SDK-managed retries. Returns ``(provider, http_client)`` — the
+    caller closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``.
+
+    This is the entry point ``ProviderSession._build_anthropic`` uses: the ``provider_factory``
+    hook's contract is a ``Provider`` (not a ``Model``), so building the provider directly avoids
+    constructing a throwaway ``AnthropicModel`` just to read ``.provider`` off it.
 
     ``base_url=None`` uses the Anthropic SDK default (the normal path); a non-empty value is
     the loopback-proxy-bypass direct URL. ``http_timeout`` is story hoopoe's per-attempt
     ``httpx.Timeout`` when present, else a bounded default from ``cfg.timeout_s`` (never
     unbounded). A transient ``{429,529,5xx}``/``httpx.TimeoutException``/``httpx.NetworkError``
     blip is re-sent BELOW the agent loop, so completed tool calls are never re-executed;
-    ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else exponential backoff."""
+    ``Retry-After`` is honored (capped at ``llm_retry_max_wait_s``), else exponential backoff.
+
+    ``auth`` is the optional RP-04 S4 :class:`~rebar.llm.auth.AnthropicAuth` carrier. When
+    SUPPLIED it is fail-closed-validated (exactly one of ``api_key``/``auth_token`` — a
+    conflicting or empty carrier raises :class:`LLMConfigError` BEFORE the client is built,
+    never degrading to the ambient credential) and its single key is injected into the
+    ``AsyncAnthropic(...)`` call; ``None`` means the SDK resolves its ambient credential
+    exactly as before RP-04."""
     import httpx
     from anthropic import AsyncAnthropic
-    from pydantic_ai.models.anthropic import AnthropicModel
     from pydantic_ai.providers.anthropic import AnthropicProvider
     from pydantic_ai.retries import AsyncTenacityTransport, RetryConfig, wait_retry_after
     from tenacity import retry_if_exception_type, stop_after_attempt
+
+    # Fail-closed BEFORE building the client so an invalid carrier never falls back to ambient.
+    auth_kwargs: dict[str, Any] = {}
+    if auth is not None:
+        from rebar.llm.auth import anthropic_auth_kwargs
+
+        auth_kwargs = anthropic_auth_kwargs(auth)
 
     def _validate_response(response: httpx.Response) -> None:
         if response.status_code in _RETRY_STATUSES:
@@ -133,7 +151,7 @@ def _build_retrying_anthropic_model(
     timeout = http_timeout if http_timeout is not None else httpx.Timeout(float(cfg.timeout_s))
     http_client = httpx.AsyncClient(transport=transport, timeout=timeout)
     anthropic_client = AsyncAnthropic(
-        base_url=base_url or None, max_retries=0, http_client=http_client
+        base_url=base_url or None, max_retries=0, http_client=http_client, **auth_kwargs
     )
     # Construction-time guard: never silently regress to SDK-managed retries.
     if anthropic_client.max_retries != 0:
@@ -141,7 +159,32 @@ def _build_retrying_anthropic_model(
             "transport-retry guard: AsyncAnthropic.max_retries must be 0 "
             "(retry is owned by the httpx transport, not the SDK)"
         )
-    model = AnthropicModel(name, provider=AnthropicProvider(anthropic_client=anthropic_client))
+    return AnthropicProvider(anthropic_client=anthropic_client), http_client
+
+
+def _build_retrying_anthropic_model(
+    name: str,
+    *,
+    base_url: str | None,
+    cfg: LLMConfig,
+    http_timeout=None,
+    _wrapped_transport=None,
+    auth=None,
+):
+    """Build an ``AnthropicModel`` on the retrying provider from
+    :func:`_build_retrying_anthropic_provider`. Returns ``(model, http_client)`` — the caller
+    closes ``http_client`` on run teardown via ``asyncio.run(http_client.aclose())``. See that
+    function for the transport/retry/timeout and ``auth`` (RP-04 S4) semantics."""
+    from pydantic_ai.models.anthropic import AnthropicModel
+
+    provider, http_client = _build_retrying_anthropic_provider(
+        base_url=base_url,
+        cfg=cfg,
+        http_timeout=http_timeout,
+        _wrapped_transport=_wrapped_transport,
+        auth=auth,
+    )
+    model = AnthropicModel(name, provider=provider)
     return model, http_client
 
 
