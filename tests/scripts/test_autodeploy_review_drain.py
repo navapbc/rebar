@@ -146,8 +146,7 @@ def box(tmp_path: Path) -> dict[str, object]:
     for tool in ("rsync", "chown", "stat"):
         _stub(bin_dir, tool, "exit 0")
 
-    env = dict(os.environ)
-    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env = {"PATH": f"{bin_dir}:{os.environ['PATH']}"}
     env.update(
         {
             "STATE_DIR": str(state),
