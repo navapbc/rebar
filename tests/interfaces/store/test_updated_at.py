@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _subprocess_env import subprocess_env
+
 import rebar
 
 
@@ -27,7 +29,7 @@ def _snapshot_compiled_state(repo: Path, tid: str) -> dict:
 
 
 def _compact(repo: Path, tid: str) -> None:
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env["REBAR_SYNC_PULL"] = "off"
     cp = subprocess.run(
@@ -85,7 +87,6 @@ def test_stale_pre_p1_1_cache_is_invalidated(rebar_repo: Path) -> None:
     # A .cache.json written before updated_at existed (an OLDER reducer-cache
     # version) must be invalidated by the version bump, not served verbatim —
     # otherwise every untouched ticket would report updated_at=None post-upgrade.
-    import os
 
     from rebar.reducer import _cache
     from rebar.reducer._api import reduce_ticket
@@ -119,7 +120,6 @@ def test_stale_pre_attestations_cache_is_invalidated(rebar_repo: Path) -> None:
     # version bump, not served verbatim — otherwise a genuinely-signed
     # plan-review attestation reads as absent and `rebar claim` is wrongly
     # blocked. Regression guard for bug wait-warp-inlay (908b).
-    import os
 
     from rebar.reducer import _cache
     from rebar.reducer._api import reduce_ticket

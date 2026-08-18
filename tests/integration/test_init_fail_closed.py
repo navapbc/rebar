@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import config
@@ -62,7 +63,7 @@ def _bare_remote(tmp_path: Path, *, advertised: bool) -> tuple[Path, str | None]
 
 
 def _env(repo: Path) -> dict[str, str]:
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env["REBAR_SYNC_PUSH"] = "off"
     env["REBAR_SYNC_PULL"] = "off"

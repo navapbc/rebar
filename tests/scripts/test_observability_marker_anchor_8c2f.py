@@ -16,10 +16,11 @@ a synthetic journal and assert prose naming a marker counts 0 while a genuine re
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import textwrap
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -121,7 +122,7 @@ def _environment(
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("")
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",

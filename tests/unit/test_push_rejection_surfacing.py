@@ -31,12 +31,12 @@ remote" is observed from the remote side rather than from a spy.
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._store import push
 
@@ -237,7 +237,7 @@ def test_strict_module_cli_translates_delivery_error_without_writing_an_event(
             "--strict",
         ],
         cwd=tracker,
-        env=dict(os.environ),
+        env=subprocess_env(),
         capture_output=True,
         text=True,
         check=False,

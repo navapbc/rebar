@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -27,7 +28,7 @@ def assert_nodes_do_not_mutate_external_store(tmp_path: Path, *node_ids: str) ->
     tracker = repo / ".tickets-tracker"
     before_head = _git_out(tracker, "rev-parse", "HEAD")
     before_dirs = {path.name for path in tracker.iterdir() if path.is_dir()}
-    env = {**os.environ, "REBAR_ROOT": str(repo)}
+    env = subprocess_env({"REBAR_ROOT": str(repo)})
 
     result = subprocess.run(
         [

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import importlib
-import os
 import subprocess
 import sys
 import types
@@ -12,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -151,7 +151,7 @@ def test_only_and_except_are_mutually_exclusive_before_lock(rebar_repo: Path) ->
 
 def test_real_cli_and_engine_report_semantic_selection_failure(rebar_repo: Path) -> None:
     """The installed CLI crosses the child-process boundary before rejecting IDs."""
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(rebar_repo)
     completed = subprocess.run(
         [

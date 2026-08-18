@@ -21,6 +21,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from _subprocess_env import subprocess_env
+
 _ROOT = Path(__file__).resolve().parents[2]
 _TEST_YML = _ROOT / ".github" / "workflows" / "test.yml"
 _GERRIT_YML = _ROOT / ".github" / "workflows" / "gerrit-verify.yaml"
@@ -234,7 +236,6 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     tmp_path: Path,
 ) -> None:
     """Definition/tree skew skips only when the patchset lacks the selector script."""
-    import os
     import shlex
     import subprocess
     import sys
@@ -252,7 +253,7 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     absent = subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", run],
         cwd=absent_tree,
-        env={**os.environ, "GITHUB_OUTPUT": str(absent_output)},
+        env=subprocess_env({"GITHUB_OUTPUT": str(absent_output)}),
         capture_output=True,
         text=True,
     )
@@ -278,7 +279,7 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     current = subprocess.run(
         ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", executable_run],
         cwd=current_tree,
-        env={**os.environ, "GITHUB_OUTPUT": str(current_output)},
+        env=subprocess_env({"GITHUB_OUTPUT": str(current_output)}),
         capture_output=True,
         text=True,
     )

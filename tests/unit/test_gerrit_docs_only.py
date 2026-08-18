@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -127,11 +128,12 @@ def test_documentation_contract_selector_keeps_unmarked_integration_modules(
         encoding="utf-8",
     )
     python_stub.chmod(0o755)
-    env = {
-        **os.environ,
-        "CAPTURE": str(capture),
-        "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
-    }
+    env = subprocess_env(
+        {
+            "CAPTURE": str(capture),
+            "PATH": f"{stub_dir}{os.pathsep}{os.environ['PATH']}",
+        }
+    )
 
     subprocess.run(["bash", "-c", selector], cwd=repo, env=env, check=True)
     arguments = capture.read_text(encoding="utf-8").splitlines()

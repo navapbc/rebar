@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -159,7 +160,7 @@ def test_the_suite_refuses_to_run_on_an_under_floor_git(tmp_path: Path) -> None:
     )
     shim.chmod(0o755)
 
-    env = {**os.environ, "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"}
+    env = subprocess_env({"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"})
     completed = subprocess.run(
         [
             sys.executable,

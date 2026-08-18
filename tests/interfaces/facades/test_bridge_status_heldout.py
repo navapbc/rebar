@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 LAST_PASS_REF = "refs/reconciler/last-pass"
 LOCK_REF = "refs/reconciler/lock"
@@ -18,7 +18,7 @@ GATE_REF = "refs/reconciler/gate"
 def _run_cli(
     repo: Path, *args: str, extra_env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env.update(extra_env or {})
     return subprocess.run(

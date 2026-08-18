@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -100,7 +101,7 @@ def runner_env(tmp_path: Path, checkout: Path, *, mode: str = "live") -> dict[st
     )
     rebar.chmod(0o755)
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",

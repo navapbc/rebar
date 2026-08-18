@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import textwrap
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -88,7 +88,7 @@ def _environment(tmp_path: Path, target: str) -> tuple[dict[str, str], dict[str,
     repl_log = tmp_path / "replication.log"
     repl_log.write_text("[ERROR]\n" * 7)
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",

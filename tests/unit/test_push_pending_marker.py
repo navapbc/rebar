@@ -22,12 +22,12 @@ inverse failure — a diagnostic that learns to crash its caller is worse than n
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._store import push, push_state
 
@@ -313,7 +313,7 @@ def test_push_state_is_importable_without_the_mcp_extra() -> None:
         "from rebar._store import push_state; print(push_state.MARKER)"
     )
     run = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env={**os.environ}
+        [sys.executable, "-c", probe], capture_output=True, text=True, env=subprocess_env({})
     )
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == push_state.MARKER

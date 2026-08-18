@@ -13,11 +13,11 @@ verdict — never internal function names — so they survive a behaviour-preser
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -111,11 +111,12 @@ def test_transition_event_passes_the_merge_gate(signed_repo: Path) -> None:
     authenticated-authorship merge-gate with enforcement on (exit 0)."""
     t = rebar.create_ticket("task", "t", repo_root=str(signed_repo))
     rebar.transition(t, "open", "idea", repo_root=str(signed_repo))
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(signed_repo),
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(signed_repo),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+        }
+    )
     res = subprocess.run(
         ["rebar", "verify-identity", "--all"],
         cwd=signed_repo,

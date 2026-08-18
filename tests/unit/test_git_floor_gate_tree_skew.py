@@ -24,13 +24,13 @@ makes them genuinely different cases, and a fix verified on only one of them is 
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
@@ -55,7 +55,7 @@ def _run_gate(cwd: Path, *, git_version: str | None = None) -> subprocess.Comple
     """Execute the real gate script in `cwd`, optionally against a stubbed `git --version`."""
     env = None
     if git_version is not None:
-        env = dict(os.environ)
+        env = subprocess_env()
         env["PATH"] = f"{_stub_git(cwd / 'bin', git_version)}:{env['PATH']}"
     return subprocess.run(
         ["bash", "-c", _gate_script()],

@@ -16,6 +16,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _subprocess_env import subprocess_env
+
 import rebar
 
 
@@ -46,9 +48,8 @@ def _extract_id(stdout: str) -> str:
 
 
 def _cli_id(*args: str, env: dict | None = None) -> str:
-    import os
 
-    merged = {**os.environ, **(env or {})}
+    merged = subprocess_env({**(env or {})})
     cp = subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, env=merged
     )

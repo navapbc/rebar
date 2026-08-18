@@ -21,12 +21,12 @@ CLI exit codes, and on-disk event files — never internal structure.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._store import compat
@@ -79,7 +79,7 @@ def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=str(cwd),
-        env=dict(os.environ),
+        env=subprocess_env(),
     )
 
 

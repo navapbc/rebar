@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from _build_provenance_fixture import materialize_build_hook_package
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import signing
@@ -409,9 +410,8 @@ def test_hook_fails_when_rebar_build_commit_empty(tmp_path: Path) -> None:
     """AC3(a): `REBAR_BUILD_COMMIT=""` (set-but-empty, release context) fails the real build."""
     tree = tmp_path / "src"
     materialize_build_hook_package(_REPO_ROOT, tree)
-    import os
 
-    env = {**os.environ, "REBAR_BUILD_COMMIT": ""}
+    env = subprocess_env({"REBAR_BUILD_COMMIT": ""})
     cp = subprocess.run(
         [sys.executable, "-m", "build", "--outdir", str(tmp_path / "d"), str(tree)],
         capture_output=True,

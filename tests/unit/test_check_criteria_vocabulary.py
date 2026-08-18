@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -263,7 +264,7 @@ def test_missing_git_binary_falls_back_to_the_filesystem_walk(tmp_path: Path) ->
     allowlist.write_text("", encoding="utf-8")
     empty_path = tmp_path / "empty-bin"
     empty_path.mkdir()
-    env = os.environ.copy()
+    env = subprocess_env()
     env["PATH"] = str(empty_path)
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--root", str(tmp_path), "--allowlist", str(allowlist)],
@@ -299,7 +300,7 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     stub_bin.mkdir()
     for command in ("ruff", "zizmor", "actionlint"):
         _write_executable(stub_bin / command)
-    env = os.environ.copy()
+    env = subprocess_env()
     env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
 
     result = subprocess.run(

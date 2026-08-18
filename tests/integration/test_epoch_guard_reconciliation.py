@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import _cli
@@ -307,7 +308,7 @@ def test_cli_always_push_surfaces_epoch_refusal_on_stderr(
     repos = _build_epoch_divergence(tmp_path, monkeypatch)
     local_before = _rev(repos.tracker)
     origin_before = _origin_rev(repos.origin)
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "REBAR_ROOT": str(repos.root),

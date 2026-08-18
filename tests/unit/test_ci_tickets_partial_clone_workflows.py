@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -182,7 +183,7 @@ def test_pack_guard_fails_closed_on_malformed_count_objects(
     git = fake_bin / "git"
     git.write_text(f"#!/bin/sh\nprintf '%s' '{fake_output}'\n", encoding="utf-8")
     git.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}", limit_name: limit}
+    env = subprocess_env({"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}", limit_name: limit})
     result = subprocess.run(["bash", "-c", _standalone_guard(path, job)], cwd=tmp_path, env=env)
     assert result.returncode != 0
 
@@ -196,6 +197,6 @@ def test_pack_guard_fails_closed_when_count_objects_errors(
     git = fake_bin / "git"
     git.write_text("#!/bin/sh\nexit 71\n", encoding="utf-8")
     git.chmod(0o755)
-    env = {**os.environ, "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}", limit_name: limit}
+    env = subprocess_env({"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}", limit_name: limit})
     result = subprocess.run(["bash", "-c", _standalone_guard(path, job)], cwd=tmp_path, env=env)
     assert result.returncode != 0

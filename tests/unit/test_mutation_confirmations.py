@@ -12,13 +12,13 @@ codes, the on-disk event log, and the reduced state ``rebar show`` reports.
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.graph._links import add_dependency
@@ -51,7 +51,7 @@ def _cli(*args: str, repo: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=str(repo),
-        env=dict(os.environ),
+        env=subprocess_env(),
     )
 
 

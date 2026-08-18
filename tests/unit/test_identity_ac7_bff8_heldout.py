@@ -9,11 +9,11 @@ CI merge-gate workflow file.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -36,7 +36,7 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    env = {**os.environ, "REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0"}
+    env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0"})
     return subprocess.run(["rebar", *args], cwd=repo, env=env, capture_output=True, text=True)
 
 

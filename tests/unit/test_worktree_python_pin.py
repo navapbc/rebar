@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -121,7 +122,7 @@ def _sandbox(tmp_path: Path, *, uv_exit: int) -> tuple[Path, dict[str, str]]:
     )
     stub_uv.chmod(0o755)
 
-    env = os.environ.copy()
+    env = subprocess_env()
     env["PATH"] = f"{stub_bin}{os.pathsep}{env['PATH']}"
     return stub_bin, env
 

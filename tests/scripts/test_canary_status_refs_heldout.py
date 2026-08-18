@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "canary_bridge.py"
@@ -75,7 +75,7 @@ class RealStatusRunner:
                     "fence": 10,
                 },
             )
-        env = dict(os.environ)
+        env = subprocess_env()
         env["REBAR_ROOT"] = str(self.repo)
         completed = subprocess.run(
             [sys.executable, "-m", "rebar.cli", *argv[1:]],

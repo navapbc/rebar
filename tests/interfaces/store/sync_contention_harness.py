@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _subprocess_env import subprocess_env
+
 import rebar
 
 
@@ -34,7 +36,7 @@ def _git(*args: str, cwd: Path) -> None:
 def _rebar_cli(*args: str, repo: Path, push: str, timeout: int = 60) -> subprocess.CompletedProcess:
     """Invoke the real `rebar` CLI in a subprocess (the consumer-facing path), with
     REBAR_SYNC_PUSH set so background pushes contend exactly as the bug describes."""
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env["REBAR_SYNC_PUSH"] = push
     rebar_bin = shutil.which("rebar")

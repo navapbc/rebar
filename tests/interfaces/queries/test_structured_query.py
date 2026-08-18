@@ -5,16 +5,17 @@ back-compat guarantee that a predicate-free search is byte-identical to before.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 import rebar
 
 
 def _env(repo: Path) -> dict:
-    e = dict(os.environ)
+    e = subprocess_env()
     e["REBAR_ROOT"] = str(repo)
     return e
 

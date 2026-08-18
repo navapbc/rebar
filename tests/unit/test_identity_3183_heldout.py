@@ -10,12 +10,12 @@ ledger. Observable behaviour only.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import uuid as _uuid
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -142,7 +142,7 @@ def test_snapshot_roundtrip_signed_events_still_verify(
     monkeypatch.setenv("REBAR_COMPACT_THRESHOLD", "1")
     rebar.compact(tid, repo_root=str(repo))
 
-    env = {**os.environ, "REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"}
+    env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     res = subprocess.run(
         ["rebar", "verify-authorship", "--all"],
         cwd=repo,
@@ -174,7 +174,7 @@ def test_verify_authorship_flags_unknown_author(store: Path) -> None:
     }
     (tdir / f"1-{ev_uuid}-CREATE.json").write_text(json.dumps(event))
 
-    env = {**os.environ, "REBAR_ROOT": str(store), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"}
+    env = subprocess_env({"REBAR_ROOT": str(store), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     res = subprocess.run(
         ["rebar", "verify-authorship", "--all"],
         cwd=store,
@@ -189,7 +189,7 @@ def test_verify_authorship_flags_unknown_author(store: Path) -> None:
 def test_fsck_surfaces_unsigned_count(store: Path) -> None:
     """fsck surfaces a store-wide unsigned-event count (AC2 'show/fsck surface')."""
     rebar.create_ticket("task", "unsigned t", repo_root=str(store))
-    env = {**os.environ, "REBAR_ROOT": str(store)}
+    env = subprocess_env({"REBAR_ROOT": str(store)})
     res = subprocess.run(["rebar", "fsck"], cwd=store, env=env, capture_output=True, text=True)
     assert "authorship:" in res.stdout.lower()
     assert "unsigned" in res.stdout.lower()

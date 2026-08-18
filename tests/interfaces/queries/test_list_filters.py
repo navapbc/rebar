@@ -9,12 +9,12 @@ min-children boundary, blocking transitions, and validation of bad input.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 from _topology_template import clone_topology_template
 
 import rebar
@@ -22,7 +22,7 @@ import rebar
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 def _env(repo: Path) -> dict:
-    e = dict(os.environ)
+    e = subprocess_env()
     e["REBAR_ROOT"] = str(repo)
     return e
 

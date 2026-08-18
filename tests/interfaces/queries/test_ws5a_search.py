@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from _subprocess_env import subprocess_env
+
 import rebar
 
 
@@ -33,9 +35,8 @@ def _cli_search_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 
 
 def _env(repo: Path) -> dict:
-    import os
 
-    e = dict(os.environ)
+    e = subprocess_env()
     e["REBAR_ROOT"] = str(repo)
     return e
 

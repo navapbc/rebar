@@ -11,11 +11,11 @@ out.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.attest import sshsig
@@ -68,12 +68,13 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
     tid = rebar.create_ticket("task", "signed work", repo_root=str(store))
     rebar.comment(tid, "a signed comment", repo_root=str(store))
 
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(store),
-        "REBAR_IDENTITY_SIGNING_KEY": priv,
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(store),
+            "REBAR_IDENTITY_SIGNING_KEY": priv,
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+        }
+    )
     res = subprocess.run(
         ["rebar", "verify-authorship", "--all"],
         cwd=store,

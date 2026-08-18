@@ -23,11 +23,11 @@ ledger values), never internal classifier names.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -72,11 +72,12 @@ def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
 def _gate(repo: Path, *args: str) -> subprocess.CompletedProcess:
     """Run the merge-gate with enforcement ON via the config/env path (no ``--since``,
     so EVERY in-scope event is enforced)."""
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(repo),
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(repo),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+        }
+    )
     return subprocess.run(
         ["rebar", "verify-identity", *args],
         cwd=repo,
@@ -127,15 +128,16 @@ def _rewrite_tracker_history(repo: Path) -> tuple[str, str, dict[str, str]]:
         for parent in parents:
             command.extend(("-p", rewritten[parent]))
         timestamp = 1_600_000_000 + index
-        rewrite_env = {
-            **os.environ,
-            "GIT_AUTHOR_NAME": "History Rewriter",
-            "GIT_AUTHOR_EMAIL": "rewrite@example.com",
-            "GIT_AUTHOR_DATE": f"@{timestamp} +0000",
-            "GIT_COMMITTER_NAME": "History Rewriter",
-            "GIT_COMMITTER_EMAIL": "rewrite@example.com",
-            "GIT_COMMITTER_DATE": f"@{timestamp} +0000",
-        }
+        rewrite_env = subprocess_env(
+            {
+                "GIT_AUTHOR_NAME": "History Rewriter",
+                "GIT_AUTHOR_EMAIL": "rewrite@example.com",
+                "GIT_AUTHOR_DATE": f"@{timestamp} +0000",
+                "GIT_COMMITTER_NAME": "History Rewriter",
+                "GIT_COMMITTER_EMAIL": "rewrite@example.com",
+                "GIT_COMMITTER_DATE": f"@{timestamp} +0000",
+            }
+        )
         rewritten[old_commit] = _git(tracker, *command, env=rewrite_env)
 
     new_tip = rewritten[old_tip]

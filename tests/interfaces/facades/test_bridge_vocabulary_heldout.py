@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._cli import main
 
@@ -165,12 +166,11 @@ def test_check_access_is_a_command_not_an_fsck_flag(cli_runner: Callable) -> Non
 @pytest.fixture
 def cli_runner(rebar_repo):
     """Run the actual module entrypoint with credentials removed."""
-    import os
     import subprocess
     import sys
 
     def run(*args: str):
-        env = os.environ.copy()
+        env = subprocess_env()
         for key in ("JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN"):
             env.pop(key, None)
         return subprocess.run(

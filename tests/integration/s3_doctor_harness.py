@@ -29,18 +29,21 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from _subprocess_env import subprocess_env
+
 
 def git(cwd: str | Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run git in ``cwd`` with an isolated, hook-free, identity-stamped environment."""
-    env = {
-        **os.environ,
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-        "GIT_AUTHOR_NAME": "t",
-        "GIT_AUTHOR_EMAIL": "t@t",
-        "GIT_COMMITTER_NAME": "t",
-        "GIT_COMMITTER_EMAIL": "t@t",
-    }
+    env = subprocess_env(
+        {
+            "GIT_CONFIG_GLOBAL": "/dev/null",
+            "GIT_CONFIG_SYSTEM": "/dev/null",
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        }
+    )
     return subprocess.run(
         ["git", *args],
         cwd=str(cwd),

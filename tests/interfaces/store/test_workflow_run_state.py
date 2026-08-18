@@ -11,10 +11,11 @@ survives compaction.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands import _seam
@@ -181,7 +182,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
         capture_output=True,
         text=True,
         cwd=str(rebar_repo),
-        env={**os.environ, "REBAR_SYNC_PULL": "off"},
+        env=subprocess_env({"REBAR_SYNC_PULL": "off"}),
     )
     assert cp.returncode == 0, cp.stderr
     snaps = list((_tracker(rebar_repo) / tid).glob("*-SNAPSHOT.json"))

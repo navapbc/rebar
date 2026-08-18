@@ -25,12 +25,12 @@ byte-content of on-disk event files, and the raised exception type — never int
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -39,7 +39,7 @@ COMPAT_FILE = ".store-compat.json"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _cli(*args: str, cwd: str, **env: str) -> subprocess.CompletedProcess:
-    e = dict(os.environ)
+    e = subprocess_env()
     e.update(env)
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],

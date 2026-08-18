@@ -8,12 +8,12 @@ metric id, each a value or an `unavailable` object. Text format / isolation held
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from datetime import date
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 import rebar.metrics
@@ -120,7 +120,7 @@ def test_foreign_repo_honest_unavailable(rebar_repo):
     )
     (rebar_repo / "src").mkdir()
     (rebar_repo / "src" / "main.go").write_text("package main\nfunc main() {}\n", encoding="utf-8")
-    env = os.environ.copy()
+    env = subprocess_env()
     env["PATH"] = ""
 
     completed = _cli("metrics", "--output", "json", cwd=str(rebar_repo), env=env)

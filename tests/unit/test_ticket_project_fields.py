@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
@@ -24,6 +23,7 @@ import types
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -57,7 +57,7 @@ def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=str(cwd),
-        env=dict(os.environ),
+        env=subprocess_env(),
     )
 
 

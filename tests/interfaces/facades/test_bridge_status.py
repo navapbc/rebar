@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 LAST_PASS_REF = "refs/reconciler/last-pass"
 
@@ -22,7 +22,7 @@ def _reconciler_main():
 
 
 def _run_cli(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
+from _subprocess_env import subprocess_env
 
 
 @pytest.fixture(scope="module")
@@ -193,7 +193,7 @@ def _store_snapshot(root: Path) -> dict[str, object]:
 
 
 def _run_cli(tracker: Path) -> tuple[subprocess.CompletedProcess[str], dict]:
-    env = os.environ.copy()
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(tracker.parent)
     env["REBAR_TRACKER_DIR"] = str(tracker)
     cp = subprocess.run(

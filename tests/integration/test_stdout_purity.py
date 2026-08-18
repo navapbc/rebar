@@ -13,13 +13,13 @@ contract two ways:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar import _engine
 
@@ -95,7 +95,7 @@ def test_diagnostic_goes_to_stderr_not_stdout() -> None:
         text=True,
         capture_output=True,
         check=True,
-        env={**os.environ, "REBAR_LOG_LEVEL": "WARNING"},
+        env=subprocess_env({"REBAR_LOG_LEVEL": "WARNING"}),
     )
 
     # stdout is exactly the JSON data line — pure, parseable, nothing else.

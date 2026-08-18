@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.reducer import reduce_ticket
@@ -96,7 +97,7 @@ def test_sigkill_mid_retirement_recovers_from_fresh_process(
 
     barrier = tmp_path / "barrier"
     barrier.mkdir()
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_TEST_COMPACT_RENAME_BARRIER"] = str(barrier)
     env["REBAR_COMPACTION_HORIZON_NS"] = "0"
 
@@ -162,7 +163,7 @@ def _fsck_subprocess(repo: Path, *flags: str) -> tuple[int, str]:
     out = subprocess.run(
         [sys.executable, "-m", "rebar.cli", "fsck", *flags],
         cwd=str(repo),
-        env={**os.environ, "REBAR_COMPACTION_HORIZON_NS": "0"},
+        env=subprocess_env({"REBAR_COMPACTION_HORIZON_NS": "0"}),
         capture_output=True,
         text=True,
         timeout=60,

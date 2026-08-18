@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -29,7 +29,7 @@ def test_authorship_history_fixture_keeps_auto_maintenance_foreground(tmp_path: 
     trace = tmp_path / "trace2.json"
     basetemp = tmp_path / "nested-pytest"
     global_config.write_text("[gc]\n\tautoDetach = true\n[maintenance]\n\tautoDetach = true\n")
-    env = os.environ.copy()
+    env = subprocess_env()
     env.update(
         {
             "GIT_CONFIG_GLOBAL": str(global_config),

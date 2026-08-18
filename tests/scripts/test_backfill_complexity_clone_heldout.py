@@ -8,11 +8,11 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar.metrics.snapshot import read_snapshots
 
@@ -51,7 +51,7 @@ def _repo_with_commits(tmp_path: Path, dates: list[str]) -> tuple[Path, list[str
             check=True,
             capture_output=True,
             text=True,
-            env={**os.environ, "GIT_COMMITTER_DATE": cdate},
+            env=subprocess_env({"GIT_COMMITTER_DATE": cdate}),
         )
         shas.append(_git(repo, "rev-parse", "HEAD").strip())
     return repo, shas

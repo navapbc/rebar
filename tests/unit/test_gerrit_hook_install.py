@@ -19,12 +19,12 @@ run from inside a worktree (the fix).
 
 from __future__ import annotations
 
-import os
 import stat
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPO_ROOT / "scripts" / "install-gerrit-hook.sh"
@@ -133,7 +133,7 @@ def test_installer_from_a_worktree_leaves_both_hooks_working(
     _write_hook(source, FAKE_GERRIT_HOOK)
     wrapper_before = (hooks / "commit-msg").read_bytes()
 
-    env = dict(os.environ, REBAR_GERRIT_HOOK_SOURCE=str(source))
+    env = subprocess_env(REBAR_GERRIT_HOOK_SOURCE=str(source))
     result = subprocess.run(
         ["sh", str(INSTALLER)],
         cwd=worktree,
@@ -172,7 +172,7 @@ def test_installer_is_idempotent(
     _main, worktree, hooks = checkout_with_worktree
     source = tmp_path / "gerrit-commit-msg"
     _write_hook(source, FAKE_GERRIT_HOOK)
-    env = dict(os.environ, REBAR_GERRIT_HOOK_SOURCE=str(source))
+    env = subprocess_env(REBAR_GERRIT_HOOK_SOURCE=str(source))
 
     for _ in range(2):
         assert (
@@ -199,7 +199,7 @@ def test_installer_refuses_to_clobber_an_unrecognized_commit_msg_hook(
     result = subprocess.run(
         ["sh", str(INSTALLER)],
         cwd=worktree,
-        env=dict(os.environ, REBAR_GERRIT_HOOK_SOURCE=str(source)),
+        env=subprocess_env(REBAR_GERRIT_HOOK_SOURCE=str(source)),
         capture_output=True,
         text=True,
         timeout=60,

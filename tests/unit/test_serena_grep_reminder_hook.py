@@ -22,12 +22,12 @@ Two properties matter more than the trigger, and both are safety properties:
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _REPO_ROOT / "scripts" / "hooks" / "serena_grep_reminder.py"
@@ -245,7 +245,7 @@ def test_hook_command_resolves_from_a_foreign_cwd(tmp_path):
         ["/bin/sh", "-c", command],
         input=json.dumps(_envelope("grep -rn foo src/")),
         cwd=tmp_path,
-        env={**os.environ, "CLAUDE_PROJECT_DIR": str(_REPO_ROOT)},
+        env=subprocess_env({"CLAUDE_PROJECT_DIR": str(_REPO_ROOT)}),
         capture_output=True,
         text=True,
         check=False,

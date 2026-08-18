@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -82,7 +83,7 @@ def test_delete_composer_stamps_email(store: Path) -> None:
     b = rebar.create_ticket("task", "B", repo_root=str(store))
     rebar.link(a, b, "relates_to", repo_root=str(store))
     # delete is CLI-only (destructive; requires --user-approved).
-    env = {**os.environ, "REBAR_ROOT": str(store)}
+    env = subprocess_env({"REBAR_ROOT": str(store)})
     res = subprocess.run(
         ["rebar", "delete", b, "--user-approved"],
         cwd=store,

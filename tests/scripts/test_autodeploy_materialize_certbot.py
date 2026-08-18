@@ -17,10 +17,11 @@ an unrelated-only diff does NOT trigger the certbot block.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import textwrap
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 AUTODEPLOY = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "autodeploy.sh"
 _DEPLOYED = "d" * 40
@@ -89,7 +90,7 @@ def _make_box(tmp_path: Path, diff_pathspec: str) -> dict[str, object]:
     for tool in ("docker", "curl", "rsync", "chown", "stat"):
         _stub(bin_dir, tool, "exit 0")
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env.update(
         {

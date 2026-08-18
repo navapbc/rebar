@@ -23,11 +23,11 @@ internal classifier names. This file is held out from the fix implementer.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -72,11 +72,12 @@ def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
 def _gate(repo: Path, *args: str) -> subprocess.CompletedProcess:
     """Run the merge-gate with enforcement ON (no ``--since`` → every in-scope event is
     enforced)."""
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(repo),
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(repo),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+        }
+    )
     return subprocess.run(
         ["rebar", "verify-identity", *args],
         cwd=repo,

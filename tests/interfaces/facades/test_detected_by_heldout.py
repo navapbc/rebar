@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -49,9 +50,8 @@ def _extract_id(stdout: str) -> str:
 
 
 def _cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    import os
 
-    merged = {**os.environ, **(env or {})}
+    merged = subprocess_env({**(env or {})})
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, env=merged
     )

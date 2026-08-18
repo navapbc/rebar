@@ -11,10 +11,11 @@ that each counter keeps its own delta offset.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import textwrap
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "scripts" / "observability.sh"
 _SHA = "a" * 40
@@ -83,7 +84,7 @@ def _environment(tmp_path: Path, journal_lines: list[str]) -> tuple[dict[str, st
     # test_observability_coldstart_e2a6.py). Pre-initialising keeps the split under test.
     for name in _OFFSET_VARIABLES:
         (offsets / name.lower()).write_text("0\n")
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "PATH": f"{bin_dir}:{env['PATH']}",

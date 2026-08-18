@@ -46,6 +46,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 APPLIER_PATH = REPO_ROOT / "src" / "rebar" / "_engine" / "rebar_reconciler" / "applier.py"
@@ -138,9 +139,8 @@ def test_drift_rejects_unknown_subjects(applier):
 
 
 def _git_env() -> dict:
-    import os
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "GIT_AUTHOR_NAME": "Drift Test",

@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from _subprocess_env import subprocess_env
+
 import rebar
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,12 +38,13 @@ def git(
 
 def isolated_git_env(home: Path) -> dict[str, str]:
     home.mkdir(exist_ok=True)
-    return {
-        **os.environ,
-        "HOME": str(home),
-        "GIT_CONFIG_GLOBAL": str(home / ".gitconfig"),
-        "GIT_CONFIG_SYSTEM": os.devnull,
-    }
+    return subprocess_env(
+        {
+            "HOME": str(home),
+            "GIT_CONFIG_GLOBAL": str(home / ".gitconfig"),
+            "GIT_CONFIG_SYSTEM": os.devnull,
+        }
+    )
 
 
 @dataclass(frozen=True)
@@ -142,7 +145,7 @@ def _commit_tree_with_files(
     message: str,
 ) -> str:
     index = repo / f".test-index-{uuid.uuid4().hex}"
-    env = {**os.environ, "GIT_INDEX_FILE": str(index)}
+    env = subprocess_env({"GIT_INDEX_FILE": str(index)})
     git(repo, "read-tree", f"{tree_source}^{{tree}}", env=env)
     for path, content in files.items():
         blob = git(repo, "hash-object", "-w", "--stdin", input_text=content).stdout.strip()

@@ -31,6 +31,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -131,15 +132,16 @@ def test_async_push_survives_parent_exit_and_lands_event(
 
     # NOTE: the title/description must contain NO literal "push" token, or the
     # parent's own git calls would falsely block in the shim.
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(repo),
-        "REBAR_SYNC_PUSH": "async",
-        "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-        "REAL_GIT": real_git,
-        "PUSH_ENTERED_MARKER": str(entered),
-        "PUSH_RELEASE_FILE": str(release),
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(repo),
+            "REBAR_SYNC_PUSH": "async",
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "REAL_GIT": real_git,
+            "PUSH_ENTERED_MARKER": str(entered),
+            "PUSH_RELEASE_FILE": str(release),
+        }
+    )
     proc = subprocess.Popen(
         [
             sys.executable,

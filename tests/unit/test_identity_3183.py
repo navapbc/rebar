@@ -9,11 +9,11 @@ event and exits non-zero (the real control); with the config OFF it is advisory
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -37,7 +37,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _verify_authorship(store: Path, *, required: bool) -> subprocess.CompletedProcess:
-    env = {**os.environ, "REBAR_ROOT": str(store)}
+    env = subprocess_env({"REBAR_ROOT": str(store)})
     env["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "1" if required else "0"
     return subprocess.run(
         ["rebar", "verify-authorship", "--all"],

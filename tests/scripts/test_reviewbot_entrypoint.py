@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 from pathlib import Path
+
+from _subprocess_env import subprocess_env
 
 DOCKERFILE = Path(__file__).resolve().parents[2] / "infra" / "compose" / "Dockerfile.reviewbot"
 
@@ -40,7 +41,7 @@ def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) ->
     git.write_text("#!/bin/sh\necho 'git unexpectedly called' >&2\nexit 97\n")
     git.chmod(0o755)
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env.pop("REVIEWBOT_TICKETS_PAT", None)
     env.update({"HOME": str(tmp_path / "home"), "PATH": f"{bin_dir}:{env['PATH']}"})
     result = subprocess.run(

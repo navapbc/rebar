@@ -5,13 +5,13 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import logging
-import os
 import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._store import lock, push
 
@@ -103,7 +103,7 @@ def test_clean_ahead_pushes_without_empty_commit_and_rejection_keeps_commit(
             "--strict",
         ],
         cwd=tmp_path,
-        env={**os.environ, "REBAR_SYNC_PUSH": "always"},
+        env=subprocess_env({"REBAR_SYNC_PUSH": "always"}),
         capture_output=True,
         text=True,
         check=False,
@@ -417,7 +417,7 @@ def test_module_cli_routes_commit_flags_and_keeps_push_action(
 ) -> None:
     tracker, origin = tracker_and_origin
     (tracker / "cli-commit.json").write_text("{}\n", encoding="utf-8")
-    env = {**os.environ, "REBAR_SYNC_PUSH": "always"}
+    env = subprocess_env({"REBAR_SYNC_PUSH": "always"})
     completed = subprocess.run(
         [
             sys.executable,

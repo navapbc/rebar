@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 from rebar.attest import trusted_env
 
@@ -239,7 +240,7 @@ def test_materialize_script_renders_guard_from_ssm_stub(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("EXISTING=1\nREBAR_OPCERT_GUARD=STALE\n")
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env["PATH"] = f"{stub_dir}:{env['PATH']}"
     env["NGINX_MAP_FILE"] = str(map_file)
     env["ENV_FILE"] = str(env_file)
@@ -271,7 +272,7 @@ def test_materialize_script_fails_closed_on_empty_guard(tmp_path: Path) -> None:
     stub_aws.write_text('#!/bin/sh\nprintf "None\\n"\n')  # SSM returns the None sentinel
     stub_aws.chmod(stub_aws.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env["PATH"] = f"{stub_dir}:{env['PATH']}"
     env["NGINX_MAP_FILE"] = str(tmp_path / "map.conf")
     env["ENV_FILE"] = str(tmp_path / ".env")

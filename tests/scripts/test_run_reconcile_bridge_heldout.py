@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 from test_run_reconcile_bridge import (
     ROOT,
     bridge_workspace,
@@ -152,7 +152,7 @@ def test_shallow_checkout_is_rejected_before_reconciliation(tmp_path: Path) -> N
         capture_output=True,
         text=True,
     )
-    env = dict(os.environ)
+    env = subprocess_env()
     env.pop("REBAR_ROOT", None)
     env.update(
         {

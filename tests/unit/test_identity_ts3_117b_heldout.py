@@ -14,11 +14,11 @@ Observable behaviour only.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -60,7 +60,7 @@ def _keypair(tmp_path: Path, name: str) -> tuple[str, str]:
 
 
 def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.CompletedProcess:
-    env = {**os.environ, "REBAR_ROOT": str(store), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"}
+    env = subprocess_env({"REBAR_ROOT": str(store), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1"})
     if priv:
         env["REBAR_IDENTITY_SIGNING_KEY"] = priv
     return subprocess.run(

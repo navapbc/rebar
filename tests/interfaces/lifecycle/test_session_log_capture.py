@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar import RebarError
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.interface
 
 
 def _cli(repo: Path, *args: str, readonly: bool = False) -> tuple[int, str, str]:
-    env = {**os.environ, "REBAR_ROOT": str(repo)}
+    env = subprocess_env({"REBAR_ROOT": str(repo)})
     if readonly:
         env["REBAR_MCP_READONLY"] = "1"
     cp = subprocess.run(

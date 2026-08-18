@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
 
@@ -131,7 +132,7 @@ def _remote_head(origin: Path) -> str:
 def _run_block(case: GitCase, block: str, label: str) -> subprocess.CompletedProcess[str]:
     script = case.root / f"{label}.sh"
     script.write_text(block, encoding="utf-8")
-    env = dict(os.environ)
+    env = subprocess_env()
     env.pop("REBAR_SYNC_PUSH", None)
     env["PATH"] = f"{Path(sys.executable).parent}:{env['PATH']}"
     env["BRIDGE_BOT_NAME"] = "Bridge Bot"
@@ -154,7 +155,7 @@ def _run_reconciler(case: GitCase, label: str) -> subprocess.CompletedProcess[st
     rebar = bin_dir / "rebar"
     rebar.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     rebar.chmod(0o755)
-    env = dict(os.environ)
+    env = subprocess_env()
     env.update(
         {
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",

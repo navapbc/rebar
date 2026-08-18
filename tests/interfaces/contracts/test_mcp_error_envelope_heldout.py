@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SRC = REPO_ROOT / "src" / "rebar"
@@ -24,7 +25,7 @@ SRC = REPO_ROOT / "src" / "rebar"
 # shared helpers
 # ---------------------------------------------------------------------------
 def _clean_env(root: Path) -> dict:
-    env = dict(os.environ, REBAR_ROOT=str(root))
+    env = subprocess_env(REBAR_ROOT=str(root))
     for var in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
         env.pop(var, None)
     return env

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar import _cli
 
@@ -17,7 +17,7 @@ from rebar import _cli
 def _run_cli(
     repo: Path, *args: str, extra_env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = str(repo)
     env.update(extra_env or {})
     return subprocess.run(

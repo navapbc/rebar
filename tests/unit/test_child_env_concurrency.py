@@ -18,14 +18,15 @@ Observable behavior only — returned mappings and the (non-)mutation of ``os.en
 
 from __future__ import annotations
 
-import os
 import threading
+
+from _subprocess_env import subprocess_env
 
 from rebar import _child_env
 
 
 def _snapshot_environ() -> dict[str, str]:
-    return dict(os.environ)
+    return subprocess_env()
 
 
 def test_concurrent_owning_projections_isolate_credentials_without_touching_os_environ(
@@ -41,7 +42,7 @@ def test_concurrent_owning_projections_isolate_credentials_without_touching_os_e
     monkeypatch.setenv("GIT_SSH_COMMAND", "ssh -o Foo=bar")  # native var must survive
 
     before = _snapshot_environ()
-    base = dict(os.environ)
+    base = subprocess_env()
 
     n_workers = 12
     iterations = 200
@@ -110,7 +111,7 @@ def test_concurrent_unrelated_siblings_strip_secrets_under_contention(monkeypatc
     monkeypatch.setenv("AWS_PROFILE", "native-should-survive")
 
     before = _snapshot_environ()
-    base = dict(os.environ)
+    base = subprocess_env()
     owned = _child_env.owned_secret_names()
 
     n_workers = 10

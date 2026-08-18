@@ -9,11 +9,11 @@ CI workflow file are held out.
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -36,7 +36,7 @@ def store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _run(store: Path, *args: str, env_extra: dict | None = None) -> subprocess.CompletedProcess:
-    env = {**os.environ, "REBAR_ROOT": str(store)}
+    env = subprocess_env({"REBAR_ROOT": str(store)})
     # config leaves require_authenticated OFF; the flag must force it on.
     env["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "0"
     if env_extra:

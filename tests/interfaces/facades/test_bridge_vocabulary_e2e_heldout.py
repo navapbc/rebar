@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.integration
 
 
 def _run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
+    env = subprocess_env()
     for key in ("JIRA_URL", "JIRA_USER", "JIRA_PROJECT", "JIRA_API_TOKEN"):
         env.pop(key, None)
     return subprocess.run(

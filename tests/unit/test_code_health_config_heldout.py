@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar import config
 
@@ -22,7 +22,7 @@ def _project(tmp_path: Path) -> Path:
 
 def test_cli_overrides_render_through_real_config_command(tmp_path: Path) -> None:
     project = _project(tmp_path)
-    env = os.environ.copy()
+    env = subprocess_env()
     env.pop("REBAR_CONFIG", None)
     env["XDG_CONFIG_HOME"] = str(tmp_path / "xdg")
     completed = subprocess.run(

@@ -7,11 +7,11 @@ determinism fix, error/exit contracts, and the library/schema shape.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._engine import in_process_cli
 
@@ -309,12 +309,13 @@ def _multi_overlap(base: Path) -> None:
 
 
 def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
-    env = {
-        **os.environ,
-        "REBAR_TRACKER_DIR": str(tracker),
-        "REBAR_SYNC_PULL": "off",
-        "REBAR_SYNC_PUSH": "off",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_TRACKER_DIR": str(tracker),
+            "REBAR_SYNC_PULL": "off",
+            "REBAR_SYNC_PUSH": "off",
+        }
+    )
     return subprocess.run([_CLI, "next-batch", *args], env=env, capture_output=True, text=True)
 
 

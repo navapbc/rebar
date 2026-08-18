@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -108,11 +109,12 @@ def _ticket_server(
 
     global_config = root / "daemon.gitconfig"
     global_config.write_text("[uploadpack]\n\tallowFilter = true\n", encoding="utf-8")
-    daemon_env = {
-        **os.environ,
-        "GIT_CONFIG_GLOBAL": str(global_config),
-        "GIT_CONFIG_NOSYSTEM": "1",
-    }
+    daemon_env = subprocess_env(
+        {
+            "GIT_CONFIG_GLOBAL": str(global_config),
+            "GIT_CONFIG_NOSYSTEM": "1",
+        }
+    )
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
@@ -203,7 +205,7 @@ def _fetch(
     else:
         source = server.url
     trace = path.parent / f"{path.name}.packet"
-    env = {**os.environ, "GIT_TRACE_PACKET": str(trace), "GIT_TERMINAL_PROMPT": "0"}
+    env = subprocess_env({"GIT_TRACE_PACKET": str(trace), "GIT_TERMINAL_PROMPT": "0"})
     _git(path, "fetch", *options, source, "+tickets:refs/remotes/origin/tickets", env=env)
     return trace
 
@@ -256,7 +258,7 @@ def _assert_filter_protocol(trace: Path) -> None:
 
 
 def _assert_historical_blob_missing(repo: Path, server: TicketServer) -> None:
-    env = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+    env = subprocess_env({"GIT_NO_LAZY_FETCH": "1"})
     result = _run(["git", "cat-file", "-e", server.historical_blob], cwd=repo, env=env, check=False)
     assert result.returncode != 0, "historical payload unexpectedly exists in blobless client"
 
@@ -274,7 +276,7 @@ def _guard_script(path: Path, job: str) -> str:
 
 
 def _run_guard(repo: Path, workflow: Path, job: str, env_name: str, limit: int) -> int:
-    env = {**os.environ, env_name: str(limit)}
+    env = subprocess_env({env_name: str(limit)})
     result = _run(["bash", "-c", _guard_script(workflow, job)], cwd=repo, env=env, check=False)
     return result.returncode
 
@@ -391,12 +393,13 @@ def test_identity_no_promisor_fetch(
     tracker = client / ".tickets-tracker"
     _git(client, "worktree", "add", "-B", "tickets", str(tracker), "origin/tickets")
     before = _git(client, "count-objects", "-v")
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(client),
-        "REBAR_TRACKER_DIR": str(tracker),
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0",
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(client),
+            "REBAR_TRACKER_DIR": str(tracker),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0",
+        }
+    )
     result = _run(["rebar", "verify-identity"], cwd=client, env=env, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
     assert _git(client, "count-objects", "-v") == before

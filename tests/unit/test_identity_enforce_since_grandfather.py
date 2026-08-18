@@ -19,11 +19,11 @@ authenticated-identity rollout (epic pristine-horrible-whapuku):
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._commands._seam import tracker_dir
@@ -60,12 +60,13 @@ def _gate_via_env(repo: Path, *args: str, enforce_since: str) -> subprocess.Comp
     """Run the verify-identity gate with enforcement + boundary driven through the ENV/config
     path (``REBAR_IDENTITY_REQUIRE_AUTHENTICATED`` / ``REBAR_IDENTITY_ENFORCE_SINCE``) — NOT the
     ``--require-authenticated`` / ``--since`` flags. ``args`` carries only scope/output flags."""
-    env = {
-        **os.environ,
-        "REBAR_ROOT": str(repo),
-        "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
-        "REBAR_IDENTITY_ENFORCE_SINCE": enforce_since,
-    }
+    env = subprocess_env(
+        {
+            "REBAR_ROOT": str(repo),
+            "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "1",
+            "REBAR_IDENTITY_ENFORCE_SINCE": enforce_since,
+        }
+    )
     return subprocess.run(
         ["rebar", "verify-identity", *args], cwd=repo, env=env, capture_output=True, text=True
     )

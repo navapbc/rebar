@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 from rebar._snapshot import cache
 from rebar._snapshot import repo_snapshot as rs
@@ -129,7 +130,7 @@ def test_cross_process_single_flight(store, repo, tmp_path):
     sha = _commit(repo, "f.txt", "v1\n")
     marker = tmp_path / "builds.log"
     # store == <base>/rebar-gate-snapshots; children re-append, so pass the BASE.
-    env = {**os.environ, "REBAR_GATE_TMPDIR": str(store.parent)}
+    env = subprocess_env({"REBAR_GATE_TMPDIR": str(store.parent)})
     procs = [
         subprocess.Popen([sys.executable, "-c", _CHILD, sha, str(repo), str(marker)], env=env)
         for _ in range(3)

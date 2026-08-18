@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 
@@ -24,7 +25,7 @@ MANIFEST = ["ran unit tests: PASS", "lint clean", "manual smoke OK"]
 
 
 def _cli(*args: str, cwd: Path, **env: str) -> subprocess.CompletedProcess:
-    e = dict(os.environ)
+    e = subprocess_env()
     e.update(env)
     return subprocess.run(
         [sys.executable, "-m", "rebar.cli", *args],

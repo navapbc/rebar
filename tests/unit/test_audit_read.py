@@ -8,13 +8,13 @@ links from `code_review` tickets, each with its own sidecar history).
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 import types
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar.llm.code_review import sidecar as code_sidecar
@@ -126,7 +126,7 @@ def test_audit_show_cli_json_shape(store: Path) -> None:
     tid = rebar.create_ticket("task", "cli work ticket", description="x" * 60, repo_root=r)
     assert plan_sidecar.emit(_plan_verdict(tid, "only"), material="m1", repo_root=r)
 
-    env = dict(os.environ)
+    env = subprocess_env()
     env["REBAR_ROOT"] = r
     env["REBAR_SIGNING_KEY"] = "k"
     proc = subprocess.run(

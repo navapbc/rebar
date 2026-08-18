@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from _subprocess_env import subprocess_env
+
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "metrics_polyglot"
 
 
@@ -28,7 +30,7 @@ def copy_project(tmp_path: Path, language: str) -> Path:
 def _initialize_project(project: Path) -> None:
     """Create the disposable repository and ticket store required by the CLI."""
 
-    env = os.environ.copy()
+    env = subprocess_env()
     # The children must resolve the repo from their cwd (the fixture project) — drop the
     # suite-wide sandbox REBAR_ROOT default (tests/conftest.py), which would win over cwd.
     env.pop("REBAR_ROOT", None)
@@ -160,7 +162,7 @@ def git_only_bin(tmp_path: Path) -> Path:
 def run_metrics(project: Path, *, path: str) -> dict[str, Any]:
     """Run the public CLI in a subprocess and return its metric document."""
 
-    env = os.environ.copy()
+    env = subprocess_env()
     env["PATH"] = path
     # The child must resolve the repo from its cwd (the fixture project) — drop the
     # suite-wide sandbox REBAR_ROOT default (tests/conftest.py), which would win over cwd.

@@ -27,6 +27,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _subprocess_env import subprocess_env
 
 import rebar
 from rebar._errors import RebarError
@@ -46,12 +47,13 @@ def _isolated_git_env(home: Path) -> dict[str, str]:
     reproducing the container's bare python:slim image where the fresh clone has no identity.
     Inherits the runner's PYTHONPATH pin so a subprocess ``import rebar`` resolves this src."""
     home.mkdir(exist_ok=True)
-    return {
-        **os.environ,
-        "HOME": str(home),
-        "GIT_CONFIG_GLOBAL": str(home / ".gitconfig"),  # absent ⇒ empty
-        "GIT_CONFIG_SYSTEM": os.devnull,
-    }
+    return subprocess_env(
+        {
+            "HOME": str(home),
+            "GIT_CONFIG_GLOBAL": str(home / ".gitconfig"),  # absent ⇒ empty
+            "GIT_CONFIG_SYSTEM": os.devnull,
+        }
+    )
 
 
 @pytest.fixture
@@ -218,13 +220,13 @@ def test_ensure_sets_a_global_identity_for_attribution(
         ["git", "config", "--global", "user.email"],
         capture_output=True,
         text=True,
-        env={**os.environ, "HOME": str(home)},
+        env=subprocess_env({"HOME": str(home)}),
     )
     assert pre.stdout.strip() == ""
 
     assert _run_ensure(clone, home).returncode == 0
 
-    env = {**os.environ, "HOME": str(home)}
+    env = subprocess_env({"HOME": str(home)})
     g_email = subprocess.run(
         ["git", "config", "--global", "user.email"], capture_output=True, text=True, env=env
     ).stdout.strip()
