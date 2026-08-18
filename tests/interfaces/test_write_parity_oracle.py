@@ -9,8 +9,8 @@ the same expectation, any surface drift — a param present on one adapter but
 missing on another, or a runtime rule enforced inconsistently — fails the suite
 WITHOUT an LLM, a change-detector, or a hand-maintained NxM matrix.
 
-Known, ticketed divergences (the MCP force/reason/caused_by/ref gaps tracked by
-``scratchy-leprous-galago``) are recorded as per-row strict-xfails: the suite is
+Known, ticketed divergences (such as the remaining MCP close-reason gap) are
+recorded as per-row strict-xfails: the suite is
 GREEN today, and when the gap is closed the MCP classification flips to match
 the expectation, the strict-xfail xpasses, and the marker must be deleted — the
 intended forcing function for cleanup.
@@ -30,7 +30,6 @@ from write_parity_contract import (
     ACCEPTED,
     ADAPTER_BOUND_INTERNALS,
     CASES,
-    PARAM_NOT_EXPOSED,
     REJECTED,
     Case,
     execute,
@@ -107,40 +106,12 @@ def test_adapter_bound_internals_are_not_contract_params() -> None:
     assert not leaked, f"adapter-bound internals leaked into the contract: {leaked}"
 
 
-class _ConvergedMcpAdapter(McpAdapter):
-    """The MCP write surface as it will be AFTER ``scratchy-leprous-galago``
-    lands: the reason-carrying params are advertised and threaded through to the
-    engine. Used only by the convergence test to prove the oracle flips a
-    strict-xfail MCP row to an xpass once the gap closes.
-    """
-
-    def _tool_params(self, tool: str) -> set[str]:
-        return super()._tool_params(tool) | set(TRANSITION_WRITE_PARAMS)
-
-    def transition(self, tid, current, target, **kw):  # type: ignore[override]
-        return LibraryAdapter().transition(tid, current, target, **kw)
-
-    def claim(self, tid, assignee=None, **kw):  # type: ignore[override]
-        return LibraryAdapter().claim(tid, assignee=assignee, **kw)
-
-
 def test_oracle_detects_convergence(rebar_repo: Path) -> None:
-    """The strict-xfail MCP rows are a genuine forcing function, proven in-suite.
-
-    A row that is PARAM_NOT_EXPOSED on today's MCP surface classifies ACCEPTED on
-    a parity-complete (post-scratchy) MCP surface — so when the gap lands the
-    strict-xfail xpasses and its marker must be deleted. This asserts both ends
-    of that transition against real stores rather than merely recording it.
-    """
+    """A converged MCP row stays unmarked and executes through the real adapter."""
     case = _case("force-claim")
-    assert case.xfail.get("mcp"), "guard: force-claim must be a strict-xfail MCP row today"
+    assert "mcp" not in case.xfail, "guard: converged force-claim must not remain xfailed"
 
-    gap, _ = execute(McpAdapter(), case, rebar_repo)
-    assert gap.kind == PARAM_NOT_EXPOSED, (
-        f"expected today's MCP surface to lack the force param, got {gap}"
-    )
-
-    converged, subject = execute(_ConvergedMcpAdapter(), case, rebar_repo)
+    converged, subject = execute(McpAdapter(), case, rebar_repo)
     assert converged == case.expected, (
         f"parity-complete MCP surface classified {converged}, expected {case.expected} "
         "— the oracle would not detect convergence"
