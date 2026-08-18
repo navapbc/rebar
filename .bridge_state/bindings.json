@@ -2515,6 +2515,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:22Z"
     },
+    "1128-505b-54ac-497f": {
+      "created_at": "2026-08-18T19:38:29Z",
+      "jira_id": "4589242",
+      "jira_key": "REB-3188",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:32Z"
+    },
     "114f-3eea-190e-4972": {
       "baseline": {
         "assignee": null,
@@ -9876,6 +9883,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:09Z"
     },
+    "3e21-4476-d1ca-4f50": {
+      "created_at": "2026-08-18T19:38:32Z",
+      "jira_id": "4589243",
+      "jira_key": "REB-3189",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:35Z"
+    },
     "3e28-f913-d06b-471a": {
       "baseline": {
         "assignee": null,
@@ -14303,6 +14317,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:57Z"
     },
+    "58bd-d656-c52f-4cf4": {
+      "created_at": "2026-08-18T19:38:37Z",
+      "jira_id": "4589244",
+      "jira_key": "REB-3190",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:40Z"
+    },
     "58e0-ca58-c5ab-4322": {
       "baseline": {
         "assignee": {
@@ -15461,6 +15482,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:00:41Z"
     },
+    "60c1-80de-a22f-4d39": {
+      "created_at": "2026-08-18T19:38:43Z",
+      "jira_id": "4589245",
+      "jira_key": "REB-3191",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:46Z"
+    },
     "60ce-29c1-58be-4648": {
       "baseline": {
         "assignee": null,
@@ -16160,6 +16188,13 @@
       "peer_parent": "REB-338",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:01:09Z"
+    },
+    "65bf-173b-e16b-4bb9": {
+      "created_at": "2026-08-18T19:38:49Z",
+      "jira_id": "4589246",
+      "jira_key": "REB-3192",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:52Z"
     },
     "65d7-8270-bdc6-41f6": {
       "baseline": {
@@ -18137,6 +18172,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:29Z"
+    },
+    "73b2-6194-c430-45ab": {
+      "created_at": "2026-08-18T19:38:56Z",
+      "jira_id": "4589247",
+      "jira_key": "REB-3193",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:38:58Z"
     },
     "73cb-2716-bde1-4655": {
       "baseline": {
@@ -21176,6 +21218,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:31Z"
+    },
+    "86e0-36a1-1247-4454": {
+      "created_at": "2026-08-18T19:38:58Z",
+      "jira_id": "4589248",
+      "jira_key": "REB-3194",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:01Z"
     },
     "8705-5c65-c1b6-42de": {
       "baseline": {
@@ -29990,6 +30039,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:16Z"
     },
+    "bc13-2e29-1359-44b5": {
+      "created_at": "2026-08-18T19:39:04Z",
+      "jira_id": "4589249",
+      "jira_key": "REB-3195",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:06Z"
+    },
     "bc6e-71cf-255a-47f7": {
       "baseline": {
         "assignee": null,
@@ -31748,6 +31804,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:19Z"
     },
+    "c996-8a5f-5123-4f8e": {
+      "created_at": "2026-08-18T19:39:10Z",
+      "jira_id": "4589250",
+      "jira_key": "REB-3196",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:13Z"
+    },
     "c9a5-3a8c-fd77-4f42": {
       "created_at": "2026-08-15T15:11:20Z",
       "jira_key": "REB-763",
@@ -32887,6 +32950,13 @@
       "jira_key": "REB-320",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:11:55Z"
+    },
+    "cfb7-f2ce-ce8a-4cfd": {
+      "created_at": "2026-08-18T19:39:13Z",
+      "jira_id": "4589251",
+      "jira_key": "REB-3197",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:15Z"
     },
     "cfcb-a023-09a0-42ad": {
       "baseline": {
@@ -34129,7 +34199,7 @@
         },
         "description": "## Context\nA clean local `rebar review-code` and a later `rebar review-plan` emitted repeated `rebar.llm.structured` warnings: `parse_structured: multiple candidates validated ...; selecting the LAST`. Logged first and last Pydantic models were semantically identical. The gates passed, but ordinary native structured replies were falsely classified as ambiguous.\n\n## Confirmed root cause\nFor text containing exactly one JSON object, `_candidate_dicts` appends the same decoded dict from `_all_json_objects(text)` and again from `json.loads(text)`. `_select_and_validate` validates both into distinct Pydantic instances, then checks identity (`validated[-1] is not validated[0]`), which is always true for separately constructed instances even when equality and serialized values match. Runtime probe: one exact JSON reply produced `candidate_count=2`, `candidate_equal=True`, `validated_equal=True`, `validated_identical=False`. This is parser-generated duplication, not model text, provider envelopes, or retry aggregation.\n\n## Plan\n- Deduplicate semantically identical decoded candidate dicts in discovery order before validation.\n- Preserve discovery order and last-valid-wins for genuinely distinct candidates.\n- Add a RED warning-capture regression for an exact single-object reply and retain the existing conflicting-candidate warning/last-wins test as the negative control.\n- Run focused structured-output, adapter, and review-kernel suites plus lint/typecheck.\n\n## Acceptance Criteria\n- [x] An exact one-object structured reply yields one semantic candidate and emits no multiple-candidate warning.\n- [x] Repeated semantically identical valid objects emit no ambiguity warning and return the same validated result.\n- [x] Distinct valid candidates still select the last and emit the ambiguity warning.\n- [x] Invalid/repair/sentinel and schema-filtering behavior remains unchanged.\n- [x] Focused structured-output and review gates pass.\n\n## Testing\n- `pytest tests/unit/test_structured.py tests/unit/test_pai_output.py tests/unit/test_review_kernel.py tests/interfaces/store/test_completion_verifier.py -q` proves candidate selection, warning behavior, repair/sentinel parsing, adapter parity, and verifier integration.\n- `make lint` and `make typecheck` prove formatting, complexity, and static-type gates.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Structured LLM replies emit duplicate valid payload candidates"
       },
       "created_at": "2026-08-17T00:42:48Z",
@@ -34375,6 +34445,13 @@
       "peer_parent": "REB-1190",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:47Z"
+    },
+    "d8c1-e75e-77d8-4c00": {
+      "created_at": "2026-08-18T19:39:18Z",
+      "jira_id": "4589252",
+      "jira_key": "REB-3198",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:21Z"
     },
     "d8e9-2e21-1daf-4c7b": {
       "baseline": {
@@ -35440,6 +35517,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:26Z"
     },
+    "df80-d453-2267-4953": {
+      "created_at": "2026-08-18T19:39:21Z",
+      "jira_id": "4589253",
+      "jira_key": "REB-3199",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:24Z"
+    },
     "df83-e54d-1637-47ae": {
       "baseline": {
         "assignee": null,
@@ -35586,8 +35670,16 @@
       "updated_at": "2026-08-17T19:41:29Z"
     },
     "e050-f81b-3872-429f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Why\nComplete the contract vocabulary the prompt model reuses. Lowest-risk, built right after the skeleton so the contract surface is fully exercised before prompts adopt it.\n\n## What\n- Add input/output schema names + description to the 7 remaining ops in\n  `src/rebar/llm/workflow/steps.py` (`fetch_commits`, `fetch_epic_graph`, `render_context`,\n  `gate`, `comment_verdict`, `tag`, `set_fields`).\n- Author + register each op's INPUT *and* OUTPUT schema (2020-12) in `src/rebar/schemas/` (the OUTPUT schema is what AC2's per-op shape test checks; do not author input-only).\n- A registry-coverage test asserts EVERY registered step has a contract (mirrors the existing\n  schema coverage-guard pattern).\n\n## Scope\nIn: contracts for all scripted ops + their input schemas + coverage test. Out: prompts, MCP.\n\n## Acceptance Criteria\n- [ ] All 8 ops declare input+output+description; a test FAILS if any registered op lacks a contract.\n- [ ] Each op's declared output schema matches what it actually returns (per-op output-shape test).\n- [ ] Input schemas are 2020-12 and resolve through the registry.\n- [ ] Input schemas REJECT malformed input (a negative test), not only accept valid input.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Scripted-op contracts: backfill all 8 built-in ops (generalize the skeleton)"
+      },
       "created_at": "2026-08-15T15:13:31Z",
       "jira_key": "REB-350",
+      "peer_parent": "REB-338",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:31Z"
     },
@@ -35641,8 +35733,16 @@
       "updated_at": "2026-08-15T15:13:33Z"
     },
     "e0e2-7205-48cc-4480": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Consolidate cross-session duplicated primitives (canonical-JSON/hash + retry/backoff)\n\n## Context\n\nA codebase-health audit (joe-janitor, 2026-06-24; report at `.joe-janitor/report-2026-06-24.md`) found a **cross-session duplication** pattern \u2014 many independent agent sessions each solving the same sub-problem locally instead of reaching for a shared primitive \u2014 in two determinism-adjacent clusters: canonical-JSON/content-hash (6+ sites) and retry/backoff (7+ sites).\n\n## Revised scope (2026-06-25, post-brainstorm \u2014 supersedes the original framing below)\n\nA grounded brainstorm + adversarial digest trace (recorded as comments on this epic) **revised the original premise**: there is **no live cross-clone determinism bug**. Each digest is produced by a single encoder for a single purpose and is never compared against a *different* encoder's output; sign/verify and plan/apply both run the same code version, so every domain is self-consistent. The one persisted-and-recompared site (`signing.py`) already uses the proposed canonical kwargs, so it migrates **byte-identically**. Therefore this epic is a **pure DRY / maintainability consolidation**, and the governing rule is **freeze every site's output bytes** (changing any digest is the only way to introduce a regression). Two original citations were also corrected: `_store/canonical.py` is the live serialization home (6 importers + a byte-parity contract), **not** \"imported by nobody\"; and `orchestrator.py:688-689` contains **no** canonical-JSON code (stale citation, dropped).\n\nThe retry cluster is **right-sized rather than universally consolidated**: only the one genuine in-file duplication is unified; sites that solve genuinely different problems are left bespoke (no universal `retry()` framework \u2014 that was judged over-generalization).\n\n## Scope\n\nIn scope:\n- **Cluster 1 (canonical-JSON/hash):** make `_store/canonical.py` the single seam \u2014 extend it with\n  backward-compatible `canonical_str(doc, *, ascii_only=False, default=None)` + `content_hash(...)`,\n  migrate the real digest/serialization sites (`signing.py`, `llm/workflow/schema.py`,\n  `_engine/rebar_reconciler/conflict_resolver.py`, `_engine/rebar_reconciler/mutation.py`) onto it,\n  delete the local copies, and **preserve each site's exact output bytes** (every retained variant is\n  an explicit, justified parameter \u2014 `ascii_only=True` for `mutation.py`, `default=str` for\n  `conflict_resolver.py` \u2014 with a cited consumer).\n- **Cluster 2 (retry/backoff), right-sized:** unify only the two near-identical `_advisory_lock`\n  backoff functions (`_compute_backoff_seconds` + `_cas_backoff_seconds` \u2014 same `base\u00b7factor^n`\n  capped + \u00b1jitter formula, differing only in constants) into one parameterized pure function,\n  preserving both budgets' constants and behavior.\n- Characterization tests that **prove output bytes are unchanged** across the migrated canonical\n  sites (incl. non-ASCII / nested / unicode-key inputs) and that signing verify round-trips\n  unchanged; the existing advisory-lock jitter test continues to pin the unified backoff.\n\nOut of scope (intentionally left bespoke / deferred):\n- A universal `retry(...)` helper or a new `src/rebar/_retry.py` leaf module \u2014 **rejected** as\n  over-generalization of genuinely different problems.\n- The other retry sites stay as-is, each with a one-line rationale: `push.py` (git merge-CAS loop,\n  no sleep-backoff), `jira-capability-probe.py` (polls on an *empty result* \u2014 eventual consistency,\n  not exception retry), `runner.py`/`structured.py` (stateful prompt-feedback retry), and the\n  intentionally distinct `acli_subprocess` / `acli_rest` transient-fault *policies*.\n- Any change to the wire format / value of any existing signature or digest (this is behavior-\n  preserving; `mutation.py`'s `ensure_ascii=True` is **preserved**, not \"fixed\").\n- A third-party retry lib (`tenacity`) \u2014 keep core deps tiny.\n- The other audit findings (jsonschema dep, file-size splits) \u2014 tracked separately.\n\n## Plan (child tickets)\n\n- **Child 1 \u2014 Cluster 1 (canonical-JSON/hash consolidation).** Extend `_store/canonical.py` with the\n  documented one-true-encoding + `content_hash`; migrate the 4 real sites byte-identically; add the\n  characterization + signing-round-trip tests.\n- **Child 2 \u2014 Cluster 2 (advisory-lock backoff unify).** Collapse the two `_advisory_lock` backoff\n  functions into one parameterized pure function; keep the two retry budgets as config; preserve\n  behavior under the existing jitter test.\n\n## Child tickets (delivered)\n\nBoth child tickets were created, **parented to this epic** (via `parent_id`, the containment hierarchy \u2014 not a `deps` edge, so this epic's `deps` is correctly empty), and each passed the plan-review and completion-verification gates with an HMAC-signed PASS verdict:\n\n- **Cluster 1** \u2014 `blunt-tramp-kale` (`1c66-6644-4dfb-4afa`): consolidate canonical-JSON/content-hash\n  onto the `_store/canonical.py` seam (byte-preserving). Status: **closed**; completion-verifier:\n  **PASS** (signed @ commit `756a88a2`). Has its own AC + file-impact + verify-commands.\n- **Cluster 2** \u2014 `snag-reek-ember` (`325a-8036-2069-4ed4`): unify the two `_advisory_lock` backoff\n  functions into one parameterized helper. Status: **closed**; completion-verifier: **PASS** (signed\n  @ commit `1e701b46`). Has its own AC + file-impact + verify-commands.\n\nBoth shipped in PR #21 (navapbc/rebar), merged to `main` 2026-06-25.\n\n## Acceptance Criteria\n\n- [ ] `_store/canonical.py` is the single seam for \"sorted-key compact JSON (+ sha256)\": it exposes\n      `canonical_str`/`canonical_bytes` (extended with `ascii_only` / `default` keyword params,\n      defaults reproducing today's bytes) and `content_hash`; the real sites (`signing.py`,\n      `llm/workflow/schema.py`, `conflict_resolver.py`, `mutation.py`) import it and their local\n      reimplementations are deleted. (`schema.py`'s public `canonical_json`/`content_hash` names are\n      preserved as re-exports/delegators.)\n- [ ] The one true encoding (`ensure_ascii=False, sort_keys=True, separators=(\",\",\":\")`) is\n      documented, and every retained variant is an explicit, justified parameter with a cited\n      consumer: `ascii_only=True` for `mutation.py`, `default=str` for `conflict_resolver.py`. No\n      silent divergence remains.\n- [ ] A characterization test proves every migrated caller's **output bytes are unchanged** vs the\n      pre-refactor snapshot for a fixed input set incl. non-ASCII, nested, and unicode-key payloads;\n      and signing sign\u2192verify round-trips are unchanged. (No digest value changes \u2014 behavior-\n      preserving DRY, per the no-live-bug analysis on this epic.)\n- [ ] The two `_advisory_lock` backoff functions are unified into one parameterized pure function\n      that preserves both budgets' constants and behavior (pinned by the existing jitter test). The\n      other retry sites are left bespoke, each carrying a one-line documented rationale; **no**\n      universal `retry()` helper or `_retry.py` module is introduced.\n- [ ] `make lint` + the full test suite pass; no new module exceeds the 800-LOC soft cap; no new\n      sub-100-LOC leaf module is created (the canonical seam stays in `_store/canonical.py`; the\n      backoff unify stays in `_advisory_lock.py`).\n- [ ] Two child tickets (Cluster 1; Cluster 2 backoff-unify) are created and parented to this epic,\n      each with its own AC + file-impact, and each passes the plan-review and completion-verification\n      gates.\n- [ ] One tested home each for canonical-JSON/hash and the advisory-lock backoff formula; a future audit\n- [ ] Behavior is provably preserved: a byte-equality characterization test guarantees no migrated\n- [ ] Net LOC decreases (duplication removed) with zero wire-format/digest changes.\n\n## Original framing (superseded \u2014 retained for provenance)\n\nThe original description asserted a live cross-clone determinism hazard and a full retry-helper consolidation (child tickets A1\u2013A4 + B1\u2013B4, a new `src/rebar/_retry.py`, and a `mutation.py` `ensure_ascii` drift \"fix\"). The post-brainstorm analysis above supersedes that: no live bug exists, the encoding is frozen rather than normalized, and the retry work is narrowed to the single genuine duplication. See the epic comments for the digest-by-digest BENIGN/HAZARD trace.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Consolidate cross-session duplicated primitives (canonical-JSON/hash + retry/backoff)"
+      },
       "created_at": "2026-08-15T15:13:33Z",
       "jira_key": "REB-352",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:33Z"
     },
@@ -35667,8 +35767,16 @@
       "updated_at": "2026-08-15T15:13:35Z"
     },
     "e14e-70b3-5c84-4fb9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\nrebar help overview omits nine routable subcommands \u2014 including reopen (step 5 of the documented agent loop) and fsck (referenced by CLAUDE.md).\n\n## Reproduction Steps\n(verified on installed 0.4.0 == HEAD)\n1. rebar help -> overview lists 32 subcommands.\n2. Missing but dispatched and individually documented: reopen, delete, compact, compact-all, fsck, fsck-recover, revert, resolve, format (arms at rebar:248-581; per-subcommand help at rebar:96-134).\n\n## Expected vs Actual\n- Expected: the discovery surface for agents lists every public subcommand.\n- Actual: nine omissions; agents relying on help never discover reopen/fsck.\n\n## Source\nsrc/rebar/_engine/rebar:34-73 (_print_overview).\n\n## Fix direction\nAdd the nine lines with one-line descriptions consistent with their per-subcommand help; add a guard test that extracts every case arm from the dispatcher and asserts each appears in the overview (with a deliberate allowlist for internal-only arms, if any \u2014 see implementation-notes comment for the validated extraction approach and the arm inventory it found).\n\n## Suggested RED test\nThe case-arm-vs-overview guard test is the RED test: it fails today listing the nine, passes after.\n\n## Acceptance Criteria\n- [ ] All public dispatcher arms appear in rebar help (RED guard test first)\n- [ ] Guard test prevents future drift; internal arms (if any) explicitly allowlisted with a comment\n- [ ] Descriptions consistent with per-subcommand help text",
+        "priority": "Low",
+        "status": "Done",
+        "summary": "rebar help overview omits nine routable subcommands incl. workflow-core reopen and fsck"
+      },
       "created_at": "2026-08-15T15:13:35Z",
       "jira_key": "REB-354",
+      "peer_parent": "REB-61",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:35Z"
     },
@@ -35701,8 +35809,16 @@
       "updated_at": "2026-08-15T15:13:36Z"
     },
     "e165-377b-a8e3-49c9": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Dependencies (STACKED \u2014 read against the stack tip, not origin/main)\ne165 builds directly on two ANCESTOR changes in this review stack that are NOT yet merged to origin/main: **ddbe** (identity entity + the `rebar identity` `main()` intercept in `src/rebar/_cli/__init__.py`) and **bde5** (`src/rebar/attest/authorship.py` with `sign_authorship`/`verify_authorship`/`resolve_trust_root`). Both exist at e165's implementation base (the stack tip). Review this plan with `--source local` so those ancestors are visible; against origin/main alone they will (correctly) appear absent.\n\n## Context\nGive an `identity`'s public keys a LIFECYCLE with cryptographic continuity: a trust-on-first-use (TOFU) genesis key, and subsequent key add/rotate/revoke changes that must each be signed by a currently-valid key of that identity (fills git-bug's unimplemented `IsProtected`). A key's validity is scoped to its ERA \u2014 its position in the authoritative MERGED event log \u2014 never to an attacker-set event timestamp. Builds on ddbe (identity + `keys`) and bde5 (authorship sign/verify via `rebar.authorship.v1`).\n\n## Why\nWithout a signed rotation chain, anyone who can append a KEY event to an identity could inject their own key and forge authorship. Anchoring validity to merged-log position (not wall-clock) stops an attacker from backdating a forged event into a revoked key's window.\n\n## What\n### 1. KEY lifecycle events on the identity (TAG_DELTA precedent)\nAdd key-management event types folded by the reducer into an era-scoped keyring:\n- Event types (new constants in `src/rebar/reducer/_version.py`, added to the\n  known-event-type set; bump the reducer version so older clones\n  preserve-and-ignore \u2014 see the TAG_DELTA v3 note): `KEY_ADD` and `KEY_REVOKE`\n  (a rotate = a `KEY_REVOKE` of the old key + a `KEY_ADD` of the new, or a single\n  `KEY_ADD` that supersedes; keep the two primitive events, model rotate as their\n  composition).\n- `KEY_ADD` data: `{public_key: <authorized-keys line>, signature: <DSSE envelope\n  or null for genesis>}`. `KEY_REVOKE` data: `{public_key: <line>, signature:\n  <DSSE envelope>}`.\n- New reducer processor `process_key_event` (in `_processors.py`, dispatched from\n  `_replay.py`) folds these into `state[\"keyring\"]`: a list of\n  `{public_key, added_epoch, revoked_epoch|null}` records, where `epoch` is the ordinal\n  position (see \u00a72). `state[\"keys\"]` (from ddbe) becomes the DERIVED set of keys\n  whose validity window contains the CURRENT (latest) epoch \u2014 i.e. currently-valid\n  keys \u2014 so existing readers keep working.\n\n  SEEDING + MIGRATION (required): (a) `src/rebar/reducer/_state.py`'s\n  `make_initial_state()` must seed `keyring = []` and `keyring_epoch = 0` (as it\n  seeds `managed_refs`/`claimed_session`), so a ticket that never had a KEY event\n  has canonical zero-values, not absent keys. (b) BOOTSTRAP for identities created\n  by ddbe: `process_create` for an `identity` whose CREATE carried a static `keys`\n  list seeds an implicit GENESIS keyring \u2014 one `{public_key, added_epoch:0,\n  revoked_epoch:null}` record per CREATE key (all genesis keys share epoch 0 \u2014 the\n  genesis is ONE lifecycle step regardless of key count), and sets the cursor\n  `keyring_epoch = 1` (epoch 0 consumed by genesis; the next real KEY_ADD/KEY_REVOKE\n  gets epoch 1). So a pre-existing identity's `keys` are all valid from epoch 0 and\n  `resolve_trust_root`/`verify_authorship` work with no explicit KEY event. An\n  identity created with NO keys has an empty keyring and `keyring_epoch = 0` (genesis\n  happens later, at the first KEY_ADD, which is then the TOFU epoch-0 step).\n\n### 2. Era = a snapshot-safe keyring EPOCH counter (NOT event timestamp, NOT the raw replay loop index)\nMaintain a monotonic `state[\"keyring_epoch\"]` integer = the NEXT epoch to assign (a cursor, not a per-key id). Each key-lifecycle STEP consumes one epoch: the reducer records the change at the CURRENT `keyring_epoch`, THEN increments it by 1. MULTIPLE keys may be valid at the same epoch (a keyring legitimately holds several concurrently-valid keys); an epoch does not uniquely own one key \u2014 it is only a validity-window boundary. A key added at epoch `a` and revoked at epoch `r` is VALID for epochs in `[a, r)` (open at `r`: a key cannot sign at/after its own revocation); a never-revoked key has `revoked_epoch = None`.\n\nCRITICAL \u2014 snapshot safety (the raw replay loop index is WRONG): `replay_events()` starts from the latest SNAPSHOT and skips pre-snapshot events, so the loop index is NOT the absolute ordinal. Therefore: (a) `process_snapshot` FREEZES `keyring_epoch` (and the full `keyring`) into the SNAPSHOT `compiled_state` and RESTORES them on replay; (b) `process_key_event` increments the RESTORED `keyring_epoch` counter, not any loop index. This keeps epochs stable across compaction.\n\nEpoch is derived purely from the canonical fold ORDER (the reducer's HLC-filename replay order \u2014 identical on every clone after sync, see reducer/_cache.py, _processors.py:538), NEVER from the attacker-controllable `data`-level timestamp.\n\nCanonical signed content of a KEY op (what the authorship signature covers): the epoch is NOT signed (it is assigned at fold time). The signature covers `canonical.canonical_str({\"op\": \"KEY_ADD\" | \"KEY_REVOKE\", \"identity_id\": <id>, \"public_key\": <authorized-keys line>}).encode(\"utf-8\")` (sorted-keys canonical form from `rebar._store.canonical`). This binds a specific key operation to a specific identity; the write-gate checks it was authorized by a currently-valid key (the trust root at the latest epoch BEFORE this op).\n\n### 3. Write-time refusal of unsigned/invalidly-signed KEY changes\nA `KEY_ADD`/`KEY_REVOKE` after genesis is REFUSED (the write raises, no event is appended) unless its `signature` is a valid `rebar.authorship.v1` authorship envelope (bde5 `verify_authorship`) over the KEY event's canonical content, produced by a key that is CURRENTLY valid for this identity (valid at the era immediately preceding this change). The GENESIS `KEY_ADD` (the first key event for an identity that has no keys yet) is TOFU: accepted WITHOUT a signature (nothing to chain to). Surface this via a new command/library seam `add_identity_key` / `revoke_identity_key` (CLI `rebar identity key add/revoke`) that performs the signature check before appending.\n\n### 4. Epoch-scoped authorship verification (extends bde5)\nAdd `verify_authorship_at_epoch(envelope, identity_id, epoch, *, repo_root=None) -> Verdict`: resolve the identity's keyring, build the trust root from ONLY the keys whose `[added_epoch, revoked_epoch)` window contains `epoch`, and verify. An event whose signing key was revoked before the event's epoch fails; one within the key's valid epoch passes. (`verify_authorship` from bde5 stays as the \"current-era\" convenience.)\n\nEpoch derivation for an arbitrary (non-KEY) event: the epoch that GOVERNS an event's authorship is the number of the identity's KEY lifecycle events whose canonical fold position precedes that event. Provide a helper `epoch_for_position(identity_id, event_position, *, repo_root=None) -> int`. It must be SNAPSHOT-AWARE (KEY_ADD/KEY_REVOKE are KNOWN_EVENT_TYPES and are folded into the identity's SNAPSHOT by compact.py, whose files are then retired \u2014 so a naive file scan under-counts). Compute it by folding the identity's keyring the same way the reducer does \u2014 start from the latest SNAPSHOT's restored `keyring_epoch` (the epoch as of compaction) and add only the POST-snapshot KEY events whose canonical `{HLC-ts}-{uuid}` position precedes `event_position`. Equivalently: reduce the identity's KEY history (SNAPSHOT base + live KEY events) truncated at `event_position` and read the resulting `keyring_epoch`. Reuse the reducer's snapshot-start logic (do not re-scan raw files independently). e165 defines this derivation + the `verify_authorship_at_epoch` primitive (which takes the resolved epoch); WIRING it into live event verification at the write/merge path is 3183's job. The AC tests call `verify_authorship_at_epoch` with explicit epochs on a constructed keyring, so the primitive is exercised independent of the derivation helper.\n\n### 5. Write-path allowlist + CLI wiring (grounded consumer list)\n- `src/rebar/_store/event_append.py`: `KEY_ADD`/`KEY_REVOKE` MUST be added to the\n  hardcoded `EVENT_TYPES` frozenset (~line 50) or `_validate_event` raises\n  a `StoreError` (invalid event_type; ~line 120) and the write seam fails before any\n  event lands. Separate from the reducer known-type set in `_version.py` \u2014 BOTH need\n  the new types (the TAG_DELTA precedent touched both).\n- `src/rebar/reducer/_cache.py`: bump `_REDUCER_CACHE_VERSION` so stale `.cache.json`\n  files (which lack `keyring`/`keyring_epoch`) are invalidated.\n- `src/rebar/_commands/fsck.py`: `KEY_ADD`/`KEY_REVOKE` must be placed in one of\n  its orphan-type frozensets (`_AUTO_RECOVER_ORPHAN_TYPES` or\n  `_HUMAN_TRIAGE_ORPHAN_TYPES`) \u2014 a test asserts these together cover every\n  KNOWN_EVENT_TYPE except CREATE/SNAPSHOT. KEY events onto an identity are not\n  orphans in the graph sense; classify them under human-triage (or a dedicated\n  exempt path) so the coverage assertion holds.\n- CLI `rebar identity key add|revoke`: extend the identity subcommand `main()`\n  intercept in `src/rebar/_cli/__init__.py` (the seam ddbe used) \u2014 NOT the\n  `_ARGV_REGISTRY`/`_WRITES_FULL` golden-file path (which would touch `tests/golden`).\n\n## Scope\nIn: the KEY_ADD/KEY_REVOKE events + reducer keyring fold + epoch computation, the signed-rotation write gate (add/revoke seam), TOFU genesis, and `verify_authorship_at_epoch`. Out: auto-signing every normal event / the merge-gate enforcement (3183), Jira mapping (264f/2f13). Key material lives in `keys` as before; private keys are operator-held (signatures are produced out-of-band via the bde5 signing seam).\n\n## Acceptance Criteria\n- [ ] A `KEY_ADD`/`KEY_REVOKE` on an identity that already has a genesis key is\n  REFUSED unless accompanied by a valid authorship signature from a currently-valid\n  key of that identity; a test asserts an UNSIGNED key-add is refused (raises / no\n  event appended) while the genesis key-add (first key) is accepted TOFU.\n- [ ] An event whose authorship envelope was produced by a key REVOKED at an\n  earlier era fails `verify_authorship_at_epoch` for that event's epoch, while an event\n  signed within the key's valid era PASSES (test builds a keyring with an add then\n  a revoke and checks both sides of the boundary).\n- [ ] Validity is computed from the keyring EPOCH (fold order), NOT the event's\n  `data` timestamp: a test with a misleading/backdated `data` timestamp does NOT\n  change which epoch (key set) governs it.\n- [ ] Snapshot safety: an identity whose keyring events are COMPACTED into a\n  SNAPSHOT reduces to the SAME keyring + `keyring_epoch` as the uncompacted log,\n  and a KEY event ADDED AFTER the snapshot gets the correct next epoch (a test\n  compacts then adds a key and asserts the epoch is contiguous, not reset).\n\n## file_impact\n- `src/rebar/reducer/_version.py` (KEY_ADD/KEY_REVOKE constants + version bump + known-type set)\n- `src/rebar/reducer/_processors.py` (process_key_event: fold keyring + epoch counter + derive current keys; process_snapshot freezes/restores keyring+keyring_epoch)\n- `src/rebar/reducer/_replay.py` (dispatch KEY events)\n- `src/rebar/attest/authorship.py` (verify_authorship_at_epoch + era-scoped trust root)\n- `src/rebar/_commands/identity.py` (add_identity_key/revoke_identity_key seam with the signed-rotation write gate; CLI wiring)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "identity: TOFU genesis + G2 signed key-rotation chain + era-scoped validity"
+      },
       "created_at": "2026-08-15T15:13:37Z",
       "jira_key": "REB-971",
+      "peer_parent": "REB-368",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:37Z"
     },
@@ -35769,14 +35885,44 @@
       "updated_at": "2026-08-15T15:13:39Z"
     },
     "e1f4-d518-3240-472e": {
+      "baseline": {
+        "assignee": null,
+        "description": "# Event-sourced enrichment queue: cert-triggered enqueue, 60-min soak, latest-wins, lock-guarded claim\n\n## Why\nEnrichment must be async and off the hot write path. rebar's event store is already a durable, shared, serialized-write queue substrate \u2014 better than a bolted-on SQLite/broker (which cannot live on a shared path nor be visible to all clients). Modeling the queue as sidecar events makes \"a new certification replaces the old entry\" the natural latest-wins reduce.\n\n## What\nThree sidecar events keyed by `ticket_id`, reduced to queue state:\n- `ENQUEUE_ENRICH` `{ticket_id, not_before_ns}` appended on plan-review CERTIFICATION, `not_before_ns = cert + SOAK` (SOAK default 60 min). A re-cert appends a new one that supersedes the prior (latest-wins by HLC) and bumps `not_before_ns` \u2014 the soak/debounce as a stored timestamp filtered at drain, NOT an in-process timer.\n- `CLAIM_ENRICH` `{ticket_id, drainer_id, lease_expires_ns}`, `DONE_ENRICH` `{ticket_id}`.\n- Reducer `pending_enrichment(now_ns)` \u2192 entries past soak, unclaimed-or-lease-expired, with no later DONE.\n\n## Atomicity + claim (accurate to the store's ACTUAL locking model \u2014 DERISKED)\n`append_event` (`_commands/_seam.py`) SELF-SERIALIZES every write: it goes through `stage_and_commit`, which acquires the store write lock (`_store/lock.py::write_lock`) for its own append. So a claim CANNOT hold `lock.acquire` across its own `append_event` \u2014 the non-reentrant mkdir leg of the lock would deadlock/timeout. The claim primitive is therefore OPTIMISTIC (the epic's stated model: \"one drainer lands, losers retry\"), not a held-lock read-check-append.\n- **Enqueue placement (no false atomicity):** `sign_plan_review` writes the SIGNATURE via `sign_manifest`\u2192`append_event`, which takes its OWN per-event lock; there is no shared held-lock spanning cert+enqueue, and refactoring the signing path to provide one is out of scope. So `ENQUEUE_ENRICH` is a SEPARATE append immediately after `sign_plan_review` returns. Correctness does NOT depend on atomicity: the S4 drain's self-healing fallback treats any certified ticket with an absent/stale digest as enqueable, so a crash between cert and ENQUEUE cannot permanently miss it.\n- **Race-free claim (OPTIMISTIC append + arbitration):** the drainer re-reduces the ticket's queue state and, only if still pending (unclaimed or lease-expired), appends `CLAIM_ENRICH` (with a fresh `lease_expires_ns`) via `append_event` (which self-serializes under the store write lock). It then ARBITRATES: among the `CLAIM_ENRICH` events after the latest `ENQUEUE_ENRICH` whose lease is STILL LIVE, the earliest `(timestamp, uuid)` wins. THIS drainer won iff it is that earliest live claim; losers re-read and pick another. Filtering contenders by live lease is what makes lease expiry self-healing (an expired prior claim is not a contender). Exactly one drainer lands per soak window.\nLease `LEASE_TTL` (default 15 min); a claim with `lease_expires_ns < now` is treated as unclaimed on the next drain (self-healing, no separate reaper process). Defense-in-depth fallback (owned/implemented by the S4 drain, see below): the drain ALSO treats a ticket that is certified but whose digest is absent/stale as implicitly enqueable, so even a crash between cert and ENQUEUE cannot permanently miss it.\n\n## Scope (exact edit targets)\n- `src/rebar/_store/event_append.py` `EVENT_TYPES` (+ StoreError message): add the three types. `src/rebar/reducer/_version.py`: add to `_NON_REPLAY_KNOWN_TYPES` (sidecar; like REVIEW_RESULT/TICKET_DIGEST).\n- Enqueue hook in the `src/rebar/llm/plan_review/` certification path (`attest.sign_plan_review`, best-effort after the SIGNATURE append), using the HLC clock (`hlc.physical_now()`) for `not_before_ns`. No held-lock cert-critical-section (the enqueue is a separate append; correctness rests on the self-healing fallback, not atomicity).\n- Config field target `src/rebar/llm/config.py`: `overlap_soak_min` (60), `overlap_lease_ttl_min` (15) on `LLMConfig` (`[tool.rebar.llm]`, `REBAR_LLM_OVERLAP_*`) \u2014 LLM-feature tunables, not `VerifyConfig`.\n- This story owns ENQUEUE + CLAIM + the reducer. It does NOT own DONE-emission, the growth-bound retention, or the self-healing scan \u2014 those require the drain runner and are OWNED BY S4 (leggy-heedless-mosquito).\n\n## Dependencies\nS2 (wispy-cheerless-tick) for the digest freshness the enqueue/drain consult. S4 owns the drain that appends DONE + runs the fallback scan.\n\n## Testing\n- `tests/unit/test_enrich_queue.py`: `test_enqueue_and_recert` (not_before = cert+SOAK; re-cert supersedes+bumps); `test_soak_and_latest_wins` (pending honors soak + \u22641/ticket); `test_claim_race` (two claimers in one critical section \u2192 exactly one CLAIM lands); `test_lease_reclaim` (expired lease reclaimable, idempotent).\n\n## Acceptance Criteria\n- [ ] Certifying appends `ENQUEUE_ENRICH` with `not_before_ns = cert + SOAK` (a separate append after `sign_plan_review`); re-cert supersedes+bumps; `pytest ...::test_enqueue_and_recert`. A crash between cert and enqueue is recovered by the S4 self-healing scan (no permanent miss).\n- [ ] `pending_enrichment(now)` returns only past-soak, unclaimed-or-expired, \u22641/ticket; `::test_soak_and_latest_wins`.\n- [ ] Two concurrent claimers \u2192 exactly one wins via optimistic append + earliest-live-lease arbitration; the loser re-reads and picks another; `::test_claim_one_winner`.\n- [ ] Lease-expired claim reclaimable on next drain (self-healing); re-processing idempotent; `::test_lease_reclaim`.\n- [ ] The three event types are in `EVENT_TYPES` + `_NON_REPLAY_KNOWN_TYPES`. (DONE-emission, growth-bound, and the self-healing scan are S4's ACs, not this story's.)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "Event-sourced enrichment queue: cert-triggered enqueue, 60-min soak, latest-wins, optimistic claim"
+      },
       "created_at": "2026-08-15T15:13:39Z",
       "jira_key": "REB-847",
+      "peer_parent": "REB-296",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:39Z"
     },
     "e205-cf65-aea8-42e9": {
+      "baseline": {
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
+        "description": "## What\n\nPurge STALE present-tense bash-engine/bash-seam language from CI comments and the `_commands` package module docstrings. These describe machinery that no longer exists: the bash test-suite collector was removed, and the bash write seam was retired in Tier D (`_seam.append_event`'s OWN function docstring already says: \"Tier D retired the bash seam; `rebar._store` is the sole write core\") \u2014 yet several MODULE docstrings and CI comments still assert the bash path in present tense, contradicting reality.\n\nVerified stale spots (each confirmed against `origin/main`):\n1. `.github/workflows/test.yml:8` \u2014 comment references \"standalone bash suite under\n   `tests/scripts/test-*.sh`, which the `test_bash_suites.py` collector runs\" \u2014 BOTH the\n   collector and `tests/scripts/test-*.sh` are GONE (verified: no such files).\n2. `.github/workflows/external-integration.yml:45` \u2014 comment claims the fixture\n   \"initializes a git-backed store via the bash engine, which shells out to jq + git\".\n   The engine is Python/in-process now. Reword the comment (do NOT silently drop the jq\n   install unless verified unused \u2014 reword its justification instead).\n3. `src/rebar/_commands/leaf.py:1-9` \u2014 the WHOLE module docstring (not just line 9) is\n   stale: it claims the functions are \"reached behind `REBAR_LEAF_WRITES=python`\" and\n   \"append through the bash write seam (`_seam.append_event` \u2192 `ticket-append-event.sh` \u2192\n   `write_commit_event`) so the locked write path is unchanged until Tier D\", and \"the\n   per-command bash suite passes against either implementation\". All retired.\n4. `src/rebar/_commands/_seam.py:1-11` \u2014 the MODULE docstring still says appends route\n   \"through ONE narrow seam \u2014 the bash `ticket-append-event.sh` wrapping\n   `write_commit_event`\" and \"Python writes route through the bash core so invariant I5\n   holds\", directly contradicting THIS FILE's own `append_event` docstring. (Discovered\n   during plan review; added to scope.)\n5. `src/rebar/_commands/__init__.py:1-10` \u2014 references the \"`ticket-commands.py` engine\n   entrypoint) when `REBAR_LEAF_WRITES=python`\" bash dispatcher path. (Discovered during\n   plan review; added to scope.)\n\n**Out of scope (deliberately NOT purged):** `src/rebar/_store/event_append.py:4` and `src/rebar/_store/lock.py:7,22` reference the bash core as documented lineage / the `docs/bash-migration.md \u00a76` dual-window interop rule \u2014 these are historical/interop references, not stale present-tense claims, and are left as-is. Legitimate references to `docs/bash-migration.md` as a HISTORICAL record are kept everywhere.\n\n## Scope\nReword each of the five stale spots to describe the CURRENT in-process reality (writes go through `rebar._store.event_append.write_and_push`; the Python tiers + pytest layout for tests), keeping any legitimate historical `bash-migration.md` citation. Do not change behavior \u2014 comments/docstrings only.\n\n## Acceptance Criteria\n- [ ] `test.yml` comment no longer references the removed `test_bash_suites.py` collector\n      or `tests/scripts/test-*.sh`; it describes the current pytest layout.\n- [ ] `external-integration.yml` comment no longer claims a \"bash engine \u2026 shells out to\n      jq\"; the jq step's justification is reworded (jq kept only if still used).\n- [ ] The `_commands` module docstrings (leaf.py, _seam.py, __init__.py) describe the\n      current in-process `rebar._store` write path, consistent with `_seam.append_event`.\n- [ ] **Completeness proof (in-session, single command):**\n      `grep -rn 'REBAR_LEAF_WRITES\\|ticket-append-event.sh\\|per-command bash suite\\|route through the bash core\\|test_bash_suites\\|bash engine' src/rebar/_commands .github/workflows/test.yml .github/workflows/external-integration.yml`\n      returns NOTHING (all five stale spots purged; `_store` lineage refs are outside this\n      grep's paths and intentionally untouched).\n- [ ] No behavioral change: `make lint && make typecheck && make test` stay green.\n\nFiles: `.github/workflows/test.yml`, `.github/workflows/external-integration.yml`, `src/rebar/_commands/leaf.py`, `src/rebar/_commands/_seam.py`, `src/rebar/_commands/__init__.py`.",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "P1: Purge stale bash-engine language from CI comments & leaf.py docstring"
+      },
       "created_at": "2026-08-15T15:13:40Z",
       "jira_key": "REB-1015",
+      "peer_parent": "REB-1008",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:13:40Z"
     },
@@ -38288,9 +38434,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context / Problem\nClosing recovery ticket `irascible-clueless-basenji` after `set-file-impact --none` spent approximately five minutes in the deterministic work-landed precheck before succeeding. The ticket had `file_impact=[]` / `file_impact_scope=none`, no descendants, a signed PASS plan review, and a signed PASS completion verification. No commit was required or expected.\n\nThe hot path is unconditional in `src/rebar/_commands/close_precheck.py`:\n- `_check_work_landed` calls `_referencing_commits(...)` before checking `field_reads.file_impact(...)` (current lines 219-220).\n- `_referencing_commits` reads the full `git log`, extracts every historical ticket reference, and calls `resolve_ticket_id(..., quiet=True)` for every unique reference (current lines 326-345).\n- During the reproduction, interruption showed the process inside `resolve_ticket_id -> _scan_alias -> json.load`, scanning tracker snapshots for an unrelated historical reference.\n\nThis work is unnecessary when neither the ticket nor any accepted descendant declares file impact: `_check_file_impact_vs_diff` already treats an empty union as out of scope. The current ordering turns an ordinary no-code close into a repository-history \u00d7 ticket-resolution scan.\n\n## Proposed Plan\n- Add a cheap guard in `_check_work_landed` based on the union of file impact for the ticket and accepted descendants.\n- Return before `_referencing_commits` when that union is empty.\n- Preserve existing commit-presence and declared-impact-vs-diff enforcement when any in-scope file impact exists.\n- Add focused regression tests proving the no-impact path never invokes commit discovery and the impact-present path remains enforced.\n- Confirm the change does not alter administrative disposition, force, descendant-credit, or completion-verifier semantics.\n\n## Acceptance Criteria\n- [ ] Closing a ticket whose accepted ticket/descendant scope has no file impact does not call `_referencing_commits`.\n- [ ] A ticket or accepted descendant with file impact still runs referencing-commit discovery and existing landing checks.\n- [ ] Existing file-impact-vs-diff and descendant-credit tests remain green.\n- [ ] A regression test fails if full-history commit discovery is reintroduced on the empty-impact path.\n- [ ] The implementation preserves completion-verifier and administrative-disposition behavior.",
+        "description": "## Context / Problem\nClosing recovery ticket `irascible-clueless-basenji` after `set-file-impact --none` spent approximately five minutes ... The hot path is unconditional in `src/rebar/_commands/close_precheck.py`:\n- `_check_work_landed` calls `_referencing_commits(...)` before checking `field_reads.file_impact(...)` (current line...\n- `_referencing_commits` reads the full `git log`, extracts every historical ticket reference, and calls `resolve_tic...\n- During the reproduction, interruption showed the process inside `resolve_ticket_id -> _scan_alias -> json.load`, sc...\nThis work is unnecessary when neither the ticket nor any accepted descendant declares file impact: `_check_file_impac...\n## Proposed Plan\n- Add a cheap guard in `_check_work_landed` based on the union of file impact for the ticket and accepted descendants.\n- Return before `_referencing_commits` when that union is empty.\n- Preserve existing commit-presence and declared-impact-vs-diff enforcement when any in-scope file impact exists.\n- Add focused regression tests proving the no-impact path never invokes commit discovery and the impact-present path ...\n- Confirm the change does not alter administrative disposition, force, descendant-credit, or completion-verifier sema...\n## Acceptance Criteria\n- [x] Closing a ticket whose accepted ticket/descendant scope has no file impact does not call `_referencing_commits`.\n- [x] A ticket or accepted descendant with file impact still runs referencing-commit discovery and existing landing c...\n- [x] Existing file-impact-vs-diff and descendant-credit tests remain green.\n- [x] A regression test fails if full-history commit discovery is reintroduced on the empty-impact path.\n- [x] The implementation preserves completion-verifier and administrative-disposition behavior.\n[full output: \"$HOME/Library/Application Support/rtk/tee/1787076185_jq_-r__description.log\"]",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Close precheck scans all commit references when file impact is empty"
       },
       "created_at": "2026-08-16T18:37:15Z",
@@ -39700,6 +39846,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:14Z"
+    },
+    "fd48-7a80-33e9-4400": {
+      "created_at": "2026-08-18T19:39:29Z",
+      "jira_id": "4589254",
+      "jira_key": "REB-3200",
+      "state": "confirmed",
+      "updated_at": "2026-08-18T19:39:31Z"
     },
     "fd71-a0a0-d9b0-4769": {
       "created_at": "2026-08-15T15:16:15Z",
@@ -42013,9 +42166,22 @@
     "REB-3185": "d890-e711-156e-444b",
     "REB-3186": "e499-704e-fa13-4916",
     "REB-3187": "eb0d-4c3d-5344-47d7",
+    "REB-3188": "1128-505b-54ac-497f",
+    "REB-3189": "3e21-4476-d1ca-4f50",
     "REB-319": "cf14-d845-075a-4f74",
+    "REB-3190": "58bd-d656-c52f-4cf4",
+    "REB-3191": "60c1-80de-a22f-4d39",
+    "REB-3192": "65bf-173b-e16b-4bb9",
+    "REB-3193": "73b2-6194-c430-45ab",
+    "REB-3194": "86e0-36a1-1247-4454",
+    "REB-3195": "bc13-2e29-1359-44b5",
+    "REB-3196": "c996-8a5f-5123-4f8e",
+    "REB-3197": "cfb7-f2ce-ce8a-4cfd",
+    "REB-3198": "d8c1-e75e-77d8-4c00",
+    "REB-3199": "df80-d453-2267-4953",
     "REB-32": "1465-6362-092b-4ab4",
     "REB-320": "cf7c-1832-d5cd-4aa3",
+    "REB-3200": "fd48-7a80-33e9-4400",
     "REB-321": "d006-759b-deb2-44ba",
     "REB-322": "d04a-040b-b689-4d51",
     "REB-323": "d07f-d91f-d722-45de",
