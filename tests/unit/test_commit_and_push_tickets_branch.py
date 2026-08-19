@@ -24,6 +24,18 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     return completed
 
 
+def _bare_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check and completed.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed: {completed.stderr}")
+    return completed
+
+
 @pytest.fixture
 def tracker_and_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     origin = tmp_path / "origin.git"
@@ -64,10 +76,10 @@ def test_dirty_tracker_is_committed_and_delivered(
     )
 
     local_head = _git(tracker, "rev-parse", "HEAD").stdout.strip()
-    remote_head = _git(origin, "rev-parse", "tickets").stdout.strip()
+    remote_head = _bare_git(origin, "rev-parse", "tickets").stdout.strip()
     assert remote_head == local_head
     assert _git(tracker, "status", "--porcelain").stdout == ""
-    assert _git(origin, "show", "tickets:dirty-event.json").stdout == event.read_text()
+    assert _bare_git(origin, "show", "tickets:dirty-event.json").stdout == event.read_text()
     assert _git(tracker, "log", "-1", "--format=%s").stdout.strip() == (
         "chore: commit inbound bridge events"
     )

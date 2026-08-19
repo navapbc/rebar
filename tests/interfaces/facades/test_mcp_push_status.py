@@ -41,6 +41,12 @@ def _git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
     return r
 
 
+def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
+    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
+    return r
+
+
 @pytest.fixture
 def declining_store(rebar_repo: Path, tmp_path: Path) -> Path:
     """Repoint the store's tracker at an origin that declines every push."""
@@ -56,7 +62,7 @@ def declining_store(rebar_repo: Path, tmp_path: Path) -> Path:
     hook = origin / "hooks" / "pre-receive"
     hook.write_text(_DECLINE_HOOK)
     hook.chmod(0o755)
-    _git(origin, "config", "core.hooksPath", str(origin / "hooks"))
+    _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
     return tracker
 
 

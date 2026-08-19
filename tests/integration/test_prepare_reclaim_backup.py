@@ -32,6 +32,23 @@ def _git(
     )
 
 
+def _bare_git(
+    repo: Path,
+    *args: str,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        check=check,
+        capture_output=True,
+        text=True,
+        env=env,
+        input=input_text,
+    )
+
+
 def _write(repo: Path, relative: str, content: str) -> None:
     target = repo / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +141,7 @@ def _build_backup_fixture(workspace: Path, topology: Path) -> BackupFixture:
     _git(seed, "remote", "add", "origin", str(remote))
     _git(seed, "push", "-q", "--all", "origin")
     _git(seed, "push", "-q", "--tags", "origin")
-    _git(remote, "symbolic-ref", "HEAD", "refs/heads/tickets")
+    _bare_git(remote, "symbolic-ref", "HEAD", "refs/heads/tickets")
 
     _clone(remote, repo, diverged_tip)
     assert _git(repo, "rev-parse", "HEAD").stdout.strip() == old_tip
@@ -258,8 +275,8 @@ def test_prepares_manifest_bundle_and_exact_restore_without_remote_mutation(
     _git(restored, "init", "-q", "--bare")
     for bundle_ref, oid in data["bundle_refs"].items():
         restored_ref = "refs/restored/" + bundle_ref.removeprefix(HELPER_PREFIX)
-        _git(restored, "fetch", "-q", str(bundle), f"{bundle_ref}:{restored_ref}")
-        assert _git(restored, "rev-parse", restored_ref).stdout.strip() == oid
+        _bare_git(restored, "fetch", "-q", str(bundle), f"{bundle_ref}:{restored_ref}")
+        assert _bare_git(restored, "rev-parse", restored_ref).stdout.strip() == oid
 
     assert _remote_snapshot(fixture.repo) == remote_before
     assert _helper_refs(fixture.repo) == {}
@@ -600,7 +617,7 @@ def test_refuses_empty_and_ticketsless_origins(
     assert _helper_refs(fixture.repo) == {}
 
     _git(fixture.repo, "remote", "set-url", "origin", str(fixture.remote))
-    _git(fixture.remote, "update-ref", "-d", "refs/heads/tickets")
+    _bare_git(fixture.remote, "update-ref", "-d", "refs/heads/tickets")
     ticketsless = _run(
         fixture,
         tmp_path / "ticketsless.bundle",

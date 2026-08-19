@@ -30,6 +30,18 @@ def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     return completed
 
 
+def _bare_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if check and completed.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)} failed: {completed.stderr}")
+    return completed
+
+
 @pytest.fixture
 def tracker_and_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     origin = tmp_path / "origin.git"
@@ -63,7 +75,7 @@ def _delivery_error(call, reason: str) -> push.PushDeliveryError:
 
 
 def _remote_head(origin: Path) -> str:
-    return _git(origin, "rev-parse", "tickets").stdout.strip()
+    return _bare_git(origin, "rev-parse", "tickets").stdout.strip()
 
 
 def test_clean_ahead_pushes_without_empty_commit_and_rejection_keeps_commit(
@@ -180,7 +192,7 @@ def test_recovery_guard_blocks_before_staging_and_clean_retry_delivers(
 
     marker.rmdir()
     push.commit_and_push_tickets_branch(tracker, message="guarded", strict=True)
-    assert _git(origin, "show", "tickets:recoverable.json").stdout == "retain me\n"
+    assert _bare_git(origin, "show", "tickets:recoverable.json").stdout == "retain me\n"
     assert _git(tracker, "status", "--porcelain").stdout == ""
 
 
@@ -219,11 +231,11 @@ def test_stage_and_commit_failures_split_strict_from_default_and_retry(
     assert phase in caplog.text.lower()
     assert push_calls == 0
     assert event.read_text(encoding="utf-8") == "retain me\n"
-    assert _git(origin, "show", f"tickets:{event.name}", check=False).returncode != 0
+    assert _bare_git(origin, "show", f"tickets:{event.name}", check=False).returncode != 0
 
     monkeypatch.setattr(push, "_git", original_git)
     push.commit_and_push_tickets_branch(tracker, message=f"retry {phase}", strict=True)
-    assert _git(origin, "show", f"tickets:{event.name}").stdout == "retain me\n"
+    assert _bare_git(origin, "show", f"tickets:{event.name}").stdout == "retain me\n"
 
 
 def test_lock_failure_splits_strict_from_default_and_retry(
@@ -250,11 +262,11 @@ def test_lock_failure_splits_strict_from_default_and_retry(
         assert push.commit_and_push_tickets_branch(tracker, message="retry lock") is None
     assert "lock" in caplog.text.lower()
     assert event.read_text(encoding="utf-8") == "retain me\n"
-    assert _git(origin, "show", "tickets:lock-retry.json", check=False).returncode != 0
+    assert _bare_git(origin, "show", "tickets:lock-retry.json", check=False).returncode != 0
 
     monkeypatch.setattr(lock, "write_lock", original_lock)
     push.commit_and_push_tickets_branch(tracker, message="retry lock", strict=True)
-    assert _git(origin, "show", "tickets:lock-retry.json").stdout == "retain me\n"
+    assert _bare_git(origin, "show", "tickets:lock-retry.json").stdout == "retain me\n"
 
 
 def test_exclusion_failure_splits_strict_from_default_and_retry(
@@ -300,11 +312,11 @@ def test_exclusion_failure_splits_strict_from_default_and_retry(
     assert push_calls == 0
     assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == head_before
     assert event.read_text(encoding="utf-8") == "retain me\n"
-    assert _git(origin, "show", f"tickets:{event.name}", check=False).returncode != 0
+    assert _bare_git(origin, "show", f"tickets:{event.name}", check=False).returncode != 0
 
     monkeypatch.setattr(push, "_git", original_git)
     push.commit_and_push_tickets_branch(tracker, message="retry exclusion", strict=True)
-    assert _git(origin, "show", f"tickets:{event.name}").stdout == "retain me\n"
+    assert _bare_git(origin, "show", f"tickets:{event.name}").stdout == "retain me\n"
 
 
 def test_legacy_tracker_commit_excludes_lock_artifacts_and_retry_is_clean(
@@ -350,7 +362,7 @@ def test_legacy_tracker_commit_excludes_lock_artifacts_and_retry_is_clean(
     assert not [name for name in tree if name.startswith(".ticket-write.lock")], (
         f"reserved lock artifacts entered the committed tree: {tree}"
     )
-    assert _git(origin, "show", "tickets:legacy-event.json").stdout == "{}\n"
+    assert _bare_git(origin, "show", "tickets:legacy-event.json").stdout == "{}\n"
 
     # Clean retry: excluded paths must not leave the tracker permanently dirty.
     assert _git(tracker, "status", "--porcelain").stdout == ""
