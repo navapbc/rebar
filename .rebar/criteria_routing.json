@@ -85,6 +85,24 @@
       "block_threshold": 0.9,
       "blocking_enabled": false,
       "applies_to": []
+    },
+    "project.ci-gate-compat": {
+      "_comment": "Ticket unaroused-undead-ibisbill: project dogfood criterion. A new hard-fail pipeline gate must guard or grandfather branches created before it, or every in-flight branch breaks. GLOB-TRIGGERED through applies_to (the declarative, tech-agnostic seam) rather than a hard-coded CI path in Python, which project.portability forbids; adding a CI system is adding a glob here. applies_to_config_key lets a project REPLACE the glob set via [code_review] ci_config_globs instead of waiting for rebar to enumerate its layout. ADVISORY in v1 (blocking_enabled=false) pending calibration on real reviews.",
+      "exec": "1-TURN",
+      "applies_to": [
+        "**/.github/workflows/**",
+        "**/Jenkinsfile*",
+        "**/.gitlab-ci.yml",
+        "**/.circleci/**",
+        "**/azure-pipelines*.y*ml",
+        "**/.buildkite/**",
+        "**/bitbucket-pipelines.yml",
+        "**/.drone.yml"
+      ],
+      "applies_to_config_key": "code_review.ci_config_globs",
+      "default_posture": "advisory",
+      "block_threshold": 0.9,
+      "blocking_enabled": false
     }
   },
   "activate": {
@@ -102,6 +120,9 @@
     ],
     "project.measurement-provenance": [
       "plan_review"
+    ],
+    "project.ci-gate-compat": [
+      "code_review"
     ]
   }
 }

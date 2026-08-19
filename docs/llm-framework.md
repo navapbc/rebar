@@ -673,6 +673,35 @@ located configuration error instead of being silently skipped. A missing eval
 spec likewise reports both the logical criterion id and the expected
 code-review eval-spec path.
 
+### Project dogfood: ci-gate-compat
+
+`project.ci-gate-compat` is a project-owned advisory code-review criterion. It asks whether a
+pipeline/gate-configuration change adds a hard-fail gate with no compatibility guard, so a
+branch created before the change — one that has not been rebased onto it — would now fail. It
+exists because escaped-bug analysis found four such regressions in a row (a tool-version floor,
+new gate steps run against pre-gate changes, a whole-tree module-size cap, and unguarded gate
+steps).
+
+Its routing, Pass-1 rubric, and eval corpus live in `.rebar/criteria_routing.json`,
+`.rebar/prompts/`, and `.rebar/evals/`, exactly as the review-phase-boundaries dogfood does. The
+criterion is **glob-triggered**: it joins the Round-A fan-in only when the review's changed files
+match its `applies_to` globs, which ship covering several CI systems. That trigger is
+**declarative on purpose** — a hard-coded CI path in Python would tie the criterion to one
+vendor and violate `project.portability`, whose support matrix includes "CI under any provider …
+projects with NO CI provider at all". Adding a CI system is therefore adding a glob, not editing
+code, and a project whose pipeline lives somewhere else entirely replaces the whole set through
+the `applies_to_config_key` pointer, which resolves to the `[code_review] ci_config_globs`
+config key (see `docs/config.md`). The rubric itself names no CI vendor and instead defines its
+recognition vocabulary — hard-fail gate, precondition, compatibility guard — in tool-neutral
+terms.
+
+It does not make blocking decisions: its advisory posture (`blocking_enabled: false`) leaves
+Pass 3's normal deterministic routing in control while the criterion is calibrated on real
+reviews. The balanced `CG-F1`–`CG-F6` fire and `CG-N1`–`CG-N6` pass corpus draws its cases from
+several different CI systems and pairs each fire case with the nearest non-finding control: an
+if-present guard, a changed-files-only scope, a recorded baseline that grandfathers existing
+violations, an explicitly warn-only step, a gate removal, and documentation.
+
 ## Pluggable output contracts (each operation declares its own shape)
 
 The runner no longer hardcodes the findings model: the **structured-output contract** is

@@ -17,6 +17,7 @@ is silently DROPPED, never errored — so a hallucinated id costs nothing.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Sequence
 from functools import lru_cache
@@ -27,6 +28,8 @@ from rebar.llm import criteria as _criteria
 
 # The code-review gate key in the shared `.rebar/criteria_routing.json` overlay (story 5065).
 _GATE_KEY = "code_review"
+
+logger = logging.getLogger(__name__)
 
 # ── The closed overlay-id vocabulary (WS1 OWNS this) ──────────────────────────────────────
 # The 12 specialist overlays the base reviewer may escalate to. WS2 authors the per-id
@@ -239,6 +242,88 @@ def applies_to_globs(criterion_id: str) -> list[str]:
     entry = routing_index().get(criterion_id) or {}
     globs = entry.get("applies_to") or []
     return [g for g in globs if isinstance(g, str)]
+
+
+# ── Project-criterion glob triggers (the declarative `applies_to` seam) ──────────────────────
+# A PROJECT criterion (`project.<name>`, activated through `.rebar/criteria_routing.json`) is
+# not a member of the closed :data:`OVERLAY_IDS` enum, so `glob_triggered_overlays` never sees
+# it. Its trigger is resolved here instead, from the SAME declarative `applies_to` field — an
+# empty list keeps the historical "runs on every review" behaviour, a non-empty one gates the
+# criterion on the review's changed files. The set is additionally overridable per project:
+# an entry may name a dotted config path in `applies_to_config_key` whose non-empty list value
+# REPLACES `applies_to`, so a project declares its own paths rather than waiting for a new
+# glob to ship. Nothing here knows what the globs MEAN — that keeps the shipped package free of
+# any one tool's file layout.
+_APPLIES_TO_CONFIG_KEY = "applies_to_config_key"
+
+
+def _str_globs(value: Any) -> list[str]:
+    """A routing/config value narrowed to a list of glob strings (non-lists yield ``[]``)."""
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [g for g in value if isinstance(g, str) and g]
+
+
+def _config_globs(dotted_key: str, repo_root: str | None) -> list[str]:
+    """The glob list a routing entry's ``applies_to_config_key`` points at, or ``[]``.
+
+    Malformed config deliberately fails OPEN to the routing default (and is logged), mirroring
+    :func:`rebar.llm.plan_review.pin_health.read_enforcement`: an unreadable optional key must
+    not silently delete review coverage, and the shipped `applies_to` is the safe fallback."""
+    section, _, key = dotted_key.partition(".")
+    if not section or not key:
+        return []
+    from rebar import config as _config
+
+    try:
+        composed = _config.compose_config(repo_root)
+    except _config.ConfigError:
+        logger.warning(
+            "code-review criteria: config key %r unreadable; using the declared applies_to",
+            dotted_key,
+            exc_info=True,
+        )
+        return []
+    table = getattr(composed, section, None)
+    if table is None or not hasattr(table, key):
+        # A typo in the routing pointer is otherwise indistinguishable from an unset key, so
+        # say so once rather than degrading silently.
+        logger.warning(
+            "code-review criteria: applies_to_config_key %r names no config key; "
+            "using the declared applies_to",
+            dotted_key,
+        )
+        return []
+    return _str_globs(getattr(table, key))
+
+
+def project_applies_to_globs(criterion_id: str, repo_root: str | None = None) -> list[str]:
+    """The EFFECTIVE ``applies_to`` globs for one criterion under a repo's overlay.
+
+    The routing entry's ``applies_to``, unless the entry names an ``applies_to_config_key``
+    whose configured list is non-empty — in which case that list REPLACES it (replace, not
+    extend, so a project can narrow as well as widen). An empty result means "no glob trigger":
+    the criterion is not gated and always joins the Round-A fan-in."""
+    entry = effective_routing(repo_root).get(criterion_id) or {}
+    config_key = entry.get(_APPLIES_TO_CONFIG_KEY)
+    if isinstance(config_key, str) and config_key:
+        override = _config_globs(config_key, repo_root)
+        if override:
+            return override
+    return _str_globs(entry.get("applies_to"))
+
+
+def criterion_matches_changed_files(
+    criterion_id: str, changed_files: Sequence[str], repo_root: str | None = None
+) -> bool:
+    """True when ``criterion_id`` should run for a review over ``changed_files``.
+
+    An ungated criterion (no effective globs) always matches; a gated one matches only when at
+    least one changed file hits at least one of its globs."""
+    globs = project_applies_to_globs(criterion_id, repo_root)
+    if not globs:
+        return True
+    return any(_glob_match(f, g) for f in changed_files for g in globs)
 
 
 def _glob_match(path: str, pattern: str) -> bool:

@@ -7,6 +7,7 @@
     "code_health.scan_roots",
     "code_health.size_cap",
     "code_health.size_near_fraction",
+    "code_review.ci_config_globs",
     "compact.COMPACTION_HORIZON_NS",
     "compact.threshold",
     "ensure.hint_enabled",
@@ -107,6 +108,7 @@
     "REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLOSE",
     "REBAR_VERIFY_REQUIRE_PLAN_REVIEW_FOR_CLAIM",
     "REBAR_VERIFY_REQUIRE_TICKET_FOR_COMMIT",
-    "REBAR_VERIFY_VERIFY_WINDOW_HEADROOM"
+    "REBAR_VERIFY_VERIFY_WINDOW_HEADROOM",
+    "REBAR_CODE_REVIEW_CI_CONFIG_GLOBS"
   ]
 }

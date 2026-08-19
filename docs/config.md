@@ -292,6 +292,32 @@ analyzer *selection* key: `git_metrics` composes the scc, lizard, and jscpd adap
 Install the required tools separately as described in
 [user-guide.md](user-guide.md) (§ Metrics).
 
+### Code-review criteria routing (`code_review.*`)
+
+The code-review gate routes some criteria by file glob — a criterion whose
+`.rebar/criteria_routing.json` entry declares `applies_to` runs only when the review's changed
+files match. `ci_config_globs` lets a project **replace** the glob set of any criterion whose
+routing entry points at it via `applies_to_config_key`, so a pipeline that lives somewhere rebar
+does not ship a glob for is *declared* rather than waiting to be enumerated. It is
+vendor-neutral by construction: rebar never interprets the values, it only matches paths.
+
+```toml
+# rebar.toml
+[code_review]
+ci_config_globs = ["ci/pipeline.yaml", "deploy/**/*.yml"]   # list[str]; default []
+```
+
+```toml
+# pyproject.toml
+[tool.rebar.code_review]
+ci_config_globs = ["ci/pipeline.yaml", "deploy/**/*.yml"]
+```
+
+`ci_config_globs` is `list[str]` and defaults to `[]`, meaning the routing entry's own
+`applies_to` globs apply. A non-empty value **replaces** them rather than extending them, so a
+project can narrow the trigger as well as widen it. Malformed config fails open to the declared
+globs (and is logged) so an unreadable optional key can never silently delete review coverage.
+
 ### Reconciler + Jira tunables — config-file wired (consumed via `load_config`)
 
 `reconciler.*` and `jira.*` are settable in `[tool.rebar.reconciler]` /

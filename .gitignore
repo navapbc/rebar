@@ -35,6 +35,7 @@ docs/experiments/plan-review-gate/runs/criterion_firings.jsonl
 .rebar/prompts/*
 !.rebar/prompts/plan-review-project-portability.md
 !.rebar/prompts/code-review-project-review-phase-boundaries.md
+!.rebar/prompts/code-review-project-ci-gate-compat.md
 !.rebar/prompts/plan-review-project-symbol-reference-completeness.md
 !.rebar/prompts/plan-review-project-engine-layer-enforcement.md
 !.rebar/prompts/plan-review-project-measurement-provenance.md
@@ -42,6 +43,7 @@ docs/experiments/plan-review-gate/runs/criterion_firings.jsonl
 .rebar/evals/*
 !.rebar/evals/plan-review-project-portability.eval.yaml
 !.rebar/evals/code-review-project-review-phase-boundaries.eval.yaml
+!.rebar/evals/code-review-project-ci-gate-compat.eval.yaml
 !.rebar/evals/plan-review-project-engine-layer-enforcement.eval.yaml
 # .claude/ itself can't stay excluded, or the negation below can't re-include a file inside
 # it (git won't descend into an excluded directory) — so ignore its contents individually

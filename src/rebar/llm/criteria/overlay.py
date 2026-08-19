@@ -187,6 +187,23 @@ def _load_overlay(repo_root: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _validate_applies_to_config_key(cid: str, entry: dict, *, where: str) -> None:
+    """Shape-check an entry's optional ``applies_to_config_key``.
+
+    The key is a DECLARATIVE pointer at a ``<section>.<key>`` config path whose list value
+    replaces the entry's ``applies_to`` globs (the code-review glob trigger). Only its SHAPE is
+    checked here — whether the path resolves is a runtime concern the consumer reports — but a
+    non-string, empty, or undotted pointer is a typo that would otherwise no-op silently."""
+    if "applies_to_config_key" not in entry:
+        return
+    pointer = entry["applies_to_config_key"]
+    if not isinstance(pointer, str) or not re.fullmatch(r"\w+\.\w+", pointer):
+        raise CriteriaError(
+            f"{where}: criterion {cid!r} applies_to_config_key must be a "
+            f"'<section>.<key>' string, got {pointer!r}"
+        )
+
+
 def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
     """Structural floor-check on ONE routing entry (located error). Mirrors the shape the
     packaged index carries so an overlay entry can't smuggle a malformed record past load."""
@@ -232,6 +249,7 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
             f"{where}: criterion {cid!r} fail_mode must be 'open' or 'closed', "
             f"got {entry.get('fail_mode')!r}"
         )
+    _validate_applies_to_config_key(cid, entry, where=where)
     # A bool `disabled` key TURNS OFF a built-in criterion (removed from effective_criteria, so
     # it is never loaded/run) — allowed ONLY on an un-prefixed built-in id, never on a
     # `project.` id (a project criterion is turned off by omitting it from `activate`).

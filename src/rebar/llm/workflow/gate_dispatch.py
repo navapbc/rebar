@@ -25,6 +25,7 @@ driven by the B1 ``ProductionBatchRunner``; agent steps (verify/coach) run throu
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -424,15 +425,27 @@ def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
     return _CodeReviewPrep(dc, doc, rec, inputs, context_overrides, t_total)
 
 
-def _activated_code_review_project_criteria(repo_root: str | None) -> tuple[dict[str, str], ...]:
+def _activated_code_review_project_criteria(
+    repo_root: str | None, changed_files: Sequence[str] = ()
+) -> tuple[dict[str, str], ...]:
     """Resolve active project-owned code-review criteria to their physical prompt ids.
 
     The shared overlay registry carries logical ids (``project.<name>``), while the prompt
     library uses gate-qualified filesystem-safe ids. Keeping that translation here gives the
     batch runner both forms: the physical id drives the prompt, and the logical id remains on
     emitted findings for routing and user-visible attribution.
+
+    A criterion that declares ``applies_to`` globs (or points at a config key that supplies
+    them) is GLOB-GATED: it is returned only when ``changed_files`` hits one of its globs. That
+    keeps the trigger declarative — a project scopes a criterion to its own pipeline/config
+    files by editing routing or config, never this module. A criterion with no effective globs
+    is ungated and always returned, so the historical always-on behaviour is preserved.
     """
-    from rebar.llm.code_review.registry import effective_criteria, effective_routing
+    from rebar.llm.code_review.registry import (
+        criterion_matches_changed_files,
+        effective_criteria,
+        effective_routing,
+    )
     from rebar.llm.criteria.ids import criterion_prompt_id
 
     routing = effective_routing(repo_root)
@@ -444,6 +457,7 @@ def _activated_code_review_project_criteria(repo_root: str | None) -> tuple[dict
         for criterion_id in effective_criteria(repo_root)
         if criterion_id.startswith("project.")
         and str((routing.get(criterion_id) or {}).get("exec", "1-TURN")).upper() != "DET"
+        and criterion_matches_changed_files(criterion_id, changed_files, repo_root)
     )
 
 
@@ -496,7 +510,9 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 batch_runner=CodeReviewBatchRunner(
                     context=prep.dc.context,
                     context_overrides=prep.context_overrides,
-                    project_criteria=_activated_code_review_project_criteria(execution_repo_root),
+                    project_criteria=_activated_code_review_project_criteria(
+                        execution_repo_root, prep.dc.changed_files
+                    ),
                     # Thread the ONE resolved (possibly re-rooted snapshot) root through BOTH
                     # discovery and rubric resolution, so the runner's agreement check can
                     # catch a future divergence instead of it surfacing as "unknown prompt".
