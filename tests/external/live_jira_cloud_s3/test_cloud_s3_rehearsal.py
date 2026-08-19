@@ -20,14 +20,14 @@ before and after. The five validations the story requires map to the scenarios:
   5. ZERO Jira mutations (structural + before/after counts)
      -> enforced on every test; proven non-vacuous by test_read_only_guard_is_real
 
-Plus a negative control from the prior-failure lesson: an UNKNOWN mapped project must
-FAIL CLOSED, never silently fetch (``test_unknown_project_fails_closed``).
+Plus a negative control from the prior-failure lesson: an UNKNOWN mapped project (among
+several) is SKIPPED and the pass continues over the others
+(``test_unknown_project_skips_and_continues``).
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -239,18 +239,24 @@ def test_s3_store_roundtrips_with_mapping_intact(rehearsal_store: Path, tmp_path
 
 
 @_skip
-def test_unknown_project_fails_closed(rehearsal_store: Path) -> None:
-    """Mapping a project Jira does not know makes the inbound fetch FAIL CLOSED, never
-    silently succeed — the documented correct behaviour the old harness violated."""
+def test_unknown_project_skips_and_continues(rehearsal_store: Path) -> None:
+    """Mapping a project Jira does not know is SKIPPED, and the pass CONTINUES over the
+    other mapped projects — the intended per-project resilience (ticket f643).
+
+    The store already maps REB + DIG, so adding a non-existent third key exercises the
+    multi-project skip path (fetcher ``_isolate_projects``): the base JQL search for the
+    absent project errors in the acli subprocess, that error is caught and the key is
+    dropped from the snapshot, and the fetch still returns the REB/DIG results rather than
+    aborting. (The single-project boundary still fails closed — see the non-external
+    ``tests/unit/rebar_reconciler/test_fetch_multi_project.py``.)
+    """
     work = rehearsal_store
     rebar.bridge_projects_set("REBGHOST", ["rebar-ghost"], repo_root=str(work))
 
-    # The base JQL search for an absent project errors out in the acli subprocess, so
-    # the fetch pass fails closed rather than returning a partial/empty snapshot. Assert
-    # the concrete failure mode (a non-blind exception) the old harness wrongly treated
-    # as success.
-    with pytest.raises((subprocess.CalledProcessError, RuntimeError, ValueError)):
-        _snapshot(work, "unknown-fail-closed")
+    # The unknown project must NOT abort the pass: the read-only snapshot succeeds and
+    # covers only the real mapped projects — REBGHOST contributes no keys.
+    snapshot = _snapshot(work, "unknown-skip-and-continue")
+    assert "REBGHOST" not in _projects_of(snapshot.keys())
 
 
 # ---------------------------------------------------------------------------

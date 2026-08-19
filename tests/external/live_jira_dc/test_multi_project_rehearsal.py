@@ -265,8 +265,9 @@ def store_copy(
     repos, zero→configured-but-empty, legacy→one repo). ``legacy_default`` is left UNSET
     (None) so the scrubbed production tickets resolve to "not synced" rather than flooding
     the outbound plan; only scenario 4 sets it, scoped to its own ticket. The UNKNOWN key
-    is deliberately NOT seeded here: an unknown project configured for ALL scenarios would
-    make every inbound pass fail closed; scenario 7 injects it locally instead.
+    is deliberately NOT seeded here: it would perturb every scenario's per-project fan-out
+    (and pollute the alert stream with a skip on every pass); scenario 7 injects it locally
+    instead.
     """
     from _dc_fixtures import fetch_tickets, run_git, scrub_bridge_state
     from _dc_support import CLOUD_CREDENTIAL_VARS, source_repo_root
@@ -566,21 +567,26 @@ def test_contamination_guard_refuses_out_of_scope_target(
 
 
 # ---------------------------------------------------------------------------
-# Scenario 7 — unknown-project fail-closed (the pivot's key scenario)
+# Scenario 7 — unknown-project SKIP-and-continue (the pivot's key scenario)
 # ---------------------------------------------------------------------------
 
 
 @_skip
-def test_unknown_project_fails_closed(
+def test_unknown_project_skips_and_continues(
     store_copy: Path, scratch_projects: dict[str, str], dc_transport: Any, run_label: str
 ) -> None:
-    """A mapping entry for a project that does NOT exist in Jira fails the pass CLOSED.
+    """A mapping entry for a project that does NOT exist in Jira is SKIPPED, and the pass
+    CONTINUES over the other mapped projects (ticket f643).
 
-    This is the true fail-closed product behaviour the DC rework pivots on: an inbound
-    fan-out over a non-existent project key errors and ABORTS the whole pass rather than
-    quietly returning empty results. We configure an RBJ-format key that was never
-    provisioned, then assert the bridge pass RAISES and mutates nothing in the real
-    scratch projects.
+    This is the intended per-project resilience contract (fetcher.py ``_isolate_projects``):
+    with MORE THAN ONE mapped project, an inbound fan-out over a non-existent key degrades
+    only THAT project — it is logged, an alert fires, and the key is dropped from the
+    snapshot — while every other mapped project still reconciles. The pass does NOT abort.
+    (The single-project boundary still fails closed; that has non-external coverage in
+    ``tests/unit/rebar_reconciler/test_fetch_multi_project.py``.)
+
+    The base copy already maps FOUR projects (one/two/zero/legacy), so adding the unknown
+    key exercises the >1 skip path, not the single-project fail-closed boundary.
     """
     work = store_copy
     one, two = scratch_projects["one"], scratch_projects["two"]
@@ -593,19 +599,17 @@ def test_unknown_project_fails_closed(
 
     before = {p: sorted(_keys_by_label(dc_transport, p, run_label)) for p in (one, two)}
 
-    # BOTH the read-only preview AND the mutating sync must fail closed over the non-existent
-    # project key. The library wraps the inbound fetch's transport error (JQL over an unknown
-    # project → Jira 400) as a RebarError, so pin that type rather than a bare Exception, and
-    # use separate blocks so the sync leg — the one that could damage live data — is genuinely
-    # exercised (a single combined block would let preview's raise skip the sync call).
-    with pytest.raises(rebar.RebarError):
-        rebar.bridge_preview(repo_root=str(work))
-    with pytest.raises(rebar.RebarError):
-        rebar.bridge_sync(repo_root=str(work))
+    # Neither the read-only preview NOR the mutating sync aborts over the non-existent project
+    # key: the unknown project is skipped and the pass proceeds. Run both legs so the sync leg
+    # — the one that could damage live data — is genuinely exercised.
+    rebar.bridge_preview(repo_root=str(work))
+    rebar.bridge_sync(repo_root=str(work))
 
+    # The skip is safe: the real scratch projects are untouched by the aborted-then-resumed
+    # unknown-key handling (no partial read reached them as deletions).
     after = {p: sorted(_keys_by_label(dc_transport, p, run_label)) for p in (one, two)}
     assert after == before, (
-        f"a fail-closed pass over an unknown project still mutated live issues: "
+        f"a skip-and-continue pass over an unknown project mutated live issues: "
         f"before={before} after={after}"
     )
 
