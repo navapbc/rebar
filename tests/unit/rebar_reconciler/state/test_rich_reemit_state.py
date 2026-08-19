@@ -531,3 +531,209 @@ def test_the_narrow_operation_does_not_expose_the_owners(tmp_path: _Path) -> Non
             continue
         member = getattr(store, name, None)
         assert not isinstance(member, (BindingLifecycle, BindingRepository)), name
+
+
+# --- 9. RP-02 S3 T3: production no longer mutates through the query --------------
+#
+# S2 T3 added ``BindingStore.note_rich_emit`` as the named door onto this state; this
+# section is the oracle for the PRODUCTION caller finally walking through it. The tests
+# above are the compatibility half and must pass UNCHANGED — the cutover is required to be
+# behaviour-preserving, so a change in the counter progression, the single read-back, the
+# baseline route or the fail-open branches would be a regression, not an improvement.
+
+
+class _AllBindingsWatcher(_Store):
+    """A real store that counts every ``all_bindings()`` call made against it.
+
+    A counting subclass rather than a poisoned return value, because the interesting
+    assertion is that the shallow query is not CONSULTED at all. Poisoning what it returns
+    would only prove the mutation fails, and ``_observe_rich_reemit`` swallows exceptions
+    by design — the failure would be indistinguishable from a transport fault.
+    """
+
+    def __init__(self, tracker_dir: _Path) -> None:
+        super().__init__(tracker_dir)
+        self.all_bindings_calls = 0
+
+    def all_bindings(self) -> dict[str, dict]:
+        self.all_bindings_calls += 1
+        return super().all_bindings()
+
+
+def _watching_store(tmp_path: _Path) -> _AllBindingsWatcher:
+    store = _AllBindingsWatcher(tmp_path / ".tickets-tracker")
+    store.bind_confirm("loc-1", "REB-1")
+    return store
+
+
+def test_the_production_push_never_reaches_a_binding_through_all_bindings(
+    tmp_path: _Path, set_flag
+) -> None:
+    """The point of this task. ``all_bindings()`` is a READ-shaped query, and reaching a
+    live entry through it to write is an unowned write seam — the store cannot enforce any
+    invariant on a mutation it never saw.
+    """
+    set_flag("dc")
+    store = _watching_store(tmp_path)
+    ctx = _ctx(store, _Client(), tmp_path)
+
+    _push(ctx)
+
+    assert store.all_bindings_calls == 0
+
+
+def test_the_production_push_records_through_the_narrow_operation(
+    tmp_path: _Path, set_flag, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not merely "does not use the query" but "uses the named door" — the two are
+    different claims, and only the second one survives someone deleting the call.
+
+    This binds to the method NAME deliberately. "Record rich-emission state through the
+    facade's narrow operation" is the acceptance criterion, not an implementation detail
+    that happens to satisfy it, and ``note_rich_emit`` is a public method on the store that
+    the reconciler, the adapters and ``bridge fsck`` all bind to. Renaming it IS a contract
+    change and should break a test; what must not break this is a change to how the
+    operation computes its answer, which the spy passes straight through.
+    """
+    set_flag("dc")
+    store = _watching_store(tmp_path)
+    seen: list[tuple[str, Any]] = []
+    real = type(store).note_rich_emit
+
+    def _spy(inner: Any, local_id: str, wire: Any) -> Any:
+        seen.append((local_id, wire))
+        return real(inner, local_id, wire)
+
+    monkeypatch.setattr(type(store), "note_rich_emit", _spy)
+    ctx = _ctx(store, _Client(), tmp_path)
+
+    _push(ctx)
+
+    assert seen == [("loc-1", _WIRE)]
+
+
+def test_the_cutover_preserves_the_read_back_threshold(tmp_path: _Path, set_flag) -> None:
+    """The compatibility claim, restated against the watching store so it is pinned on the
+    post-cutover path specifically and not only through the shared fixtures above."""
+    set_flag("dc")
+    store = _watching_store(tmp_path)
+    client = _Client()
+    ctx = _ctx(store, client, tmp_path)
+
+    _push(ctx)
+    _push(ctx)
+    assert client.gets == []
+
+    _push(ctx)
+    assert client.gets == ["REB-1"]
+    assert store.all_bindings_calls == 0
+
+
+def test_a_missing_binding_still_skips_the_read_back_after_the_cutover(
+    tmp_path: _Path, set_flag
+) -> None:
+    """The fail-open branch that the narrow operation reports as ``None`` rather than 0.
+
+    ``0`` would read as "first push of this wire" and, on a threshold of one, could trigger
+    a read-back for a binding that is not there. An unbound id must simply do nothing.
+    """
+    set_flag("dc")
+    store = _AllBindingsWatcher(tmp_path / ".tickets-tracker")
+    client = _Client()
+    ctx = _ctx(store, client, tmp_path)
+
+    synced = {"description": _WIRE}
+    ctx.synced_fields.setdefault("loc-absent", {}).update(synced)
+    apply_handlers._observe_rich_reemit(ctx, "loc-absent", "REB-9", synced)
+
+    assert client.gets == []
+    assert store.all_bindings_calls == 0
+
+
+def test_the_call_site_makes_no_false_claim_about_the_facade(tmp_path: _Path) -> None:
+    """The docstring justified mutation-through-query with a claim that S2 T3 falsified.
+
+    It said ``binding_store.py`` "sits at the module-size cap and cannot carry a narrower
+    accessor". A narrower accessor now exists AND that file is no longer at the cap, so
+    the sentence was doubly wrong and is exactly the kind of stale justification that
+    keeps a workaround alive after its reason has gone.
+
+    Asserted as source text because there is no other way: the absence of a false comment
+    has no runtime behaviour to observe. That makes this a deliberately narrow assertion —
+    it pins one retired sentence, not the docstring's wording — and its value is
+    preventing the justification from being restored alongside a revert of the cut, which
+    is exactly how this workaround survived its own obsolescence the first time.
+    """
+    source = (_ENGINE / "rebar_reconciler" / "apply_handlers.py").read_text(encoding="utf-8")
+
+    assert "cannot carry a narrower accessor" not in source
+
+
+# --- 10. the production mutation-through-query census ---------------------------
+
+#: Production modules permitted to call ``all_bindings()``, each with the reason it is a
+#: READ. The census is an allowlist rather than a ban because the query is legitimate for
+#: iteration — what it must never be is a write seam. Keying on classification instead of
+#: absence means a NEW caller cannot appear silently: it fails this test and someone has to
+#: decide, in writing, which kind it is. Every entry below was verified by reading the call
+#: site: each iterates or snapshots, and every write in those modules goes through a named
+#: facade method (``set_baseline``, ``merge_baseline``, ``unbind``).
+_ALL_BINDINGS_READERS = {
+    "_engine/rebar_reconciler/binding_walk.py": (
+        "iterates entries to classify off-snapshot bindings; phase 1 is read-only by design"
+    ),
+    "_engine/rebar_reconciler/reconcile_helpers.py": (
+        "iterates to advance baselines; writes go through set_baseline / merge_baseline"
+    ),
+    "_engine/rebar_reconciler/reconcile_check.py": (
+        "iterates to build the discrepancy report for a read-only command"
+    ),
+    "_commands/bridge_repair.py": (
+        "before/after snapshots of the outer map, used as a refusal guard; the prune "
+        "itself goes through unbind()"
+    ),
+}
+
+
+def _production_all_bindings_callers() -> set[str]:
+    """Every production module containing a real ``x.all_bindings()`` CALL.
+
+    Parsed, not grepped. A substring search cannot tell a call from a mention, and this
+    codebase discusses ``all_bindings()`` in prose constantly — the shallow-copy contract
+    is documented on ``peer_state``, on the facade's own method, and on the lifecycle
+    owner that replaced it as the write door. Those are the files most likely to talk about
+    it and least likely to misuse it, so a text match would fill the allowlist with
+    docstrings and leave no room to notice a real new caller.
+    """
+    import ast
+
+    root = _Path(__file__).resolve().parents[4] / "src" / "rebar"
+    callers: set[str] = set()
+    for path in root.rglob("*.py"):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except SyntaxError:  # pragma: no cover — a parse failure is its own gate's problem
+            continue
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "all_bindings"
+            ):
+                callers.add(path.relative_to(root).as_posix())
+                break
+    return callers
+
+
+def test_no_production_module_outside_the_read_allowlist_calls_all_bindings() -> None:
+    """AC3, as a standing gate rather than a one-off inspection.
+
+    ``apply_handlers.py`` leaving this set IS the deliverable of this task, so its absence
+    is asserted by the equality below rather than as a separate check.
+    """
+    assert _production_all_bindings_callers() == set(_ALL_BINDINGS_READERS)
+
+
+def test_every_allowlisted_reader_carries_a_written_reason() -> None:
+    """An allowlist without reasons decays into a list of exceptions nobody can audit."""
+    assert all(reason.strip() for reason in _ALL_BINDINGS_READERS.values())

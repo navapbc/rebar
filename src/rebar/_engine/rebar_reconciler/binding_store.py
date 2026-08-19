@@ -228,11 +228,24 @@ class BindingStore:
     def all_bindings(self) -> dict[str, dict]:
         """A SHALLOW copy of the ``{local_id: entry}`` map.
 
-        Fresh outer mapping (so a caller may iterate it while the lifecycle adds or
-        removes bindings), but the inner entry dicts are the LIVE ones. Callers rely on
-        that: the baseline advance and the rich-text handler mutate an entry they got
-        from here and expect the next ``save()`` to persist it. Deep-copying would
-        silently drop those writes.
+        Fresh outer mapping, so a caller may iterate it while the lifecycle adds or
+        removes bindings; the inner entry dicts are the LIVE ones, so what a caller reads
+        through here is current state and not a snapshot taken at call time.
+
+        This is now a READ-ONLY query in practice. It used to be described as a write
+        seam — "the baseline advance and the rich-text handler mutate an entry they got
+        from here" — and neither half of that survives inspection: the rich-text handler
+        was cut to :meth:`note_rich_emit` in RP-02 S3 T3 (``likeminded-wearproof-barracuda``),
+        and the baseline advance never wrote through this query at all, because
+        :meth:`set_baseline` reaches the repository's own dictionaries directly. Writing
+        through a read-shaped call is an unowned seam — a mutation this facade never saw
+        and can enforce no invariant on — so the named operations own writes and a standing
+        allowlist census keeps new callers of this query classified as reads.
+
+        The shallowness still matters and must not become a deep copy. Callers iterate it
+        expecting live entries, and a deep copy would hand them a stale view; the top-level
+        aliasing is separately load-bearing, since a copy of the outer document loses any
+        NEW top-level key a write adds (ADR 0099 §2 and §3).
         """
         return dict(self._data["bindings"])
 
