@@ -587,3 +587,99 @@ def resolve_os_actor(tracker: str | os.PathLike[str]) -> str:
     except OSError:
         pass
     return os.environ.get("USER") or "unknown"
+
+
+# --------------------------------------------------------------------------- #
+# Below-seam LLM-subsystem resolvers (RP-04 config-ownership cutover, ticket 1b07).
+# These OWN the ambient env / ``[snapshot]``-config-table reads that previously sat BELOW
+# the composition seam in the ``llm`` / ``llm/plan_review`` / ``llm/workflow`` helpers.
+# Each below-seam caller now RECEIVES the resolved value from here (re-exported via
+# ``rebar.config``) instead of reading ``os.environ`` itself. Every read is LIVE per call
+# (never import-time bound) so a mid-operation override — the gate ``ref``/``source``, the
+# plan-review budget, the usage-log sink, the preview timeout an operator flips per run — is
+# still observed. This is the composition seam the config-ownership gate treats as OWNED, so
+# the env-name literals stay visible to ``gen_env_registry`` here. Callers pass any subsystem
+# default constant (``DEFAULT_REF`` / ``SOURCE_ATTESTED`` / …) so this leaf module keeps its
+# stdlib-only, no-``rebar``-import invariant.
+# --------------------------------------------------------------------------- #
+
+
+def _gate_str_pref(
+    env_name: str,
+    file_key: str,
+    default: str,
+    root: str | os.PathLike[str] | None = None,
+) -> str:
+    """One gate string preference: env ``env_name`` > ``[snapshot]`` ``file_key`` > ``default``,
+    trimmed, re-read LIVE per call (an env override applied mid-operation is observed)."""
+    raw = os.environ.get(env_name)
+    if raw is not None and raw.strip():
+        return raw.strip()
+    fv = _snapshot_table(root).get(file_key)
+    if isinstance(fv, str) and fv.strip():
+        return fv.strip()
+    return default
+
+
+def resolve_gate_ref(default: str, root: str | os.PathLike[str] | None = None) -> str:
+    """The code-reading gate's default ``ref``: ``REBAR_GATE_REF`` > ``[snapshot].ref`` >
+    ``default`` (the caller's ``DEFAULT_REF``). LIVE per call so a mid-run override lands.
+    Owns the ambient read for :func:`rebar.llm.gate_source.default_ref`."""
+    return _gate_str_pref("REBAR_GATE_REF", "ref", default, root)
+
+
+def resolve_gate_source(default: str, root: str | os.PathLike[str] | None = None) -> str:
+    """The code-reading gate's default ``source`` preference: ``REBAR_GATE_SOURCE`` >
+    ``[snapshot].source`` > ``default`` (the caller's ``SOURCE_ATTESTED``), LIVE per call.
+    The caller still validates the value against the allowed modes. Owns the ambient read
+    for :func:`rebar.llm.gate_source.default_source`."""
+    return _gate_str_pref("REBAR_GATE_SOURCE", "source", default, root)
+
+
+def resolve_plan_review_budget(default: float) -> float:
+    """The base per-plan budget cap in USD, BEFORE centrality scaling:
+    ``REBAR_PLAN_REVIEW_BUDGET`` when a parseable float, else ``default``. Read LIVE per call
+    (a malformed value silently falls back). Owns the ambient read for
+    :func:`rebar.llm.plan_review.sizing.plan_budget_cap`."""
+    raw = os.environ.get("REBAR_PLAN_REVIEW_BUDGET", "").strip()
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+    return default
+
+
+def resolve_usage_log_sink() -> str | None:
+    """The explicit usage-log JSONL sink override ``REBAR_USAGE_LOG``, or ``None`` when unset
+    (the caller then falls back to its gate-session default sink). Read LIVE per call. Owns the
+    ambient read for :func:`rebar.llm.usage_log`'s sink resolution."""
+    path = os.environ.get("REBAR_USAGE_LOG")
+    return path or None
+
+
+def resolve_preview_timeout(default: float) -> float:
+    """The criterion-preview sync-attempt budget in seconds: ``REBAR_PREVIEW_TIMEOUT`` when a
+    POSITIVE number, else ``default`` (the caller's ``_DEFAULT_TIMEOUT``). Read LIVE per call.
+    Owns the ambient read for :func:`rebar.llm.workflow.criterion_preview._default_timeout`."""
+    raw = os.environ.get("REBAR_PREVIEW_TIMEOUT")
+    if raw:
+        try:
+            val = float(raw)
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return default
+
+
+def resolve_run_root(explicit: str | os.PathLike[str] | None = None) -> Path:
+    """The run-scoped scratch base for the workflow-run bank: ``explicit`` > ``REBAR_ROOT`` >
+    ``Path.cwd()`` (env>cwd — NOT the git-toplevel fallback of :func:`repo_root`, and paths are
+    kept verbatim, NOT realpath-normalized, to preserve the exact scratch dir the run and the
+    repo-leak guard expect). Owns the ``REBAR_ROOT`` read for
+    :func:`rebar.llm.workflow.completion_banking.CriterionBank.for_run`."""
+    if explicit:
+        return Path(explicit)
+    env_root = os.environ.get("REBAR_ROOT")
+    return Path(env_root) if env_root else Path.cwd()

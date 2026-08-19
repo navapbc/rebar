@@ -373,7 +373,7 @@ def _description_limit(repo_root: str | None) -> int:
     """Resolve the shared typed gate limit (including its packaged default)."""
     from rebar import config as _config
 
-    return _config.load_config(repo_root).verify.max_ticket_description_chars
+    return _config.compose_config(repo_root).verify.max_ticket_description_chars
 
 
 def p4_oversize(ctx: PlanContext) -> DetResult:

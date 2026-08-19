@@ -203,7 +203,7 @@ def _resolve_scoped(
         var = m.group(1)
         if var not in os.environ:
             raise ExpressionError(f"environment variable {var!r} is not set")
-        return os.environ[var]
+        return os.environ[var]  # read-via: workflow-expression-env-control
 
     return _ENV_RE.sub(sub_env, out)
 

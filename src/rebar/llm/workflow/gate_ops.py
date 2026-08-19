@@ -76,7 +76,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     is_epic = root.get("ticket_type") == "epic"
     from rebar import config as _config
 
-    description_limit = _config.load_config(ctx.repo_root).verify.max_ticket_description_chars
+    description_limit = _config.compose_config(ctx.repo_root).verify.max_ticket_description_chars
     description_chars = len(root.get("description") or "")
     if description_chars > description_limit:
         cfg = resolve_gate_config(ctx.repo_root)
@@ -193,7 +193,7 @@ def completion_precheck(ctx: StepContext) -> dict[str, Any]:
     # ticket, and tool surface (config otherwise identical) before the prefetch run.
     import os
 
-    if os.environ.get("REBAR_VERIFY_PREFETCH") == "0":
+    if os.environ.get("REBAR_VERIFY_PREFETCH") == "0":  # read-via: subsystem-kill-switch
         context = base
     else:
         spec = PrefetchSpec(ticket_id=str(tid), graph=graph)

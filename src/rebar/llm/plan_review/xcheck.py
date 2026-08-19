@@ -233,7 +233,7 @@ def maybe_apply_contradiction(
     from rebar import config as _config
 
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-cross-checked
         return
     if not getattr(verify_cfg, "contradiction_xcheck_active", False):
@@ -381,7 +381,7 @@ def maybe_apply_comment_trail(
     from rebar import config as _config
 
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-consulted
         return
     if not getattr(verify_cfg, "comment_trail_xcheck_active", False):
