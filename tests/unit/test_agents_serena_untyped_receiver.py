@@ -56,10 +56,13 @@ def test_nav_doc_carries_the_untyped_receiver_reproduction() -> None:
     doc = NAV_DOC.read_text(encoding="utf-8")
     assert "set_entity_property" in doc
     assert "_direct_rest_put_raw" in doc, "the control that proves Serena is not simply broken"
-    # The three real call sites the empty result hides.
+    # The three real call sites the empty result hides. The third moved from
+    # ``apply_inbound_records.py`` into ``apply_inbound_events.py`` when that module was
+    # split at its concern boundary (ticket 6f51-f8a4-b4fb-450c); the doc cites the writer's
+    # true home, so this anchor follows it. The census is unweakened — still three sites.
     assert "dispatch_one.py" in doc
     assert "binding_store.py" in doc
-    assert "apply_inbound_records.py" in doc
+    assert "apply_inbound_events.py" in doc
 
 
 def test_nav_doc_row_count_phrase_matches_the_table() -> None:

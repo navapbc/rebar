@@ -31,10 +31,11 @@ from rebar_reconciler.apply_base import (
     _direction_guard,
     _load_mutation_module,
 )
-from rebar_reconciler.apply_inbound_records import (
+from rebar_reconciler.apply_inbound_events import (
     # Loop-breaker marker re-exported so ``apply_inbound._RECONCILER_MARKER_APPLIER``
     # still resolves (its sole use — the create comment-bootstrap — moved with the
-    # phase helpers to apply_inbound_records.py, ticket 090a).
+    # phase helpers, ticket 090a, and moved again with them to apply_inbound_events.py
+    # when apply_inbound_records.py was split, ticket 6f51-f8a4-b4fb-450c).
     _RECONCILER_MARKER_APPLIER,  # noqa: F401
     _inbound_create_record_binding,
     _inbound_create_write_create_event,
@@ -42,10 +43,14 @@ from rebar_reconciler.apply_inbound_records import (
     _inbound_create_writeback_jira,
     _inbound_update_apply_comments,
     _inbound_update_apply_labels,
-    _inbound_update_apply_links,
     _inbound_update_write_edit_event,
     _inbound_update_write_status_event,
 )
+
+# The inbound link graph stays in apply_inbound_records.py — it mutates rebar's shared
+# link store through the rebar facade rather than writing event files (ticket
+# 6f51-f8a4-b4fb-450c).
+from rebar_reconciler.apply_inbound_records import _inbound_update_apply_links
 from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
     _jira_key_to_local_id,

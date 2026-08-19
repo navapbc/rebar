@@ -194,7 +194,7 @@ def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(supp
     Both forms exist in this codebase (see the exclusion list in ``inbound_differ.py`` about bug
     ``eadb``), and only one is written. All three writers emit ``rebar-id:<local_id>``:
     ``dispatch_one.py`` (the outbound create this row is about),
-    ``apply_inbound_records.py`` (the inbound-create write-back) and
+    ``apply_inbound_events.py`` (the inbound-create write-back) and
     ``binding_recovery.py`` (pending-binding recovery). The hyphen form is READ-ONLY legacy.
     Asserted as source text because a label literal is a string, which is precisely the thing a
     semantic reference search cannot see.
@@ -202,7 +202,10 @@ def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(supp
     The writer list is keyed on FILE NAME, so it pins each writer's location as well as its
     behaviour and must be retargeted whenever one moves. Recovery moved out of
     ``binding_store.py`` into ``binding_recovery.py`` in RP-02 S3 (``polarized-servile-jenny``),
-    which is why the third entry changed; the census itself is unweakened, and a grep for the
+    which is why the third entry changed. The write-back likewise moved out of
+    ``apply_inbound_records.py`` into ``apply_inbound_events.py`` when that module was split at
+    its concern boundary (ticket ``6f51-f8a4-b4fb-450c``, ``uncommon-variable-cockatiel``),
+    which is why the second entry changed; the census itself is unweakened, and a grep for the
     literal across ``src/`` still finds exactly these three writers. The per-writer line numbers
     this docstring used to carry were already stale and have been dropped rather than refreshed —
     naming the module is enough to find the call site, and a line number here goes stale on every
@@ -214,7 +217,7 @@ def test_the_writer_emits_the_COLON_label_form_and_nothing_emits_the_hyphen(supp
     drives recovery against a recording client and asserts the label it actually emits. If this
     census and that test ever disagree, the behavioural one is right.
     """
-    writers = ("dispatch_one.py", "apply_inbound_records.py", "binding_recovery.py")
+    writers = ("dispatch_one.py", "apply_inbound_events.py", "binding_recovery.py")
     for name in writers:
         source = (_ENGINE / name).read_text()
         assert 'f"rebar-id:{local_id}"' in source, (

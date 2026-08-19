@@ -55,19 +55,32 @@ def test_no_inline_acliclient_construction(filename: str) -> None:
     )
 
 
+#: The inbound-apply record surface, across which exactly ONE ``"jira"`` literal may appear.
+#: It was one file until ticket 6f51-f8a4-b4fb-450c split ``apply_inbound_records.py`` at its
+#: concern boundary; the surviving literal travelled with the create-event writer into
+#: ``apply_inbound_events.py``, so the census counts both halves rather than the old path
+#: alone. Counting the pair (not just the new home) keeps the gate exactly as strong: a
+#: provider-identity literal re-introduced in EITHER half still fails.
+_INBOUND_APPLY_RECORD_SURFACE = (
+    "apply_inbound_records.py",
+    "apply_inbound_events.py",
+)
+
+
 def test_apply_inbound_records_has_single_jira_literal() -> None:
-    """``apply_inbound_records.py`` carries exactly one ``"jira"`` literal — the
+    """The inbound-apply record surface carries exactly one ``"jira"`` literal — the
     retained ``validate_creation_channel("jira")`` vocabulary key. The two former
     provider-identity literals now come from the selected backend's ``vendor``."""
-    path = _REC / "apply_inbound_records.py"
-    text = path.read_text()
-    occurrences = text.count('"jira"')
+    texts = {name: (_REC / name).read_text() for name in _INBOUND_APPLY_RECORD_SURFACE}
+    per_file = {name: text.count('"jira"') for name, text in texts.items()}
+    occurrences = sum(per_file.values())
     assert occurrences == 1, (
-        f'expected exactly one "jira" literal in apply_inbound_records.py (the '
-        f"validate_creation_channel vocabulary key), found {occurrences}. The two "
-        f"provider-identity literals must be replaced by the backend vendor."
+        f'expected exactly one "jira" literal across {list(_INBOUND_APPLY_RECORD_SURFACE)} '
+        f"(the validate_creation_channel vocabulary key), found {occurrences} "
+        f"({per_file}). The two provider-identity literals must be replaced by the "
+        f"backend vendor."
     )
-    assert 'validate_creation_channel("jira")' in text, (
+    assert any('validate_creation_channel("jira")' in text for text in texts.values()), (
         'the single retained "jira" literal must be the '
         'validate_creation_channel("jira") vocabulary key'
     )
