@@ -2,8 +2,11 @@
 
 **Status:** Accepted
 **Date:** 2026-08-18
-**Ticket:** `patterned-fossillike-betafish` / `0eb8-08bd-f9cb-4798`
-**Story:** `mica-governing-buck` / `5142-4dbf-9469-4672`
+**Ticket:** `patterned-fossillike-betafish` / `0eb8-08bd-f9cb-4798` (S1, authored this ADR)
+**Finalized by:** `likeminded-wearproof-barracuda` / `ef69-e27b-d02d-4eef` (S3 T3)
+**Story:** S1 `mica-governing-buck` / `5142-4dbf-9469-4672`;
+S2 `brainy-cooked-hog` / `fc1c-1b08-70c2-4afb`;
+S3 `convergent-pinelike-lunamoth` / `486a-69ef-6370-48ff`
 **Epic:** RP-02 `citric-moudly-vipersquid` / `5e64-d9cd-2dd4-4036`
 **Relates to:** [ADR 0027](0027-reconciler-binding-lifecycle.md),
 [ADR 0028](0028-reconciler-bound-but-absent-not-deleted.md),
@@ -42,10 +45,13 @@ has, and keep the public entry point.
 
 ## Decision
 
-Decisions 1, 2, 4, 5, 6, 7, and 8 are **realized** in the landed S1 slice
-(`vivacious-widish-indianabat`, `evadable-curious-mastodon`). Decision 3's replacement
-seam and the recovery obligation in Decision 5 are **planned** for S2
-(`brainy-cooked-hog`) and S3 (`convergent-pinelike-lunamoth`).
+Every decision below is now **realized**. Decisions 1, 2, 4, 5, 8, 9, and 10 landed in S1
+(`vivacious-widish-indianabat`, `evadable-curious-mastodon`); Decision 3's replacement seam
+in S2 (`brainy-cooked-hog`), cut over in S3 T3; and the recovery obligation in Decision 5,
+its invocation boundary (Decision 6) and its reversal rule (Decision 7) in S3
+(`convergent-pinelike-lunamoth`). Nothing here is aspirational any more, which changes how
+to read it: each rule below is load-bearing on code that exists, so weakening one is a
+behaviour change, not a plan revision.
 
 ### 1. Internal ownership behind one facade
 
@@ -75,9 +81,14 @@ commit-back step still commits the same files. Neither is affected.
 `peer_state.py` and `get_rotation.py` remain independent owners of peer/baseline
 semantics and rotation-stamp arithmetic; both are unchanged by this work.
 
-Lifecycle policy — bind/confirm/retire/tombstone/comment bookkeeping, absence grace, and
-recovery — deliberately **stays in the facade for now**. Extracting it is S2; this
-decision records only the persistence boundary.
+Lifecycle policy — bind/confirm/retire/tombstone/comment bookkeeping and absence grace —
+stayed in the facade through S1 and moved to `BindingLifecycle` (`binding_lifecycle.py`) in
+S2; incomplete-operation recovery moved to `BindingRecovery` (`binding_recovery.py`) in S3.
+The facade holds all three owners privately and delegates. Ownership is now three-way and
+strict: the repository owns every byte on disk, the lifecycle owner owns identity
+transitions, and recovery reaches transitions **through** the lifecycle owner rather than
+re-implementing confirm/unbind — otherwise a recovered binding would not be byte-identical
+to one the ordinary path produced and the store would slowly acquire two dialects.
 
 ### 2. Open views, not copies
 
@@ -111,11 +122,19 @@ or removes bindings, while the baseline advance and the rich-text handler mutate
 obtained from it and expect the next `save()` to persist it. Deep-copying would break
 them; that is why this slice preserves the shallow contract verbatim.
 
-Mutation-through-query is nevertheless the hazard RP-02 is closing. A narrow **named**
-mutation operation on the facade will replace the pattern for rich emission, after which
-production stops writing through a query result. That seam is **planned, not landed**
-(S2 `morose-selfaware-unicorn`, cut over in S3 `likeminded-wearproof-barracuda`); this
-ADR does not change `all_bindings()`.
+Mutation-through-query was nevertheless the hazard RP-02 set out to close, and it is now
+closed. `BindingStore.note_rich_emit` (S2 `morose-selfaware-unicorn`) is the narrow
+**named** mutation operation, and `apply_handlers._observe_rich_reemit` walks through it
+(S3 T3 `likeminded-wearproof-barracuda`), so **no production module reaches a binding
+through `all_bindings()` in order to write to it**. The copy depth itself never changed.
+
+The distinction to preserve: `all_bindings()` is a READ-shaped query. Using it as a write
+seam was not a performance problem — it was an *unowned* one. The store never saw those
+mutations, so it could enforce no invariant on them, and the justification at the call site
+long outlived its reason (it claimed the facade "cannot carry a narrower accessor" after the
+accessor existed). Remaining callers are held to being reads by a standing allowlist census
+that fails when a new caller appears, so the next `all_bindings()` caller has to be
+classified in writing rather than added silently.
 
 ### 4. Three asymmetric failure dispositions, each preserved exactly
 
@@ -164,11 +183,121 @@ crash after the tombstone lands but before the live replacement leaves **one exa
 identity both live and tombstoned**. That state is intentional and completable — the
 identity matches on both sides, so completion needs no guessing — and the repository must
 produce it faithfully rather than rolling the tombstone back
-(`test_live_failure_after_successful_retired_write_retains_the_tombstone`). Classifying
-and completing it is S3's job (`polarized-servile-jenny`), invoked only at a validated
-write boundary so read-only commands never repair.
+(`test_live_failure_after_successful_retired_write_retains_the_tombstone`).
 
-### 6. Persistence is NOT publication
+Classifying and completing it is **realized** in `binding_recovery.py`
+(S3 T1 `polarized-servile-jenny`). The rules, as landed:
+
+- **Completion requires EXACT agreement between three identities**: the tombstone's
+  `local_id`, the live forward entry's `jira_key`, and the live reverse entry's local id.
+  Anything else is refused with a typed abort that carries the identities which disagreed.
+  A refusal names its conflict because "unsafe" names no next step, and the operator's first
+  question is always *disagreed how* — by the time anyone reads the report the store has
+  usually moved on, so the evidence has to travel with the refusal.
+- **A tombstone with no live residue is SILENT** — neither completed nor refused. In a
+  healthy store that is very nearly every tombstone, because retirement finished. Reporting
+  those as aborts would bury the one genuine finding under a report the size of the retired
+  file, and a per-pass "nothing to repair" line would train operators to skip the one line
+  that matters.
+- **Completion removes only the live forward/reverse pair, under one `save()`, and NEVER
+  touches the tombstone.** One save because the removals are independent and a per-candidate
+  save would leave a mid-batch crash in exactly the state this repair exists to clean up.
+- **Repeating it writes nothing.** Nothing is written when there is no exact-match
+  candidate — *even when there are refusals*. Otherwise every pass would rewrite (and
+  re-commit to the tickets branch) the whole live store just to report that it changed
+  nothing, and a store holding one permanently-refused tombstone would churn forever.
+- **A failed live replacement is rolled back in memory and reported as a refusal.** Leaving
+  the pairs popped would hand the rest of the pass a view that disagrees with disk, after
+  which the next `save()` from any other owner would commit a deletion this method already
+  declined to report as done. The failure is returned, never raised: a binding repair must
+  not be the thing that aborts a sync pass.
+
+Two behaviours are worth stating outright because the planning wording implied otherwise:
+
+- **An unparseable live store cannot produce an abort at all.** It fails CLOSED in the
+  repository loader (Decision 4), so construction raises and repair is never reached. The
+  reachable "corrupt live" case is a malformed entry *shape* — it parses, so it does reach
+  the classifier, and it is refused rather than interpreted.
+- **A corrupt retired file fails OPEN**, which makes tombstones invisible and therefore
+  yields no candidate. The consequence is a *missed* repair, not a guessed deletion. That is
+  the correct direction: the missed repair survives to the next healthy pass, while a guess
+  is unrecoverable.
+
+### 6. The repair runs BEFORE the pass's first remote observation
+
+This is the decision in this ADR most likely to be silently undone, because undoing it
+breaks nothing visible. Write it down, and read it before moving the call.
+
+The repair is invoked from `reconcile.py`'s load phase (`_load_snapshots`), **immediately
+after the under-lock staleness gate and before the pass's FIRST remote issue fetch**
+(S3 T2 `flamboyant-possessive-blackbuck` / `90a5-6a33-5cda-4064`).
+
+**Why pre-observation is load-bearing.** A tombstone is authoritative retirement *intent*.
+A pass that fetched first could observe the retired issue answer 200 — because a retired
+binding's Jira issue may well still exist — and then complete that retirement in the same
+breath as fresh evidence that the identity is alive. Nothing in the completion logic is
+wrong in that ordering; what is wrong is that two contradictory facts about one identity
+would be in play at once, and a future reader trying to reconstruct why a binding vanished
+could not tell which one the pass acted on. Repairing first stops those facts being
+interleaved at all. The other end of the window matters for a symmetrical reason: a pass
+whose selection is stale has not established that its view is current, so it has no
+standing to repair anything — hence *after* the staleness gate, not before it.
+
+**Why NOT `run_differs.py`,** which both the epic's constraint list and this story's
+original plan named. `reconcile._load_snapshots` constructs the store, runs the staleness
+gate, and performs the first remote fetch all inside one call; `bind_operation_runtime` and
+`run_differs()` both run only after that call returns. **No position inside
+`run_differs.py` can precede remote observation.** The create-recovery call does live
+there, which is exactly the trap: the two recoveries look like siblings and have
+deliberately different boundaries, so "tidying" this one next to that one voids the
+guarantee while leaving every other assertion green.
+
+**The epic constraint "after the configuration snapshot AND before the remote fetch"
+describes an EMPTY window,** for the same reason: the operation config snapshot is composed
+*after* the load phase. The conjunction was unsatisfiable, so it was resolved rather than
+forced. The repair reads only local binding state and therefore has no dependency on that
+snapshot at all — the pre-observation half was kept, the snapshot conjunct dropped. Where
+the operation config snapshot is composed remains ADR 0098 / RP-04's decision, not this
+ADR's.
+
+**The guard.** Repair happens only on a pass that is **write-bearing (`persist`) and
+unscoped**. A cap-0 mode is documented read-only and completing a retirement is a write; a
+filtered pass reasons about a hand-picked subset, and the repair is store-wide by nature
+(it walks every tombstone) so it cannot be narrowed honestly — a scoped pass declines the
+whole operation rather than half of it. **Refusing is free**: no classification runs and
+nothing is read, which matters because every read-only pass reaches this line. Construction,
+load, reconcile-check, dry-run, preview, selection and filtered paths write nothing.
+
+**For whoever next splits `reconcile.py`.** That file sits at 799 of the 800-line cap, so
+the next change needing room there is forced into an extraction, and one is already queued
+against it. The spine therefore carries a single unconditional call line and *all* guard
+logic lives in `binding_recovery.py`, so the position of that line is the entire ordering
+guarantee. **Whoever splits this file must keep the call after the under-lock staleness gate
+and before the first remote fetch.** An extraction can relocate it without breaking any
+other assertion in the suite, and if it lands after the first fetch the guarantee is
+silently void — the repair would still work, still be tested, and still be wrong. The
+behavioural oracle that proves the ordering is
+`test_repair_runs_before_the_first_remote_observation` in
+`tests/unit/rebar_reconciler/orchestrate/test_recovery_write_boundary.py`.
+
+### 7. A tombstone is revoked ONLY by an explicit `unretire`
+
+Liveness observations are not revocation signals. None of `absent_404_count`, a later 200
+GET, `clear_absent`, or a same-key `bind_confirm` revokes a tombstone, and a historical
+live+tombstoned overlap still completes after any of them. **Only an explicit `unretire`
+removes the tombstone**, and after it there is no completion candidate left to act on.
+
+The reason is the incident the retired-first write order exists to prevent. Retirement is a
+*soft* delete: reversible, and reversible only because the tombstone survives. If an
+automatic liveness observation could resurrect a tombstoned identity, then the ordinary
+consequence of retiring a binding whose Jira issue still exists — which is the normal case,
+since retirement follows repeated 404s that may themselves have been transient — would be
+that the next successful GET undoes an operator's retirement without anyone asking. So
+completion deletes live residue and never a tombstone, and no automatic observation
+resurrects a tombstoned identity. `unretire` is the documented, deliberate route back, and
+it is the only one.
+
+### 8. Persistence is NOT publication
 
 Local durability and tickets-branch publication are separate layers, and a repository
 checkpoint **never** publishes. `BindingRepository.save()` / `save_retired()` write and
@@ -179,17 +308,21 @@ and coupling local durability to git availability.
 Publication stays in `reconcile_helpers.py::_commit_binding_store_snapshot`, behind an
 **exclusive** five-file allowlist: `bindings.json`, `bindings-retired.json`,
 `get_rotation.json`, the impossible-inbound-link record, and the per-link
-peer-confirmation record. Broad `git add -A` staging in the tickets worktree is
-**prohibited**: that worktree is shared and can legitimately hold unrelated operator work
-in progress, a scratch file, or an editor artifact, and a reconciler commit must not sweep
-them in. The allowlist is asserted negatively as well as positively
+peer-confirmation record. **That five-file selective publication is unchanged by the
+recovery work**, and it is the only publication route: no repair, checkpoint, or recovery
+write may publish on its own. Broad `git add -A` staging in the tickets worktree is
+**prohibited** — for a repair exactly as for an ordinary save, and the repair is the
+tempting case precisely because it runs unasked mid-pass. That worktree is shared and can
+legitimately hold unrelated operator work in progress, a scratch file, or an editor
+artifact, and a reconciler commit must not sweep them in. The allowlist is asserted
+negatively as well as positively
 (`test_publication_stages_only_the_five_allowlisted_files`). Staging is per-file
 idempotent by basename, so an **unchanged pass creates no commit**, and a
 retirement-only pass is still published. Publication itself fails open — an error is
 logged, alerted, and the pass continues on the filesystem copy. Lifecycle alerts are not
 published at all; they live outside the committed tracker tree.
 
-### 7. Explicitly rejected alternatives
+### 9. Explicitly rejected alternatives
 
 - **No journal or write-ahead log.** The ordering contract in Decision 5 already yields
   states that are detectable and completable from the two files themselves. A journal
@@ -212,11 +345,28 @@ published at all; they live outside the committed tracker tree.
 - **No new identity writer.** `BindingStore` stays the single identity owner; the
   repository is private and no collaborator gains a second door to binding state.
 
-### 8. Compatibility and rollback
+### 10. Compatibility and rollback
 
 Each slice is an **internal delegation** with unchanged stored formats and unchanged
 public signatures, so a slice can be reverted independently to the preceding facade
 implementation without a data migration or a coordinated consumer change.
+
+**The retirement repair is the one intentional behaviour delta in this epic.** Everything
+else — the persistence owner, the lifecycle owner, the recovery owner, the narrow rich-emission
+operation and its caller cutover — is extraction: same bytes, same signatures, same
+observable outcomes. Say so explicitly, because "RP-02 changed no behaviour" is otherwise the
+easy summary and it is wrong in exactly one place, which is the place a future incident will
+look at first.
+
+That delta is **additive and idempotent**, and its rollback is correspondingly cheap.
+Disabling the pre-observation call restores the prior state of the world exactly: the
+live+tombstoned overlap goes back to being detectable but uncompleted, which is what the
+retired-first order was already documented to produce. Coherent stores are never rewritten,
+so the repair is a no-op on every healthy store and a revert cannot un-repair anything a
+healthy pass did. **Rollback never deletes a remote issue** — the repair only removes local
+live residue and issues no Jira write of any kind — **and never implies an automatic
+unretire** (Decision 7): a reverted repair leaves the tombstone standing, because nothing in
+either direction may resurrect a tombstoned identity.
 
 Unknown and legacy fields — top-level and per-entry — survive a load/save round trip
 **byte-identically**, because the file is shared with other writers and dropping what this
@@ -233,58 +383,72 @@ non-exposure of the repository. Because a no-behaviour-change slice is green bef
 after by construction, those tests earn their keep through defect-seeded mutation, not
 through passing.
 
-### 9. Forward-looking notes for cross-epic coordination
+### 11. Forward-looking notes for cross-epic coordination
 
-Two references outside this ADR's scope move when these modules are restructured, and
-both will fail CI if they are not updated in the same change.
+Both notes here were written while the config reads still lived in these modules. They have
+since been cut out from under this ADR by RP-04, and both bullets are recorded in their
+corrected form rather than deleted — the second one because the *lesson* outlived the
+reference.
 
-- **The lifecycle config reads moved with lifecycle policy — REALIZED in S2 T2**
-  (`sportive-statued-goose`). The `_env_int` helper, the `_DEFAULT_ABSENT_RETIRE_GRACE`
-  default and the `RECONCILER_ABSENT_RETIRE_GRACE` read now live in
-  `binding_lifecycle.py`, beside the `note_absent` policy they parameterize;
-  `binding_store.py` keeps only an alias of the default for its long-standing inspection
-  surface. The sourcing is unchanged and still **ambient** — a direct `os.environ` read,
-  the same defensive parse (a malformed value degrades to the default rather than aborting
-  the pass), the same default of 3, the same clamp to a minimum of 1. Cutting them to a
-  configuration seam is still **not** RP-02's work; it belongs to the
-  operation-scoped-config effort of ADR 0098 (RP-04 S7.3.a, `insincere-illogical-antlion`,
-  with `best-kingly-monkey` tracking the retarget). Because
-  `scripts/config_ownership_exceptions.py` keys its legacy exceptions on **path + symbol**,
-  both rows (`RECONCILER_ABSENT_RETIRE_GRACE` and the dynamic `os.environ.get`) were
-  re-registered under `_engine/rebar_reconciler/binding_lifecycle.py` in the same change and
-  the stale `binding_store.py` rows removed, keeping the registry truthful; the gate passes.
-- **`docs/env-vars.md` must be regenerated.** It is generated by
-  `scripts/gen_env_registry.py` and records the **line numbers** of non-literal env reads,
-  so restructuring these modules shifts those references. This is not hypothetical twice
-  over: the landed delegation slice shifted the `_env_int` read in `binding_store.py` from
-  line 110 to line 109 and the CI drift gate caught the staleness, and S2 T2 moved it again
-  — the non-literal read is now `binding_lifecycle.py:69`, and
-  `RECONCILER_ABSENT_RETIRE_GRACE` is attributed to `binding_lifecycle.py` rather than
-  `binding_store.py`.
+- **The lifecycle config read is GONE from this subsystem — cut to an owned configuration
+  seam by RP-04 C3g** (`toadyish-magic-arrowana` / `2a95-236b-535f-460e`). S2 T2
+  (`sportive-statued-goose`) had moved the ambient read from `binding_store.py` to
+  `binding_lifecycle.py` beside the `note_absent` policy it parameterizes; RP-04 then removed
+  it entirely. The `_env_int` helper is gone, `binding_lifecycle.py` no longer imports `os`,
+  and `note_absent` calls `resolve_absent_retire_grace()` from `rebar.config` — which owns the
+  read. `_DEFAULT_ABSENT_RETIRE_GRACE` remains in `binding_lifecycle.py` as the shared
+  fallback default, and `binding_store.py` keeps an alias of it for its long-standing
+  inspection surface. **Behaviour is preserved**: the accessor reads the same
+  `RECONCILER_ABSENT_RETIRE_GRACE`, defaults to 3, and clamps to a minimum of 1, with the same
+  defensive parse (a malformed value degrades to the default rather than aborting the pass).
+  Consequently `scripts/config_ownership_exceptions.py` has been drained to EMPTY (`_ROWS =
+  []`) and the two rows this ADR previously described as "re-registered under
+  `binding_lifecycle.py`" no longer exist. Do not re-add them: a row there is a legacy
+  exception, and there is no longer a read for it to except.
+- **Generated references keyed on LINE NUMBERS are a standing hazard, even though this
+  particular one is now moot.** `docs/env-vars.md` is generated by
+  `scripts/gen_env_registry.py` and records the line numbers of *non-literal* env reads.
+  There are no longer any such reads in `binding_lifecycle.py` or `binding_store.py`, so the
+  specific reference this bullet used to name is gone along with the reads. The general lesson
+  is worth keeping in one sentence, because it bit three separate times during RP-02 and each
+  time it was a one-line shift in a generated file that failed the CI drift gate: **any
+  change that moves code in a module with generated line-number references must regenerate
+  those artifacts in the same change.**
 
 ## Consequences
 
 ### Positive
 
-- `binding_store.py` drops from 799 to 710 lines and persistence gains a cohesive
-  360-line owner, so the next lifecycle change has room under the ADR 0058 cap.
+- `binding_store.py` went from 799 lines — the ADR 0058 cap — to 554 across the three
+  slices, and each extracted concern gained a cohesive owner (`binding_repository.py` 360,
+  `binding_lifecycle.py` 506, `binding_recovery.py` 475). The next lifecycle change has room,
+  which is what the whole exercise was for.
 - Every asymmetry now carries its incident rationale at the point of enforcement, so a
   future reader cannot mistake fail-open retired state or an unconditional `save()` for an
   oversight.
-- The ordered partial states have direct fault oracles, which is what makes the remaining
-  slices safe to attempt at all.
+- The ordered partial states have direct fault oracles, which is what made the later slices
+  safe to attempt at all.
 - Local durability and tickets-branch publication can now fail independently without
   either taking the other down.
+- Production no longer writes through a read-shaped query: every binding mutation goes
+  through a named facade operation the store can hold an invariant on.
+- The one crash window the write order leaves is now completed automatically on the next
+  write-bearing unscoped pass, before that pass observes anything remote.
 
 ### Negative
 
 - The open-view contract is a real coupling: any future owner that copies at this boundary
   reintroduces silent write loss, and only mutation testing reliably catches the shallow
   variant.
-- Mutation-through-query survives this slice. Until S2's named seam lands, production
-  still writes to an entry obtained from `all_bindings()`.
-- Multi-file crash windows remain observable, and the retirement overlap stays
-  unrepaired until S3.
+- The repair's correctness now depends on the *position* of one call line in a file that is
+  at the module-size cap and already queued for extraction (Decision 6). Nothing fails when
+  that line moves; only the ordering oracle notices.
+- Multi-file crash windows remain observable. A store holding a permanently-refused
+  tombstone stays inconsistent by design — it is reported every write-bearing pass and waits
+  for a human, because no automatic completion can adjudicate identities that disagree.
+- The repair's observations go to `RECON:` stderr rather than the pass's structured
+  `sync_logger`, since threading the logger down would have widened the single call line in a
+  file with no room. Promoting them to structured pass events is a recorded residual gap.
 
 ### Neutral
 
