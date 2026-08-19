@@ -107,6 +107,28 @@ output, error, and lifecycle policy. Static material is provider-specific and un
 only at the sending adapter. The migration is not yet implemented; current
 ambient/per-consumer configuration paths remain until RP-04's expand/contract cutover.
 
+### Lazy CLI command and capability registry (RP-05; migration pending)
+
+[ADR 0100](adr/0100-cli-command-and-capability-registry.md) establishes one stdlib-only
+immutable lazy route registry as the single authority for top-level command identity,
+spellings/visibility, lazy handler and parser-factory references, mount/init and
+confirmation/output policy, and advertised semantic capabilities. Every command grammar is
+built by one side-effect-free stdlib `argparse` factory that both runtime parsing and
+help generation call, so generated syntax/options cannot drift from execution; there is no
+docs-only grammar, second parser, or Click dependency. Overview, canonical help,
+accepted-alias help, and unknown-command rendering are served from committed,
+runtime-authoritative package-help bytes and routed **before** the RP-04 operation snapshot,
+config materialization, store mount, handler resolution, or any optional import. A separate
+capability registry maps each capability to a packaging extra and a missing posture
+(`error` / `unavailable` / `abstain` / `fallback`), enforced only after the selected
+mode/backend is known. Aliases reuse canonical grammar (compatibility bridge/reconcile
+shims compose the same argument-definition helpers with an alias-specific `prog`); a hidden
+`bridge-status` alias is helpable but undiscoverable; a retired `purge-bridge` spelling stays
+unknown. See [ADR 0100](adr/0100-cli-command-and-capability-registry.md) for the full
+canonical/exact/compatibility/hidden/retired alias taxonomy.
+The migration is expand/contract by command family and not yet implemented; the current
+`frozenset`-census facade in `rebar._cli` remains until RP-05's cutover.
+
 ### Two writers, one store
 
 rebar's git-backed event store has **two independent writers** that must not be
