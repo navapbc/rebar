@@ -94,29 +94,46 @@ lock** and reject on mismatch with **exit 10**, surfaced uniformly as
 (`ticket-transition.sh:397` `sys.exit(10)` / `:558` `exit 10`;
 `src/rebar/__init__.py:110` maps `returncode == 10` → `ConcurrencyError`).
 
-### I4a — Parent-first claim/transition cascade (`open → in_progress`)
-Grabbing a child grabs its **open** parent first. `claim`, and the
-`open → in_progress` `transition`, run the same operation on the ticket's parent
-**before** the child whenever that parent is itself `open` — recursively up the
-chain (top-most open ancestor first), so a descendant is never moved into progress
-while an ancestor is left merely `open`. A `claim` cascade carries the same assignee
-up the chain. A parent that is already `in_progress`/`closed`/`blocked` (or absent)
-is **not** cascaded — only the requested ticket moves.
+### I4a — Parent-first claim/transition/reopen cascade
+A child never runs ahead of its parent in the lifecycle: on a **cascading edge** the
+parent is moved along the **same edge first** — recursively up the chain (top-most
+eligible ancestor first) — before the child moves. There are exactly two cascading
+edges, each with the parent status that is eligible on it:
+
+| child edge | eligible parent | why |
+|---|---|---|
+| `open → in_progress` (`claim`, and the `transition`) | `open` | a descendant is never moved into progress while an ancestor is left merely `open` |
+| `closed → open` (`reopen`, and the equivalent `transition`) | `closed` | a reopened descendant is never left under a still-`closed` ancestor |
+
+A `claim` cascade carries the same assignee up the chain. A parent in any OTHER status
+(or absent) is **not** cascaded — only the requested ticket moves. So a claim under an
+already-`in_progress`/`closed`/`blocked` parent, and a reopen under an already-`open` or
+`in_progress` parent, both leave the parent untouched.
 
 The cascade is **sequential and fail-fast, not transactional:** the parent op runs
 to completion (its own commit + push) first; **if it fails the child op is not
 attempted**, and the failure is re-raised with a message naming the parent as the
 cause (`cannot claim <child>: claiming its parent <parent> failed first …`) while
 **preserving the parent failure's exit code** — so a parent concurrency conflict is
-still **exit 10 / `ConcurrencyError`** at the leaf call. (There is intentionally no
+still **exit 10 / `ConcurrencyError`** at the leaf call. One case is exempt: the cascade
+DECISION reads the parent's status *without* the write lock, so a peer may move the
+parent off the eligible status in between. Both cascades therefore **re-check the
+parent's live status** when the parent op fails and treat a parent that has already left
+that status as **benign** — the cascade's purpose is met, so the child op proceeds. Only
+a parent still sitting in the eligible status (e.g. its own gate blocked it) aborts the
+child. (There is intentionally no
 rollback if the parent succeeds and the child then fails: an ancestor sitting in
 `in_progress` is the conservative, harmless direction.) Recursion is cycle-guarded
-(an id already on the cascade stack, including a self-parent, is skipped). Only the
-`open → in_progress` direction cascades — `close`/`reopen`/`blocked` never do
-(closing has its own separate open-children guard). Implemented in
-`src/rebar/_commands/claim.py` (`claim_compute`) and
-`src/rebar/_commands/transition.py` (`transition_compute`), via the shared
-`_resolve_open_parent` helper.
+(an id already on the cascade stack, including a self-parent, is skipped). Only the two
+edges tabled above cascade — `* → closed` and `* → blocked` never do. Closing has its
+own separate open-children guard, and that asymmetry is exactly why the `closed → open`
+edge must cascade: the guard blocks CLOSING a parent that has open children but says
+nothing about REOPENING a child, so without the cascade a `reopen` left the parent
+closed — an invalid closed-parent-with-open-child state (bug `cranial-sulfur-peafowl`).
+Implemented in `src/rebar/_commands/claim.py` (`claim_compute`) and
+`src/rebar/_commands/transition.py` (`transition_compute` → `_cascade_parent_first`,
+driven by the `_CASCADING_EDGES` table), via the shared `_resolve_parent_in_status`
+helper (`_resolve_open_parent` is its `open` specialization, which `claim` uses).
 
 #### Gate interaction (the plan-review claim gate)
 

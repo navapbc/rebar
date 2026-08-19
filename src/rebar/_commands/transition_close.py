@@ -10,7 +10,7 @@ structural guard, the completion-verification precheck (:func:`_completion_prech
 force-close audit comment, and per-ticket scratch cleanup + best-effort push.
 
 This module MUST NOT import :mod:`.transition` (no back-edge): the recursion into
-``transition_compute`` lives in ``_cascade_open_parent``, which stays there, so the
+``transition_compute`` lives in ``_cascade_parent_first``, which stays there, so the
 close tail here never calls back up.
 """
 

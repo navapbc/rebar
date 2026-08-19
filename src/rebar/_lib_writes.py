@@ -430,5 +430,15 @@ def claim(
 def reopen(ticket_id: str, *, repo_root=None) -> TransitionResult:
     """Reopen a closed ticket (closed -> open) — a thin convenience over
     :func:`transition`, still optimistic-concurrency (raises ConcurrencyError if
-    the ticket is not currently ``closed``)."""
+    the ticket is not currently ``closed``).
+
+    Carries the PARENT-FIRST CASCADE (bug cranial-sulfur-peafowl): if the ticket has a
+    ``closed`` parent, that parent is reopened first — recursively up the chain — before
+    the ticket itself, so a reopen can never leave a closed parent holding a non-closed
+    child. A parent that is already ``open`` / ``in_progress`` / ``blocked`` (or absent)
+    is left alone. Like the ``open -> in_progress`` cascade it is sequential and
+    fail-fast, not transactional: a parent failure aborts the child and is re-raised
+    naming the parent (a raced parent still surfaces as ConcurrencyError / exit 10), and
+    a parent already reopened is not rolled back if the child then fails. See
+    ``docs/concurrency.md`` §I4a."""
     return transition(ticket_id, "closed", "open", repo_root=repo_root)
