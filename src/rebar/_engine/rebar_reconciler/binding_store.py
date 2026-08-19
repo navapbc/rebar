@@ -3,14 +3,16 @@
 Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
 `.tickets-tracker/.bridge_state/bindings.json` on the tickets branch.  # tickets-boundary-ok
 
-Neither persistence nor identity is implemented here.  ``BindingRepository`` (RP-02 S1)
-owns the four state files — live store, retired sidecar, GET-rotation sidecar, alert log —
-with their load rules, exact committed bytes, and asymmetric failure dispositions (live
-fails CLOSED, retired and rotation fail OPEN); ``BindingLifecycle`` (RP-02 S2) owns the
-identity transitions (bind/confirm/unbind, the immutable numeric id, the MOVED-issue
-re-key).  This module is the FACADE over both, owning absence, retirement, tombstone and
-comment bookkeeping.  It mutates the repository's OWN dictionaries in place — handed out
-by reference, never copied — and then calls ``save()``, the single persistence boundary.
+Neither persistence nor lifecycle policy is implemented here.  ``BindingRepository``
+(RP-02 S1) owns the four state files — live store, retired sidecar, GET-rotation sidecar,
+alert log — with their load rules, exact committed bytes, and asymmetric failure
+dispositions (live fails CLOSED, retired and rotation fail OPEN); ``BindingLifecycle``
+(RP-02 S2) owns the identity transitions (bind/confirm/unbind, the immutable numeric id,
+the MOVED-issue re-key) and, since S2 T2, absence, retirement, tombstone and comment
+bookkeeping.  This module is the FACADE over both, owning GET-rotation and pending-binding
+recovery and coordinating the two.  Everything it does mutates the repository's OWN
+dictionaries in place — handed out by reference, never copied — and then calls ``save()``,
+the single persistence boundary.
 
 Write-ahead protocol (story 9622): bind_pending + save(); create_issue() →
 DIG-NNNN; record_pending_key + save() — persisted on the STILL-pending entry
@@ -27,12 +29,18 @@ for the rebar-id label, confirm if found else unbind; per-entry error → append
 ``{local_id, reason}`` to ``failure_sink`` and continue.
 
 Comment sync (emersed-specific-mutt): a ``comment_ids`` map (local_comment_key
-HLC → Jira comment ID) makes comment mirroring append-only/idempotent.
+HLC → Jira comment ID) makes comment mirroring append-only/idempotent; the map's
+write-ahead and change-gating rules live with the policy in ``binding_lifecycle``.
 """
 
 from __future__ import annotations
 
-import os
+# ``os`` is retained for its MODULE-LEVEL HANDLE, not for a call in this file. The env
+# read that used to consume it moved to ``binding_lifecycle`` with the absence policy it
+# parameterizes (RP-02 S2 T2), but ``binding_store.os`` is a long-standing part of this
+# module's surface: the atomic-write crash oracles reach ``os.replace`` through it to fail
+# the live replacement mid-save. Dropping the import would break them for no gain.
+import os  # noqa: F401
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -93,30 +101,12 @@ def _now_iso() -> str:
     return utc_now_iso()
 
 
-# Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
-# reconciler's only int-valued binding env vars; parsed defensively below so a
-# typo'd ops value degrades to the default rather than aborting the pass.
-_DEFAULT_ABSENT_RETIRE_GRACE = 3
-
-
-def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
-    """Parse an int env var defensively: malformed → default; clamp >= minimum.
-
-    The reconciler has no dotted-config reader, so lifecycle knobs are env
-    vars (matches fetcher.py / applier.py). A typo'd value (e.g. ``"abc"``)
-    must NOT abort the pass — fall back to the documented default.
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        value = default
-    else:
-        try:
-            value = int(raw)
-        except (ValueError, TypeError):
-            value = default
-    if minimum is not None and value < minimum:
-        value = minimum
-    return value
+# Bug 1e08-1a35-0267-4ca6 — the absence retirement grace. Both the default and its
+# defensive ambient parse (``_env_int``) now live in ``binding_lifecycle``, beside the
+# ``note_absent`` policy they parameterize; this is an ALIAS, not a second source of
+# truth, kept because the constant is part of this module's long-standing inspection
+# surface (the 3b5f tombstone oracle drives retirement to grace through it).
+_DEFAULT_ABSENT_RETIRE_GRACE = binding_lifecycle._DEFAULT_ABSENT_RETIRE_GRACE
 
 
 def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
@@ -148,24 +138,28 @@ class BindingStore:
 
     The FACADE, and the only public door to binding state. Two private owners sit behind
     it: :class:`BindingRepository` owns every byte on disk, and ``BindingLifecycle`` owns
-    the identity transitions (bind/confirm/unbind, the immutable numeric id, the
-    MOVED-issue re-key). This class owns what is left — retire/tombstone/comment/rotation
-    policy, absence bookkeeping, and pending-binding recovery — and coordinates the two.
-    Mutations are in-memory until ``save()``, which delegates the atomic write.
+    lifecycle policy — the identity transitions (bind/confirm/unbind, the immutable numeric
+    id, the MOVED-issue re-key) plus absence bookkeeping, retirement, tombstones and
+    comment identity. This class owns what is left — GET-rotation policy and
+    pending-binding recovery — and coordinates the two. Mutations are in-memory until
+    ``save()``, which delegates the atomic write; the few operations that must be durable
+    the instant they return (retirement, comment identity) persist themselves.
     """
 
     def __init__(self, tracker_dir: Path) -> None:
         """Open the binding state under ``tracker_dir``. READS ONLY — never writes.
 
         Every attribute below is an ALIAS for the repository's own object, never a copy:
-        the identity transitions, the ``peer_state`` delegates and the rich-text handler
-        all mutate ``bindings`` / ``reverse`` / the rotation stamps / the retired set IN
-        PLACE, so a defensive copy here would silently discard those writes. The
-        ``BindingLifecycle`` owner is constructed over the SAME repository for exactly
-        that reason, and is deliberately private — no public attribute or method hands
-        out either owner, or a caller could write binding state without passing through
-        this facade's coordination. The repository does not materialize ``.bridge_state``
-        either; the first :meth:`save` creates it.
+        the lifecycle transitions, the ``peer_state`` delegates and the rich-text handler
+        all mutate ``bindings`` / ``reverse`` / the rotation stamps IN PLACE, so a
+        defensive copy here would silently discard those writes. The ``BindingLifecycle``
+        owner is constructed over the SAME repository for exactly that reason, and is
+        deliberately private — no public attribute or method hands out either owner, or a
+        caller could write binding state without passing through this facade's
+        coordination. The retired key set and the bug-3b5f ``{local_id: jira_key}``
+        tombstone index are reached through the lifecycle owner rather than aliased here,
+        so retired state has exactly one reader. The repository does not materialize
+        ``.bridge_state`` either; the first :meth:`save` creates it.
 
         Failure dispositions come from the repository unchanged: a corrupt live store
         raises ``ValueError`` (fail CLOSED, to avoid mass-duplicating Jira issues); a
@@ -185,12 +179,6 @@ class BindingStore:
         self._repo_root = self._repo.repo_root
         self._data = self._repo.data
         self._get_rotation = self._repo.rotation
-        self._retired: set[str] = self._repo.retired_keys()
-        # Bug 3b5f: reverse of the retired file — {local_id: jira_key} — so the
-        # outbound differ can ask "was THIS local ticket confirmed-deleted?" without
-        # re-reading the file per unbound ticket. Kept in lock-step with ``_retired``
-        # by ``_retire``/``unretire``; a legacy list-form file degrades to empty.
-        self._retired_locals: dict[str, str] = self._repo.retired_locals()
 
     # -- persistence (delegated to BindingRepository) -----------------------
 
@@ -334,36 +322,22 @@ class BindingStore:
         """
         self._lifecycle.record_jira_id(local_id, jira_id)
 
-    # -- comment-ID map (append-only comment sync; emersed-specific-mutt) ---
+    # -- comment-ID map (thin delegates; emersed-specific-mutt) -------------
+    #
+    # The append-only map, its write-ahead save and the DIG-5301 duplicate class it
+    # closes are documented on ``BindingLifecycle.record_comment_id``.
 
     def record_comment_id(self, local_comment_key: str, jira_comment_id: str) -> None:
-        """Persist a COMMENT-HLC-key -> Jira-comment-ID pairing and ``save()`` NOW.
-
-        The map identifies an already-mirrored comment by the COMMENT event's HLC
-        ``timestamp`` (a stable, unique ``local_comment_key``), not by body — so
-        same-text comments never collide and an edited body is not seen as new.
-        Unlike :meth:`record_jira_id`, this ``save()``s IMMEDIATELY (write-ahead):
-        it is called on the successful ``add_comment`` return, and the durable
-        entry is what the outbound differ's PRIMARY skip keys on, so a crash after
-        the Jira post cannot re-post (closes the DIG-5301 duplicate class).
-
-        Append-only and idempotent: an identical re-record is a no-op (no ``save``
-        churn); a key is never remapped to a different id.
-        """
-        key = str(local_comment_key)
-        comment_ids = self._data.setdefault("comment_ids", {})
-        if comment_ids.get(key) == str(jira_comment_id):
-            return
-        comment_ids[key] = str(jira_comment_id)
-        self.save()
+        """Persist a COMMENT-HLC-key -> Jira-comment-ID pairing and save NOW."""
+        self._lifecycle.record_comment_id(local_comment_key, jira_comment_id)
 
     def comment_id_for(self, local_comment_key: str) -> str | None:
         """The recorded Jira comment ID for an HLC key, or ``None`` when unmapped."""
-        return self._data.get("comment_ids", {}).get(str(local_comment_key))
+        return self._lifecycle.comment_id_for(local_comment_key)
 
     def is_comment_mapped(self, local_comment_key: str) -> bool:
         """True once :meth:`record_comment_id` has persisted this HLC key."""
-        return str(local_comment_key) in self._data.get("comment_ids", {})
+        return self._lifecycle.is_comment_mapped(local_comment_key)
 
     # -- absence lifecycle (bug 1e08) --------------------------------------
 
@@ -374,24 +348,12 @@ class BindingStore:
     def note_absent(self, jira_key: str) -> None:
         """Record a consecutive-404 GET against a bound key.
 
-        Increments ``absent_404_count`` on the binding entry. When the count
-        reaches ``RECONCILER_ABSENT_RETIRE_GRACE`` consecutive 404s, the
-        binding is soft-deleted: moved to bindings-retired.json (reversible)
-        and a deduped ``binding-retired`` alert is appended.
+        Increments ``absent_404_count``; at ``RECONCILER_ABSENT_RETIRE_GRACE``
+        consecutive 404s the binding is soft-deleted (reversibly) and alerted. The
+        threshold, its defensive ambient parse, and the retired-first write order are
+        ``BindingLifecycle``'s.
         """
-        local_id = self._data["reverse"].get(jira_key)
-        entry = self._entry_for_jira_key(jira_key)
-        if entry is None:
-            return
-        entry["absent_404_count"] = int(entry.get("absent_404_count", 0)) + 1
-        entry["updated_at"] = _now_iso()
-        grace = _env_int(
-            "RECONCILER_ABSENT_RETIRE_GRACE",
-            _DEFAULT_ABSENT_RETIRE_GRACE,
-            minimum=1,
-        )
-        if entry["absent_404_count"] >= grace:
-            self._retire(local_id, jira_key, entry)
+        self._lifecycle.note_absent(jira_key)
 
     def note_absent_or_rekey(self, jira_key: str, client: TicketTransport | None = None) -> bool:
         """404 bookkeeping that first asks whether the issue MOVED (bug 7c26).
@@ -441,46 +403,13 @@ class BindingStore:
         self.note_absent(jira_key)
         return False
 
-    def _retire(self, local_id: str, jira_key: str, entry: dict[str, Any]) -> None:
-        """Soft-delete a binding: move it to the retired file + alert.
-
-        RETIRED FIRST, live second (both writes go through the repository): the entry
-        must be durable in the retired file BEFORE the live binding is dropped, or a
-        crash between the two would lose it from both and make a soft delete
-        indistinguishable from a hard one.
-        """
-        retired_entries = self._repo.retired_entries()
-        retired_entries[jira_key] = {
-            "local_id": local_id,
-            "retired_at": _now_iso(),
-            "absent_404_count": int(entry.get("absent_404_count", 0)),
-            "last_jira_key": jira_key,
-        }
-        self._repo.save_retired(retired_entries)
-        self._retired.add(jira_key)
-        self._retired_locals[local_id] = jira_key
-        # Remove the live binding (reversible: the entry survives in the
-        # retired file and the live binding can be re-created on recovery).
-        self._data["bindings"].pop(local_id, None)
-        self._data["reverse"].pop(jira_key, None)
-        self.save()
-        self._repo.alert(
-            key=f"binding-retired:{jira_key}",
-            record={
-                "kind": "binding-retired",
-                "jira_key": jira_key,
-                "local_id": local_id,
-            },
-        )
-
     def clear_absent(self, jira_key: str) -> None:
-        """Reset the absence counter after a 200 GET (the issue is alive)."""
-        entry = self._entry_for_jira_key(jira_key)
-        if entry is None:
-            return
-        if entry.get("absent_404_count"):
-            entry["absent_404_count"] = 0
-            entry["updated_at"] = _now_iso()
+        """Reset the absence counter after a 200 GET (the issue is alive).
+
+        Change-gated: an entry with no counter set is left completely untouched, so a
+        healthy pass causes no store churn. See ``BindingLifecycle.clear_absent``.
+        """
+        self._lifecycle.clear_absent(jira_key)
 
     def set_last_get(self, jira_key: str, pass_id: str) -> None:
         """Record the pass_id of the most recent GET (rotation bookkeeping)."""
@@ -498,78 +427,42 @@ class BindingStore:
 
     def is_retired(self, jira_key: str) -> bool:
         """Return True if the key has been soft-deleted (retired)."""
-        return jira_key in self._retired
+        return self._lifecycle.is_retired(jira_key)
 
-    # -- tombstones: the local-side view of retirement (bug 3b5f) -----------
+    # -- tombstones: the local-side view of retirement (thin delegates; 3b5f) -
+    #
+    # Why the local-side index exists at all, and why lifting a tombstone must clear
+    # BOTH sides, is documented on the ``BindingLifecycle`` counterparts.
 
     def retired_key_for_local(self, local_id: str) -> str | None:
         """The retired ``jira_key`` this local ticket was last bound to, or ``None``.
 
-        The reverse of ``is_retired``, which is keyed by ``jira_key`` and therefore
-        cannot answer the question the unbound-create arm needs to ask: retirement
-        UNBINDS the local ticket (``_retire`` pops it from both ``bindings`` and
-        ``reverse``), so by the time the differ sees it there is no live key to look
-        up — only this tombstone distinguishes "was paired with a confirmed-deleted
-        issue" from "never bound at all".
+        Retirement UNBINDS the local ticket, so there is no live key to look up by the
+        time the outbound differ sees it; only this tombstone distinguishes "was paired
+        with a confirmed-deleted issue" from "never bound at all".
         """
-        key = self._retired_locals.get(local_id)
-        return key if key is not None and key in self._retired else None
+        return self._lifecycle.retired_key_for_local(local_id)
 
     def is_retired_local(self, local_id: str) -> bool:
         """True when this local ticket's former Jira pairing was retired (3b5f)."""
-        return self.retired_key_for_local(local_id) is not None
+        return self._lifecycle.is_retired_local(local_id)
 
     def unretire(self, jira_key: str) -> bool:
         """Lift a tombstone: drop ``jira_key`` from the retired set AND file (3b5f).
 
-        The documented route back from a tombstone. After this call the local ticket
-        is ordinary unbound work again, so the next pass's outbound differ creates a
-        fresh Jira issue for it — without this, suppressing the create would be a
-        permanent, undocumented dead end escapable only by hand-editing
-        ``.bridge_state/bindings-retired.json``.
-
-        Returns True when a tombstone was actually lifted; False (a no-op) when the
-        key was not retired, so the call is idempotent.
+        The documented route back, so a suppressed create is not a permanent dead end.
+        Returns True when a tombstone was actually lifted; False (a no-op) when the key
+        was not retired, so the call is idempotent.
         """
-        retired_entries = self._repo.retired_entries()
-        entry = retired_entries.pop(jira_key, None)
-        if entry is None and jira_key not in self._retired:
-            return False
-        self._repo.save_retired(retired_entries)
-        self._retired.discard(jira_key)
-        for local_id, key in list(self._retired_locals.items()):
-            if key == jira_key:
-                del self._retired_locals[local_id]
-        self._repo.alert(
-            key=f"binding-unretired:{jira_key}",
-            record={
-                "kind": "binding-unretired",
-                "jira_key": jira_key,
-                "local_id": (entry or {}).get("local_id", ""),
-            },
-        )
-        return True
+        return self._lifecycle.unretire(jira_key)
 
     def note_create_suppressed(self, local_id: str, jira_key: str) -> None:
         """Record that a tombstone suppressed an outbound CREATE (3b5f).
 
-        A suppression is work NOT done, so it must be loud: a silently-skipped
-        create looks identical to a healthy steady state. The alert names the route
-        back so the operator does not have to hand-edit retired state.
+        A suppression is work NOT done, so it must be loud: a silently-skipped create
+        looks identical to a healthy steady state.
         """
-        self._repo.alert(
-            key=f"outbound-create-suppressed:{local_id}",
-            record={
-                "kind": "outbound-create-suppressed",
-                "local_id": local_id,
-                "jira_key": jira_key,
-                "reason": (
-                    f"Jira issue {jira_key} was confirmed deleted (404 to grace) and the "
-                    f"binding retired; a deleted issue is never re-created."
-                ),
-                "remedy": f"BindingStore.unretire({jira_key!r}) to re-enable creation",
-            },
-        )
+        self._lifecycle.note_create_suppressed(local_id, jira_key)
 
     # -- recovery ----------------------------------------------------------
 

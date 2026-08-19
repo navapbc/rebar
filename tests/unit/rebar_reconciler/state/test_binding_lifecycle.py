@@ -540,3 +540,453 @@ def test_bind_confirm_rebind_does_not_sweep_an_out_of_band_orphan(tmp_path: Path
         "bind_confirm must NOT sweep; only unbind does. Sweeping here would silently change "
         "behaviour and mask the fsck-reportable state this code deliberately leaves."
     )
+
+
+# ===========================================================================
+# RP-02 S2 T2 (sportive-statued-goose) — absence, tombstone, comment identity.
+#
+# These are DIRECT oracles on the policy owner. Facade-level coverage already
+# exists and stays the regression oracle for the extraction
+# (state/test_binding_absence_lifecycle.py, test_binding_store_comment_ids.py,
+# state/test_corrupt_state_guard.py, test_no_resurrection_after_confirmed_delete_3b5f.py);
+# these add the both-index / reload-through-the-repository tier the facade tests
+# do not reach, and they pin the fail-open vs fail-closed asymmetry that makes
+# this cluster dangerous to move.
+#
+# Nothing here may change a THRESHOLD, a stored field, or a disposition. Three
+# confirmed 404s retire; a 200 resets; retired corruption and alert-write
+# failures stay fail-open; live corruption stays fail-closed.
+# ===========================================================================
+
+_RETIRE_GRACE_ENV = "RECONCILER_ABSENT_RETIRE_GRACE"
+
+
+def _retired_file(root: Path) -> dict[str, Any]:
+    raw = json.loads((_bridge(root) / "bindings-retired.json").read_text(encoding="utf-8"))
+    return raw["retired"]
+
+
+def _alerts(root: Path) -> list[dict[str, Any]]:
+    d = root / "bridge_state" / "bridge_alerts"
+    if not d.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for p in sorted(d.glob("*.jsonl")):
+        out += [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    return out
+
+
+def _bind_confirmed(root: Path) -> tuple[BindingLifecycle, BindingRepository]:
+    lifecycle, repo = _lifecycle(root)
+    lifecycle.bind_confirm("loc-A", "DIG-A")
+    repo.save()
+    return lifecycle, repo
+
+
+# -- absence bookkeeping ----------------------------------------------------
+
+
+def test_note_absent_increments_and_retires_at_the_third_consecutive_404(
+    tmp_path: Path,
+) -> None:
+    """THREE consecutive 404s is the retirement threshold, and it must not move. A single
+    404 is exactly what a lagging index or a transient produces for an issue that DOES
+    exist, so absence has to be corroborated before a binding is soft-deleted."""
+    lifecycle, repo = _bind_confirmed(tmp_path)
+
+    lifecycle.note_absent("DIG-A")
+    assert repo.bindings["loc-A"]["absent_404_count"] == 1
+    assert lifecycle.is_retired("DIG-A") is False
+    lifecycle.note_absent("DIG-A")
+    assert repo.bindings["loc-A"]["absent_404_count"] == 2
+    assert lifecycle.is_retired("DIG-A") is False
+
+    lifecycle.note_absent("DIG-A")
+
+    assert lifecycle.is_retired("DIG-A") is True
+    assert "loc-A" not in repo.bindings, "retirement UNBINDS the local ticket"
+    assert "DIG-A" not in repo.reverse
+    assert _retired_file(tmp_path)["DIG-A"]["local_id"] == "loc-A"
+
+
+def test_clear_absent_resets_the_counter_after_a_successful_read(tmp_path: Path) -> None:
+    """A 200 means the issue is alive, so the corroboration restarts from zero — otherwise
+    three 404s spread across unrelated passes would eventually retire a live issue."""
+    lifecycle, repo = _bind_confirmed(tmp_path)
+    lifecycle.note_absent("DIG-A")
+    lifecycle.note_absent("DIG-A")
+
+    lifecycle.clear_absent("DIG-A")
+
+    assert repo.bindings["loc-A"]["absent_404_count"] == 0
+    lifecycle.note_absent("DIG-A")
+    lifecycle.note_absent("DIG-A")
+    assert lifecycle.is_retired("DIG-A") is False, "the reset must have restarted the count"
+
+
+def test_clear_absent_does_not_dirty_an_entry_with_no_absence(tmp_path: Path) -> None:
+    """No counter means nothing to reset; touching updated_at would churn the committed
+    file on every healthy pass."""
+    lifecycle, repo = _bind_confirmed(tmp_path)
+    before = dict(repo.bindings["loc-A"])
+
+    lifecycle.clear_absent("DIG-A")
+
+    assert repo.bindings["loc-A"] == before
+
+
+def test_note_absent_and_clear_absent_ignore_an_unbound_key(tmp_path: Path) -> None:
+    lifecycle, repo = _bind_confirmed(tmp_path)
+    before = (_bridge(tmp_path) / "bindings.json").read_bytes()
+
+    lifecycle.note_absent("DIG-UNKNOWN")
+    lifecycle.clear_absent("DIG-UNKNOWN")
+    repo.save()
+
+    assert (_bridge(tmp_path) / "bindings.json").read_bytes() == before
+
+
+def test_retirement_survives_a_reload_through_the_repository(tmp_path: Path) -> None:
+    """The tombstone and the unbinding must both be durable, or the next pass re-creates
+    the issue it just confirmed deleted."""
+    lifecycle, _ = _bind_confirmed(tmp_path)
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+
+    reloaded, repo2 = _lifecycle(tmp_path)
+
+    assert reloaded.is_retired("DIG-A") is True
+    assert reloaded.retired_key_for_local("loc-A") == "DIG-A"
+    assert reloaded.is_retired_local("loc-A") is True
+    assert "loc-A" not in repo2.bindings
+
+
+# -- the retirement grace is configurable, and parsed defensively -----------
+
+
+def test_retire_grace_env_override_is_honoured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The threshold is an ops knob. Its sourcing must stay byte-identical through the
+    extraction: a direct ambient read, not a config-seam lookup."""
+    monkeypatch.setenv(_RETIRE_GRACE_ENV, "1")
+    lifecycle, _ = _bind_confirmed(tmp_path)
+
+    lifecycle.note_absent("DIG-A")
+
+    assert lifecycle.is_retired("DIG-A") is True, "a grace of 1 must retire on the first 404"
+
+
+@pytest.mark.parametrize("raw", ["abc", "", "1.5", "-3"])
+def test_malformed_retire_grace_falls_back_to_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, raw: str
+) -> None:
+    """A typo'd ops value must NOT abort the pass — it degrades to the documented default
+    of 3, and any value below 1 is clamped to 1. This defensive parse is load-bearing:
+    aborting a reconcile on a bad env var would be a worse failure than ignoring it."""
+    monkeypatch.setenv(_RETIRE_GRACE_ENV, raw)
+    lifecycle, _ = _bind_confirmed(tmp_path)
+
+    lifecycle.note_absent("DIG-A")
+    lifecycle.note_absent("DIG-A")
+    retired_early = lifecycle.is_retired("DIG-A")
+    lifecycle.note_absent("DIG-A")
+
+    if raw == "-3":
+        assert retired_early is True, "a negative value clamps to a minimum of 1"
+    else:
+        assert retired_early is False, f"{raw!r} must fall back to the default of 3"
+        assert lifecycle.is_retired("DIG-A") is True
+
+
+# -- tombstones: suppression and the documented route back ------------------
+
+
+def test_retire_emits_an_alert_naming_the_binding(tmp_path: Path) -> None:
+    """A soft delete is invisible in the live store afterwards, so it must be loud."""
+    lifecycle, _ = _bind_confirmed(tmp_path)
+
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+
+    retired = [a for a in _alerts(tmp_path) if a.get("kind") == "binding-retired"]
+    assert len(retired) == 1
+    assert retired[0]["jira_key"] == "DIG-A"
+    assert retired[0]["local_id"] == "loc-A"
+
+
+def test_note_create_suppressed_alerts_and_names_the_remedy(tmp_path: Path) -> None:
+    """A suppression is work NOT done, and a silently-skipped create looks identical to a
+    healthy steady state. The alert must name the route back so an operator never has to
+    hand-edit the retired file."""
+    lifecycle, _ = _lifecycle(tmp_path)
+
+    lifecycle.note_create_suppressed("loc-A", "DIG-A")
+
+    rec = [a for a in _alerts(tmp_path) if a.get("kind") == "outbound-create-suppressed"]
+    assert len(rec) == 1
+    assert rec[0]["local_id"] == "loc-A"
+    assert rec[0]["jira_key"] == "DIG-A"
+    assert "unretire" in rec[0]["remedy"]
+
+
+def test_unretire_lifts_the_tombstone_from_both_the_set_and_the_file(tmp_path: Path) -> None:
+    """The documented route back. Without it, suppression would be a permanent dead end
+    escapable only by hand-editing bindings-retired.json."""
+    lifecycle, _ = _bind_confirmed(tmp_path)
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+    assert lifecycle.is_retired("DIG-A") is True
+
+    assert lifecycle.unretire("DIG-A") is True
+
+    assert lifecycle.is_retired("DIG-A") is False
+    assert lifecycle.retired_key_for_local("loc-A") is None
+    assert lifecycle.is_retired_local("loc-A") is False
+    assert "DIG-A" not in _retired_file(tmp_path)
+    reloaded, _ = _lifecycle(tmp_path)
+    assert reloaded.is_retired("DIG-A") is False, "the lift must be durable"
+
+
+def test_unretire_of_an_unretired_key_is_an_idempotent_noop(tmp_path: Path) -> None:
+    lifecycle, _ = _bind_confirmed(tmp_path)
+
+    assert lifecycle.unretire("DIG-NEVER-RETIRED") is False
+
+
+def test_unretire_emits_an_alert(tmp_path: Path) -> None:
+    lifecycle, _ = _bind_confirmed(tmp_path)
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+
+    lifecycle.unretire("DIG-A")
+
+    rec = [a for a in _alerts(tmp_path) if a.get("kind") == "binding-unretired"]
+    assert len(rec) == 1
+    assert rec[0]["jira_key"] == "DIG-A"
+
+
+def test_retiring_one_key_leaves_other_tombstones_intact(tmp_path: Path) -> None:
+    """The retired file is rewritten wholesale on each retirement, so a second retirement
+    must not drop the first."""
+    lifecycle, repo = _lifecycle(tmp_path)
+    lifecycle.bind_confirm("loc-A", "DIG-A")
+    lifecycle.bind_confirm("loc-B", "DIG-B")
+    repo.save()
+
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+    for _ in range(3):
+        lifecycle.note_absent("DIG-B")
+
+    assert set(_retired_file(tmp_path)) == {"DIG-A", "DIG-B"}
+    assert lifecycle.is_retired("DIG-A") and lifecycle.is_retired("DIG-B")
+    assert lifecycle.retired_key_for_local("loc-A") == "DIG-A"
+    assert lifecycle.retired_key_for_local("loc-B") == "DIG-B"
+
+
+def test_unretiring_one_key_leaves_other_tombstones_intact(tmp_path: Path) -> None:
+    lifecycle, repo = _lifecycle(tmp_path)
+    lifecycle.bind_confirm("loc-A", "DIG-A")
+    lifecycle.bind_confirm("loc-B", "DIG-B")
+    repo.save()
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+    for _ in range(3):
+        lifecycle.note_absent("DIG-B")
+
+    lifecycle.unretire("DIG-A")
+
+    assert lifecycle.is_retired("DIG-A") is False
+    assert lifecycle.is_retired("DIG-B") is True, "an unrelated tombstone must survive"
+    assert set(_retired_file(tmp_path)) == {"DIG-B"}
+    assert lifecycle.retired_key_for_local("loc-B") == "DIG-B"
+
+
+# -- comment identity: append-only and change-gated -------------------------
+
+
+def test_record_comment_id_persists_immediately(tmp_path: Path) -> None:
+    """Unlike the other capture operations this saves NOW (write-ahead): it is called on a
+    successful add_comment return, and the durable entry is what the outbound differ's
+    primary skip keys on, so a crash after the Jira post cannot re-post."""
+    lifecycle, _ = _lifecycle(tmp_path)
+
+    lifecycle.record_comment_id("hlc-1", "10001")
+
+    raw = json.loads((_bridge(tmp_path) / "bindings.json").read_text(encoding="utf-8"))
+    assert raw["comment_ids"] == {"hlc-1": "10001"}
+    assert lifecycle.comment_id_for("hlc-1") == "10001"
+    assert lifecycle.is_comment_mapped("hlc-1") is True
+
+
+def test_identical_re_record_performs_no_write_at_all(tmp_path: Path) -> None:
+    """Append-only and idempotent: a repeat must not WRITE, not merely produce equal bytes.
+
+    Counting writes is the only oracle that works here. `record_comment_id` stamps no
+    timestamp, so an unconditional save re-serializes byte-IDENTICAL content and a
+    before/after byte comparison passes either way — which is exactly the tautology
+    mutation exposed. The contract is "no save churn", i.e. no write, so the write is what
+    is counted.
+    """
+    lifecycle, repo = _lifecycle(tmp_path)
+    lifecycle.record_comment_id("hlc-1", "10001")
+    before = (_bridge(tmp_path) / "bindings.json").read_bytes()
+
+    writes: list[str] = []
+    real_save = type(repo).save
+
+    def counting_save(self: Any) -> None:
+        writes.append("save")
+        real_save(self)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(repo), "save", counting_save)
+        lifecycle.record_comment_id("hlc-1", "10001")
+        assert writes == [], "an identical re-record must not save"
+        lifecycle.record_comment_id("hlc-2", "10002")
+        assert writes == ["save"], "a genuinely new mapping must save exactly once"
+
+    assert (_bridge(tmp_path) / "bindings.json").read_bytes() != before
+    assert lifecycle.comment_id_for("hlc-1") == "10001"
+    assert lifecycle.comment_id_for("hlc-2") == "10002"
+
+
+def test_a_differing_id_for_a_known_key_overwrites_and_saves(tmp_path: Path) -> None:
+    """Characterized, NOT idealized: a DIFFERENT id for a known key OVERWRITES it.
+
+    The change-gate is equality-only — it short-circuits when the id matches and otherwise
+    assigns and saves. Verified against the pre-extraction implementation this epic
+    extracted from (RP-02 S1, `vivacious-widish-indianabat`): identical logic, so this
+    extraction preserves it.
+
+    The docstring on the reviewed base claimed "a key is never remapped to a different id",
+    which the code does not do. That sentence has been corrected in the moved docstring
+    rather than carried forward as a false statement, and no behavior was changed: making
+    the map genuinely append-only would be a behavior change needing its own ticket, and
+    an overwrite is plausibly wanted when a mirrored comment is recreated.
+    """
+    lifecycle, _ = _lifecycle(tmp_path)
+    lifecycle.record_comment_id("hlc-1", "10001")
+
+    lifecycle.record_comment_id("hlc-1", "99999")
+
+    assert lifecycle.comment_id_for("hlc-1") == "99999"
+    raw = json.loads((_bridge(tmp_path) / "bindings.json").read_text(encoding="utf-8"))
+    assert raw["comment_ids"]["hlc-1"] == "99999", "the overwrite is persisted"
+
+
+def test_comment_ids_are_coerced_to_strings(tmp_path: Path) -> None:
+    """Jira returns numeric ids in some payload shapes; the map is keyed and valued as
+    strings so a re-record with the other type is still recognized as identical."""
+    lifecycle, _ = _lifecycle(tmp_path)
+
+    lifecycle.record_comment_id(12345, 67890)  # type: ignore[arg-type]
+
+    assert lifecycle.comment_id_for("12345") == "67890"
+    assert lifecycle.is_comment_mapped("12345") is True
+
+
+def test_unmapped_comment_key_reads_as_none(tmp_path: Path) -> None:
+    lifecycle, _ = _lifecycle(tmp_path)
+
+    assert lifecycle.comment_id_for("hlc-absent") is None
+    assert lifecycle.is_comment_mapped("hlc-absent") is False
+
+
+def test_legacy_store_without_the_comment_map_is_readable_without_rewrite(
+    tmp_path: Path,
+) -> None:
+    """Old records predate the map entirely. Reading must not materialize it — an eager
+    rewrite would touch every store on upgrade."""
+    bridge = _bridge(tmp_path)
+    bridge.mkdir(parents=True)
+    legacy = {"version": 2, "bindings": {}, "reverse": {}}
+    (bridge / "bindings.json").write_text(json.dumps(legacy), encoding="utf-8")
+    before = (bridge / "bindings.json").read_bytes()
+
+    lifecycle, _ = _lifecycle(tmp_path)
+
+    assert lifecycle.comment_id_for("hlc-1") is None
+    assert lifecycle.is_comment_mapped("hlc-1") is False
+    assert (bridge / "bindings.json").read_bytes() == before, "a read must not rewrite"
+
+    lifecycle.record_comment_id("hlc-1", "10001")
+    raw = json.loads((bridge / "bindings.json").read_text(encoding="utf-8"))
+    assert raw["comment_ids"] == {"hlc-1": "10001"}, "the map is created on first write"
+
+
+# -- the fail-open / fail-closed asymmetry survives the move ---------------
+
+
+def test_corrupt_retired_file_fails_open_and_leaves_live_state_usable(
+    tmp_path: Path,
+) -> None:
+    """FAIL OPEN, in deliberate contrast to live state: a retired binding wrongly treated
+    as live costs one wasted GET (it re-404s and re-retires), never a duplicate write."""
+    bridge = _bridge(tmp_path)
+    bridge.mkdir(parents=True)
+    (bridge / "bindings.json").write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "bindings": {"loc-A": {"jira_key": "DIG-A"}},
+                "reverse": {"DIG-A": "loc-A"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    raw = "{corrupt retired"
+    (bridge / "bindings-retired.json").write_text(raw, encoding="utf-8")
+
+    lifecycle, repo = _lifecycle(tmp_path)
+
+    assert lifecycle.is_retired("DIG-A") is False
+    assert lifecycle.is_retired_local("loc-A") is False
+    assert repo.bindings["loc-A"]["jira_key"] == "DIG-A", "live state stays usable"
+    assert (bridge / "bindings-retired.json").read_text(encoding="utf-8") == raw
+
+
+def test_corrupt_live_state_still_fails_closed(tmp_path: Path) -> None:
+    """FAIL CLOSED. Degrading an unparseable live store to empty would report every ticket
+    unbound and mass-duplicate them in Jira — irreversible, where aborting is not."""
+    bridge = _bridge(tmp_path)
+    bridge.mkdir(parents=True)
+    (bridge / "bindings.json").write_text('{"bindings": {<<<<<<< HEAD\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="corrupt or contains git conflict"):
+        _lifecycle(tmp_path)
+
+
+def test_an_alert_write_failure_does_not_break_a_retirement(tmp_path: Path) -> None:
+    """Alerting is observability and must never break a sync pass. With the alert store's
+    parent path occupied by a regular file every append fails, and the retirement must
+    still complete and persist."""
+    lifecycle, _ = _bind_confirmed(tmp_path)
+    (tmp_path / "bridge_state").write_text("not a directory", encoding="utf-8")
+
+    for _ in range(3):
+        lifecycle.note_absent("DIG-A")
+
+    assert lifecycle.is_retired("DIG-A") is True
+    assert _retired_file(tmp_path)["DIG-A"]["local_id"] == "loc-A"
+    assert (tmp_path / "bridge_state").is_file()
+
+
+def test_unknown_fields_on_a_retired_entry_survive_a_second_retirement(
+    tmp_path: Path,
+) -> None:
+    """The retired file is rewritten wholesale, so fields another writer added to an
+    existing tombstone must not be dropped when a new one is appended."""
+    lifecycle, repo = _lifecycle(tmp_path)
+    lifecycle.bind_confirm("loc-B", "DIG-B")
+    repo.save_retired({"DIG-OLD": {"local_id": "loc-old", "future_field": {"keep": True}}})
+    lifecycle2, _ = _lifecycle(tmp_path)
+    lifecycle2.bind_confirm("loc-B", "DIG-B")
+
+    for _ in range(3):
+        lifecycle2.note_absent("DIG-B")
+
+    retired = _retired_file(tmp_path)
+    assert retired["DIG-OLD"]["future_field"] == {"keep": True}
+    assert retired["DIG-B"]["local_id"] == "loc-B"
