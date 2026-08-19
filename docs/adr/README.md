@@ -134,3 +134,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0095 — Data Center Markdown-to-wiki rendering is a segmenting, verify-then-fall-back renderer](0095-dc-segmenting-wiki-renderer.md)
 - [0097 — Many-to-many tracker projects](0097-many-to-many-tracker-projects.md)
 - [0098 — Operation-scoped configuration and provider bindings](0098-operation-scoped-config-and-provider-composition.md)
+- [0100 — Lazy CLI command and capability registry with canonical help](0100-cli-command-and-capability-registry.md)
