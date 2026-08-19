@@ -414,16 +414,13 @@ def write_path_retries() -> int:
     fail-fast-on-one-budget behaviour for CI/ops. An unparseable value falls back to the
     default rather than raising — a malformed knob must not break every write.
 
-    The name is spelled as a LITERAL here, not lifted to a constant: ``gen_env_registry``
-    only resolves string-literal keys, so a constant would ship this var undocumented."""
-    raw = os.environ.get("REBAR_LOCK_RETRIES")
-    if raw is None or not raw.strip():
-        return _WRITE_PATH_RETRIES
-    try:
-        value = int(raw.strip())
-    except ValueError:
-        return _WRITE_PATH_RETRIES
-    return max(0, min(value, _MAX_RETRIES))
+    Resolved through the owned config seam (:func:`rebar.config.resolve_lock_retries`)
+    rather than ``os.environ`` here; the signature is kept (the read is INTERNAL) so the
+    ``event_append`` / ``txn`` call sites that pass ``retries=write_path_retries()`` are
+    untouched."""
+    from rebar import config
+
+    return config.resolve_lock_retries(_WRITE_PATH_RETRIES, _MAX_RETRIES)
 
 
 def _retry_backoff_s(attempt: int) -> float:

@@ -105,9 +105,13 @@ def read_env_id(tracker: str | os.PathLike) -> str:
 
 
 def override_enabled() -> bool:
-    """True when the operator has explicitly acknowledged the re-identification."""
-    raw = os.environ.get("REBAR_ALLOW_ENV_REIDENTIFY", "")
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    """True when the operator has explicitly acknowledged the re-identification.
+
+    Resolved through the owned config seam
+    (:func:`rebar.config.resolve_allow_env_reidentify`) rather than ``os.environ`` here."""
+    from rebar import config
+
+    return config.resolve_allow_env_reidentify()
 
 
 def store_event_env_ids(

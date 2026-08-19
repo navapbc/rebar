@@ -213,8 +213,8 @@ def import_tickets(
     # Defer push: one final push instead of one per event (eliminates per-event
     # network round-trips). Restored in finally; the final push then honors the
     # caller's real sync.push policy.
-    _prev_push = os.environ.get("REBAR_SYNC_PUSH")
-    os.environ["REBAR_SYNC_PUSH"] = "off"
+    _prev_push = os.environ.get("REBAR_SYNC_PUSH")  # read-via: subprocess-env-control
+    os.environ["REBAR_SYNC_PUSH"] = "off"  # read-via: subprocess-env-control
     _import_scope = ExitStack()
     try:
         # Freeze user.name for every event-composition pass in this import. The
@@ -392,7 +392,7 @@ def import_tickets(
             if _prev_push is None:
                 os.environ.pop("REBAR_SYNC_PUSH", None)
             else:
-                os.environ["REBAR_SYNC_PUSH"] = _prev_push
+                os.environ["REBAR_SYNC_PUSH"] = _prev_push  # read-via: subprocess-env-control
 
     # One final push for the whole import (honors the restored sync.push policy).
     if created:

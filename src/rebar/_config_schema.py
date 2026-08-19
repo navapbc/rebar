@@ -366,7 +366,7 @@ class CompactConfig:
 
 @dataclass
 class SyncConfig:
-    push: str = "always"  # always | async | off
+    push: str = "always"  # always | async | off  # read-via: config.py resolve_push_mode()
     pull: str = "on"  # on | off
     remote: str = "origin"  # git remote the tickets branch syncs to (push/fetch/fsck)
 

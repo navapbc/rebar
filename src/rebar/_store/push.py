@@ -56,13 +56,9 @@ def _push_mode(root: str | None = None) -> str:
     bound = current_push_mode()
     if bound is not None:
         return bound
-    from rebar._store._push_policy import normalize_push_mode
-    from rebar.config import ConfigError, load_config
+    from rebar import config
 
-    try:
-        return normalize_push_mode(load_config(root=root).sync.push)
-    except ConfigError:
-        return "always"
+    return config.resolve_push_mode(root)
 
 
 # Bound git calls (notably the network `push`) so a stuck remote can't hang the

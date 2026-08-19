@@ -57,32 +57,16 @@ DEFAULT_REVERIFY_SECONDS = 0  # periodic integrity reverify: 0 = off (opt-in)
 DEFAULT_INTERVAL_SECONDS = 300  # background pass cadence
 
 
-def _read_snapshot_table(repo_root: str | None = None) -> dict:
-    """The merged ``[snapshot]`` config table (user < project), or ``{}`` if unreadable —
-    a broken core config degrades to env-only, never breaks the janitor."""
-    try:
-        from rebar import config as _root_config
-
-        return _root_config.read_reserved_section("snapshot", repo_root)
-    except Exception:  # noqa: BLE001 - degrade to env/defaults on any config error
-        return {}
-
-
-def _int_pref(table: dict, env_name: str, file_key: str, default: int) -> int:
-    """Resolve an int tunable: ``REBAR_GATE_*`` env > ``[snapshot]`` file key > default."""
-    raw = os.environ.get(env_name)
-    if raw is not None and raw.strip():
-        try:
-            return int(raw.strip())
-        except ValueError:
-            pass
-    fv = table.get(file_key)
-    if fv is not None and not isinstance(fv, bool):
-        try:
-            return int(fv)
-        except (TypeError, ValueError):
-            pass
-    return default
+def _default_tunables() -> dict[str, int]:
+    """The documented janitor defaults, keyed by :class:`JanitorConfig` field — passed to
+    the owned resolver so the ``[snapshot]``/env cutover keeps the defaults defined here."""
+    return {
+        "free_watermark_bytes": DEFAULT_FREE_WATERMARK_BYTES,
+        "grace_seconds": DEFAULT_GRACE_SECONDS,
+        "max_age_seconds": DEFAULT_MAX_AGE_SECONDS,
+        "reverify_seconds": DEFAULT_REVERIFY_SECONDS,
+        "interval_seconds": DEFAULT_INTERVAL_SECONDS,
+    }
 
 
 @dataclass
@@ -101,30 +85,13 @@ class JanitorConfig:
 
     @classmethod
     def from_env(cls, repo_root: str | None = None) -> JanitorConfig:
-        t = _read_snapshot_table(repo_root)
-        return cls(
-            free_watermark_bytes=_int_pref(
-                t,
-                "REBAR_GATE_FREE_WATERMARK_BYTES",
-                "free_watermark_bytes",
-                DEFAULT_FREE_WATERMARK_BYTES,
-            ),
-            grace_seconds=_int_pref(
-                t, "REBAR_GATE_GRACE_SECONDS", "grace_seconds", DEFAULT_GRACE_SECONDS
-            ),
-            max_age_seconds=_int_pref(
-                t, "REBAR_GATE_MAX_AGE_SECONDS", "max_age_seconds", DEFAULT_MAX_AGE_SECONDS
-            ),
-            reverify_seconds=_int_pref(
-                t, "REBAR_GATE_REVERIFY_SECONDS", "reverify_seconds", DEFAULT_REVERIFY_SECONDS
-            ),
-            interval_seconds=_int_pref(
-                t,
-                "REBAR_GATE_JANITOR_INTERVAL_SECONDS",
-                "interval_seconds",
-                DEFAULT_INTERVAL_SECONDS,
-            ),
-        )
+        """Resolve the tunables through the owned config seam
+        (:func:`rebar.config.resolve_janitor_tunables`): ``REBAR_GATE_*`` env >
+        ``[snapshot]`` config table > documented default. This dataclass RECEIVES the
+        resolved values rather than reading ``os.environ`` / the config file itself."""
+        from rebar import config
+
+        return cls(**config.resolve_janitor_tunables(_default_tunables(), repo_root))
 
 
 # ── store layout helpers ────────────────────────────────────────────────────────────

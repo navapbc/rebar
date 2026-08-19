@@ -428,11 +428,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "reads.py L118/185/345: legacy load_config() call outside a composition root.",
     ),
     (
-        "_io/import_ndjson.py",
-        "REBAR_SYNC_PUSH",
-        "import_ndjson.py L216/217/387: legacy env read of REBAR_SYNC_PUSH.",
-    ),
-    (
         "_logging.py",
         "REBAR_LOG_LEVEL",
         "_logging.py L93: legacy env read of REBAR_LOG_LEVEL.",
@@ -451,91 +446,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "_operation_config.py",
         "os.environ.get",
         "_operation_config.py L54: legacy dynamic env read (os.environ.get).",
-    ),
-    (
-        "_snapshot/git_fetch.py",
-        "REBAR_SNAPSHOT_STALL_ATTEMPTS",
-        "git_fetch.py L274: legacy env read of REBAR_SNAPSHOT_STALL_ATTEMPTS.",
-    ),
-    (
-        "_snapshot/git_fetch.py",
-        "REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC",
-        "git_fetch.py L218: legacy env read of REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC.",
-    ),
-    (
-        "_snapshot/git_fetch.py",
-        "REBAR_SNAPSHOT_STALL_WINDOW_SECONDS",
-        "git_fetch.py L222: legacy env read of REBAR_SNAPSHOT_STALL_WINDOW_SECONDS.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "REBAR_GATE_FREE_WATERMARK_BYTES",
-        "janitor.py L106: legacy env read of REBAR_GATE_FREE_WATERMARK_BYTES.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "REBAR_GATE_GRACE_SECONDS",
-        "janitor.py L112: legacy env read of REBAR_GATE_GRACE_SECONDS.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "REBAR_GATE_JANITOR_INTERVAL_SECONDS",
-        "janitor.py L121: legacy env read of REBAR_GATE_JANITOR_INTERVAL_SECONDS.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "REBAR_GATE_MAX_AGE_SECONDS",
-        "janitor.py L115: legacy env read of REBAR_GATE_MAX_AGE_SECONDS.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "REBAR_GATE_REVERIFY_SECONDS",
-        "janitor.py L118: legacy env read of REBAR_GATE_REVERIFY_SECONDS.",
-    ),
-    (
-        "_snapshot/janitor.py",
-        "os.environ.get",
-        "janitor.py L73: legacy dynamic env read (os.environ.get).",
-    ),
-    (
-        "_snapshot/repo_snapshot.py",
-        "REBAR_GATE_TMPDIR",
-        "repo_snapshot.py L119: legacy env read of REBAR_GATE_TMPDIR.",
-    ),
-    (
-        "_store/ensures.py",
-        "load_config",
-        "ensures.py L245: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "_store/env_identity.py",
-        "REBAR_ALLOW_ENV_REIDENTIFY",
-        "env_identity.py L109: legacy env read of REBAR_ALLOW_ENV_REIDENTIFY.",
-    ),
-    (
-        "_store/hlc.py",
-        "REBAR_HLC",
-        "hlc.py L61: legacy env read of REBAR_HLC.",
-    ),
-    (
-        "_store/hlc.py",
-        "REBAR_HLC_NOW",
-        "hlc.py L71: legacy env read of REBAR_HLC_NOW.",
-    ),
-    (
-        "_store/lock.py",
-        "REBAR_LOCK_RETRIES",
-        "lock.py L419: legacy env read of REBAR_LOCK_RETRIES.",
-    ),
-    (
-        "_store/project_ensures.py",
-        "load_config",
-        "project_ensures.py L69: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "_store/push.py",
-        "load_config",
-        "push.py L63: legacy load_config() call outside a composition root.",
     ),
     (
         "grounding/harness.py",

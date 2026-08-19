@@ -62,6 +62,14 @@ from rebar._config_sources import _map_legacy_env as _map_legacy_env
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
+from rebar._config_sources import (
+    resolve_allow_env_reidentify as resolve_allow_env_reidentify,
+)
+from rebar._config_sources import resolve_gate_tmpdir as resolve_gate_tmpdir
+from rebar._config_sources import resolve_janitor_tunables as resolve_janitor_tunables
+from rebar._config_sources import resolve_lock_retries as resolve_lock_retries
+from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits
+from rebar._config_sources import resolve_stall_attempts as resolve_stall_attempts
 from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
 from rebar._operation_config import SHADOW_ENV as SHADOW_ENV
 from rebar._operation_config import OperationSnapshot as OperationSnapshot
@@ -456,6 +464,24 @@ def compose_config() -> Config:
     calling ``load_config`` below the composition seam. A :class:`ConfigError`
     propagates (fail-closed startup), exactly as a direct ``load_config`` would."""
     return load_config()
+
+
+def resolve_push_mode(root: str | os.PathLike[str] | None = None) -> str:
+    """Outbound tickets-branch push policy, resolved LIVE per call: ``sync.push`` (env
+    ``REBAR_SYNC_PUSH`` or a config file) normalized to ``always`` | ``async`` | ``off``;
+    a malformed config falls back to ``always`` so a bad config never silently disables
+    the auto-push. Owned seam for :func:`rebar._store.push._push_mode`.
+
+    LIVE per call is load-bearing (NOT composed once and threaded): a bulk
+    :func:`rebar._io.import_ndjson` toggles ``REBAR_SYNC_PUSH=off`` in the process env
+    around its interior writes to defer per-event pushes, then restores it for one final
+    push — a compose-once value would stop observing that mutation and break the defer."""
+    from rebar._store._push_policy import normalize_push_mode
+
+    try:
+        return normalize_push_mode(load_config(root=root).sync.push)
+    except ConfigError:
+        return "always"
 
 
 def read_secret_env(env_name: str) -> str:
