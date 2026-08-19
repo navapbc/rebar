@@ -329,3 +329,192 @@ def test_background_janitor_runs_and_stops(store, repo, monkeypatch):
     thread.join(timeout=5)
     assert not thread.is_alive()
     assert len(calls) >= 1
+
+
+# --------------------------------------------------------------------------------------
+# Bug 3a52 (masonic-abeyant-stagbeetle) — the free-space watermark must scale with the
+# VOLUME, so it can never sit ABOVE the operator's disk-pressure alarm floor.
+#
+# On the review-bot host the root volume is 30 GiB and `rebar-root-disk-pressure`
+# (infra/terraform/monitoring_autodeploy.tf) alarms above 85% used = 4.5 GiB free. The
+# absolute 2-GiB DEFAULT_FREE_WATERMARK_BYTES is only crossed at 93.3% used, so the
+# janitor — the only thing that bounds /tmp/rebar-gate-snapshots — provably cannot engage
+# until after the alarm has already breached. These cases pin the ordering the runbook
+# states (infra/runbooks/review-bot-ops.md: reclaim, then alarm as the backstop).
+# --------------------------------------------------------------------------------------
+_GIB = 1024**3
+_ROOT_TOTAL = 30 * _GIB  # the review-bot host's root volume
+_ALARM_FLOOR_FREE = int(_ROOT_TOTAL * 0.15)  # 85% used — the CloudWatch threshold
+_OBSERVED_PEAK_FREE = int(_ROOT_TOTAL * 0.10)  # 90% used — reached on 2026-08-17
+
+
+@pytest.fixture
+def volume_30gib(monkeypatch):
+    """Make the janitor see a 30-GiB volume, matching the review-bot host's root disk."""
+    import shutil as _shutil
+
+    real = _shutil.disk_usage
+
+    def fake(path):
+        usage = real(path)
+        return type(usage)(_ROOT_TOTAL, _ROOT_TOTAL - usage.free, usage.free)
+
+    monkeypatch.setattr(janitor.shutil, "disk_usage", fake)
+    return _ROOT_TOTAL
+
+
+def _sparse_entry(store: Path, name: str, size: int, mtime: float) -> Path:
+    """An entry whose accounted size is ``size`` without writing ``size`` real bytes
+    (``cache.entry_size`` sums ``st_size``, so a sparse file is measured at full size)."""
+    entry = store / name
+    entry.mkdir(parents=True, exist_ok=True)
+    with open(entry / "blob", "wb") as fh:
+        fh.truncate(size)
+    os.utime(entry, (mtime, mtime))
+    return entry
+
+
+def test_watermark_evicts_at_the_alarm_floor_on_a_30gib_volume(store, repo, volume_30gib):
+    """At 85% used — the exact point the operator's alarm fires — a cold entry MUST be
+    reclaimed. Today the 2-GiB absolute watermark leaves 4.5 GiB of free space looking
+    healthy, so the pass evicts nothing and the disk keeps climbing."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=20, grace_seconds=100, max_age_seconds=10**9)
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=_ALARM_FLOOR_FREE)
+
+    assert res.evicted >= 1, (
+        "at 85% used on a 30-GiB volume the janitor must reclaim BEFORE the "
+        "rebar-root-disk-pressure alarm fires, not after"
+    )
+    assert not entry.exists()
+
+
+def test_watermark_evicts_at_the_observed_incident_peak(store, repo, volume_30gib):
+    """90% used is the peak the 2026-08-17 incident actually reached. The janitor ran
+    every 300s throughout and evicted nothing."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=20, grace_seconds=100, max_age_seconds=10**9)
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=_OBSERVED_PEAK_FREE)
+
+    assert res.evicted >= 1
+    assert not entry.exists()
+
+
+def test_reclaim_continues_past_the_trigger_to_the_hysteresis_target(store, volume_30gib):
+    """Hysteresis: a triggered pass must reclaim past the trigger up to the target, so it
+    does not sit on the threshold and re-fire on every 300s pass.
+
+    30-GiB volume, ``free_watermark_pct=20`` -> trigger 6.0 GiB free, target 7.5 GiB free
+    (trigger + RECLAIM_TARGET_MARGIN_PCT). Starting at 5.5 GiB free with three 1-GiB
+    entries: evicting one reaches 6.5 GiB, which already clears the TRIGGER, so a
+    trigger-only implementation stops at 1. Reaching the TARGET needs a second eviction.
+    """
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=20, grace_seconds=100, max_age_seconds=10**9)
+    for i in range(3):
+        _sparse_entry(store, f"{i:040x}", _GIB, now - 5000 - i)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=int(5.5 * _GIB))
+
+    assert res.evicted == 2, (
+        "a triggered pass must keep reclaiming until the hysteresis target is reached "
+        f"(expected 2 evictions to go 5.5 GiB -> 7.5 GiB free, got {res.evicted})"
+    )
+
+
+def test_volume_relative_watermark_still_honours_the_grace_window(store, volume_30gib):
+    """The new trigger must not override the recency protection: an entry touched inside
+    grace_seconds stays, even at 90% used."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=20, grace_seconds=100, max_age_seconds=10**9)
+    recent = _sparse_entry(store, "b" * 40, 4096, now - 1)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=_OBSERVED_PEAK_FREE)
+
+    assert recent.exists(), "an in-grace entry must survive the volume-relative trigger"
+    assert res.skipped_grace >= 1
+
+
+def test_watermark_pct_zero_preserves_the_absolute_only_behaviour(store, repo, volume_30gib):
+    """The relative term is off by default: with free_watermark_pct=0 the trigger is the
+    absolute watermark alone, so 90% used on a 30-GiB volume still evicts nothing."""
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=0, grace_seconds=100, max_age_seconds=10**9)
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=_OBSERVED_PEAK_FREE)
+
+    assert res.evicted == 0
+    assert entry.exists()
+
+
+def test_free_watermark_pct_tunable_survives_int_resolution(monkeypatch, tmp_path):
+    """The knob resolves through the existing int seam. A float-typed knob would be
+    truncated to 0 by _snapshot_int and silently disable the whole fix."""
+    monkeypatch.setenv("REBAR_GATE_FREE_WATERMARK_PCT", "20")
+    cfg = janitor.JanitorConfig.from_env(str(tmp_path))
+    assert cfg.free_watermark_pct == 20
+
+
+def test_free_watermark_pct_defaults_to_off(monkeypatch, tmp_path):
+    monkeypatch.delenv("REBAR_GATE_FREE_WATERMARK_PCT", raising=False)
+    cfg = janitor.JanitorConfig.from_env(str(tmp_path))
+    assert cfg.free_watermark_pct == janitor.DEFAULT_FREE_WATERMARK_PCT == 0
+
+
+def test_watermark_pct_is_clamped_so_it_cannot_demand_the_whole_volume(store, repo, volume_30gib):
+    """An out-of-range percentage must not turn the janitor into a permanent shredder.
+
+    ``free_watermark_pct`` is headroom to KEEP FREE, but "80" reads naturally as "reclaim at
+    80% used" — the inverse. Unclamped, that asks for 24 GiB free on a 30-GiB volume and
+    ``free < trigger`` is then true at every plausible free-space level, so every pass evicts
+    the entire store and every gate re-materializes its snapshot from scratch. At >=100 the
+    trigger exceeds the volume outright. The clamp keeps the knob monotonic and bounded.
+    """
+    now = time.time()
+    cfg = janitor.JanitorConfig(free_watermark_pct=100, grace_seconds=100, max_age_seconds=10**9)
+    trigger, target = janitor._space_thresholds(_ROOT_TOTAL, cfg)
+    assert trigger < _ROOT_TOTAL, "the trigger must never demand the whole volume be free"
+    assert target < _ROOT_TOTAL, "the hysteresis target must never demand the whole volume"
+
+    # 20 GiB free on a 30-GiB volume is 33% used — nothing should be reclaimed there.
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=20 * _GIB)
+    assert res.evicted == 0, "a healthy 33%-used volume must not be reclaimed"
+    assert entry.exists()
+
+
+def test_absolute_floor_still_governs_when_it_is_the_larger_term(store, repo, monkeypatch):
+    """The two watermark terms combine with ``max``, so the volume-relative term must never
+    WEAKEN the absolute floor — the direction the incident case does not exercise.
+
+    On a 10-GiB volume ``free_watermark_pct=10`` is only 1 GiB, below the 2-GiB absolute
+    floor, so the floor governs and 1.5 GiB free (85% used) still reclaims.
+    """
+    import shutil as _shutil
+
+    real = _shutil.disk_usage
+    total = 10 * _GIB
+    monkeypatch.setattr(
+        janitor.shutil,
+        "disk_usage",
+        lambda p: type(real(p))(total, total - real(p).free, real(p).free),
+    )
+    now = time.time()
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=2 * _GIB,
+        free_watermark_pct=10,
+        grace_seconds=100,
+        max_age_seconds=10**9,
+    )
+    trigger, _target = janitor._space_thresholds(total, cfg)
+    assert trigger == 2 * _GIB, "the larger (absolute) term must win"
+
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 50, mtime=now - 5000)
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=int(1.5 * _GIB))
+    assert res.evicted >= 1
+    assert not entry.exists()
