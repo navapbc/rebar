@@ -364,23 +364,15 @@ def test_corrupt_retired_state_fails_open_alerts_and_preserves_the_file(
     assert "binding-retired-file-corrupt" in kinds
 
 
-def test_corrupt_retired_alert_routes_through_the_dedup_check_per_pass(
+def test_corrupt_retired_alert_dedupes_across_passes(
     tmp_path: Path,
 ) -> None:
-    """Each pass consults the dedup gate before appending, and appends one record.
+    """A repeated corrupt-retired condition appends ONE record, deduped across passes.
 
-    Characterized, NOT idealized. ``_alert``'s docstring calls this a "deduped" alert and
-    it does consult ``alert_store.is_deduped`` first — but the record it builds carries no
-    ``timestamp_ns``, and ``is_deduped`` compares ``now - rec.get("timestamp_ns", 0)``
-    against a 24h window, so the comparison is always false and the suppression never
-    fires. A second pass over the same corrupt file therefore appends a SECOND record.
-
-    A differential probe confirmed ``BindingStore`` on the reviewed base behaves
-    identically (2 records, no ``timestamp_ns``), so this is the behavior RP-02 S1 must
-    preserve byte-for-byte; asserting one record here would have made the suite demand a
-    behavior change that this extraction is explicitly forbidden from making. The
-    unstamped-timestamp gap is a real latent defect and is filed separately rather than
-    fixed inside a pure-extraction slice.
+    ``alert_store.append`` stamps ``timestamp_ns`` centrally, so the second
+    ``BindingRepository`` pass over the same corrupt ``bindings-retired.json`` finds the
+    first record inside the 24h window and suppresses its duplicate — the dedup the
+    ``_alert`` docstring always promised (bug 8384). The stored record carries the stamp.
     """
     tracker = _seed(tmp_path, doc=_binding_doc(), raw_retired="{corrupt")
 
@@ -388,10 +380,10 @@ def test_corrupt_retired_alert_routes_through_the_dedup_check_per_pass(
     BindingRepository(tracker)
 
     corrupt = [r for r in _alert_lines(tmp_path) if r.get("kind") == "binding-retired-file-corrupt"]
-    assert len(corrupt) == 2
-    assert all(r["key"] == "retired-file-corrupt" for r in corrupt)
-    assert all(r["resolved"] is False for r in corrupt)
-    assert all("timestamp_ns" not in r for r in corrupt)
+    assert len(corrupt) == 1
+    assert corrupt[0]["key"] == "retired-file-corrupt"
+    assert corrupt[0]["resolved"] is False
+    assert isinstance(corrupt[0]["timestamp_ns"], int)
 
 
 # ---------------------------------------------------------------------------
