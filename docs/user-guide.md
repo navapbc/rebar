@@ -360,8 +360,10 @@ the review or if the recorded verdict was not a signable `PASS`.
 
 `rebar claim <id> --force[=<reason>]` bypasses any enabled start-work gate (e.g.
 plan-review) — not just plan-review specifically, but whatever gate is configured to run
-on claim, now or in the future. `--force` is CLI-only: it is not exposed over MCP (an MCP
-client always goes through the configured gate).
+on claim, now or in the future. `--force` is available on every surface — CLI, the library,
+and MCP (`claim_ticket` takes a reason-bearing `force`); it is audited not by hiding it from
+any surface but by the **absence of a signed attestation** (a forced claim records no
+certification, so a project enforces the gate by checking for that certification in CI).
 
 Finally, **validate** is a repo-wide health check. It takes **no ticket id** — it
 scans the whole store and returns a 1–5 health score with findings (orphans, cycles,
