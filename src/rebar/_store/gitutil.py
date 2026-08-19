@@ -1,14 +1,21 @@
 """One shared ``git`` subprocess wrapper.
 
-A leaf helper (stdlib only — ``os``/``subprocess``; no module-level ``rebar.*``
-imports, but two deferred in-function imports of ``_resolve_tracker_git_dir`` from
-``rebar._commands.fsck``) that consolidates the dozen hand-rolled ``_git()`` wrappers that had
+A leaf helper (stdlib only at module level — no ``rebar.*`` import at all) that
+consolidates the dozen hand-rolled ``_git()`` wrappers that had
 drifted into a different signature/return/error contract each. Every wrapper ran
 the identical shape underneath — ``subprocess.run(["git", "-C", cwd, *args],
 capture_output=True, text=True, …)`` — so :func:`run_git` is that shape once, and
 each call site keeps its OWN return/error contract by adapting the returned
 :class:`subprocess.CompletedProcess` locally (inspect ``returncode``/``stdout``,
 raise its own exception, translate a timeout, …).
+
+It also owns the tracker's shared FILESYSTEM primitives — ``_resolve_tracker_git_dir``,
+``_ticket_dirs`` and ``_dir_is_archived``. They previously lived in
+``rebar._commands.fsck_repair``, which inverted the layering: this store-layer module had to
+defer-import a command-layer *repair* module to answer 'where is the tracker's git dir', and
+seven consumers reached into 'repair' for helpers that have nothing to do with repairing
+(ticket b432-c9dc-c1b4-4a45). They are stdlib-only here; ``_dir_is_archived``'s reducer import
+stays function-local so this module keeps its no-module-level-``rebar.*`` property.
 
 NEVER ``shell=True`` — argv is a list, so a git argument can never be reinterpreted
 by a shell. This helper does not redact: it returns the ``CompletedProcess``
@@ -52,6 +59,60 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
+
+
+# ── Tracker filesystem primitives ────────────────────────────────────────────
+# Shared by fsck's diagnostic + repair paths, compact, bridge_repair,
+# tracker_maintenance and this module's own lock handling. Pure filesystem: no git
+# subprocess, no rebar module-level import (ticket b432-c9dc-c1b4-4a45).
+
+
+def _resolve_tracker_git_dir(tracker: str) -> str:
+    tracker_git = os.path.join(tracker, ".git")
+    if os.path.isfile(tracker_git):
+        with open(tracker_git, encoding="utf-8") as f:
+            gitdir = f.read().strip()
+        gitdir = gitdir[len("gitdir: ") :] if gitdir.startswith("gitdir: ") else gitdir
+        if not gitdir.startswith("/"):
+            gitdir = os.path.join(tracker, gitdir)
+        return gitdir
+    if os.path.isdir(tracker_git):
+        return tracker_git
+    return ""
+
+
+def _dir_is_archived(ticket_path: str) -> bool:
+    """True only when the ``.archived`` marker exists AND the event log net-confirms archival.
+
+    The marker is a fast-path cache, never the decision: a stale marker (reverted archive, or
+    a marker written without an ARCHIVED event) must not hide the ticket from store walks, so
+    the log check (:func:`rebar.reducer._api._is_net_archived` — ARCHIVED uuids minus
+    REVERT-targeted uuids) always confirms before a dir is skipped.
+
+    The reducer import is deliberately function-local: it keeps this module free of any
+    module-level ``rebar.*`` import, so no consumer can create an import cycle through it."""
+    if not os.path.exists(os.path.join(ticket_path, ".archived")):
+        return False
+    from rebar.reducer._api import _is_net_archived
+
+    return _is_net_archived(ticket_path)
+
+
+def _ticket_dirs(tracker: str, *, include_archived: bool = False) -> list[str]:
+    """The shared store-walk iterator: sorted ticket dirs, ACTIVE-only by default.
+
+    Skips hidden dirs (.git, .bridge_state, …): the bash `"$TRACKER_DIR"/*/` glob never
+    matched dot-dirs, and ticket ids never start with '.'. Archived tickets are excluded
+    unless ``include_archived`` — an archive is terminal (the fold at archive time leaves no
+    unfolded tail), so maintenance walks cost store ACTIVITY, not store history."""
+    dirs = sorted(
+        d
+        for d in os.listdir(tracker)
+        if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
+    )
+    if include_archived:
+        return dirs
+    return [d for d in dirs if not _dir_is_archived(os.path.join(tracker, d))]
 
 
 # raw-git-ok: locked store seam internal
@@ -212,8 +273,6 @@ _STORE_GIT_LOCK_POLL_S = 0.05
 def _store_git_lock_path(tracker: str) -> str | None:
     """The per-store advisory lock file path (inside the tracker's git dir, like git's own
     locks — never tracked), or ``None`` when *tracker* is not a git repo."""
-    from rebar._commands.fsck import _resolve_tracker_git_dir
-
     git_dir = _resolve_tracker_git_dir(tracker)
     if not git_dir:
         return None
@@ -286,7 +345,7 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
     """Remove the tracker's git ``index.lock`` ONLY IF provably stale (mtime age >
     ``_INDEX_LOCK_STALE_S``). Best-effort and safe: a young/live lock (age <= threshold,
     or unstat-able, or absent) is LEFT in place — removing a lock a live peer holds can
-    corrupt the index. Reuses fsck's git-dir resolution so the same lock path is meant.
+    corrupt the index. Uses the shared git-dir resolution so the same lock path is meant.
 
     ``force=True`` bypasses the age gate: the caller HOLDS the exclusive store write lock, so
     no live rebar peer can hold ``index.lock`` — any present lock is provably an orphan left by
@@ -295,8 +354,6 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
     otherwise wedge every write for the full 300s threshold (the Mode B catastrophic cascade).
     The device+inode identity re-validation below is STILL applied under force, so a TOCTOU
     replacement is never removed."""
-    from rebar._commands.fsck import _resolve_tracker_git_dir
-
     git_dir = _resolve_tracker_git_dir(tracker)
     if not git_dir:
         return

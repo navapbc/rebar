@@ -28,10 +28,7 @@ import time
 
 from rebar._commands.fsck_authorship import EnvAuthorshipTally
 from rebar._commands.fsck_repair import (
-    _dir_is_archived,
     _is_stale_channel_snapshot,
-    _resolve_tracker_git_dir,
-    _ticket_dirs,
 )
 from rebar._commands.fsck_repair import (
     is_snapshot_orphan as _is_snapshot_orphan,
@@ -43,7 +40,12 @@ from rebar._commands.fsck_repair import (
     repair_or_plan as _repair_or_plan,
 )
 from rebar._commands.fsck_tracker_health import _tracker_health
-from rebar._store.gitutil import _reclaim_if_stale_index_lock
+from rebar._store.gitutil import (
+    _dir_is_archived,
+    _reclaim_if_stale_index_lock,
+    _resolve_tracker_git_dir,
+    _ticket_dirs,
+)
 from rebar.reducer import reduce_ticket
 from rebar.reducer._cache import is_active_event
 

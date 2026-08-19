@@ -247,10 +247,10 @@ def _scan_snapshot_state(
     is foldable at horizon 0, so any ticket with events is selected.
 
     Walks ACTIVE tickets only by default, via the shared iterator
-    (:func:`rebar._commands.fsck_repair._ticket_dirs`): an archived ticket was terminally
+    (:func:`rebar._store.gitutil._ticket_dirs`): an archived ticket was terminally
     folded at archive time, so re-scanning it is pure history cost. ``include_archived``
     restores the full walk (the migration door for tickets archived before the fold existed)."""
-    from rebar._commands.fsck_repair import _ticket_dirs
+    from rebar._store.gitutil import _ticket_dirs
 
     needs: list[str] = []
     rest = 0

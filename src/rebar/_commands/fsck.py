@@ -6,8 +6,10 @@ themselves live in leaves it calls, one way only:
 * ``fsck_scan`` — the store walk and the per-ticket validators (checks 1–4, 5);
 * ``fsck_tracker_health`` — the tracker-level checks (4.5–4.7, 4.9);
 * ``fsck_authorship`` — the per-env authorship tally (4.8);
-* ``fsck_repair`` — the mutating ``--repair`` surface, plus the two filesystem primitives
-  (``_ticket_dirs``, ``_resolve_tracker_git_dir``) the diagnostics share.
+* ``fsck_repair`` — the mutating ``--repair`` surface.
+
+The filesystem primitives the diagnostics share (``_ticket_dirs``, ``_resolve_tracker_git_dir``)
+live in :mod:`rebar._store.gitutil`, not under ``repair`` (ticket b432-c9dc-c1b4-4a45).
 
 Text mode emits tagged lines + a summary; ``--output json`` derives
 ``{issues:[{kind,ticket_id?,filename?,detail}], fixed[], issue_count}`` from the SAME text via a
@@ -15,9 +17,10 @@ regex transform (kept identical so text and JSON never drift). Exit 0 = no issue
 found.
 
 The leaf symbols below are re-imported and re-exported so ``fsck.<symbol>`` attribute access
-keeps resolving for the callers that bind to it — ``_store/gitutil`` and ``fsck_recover``
-(``_resolve_tracker_git_dir``), ``tracker_maintenance`` (``foreign_store_path_list``), and the
-fsck tests (``_scan``, ``_check_snapshot``, ``_tracker_sync_status``, ``_foreign_store_paths``).
+keeps resolving for the callers that bind to it — ``tracker_maintenance``
+(``foreign_store_path_list``) and the fsck tests (``_scan``, ``_check_snapshot``,
+``_tracker_sync_status``, ``_foreign_store_paths``, and ``_resolve_tracker_git_dir`` /
+``_ticket_dirs``, which several store tests import from here).
 """
 
 from __future__ import annotations
@@ -39,8 +42,6 @@ from rebar._commands.fsck_repair import (  # noqa: F401
     _repair_plan,
     _repair_run,
     _repair_ticket,
-    _resolve_tracker_git_dir,
-    _ticket_dirs,
 )
 from rebar._commands.fsck_scan import _check_snapshot, _scan  # noqa: F401
 from rebar._commands.fsck_tracker_health import (  # noqa: F401
@@ -52,6 +53,10 @@ from rebar._commands.fsck_tracker_health import (  # noqa: F401
 )
 from rebar._engine_support.output import OutputFormatError, parse_output
 from rebar._store import compat
+from rebar._store.gitutil import (  # noqa: F401
+    _resolve_tracker_git_dir,
+    _ticket_dirs,
+)
 
 _STRUCTURED_KINDS = {
     "corrupt",

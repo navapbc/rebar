@@ -17,8 +17,7 @@ import os
 import subprocess
 import sys
 
-from rebar._commands.fsck import _resolve_tracker_git_dir
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import _resolve_tracker_git_dir, run_git
 
 _TICKET_COMMIT_RE = (
     r"^ticket: (CREATE|STATUS|COMMENT|LINK|UNLINK|EDIT|FILE_IMPACT|VERIFY_COMMANDS|"
