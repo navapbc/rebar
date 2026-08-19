@@ -340,3 +340,194 @@ def test_a_store_predating_the_fields_degrades_instead_of_raising(tmp_path: Path
         _push(ctx)
     assert client.gets == []
     assert ctx.synced_fields["loc-1"]["description"] == _WIRE
+
+
+# ===========================================================================
+# RP-02 S2 T3 (morose-selfaware-unicorn) — the narrow rich-emission seam.
+#
+# Production reaches a binding entry through the SHALLOW `all_bindings()` query
+# and mutates it in place. That works only because the outer copy shares inner
+# entries, and it bypasses lifecycle policy entirely. This adds a named facade
+# operation as the supported mutation seam. The caller cutover is RP-02 S3 T3.
+#
+# The oracle is DIFFERENTIAL: the new operation must agree with the legacy
+# sequence on hash, counter and persisted bytes, for changed / unchanged /
+# missing input. Critically it must perform NO save of its own — the production
+# caller never saves per emit and relies on the pass's later unconditional save,
+# so adding one would be write amplification, not parity.
+# ===========================================================================
+
+import json as _json  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+from typing import Any as _Any  # noqa: E402
+
+import pytest as _pytest  # noqa: E402
+
+from rebar_reconciler import peer_state as _ps  # noqa: E402
+from rebar_reconciler.binding_store import BindingStore as _Store  # noqa: E402
+
+
+def _tracker_dir(root: _Path) -> _Path:
+    return root / ".tickets-tracker"
+
+
+def _live(root: _Path) -> _Path:
+    return _tracker_dir(root) / ".bridge_state" / "bindings.json"
+
+
+def _bound_store(root: _Path) -> _Store:
+    store = _Store(_tracker_dir(root))
+    store.bind_confirm("loc-A", "DIG-A")
+    store.save()
+    return store
+
+
+def _legacy_note(store: _Store, local_id: str, wire: _Any) -> int | None:
+    """The sequence production runs today: shallow query, then mutate in place."""
+    entry = store.all_bindings().get(local_id)
+    if not isinstance(entry, dict):
+        return None
+    return _ps.note_rich_emit(entry, wire)
+
+
+def test_narrow_operation_matches_the_legacy_counter_progression(tmp_path: _Path) -> None:
+    """0 on a first push, then 1, then 2 for the same wire — and the equality threshold the
+    caller compares against is reached at exactly the same emit as before."""
+    legacy_root, new_root = tmp_path / "legacy", tmp_path / "new"
+    legacy, new = _bound_store(legacy_root), _bound_store(new_root)
+    wire = {"type": "doc", "content": [{"text": "hello"}]}
+
+    legacy_counts = [_legacy_note(legacy, "loc-A", wire) for _ in range(3)]
+    new_counts = [new.note_rich_emit("loc-A", wire) for _ in range(3)]
+
+    assert legacy_counts == [0, 1, 2]
+    assert new_counts == legacy_counts
+    assert new_counts[-1] == _ps.RICH_REEMIT_OBSERVE_AT
+
+
+def test_narrow_operation_persists_the_same_bytes_as_the_legacy_sequence(
+    tmp_path: _Path,
+) -> None:
+    """Byte equivalence is asserted after ONE save, not per emit: neither path saves during
+    emission, so the comparison is 'same state, then the pass's single save'."""
+    legacy_root, new_root = tmp_path / "legacy", tmp_path / "new"
+    legacy, new = _bound_store(legacy_root), _bound_store(new_root)
+    wire = "h1. Heading\n\nbody"
+
+    for _ in range(2):
+        _legacy_note(legacy, "loc-A", wire)
+        new.note_rich_emit("loc-A", wire)
+    legacy.save()
+    new.save()
+
+    assert _live(new_root).read_bytes() == _live(legacy_root).read_bytes()
+    entry = _json.loads(_live(new_root).read_text(encoding="utf-8"))["bindings"]["loc-A"]
+    assert entry["rich_sha"] == _ps.rich_sha(wire)
+    assert entry["rich_reemit"] == 1
+
+
+def test_a_changed_wire_resets_the_counter_and_rewrites_the_digest(tmp_path: _Path) -> None:
+    """Change-gated in BOTH directions: a genuinely edited body must not inherit the previous
+    body's re-emit history, or an edit would be mistaken for a non-converging loop."""
+    store = _bound_store(tmp_path)
+    store.note_rich_emit("loc-A", "first")
+    store.note_rich_emit("loc-A", "first")
+
+    assert store.note_rich_emit("loc-A", "second") == 0
+    store.save()
+
+    entry = _json.loads(_live(tmp_path).read_text(encoding="utf-8"))["bindings"]["loc-A"]
+    assert entry["rich_sha"] == _ps.rich_sha("second")
+    assert "rich_reemit" not in entry, "a differing wire clears the counter, absent means zero"
+
+
+def test_a_converging_body_never_stores_the_counter(tmp_path: _Path) -> None:
+    """Epic 0303 churn discipline: a body pushed once and never again keeps the count at 0,
+    so `rich_reemit` is never written and a no-op pass stays at zero changed entries."""
+    store = _bound_store(tmp_path)
+
+    assert store.note_rich_emit("loc-A", "converged") == 0
+    store.save()
+
+    entry = _json.loads(_live(tmp_path).read_text(encoding="utf-8"))["bindings"]["loc-A"]
+    assert "rich_reemit" not in entry
+
+
+def test_a_missing_binding_is_nonfatal_and_distinguishable(tmp_path: _Path) -> None:
+    """Today's caller resolves the entry and simply returns when it is absent. The operation
+    must be nonfatal and return something a caller can tell apart from a count — 0 would be
+    read as 'first push of this wire' and trigger real work for a binding that is not there."""
+    store = _bound_store(tmp_path)
+
+    result = store.note_rich_emit("loc-MISSING", "wire")
+
+    assert result is None
+    assert result != 0
+    assert _legacy_note(store, "loc-MISSING", "wire") is None
+
+
+def test_the_operation_performs_no_save_at_either_layer(tmp_path: _Path) -> None:
+    """No per-emit save on ANY path, at EITHER layer.
+
+    The production caller mutates in place and relies on the pass's later unconditional
+    save, so introducing a save here would be write amplification — a whole-store rewrite
+    plus fsync per description push — rather than parity.
+
+    Both the facade and the repository save are counted. Watching only the facade was a
+    mutation-proven tautology: the policy owner holds the repository directly, so a
+    `self._repo.save()` slipped into the operation never touches `BindingStore.save` and
+    was invisible to the narrower spy.
+    """
+    from rebar_reconciler.binding_repository import BindingRepository
+
+    store = _bound_store(tmp_path)
+    saves: list[str] = []
+    real_store_save = type(store).save
+    real_repo_save = BindingRepository.save
+
+    def store_save(self: _Any) -> None:
+        saves.append("facade")
+        real_store_save(self)
+
+    def repo_save(self: _Any) -> None:
+        saves.append("repository")
+        real_repo_save(self)
+
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(type(store), "save", store_save)
+        mp.setattr(BindingRepository, "save", repo_save)
+        store.note_rich_emit("loc-A", "w1")
+        store.note_rich_emit("loc-A", "w1")
+        store.note_rich_emit("loc-A", "w2")
+        store.note_rich_emit("loc-MISSING", "w3")
+
+    assert saves == [], f"the narrow operation must never save; the pass owns that (got {saves})"
+
+
+def test_all_bindings_copy_depth_is_unchanged_by_the_new_seam(tmp_path: _Path) -> None:
+    """The narrow operation is ADDITIVE. `all_bindings()` stays shallow so existing callers
+    keep working; only the later caller cutover removes the mutation-through-query pattern."""
+    store = _bound_store(tmp_path)
+
+    snapshot = store.all_bindings()
+    assert snapshot is not store.all_bindings()
+    store.note_rich_emit("loc-A", "wire")
+
+    assert store.all_bindings()["loc-A"]["rich_sha"] == _ps.rich_sha("wire")
+    assert snapshot["loc-A"]["rich_sha"] == _ps.rich_sha("wire"), (
+        "inner entries stay shared — that is the shallow contract this slice preserves"
+    )
+
+
+def test_the_narrow_operation_does_not_expose_the_owners(tmp_path: _Path) -> None:
+    """The facade stays authoritative: adding a seam must not hand out a writable owner."""
+    from rebar_reconciler.binding_lifecycle import BindingLifecycle
+    from rebar_reconciler.binding_repository import BindingRepository
+
+    store = _bound_store(tmp_path)
+
+    for name in dir(store):
+        if name.startswith("_"):
+            continue
+        member = getattr(store, name, None)
+        assert not isinstance(member, (BindingLifecycle, BindingRepository)), name
