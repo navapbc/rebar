@@ -163,7 +163,7 @@ def test_live_visibility_reports_invisible_mapped_key(tmp_path: Path) -> None:
     )
     probe = _FakeProbe(["VIS"])  # GONE not listed → invisible to the bot
 
-    verdict = bridge_fsck_visibility.audit_mapped_project_visibility(repo_root, probe=probe)
+    verdict = bridge_fsck_visibility.audit_mapped_project_visibility(repo_root, probe=probe, env={})
 
     assert verdict["status"] == "missing"
     assert "GONE" in verdict["missing"]
@@ -178,7 +178,7 @@ def test_live_visibility_all_visible_is_ok(tmp_path: Path) -> None:
     repo_root = _write_projects_mapping(tmp_path, {"VIS": ["repo-a"]}, legacy_default="DIG")
     probe = _FakeProbe(["VIS", "DIG", "OTHER"])
 
-    verdict = bridge_fsck_visibility.audit_mapped_project_visibility(repo_root, probe=probe)
+    verdict = bridge_fsck_visibility.audit_mapped_project_visibility(repo_root, probe=probe, env={})
 
     assert verdict["status"] == "ok"
     assert verdict["missing"] == []

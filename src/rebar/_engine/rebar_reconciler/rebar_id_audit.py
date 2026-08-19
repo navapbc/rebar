@@ -9,25 +9,19 @@ This module owns that contract: the authorized-writer/action tables, the guard
 legacy-batch leaf, and the ``_BatchAuditView`` adapter that lets the guard see
 legacy dict-shaped batch mutations.
 
-``_rebar_env``/``_load_errors_module`` are kept module-local (mirroring the
-applier pattern) so this guard resolves under the by-path test load without
-reaching back into the applier facade.
+``_load_errors_module`` is kept module-local (mirroring the applier pattern) so
+this guard resolves under the by-path test load without reaching back into the
+applier facade.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import logging
-import os
 import sys
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment (module-local; see applier)."""
-    return os.environ.get(f"REBAR_{name}", default)
 
 
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
@@ -151,10 +145,10 @@ def _resolve_id_guard_bypass() -> bool:
     issues — leaving it on risks duplicate/orphaned issues, hence the loud per-violation
     warning at the call site and the ``UNSAFE`` name.
     """
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        return load_config().reconciler.id_guard_bypass_unsafe
+        return compose_config().reconciler.id_guard_bypass_unsafe
     except ConfigError:
         return False  # fail-CLOSED: an unreadable config keeps the guard active
 

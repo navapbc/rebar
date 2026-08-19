@@ -80,10 +80,10 @@ def project_visibility_preflight(
     if not pass_may_mutate(target_mode, route):
         return None
     try:
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
-        config = load_config()
+        config = compose_config()
         backend_key = getattr(config.reconciler, "backend", None)
     except Exception as exc:  # noqa: BLE001 — preflight must not crash the pass
         print(

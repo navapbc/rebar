@@ -133,10 +133,10 @@ def _diff_jira_vs_local(
     # configured backend's mapper via the neutral registry seam (no vendor mapper is
     # named in this core differ).
     if inbound_mapper is None:
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
-        inbound_mapper = select_backend(load_config()).inbound
+        inbound_mapper = select_backend(compose_config()).inbound
     jira_mapped = inbound_mapper.map_remote_to_local(jira_fields)
     changed: dict[str, Any] = {}
 
@@ -631,10 +631,10 @@ def _resolve_backend_mappers(
     the differ free of any vendor mapper reference and yields a consistent pair."""
     if inbound_mapper is not None and outbound_mapper is not None:
         return inbound_mapper, outbound_mapper
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    backend = select_backend(load_config())
+    backend = select_backend(compose_config())
     return (inbound_mapper or backend.inbound), (outbound_mapper or backend.outbound)
 
 

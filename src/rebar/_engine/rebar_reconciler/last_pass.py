@@ -47,10 +47,10 @@ def _load_ref_lock():
 
 def _remote(repo_root: Path) -> str | None:
     """Return the configured authoritative remote when it exists in this clone."""
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        remote = load_config().sync.remote or "origin"
+        remote = compose_config().sync.remote or "origin"
     except ConfigError:
         remote = "origin"
     completed = __import__("subprocess").run(
@@ -68,7 +68,9 @@ def resolve_environment_id(repo_root: Path, explicit: str | None = None) -> str:
         if not value:
             raise LastPassError("target environment id must not be empty")
         return value
-    configured = os.environ.get("REBAR_ENV_ID")
+    from rebar.config import environment_id_or_none
+
+    configured = environment_id_or_none()
     if configured is not None:
         value = configured.strip()
         if not value:
@@ -323,10 +325,12 @@ def publish_process_result(
     semantic_failure = failure_kind
     if outcome == "failure" and semantic_failure is None:
         semantic_failure = "reschedule" if exit_code == 75 else "operational_failure"
+    from rebar.config import environment_id_or_none
+
     return publish(
         repo_root,
         pass_id=pass_id,
-        environment_id=os.environ.get("REBAR_ENV_ID"),
+        environment_id=environment_id_or_none(),
         outcome=outcome,
         failure_kind=None if outcome == "success" else semantic_failure,
         lock_fence=current_lock_fence(repo_root, pass_id),

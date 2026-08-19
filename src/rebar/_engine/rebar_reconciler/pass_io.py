@@ -106,7 +106,9 @@ def record_parent_divergence(
     """
     try:
         if repo_root is None:
-            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+            from rebar.config import reconciler_repo_root as _owned_repo_root
+
+            repo_root = _owned_repo_root()
         _load_alert_store().append(
             {
                 "kind": kind,
@@ -161,7 +163,9 @@ def record_capability_gap(
         return False
     try:
         if repo_root is None:
-            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+            from rebar.config import reconciler_repo_root as _owned_repo_root
+
+            repo_root = _owned_repo_root()
         _load_alert_store().append(
             {
                 "kind": kind,
