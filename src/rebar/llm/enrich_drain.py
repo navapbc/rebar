@@ -46,6 +46,33 @@ def _drain_lock_path(tracker: str) -> str:
     return os.path.join(_rebar_dir(tracker), _DRAIN_LOCK_NAME)
 
 
+# Vocabulary for a drain lock whose stamp names no holder. These are VERBATIM the phrases
+# ``rebar._commands.doctor_locks._existence_report`` renders (as "unknown (<phrase>)") for this
+# same file, because the drain's WARNING and doctor's lock row describe ONE artifact and an
+# operator reading both must not have to translate between two private dialects. They are
+# duplicated rather than imported: the dependency would run llm -> _commands, i.e. a library
+# module reaching into a CLI command. `test_drain_and_doctor_describe_a_holderless_lock_
+# identically` pins the agreement instead, so a change to either surface fails a test.
+_NO_STAMP = "no ownership stamp"
+_UNRECOGNISED_STAMP = "unrecognised ownership stamp"
+_INCOMPLETE_STAMP = "incomplete ownership stamp"
+
+
+def _holderless_stamp_phrase(stamp: str, fields: dict[str, str] | None) -> str:
+    """Which no-holder condition *stamp* is in, given ``_parse_v2_stamp``'s verdict.
+
+    Three genuinely different situations, and an operator's next move differs by which:
+    nothing was ever written (an orphan from a pre-stamp rebar, or the create/stamp window),
+    a dialect this rebar does not recognise (a NEWER rebar's stamp — forward compatibility,
+    so leave it alone), or a v2 stamp missing required fields (a torn mid-write read, i.e.
+    very likely a LIVE drainer caught mid-acquire)."""
+    if not stamp:
+        return _NO_STAMP
+    if fields is None:
+        return _UNRECOGNISED_STAMP
+    return _INCOMPLETE_STAMP
+
+
 def _describe_drain_lock_holder(path: str) -> str:
     """Human-readable holder of the drain lock at *path*, for a log line.
 
@@ -64,7 +91,7 @@ def _describe_drain_lock_holder(path: str) -> str:
     fields = _owner._parse_v2_stamp(stamp) if stamp else None
     if not fields:
         # No holder to name — the age is then the ONLY signal, so it must still be said.
-        return f"an unstamped drain lock (pre-stamp rebar, or a torn stamp){held}"
+        return f"an unknown holder ({_holderless_stamp_phrase(stamp, fields)}){held}"
     return (
         f"host={fields['host']} pid={fields['pid']} ({_owner._describe_stamped_pid(fields)}){held}"
     )
@@ -84,7 +111,10 @@ def _acquire_advisory_lock(tracker: str) -> int | None:
 
     A provably-orphaned lock is reclaimed LOUDLY and the create retried EXACTLY ONCE; a
     second collision means another drainer won the race, so we give up rather than loop.
-    A lock whose holder the shared table will not condemn is always respected."""
+    A lock whose holder the shared table will not condemn is always respected.
+
+    Mutual exclusion here is DEFEASIBLE ACROSS THE RECLAIM, by design — see the comment on
+    the ``os.unlink`` below for the window, the bounded harm, and why the fix is deferred."""
     from rebar._store import lock_owner as _owner
 
     rebar_dir = _rebar_dir(tracker)
@@ -104,6 +134,27 @@ def _acquire_advisory_lock(tracker: str) -> int | None:
                 path,
                 _describe_drain_lock_holder(path),
             )
+            # ACCEPTED RACE (task deathful-lettered-maltesedog, operator decision
+            # 2026-08-16). Nothing excludes another drainer between the
+            # `stamped_file_is_stale` verdict above and this unlink: both can condemn the
+            # same orphan, the winner can recreate and stamp a FRESH lock, and this unlink
+            # then removes that live lock — so two drains can run at once. (The mkdir leg
+            # has the same shape but is safe, because `_acquire_mkdir`'s precondition is
+            # that its caller already holds the exclusive fcntl leg; a single FILE lock has
+            # no such kernel leg to inherit.) The window is left open deliberately:
+            #   * Harm is bounded to REDUNDANT WORK, never to a wrong outcome. This lock is
+            #     advisory and exists only to stop two drain PROCESSES duplicating effort;
+            #     the correctness boundary is the per-ticket optimistic queue claim
+            #     (`overlap.queue.claim`, lease-bounded), which a second drainer loses.
+            #   * Closing it means changing the MECHANISM — a kernel leg (`flock`) or an
+            #     atomic create-and-rename — which is a larger change than the bug it would
+            #     prevent, on a path that is already strictly better than the permanent
+            #     wedge it replaced (bug knavish-stimulated-bluebottle).
+            #   * It is also self-limiting: the retry above is capped at ONE, so a contended
+            #     reclaim converges rather than spinning.
+            # Revisit only if drain work stops being idempotent, or if the queue claim
+            # ceases to be the correctness boundary — either would turn "redundant" into
+            # "wrong" and make the kernel leg worth its cost.
             try:
                 os.unlink(path)
             except OSError:

@@ -322,6 +322,40 @@ def test_an_unstamped_drain_lock_is_adjudicated_by_the_shared_ceiling(tmp_path: 
     assert aged["staleness"] == doctor_locks.STALENESS_STALE
 
 
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_an_unrecognised_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
+    """A drain lock whose contents ``_parse_v2_stamp`` declines outright (a NEWER rebar's
+    dialect) is reported as unrecognised, with no invented holder: the forward-compatible
+    refusal, not a half-parse. Young, so the shared ceiling still honours it."""
+    tracker = _tracker(tmp_path)
+    _plant_drain_lock(tracker, "rebar-lock v9 something=else")
+
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+
+    assert drain["holder_description"] == "unknown (unrecognised ownership stamp)"
+    assert drain["holder"] is None
+    assert drain["pid_state"] is None
+    assert drain["staleness"] == doctor_locks.STALENESS_NOT_STALE
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_an_incomplete_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> None:
+    """A v2 stamp missing required fields — a torn mid-write read — is reported as
+    INCOMPLETE rather than unrecognised or absent, so an operator can tell a drainer
+    caught between create and stamp apart from a lock that was never stamped."""
+    tracker = _tracker(tmp_path)
+    _plant_drain_lock(tracker, "rebar-lock v2 host=boot-x ns=1")
+
+    drain = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_ENRICH_DRAIN)
+
+    assert drain["holder_description"] == "unknown (incomplete ownership stamp)"
+    assert drain["holder"] is None
+    assert drain["pid_state"] is None
+    assert drain["staleness"] == doctor_locks.STALENESS_NOT_STALE
+
+
 # ---------------------------------------------------------------------------
 # doctor integration: exit code, JSON contract, read-only guarantee
 # ---------------------------------------------------------------------------
