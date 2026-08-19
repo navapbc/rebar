@@ -9,8 +9,9 @@ alert log — with their load rules, exact committed bytes, and asymmetric failu
 dispositions (live fails CLOSED, retired and rotation fail OPEN); ``BindingLifecycle``
 (RP-02 S2) owns the identity transitions (bind/confirm/unbind, the immutable numeric id,
 the MOVED-issue re-key) and, since S2 T2, absence, retirement, tombstone and comment
-bookkeeping.  This module is the FACADE over both, owning GET-rotation and pending-binding
-recovery and coordinating the two.  Everything it does mutates the repository's OWN
+bookkeeping; ``BindingRecovery`` (RP-02 S3) owns incomplete-operation repair — pending-binding
+recovery and interrupted-retirement completion.  This module is the FACADE over the three,
+owning GET-rotation and coordinating them.  Everything it does mutates the repository's OWN
 dictionaries in place — handed out by reference, never copied — and then calls ``save()``,
 the single persistence boundary.
 
@@ -23,7 +24,8 @@ re-attaches the label and confirms with NO Jira search (no duplicate).
 ``jira_key`` on a ``pending`` entry is an additive SUB-state of the ADR-0027
 ``pending`` state, not a new enumerated state.
 
-Recovery (next pass, recover_pending_bindings): keyed-pending → retro-attach
+Recovery (next pass, recover_pending_bindings — the policy is ``binding_recovery``'s
+since RP-02 S3 T1; this facade only delegates): keyed-pending → retro-attach
 label/property (idempotent) and confirm, NO search; keyless-pending → search Jira
 for the rebar-id label, confirm if found else unbind; per-entry error → append
 ``{local_id, reason}`` to ``failure_sink`` and continue.
@@ -47,7 +49,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
-from rebar_reconciler import binding_lifecycle, get_rotation, peer_state
+from rebar_reconciler import binding_lifecycle, binding_recovery, get_rotation, peer_state
 from rebar_reconciler.binding_repository import BindingRepository
 from rebar_reconciler.timeutil import utc_now_iso
 
@@ -63,41 +65,24 @@ class BindingPersistError(RuntimeError):
     """
 
 
-#: How long a keyless-pending binding is treated as "the create may have landed but is not
-#: indexed yet" (bug 21fc). Jira DC's Lucene index is eventually consistent and
-#: JRASERVER-70423 documents a 2,991s lag, so this is deliberately LARGER: the cost of
-#: waiting is a delayed create, of not waiting a duplicate — only one is reversible.
-_INDEX_LAG_GRACE_SECONDS = 3600.0
-
-#: Consecutive negative searches required before absence is treated as corroborated (a
-#: single miss is exactly what a lagging index produces for an issue that DOES exist).
-_MISSES_BEFORE_UNBIND = 3
-
-
-def _age_seconds(created_at: Any) -> float:
-    """Seconds since an ISO-8601 ``created_at``; ``inf`` when it is absent or unparseable.
-
-    ``inf`` is the SAFE default here and the direction matters: an entry whose age cannot
-    be established is treated as OLD, so it becomes eligible for the ordinary
-    corroborated-unbind path rather than being suppressed forever. A store written before
-    this field existed must not strand its tickets.
-    """
-    if not isinstance(created_at, str) or not created_at:
-        return float("inf")
-    from datetime import datetime, timezone
-
-    try:
-        stamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-    except ValueError:
-        return float("inf")
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return (datetime.now(timezone.utc) - stamp).total_seconds()
+# The index-lag grace, the corroborated-miss threshold and the age helper now live in
+# ``binding_recovery`` with the pending-recovery policy they parameterize (RP-02 S3 T1).
+# These are ALIASES, not a second source of truth: ``is_keyless_pending_within_grace``
+# below still reads the grace and the age, and the constants are part of this module's
+# long-standing inspection surface (the bug-21fc duplicate oracles reach the lag window
+# through it). Rebinding either constant here would desynchronize it from the recovery
+# that actually enforces it, so treat these three names as read-only labels.
+_INDEX_LAG_GRACE_SECONDS = binding_recovery._INDEX_LAG_GRACE_SECONDS
+_MISSES_BEFORE_UNBIND = binding_recovery._MISSES_BEFORE_UNBIND
+_age_seconds = binding_recovery._age_seconds
 
 
 def _now_iso() -> str:
-    # Canonical Z-suffix UTC (twin of rebar.timeutils.utc_now_iso); retained as the
-    # local spelling used across this module's call sites.
+    # Canonical Z-suffix UTC (twin of rebar.timeutils.utc_now_iso). RETAINED with no
+    # caller left in this file: the last one moved to ``binding_recovery`` with pending
+    # recovery, but this name is part of the module's PATCHABLE surface — the baseline and
+    # idempotency oracles freeze time by ``monkeypatch.setattr`` on it, so deleting it
+    # turns those suites into AttributeError rather than a behaviour change.
     return utc_now_iso()
 
 
@@ -136,14 +121,15 @@ def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
 class BindingStore:
     """Bidirectional local-id ↔ jira-key binding store.
 
-    The FACADE, and the only public door to binding state. Two private owners sit behind
-    it: :class:`BindingRepository` owns every byte on disk, and ``BindingLifecycle`` owns
+    The FACADE, and the only public door to binding state. Three private owners sit behind
+    it: :class:`BindingRepository` owns every byte on disk, ``BindingLifecycle`` owns
     lifecycle policy — the identity transitions (bind/confirm/unbind, the immutable numeric
     id, the MOVED-issue re-key) plus absence bookkeeping, retirement, tombstones and
-    comment identity. This class owns what is left — GET-rotation policy and
-    pending-binding recovery — and coordinates the two. Mutations are in-memory until
-    ``save()``, which delegates the atomic write; the few operations that must be durable
-    the instant they return (retirement, comment identity) persist themselves.
+    comment identity — and ``BindingRecovery`` owns repair of operations a crash left part
+    way through. This class owns what is left — GET-rotation policy — and coordinates the
+    three. Mutations are in-memory until ``save()``, which delegates the atomic write; the
+    few operations that must be durable the instant they return (retirement, comment
+    identity) persist themselves.
     """
 
     def __init__(self, tracker_dir: Path) -> None:
@@ -153,9 +139,11 @@ class BindingStore:
         the lifecycle transitions, the ``peer_state`` delegates and the rich-text handler
         all mutate ``bindings`` / ``reverse`` / the rotation stamps IN PLACE, so a
         defensive copy here would silently discard those writes. The ``BindingLifecycle``
-        owner is constructed over the SAME repository for exactly that reason, and is
-        deliberately private — no public attribute or method hands out either owner, or a
-        caller could write binding state without passing through this facade's
+        and ``BindingRecovery`` owners are constructed over the SAME repository for exactly
+        that reason (recovery also takes the lifecycle owner, so a repaired binding goes
+        through the same transitions an ordinary one does), and all three are deliberately
+        private — no public attribute or method hands out an owner, or a caller could write
+        binding state without passing through this facade's
         coordination. The retired key set and the bug-3b5f ``{local_id: jira_key}``
         tombstone index are reached through the lifecycle owner rather than aliased here,
         so retired state has exactly one reader. The repository does not materialize
@@ -167,6 +155,7 @@ class BindingStore:
         """
         self._repo = BindingRepository(tracker_dir)
         self._lifecycle = binding_lifecycle.BindingLifecycle(self._repo)
+        self._recovery = binding_recovery.BindingRecovery(self._repo, self._lifecycle)
         # The four locations the repository writes, mirrored here so the facade's
         # long-standing inspection surface is unchanged. They are READ-ONLY labels now:
         # the live store, the bug-1e08 retired sidecar (soft deletes live beside the live
@@ -488,6 +477,24 @@ class BindingStore:
 
     # -- recovery ----------------------------------------------------------
 
+    def complete_interrupted_retirements(self) -> binding_recovery.RetirementRepairOutcome:
+        """Finish retirements interrupted between the tombstone write and the live drop.
+
+        The facade door onto ``BindingRecovery.complete_interrupted_retirements``, which
+        owns the policy: an EXACT tombstone/forward/reverse match has its live residue
+        removed under a single ``save()``, anything that disagrees is refused with
+        evidence, and the tombstone itself is never touched — ``unretire`` remains the only
+        route back from a soft delete.
+
+        Not called from anywhere in the pass yet, deliberately: choosing WHERE a repair
+        runs inside a reconcile pass is its own decision, and wiring it before the classifier
+        had a direct oracle would have made the first failure a reconcile failure.
+
+        Returns the outcome unchanged, both halves included — a repair that reported only
+        its successes would let a permanently-refused tombstone look like a healthy store.
+        """
+        return self._recovery.complete_interrupted_retirements()
+
     def recover_pending_bindings(
         self, client: TicketTransport, *, failure_sink: list[dict[str, Any]] | None = None
     ) -> int:
@@ -508,51 +515,13 @@ class BindingStore:
         and skipped (loud but non-fatal; the entry stays pending). Returns the count
         of RESOLVED bindings (confirmed or unbound). ``client`` must expose
         ``search_issues`` / ``add_label`` / ``set_entity_property``.
+
+        A thin delegate to ``BindingRecovery`` since RP-02 S3 T1. The name, the
+        ``failure_sink`` keyword and the resolved-count return are UNCHANGED, because the
+        mature caller contract binds to this facade — ``run_differs`` calls exactly this
+        signature, and the move must be invisible to it.
         """
-        recovered = 0
-        for local_id in list(self.pending_bindings()):
-            try:
-                entry = self._data["bindings"].get(local_id) or {}
-                keyed = entry.get("jira_key")
-                if keyed:
-                    # Deterministic: the key is known — retro-attach the identity
-                    # marker (idempotent) so future JQL dedup can find the issue,
-                    # then confirm. No search.
-                    client.add_label(keyed, f"rebar-id:{local_id}")
-                    client.set_entity_property(keyed, "local_id", local_id)
-                    self.bind_confirm(local_id, keyed)
-                    recovered += 1
-                    continue
-                # Keyless: canonical colon-form label (applier.py outbound/inbound).
-                colon_label = f"rebar-id:{local_id}"
-                results = client.search_issues(f'labels = "{colon_label}"')
-                if not results:
-                    # Legacy fallback: hyphen-form (pre-colon-migration issues).
-                    hyphen_label = f"rebar-id-{local_id}"
-                    results = client.search_issues(f'labels = "{hyphen_label}"')
-                if results:
-                    self.bind_confirm(local_id, results[0]["key"])
-                    recovered += 1
-                    continue
-                # A NEGATIVE SEARCH IS NOT PROOF OF ABSENCE ON DC (bug 21fc): the keyless
-                # state is entered on a crash during create_issue — exactly when the issue
-                # may exist but not yet be indexed (Jira DC's Lucene index is eventually
-                # consistent, JRASERVER-70423: 2,991s lag). Unbinding here makes the next
-                # pass create a duplicate, so absence must be CORROBORATED: repeated misses
-                # AND an entry too old for the documented lag to explain. Else stay pending.
-                misses = int(entry.get("search_miss_count") or 0) + 1
-                entry["search_miss_count"] = misses
-                entry["updated_at"] = _now_iso()
-                if (
-                    misses >= _MISSES_BEFORE_UNBIND
-                    and _age_seconds(entry.get("created_at")) >= _INDEX_LAG_GRACE_SECONDS
-                ):
-                    self.unbind(local_id)
-                    recovered += 1
-            except Exception as exc:  # noqa: BLE001 — loud-but-non-fatal: record and continue
-                if failure_sink is not None:
-                    failure_sink.append({"local_id": local_id, "reason": repr(exc)})
-        return recovered
+        return self._recovery.recover_pending_bindings(client, failure_sink=failure_sink)
 
 
 def load_binding_store(repo_root: Path) -> BindingStore:

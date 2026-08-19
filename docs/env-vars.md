@@ -178,7 +178,7 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_sources.py:616` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/binding_lifecycle.py:70` — `os.environ.get(<non-literal>)`
+- `src/rebar/_engine/rebar_reconciler/binding_lifecycle.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:295` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:308` — `os.environ.get(<non-literal>)`
