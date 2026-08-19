@@ -345,14 +345,13 @@ def _pandoc_timeout() -> float:
     over something it can trivially default.
     """
     try:
-        from rebar.config import ConfigError, load_config
+        from rebar.config import ConfigError, resolve_pandoc_timeout
     except ImportError:
         return _PANDOC_TIMEOUT_DEFAULT
     try:
-        value = float(load_config().reconciler.dc_pandoc_timeout_s)
+        return resolve_pandoc_timeout(_PANDOC_TIMEOUT_DEFAULT)
     except (ConfigError, AttributeError, TypeError, ValueError):
         return _PANDOC_TIMEOUT_DEFAULT
-    return value if value > 0 else _PANDOC_TIMEOUT_DEFAULT
 
 
 def _convert(markdown: str, pandoc: str, timeout: float | None = None) -> str | None:

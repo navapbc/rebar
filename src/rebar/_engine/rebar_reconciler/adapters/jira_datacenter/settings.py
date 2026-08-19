@@ -78,10 +78,9 @@ def resolve_comment_max_chars() -> int:
     A non-positive value is returned as ``0`` = unlimited (jpm.xml's own
     convention), which the DC comment truncator treats as "never truncate".
     """
-    from rebar.config import load_config
+    from rebar.config import resolve_dc_comment_max_chars
 
-    configured = load_config().reconciler.comment_max_chars
-    return configured if configured > 0 else 0
+    return resolve_dc_comment_max_chars()
 
 
 def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
@@ -92,10 +91,9 @@ def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
     caller, rather than degrading to env-only defaults (the acli_subprocess
     pattern this story's plan explicitly rejects — see the module docstring).
     """
-    from rebar.config import load_config
+    from rebar.config import resolve_dc_connection
 
-    config = load_config()
-    reconciler = config.reconciler
+    url, project, allow_insecure, ca_bundle = resolve_dc_connection()
     # NOTE — the missing-PAT guard deliberately does NOT live here, and that is not an
     # oversight. This function is reached from PROPERTIES (`JiraDataCenterBackend.
     # query_project`), and on Python <= 3.11 `isinstance(x, SomeRuntimeCheckableProtocol)`
@@ -108,9 +106,9 @@ def resolve_jira_datacenter_settings() -> JiraDataCenterSettings:
     pat = os.environ.get("JIRA_PAT", "")
 
     return JiraDataCenterSettings(
-        url=reconciler.base_url,
-        project=config.jira.project,
-        allow_insecure=reconciler.allow_insecure,
-        ca_bundle=reconciler.ca_bundle,
+        url=url,
+        project=project,
+        allow_insecure=allow_insecure,
+        ca_bundle=ca_bundle,
         pat=pat,
     )

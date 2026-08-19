@@ -83,18 +83,13 @@ def cutover_clients() -> frozenset[str]:
     must stay importable without ``rebar`` on the path).
     """
     try:
-        from rebar.config import ConfigError, load_config
+        from rebar.config import ConfigError, resolve_rich_text_cutover
     except ImportError:
         return frozenset()
     try:
-        value = load_config().reconciler.rich_text_cutover
+        return resolve_rich_text_cutover()
     except ConfigError:
         return frozenset()
-    if value == "both":
-        return frozenset({"cloud", "dc"})
-    if value in ("cloud", "dc"):
-        return frozenset({value})
-    return frozenset()
 
 
 class WikiTextCodec:

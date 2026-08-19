@@ -21,9 +21,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_URL` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
-| `JIRA_USER` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_config_sources.py` |  |
+| `JIRA_URL` | `src/rebar/_config_sources.py` |  |
+| `JIRA_USER` | `src/rebar/_config_sources.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
@@ -177,8 +177,7 @@ _160 variables._
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_sources.py:615` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py:49` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_sources.py:616` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_handlers.py:64` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/apply_inbound.py:62` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/binding_store.py:109` — `os.environ.get(<non-literal>)`
@@ -187,11 +186,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:114` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:287` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:300` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:304` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:294` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:307` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:311` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:528` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:318` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:535` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:69` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:324` — `os.environ.get(<non-literal>)`

@@ -63,19 +63,26 @@ from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_sta
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
 from rebar._config_sources import repo_root_or_none as repo_root_or_none
+from rebar._config_sources import resolve_acli_call_timeout as resolve_acli_call_timeout
 from rebar._config_sources import (
     resolve_allow_env_reidentify as resolve_allow_env_reidentify,
 )
+from rebar._config_sources import resolve_dc_comment_max_chars as resolve_dc_comment_max_chars
+from rebar._config_sources import resolve_dc_connection as resolve_dc_connection
 from rebar._config_sources import resolve_detected_by as resolve_detected_by
 from rebar._config_sources import resolve_gate_ref as resolve_gate_ref
 from rebar._config_sources import resolve_gate_source as resolve_gate_source
 from rebar._config_sources import resolve_gate_tmpdir as resolve_gate_tmpdir
 from rebar._config_sources import resolve_janitor_tunables as resolve_janitor_tunables
+from rebar._config_sources import resolve_jira_connection as resolve_jira_connection
+from rebar._config_sources import resolve_jira_probe_scope as resolve_jira_probe_scope
 from rebar._config_sources import resolve_lock_retries as resolve_lock_retries
 from rebar._config_sources import resolve_os_actor as resolve_os_actor
 from rebar._config_sources import resolve_otlp_endpoint as resolve_otlp_endpoint
+from rebar._config_sources import resolve_pandoc_timeout as resolve_pandoc_timeout
 from rebar._config_sources import resolve_plan_review_budget as resolve_plan_review_budget
 from rebar._config_sources import resolve_preview_timeout as resolve_preview_timeout
+from rebar._config_sources import resolve_rich_text_cutover as resolve_rich_text_cutover
 from rebar._config_sources import resolve_run_root as resolve_run_root
 from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits
 from rebar._config_sources import resolve_stall_attempts as resolve_stall_attempts
