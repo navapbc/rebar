@@ -67,13 +67,19 @@ from rebar._config_sources import (
     resolve_allow_env_reidentify as resolve_allow_env_reidentify,
 )
 from rebar._config_sources import resolve_detected_by as resolve_detected_by
+from rebar._config_sources import resolve_gate_ref as resolve_gate_ref
+from rebar._config_sources import resolve_gate_source as resolve_gate_source
 from rebar._config_sources import resolve_gate_tmpdir as resolve_gate_tmpdir
 from rebar._config_sources import resolve_janitor_tunables as resolve_janitor_tunables
 from rebar._config_sources import resolve_lock_retries as resolve_lock_retries
 from rebar._config_sources import resolve_os_actor as resolve_os_actor
 from rebar._config_sources import resolve_otlp_endpoint as resolve_otlp_endpoint
+from rebar._config_sources import resolve_plan_review_budget as resolve_plan_review_budget
+from rebar._config_sources import resolve_preview_timeout as resolve_preview_timeout
+from rebar._config_sources import resolve_run_root as resolve_run_root
 from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits
 from rebar._config_sources import resolve_stall_attempts as resolve_stall_attempts
+from rebar._config_sources import resolve_usage_log_sink as resolve_usage_log_sink
 from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
 from rebar._operation_config import SHADOW_ENV as SHADOW_ENV
 from rebar._operation_config import OperationSnapshot as OperationSnapshot

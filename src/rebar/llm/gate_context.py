@@ -198,7 +198,8 @@ def assert_gated(context: str = "agentic file access") -> None:
     deliberate, audited exception."""
     if _in_gate_session.get():
         return
-    if os.environ.get("REBAR_GATE_ALLOW_UNGATED", "").strip().lower() in ("1", "true", "yes"):
+    allow = os.environ.get("REBAR_GATE_ALLOW_UNGATED", "")  # read-via: subsystem-kill-switch
+    if allow.strip().lower() in ("1", "true", "yes"):
         # `__name__`, not the former hardcoded "rebar.llm.config" (ticket b300): the warning
         # calls the override "audited", so attributing it to a module that no longer holds
         # this code sends whoever greps the logs to the wrong file.

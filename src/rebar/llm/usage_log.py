@@ -465,11 +465,13 @@ def _resolve_sink() -> str | None:
     store, and we create nothing.
     """
 
-    # Read via the string literal (== ENV_VAR) so the env-var registry generator
-    # (scripts/gen_env_registry.py) names REBAR_USAGE_LOG rather than listing it as an
-    # opaque non-literal read — this is a fixed, operator-facing var, so it belongs in
-    # the named table in docs/env-vars.md.
-    path = os.environ.get("REBAR_USAGE_LOG")
+    # Resolve the explicit sink override through the owned config seam
+    # (``config.resolve_usage_log_sink`` reads ``REBAR_USAGE_LOG`` LIVE per call) — this is a
+    # fixed, operator-facing var, so it belongs in the named table in docs/env-vars.md and the
+    # env-var registry generator (scripts/gen_env_registry.py) names it at the composition seam.
+    from rebar import config as _root_config
+
+    path = _root_config.resolve_usage_log_sink()
     if path:
         return path
     # Lazy for the same stdlib-only reason as `_repo_root_for_default_sink`. Imported through

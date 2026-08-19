@@ -28,7 +28,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import shutil
 from dataclasses import dataclass
@@ -115,7 +114,7 @@ def load_verify_cfg(repo_root: str | None) -> Any:
     from rebar._config_schema import VerifyConfig
 
     try:
-        return _config.load_config(repo_root).verify
+        return _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → packaged defaults
         return VerifyConfig()
 
@@ -443,12 +442,10 @@ class CriterionBank:
 
         When ``repo_root`` is not supplied, honour ``REBAR_ROOT`` before falling back to the
         cwd so the run-scoped scratch dir never scribbles into the developer/CI checkout
-        (which the suite's repo-leak guard would flag)."""
-        if repo_root:
-            base = Path(repo_root)
-        else:
-            env_root = os.environ.get("REBAR_ROOT")
-            base = Path(env_root) if env_root else Path.cwd()
+        (        which the suite's repo-leak guard would flag)."""
+        from rebar import config as _config
+
+        base = _config.resolve_run_root(repo_root)
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", str(run_id) or "run")
         return cls(base / ".rebar" / "workflow_runs" / safe / "bank", stamps)
 

@@ -82,7 +82,7 @@ def read_enforcement(repo_root=None) -> bool:
     from rebar import config
 
     try:
-        return bool(config.load_config(repo_root).verify.enforce_plan_material_pins)
+        return bool(config.compose_config(repo_root).verify.enforce_plan_material_pins)
     except config.ConfigError:
         record = {"event": "plan_material_pin_config_unreadable"}
         logger.warning(

@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import os
 from collections.abc import Iterator
 from dataclasses import replace
 
@@ -57,34 +56,19 @@ PROVENANCE_KEYS = ("source", "verified_at_sha", "signable")
 _UNPINNED = {"source": None, "verified_at_sha": None, "signable": False}
 
 
-def _snapshot_table(repo_root: str | None) -> dict:
-    try:
-        from rebar import config as _root_config
-
-        return _root_config.read_reserved_section("snapshot", repo_root)
-    except Exception:  # noqa: BLE001 - degrade to env/defaults on any config error
-        return {}
-
-
-def _str_pref(env_name: str, file_key: str, default: str, repo_root: str | None) -> str:
-    raw = os.environ.get(env_name)
-    if raw is not None and raw.strip():
-        return raw.strip()
-    fv = _snapshot_table(repo_root).get(file_key)
-    if isinstance(fv, str) and fv.strip():
-        return fv.strip()
-    return default
-
-
 def default_ref(repo_root: str | None = None) -> str:
     """The default ``ref`` (``REBAR_GATE_REF`` > ``[snapshot].ref`` > ``origin/main``)."""
-    return _str_pref("REBAR_GATE_REF", "ref", DEFAULT_REF, repo_root)
+    from rebar import config as _root_config
+
+    return _root_config.resolve_gate_ref(DEFAULT_REF, repo_root)
 
 
 def default_source(repo_root: str | None = None) -> str:
     """The default ``source`` mode (``REBAR_GATE_SOURCE`` > ``[snapshot].source`` >
     ``attested``); an invalid configured value falls back to ``attested``."""
-    val = _str_pref("REBAR_GATE_SOURCE", "source", SOURCE_ATTESTED, repo_root)
+    from rebar import config as _root_config
+
+    val = _root_config.resolve_gate_source(SOURCE_ATTESTED, repo_root)
     return val if val in (SOURCE_ATTESTED, SOURCE_LOCAL) else SOURCE_ATTESTED
 
 

@@ -36,7 +36,6 @@ leave a half-active criterion (the rubric prompt is written first, harmlessly, b
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import subprocess
 import tempfile
@@ -178,15 +177,9 @@ def _new_job_id() -> str:
 def _default_timeout() -> float:
     """The sync-attempt budget in seconds: ``REBAR_PREVIEW_TIMEOUT`` if a positive number, else
     :data:`_DEFAULT_TIMEOUT` (60s)."""
-    raw = os.environ.get("REBAR_PREVIEW_TIMEOUT")
-    if raw:
-        try:
-            val = float(raw)
-            if val > 0:
-                return val
-        except ValueError:
-            pass
-    return _DEFAULT_TIMEOUT
+    from rebar import config as _config
+
+    return _config.resolve_preview_timeout(_DEFAULT_TIMEOUT)
 
 
 def preview_or_job(
