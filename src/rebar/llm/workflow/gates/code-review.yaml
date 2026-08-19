@@ -104,6 +104,7 @@ steps:
         - { prompt: code-review-llm-prompts, when: "${{ steps.triggers.outputs.include_llm_prompts }}" }
         - { prompt: code-review-deletion-impact, when: "${{ steps.triggers.outputs.include_deletion_impact }}" }
         - { prompt: code-review-scope-intent, when: "${{ steps.triggers.outputs.include_scope_intent }}" }
+        - { prompt: code-review-surface-parity, when: "${{ steps.triggers.outputs.include_surface_parity }}" }
 
   # ── Round-B membership: (glob ∪ base.recommend) − already-run(Round-A), capped at N=3. ──────
   - id: union
@@ -142,6 +143,7 @@ steps:
         - { prompt: code-review-llm-prompts, when: "${{ steps.union.outputs.include_llm_prompts }}" }
         - { prompt: code-review-deletion-impact, when: "${{ steps.union.outputs.include_deletion_impact }}" }
         - { prompt: code-review-scope-intent, when: "${{ steps.union.outputs.include_scope_intent }}" }
+        - { prompt: code-review-surface-parity, when: "${{ steps.union.outputs.include_surface_parity }}" }
 
   # ── Merge + cluster the three finding sources. ──────────────────────────────────────────────
   - id: merge

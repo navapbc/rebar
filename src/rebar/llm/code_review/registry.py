@@ -49,6 +49,8 @@ OVERLAY_IDS: tuple[str, ...] = (
     "llm-prompts",  # prompt/contract/output-schema changes to LLM surfaces
     "deletion-impact",  # (content-triggered) removed def/class/signature → dangling references
     "scope-intent",  # (content-triggered) diff vs the UNION scope/AC of the commit's tickets
+    "surface-parity",  # (glob-triggered) a write-op's param/guard/required-field surface changed
+    # on one adapter (lib/CLI/MCP) without the siblings updated in lockstep
 )
 
 # Operational policy (config, not a magic constant baked into the wire schema): the

@@ -163,6 +163,18 @@
     "block_threshold": 0.50,
     "blocking_enabled": true
   },
+  "surface-parity": {
+    "_comment": "ticket restoring-shallow-blobfish: GLOB-triggered overlay \u2014 fires when a diff touches a write-op adapter file (CLI _commands, lib _lib_writes.py, MCP _mcp_writes.py) and flags a param/guard/required-field surface change that was NOT mirrored to the sibling adapters in lockstep. The static code-review complement to the runtime write-parity conformance oracle (topaz-blubbery-mice). ADVISORY (blocking_enabled=false): a lockstep divergence is a coach-not-block finding, verified in Pass-2 and decided in Pass-3; a deliberately justified divergence must not fire.",
+    "exec": "AGENT",
+    "applies_to": [
+      "**/_commands/**",
+      "**/_lib_writes.py",
+      "**/_mcp_writes.py"
+    ],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false
+  },
   "secret-detection": {
     "exec": "DET",
     "applies_to": [],

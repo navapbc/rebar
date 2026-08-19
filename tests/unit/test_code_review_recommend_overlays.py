@@ -32,6 +32,7 @@ def test_overlay_ids_is_the_expected_closed_set():
         "llm-prompts",
         "deletion-impact",
         "scope-intent",
+        "surface-parity",
     }
     # closed + ordered: enum() is derived from the one constant (no second source to drift)
     assert reg.overlay_id_enum() == list(reg.OVERLAY_IDS)
