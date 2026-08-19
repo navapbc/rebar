@@ -11,8 +11,16 @@ Design:
   * **Off the hot path.** A SINGLE background pass (Bazel moved GC to idle), never invoked
     from populate/read. :func:`start_background_janitor` runs :func:`run_gc` on an interval.
   * **Trigger.** Primary = a FREE-SPACE watermark (:func:`shutil.disk_usage`), backstopped
-    by the incrementally-maintained byte total (no hot-path ``du``). Secondary = a max-age
-    cold-trim of genuinely cold entries.
+    by the incrementally-maintained byte total (no hot-path ``du``). The watermark has TWO
+    terms and the trigger is the LARGER: an absolute free-bytes floor
+    (``free_watermark_bytes``) and a VOLUME-RELATIVE headroom percentage
+    (``free_watermark_pct``, 0 = off). The absolute floor alone is disk-size-blind — on a
+    small root volume 2 GiB free is already >90% used, i.e. past the operator's
+    disk-pressure alarm, so reclamation could only ever engage after the alarm had already
+    breached. Once a pass starts reclaiming it runs on to a slightly higher TARGET
+    (``+RECLAIM_TARGET_MARGIN_PCT``) rather than stopping the instant it clears the
+    trigger, so passes do not thrash one entry at a time along the threshold.
+    Secondary = a max-age cold-trim of genuinely cold entries, independent of space.
   * **Victim selection.** LRU by the cache's touch-on-read ``mtime`` (never ``atime``),
     skipping any entry within a short grace window.
   * **Eviction mechanism.** ``rename(<sha>, trash/<uuid>)`` (atomic disappearance from the
@@ -51,10 +59,27 @@ except ImportError:  # pragma: no cover - platform-dependent
 
 # ── documented default tunables ───────────────────────────────────────────────────────
 DEFAULT_FREE_WATERMARK_BYTES = 2 * 1024 * 1024 * 1024  # reclaim when free disk < 2 GiB
+DEFAULT_FREE_WATERMARK_PCT = 0  # volume-relative headroom %, 0 = off (absolute floor only)
 DEFAULT_GRACE_SECONDS = 120  # never evict an entry used within the last 2 minutes
 DEFAULT_MAX_AGE_SECONDS = 7 * 24 * 3600  # cold-trim entries untouched for > 7 days
 DEFAULT_REVERIFY_SECONDS = 0  # periodic integrity reverify: 0 = off (opt-in)
 DEFAULT_INTERVAL_SECONDS = 300  # background pass cadence
+
+# FIXED internal hysteresis margin (like DEFAULT_GRACE_SECONDS / DEFAULT_INTERVAL_SECONDS this
+# is a constant of the algorithm, NOT an operator knob — it is deliberately absent from
+# _default_tunables() and from the env/[snapshot] config seam). A pass that has started
+# reclaiming keeps going until free space reaches (free_watermark_pct + this) % of the volume,
+# so it overshoots the trigger instead of stopping on it and re-firing on the next pass.
+RECLAIM_TARGET_MARGIN_PCT = 5
+
+# Upper bound for ``free_watermark_pct``. The knob is headroom to KEEP FREE, but "80" reads
+# naturally as "reclaim at 80% used" — the INVERSE — and unclamped that asks for 80% of the
+# volume to be free, making ``free < trigger`` true at every plausible level: every pass would
+# evict the whole store and every gate would re-materialize its snapshot from scratch. At >=100
+# the trigger exceeds the volume outright and reclamation never terminates usefully. Half the
+# volume is already far more headroom than a CACHE may demand, so values above this are clamped
+# (never rejected — a janitor must not fail a gate over a tunable).
+MAX_FREE_WATERMARK_PCT = 50
 
 
 def _default_tunables() -> dict[str, int]:
@@ -62,6 +87,7 @@ def _default_tunables() -> dict[str, int]:
     the owned resolver so the ``[snapshot]``/env cutover keeps the defaults defined here."""
     return {
         "free_watermark_bytes": DEFAULT_FREE_WATERMARK_BYTES,
+        "free_watermark_pct": DEFAULT_FREE_WATERMARK_PCT,
         "grace_seconds": DEFAULT_GRACE_SECONDS,
         "max_age_seconds": DEFAULT_MAX_AGE_SECONDS,
         "reverify_seconds": DEFAULT_REVERIFY_SECONDS,
@@ -73,11 +99,25 @@ def _default_tunables() -> dict[str, int]:
 class JanitorConfig:
     """Snapshot-cache janitor tunables (documented defaults; env/config overridable).
 
+    The free-space watermark has TWO terms and reclamation triggers on the LARGER of them:
+    ``free_watermark_bytes`` (an absolute free-bytes floor) and ``free_watermark_pct`` (free
+    space as a PERCENTAGE of the volume, ``0`` = off). The percentage term exists because the
+    absolute floor is disk-size-blind: the same 2 GiB is generous headroom on a 500 GiB volume
+    and >90% used on a 30 GiB one, so on a small root volume the janitor could not engage until
+    the host was already past its disk-pressure alarm. Set the percentage to the headroom the
+    deployment's alarm expects (e.g. ``20`` to reclaim at 80% used, below an 85% alarm).
+    Reclamation is HYSTERETIC: a pass starts at the trigger and then runs on to a target
+    ``RECLAIM_TARGET_MARGIN_PCT`` points higher (a fixed internal margin, not a knob), so it
+    does not stall on the threshold and re-fire every interval.
+
+    All values are INTEGERS — including the percentage, which is whole points, not a fraction.
+
     ``max_age_seconds`` is expected to be MUCH larger than ``grace_seconds`` (cold-trim
     age ≫ recency-protection window); a contradictory ``max_age < grace`` would let the
     cold-trim override the grace protection."""
 
     free_watermark_bytes: int = DEFAULT_FREE_WATERMARK_BYTES
+    free_watermark_pct: int = DEFAULT_FREE_WATERMARK_PCT
     grace_seconds: int = DEFAULT_GRACE_SECONDS
     max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS
     reverify_seconds: int = DEFAULT_REVERIFY_SECONDS
@@ -300,6 +340,40 @@ def run_gc(
                 pass
 
 
+def _space_thresholds(total: int, cfg: JanitorConfig) -> tuple[int, int]:
+    """The ``(trigger, target)`` free-byte thresholds for one pass on a ``total``-byte volume.
+
+    ``trigger`` is where reclamation STARTS, ``target`` where an already-running pass STOPS
+    (hysteresis). Each is the larger of the absolute floor and the volume-relative term, so
+    raising one term can never weaken the other. With ``free_watermark_pct == 0`` the
+    volume-relative term is OFF and both collapse to ``free_watermark_bytes`` — bit-identical
+    to the absolute-floor-only behaviour, which is why the margin is not applied here.
+
+    The percentage is clamped to ``MAX_FREE_WATERMARK_PCT`` so an out-of-range value cannot
+    make the trigger meet or exceed the volume, which would evict the whole store every pass."""
+    if cfg.free_watermark_pct <= 0:
+        return cfg.free_watermark_bytes, cfg.free_watermark_bytes
+    pct = min(cfg.free_watermark_pct, MAX_FREE_WATERMARK_PCT)
+    trigger = max(cfg.free_watermark_bytes, total * pct // 100)
+    target = max(cfg.free_watermark_bytes, total * (pct + RECLAIM_TARGET_MARGIN_PCT) // 100)
+    return trigger, target
+
+
+def _reverify_pass(root: Path, cfg: JanitorConfig, now: float, res: GcResult) -> None:
+    """Optional periodic integrity reverify (opt-in via ``reverify_seconds > 0``). Honors the
+    PERIOD: an entry reverified within the window is skipped (its integrity sidecar's mtime is
+    the last-reverified stamp). Accumulates into ``res`` in place."""
+    if cfg.reverify_seconds <= 0:
+        return
+    reverify_floor = now - cfg.reverify_seconds
+    for entry in _entries(root):
+        if _last_reverified(root, entry.name) > reverify_floor:
+            continue
+        res.reverified += 1
+        if reverify_entry(entry.name, root):
+            res.healed += 1
+
+
 def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None) -> GcResult:
     res = GcResult()
     # Re-drain any straggler trash from an interrupted prior pass first (AC5).
@@ -309,13 +383,19 @@ def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None)
     grace_floor = now - cfg.grace_seconds
     max_age_floor = now - cfg.max_age_seconds
 
-    free = shutil.disk_usage(str(root)).free if free_bytes is None else free_bytes
+    # ``total`` ALWAYS comes from the real volume (the percentage term is meaningless without
+    # it); only ``free`` is overridable, so a test can inject pressure on a real filesystem.
+    usage = shutil.disk_usage(str(root))
+    free = usage.free if free_bytes is None else free_bytes
+    trigger, target = _space_thresholds(usage.total, cfg)
+    # Hysteresis: armed at the trigger, disarmed only once free space reaches the target — NOT
+    # the moment it merely clears the trigger again.
+    need_space = free < trigger
 
     for entry in entries:
         mtime = _cache.entry_mtime(entry)
         in_grace = mtime > grace_floor
         too_cold = mtime < max_age_floor
-        need_space = free < cfg.free_watermark_bytes
 
         if in_grace and not too_cold:
             # Recently used and not yet max-age cold → protected by the grace window.
@@ -330,18 +410,9 @@ def _gc_pass(root: Path, cfg: JanitorConfig, now: float, free_bytes: int | None)
             res.evicted += 1
             res.reclaimed_bytes += reclaimed
             free += reclaimed
+            need_space = need_space and free < target
 
-    # Optional periodic integrity reverify (opt-in via reverify_seconds > 0). Honors the
-    # PERIOD: an entry reverified within the window is skipped (its integrity sidecar's
-    # mtime is the last-reverified stamp).
-    if cfg.reverify_seconds > 0:
-        reverify_floor = now - cfg.reverify_seconds
-        for entry in _entries(root):
-            if _last_reverified(root, entry.name) > reverify_floor:
-                continue
-            res.reverified += 1
-            if reverify_entry(entry.name, root):
-                res.healed += 1
+    _reverify_pass(root, cfg, now, res)
     return res
 
 
