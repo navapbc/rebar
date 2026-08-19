@@ -452,7 +452,7 @@ def test_unstamped_orphan_is_reclaimed_past_the_ceiling(
     assert fd is not None, "an aged-out unstamped orphan must be reclaimable"
     D._release_advisory_lock(_tracker(repo), fd)
     # With no holder to name, the age is the only signal an operator has — say it anyway.
-    assert any("unstamped drain lock" in r.getMessage() for r in caplog.records)
+    assert any(D._NO_STAMP in r.getMessage() for r in caplog.records)
     assert any(", held " in r.getMessage() for r in caplog.records)
 
 
@@ -522,3 +522,91 @@ def test_acquire_swallows_other_os_errors(repo: str, monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(os, "open", _boom)
     assert D._acquire_advisory_lock(_tracker(repo)) is None
+
+
+# ---------------------------------------------------------------------------
+# holder vocabulary: the drain log and `rebar doctor` describe ONE artifact
+# ---------------------------------------------------------------------------
+
+
+def test_torn_stamp_is_described_as_incomplete_not_unstamped(repo: str) -> None:
+    """A v2 stamp read mid-write (the prefix landed, the fields did not) is a DIFFERENT
+    condition from a lock that was never stamped, and the log line must say which: the
+    first is a live drainer caught in its create/stamp window, the second an orphan from
+    a pre-stamp rebar. Collapsing both into "unstamped" hides that."""
+    path = _plant_lock(repo, "rebar-lock v2 host=boot-x ns=1")
+
+    description = D._describe_drain_lock_holder(str(path))
+
+    assert D._INCOMPLETE_STAMP in description
+    assert D._NO_STAMP not in description
+    assert ", held " in description  # with no holder to name, the age is the only signal
+
+
+@pytest.mark.parametrize(
+    ("stamp", "phrase"),
+    [
+        ("", "_NO_STAMP"),
+        ("rebar-lock v9 something=else", "_UNRECOGNISED_STAMP"),
+        ("rebar-lock v2 host=boot-x ns=1", "_INCOMPLETE_STAMP"),
+    ],
+)
+def test_drain_and_doctor_describe_a_holderless_lock_identically(
+    repo: str, stamp: str, phrase: str
+) -> None:
+    """Two surfaces, one artifact: the drain's WARNING and doctor's lock row must not
+    drift into private dialects for the same lock file. Pins the shared phrasing so a
+    change to either surface fails here rather than in an operator's head."""
+    from rebar._commands import doctor_locks
+
+    expected = getattr(D, phrase)
+    path = _plant_lock(repo, stamp)
+
+    assert expected in D._describe_drain_lock_holder(str(path))
+    row = doctor_locks._existence_report("enrich-drain", str(path), note="free")
+    assert row["holder_description"] == f"unknown ({expected})"
+
+
+def test_stamp_write_failure_keeps_a_ceiling_bounded_lock(
+    repo: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed stamp write (full disk, read-only mount) must not fail the acquire — a
+    drain concern never fails its caller. The contract of that branch is that the fd is
+    still returned, the loss of attribution is announced, and the resulting unstamped
+    lock stays bounded by the shared wall-clock ceiling rather than wedging."""
+    from rebar._store import lock_owner as owner
+
+    real_open, real_write = os.open, os.write
+    drain_fds: set[int] = set()
+
+    def _tracking_open(path, *args, **kwargs):
+        fd = real_open(path, *args, **kwargs)
+        if str(path).endswith(D._DRAIN_LOCK_NAME):
+            drain_fds.add(fd)
+        return fd
+
+    def _refusing_write(fd, data):
+        if fd in drain_fds:
+            raise OSError("no space left on device")
+        return real_write(fd, data)
+
+    monkeypatch.setattr(os, "open", _tracking_open)
+    monkeypatch.setattr(os, "write", _refusing_write)
+    with caplog.at_level("WARNING", logger="rebar.llm.enrich_drain"):
+        fd = D._acquire_advisory_lock(_tracker(repo))
+    monkeypatch.setattr(os, "open", real_open)
+    monkeypatch.setattr(os, "write", real_write)
+
+    assert fd is not None, "a stamp write failure must not turn into a failed acquire"
+    assert any("lock is unattributable" in r.getMessage() for r in caplog.records)
+    path = _drain_lock(repo)
+    assert path.read_text(encoding="utf-8") == ""  # nothing was stamped
+    os.close(fd)
+
+    # Still ceiling-bounded: honoured while young, reclaimable once aged out.
+    assert D._acquire_advisory_lock(_tracker(repo)) is None
+    when = time.time() - (owner._MKDIR_LOCK_STALE_CEILING_S + 60)
+    os.utime(path, (when, when))
+    reclaimed = D._acquire_advisory_lock(_tracker(repo))
+    assert reclaimed is not None, "an unattributable lock must never wedge past the ceiling"
+    D._release_advisory_lock(_tracker(repo), reclaimed)
