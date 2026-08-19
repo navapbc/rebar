@@ -44,7 +44,9 @@ seam that implements it:
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import subprocess
 import sys
 import time
 from collections.abc import Callable
@@ -384,10 +386,35 @@ def test_delete_permission_probe(tmp_path):
         )
 
 
+def _fresh_search(client: Any, jql: str) -> Any:
+    """Run ``jql`` against Jira, bypassing ``AcliClient``'s per-JQL memo.
+
+    ``AcliClient.search_issues`` memoizes its full result set per JQL string in
+    ``client._search_cache`` — no TTL, no invalidation, and **negative (empty)
+    answers are cached too**. That is correct for the pagination callers it was
+    built for (they re-ask the same JQL only to slice the next page), but it is
+    fatal for a poll: an index-visibility poll re-issues two CONSTANT JQL strings
+    on ONE client, so only the first attempt would ever reach Jira and every later
+    attempt would replay that first (empty) answer from a dict. The budget and the
+    exponential backoff would then be inert — the poll would sleep out its whole
+    budget without asking Jira again, and could only succeed if the index happened
+    to have converged at the instant of the very first query.
+
+    Evicting the entry before each call is the same pattern the production JQL
+    retry loop in ``rebar_reconciler.access_check`` already uses, and it keeps the
+    fix at the polling call site: ``search_issues``'s default caching semantics are
+    untouched for every other caller.
+    """
+    cache = getattr(client, "_search_cache", None)
+    if isinstance(cache, dict):
+        cache.pop(jql, None)
+    return client.search_issues(jql)
+
+
 def _issue_exists(client: Any, key: str) -> bool:
     """True if a direct search by key returns the issue (index-visible)."""
     try:
-        hits = client.search_issues(f'key = "{key}"')
+        hits = _fresh_search(client, f'key = "{key}"')
     except Exception:  # noqa: BLE001 — a transient search error means "unknown"; caller treats as not-visible
         return False
     return any(h.get("key") == key for h in hits or [])
@@ -437,6 +464,10 @@ def _poll_until_visible(
     exponentially (1, 2, 4, 8s, capped) — the same backoff shape as ``_retry`` — so a slow
     index is waited out patiently rather than polled at a fixed 2s. ``time_fn``/``sleep_fn``
     are injectable purely for deterministic testing; the live call site keeps real time.
+
+    Every attempt goes through ``_fresh_search``, so both JQLs are genuinely re-asked each
+    time round the loop; without that the client's per-JQL memo would serve the first
+    (empty) answer forever and make the budget and backoff below purely decorative.
     """
     if timeout_s is None:
         timeout_s = _default_index_visibility_timeout()
@@ -446,7 +477,7 @@ def _poll_until_visible(
         if _issue_exists(client, key):
             return True
         try:
-            hits = client.search_issues(f'summary ~ "{summary}"')
+            hits = _fresh_search(client, f'summary ~ "{summary}"')
             if any(h.get("key") == key for h in hits or []):
                 return True
         except Exception:  # noqa: BLE001 — search lag is expected mid-poll; keep polling until the deadline
@@ -529,6 +560,64 @@ def test_index_visibility_timeout_env_override(monkeypatch):
     assert _default_index_visibility_timeout() == 300.0
     monkeypatch.setenv(INDEX_VISIBILITY_TIMEOUT_ENV, "not-a-number")
     assert _default_index_visibility_timeout() == _DEFAULT_INDEX_VISIBILITY_TIMEOUT_S
+
+
+class _IndexLaggingAcliRun:
+    """Stands in for ``AcliClient._run`` — a Jira whose search index only returns the
+    just-created issue at/after ``visible_at`` on the injected simulated clock.
+
+    Substituting at the SUBPROCESS seam (not at ``search_issues``) is the point: it keeps
+    the real ``AcliClient.search_issues`` — including its per-JQL result cache — in the
+    path, which a hand-rolled fake client silently omits. No network, no creds.
+    """
+
+    def __init__(self, key: str, summary: str, clock: _FakeClock, *, visible_at: float) -> None:
+        self._key = key
+        self._summary = summary
+        self._clock = clock
+        self._visible_at = visible_at
+        self.jqls: list[str] = []
+
+    def __call__(self, cmd: list[str], *, retry_on_timeout: bool = False):
+        jql = cmd[cmd.index("--jql") + 1]
+        self.jqls.append(jql)
+        hit = self._clock.monotonic() >= self._visible_at
+        payload = [{"key": self._key, "fields": {"summary": self._summary}}] if hit else []
+        return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
+
+
+def test_poll_until_visible_requeries_a_real_client_until_the_index_converges():
+    """Bug d30c: the poll must keep asking JIRA, not keep re-reading its own first answer.
+
+    ``AcliClient.search_issues`` memoizes per-JQL and caches NEGATIVE results too, so a
+    poll that re-calls it with the same JQL gets the first (empty) answer back forever —
+    turning the 120s budget into a single-shot check that can only pass if the index has
+    already converged when the very first query lands. Raising the budget or backing off
+    cannot help, because no further query is ever issued.
+
+    Drives the helper against a REAL ``AcliClient`` (stubbed only at the subprocess seam)
+    with an index that converges at a simulated t=60s — comfortably inside the 120s
+    budget — and asserts the observable outcome: the issue is found.
+    """
+    clock = _FakeClock()
+    key, summary = "REB-9999", "synthetic summary"
+    runner = _IndexLaggingAcliRun(key, summary, clock, visible_at=60.0)
+    client = _recon("acli").AcliClient(
+        jira_url="https://example.invalid", user="u", api_token="t", jira_project="REB"
+    )
+    client._run = runner  # type: ignore[method-assign]
+
+    found = _poll_until_visible(client, key, summary, time_fn=clock.monotonic, sleep_fn=clock.sleep)
+
+    assert found is True, (
+        "poll never saw an index that converged at t=60s, well inside the 120s budget — "
+        "it stopped querying Jira after the first attempt"
+    )
+    # The contract is "poll": the key search must actually reach Jira more than once.
+    assert runner.jqls.count(f'key = "{key}"') > 1, (
+        f"the key search was issued only {runner.jqls.count(f'key = {key!r}')} time(s); "
+        "the poll is re-reading a cached answer instead of re-querying"
+    )
 
 
 def test_c1_conflict_signal(tmp_path):
