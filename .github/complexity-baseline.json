@@ -11,7 +11,6 @@
     "src/rebar/_commands/fsck_repair.py::_repair_plan": 17,
     "src/rebar/_commands/fsck_repair.py::_repair_run": 30,
     "src/rebar/_commands/init.py::_mount_or_create_branch": 18,
-    "src/rebar/_commands/transition.py::_parse_flags": 17,
     "src/rebar/_commands/transition_close.py::close_ticket": 17,
     "src/rebar/_commands/verify_authorship.py::_verify_signed": 16,
     "src/rebar/_commands/verify_authorship.py::cli": 18,
