@@ -38,15 +38,19 @@ trace, an incident, a Jira ticket, a vague "X is broken"). Run the full protocol
 isolated so evidence for one stays clean of another.
 
 **Before you begin, switch to a fresh worktree based on `origin/main`, and `cd` into it.** Do
-this as the very first step of skill execution —
-`git fetch origin && git worktree add <path> -b <branch> origin/main` — so all reproduction,
-experiments, and the eventual Phase 2 fix happen in isolation on current `main`, never in the
-primary checkout. **`cd` into the worktree and run every subsequent command — reproduction,
-experiments, edits, gates, `rebar`, ticket closes, and `git` — from inside it**, so they all
-act on this worktree's branch and not the primary checkout. When the skill concludes — whether the fix
-lands, the run fails, or you abandon it — retire the worktree with `git worktree remove <path>`
-(then `git worktree prune`), so it does not leak; keep it only when an unlanded fix must
-survive for follow-up.
+this as the very first step of skill execution — `git fetch origin && make worktree
+name=<branch>`, which creates the worktree from current `origin/main` **and provisions its
+virtualenv** — so all reproduction, experiments, and the eventual Phase 2 fix happen in
+isolation on current `main`, never in the primary checkout. Then **run every command with the
+worktree venv first on `PATH`** (`env PATH="$PWD/.venv/bin:$PATH" <cmd>`, or activate it in each
+command — shell state does not persist between them). A fresh worktree's venv is not on the
+ambient `PATH`, so without this the `git commit` hook fails with a missing `ruff`/`mypy` even
+though the code is clean — see `docs/local-dev-env.md`. **`cd` into the worktree and run every
+subsequent command — reproduction, experiments, edits, gates, `rebar`, ticket closes, and `git`
+— from inside it**, so they all act on this worktree's branch and not the primary checkout. When
+the skill concludes — whether the fix lands, the run fails, or you abandon it — retire the
+worktree with `git worktree remove <path>` (then `git worktree prune`), so it does not leak;
+keep it only when an unlanded fix must survive for follow-up.
 
 ## Operating principles
 
@@ -117,7 +121,8 @@ run, why it's necessary, and its blast radius, then wait. Prefer a local reprodu
 **Carve-out — the project's own tracker.** The tracker this debug session is already operating
 within — the one that produced or holds the ticket under debug — is the project's own mandated
 tracker, and the **prescribed writebacks this protocol requires** (the Phase-1-exit RCA comment,
-the Step-7 sibling tickets, the not-a-bug classification comment, and the final report comment)
+the `caused_by` link to the defect's originating ticket, the Step-7 sibling tickets, the
+not-a-bug classification comment, and the final report comment)
 are pre-approved on it: post them without asking. Everything else stays gated: any *other*
 tracker is third-party and needs approval per the paragraph above, as does any own-tracker
 mutation beyond the prescribed writebacks (transitions, edits to others' tickets, bulk changes).
@@ -150,7 +155,10 @@ replicate the original report. It also **keeps the not-a-bug guard** (see the Ph
 gate): even on the fast path you must confirm the behavior actually violates a cited
 authoritative source before auto-applying a fix — a mechanism that turns out to be
 working-as-designed drops you out of the fast path (surface it to the user), it does not license a
-patch.
+patch. And it **keeps defect attribution**: a single recent diff is usually what put you on the
+fast path in the first place, so the origin is usually close at hand. But "usually" is not
+"always": if the single diff turns out to be the *fix* site rather than the cause site, run the
+full attribution step — a fast-path bug still gets a correctly attributed origin.
 
 **Return to the full protocol on surprise.** The moment any gate assumption breaks — the
 first fix doesn't turn the test green, a second plausible cause appears, the change isn't
@@ -191,7 +199,8 @@ hypotheses later. Pull from every available source:
   `git blame` the suspect lines, and check recently-touched files near the failure. When the
   bug has a known good→bad transition and a way to test it, `git bisect` is the fastest path
   to the introducing commit. A suspect commit is a *lead* — record it as one; it becomes
-  hypothesis material in Stage 2.
+  hypothesis material in Stage 2, and (once a cause is confirmed) the raw material for the
+  defect-attribution step at the Phase 1 exit gate.
 - **Prior fixes & regression history** — check *early* for past bug reports on this behavior
   and the commits that fixed them (`git log --grep`, `git log -S<symbol>`, tracker search).
   This is cheap and it shapes what data to gather: a behavior that was fixed before and
@@ -398,9 +407,157 @@ through Phase 2's RED→GREEN discipline independently (one RED test per mechani
 confirmed, cited, parsimonious account is the earned key to Phase 2. Until it exists, stay in
 Phase 1.
 
+**Attribute the defect to its originating ticket (`caused_by`) — part of the RCA, not an
+extra.** A root cause names a changeable artifact; that artifact got the way it is through some
+*change*, and that change was made under some *ticket*. Naming it is what turns one bug fix into
+a measurable defect-escape signal: which work item shipped a defect past its own review, tests,
+and gates. An RCA that stops at the mechanism cannot answer that, so complete the attribution
+before you write the RCA comment.
+
+rebar already carries this: `caused_by` is a first-class relation, a bug close accepts an
+explicit `--caused-by=<id>`, and the link feeds `rebar metrics`' escape-rate lenses and the
+epic-close `caused_by` floor (`docs/plan-review-gate.md`). **Left implicit, a bug close falls
+back to best-effort `git blame` auto-derivation over the ticket's impacted paths** — a heuristic
+that blames *files* and records nothing at all when it cannot read them (see
+`docs/clone-guidance.md`). You have just *proved* which mechanism broke and can name the commit
+that introduced it, which is strictly better evidence than that fallback can produce. **Supply
+it explicitly. Do not let the guess stand in for the proof.**
+
+**But inherit the fallback's discipline.** Your advantage over it is *aim*, not a different
+instrument — you point the same `git blame` at the lines the experiment implicated instead of at
+whole files, and you have the judgment to walk through a carrier commit and to recognize an
+omission or an unmet obligation, which a line-count majority cannot — and to know that the place
+a fix lands is frequently not the place the defect came from. What the fallback has that you do
+not is indifference: it fails closed, refusing to attribute on a sub-majority, a partial read,
+or a self-attribution, because a wrong culprit is worse for the metric than a blank one. You
+have just spent a session building an explanatory narrative, and a plausible-looking culprit
+will slot into it comfortably. Proving the mechanism is **not** the same as proving its origin —
+one is about what is broken now, the other about which change made it wrong. Do the git work for
+the second question too; do not answer it from the momentum of the first.
+
+**Attribution is a sub-investigation, and its cost is authorized.** Treat it as a second, small
+application of this protocol rather than a field to populate: form a candidate origin, look for
+evidence that would refute it, and follow the history until one candidate survives. Spending a
+`git bisect`, a producer-side history search, or a read through two or three tracker tickets to
+get it right is **expected and sanctioned** — not scope creep to be economized away. The reason
+it has to happen *here* is that you are the only party who will ever hold both halves at once:
+the proven mechanism, and the history around it. A later agent handed the closed ticket sees the
+fix and the symptom, and would have to re-derive the entire root cause before it could even
+begin attributing — which is why deferred attribution does not happen. Your context is the
+advantage; spend it while you have it.
+
+1. **Find the introducing change from the confirmed mechanism** — blame the *exact* lines the
+   experiment implicated, not the file: `git blame -L<start>,<end> -- <path>`, or
+   `git log -L<start>,<end>:<path>` for the line range's own history. When the bug has a known
+   good→bad transition, `git bisect` names the commit directly and is the strongest evidence.
+   **This step only applies when the implicated site is itself what went wrong.** Confirm that
+   before you trust any blame result — see step 3.
+2. **Walk through carriers.** A blame hit on a reformat, rename, file move, or mechanical
+   refactor is a *carrier* of the defect, not its origin. Re-blame ignoring those
+   (`git blame -w -C -M`), follow the file across moves (`git log --follow`), and step back
+   through the carrier (`git blame <carrier>^ -L…`) until you reach the commit that made the
+   behavior wrong. Attribute to that one.
+3. **The fix site is not the cause site.** *This is the most common way attribution goes
+   wrong, and blaming the code you are about to change is exactly how you get it wrong.* A large
+   class of defects is an **unmet obligation**: some change elsewhere introduced a new contract —
+   a field, a signature, an invariant, a schema version, a config key, a changed default — and
+   *this* site was never updated to meet it. The code here may be untouched for years and still
+   be the place the failure surfaces and the place the fix lands. Blame on it will confidently
+   name whoever last edited a correct-at-the-time line. That answer is wrong, and it is wrong in
+   the direction that makes the metric useless: it charges the defect to the consumer's old
+   ticket instead of to the change that created the obligation and shipped without updating its
+   consumers — which is precisely the escape worth counting.
+
+   **The date test detects it cheaply.** Compare the blame date on the implicated lines against
+   the point where behavior actually became wrong (the `git bisect` result, the first red run,
+   the release the report starts at). If the implicated lines predate that transition, they did
+   not cause it — by definition something else changed. Treat that mismatch as a hard signal to
+   stop blaming this file and go find the obligation.
+
+   **To attribute an unmet obligation**, name the contract being violated — the symbol, field,
+   schema, endpoint, or flag this site is out of step with — and find the change that
+   *introduced* it, not the change that failed to follow it: `git log -S<symbol>` /
+   `git log -G<pattern>` on the **producer** side, `git log --follow` on the file that defines
+   the contract, or the commit that added/renamed/redefined it. Attribute to that change's
+   ticket. Symmetrically, when the transition is a behavior change rather than a new symbol, the
+   origin is the commit that changed the behavior the consumer relied on.
+
+   Sanity check either way: the ticket you name should be one where a reviewer could plausibly
+   have caught this — the work that created the obligation, or the work that broke the
+   behavior. If the ticket you are about to name could not have known about this site or this
+   requirement, you have the wrong ticket.
+
+4. **Recover the ticket from the commit** — read the `rebar-ticket:` trailer or the leading
+   `<id>:` subject (`git show -s <sha>`; format per `rebar explain commit-trailer`;
+   `rebar verify-commit-ticket <sha>` to check one). For commits predating the trailer
+   convention, fall back to tracker search on the changed symbol/behavior (`rebar search`,
+   `git log --grep`, `git log -S<symbol>`).
+5. **Record it on the close** — pass the culprit explicitly when you close the bug:
+
+   ```sh
+   rebar transition <bug-id> in_progress closed --class=<close-class> --caused-by=<origin-id>
+   ```
+
+   `--caused-by` overrides the blame auto-derivation. `--class` is **required** on a bug close
+   (the write-side guard refuses without it, and no `--force` waives it) — pick the one that
+   matches what you proved: `regression` (a later change broke working behavior), `plan_defect`
+   (the originating plan was wrong), `preexisting`, `env_integration`, `flaky`, `undetermined`.
+   Together they tell the escape-rate lenses both *where it came from* and *what kind of escape
+   it was*.
+
+   **`--caused-by` on the close is not optional once you have an origin, even if you already
+   linked one.** Recording the link early with `rebar link <bug-id> <origin-id> caused_by`
+   (pre-approved own-tracker writeback) is fine and often useful — it gets the finding down
+   before Phase 2 can be interrupted — but it does **not** stand in for the flag. A close with
+   an empty `--caused-by` re-runs blame auto-derivation unconditionally; it does not check
+   whether the ticket already carries a `caused_by` edge, so it will happily add a second,
+   guessed edge *beside* your proven one. Two edges, one of them wrong, is a worse input to the
+   metric than either alone. Pass the flag on the close every time. (For an already-closed bug,
+   `rebar link` is the only path left — use it.) **Direction matters** on the link form: first
+   id is the bug, second is the culprit, reading "id1 was caused by id2".
+
+   Either way, state the attribution and its evidence (the sha, and why that commit rather than
+   its neighbors) in the RCA comment too, so the reasoning survives independently of the link.
+6. **Say so when you disagree with the default.** If your attribution differs from the commit a
+   whole-file blame majority would name — because you walked through a carrier, or because the
+   cause is an obligation created in a different file than the one the fix touches — record that
+   divergence and its reasoning in the RCA. That note is what lets a later reader tell a
+   considered attribution from a mechanical one.
+
+**Hold attribution to the same evidentiary standard as the root cause.** State the causal claim
+and check it survives: *this change made this behavior wrong, and before it the behavior was
+right.* Proximity is not evidence — being the same file, or merely being recent, satisfies
+nothing; and per step 3 the originating commit often does not touch the failing site at all. A
+plausible-looking but wrong `caused_by` is *worse than none*: it silently mis-assigns escaped
+defects and corrupts the very metric the link exists to feed. Do not guess to fill the field.
+
+Four cases resolve differently:
+
+- **Regression** — the mechanism worked and a later change broke it. Attribute to that change's
+  ticket. If the origin is itself a prior *bugfix* ticket, link it anyway — a fix that reopened
+  a defect is exactly the signal worth counting.
+- **Unmet obligation / missed consumer update** — a change elsewhere created a requirement this
+  site never met (see step 3). Attribute to the ticket behind *that* change, not to the site being
+  fixed. This is the case blame auto-derivation gets systematically wrong, so it is the case
+  where supplying `--caused-by` explicitly matters most.
+- **Omission** (`incomplete-implementation`, or a guard/case that was never written) — there is
+  no commit that broke it, so blame will not find one. Attribute to the ticket that *should*
+  have covered the behavior: the story/epic that introduced the feature the case belongs to, or
+  the ticket whose acceptance criteria the missing behavior falls under. Say in the RCA that the
+  attribution is by scope-of-work rather than by introducing commit.
+- **Unattributable** — no commit or ticket can be identified to the standard above (pre-history
+  code, an untrailered import, a genuinely ambiguous multi-commit origin). Record that
+  explicitly in the RCA: state what you searched (blame range, bisect bounds, tracker queries)
+  and why it came up empty, and leave the link unset. "Unattributable, and here is the search"
+  is a usable data point; a fabricated origin is not.
+
+Attribution applies to the **`defect` and `incomplete-implementation`** paths. When the not-a-bug
+guard below classifies the finding as anything else, there is no defect to attribute — skip it.
+
 **Write the RCA back before crossing into Phase 2.** Post the confirmed account as a comment on
 the ticket under debug in the project's own tracker (pre-approved; see the approval-gate
-carve-out): the root-cause mechanism and the discriminating evidence that confirmed it. This is
+carve-out): the root-cause mechanism, the discriminating evidence that confirmed it, and the
+attributed origin from the step above (or the unattributable finding and its searches). This is
 the durable record the next reader searches for — it must exist even if Phase 2 is interrupted.
 For a **non-trivial fix** — one whose planned blast radius reaches non-test code — also write
 the fix plan into the ticket's description, declare the expected files in `file_impact`, and run
@@ -638,6 +795,9 @@ signal):
 - **Proven root cause** — the mechanism, with key citations.
 - **Proof** — the discriminating experiment(s) and result(s) that confirmed it and killed
   alternatives.
+- **Defect origin** — the ticket the defect came from and how you got there (introducing commit
+  sha, or scope-of-work for an omission), plus confirmation the `caused_by` link is recorded —
+  or an explicit "unattributable" with the searches that came up empty.
 - **Test** — the RED→GREEN test (path), confirmed legitimately RED first, held out from the
   fix subagent, and shown to have teeth (mutation check returned it to RED).
 - **Fix** — what changed and why it addresses the root cause (not the symptom).
@@ -657,6 +817,18 @@ Post this report (or its per-problem summary) as a comment on the ticket under d
 project's own tracker — the pre-approved writeback that closes the loop: cause, proof, test,
 fix, siblings, replication. Prior tickets are only as useful as what the last debugger wrote
 back.
+
+**Do not close the bug ticket until its origin is recorded.** Before
+the close must carry `--caused-by=<origin-id>`, or — when nothing could be attributed to the
+standard above — the RCA comment must record an explicit unattributable finding with the
+searches that came up empty, per the attribution step at the Phase 1 exit gate. An earlier
+`rebar link` does **not** excuse the flag: a close with an empty `--caused-by` re-derives from
+blame regardless and can add a competing edge. Closing bare and letting blame auto-derivation
+take its chances is not attribution — it is the default you were supposed to beat. Closing without
+one loses the mapping permanently: the fix lands, the session ends, and no later reader can
+reconstruct which work item the defect escaped from. Attribution is cheap while the mechanism
+and its blame trail are still in front of you and expensive-to-impossible afterwards — that
+asymmetry is why it gates the close.
 
 If a problem is *not* solved (looped out without a confirmed cause, or blocked on an approval
 you don't have), say so plainly with the current best evidence and the specific blocker —
