@@ -102,8 +102,12 @@ itself to `in_progress` too. If you cannot claim (a `ConcurrencyError`/exit 10 m
 else holds it, or a gate blocks the claim), resolve that FIRST — pick another ticket, or earn
 the required attestation — rather than working unclaimed. `--force[=<reason>]` bypasses any
 enabled start-work gate (plan-review or whatever gate is configured, present or future) — treat
-it as an escape hatch for a human operator's judgment call, not a routine agent move; it is
-CLI-only and not exposed over MCP.
+it as an escape hatch for a human operator's judgment call, not a routine agent move. It is
+available on **every** surface — library, CLI, and MCP (`transition_ticket` / `claim_ticket`
+take a reason-bearing `force`) — and is audited not by withholding it from any surface but by
+the **absence of a signed attestation**: a forced op records no certification, so a project
+that must keep force from circumventing a gate enforces it by checking for that certification
+in CI.
 
 ## The parallel-agent workflow
 
