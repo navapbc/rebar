@@ -265,6 +265,38 @@ def glob_triggered_overlays(changed_files: Sequence[str]) -> list[str]:
     return out
 
 
+def project_applies_to_globs(criterion_id: str, repo_root: str | None = None) -> list[str]:
+    """The ``applies_to`` file globs a PROJECT criterion declares, read from the
+    overlay-MERGED routing.
+
+    Deliberately NOT :func:`applies_to_globs`: that one reads the PACKAGED
+    :func:`routing_index`, which carries no entry for a ``project.<name>`` id at all — so it
+    would report an empty list for every project criterion and silently fail open. A project
+    criterion exists only in ``.rebar/criteria_routing.json``, hence :func:`effective_routing`.
+    """
+    entry = effective_routing(repo_root).get(criterion_id) or {}
+    globs = entry.get("applies_to") or []
+    return [g for g in globs if isinstance(g, str)]
+
+
+def project_criterion_applies(
+    criterion_id: str, changed_files: Sequence[str], repo_root: str | None = None
+) -> bool:
+    """Whether a project criterion's ``applies_to`` admits this review's changed files.
+
+    An EMPTY (or absent) glob list means UNGATED — the criterion runs on every review. That
+    is the OPPOSITE of the same key's meaning on a BUILT-IN overlay, where empty means
+    "escalation-only, never glob-fires" (:func:`glob_triggered_overlays`). The project meaning
+    is forced: a ``project.`` id is not in :data:`OVERLAY_IDS`, so the base reviewer can never
+    escalate to it and "empty = never run" would make every project criterion dead. The
+    collision is documented in ADR 0074.
+    """
+    globs = project_applies_to_globs(criterion_id, repo_root)
+    if not globs:
+        return True
+    return any(_glob_match(f, g) for f in changed_files for g in globs)
+
+
 # ── Content triggers (the analog of glob triggers, keyed on the DIFF's removed lines) ────────
 # Pragmatic, POLYGLOT removed-declaration patterns. This is deliberately a heuristic (the story
 # expects it to EVOLVE per language): it matches a def/class/function/method SIGNATURE on a

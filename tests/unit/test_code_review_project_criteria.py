@@ -780,3 +780,103 @@ def test_pass3_routing_parity_overlay_absent_repo_preserves_disposition(
     assert finding["reason"] == "default-advisory"
     assert finding["block_threshold"] == 0.95
     assert finding["blocking_enabled"] is False
+
+
+# ── `applies_to` gates a project criterion on the changed files (bug d343-47c6) ─────────
+# A project code-review criterion's `applies_to` used to be stored and never read, so the
+# criterion ran on EVERY review regardless of what changed. These pin the gate at the real
+# dispatch seam (`produce_code_review_verdict`), not at a helper.
+def _verdict_with_changed_files(
+    repo: Path,
+    runner: _ProductionRecordingRunner,
+    monkeypatch,
+    changed_files: list[str],
+) -> dict:
+    from rebar.llm.code_review import detectors
+
+    monkeypatch.setattr(detectors, "run_security_detectors", lambda **kwargs: {})
+    return gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            source="local",
+            diff_text="--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('changed')\n",
+            changed_files=changed_files,
+            runner=runner,
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+
+
+def test_project_criterion_glob_matching_a_changed_file_is_dispatched(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _project_repo(tmp_path, routing={**_PROJECT_ROUTING, "applies_to": ["**/*.py"]})
+    runner = _ProductionRecordingRunner()
+
+    verdict = _verdict_with_changed_files(repo, runner, monkeypatch, ["x.py"])
+
+    assert verdict["verdict"] == "PASS"
+    assert runner.calls.count(_PROJECT_PROMPT) == 1
+
+
+def test_project_criterion_glob_matching_no_changed_file_is_not_dispatched(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _project_repo(
+        tmp_path, routing={**_PROJECT_ROUTING, "applies_to": ["**/.github/workflows/**"]}
+    )
+    runner = _ProductionRecordingRunner()
+
+    verdict = _verdict_with_changed_files(repo, runner, monkeypatch, ["x.py"])
+
+    assert verdict["verdict"] == "PASS"
+    assert _PROJECT_PROMPT not in runner.calls
+
+
+def test_project_criterion_with_empty_applies_to_is_always_dispatched(
+    tmp_path, monkeypatch
+) -> None:
+    """An EMPTY `applies_to` means UNGATED for a project criterion — the opposite of its
+    built-in-overlay meaning (empty = escalation-only, never glob-fires). This is the
+    shape `.rebar/criteria_routing.json` uses today, so it must keep running on any diff."""
+    repo = _project_repo(tmp_path)  # _PROJECT_ROUTING carries "applies_to": []
+    runner = _ProductionRecordingRunner()
+
+    verdict = _verdict_with_changed_files(repo, runner, monkeypatch, ["unrelated/thing.txt"])
+
+    assert verdict["verdict"] == "PASS"
+    assert runner.calls.count(_PROJECT_PROMPT) == 1
+
+
+@pytest.mark.parametrize(
+    ("applies_to", "changed_files", "expected"),
+    [
+        ([], ["anything.txt"], True),
+        (["**/*.py"], ["src/a.py"], True),
+        (["**/*.py"], ["README.md"], False),
+        (["**/*.py"], [], False),
+        (["docs/**", "**/*.py"], ["docs/guide.md"], True),
+    ],
+)
+def test_activated_project_criteria_honours_applies_to(
+    tmp_path, applies_to, changed_files, expected
+) -> None:
+    repo = _project_repo(tmp_path, routing={**_PROJECT_ROUTING, "applies_to": applies_to})
+
+    activated = gate_dispatch._activated_code_review_project_criteria(str(repo), changed_files)
+
+    assert (_PROJECT_ID in [entry["criterion_id"] for entry in activated]) is expected
+
+
+def test_project_applies_to_globs_read_the_overlay_not_the_packaged_index(tmp_path) -> None:
+    """The globs must resolve through `effective_routing(repo_root)`. The packaged
+    `routing_index()` has no entry for a `project.` id at all, so `applies_to_globs`
+    (which reads it) would report an EMPTY list and silently fail open."""
+    repo = _project_repo(tmp_path, routing={**_PROJECT_ROUTING, "applies_to": ["**/*.py"]})
+
+    assert code_review_registry.applies_to_globs(_PROJECT_ID) == []  # packaged index: absent
+    assert code_review_registry.project_applies_to_globs(_PROJECT_ID, str(repo)) == ["**/*.py"]
+    assert code_review_registry.project_criterion_applies(_PROJECT_ID, ["a.py"], str(repo))
+    assert not code_review_registry.project_criterion_applies(_PROJECT_ID, ["a.md"], str(repo))
