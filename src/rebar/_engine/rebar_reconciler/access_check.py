@@ -68,12 +68,15 @@ def _resolve_probe_scope(
     There is NO implicit ``DIG`` project default (AC2): an unset ``JIRA_PROJECT`` fails
     closed rather than silently probing a hard-coded project.
     """
+    from rebar.config import resolve_jira_probe_scope
+
     src = os.environ if env is None else env
+    jira_url, jira_user, jira_project = resolve_jira_probe_scope(env)
     creds = {
-        "jira_url": src.get("JIRA_URL", ""),
-        "jira_user": src.get("JIRA_USER", ""),
+        "jira_url": jira_url,
+        "jira_user": jira_user,
         "jira_api_token": src.get("JIRA_API_TOKEN", ""),
-        "jira_project": src.get("JIRA_PROJECT", ""),
+        "jira_project": jira_project,
     }
     if not creds["jira_url"] or not creds["jira_user"] or not creds["jira_api_token"]:
         return None, (
@@ -279,11 +282,11 @@ def _build_probe_client(env: dict[str, str] | None, client_cls) -> Any:
     Missing credentials fail closed (they cannot be distinguished from an
     unreachable backend for preflight purposes).
     """
+    from rebar.config import resolve_jira_probe_scope
+
     src = os.environ if env is None else env
-    jira_url = src.get("JIRA_URL", "")
-    jira_user = src.get("JIRA_USER", "")
+    jira_url, jira_user, jira_project = resolve_jira_probe_scope(env)
     jira_api_token = src.get("JIRA_API_TOKEN", "")
-    jira_project = src.get("JIRA_PROJECT", "")
     if not jira_url or not jira_user or not jira_api_token:
         raise TransportUnavailableError(
             "project-visibility probe: missing Jira credentials "

@@ -43,12 +43,6 @@ from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL
 # import for the same ``spec_from_file_location`` reason as above.
 from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE
 
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment."""
-    return os.environ.get(f"REBAR_{name}", default)
-
-
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
 # _loader.py). Import it normally when package context exists, else bootstrap it
 # by file path — this module is itself exec'd standalone via
@@ -409,7 +403,7 @@ def _diff_fields(
     against ``jira_fields["parent"]["key"]``.  Unbound parents are omitted
     from the mapped dict and therefore never emitted as changes.
     """
-    verbose = _rebar_env("RECONCILER_VERBOSE", "0") == "1"
+    verbose = os.environ.get("REBAR_RECONCILER_VERBOSE", "0") == "1"  # read-via: debug switch
     ticket_id = ticket.get("ticket_id") or ticket.get("id") or "<no-id>"
 
     # Convergence rollout retired (story d6bd): the arbitration ANCESTOR used by

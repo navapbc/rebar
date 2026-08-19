@@ -80,13 +80,9 @@ def _acli_call_timeout() -> int:
     failing the call — a zero/negative timeout would make ``communicate(timeout=0)``
     time out every call instantly.
     """
-    from rebar.config import ConfigError, load_config
+    from rebar.config import resolve_acli_call_timeout
 
-    try:
-        value = load_config().reconciler.jira_cli_timeout
-    except ConfigError:
-        return _DEFAULT_ACLI_TIMEOUT
-    return value if value > 0 else _DEFAULT_ACLI_TIMEOUT
+    return resolve_acli_call_timeout(_DEFAULT_ACLI_TIMEOUT)
 
 
 class JiraSettings(NamedTuple):
@@ -113,20 +109,9 @@ def resolve_jira_settings(*, project_default: str = "") -> JiraSettings:
     non-https ``jira.url`` (without ``jira.allow_insecure``), by contrast, is a deliberate
     security-policy rejection that FAILS LOUD (``InsecureUrlError`` propagates — bug bdb8).
     """
-    from rebar.config import ConfigError, InsecureUrlError, load_config
+    from rebar.config import resolve_jira_connection
 
-    try:
-        jira = load_config().jira
-        url, user, project = jira.url, jira.user, jira.project
-    except InsecureUrlError:
-        # A deliberate security-policy rejection (a cleartext jira.url) must FAIL LOUD —
-        # parity with the DC resolver's fail-loud posture — not silently degrade to env
-        # like a malformed config does (bug bdb8).
-        raise
-    except ConfigError:
-        url = os.environ.get("JIRA_URL", "")
-        user = os.environ.get("JIRA_USER", "")
-        project = os.environ.get("JIRA_PROJECT", "")
+    url, user, project = resolve_jira_connection()
     return JiraSettings(
         url=url,
         user=user,

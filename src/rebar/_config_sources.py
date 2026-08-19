@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 from rebar._config_schema import _SECTIONS, ConfigError, _as_bool
@@ -683,3 +684,97 @@ def resolve_run_root(explicit: str | os.PathLike[str] | None = None) -> Path:
         return Path(explicit)
     env_root = os.environ.get("REBAR_ROOT")
     return Path(env_root) if env_root else Path.cwd()
+
+
+# --------------------------------------------------------------------------- #
+# Reconciler JIRA-family resolvers — owned entry points for the below-seam
+# adapters. Each references ``load_config`` as a ``rebar.config`` attribute at
+# CALL time (monkeypatch-compatible) and imports it LAZILY, so the stdlib-only
+# reconciler engine stays importable without ``rebar`` on the path.
+# --------------------------------------------------------------------------- #
+
+
+def resolve_jira_connection() -> tuple[str, str, str]:
+    """``(url, user, project)`` from ``load_config().jira.*``; on ``ConfigError`` fall
+    back to the ``JIRA_URL``/``JIRA_USER``/``JIRA_PROJECT`` env layer (read LIVE per call).
+    ``InsecureUrlError`` PROPAGATES — a cleartext ``jira.url`` must fail loud, not degrade."""
+    import rebar.config as _cfg
+
+    try:
+        jira = _cfg.load_config().jira
+        return jira.url, jira.user, jira.project
+    except _cfg.InsecureUrlError:
+        raise
+    except _cfg.ConfigError:
+        return (
+            os.environ.get("JIRA_URL", ""),
+            os.environ.get("JIRA_USER", ""),
+            os.environ.get("JIRA_PROJECT", ""),
+        )
+
+
+def resolve_acli_call_timeout(default: int) -> int:
+    """The ACLI per-call subprocess timeout: ``reconciler.jira_cli_timeout`` over
+    ``default``; a ``ConfigError`` or any non-positive value falls back to ``default``."""
+    import rebar.config as _cfg
+
+    try:
+        value = _cfg.load_config().reconciler.jira_cli_timeout
+    except _cfg.ConfigError:
+        return default
+    return value if value > 0 else default
+
+
+def resolve_jira_probe_scope(env: Mapping[str, str] | None) -> tuple[str, str, str]:
+    """``(url, user, project)`` from the ``JIRA_URL``/``JIRA_USER``/``JIRA_PROJECT`` env
+    layer, reading ``env`` when supplied else the live process environment."""
+    src: Mapping[str, str] = os.environ if env is None else env
+    return src.get("JIRA_URL", ""), src.get("JIRA_USER", ""), src.get("JIRA_PROJECT", "")
+
+
+def resolve_dc_comment_max_chars() -> int:
+    """The Data Center comment ceiling ``reconciler.comment_max_chars`` — FAIL LOUD (no
+    ``ConfigError`` guard); a non-positive value is returned as ``0`` (= unlimited)."""
+    import rebar.config as _cfg
+
+    configured = _cfg.load_config().reconciler.comment_max_chars
+    return configured if configured > 0 else 0
+
+
+def resolve_dc_connection() -> tuple[str, str, bool, str]:
+    """``(base_url, project, allow_insecure, ca_bundle)`` from the typed config — FAIL
+    LOUD (any ``ConfigError`` propagates rather than degrading to env-only defaults)."""
+    import rebar.config as _cfg
+
+    config = _cfg.load_config()
+    reconciler = config.reconciler
+    return (
+        reconciler.base_url,
+        config.jira.project,
+        reconciler.allow_insecure,
+        reconciler.ca_bundle,
+    )
+
+
+def resolve_rich_text_cutover() -> frozenset[str]:
+    """The set of clients on the RICH rich-text wire from ``reconciler.rich_text_cutover``
+    (``off``→∅, ``cloud``/``dc``→that one, ``both``→both), read LIVE per call. Raises
+    ``ConfigError`` when the config is unreadable — the caller fails CLOSED to ``∅``."""
+    import rebar.config as _cfg
+
+    value = _cfg.load_config().reconciler.rich_text_cutover
+    if value == "both":
+        return frozenset({"cloud", "dc"})
+    if value in ("cloud", "dc"):
+        return frozenset({value})
+    return frozenset()
+
+
+def resolve_pandoc_timeout(default: float) -> float:
+    """The pandoc wall-clock ceiling ``reconciler.dc_pandoc_timeout_s`` over ``default``
+    (read LIVE per call); a non-positive value falls back to ``default``. May raise
+    ``ConfigError``/``AttributeError``/``TypeError``/``ValueError`` — the caller fails safe."""
+    import rebar.config as _cfg
+
+    value = float(_cfg.load_config().reconciler.dc_pandoc_timeout_s)
+    return value if value > 0 else default

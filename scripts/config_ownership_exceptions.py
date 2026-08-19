@@ -33,66 +33,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "_preflight.py L86: legacy load_config() call outside a composition root.",
     ),
     (
-        "_engine/rebar_reconciler/access_check.py",
-        "JIRA_PROJECT",
-        "access_check.py L76/286: legacy env read of JIRA_PROJECT.",
-    ),
-    (
-        "_engine/rebar_reconciler/access_check.py",
-        "JIRA_URL",
-        "access_check.py L73/283: legacy env read of JIRA_URL.",
-    ),
-    (
-        "_engine/rebar_reconciler/access_check.py",
-        "JIRA_USER",
-        "access_check.py L74/284: legacy env read of JIRA_USER.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/acli_subprocess.py",
-        "JIRA_PROJECT",
-        "acli_subprocess.py L129: legacy env read of JIRA_PROJECT.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/acli_subprocess.py",
-        "JIRA_URL",
-        "acli_subprocess.py L127: legacy env read of JIRA_URL.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/acli_subprocess.py",
-        "JIRA_USER",
-        "acli_subprocess.py L128: legacy env read of JIRA_USER.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/acli_subprocess.py",
-        "load_config",
-        "acli_subprocess.py L86/119: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/outbound_fields.py",
-        "REBAR_RECONCILER_VERBOSE",
-        "outbound_fields.py L412: legacy env read of REBAR_RECONCILER_VERBOSE.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira/outbound_fields.py",
-        "os.environ.get",
-        "outbound_fields.py L49: legacy dynamic env read (os.environ.get).",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira_datacenter/settings.py",
-        "load_config",
-        "settings.py L83/97: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira_family/rich_text.py",
-        "load_config",
-        "rich_text.py L90: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "_engine/rebar_reconciler/adapters/jira_family/wiki_render.py",
-        "load_config",
-        "wiki_render.py L352: legacy load_config() call outside a composition root.",
-    ),
-    (
         "_engine/rebar_reconciler/applier.py",
         "REBAR_ROOT",
         "applier.py L576: legacy env read of REBAR_ROOT.",
