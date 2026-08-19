@@ -678,3 +678,215 @@ def test_report_mode_exits_zero_and_lists_hits(lint, tree, capsys):
 def test_clean_tree_exits_zero(lint, tree):
     _py(tree, "src/rebar/pure.py", "def f():\n    return 1\n")
     assert lint.main(["--root", str(tree)]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Layer P — R3: seam composition (ticket 638a-3746-e58a-4929)
+#
+# R1/R2 enforce the MECHANISM rule ("no raw subprocess git"). R3 enforces the
+# PROTOCOL rule: the git-adapter's mutation primitives are sanctioned exports,
+# so a caller could compose them into a hand-rolled non-atomic sequence and
+# every individual call would pass. R3 fires on such a composition made from
+# outside the reconciler write-seam files.
+# ---------------------------------------------------------------------------
+
+
+def test_r3_composed_add_commit_outside_seam_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/compose.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def snapshot(d):
+            git_adapter.add(d, "bindings.json")
+            git_adapter.commit(d, "persist", no_verify=True)
+        """,
+    )
+    violations = lint.check(tree)
+    assert _kinds(violations) == ["seam-composition", "seam-composition"]
+    assert "add" in violations[0].detail
+    assert "commit" in violations[1].detail
+
+
+def test_r3_detached_index_purge_shape_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/purge.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def purge(root, present, old, env):
+            git_adapter.read_tree(root, old, env=env)
+            git_adapter.rm_cached(root, *present, env=env)
+            t = git_adapter.write_tree(root, env=env)
+            c = git_adapter.commit_tree(root, t, parent=old, message="m", env=env)
+            git_adapter.update_ref(root, "refs/heads/tickets", c, old)
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["seam-composition"] * 5
+
+
+@pytest.mark.parametrize("seam_file", ["git_adapter.py", "_ref_lock.py", "_ref_lock_push.py"])
+def test_r3_does_not_fire_inside_the_write_seam(lint, tree, seam_file):
+    _py(
+        tree,
+        f"src/rebar/{seam_file}",
+        """
+        from rebar_reconciler import git_adapter
+
+        def under_the_lock(d):
+            git_adapter.add(d, "bindings.json")
+            git_adapter.commit(d, "persist")
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_r3_line_marker_with_reason_silences(lint, tree):
+    _py(
+        tree,
+        "src/rebar/compose.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def snapshot(d):
+            git_adapter.add(d, "b.json")  # raw-git-ok: selective staging, see 11a9
+            git_adapter.commit(d, "m")  # raw-git-ok: selective staging, see 11a9
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_r3_function_marker_with_reason_silences(lint, tree):
+    _py(
+        tree,
+        "src/rebar/compose.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        # raw-git-ok: detached temp index + CAS ref-advance; never touches the worktree
+        def purge(root, old, env):
+            git_adapter.read_tree(root, old, env=env)
+            git_adapter.update_ref(root, "refs/heads/tickets", "new", old)
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_r3_marker_without_reason_fails(lint, tree):
+    _py(
+        tree,
+        "src/rebar/compose.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def snapshot(d):
+            git_adapter.commit(d, "m")  # raw-git-ok:
+        """,
+    )
+    kinds = _kinds(lint.check(tree))
+    assert "marker-without-reason" in kinds
+    assert "seam-composition" in kinds
+
+
+def test_r3_ignores_non_git_adapter_add_and_commit(lint, tree):
+    _py(
+        tree,
+        "src/rebar/ordinary.py",
+        """
+        def collect(session, items):
+            seen = set()
+            for i in items:
+                seen.add(i)
+            session.commit()
+            session.add(items)
+            return seen
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_r3_ignores_git_adapter_read_ops(lint, tree):
+    _py(
+        tree,
+        "src/rebar/reads.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def probe(d, sha):
+            git_adapter.rev_parse(d, "tickets")
+            git_adapter.cat_file_exists(d, "tickets:f")
+            git_adapter.diff_cached_names(d)
+            git_adapter.commit_email(d, sha)
+            git_adapter.verify_commit(d, sha)
+        """,
+    )
+    assert lint.check(tree) == []
+
+
+def test_r3_dynamic_loader_binding_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/lazy.py",
+        """
+        def snapshot(d):
+            git_adapter = _load("rebar_reconciler.git_adapter", "git_adapter.py")
+            git_adapter.commit(d, "m")
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["seam-composition"]
+
+
+def test_r3_aliased_import_binding_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/aliased.py",
+        """
+        from rebar_reconciler import git_adapter as ga
+
+        def snapshot(d):
+            ga.add(d, "b.json")
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["seam-composition"]
+
+
+def test_r3_from_imported_primitive_bare_name_fires(lint, tree):
+    _py(
+        tree,
+        "src/rebar/direct.py",
+        """
+        from rebar_reconciler.git_adapter import add, commit, rev_parse
+
+        def snapshot(d):
+            rev_parse(d, "tickets")
+            add(d, "b.json")
+            commit(d, "m")
+        """,
+    )
+    assert _kinds(lint.check(tree)) == ["seam-composition", "seam-composition"]
+
+
+def test_r3_report_mode_lists_seam_composition_hits(lint, tree, capsys):
+    _py(
+        tree,
+        "src/rebar/compose.py",
+        """
+        from rebar_reconciler import git_adapter
+
+        def snapshot(d):
+            git_adapter.commit(d, "m")  # raw-git-ok: durable reason here
+        """,
+    )
+    rc = lint.main(["--root", str(tree), "--report"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "seam-composition" in out
+    assert "durable reason here" in out
+
+
+def test_repo_tree_has_no_unsanctioned_raw_git_writes(lint):
+    """The gate must pass on rebar's own tree — the in-process equivalent of the
+    CI step, so the policy holds in environments with no CI provider."""
+    assert lint.check(REPO_ROOT) == []
