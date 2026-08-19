@@ -40,6 +40,8 @@ MARKER_KEY = "_generated_by"
 #: A new generator MUST be added here and to the `docs/README.md` table together.
 GENERATED: dict[str, str] = {
     "docs/cli-reference.md": "python scripts/gen_cli_reference.py",
+    "docs/config-reference.md": "python scripts/gen_config_reference.py",
+    "docs/security.md": "python scripts/gen_config_reference.py",
     "docs/env-vars.md": "python scripts/gen_env_registry.py",
     "docs/mcp-reference.md": "python scripts/gen_mcp_reference.py",
     "docs/plan-review-criteria-guide.md": (

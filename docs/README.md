@@ -92,6 +92,13 @@ Configuring, deploying, syncing, and releasing rebar.
 - **[config.md](config.md)** — rebar's configuration surface: the `rebar.toml` (or
   `[tool.rebar]` in `pyproject.toml`) keys, precedence, and the design of record behind
   them.
+- **[config-reference.md](config-reference.md)** — the generated, machine-current
+  projection of the typed config schema: every `section.field` key with its type,
+  default, and lifecycle, plus the deprecated aliases and removed keys (kept in sync by
+  a drift test under `make test`; do not edit by hand).
+- **[security.md](security.md)** — the generated security reference: the adapter
+  send-credential name inventory and the child-process environment projection contract
+  (kept in sync by a drift test under `make test`; do not edit by hand).
 - **[env-vars.md](env-vars.md)** — the generated registry of every `REBAR_*` (and other)
   environment variable read under `src/rebar`, with its reading module and alias status
   (kept in sync by a CI drift gate).
@@ -282,6 +289,8 @@ a reserved top-level `_generated_by` key for JSON (which has no comment syntax).
 | File | Derived from | Regenerate with | Enforcing CI gate |
 |---|---|---|---|
 | `docs/cli-reference.md` | the CLI's own help data (`rebar._cli._help`) + the curated intercept table in the generator | `python scripts/gen_cli_reference.py` | CLI-reference drift gate |
+| `docs/config-reference.md` | the typed config schema (`rebar._config_schema._SECTION_CLASSES`) plus the `cfg`-kind deprecations/tombstones in `rebar._deprecations` | `python scripts/gen_config_reference.py` | Config-reference drift gate |
+| `docs/security.md` | the adapter send-credential name registry (`rebar._child_env._ADAPTER_SECRET_NAMES`) | `python scripts/gen_config_reference.py` | Config-reference drift gate |
 | `docs/env-vars.md` | an AST scan of `src/rebar/**/*.py` for env reads, plus `rebar._deprecations.REGISTRY` and `rebar.mcp_server.MCP_ENV_VARS` | `python scripts/gen_env_registry.py` | Env-var registry drift gate |
 | `docs/mcp-reference.md` | the MCP server's own tool registrars and their docstrings | `python scripts/gen_mcp_reference.py` | MCP-reference drift gate |
 | `docs/plan-review-criteria-guide.md` | the merged criteria registry (`rebar.llm.plan_review.registry.load_criteria`) | `python -m rebar.llm.plan_review.registry regenerate-criteria-guide` | Criteria-routing parity gate |

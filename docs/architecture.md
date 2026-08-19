@@ -256,7 +256,9 @@ that and the other workflow-engine-v2 de-risk POCs are indexed in
   branch name and the worktree/symlink dir shown here are the **defaults**; both are
   configurable via `tracker.branch` / `tracker.dir` (resolved through `tickets_branch()`
   / `tracker_dir()`), set at `init` and not auto-migrated thereafter — see
-  [`docs/config.md`](config.md).
+  [`docs/config.md`](config.md) (and the generated key-by-key
+  [`docs/config-reference.md`](config-reference.md); secrets handling in
+  [`docs/security.md`](security.md)).
 
 - **Init vs. symlink (two distinct concepts).** *Initializing* a store materializes
   the orphan `tickets` branch + the linked worktree and edits `.git/info/exclude`
