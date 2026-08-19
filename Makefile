@@ -207,7 +207,19 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# Release supply-chain audits (story 08a8), AFTER ruff so ruff findings still surface.
 	@# zizmor stays scoped to release.yml (widening the security audit is separate work);
 	@# actionlint below validates ALL workflows. zizmor is a cross-platform pip tool (in [dev]).
-	zizmor $(RELEASE_WORKFLOW)
+	@# Online/offline split (bug 7a03): with NO GitHub token in the environment zizmor drops to
+	@# offline mode and prints a "running in offline mode" WARN while skipping its five
+	@# token-backed audits (impostor-commit, ref-confusion, known-vulnerable-actions,
+	@# stale-action-refs, ref-version-mismatch). Local `make lint` stays portable/offline, so
+	@# pass `--offline` EXPLICITLY there to drop that misleading warning from a clean lint. CI
+	@# (Gerrit Verify + the push/PR lanes) sets GH_TOKEN, so the same step runs ONLINE and the
+	@# five live-metadata audits execute. Detect a token here rather than in CI so both invoke
+	@# one Makefile — the portability contract (an offline local fallback, online in CI).
+	@if [ -n "$${GH_TOKEN:-$${GITHUB_TOKEN:-$${ZIZMOR_GITHUB_TOKEN:-}}}" ]; then \
+		zizmor $(RELEASE_WORKFLOW); \
+	else \
+		zizmor --offline $(RELEASE_WORKFLOW); \
+	fi
 	@# actionlint validates ALL workflows — the context-availability / parse-error class (e.g.
 	@# the reconcile-bridge `runner`-in-job-env startup failure, bug 8002) that release.yml-only
 	@# linting missed. It is an OS/arch-specific Go binary: use one already on PATH / in .tools;

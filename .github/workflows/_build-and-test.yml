@@ -88,6 +88,15 @@ jobs:
       # (never mutates) — a failure means "run `make format`". This is the gate that
       # catches NameError-on-error-path bugs + format drift.
       - name: lint (ruff check + format --check, gating)
+        env:
+          # Give zizmor a GitHub token so its `make lint` step runs ONLINE (bug 7a03) and
+          # executes the five token-backed supply-chain audits (impostor-commit,
+          # ref-confusion, known-vulnerable-actions, stale-action-refs, ref-version-mismatch)
+          # that require a GitHub client for live action metadata. Least-privilege: the
+          # automatic, read-only job token (this job's `permissions:` is `contents: read`).
+          # Local `make lint` has no token and stays offline/portable — the Makefile picks
+          # the mode, so CI and local invoke one recipe.
+          GH_TOKEN: ${{ github.token }}
         run: make lint
 
       # GATING: parity between the local pre-commit gate and CI. Runs the hygiene hooks
