@@ -263,9 +263,9 @@ def _emit_mode_manifest(
     # the manifest_path is valid; overwrite with the asymmetric shape.
     if manifest_path is None:
         if repo_root is None:
-            repo_root_resolved = Path(
-                os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
-            )
+            from rebar.config import reconciler_repo_root as _owned_repo_root
+
+            repo_root_resolved = _owned_repo_root()
         else:
             repo_root_resolved = repo_root
         snapshots_dir = repo_root_resolved / "bridge_state" / "snapshots"

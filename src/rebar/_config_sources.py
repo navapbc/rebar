@@ -778,3 +778,18 @@ def resolve_pandoc_timeout(default: float) -> float:
 
     value = float(_cfg.load_config().reconciler.dc_pandoc_timeout_s)
     return value if value > 0 else default
+
+
+_DEFAULT_ABSENT_RETIRE_GRACE = 3
+
+
+def resolve_absent_retire_grace() -> int:
+    """Consecutive-404 retire grace (``RECONCILER_ABSENT_RETIRE_GRACE``): raw env over the
+    default, clamped to ``>= 1``. Owns the read for ``binding_store``/``binding_walk``."""
+    raw = os.environ.get("RECONCILER_ABSENT_RETIRE_GRACE")
+    if raw is None:
+        return _DEFAULT_ABSENT_RETIRE_GRACE
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return _DEFAULT_ABSENT_RETIRE_GRACE

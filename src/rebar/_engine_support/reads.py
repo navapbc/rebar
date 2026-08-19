@@ -109,20 +109,20 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
     purpose); otherwise the relative dir name is joined under the resolved repo root
     (explicit arg > REBAR_ROOT > git toplevel of cwd), which must be a git work tree.
     """
-    from rebar.config import ConfigError, load_config, tracker_dir_override
+    from rebar.config import ConfigError, compose_config, repo_root_env, tracker_dir_override
 
     env_dir = tracker_dir_override()
     if env_dir:
         return env_dir
     try:
-        name = load_config(root=repo_root).tracker.dir
+        name = compose_config(root=repo_root).tracker.dir
     except ConfigError:
         name = ".tickets-tracker"  # malformed config never breaks a read's path resolution
     if os.path.isabs(name):
         # An absolute configured dir relocates the store (EV-3b) — like the env
         # override, return it verbatim with no git precondition on the repo root.
         return name
-    root = str(repo_root) if repo_root is not None else os.environ.get("REBAR_ROOT")
+    root = str(repo_root) if repo_root is not None else repo_root_env()
     if not root:
         try:
             root = (
@@ -179,10 +179,10 @@ def _sync_disabled(root: str | None = None) -> bool:
     tracker) is passed explicitly so resolution is pure stat-based discovery — no
     ``git`` subprocess for root detection. Best-effort: a malformed config leaves
     sync enabled (every fetch failure is swallowed downstream anyway)."""
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        return load_config(root=root).sync.pull == "off"
+        return compose_config(root=root).sync.pull == "off"
     except ConfigError:
         return False
 
@@ -339,10 +339,10 @@ def _load_scratch(ticket_id: str, tracker: str) -> dict:
     # scratch.base_dir via the typed config (env REBAR_SCRATCH_BASE_DIR, deprecated
     # alias SCRATCH_BASE_DIR, or a config file). Explicit root → pure stat discovery
     # (no git subprocess); a malformed config falls back to the default (display path).
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        scratch_base = load_config(root=repo_root).scratch.base_dir.strip()
+        scratch_base = compose_config(root=repo_root).scratch.base_dir.strip()
     except ConfigError:
         scratch_base = ""
     if not scratch_base:
