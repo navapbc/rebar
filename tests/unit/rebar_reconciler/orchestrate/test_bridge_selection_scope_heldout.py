@@ -19,6 +19,14 @@ class _Bindings:
     def get_jira_key(self, local_id: str) -> str | None:
         return self._local_to_jira.get(local_id)
 
+    # -- write-boundary interface (RP-02 S3 T2, flamboyant-possessive-blackbuck): the
+    #    load phase asks every store to repair interrupted retirements once per pass, so
+    #    the fake must answer that call. A no-op is the RIGHT answer here and not a
+    #    shortcut: this double has no retired state at all, so a real store built from it
+    #    would classify no candidates and write nothing either. -------------------------
+    def repair_at_write_boundary(self, *, persist: bool, scoped: bool) -> None:
+        return None
+
 
 class _Mode(enum.Enum):
     PREVIEW = "dry-run"

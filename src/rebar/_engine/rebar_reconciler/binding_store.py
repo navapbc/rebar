@@ -495,6 +495,28 @@ class BindingStore:
         """
         return self._recovery.complete_interrupted_retirements()
 
+    def repair_at_write_boundary(
+        self, *, persist: bool, scoped: bool
+    ) -> binding_recovery.RetirementRepairOutcome:
+        """The pass-level door onto interrupted-retirement repair, guard included.
+
+        The facade door the reconcile spine calls once per pass, at the point where the
+        pass has already taken the exclusive lock and cleared the under-lock staleness gate
+        but has NOT yet made its first remote observation. Ordering is the whole reason the
+        call site is where it is: a tombstone records authoritative retirement intent, and a
+        pass that fetched first could see the retired issue answer 200 and then finish the
+        retirement in the same breath as fresh evidence that the issue is alive. Repairing
+        before the fetch keeps the recorded decision from racing a later observation.
+
+        The ``persist``/``scoped`` policy is ``BindingRecovery.repair_at_write_boundary``'s
+        and is deliberately NOT re-stated at the call site: a read-only pass and a filtered
+        pass both get an empty outcome and no write. This is a thin delegate for the same
+        reason the other recovery delegate is one — the recovery owner stays private, so no
+        caller can reach the unguarded ``complete_interrupted_retirements`` on it without
+        passing through this facade.
+        """
+        return self._recovery.repair_at_write_boundary(persist=persist, scoped=scoped)
+
     def recover_pending_bindings(
         self, client: TicketTransport, *, failure_sink: list[dict[str, Any]] | None = None
     ) -> int:

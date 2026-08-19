@@ -293,6 +293,10 @@ def _load_snapshots(ctx: _PassContext) -> None:
         filtered=bool(scoped_ids),
         filter_count=len(scoped_ids) if scoped_ids else 0,
     )
+    # Interrupted-retirement repair (RP-02 S3 T2): after the under-lock staleness gate,
+    # and BEFORE the first remote fetch below — so no pass can interleave fresh liveness
+    # evidence for a retired issue with completing that issue's retirement.
+    binding_store.repair_at_write_boundary(persist=persist, scoped=bool(scoped_ids))
     if scoped_ids:
         print(
             f"FILTERED PASS: scope restricted to {len(scoped_ids)} "
