@@ -1,22 +1,32 @@
-"""Environment-bound manifest signing for tickets.
+"""Environment-bound manifest signing for tickets — the entry module of the signing family.
 
 New writes mint ``rebar.opcert.v1`` DSSE op-certs with an environment Ed25519 key; reads dispatch
 by record shape so legacy HMAC attestations remain verifiable. Signatures persist as append-only
 ``SIGNATURE`` events through the shared locked write path. Legacy HMAC keys come from
 ``REBAR_SIGNING_KEY`` or ``<tracker>/.signing-key`` and bind the ticket id and whole manifest.
+
+This module owns the concerns that need the whole picture — scheme DISPATCH
+(:func:`verify_attestation_record`), the op-cert sign path, the resolve/reduce read path, and the
+two CLI arms — and re-exports the layers beneath it so ``rebar.signing`` stays the single import
+point for the entire surface (story f5c1-e41d split it along the seams that already existed):
+
+* :mod:`rebar._signing_manifest` — the signed-manifest vocabulary + gate-code provenance (a
+  stdlib-only leaf).
+* :mod:`rebar._signing_hmac` — the retired symmetric HMAC scheme, kept whole.
+* :mod:`rebar._opcert_signing` — the op-cert env-key custody + mint/verify machinery (story 8d8e).
+
+Direction is ``signing -> _signing_hmac -> _signing_manifest``, acyclic; there are no back-edges.
+A re-exported symbol is an ALIAS: its in-family consumers resolve it in its DEFINING module, so
+tests must monkeypatch it there, not here — see those modules' docstrings and
+``tests/unit/test_signing_module_split.py``, which guards both seams positively.
 """
 
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
-import logging
 import os
-import subprocess
 import time
-import uuid as _uuid
-from pathlib import Path
 
 from rebar import config
 from rebar._opcert_signing import (
@@ -27,30 +37,76 @@ from rebar._opcert_signing import (
     sign_opcert_manifest,
     verify_opcert_record,
 )
-from rebar._store.canonical import canonical_bytes
+from rebar._signing_hmac import (
+    _NO_KEY,
+    ALGORITHM,
+    PAYLOAD_VERSION,
+    _canonical_payload,
+    _generate_key_file,
+    _hmac_opcert_not_certified,
+    compute_signature,
+    key_fingerprint,
+    signing_key,
+    verify_record,
+)
+from rebar._signing_manifest import (
+    REBAR_VERSION_PREFIX,
+    VERIFIED_AT_SHA_PREFIX,
+    SigningError,
+    _baked_commit_sha,
+    _gate_commit_sha,
+    _gate_source_dir,
+    gate_code_version,
+    head_sha,
+    parse_manifest,
+    rebar_version_from_manifest,
+    rebar_version_step,
+    verified_at_sha_from_manifest,
+    verified_at_sha_step,
+    verified_at_sha_subject,
+)
 
-# Re-exported for back-compat + tests: the op-cert env-key custody + mint/verify machinery lives
-# in ``rebar._opcert_signing`` (split out to keep both units under the module-size cap, story 8d8e).
+# The re-export contract: ``rebar.signing`` is the single import point for the whole family, so
+# every name the sibling modules define is listed here — the PRIVATE ones deliberately, because
+# they are reached by `rebar/llm/build_drift.py` (`_gate_commit_sha`) and by tests, and without
+# the declaration a linter reads each re-export as an unused import and an auto-fix deletes it.
+# Sorted (RUF022), not grouped by origin — the import block above shows which module owns what.
 __all__ = [
+    "ALGORITHM",
+    "OPCERT_KINDS",
+    "PAYLOAD_VERSION",
+    "REBAR_VERSION_PREFIX",
+    "VERIFIED_AT_SHA_PREFIX",
+    "_NO_KEY",
     "OpcertKeyUnavailable",
+    "SigningError",
+    "_baked_commit_sha",
+    "_canonical_payload",
+    "_gate_commit_sha",
+    "_gate_source_dir",
+    "_generate_key_file",
+    "_hmac_opcert_not_certified",
+    "compute_signature",
     "ensure_opcert_key",
+    "gate_code_version",
+    "head_sha",
+    "key_fingerprint",
+    "most_recent_attestation",
     "opcert_principal",
+    "parse_manifest",
+    "rebar_version_from_manifest",
+    "rebar_version_step",
     "sign_manifest",
     "sign_opcert_manifest",
+    "signing_key",
+    "verified_at_sha_from_manifest",
+    "verified_at_sha_step",
+    "verified_at_sha_subject",
     "verify_attestation_record",
+    "verify_attestations",
+    "verify_record",
     "verify_signature",
 ]
-
-logger = logging.getLogger(__name__)
-
-# HMAC over SHA-256. Recorded on every signature so a future algorithm migration
-# is detectable on old records rather than silently mis-verified.
-ALGORITHM = "HMAC-SHA256"
-
-# Payload schema version (independent of the event SCHEMA_VERSION): bump only if
-# the canonical signed-payload shape changes, since that would invalidate every
-# prior signature.
-PAYLOAD_VERSION = 1
 
 # The gated OP-CERT kinds (story 8f1d, contract phase): signed + accepted EXCLUSIVELY as
 # asymmetric op-certs (rebar.opcert.v1 DSSE/SSHSIG). The legacy symmetric HMAC scheme is retired
@@ -59,412 +115,7 @@ PAYLOAD_VERSION = 1
 OPCERT_KINDS = frozenset({"plan-review", "completion-verifier"})
 
 
-class SigningError(Exception):
-    """A signing/verification failure carrying a stderr message + exit code.
-
-    Mirrors ``rebar._commands._seam.CommandError`` so the library facade maps it
-    onto ``RebarError`` and the CLI arms reproduce the stderr + exit contract.
-    """
-
-    def __init__(self, message: str, returncode: int = 1) -> None:
-        super().__init__(message)
-        self.message = message
-        self.returncode = returncode
-
-
-# ── Key management (environment-specific secret) ──────────────────────────────
-# Sentinel returned when a read-only resolution finds no key. It fingerprints
-# deterministically and certifies nothing (a real signature can never match it),
-# so a verify on a key-less environment yields unsigned/foreign_key — never a
-# false certify — without minting a persistent secret as a side effect.
-_NO_KEY = b""
-
-
-def signing_key(tracker: str | os.PathLike[str], *, create_if_missing: bool = True) -> bytes:
-    """Resolve the environment's signing key as raw bytes.
-
-    Order: ``REBAR_SIGNING_KEY`` (non-empty after stripping) > the per-environment
-    ``<tracker>/.signing-key`` file. With ``create_if_missing=True`` (signing) a
-    missing file is generated as a fresh UUID4 (0o600, atomic). With
-    ``create_if_missing=False`` (verifying) a missing file is NOT created — the
-    function returns the empty ``_NO_KEY`` sentinel so a read-only verify never
-    writes a secret to disk. An empty / whitespace-only key file is treated as
-    corruption: a signing caller gets a :class:`SigningError` (an empty key is
-    attacker-guessable and must never sign), a verify caller gets ``_NO_KEY``
-    (so it certifies nothing). Raises :class:`SigningError` on a real I/O error.
-    """
-    # Strip surrounding whitespace so an injected key copied with a trailing
-    # newline fingerprints identically to the file form (which also strips).
-    env_key = os.environ.get("REBAR_SIGNING_KEY")  # read-via: credential-injection
-    if env_key and env_key.strip():
-        return env_key.strip().encode("utf-8")
-
-    key_file = Path(tracker) / ".signing-key"
-    if not key_file.exists():
-        if not create_if_missing:
-            return _NO_KEY
-        _generate_key_file(key_file)
-    try:
-        raw = key_file.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        raise SigningError(f"Error: could not read signing key: {exc}") from None
-    if not raw:
-        # Empty/whitespace-only key file: an empty key is forgeable by anyone, so
-        # it must never be used. Read-only verifies degrade to _NO_KEY (certify
-        # nothing); a signing caller must fail loudly rather than emit a forgeable
-        # signature.
-        if not create_if_missing:
-            return _NO_KEY
-        raise SigningError(
-            f"Error: signing key at {key_file} is empty (corrupt). Remove it to "
-            "regenerate, or set REBAR_SIGNING_KEY."
-        )
-    return raw.encode("utf-8")
-
-
-def _generate_key_file(key_file: Path) -> None:
-    """Atomically create ``key_file`` with a fresh UUID4 key (0o600).
-
-    Write the full key to a unique temp (``mkstemp`` → 0o600, O_EXCL, distinct
-    per thread AND per process), then ``os.link`` it into place. The link is
-    atomic and fails closed if the target already exists, so exactly ONE creator
-    ever lands a key and every reader observes the complete file — never the
-    empty/torn window an in-place O_EXCL+write would expose, and never two
-    divergent keys for one environment (S1). A lost race (target exists) is
-    fine: we drop our temp and the caller reads the winner's key.
-    """
-    import tempfile
-
-    fd, tmp = tempfile.mkstemp(prefix=".signing-key.", dir=str(key_file.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(str(_uuid.uuid4()) + "\n")
-        try:
-            os.link(tmp, str(key_file))  # atomic exclusive create
-        except FileExistsError:
-            pass  # someone else won the race; their key stays
-    except OSError as exc:
-        raise SigningError(f"Error: could not create signing key at {key_file}: {exc}") from None
-    finally:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-
-
-def key_fingerprint(key: bytes) -> str:
-    """A short, domain-separated SHA-256 fingerprint of the key (never the key).
-
-    Stored on the signature record as ``key_id`` so verification can report
-    "signed by a different environment" distinctly from "manifest altered".
-    """
-    return hashlib.sha256(b"rebar-signing-key-v1\x00" + key).hexdigest()[:16]
-
-
-# ── Manifest + payload canonicalisation ───────────────────────────────────────
-def parse_manifest(payload) -> list[str]:
-    """Validate a manifest into a list of non-empty verified-step strings.
-
-    Accepts an already-parsed list or a JSON-array string. Raises
-    :class:`SigningError` (exit 1) with a specific message on any shape error,
-    mirroring the leaf-write validators' contract.
-    """
-    if isinstance(payload, list):
-        data = payload
-    else:
-        try:
-            data = json.loads(payload)
-        except (json.JSONDecodeError, TypeError):
-            raise SigningError("Error: manifest argument is not valid JSON") from None
-    if not isinstance(data, list):
-        raise SigningError("Error: manifest must be a JSON array of verified-step strings")
-    if not data:
-        raise SigningError("Error: manifest must contain at least one verified step")
-    steps: list[str] = []
-    for idx, item in enumerate(data):
-        if not isinstance(item, str) or not item.strip():
-            raise SigningError(f"Error: manifest[{idx}] must be a non-empty string")
-        steps.append(item)
-    return steps
-
-
-def _canonical_payload(ticket_id: str, manifest: list[str]) -> bytes:
-    """Deterministic bytes signed/verified: sorted-key compact JSON.
-
-    Routed through the canonical seam (:func:`rebar._store.canonical.canonical_bytes`,
-    ``ensure_ascii=False``) — byte-identical to the prior inline ``json.dumps``.
-    """
-    return canonical_bytes(
-        {
-            "v": PAYLOAD_VERSION,
-            "algorithm": ALGORITHM,
-            "ticket_id": ticket_id,
-            "manifest": manifest,
-        }
-    )
-
-
-def compute_signature(ticket_id: str, manifest: list[str], key: bytes) -> str:
-    """HMAC-SHA256 hex over the canonical ``(ticket_id, manifest)`` payload."""
-    return hmac.new(key, _canonical_payload(ticket_id, manifest), hashlib.sha256).hexdigest()
-
-
-# ── attested verified_at_sha pin (epic raze-vet-ditch S4) ─────────────────────
-# The SHA a gate verified is bound through the EXISTING manifest channel as a manifest
-# STEP, NOT a new signed-payload field: the step enters the signed bytes (compute_signature
-# signs the whole manifest list) WITHOUT touching `_canonical_payload` or bumping
-# PAYLOAD_VERSION — so no prior certified closure is invalidated. The step is shaped as an
-# in-toto-style subject so a future move to a DSSE/asymmetric envelope is an envelope swap,
-# not a data-shape rewrite (see :func:`verified_at_sha_subject`).
-VERIFIED_AT_SHA_PREFIX = "verified-at-sha:"
-
-
-def verified_at_sha_step(sha: str) -> str:
-    """The signed manifest step that pins the verified SHA (``verified-at-sha:<sha>``)."""
-    return f"{VERIFIED_AT_SHA_PREFIX}{sha}"
-
-
-def verified_at_sha_from_manifest(manifest: list[str] | None) -> str | None:
-    """Extract the pinned ``verified_at_sha`` from a signed manifest, or ``None``."""
-    for step in manifest or []:
-        if isinstance(step, str) and step.startswith(VERIFIED_AT_SHA_PREFIX):
-            return step[len(VERIFIED_AT_SHA_PREFIX) :] or None
-    return None
-
-
-def verified_at_sha_subject(sha: str, ticket_id: str, predicate_type: str) -> dict:
-    """Map the pin to an in-toto v1 Statement subject/predicate shape — the contract that
-    makes a future DSSE/asymmetric/transparency-log migration an envelope swap (the same
-    ``{name, digest, predicateType}`` data), not a rewrite. The HMAC manifest step
-    (:func:`verified_at_sha_step`) is the current trust anchor; this is its in-toto image."""
-    return {
-        "subject": [{"name": ticket_id, "digest": {"sha1": sha}}],
-        "predicateType": predicate_type,
-    }
-
-
-# ── gate-code provenance (which rebar produced an attestation) ────────────────
-# Audit/provenance ONLY: recorded in the signed manifest and displayed, NEVER read
-# by validity computation. Distinct from ``verified-at-sha`` (the TARGET repo commit
-# a plan-review verified) and from ``regver`` (the criteria-registry skew stamp, which
-# DOES enforce). See epic jira-reb-596.
-REBAR_VERSION_PREFIX = "rebar-version:"
-
-
-def rebar_version_step(value: str) -> str:
-    """The signed manifest step recording the gate code that produced the attestation
-    (``rebar-version:<version> (<short-sha>[-dirty])``)."""
-    return f"{REBAR_VERSION_PREFIX} {value}"
-
-
-def rebar_version_from_manifest(manifest: list[str] | None) -> str | None:
-    """Extract the gate-code version+SHA provenance stamp, or ``None`` when the manifest
-    predates the stamp (epic jira-reb-596)."""
-    for step in manifest or []:
-        if isinstance(step, str) and step.startswith(REBAR_VERSION_PREFIX):
-            return step[len(REBAR_VERSION_PREFIX) :].strip() or None
-    return None
-
-
-def _gate_source_dir() -> str:
-    """Directory of the installed rebar package — the gate code doing the certifying.
-    signing.py lives in that package, so its own path locates it without importing the
-    ``rebar`` facade (which would pull the whole package into the import-cycle graph)."""
-    return os.path.dirname(os.path.abspath(__file__))
-
-
-def _baked_commit_sha() -> str | None:
-    """The commit SHA baked into the wheel at build time (``rebar._build_info.COMMIT``),
-    or ``None`` when absent (editable/source install, or built outside a git tree). This
-    is the non-git fallback for :func:`_gate_commit_sha` (epic jira-reb-596, story 2)."""
-    import importlib
-
-    try:
-        # Dynamic import: _build_info.py is generated at build time (git-ignored), so it is
-        # absent from the source tree that mypy/CI type-checks against.
-        mod = importlib.import_module("rebar._build_info")
-    except ImportError:
-        return None
-    commit = getattr(mod, "COMMIT", None)
-    return commit or None
-
-
-def _gate_commit_sha(*, source_dir: str | None = None) -> str | None:
-    """Short commit SHA of the rebar SOURCE checkout (the gate code), with a ``-dirty``
-    suffix when its working tree has uncommitted changes. Resolution order (epic
-    jira-reb-596): live git checkout first (the source of truth in dev/editable installs),
-    then the build-baked SHA for non-git (wheel/PyPI) installs, then ``None``. Best-effort:
-    any git failure falls through to the baked SHA (+ a debug log)."""
-    src = source_dir or _gate_source_dir()
-    try:
-        out = subprocess.run(
-            ["git", "-C", src, "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        logger.debug("gate commit sha: git executable unavailable for %s", src)
-        return _baked_commit_sha()
-    sha = out.stdout.strip()
-    if out.returncode != 0 or not sha:
-        logger.debug("gate commit sha: %s is not a live git checkout; using baked SHA", src)
-        return _baked_commit_sha()
-    # `-dirty` marker — an honest audit needs to distinguish "this exact commit certified"
-    # from "some uncommitted variant of it did". Scoped to the rebar source tree.
-    try:
-        status = subprocess.run(
-            ["git", "-C", src, "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if status.returncode == 0 and status.stdout.strip():
-            sha += "-dirty"
-    except OSError:
-        pass  # a resolvable HEAD but unresolvable dirty-state — keep the clean SHA
-    return sha
-
-
-def gate_code_version(*, source_dir: str | None = None) -> str:
-    """Provenance string for the rebar gate code that produced an attestation:
-    ``"<version> (<short-sha>[-dirty])"``, or just ``"<version>"`` when no commit SHA is
-    resolvable (a non-git install with no baked SHA). Audit-only; never consumed by the
-    claim/close validity computation (epic jira-reb-596)."""
-    import importlib.metadata
-
-    # importlib.metadata (not `rebar.__version__`) so this leaf module never imports the
-    # rebar facade — keeps signing out of the package import-cycle graph.
-    try:
-        version = importlib.metadata.version("nava-rebar")
-    except importlib.metadata.PackageNotFoundError:
-        version = "0+unknown"
-    sha = _gate_commit_sha(source_dir=source_dir)
-    return f"{version} ({sha})" if sha else version
-
-
-# ── Verification (pure; no I/O) ───────────────────────────────────────────────
-def verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict:
-    """Certify a stored signature ``record`` against a freshly recomputed HMAC.
-
-    Returns a verdict dict ``{verified, verdict, reason, ...}`` where ``verdict``
-    is one of:
-
-    * ``certified``   — the manifest matches the signature under this key.
-    * ``mismatch``    — the steps no longer match (manifest altered / bad sig).
-    * ``foreign_key`` — signed by a *different* environment's key, OR this
-      environment has no usable key — either way it cannot be certified here.
-    * ``unsigned``    — the ticket carries no signature.
-    """
-    # Fail closed on any malformed record: a non-dict signature value (e.g. a
-    # corrupt or forward-compat SNAPSHOT compiled_state) must yield a clean
-    # verdict, never an AttributeError that crashes the CLI/MCP caller.
-    record = record if isinstance(record, dict) else {}
-    raw_manifest = record.get("manifest")
-    manifest = raw_manifest if isinstance(raw_manifest, list) else []
-    stored_sig = record.get("signature") or ""
-    if not isinstance(stored_sig, str):
-        stored_sig = ""
-    stored_fp = record.get("key_id") or ""
-    if not isinstance(stored_fp, str):
-        stored_fp = ""
-
-    # Every verdict carries the same keys (uniform contract): consumers can read
-    # result["manifest"]/["step_count"] regardless of outcome, including unsigned.
-    base = {
-        "manifest": manifest,
-        "step_count": len(manifest),
-        "algorithm": record.get("algorithm"),
-        "key_id": stored_fp or None,
-        "signed_at": record.get("signed_at"),
-        "head_sha": record.get("head_sha"),
-        # The attested SHA the verdict was computed against (from the signed manifest step;
-        # falls back to the record field). None for legacy/non-attested signatures.
-        "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
-        # The rebar gate code that produced the attestation (audit/provenance, epic
-        # jira-reb-596). None for pre-stamp / unsigned records.
-        "rebar_version": rebar_version_from_manifest(manifest),
-    }
-
-    if not stored_sig:
-        return {
-            **base,
-            "verified": False,
-            "verdict": "unsigned",
-            "reason": "ticket has no signature",
-        }
-
-    # An empty key (the _NO_KEY sentinel: no .signing-key, no REBAR_SIGNING_KEY, or
-    # a corrupt empty key file) can NEVER certify — HMAC under an empty key is
-    # forgeable by anyone, so a crafted signature must not be accepted. A key-less
-    # environment treats every signature as un-certifiable (foreign).
-    if not key:
-        return {
-            **base,
-            "verified": False,
-            "verdict": "foreign_key",
-            "reason": "this environment has no signing key; it cannot certify any signature",
-        }
-
-    local_fp = key_fingerprint(key)
-    if stored_fp and stored_fp != local_fp:
-        return {
-            **base,
-            "verified": False,
-            "verdict": "foreign_key",
-            "reason": (
-                f"signature was produced by a different environment key "
-                f"(signed with {stored_fp}; this environment is {local_fp})"
-            ),
-        }
-
-    # No stored fingerprint (a hand-written / forward-compat record) cannot be
-    # attributed to an environment — fall through to the HMAC check, which fails
-    # CLOSED (mismatch, never certified) when it was actually signed elsewhere.
-    expected = compute_signature(ticket_id, manifest, key)
-    if hmac.compare_digest(expected, stored_sig):
-        return {
-            **base,
-            "verified": True,
-            "verdict": "certified",
-            "reason": "verified steps match the signature",
-        }
-    return {
-        **base,
-        "verified": False,
-        "verdict": "mismatch",
-        "reason": (
-            "verified steps do NOT match the signature (manifest altered or signature invalid)"
-        ),
-    }
-
-
-def _hmac_opcert_not_certified(record: dict, kind: str) -> dict:
-    """Uniform not-certified verdict for a legacy HMAC record of an op-cert kind (story 8f1d).
-
-    HMAC is retired for ``OPCERT_KINDS``, so the record can never certify. Same base keys as
-    :func:`verify_record` (``compute_validity`` / ``signature_findings`` read it unchanged);
-    ``verdict='unknown_scheme'`` — the scheme is no longer accepted for this kind."""
-    raw_manifest = record.get("manifest")
-    manifest = raw_manifest if isinstance(raw_manifest, list) else []
-    return {
-        "manifest": manifest,
-        "step_count": len(manifest),
-        "algorithm": record.get("algorithm"),
-        "key_id": record.get("key_id") if isinstance(record.get("key_id"), str) else None,
-        "signed_at": record.get("signed_at"),
-        "head_sha": record.get("head_sha"),
-        "verified_at_sha": verified_at_sha_from_manifest(manifest) or record.get("verified_at_sha"),
-        "rebar_version": rebar_version_from_manifest(manifest),
-        "verified": False,
-        "verdict": "unknown_scheme",
-        "reason": (
-            f"HMAC is a retired scheme for op-cert kind {kind!r}; this legacy HMAC "
-            "attestation no longer certifies — re-run the gate to re-issue an asymmetric op-cert"
-        ),
-    }
-
-
+# ── Verify dispatch (which scheme certified this record) ──────────────────────
 def verify_attestation_record(
     record: dict | None,
     ticket_id: str,
@@ -477,8 +128,8 @@ def verify_attestation_record(
 
     An ``envelope``-bearing record (a ``rebar.opcert.v1`` DSSE op-cert) routes to the op-cert
     verifier; a legacy ``signature``-bearing (HMAC) record routes to the UNCHANGED
-    :func:`verify_record`. This lets old HMAC attestations verify alongside new envelope ones on the
-    same store (kind-keyed coexistence). The result shape is the uniform
+    :func:`rebar._signing_hmac.verify_record`. This lets old HMAC attestations verify alongside
+    new envelope ones on the same store (kind-keyed coexistence). The result shape is the uniform
     :func:`verify_record` contract either way, so downstream readers (``verify_signature``,
     ``compute_validity``, ``signature_findings``) are unchanged.
 
@@ -507,24 +158,7 @@ def verify_attestation_record(
     return verify_record(record, ticket_id, key)
 
 
-# ── git audit metadata ────────────────────────────────────────────────────────
-def head_sha(repo_root) -> str:
-    """Current HEAD sha of ``repo_root``, or ``'unknown'`` when unresolvable. It is audit
-    metadata and a public freshness-binding helper. Callers must treat
-    ``'unknown'`` as "no resolvable HEAD", never as a matchable value."""
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return "unknown"
-    sha = out.stdout.strip()
-    return sha if out.returncode == 0 and sha else "unknown"
-
-
+# ── Sign path (mint an op-cert + append the SIGNATURE event) ──────────────────
 def _sign_manifest_under_lock(
     ticket_id: str,
     manifest,
@@ -600,6 +234,7 @@ def sign_manifest(
 # ``retire_attested_pin`` was removed; reopen invalidation is computed on read. See ADR 0009.
 
 
+# ── Read path (resolve the ticket, pick the record, verify it) ────────────────
 def _resolve_and_reduce(ticket_id: str, repo_root):
     """Shared verify boilerplate: resolve the id, reduce the ticket, load the key.
 

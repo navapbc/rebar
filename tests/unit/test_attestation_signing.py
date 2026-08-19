@@ -16,8 +16,13 @@ from _build_provenance_fixture import materialize_build_hook_package
 from _subprocess_env import subprocess_env
 
 import rebar
-from rebar import signing
+from rebar import _signing_manifest, signing
 from rebar._commands.transition_close import _verdict_manifest
+
+# `_baked_commit_sha` is patched on `_signing_manifest`, the module that DEFINES it, NOT on the
+# `rebar.signing` alias: its only consumer `_gate_commit_sha` lives there and reads it as a bare
+# global, so a patch on the re-export would silently no-op (story f5c1-e41d split the two out of
+# signing.py together). `tests/unit/test_signing_module_split.py` guards that seam positively.
 
 
 @pytest.fixture
@@ -138,7 +143,7 @@ def test_gate_code_version_non_git_omits_sha(
     plain = tmp_path / "nogit"
     plain.mkdir()
     monkeypatch.setattr("importlib.metadata.version", lambda *a, **k: "1.2.3")
-    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: None)  # no wheel-baked SHA either
+    monkeypatch.setattr(_signing_manifest, "_baked_commit_sha", lambda: None)  # nor wheel-baked
     # No live checkout and no baked SHA -> version only.
     assert signing.gate_code_version(source_dir=str(plain)) == "1.2.3"
 
@@ -150,7 +155,7 @@ def test_gate_code_version_falls_back_to_baked_sha(
     plain = tmp_path / "nogit"
     plain.mkdir()
     monkeypatch.setattr("importlib.metadata.version", lambda *a, **k: "1.2.3")
-    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: "bakedsha")
+    monkeypatch.setattr(_signing_manifest, "_baked_commit_sha", lambda: "bakedsha")
     assert signing.gate_code_version(source_dir=str(plain)) == "1.2.3 (bakedsha)"
 
 
@@ -160,10 +165,20 @@ def test_gate_code_version_prefers_live_over_baked(
     """Live checkout wins over the baked SHA (the baked value can be stale in an editable
     install that has since advanced)."""
     src = _git_repo(tmp_path / "src")
+    live = subprocess.run(
+        ["git", "-C", str(src), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
     monkeypatch.setattr("importlib.metadata.version", lambda *a, **k: "1.2.3")
-    monkeypatch.setattr(signing, "_baked_commit_sha", lambda: "STALEBAKED")
+    monkeypatch.setattr(_signing_manifest, "_baked_commit_sha", lambda: "STALEBAKED")
     got = signing.gate_code_version(source_dir=str(src))
-    assert "STALEBAKED" not in got and got.startswith("1.2.3 (")
+    # Pin the LIVE sha positively, not just the absence of the baked one: a bare
+    # `"STALEBAKED" not in got` also passes when the patch never took effect at all, which is
+    # exactly how this assertion would go quiet if the two symbols were ever split apart again.
+    assert got == f"1.2.3 ({live})"
+    assert "STALEBAKED" not in got
 
 
 def test_baked_commit_sha_reads_build_info(monkeypatch: pytest.MonkeyPatch) -> None:
