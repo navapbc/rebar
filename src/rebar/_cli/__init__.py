@@ -124,6 +124,48 @@ _COMPACT = frozenset({"compact", "compact-all"})
 # initialization policies below.
 _BRIDGE = frozenset({"bridge", "bridge-status", "bridge-fsck"})
 _HIDDEN_ALIASES = frozenset({"bridge-status"})
+
+
+def _wants_help(rest: list[str]) -> bool:
+    """True if a bare ``--help``/``-h`` appears before any ``--`` terminator.
+
+    The dispatcher must honour a help flag in ANY position, not only ``rest[0]``:
+    ``rebar create task --help`` used to fall through to the create handler, which
+    consumed ``--help`` as the positional title and created a placeholder ticket
+    (bug b8de).
+
+    Scanning stops at the first ``--`` so a caller can suppress the help intercept
+    at the dispatcher. This is a dispatcher-level convention only: downstream write
+    handlers parse their own positionals and do not themselves treat ``--`` as an
+    argument terminator, so ``--`` is an escape from help interception, not a
+    general "everything after is literal data" contract. A ``--help``/``-h`` meant
+    as the *value* of a value-taking option (e.g. ``-d --help``) is likewise read
+    as a help request here; passing such a literal is an unsupported edge, matching
+    argparse's own precedence of the help flag.
+    """
+    for tok in rest:
+        if tok == "--":
+            return False
+        if tok in ("--help", "-h"):
+            return True
+    return False
+
+
+def _help_requested(sub: str, rest: list[str]) -> bool:
+    """Whether ``rebar <sub> …`` is a help request the DISPATCHER should serve itself.
+
+    Nested-dispatch families (the ``bridge`` group) own their children's help, so
+    for them only a LEADING ``--help``/``-h`` asks for the family's own usage — a
+    later flag belongs to a child (``bridge preview --help`` → preview usage, served
+    by ``bridge_cli``, not the dispatcher). This keeps ``bridge --help`` identical to
+    ``help bridge``. Every other command has no nested help, so a ``--help``/``-h`` in
+    any position before a ``--`` is a usage request for it (bug b8de).
+    """
+    if sub in _BRIDGE:
+        return bool(rest) and rest[0] in ("--help", "-h")
+    return _wants_help(rest)
+
+
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -697,8 +739,12 @@ def _main_dispatch(argv: list[str]) -> int:
 
     sub, rest = first, argv[1:]
 
-    # `rebar <sub> --help|-h` as the FIRST arg after the subcommand → usage, no exec.
-    if rest and rest[0] in ("--help", "-h") and sub not in _HIDDEN_ALIASES:
+    # `rebar <sub> --help|-h` → usage, no exec. For most commands a help flag in ANY
+    # position before a `--` counts (else `create task --help` reaches the handler and is
+    # stored as the ticket title — bug b8de); nested-dispatch families (bridge*) honour only
+    # a leading flag so a child keeps its own help. Commands intercepted earlier never reach
+    # here.
+    if sub not in _HIDDEN_ALIASES and _help_requested(sub, rest):
         return _emit_subcommand_help(sub)
 
     # Unknown subcommand: error to stderr + overview to stdout, exit 1.
