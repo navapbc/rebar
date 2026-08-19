@@ -46,6 +46,11 @@ def append(record: dict, repo_root: Path) -> None:
     store_dir = _store_dir(repo_root)
     store_dir.mkdir(parents=True, exist_ok=True)
     today = _today_file(repo_root)
+    # Bug 8384: stamp timestamp_ns centrally so is_deduped's window comparison has a
+    # basis for EVERY caller. A caller-supplied value wins (spread after the default),
+    # so the callers that already stamp are unchanged; the ones that never did (e.g.
+    # BindingRepository.alert, some fetcher paths) now dedupe correctly.
+    record = {"timestamp_ns": time.time_ns(), **record}
     with today.open("a", encoding="utf-8") as f:
         if fcntl is not None:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
