@@ -4,7 +4,8 @@ The live cell ``test_inbound_link_round_trips`` reports "the inbound Jira link d
 a local dep". "Did not surface" spans three separable stages, and a count of one failure names
 none of them:
 
-  1. the DIFFER — ``inbound_differ._diff_links_inbound`` (``inbound_differ.py:362-418``) turning a
+  1. the DIFFER — ``inbound_differ._diff_links_inbound`` (defined in the sibling
+     ``inbound_collection_diffs.py`` and re-exported) turning a
      Jira ``issuelinks`` entry into ``{"action": "add", "target_id", "relation"}``;
   2. the APPLIER — ``apply_inbound_records._inbound_update_apply_links``
      (``apply_inbound_records.py:527-560``) writing each of those through ``rebar.link``;
