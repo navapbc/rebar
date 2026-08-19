@@ -632,7 +632,10 @@ routing.
 Active LLM-backed project criteria are validated and injected exactly once
 into the `round_a` finder batch. They are not injected into `round_b`; that
 bounded pass remains limited to overlays selected by the Round A escalation
-result. Each emitted finding keeps its reviewer prompt provenance and appends
+result. A criterion that declares `applies_to` globs in its routing
+entry is injected only when one of the review's changed files matches; an empty
+or absent `applies_to` means ungated, so it is injected on every review (the
+built-in-overlay meaning of an empty list is the opposite — see ADR 0074). Each emitted finding keeps its reviewer prompt provenance and appends
 the logical criterion id in the `project.<name>` namespace to its criteria
 tags.
 

@@ -187,6 +187,29 @@ def _load_overlay(repo_root: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _validate_applies_to(cid: str, entry: dict[str, Any], *, where: str) -> None:
+    """Shape-check a routing entry's ``applies_to`` (the file globs gating WHEN a criterion
+    runs against a review's changed files).
+
+    Every consumer narrows a malformed value to ``[]`` (``entry.get("applies_to") or []`` then
+    ``[g for g in globs if isinstance(g, str)]``), and an empty glob list means UNGATED for a
+    project criterion — so a typo used to turn the gate silently OFF and run the criterion on
+    every review (bug d343-47c6). It fails at LOAD instead. An empty LIST stays legal: that is
+    the deliberate "ungated" spelling this repo's own overlay uses.
+
+    Kept a separate function, called unconditionally, so :func:`_validate_routing_entry` gains
+    no branch (its cyclomatic complexity is at the ratchet's recorded ceiling).
+    """
+    if "applies_to" not in entry:
+        return
+    globs = entry["applies_to"]
+    if not isinstance(globs, list) or any(not isinstance(g, str) or not g for g in globs):
+        raise CriteriaError(
+            f"{where}: criterion {cid!r} applies_to must be a list of non-empty glob "
+            f"strings (an empty list means ungated), got {globs!r}"
+        )
+
+
 def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
     """Structural floor-check on ONE routing entry (located error). Mirrors the shape the
     packaged index carries so an overlay entry can't smuggle a malformed record past load."""
@@ -246,6 +269,7 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
                 f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
                 f"got {entry.get('disabled')!r}"
             )
+    _validate_applies_to(cid, entry, where=where)
     ap = entry.get("applies_at")
     if isinstance(ap, dict):
         # Plan-review proportionate scrutiny is keyed on container/leaf, never ticket
