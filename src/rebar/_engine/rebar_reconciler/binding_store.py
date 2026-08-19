@@ -322,6 +322,28 @@ class BindingStore:
         """
         self._lifecycle.record_jira_id(local_id, jira_id)
 
+    # -- rich-text emission state (morose-selfaware-unicorn) ---------------
+
+    def note_rich_emit(self, local_id: str, wire: Any) -> int | None:
+        """Record that ``wire`` was CONFIRMEDLY pushed as this binding's description.
+
+        The facade's NAMED door onto rich-emission state, and the supported replacement
+        for reaching a live entry through the shallow ``all_bindings()`` query and writing
+        to it — a read-shaped call being used as an unowned write seam. Policy (and the
+        rationale for every choice below) is ``BindingLifecycle.note_rich_emit``'s; this
+        is a thin delegate, so the mature caller contract stays on ``BindingStore``.
+
+        Returns the consecutive-identical-push count (0 on the first push of a wire), or
+        ``None`` when the local id is unbound — distinct from ``0``, which would read as
+        a first push and trigger the caller's read-back for a binding that is not there.
+        A missing binding is nonfatal.
+
+        Performs NO save: every confirmed description push reaches this, and durability
+        comes from the pass's later unconditional :meth:`save`, so persisting per emit
+        would only add an fsync per push.
+        """
+        return self._lifecycle.note_rich_emit(local_id, wire)
+
     # -- comment-ID map (thin delegates; emersed-specific-mutt) -------------
     #
     # The append-only map, its write-ahead save and the DIG-5301 duplicate class it
