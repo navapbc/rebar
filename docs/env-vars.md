@@ -143,7 +143,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
 | `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
-| `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
+| `REBAR_SIGNING_KEY` | `src/rebar/_signing_hmac.py` |  |
 | `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_sources.py` |  |
 | `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_sources.py` |  |
