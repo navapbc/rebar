@@ -95,7 +95,7 @@ def signing_key(tracker: str | os.PathLike[str], *, create_if_missing: bool = Tr
     """
     # Strip surrounding whitespace so an injected key copied with a trailing
     # newline fingerprints identically to the file form (which also strips).
-    env_key = os.environ.get("REBAR_SIGNING_KEY")
+    env_key = os.environ.get("REBAR_SIGNING_KEY")  # read-via: credential-injection
     if env_key and env_key.strip():
         return env_key.strip().encode("utf-8")
 

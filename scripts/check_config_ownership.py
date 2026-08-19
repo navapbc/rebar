@@ -58,6 +58,8 @@ _COMPOSITION_ROOT_RELPATHS: frozenset[str] = frozenset(
     {
         "llm/anthropic_model.py",
         "llm/bedrock_model.py",
+        "grounding/resolve.py",
+        "grounding/oracle.py",
     }
 )
 

@@ -90,7 +90,7 @@ def install_stderr_handler(root: str = "rebar", *, level: int | None = None) -> 
 
 def _resolve_level() -> int:
     """Resolve the handler level from ``REBAR_LOG_LEVEL`` (name or number), default WARNING."""
-    raw = (os.environ.get("REBAR_LOG_LEVEL") or "").strip()
+    raw = (os.environ.get("REBAR_LOG_LEVEL") or "").strip()  # read-via: diagnostic-verbosity
     if not raw:
         return logging.WARNING
     if raw.isdigit():

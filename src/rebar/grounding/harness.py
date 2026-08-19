@@ -53,7 +53,7 @@ _TIMEOUT_ENV = "REBAR_GROUNDING_TIMEOUT"
 def _resolve_timeout(timeout: float | None) -> float:
     if timeout is not None:
         return timeout
-    raw = os.environ.get(_TIMEOUT_ENV)
+    raw = os.environ.get(_TIMEOUT_ENV)  # read-via: tool-timeout-knob
     if raw:
         try:
             val = float(raw)

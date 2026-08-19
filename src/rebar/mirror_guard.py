@@ -228,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
     verdicts, code = run(
         check_replication=do_all or args.replication,
         check_ruleset=do_all or args.ruleset,
-        github_token=os.environ.get("GITHUB_TOKEN"),
+        github_token=os.environ.get("GITHUB_TOKEN"),  # read-via: cli-credential-boundary
         base_url=args.base_url,
         repo=args.repo,
     )

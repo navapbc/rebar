@@ -474,7 +474,7 @@ async def rerun(request: Request) -> JSONResponse:
 
 def _port() -> int:
     """Resolve the listen port from ``REVIEW_BOT_PORT`` (default ``DEFAULT_PORT``)."""
-    raw = os.environ.get("REVIEW_BOT_PORT")
+    raw = os.environ.get("REVIEW_BOT_PORT")  # read-via: server-bootstrap
     if not raw:
         return DEFAULT_PORT
     try:

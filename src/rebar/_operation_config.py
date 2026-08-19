@@ -51,7 +51,7 @@ def shadow_enabled() -> bool:
     shared boolean coercion so the switch reads exactly like every other rebar
     boolean; an unrecognized value defaults to enabled (the diagnostic is guarded and
     side-effect-free, so failing open is safe)."""
-    raw = os.environ.get(SHADOW_ENV)
+    raw = os.environ.get(SHADOW_ENV)  # read-via: subsystem-kill-switch
     if raw is None:
         return True
     try:

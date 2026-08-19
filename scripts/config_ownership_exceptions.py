@@ -30,61 +30,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "Cutting it to the configuration seam remains RP-04 S7.3.a's slice (ticket "
         "best-kingly-monkey tracks the retarget).",
     ),
-    (
-        "_logging.py",
-        "REBAR_LOG_LEVEL",
-        "_logging.py L93: legacy env read of REBAR_LOG_LEVEL.",
-    ),
-    (
-        "_opcert_signing.py",
-        "REBAR_OPCERT_ENV_ID",
-        "_opcert_signing.py L222: legacy env read of REBAR_OPCERT_ENV_ID.",
-    ),
-    (
-        "_opcert_signing.py",
-        "REBAR_OPCERT_KEY_PATH",
-        "_opcert_signing.py L188: legacy env read of REBAR_OPCERT_KEY_PATH.",
-    ),
-    (
-        "_operation_config.py",
-        "os.environ.get",
-        "_operation_config.py L54: legacy dynamic env read (os.environ.get).",
-    ),
-    (
-        "grounding/harness.py",
-        "os.environ.get",
-        "harness.py L56: legacy dynamic env read (os.environ.get).",
-    ),
-    (
-        "grounding/oracle.py",
-        "load_config",
-        "oracle.py L170: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "grounding/resolve.py",
-        "REBAR_CTAGS_BIN",
-        "resolve.py L62: legacy import-time default capture of REBAR_CTAGS_BIN.",
-    ),
-    (
-        "grounding/resolve.py",
-        "load_config",
-        "resolve.py L543: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "mirror_guard.py",
-        "GITHUB_TOKEN",
-        "mirror_guard.py L231: legacy env read of GITHUB_TOKEN.",
-    ),
-    (
-        "review_bot/app.py",
-        "REVIEW_BOT_PORT",
-        "app.py L477: legacy env read of REVIEW_BOT_PORT.",
-    ),
-    (
-        "signing.py",
-        "REBAR_SIGNING_KEY",
-        "signing.py L98: legacy env read of REBAR_SIGNING_KEY.",
-    ),
 ]
 
 LEGACY_EXCEPTIONS: list[dict] = [

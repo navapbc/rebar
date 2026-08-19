@@ -185,7 +185,7 @@ def ensure_opcert_key(
                 "(the composed signer's key copy is absent)"
             )
         return bound_path
-    override = os.environ.get("REBAR_OPCERT_KEY_PATH")
+    override = os.environ.get("REBAR_OPCERT_KEY_PATH")  # read-via: credential-deployment-override
     if override and override.strip():
         override = override.strip()
         if not os.path.exists(override):
@@ -219,7 +219,7 @@ def opcert_principal(
     effective = binding if binding is not None else _current_binding()
     if effective is not None and effective.principal and effective.principal.strip():
         return effective.principal.strip()
-    override = os.environ.get("REBAR_OPCERT_ENV_ID")
+    override = os.environ.get("REBAR_OPCERT_ENV_ID")  # read-via: identity-deployment-override
     if override and override.strip():
         return override.strip()
     from rebar._commands._seam import env_id as _env_id
