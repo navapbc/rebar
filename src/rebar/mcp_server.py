@@ -418,10 +418,7 @@ def _mcp_gate(attr: str, *, fail: bool) -> bool:
     ``_as_bool`` coercion accepts 1/true/yes/on, any case, whitespace-tolerant). On a
     MALFORMED config it returns ``fail`` — the SAFE direction for that gate, so the
     value reported by ``rebar config`` is exactly what's enforced here."""
-    try:
-        return getattr(rebar.config.load_config().mcp, attr)
-    except rebar.config.ConfigError:
-        return fail
+    return rebar.config.mcp_gate(attr, fail=fail)
 
 
 def _readonly() -> bool:
@@ -588,7 +585,7 @@ def build_server(cfg=None):
     Settings.model_rebuild()
 
     if cfg is None:
-        cfg = rebar.config.load_config()
+        cfg = rebar.config.compose_config()
     mcp_cfg = cfg.mcp
 
     # Auth seam (S2): OFF by default. When enabled, build the composite token verifier
@@ -639,11 +636,9 @@ def build_server(cfg=None):
     # ContextVar that ProxyTokenVerifier (already in the composite) reads. The factory
     # already validated the secret env var is non-empty, so `secret` here is non-empty.
     if auth_enabled and "proxy" in mcp_cfg.auth_strategies:
-        import os
-
         from rebar._mcp_auth import ProxyAuthMiddleware
 
-        _secret = os.environ.get(mcp_cfg.auth_proxy_secret_env) or ""
+        _secret = rebar.config.read_secret_env(mcp_cfg.auth_proxy_secret_env)
         _orig_app = mcp.streamable_http_app
 
         def _wrapped_streamable_http_app(*args, **kwargs):
@@ -732,7 +727,7 @@ def main() -> None:
 
     # Load config once; a malformed config (ConfigError) may propagate and fail startup
     # (fail-closed). The transport selection drives both build_server and run().
-    cfg = rebar.config.load_config()
+    cfg = rebar.config.compose_config()
     server = build_server(cfg)
     server.run(transport="streamable-http" if cfg.mcp.transport == "http" else "stdio")
 

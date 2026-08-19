@@ -438,11 +438,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "_logging.py L93: legacy env read of REBAR_LOG_LEVEL.",
     ),
     (
-        "_mcp_auth.py",
-        "os.environ.get",
-        "_mcp_auth.py L411/658/760: legacy dynamic env read (os.environ.get).",
-    ),
-    (
         "_opcert_signing.py",
         "REBAR_OPCERT_ENV_ID",
         "_opcert_signing.py L222: legacy env read of REBAR_OPCERT_ENV_ID.",
@@ -676,16 +671,6 @@ _ROWS: list[tuple[str, str, str]] = [
         "llm/workflow/interpreter.py",
         "os.environ[...]",
         "interpreter.py L206: legacy dynamic env read (os.environ[...]).",
-    ),
-    (
-        "mcp_server.py",
-        "load_config",
-        "mcp_server.py L422/591/735: legacy load_config() call outside a composition root.",
-    ),
-    (
-        "mcp_server.py",
-        "os.environ.get",
-        "mcp_server.py L646: legacy dynamic env read (os.environ.get).",
     ),
     (
         "mirror_guard.py",
