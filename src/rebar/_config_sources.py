@@ -458,20 +458,24 @@ def _snapshot_table(root: str | os.PathLike[str] | None = None) -> dict:
         return {}
 
 
-def _snapshot_int(raw: str | None, table: dict, file_key: str, default: int) -> int:
-    """One janitor int tunable: env ``raw`` > ``[snapshot]`` ``file_key`` > ``default``."""
+def _snapshot_int(raw: str | None, table: dict, key: str, defaults: dict[str, int]) -> int:
+    """One janitor int tunable: env ``raw`` > ``[snapshot]`` ``key`` > ``defaults[key]``.
+
+    Every janitor knob names its ``[snapshot]`` key and its default with the SAME string, so
+    the caller hands over the whole defaults mapping and this indexes it — one name per knob
+    at the call site instead of two that could silently drift apart."""
     if raw is not None and raw.strip():
         try:
             return int(raw.strip())
         except ValueError:
             pass
-    fv = table.get(file_key)
+    fv = table.get(key)
     if fv is not None and not isinstance(fv, bool):
         try:
             return int(fv)
         except (TypeError, ValueError):
             pass
-    return default
+    return defaults[key]
 
 
 def resolve_janitor_tunables(
@@ -481,36 +485,28 @@ def resolve_janitor_tunables(
     config table > per-knob ``defaults``. Owns the ambient env + config-table reads at
     the composition seam; the below-seam ``JanitorConfig`` RECEIVES these values."""
     t = _snapshot_table(root)
+    d = defaults
     return {
         "free_watermark_bytes": _snapshot_int(
-            os.environ.get("REBAR_GATE_FREE_WATERMARK_BYTES"),
-            t,
-            "free_watermark_bytes",
-            defaults["free_watermark_bytes"],
+            os.environ.get("REBAR_GATE_FREE_WATERMARK_BYTES"), t, "free_watermark_bytes", d
+        ),
+        # Volume-RELATIVE free-space headroom, whole percent (bug 3a52). INT like every other
+        # janitor knob — a fractional 0.2 would be truncated to 0 here and silently disable the
+        # term rather than fail, so the knob is points (20 = reclaim at 80% used).
+        "free_watermark_pct": _snapshot_int(
+            os.environ.get("REBAR_GATE_FREE_WATERMARK_PCT"), t, "free_watermark_pct", d
         ),
         "grace_seconds": _snapshot_int(
-            os.environ.get("REBAR_GATE_GRACE_SECONDS"),
-            t,
-            "grace_seconds",
-            defaults["grace_seconds"],
+            os.environ.get("REBAR_GATE_GRACE_SECONDS"), t, "grace_seconds", d
         ),
         "max_age_seconds": _snapshot_int(
-            os.environ.get("REBAR_GATE_MAX_AGE_SECONDS"),
-            t,
-            "max_age_seconds",
-            defaults["max_age_seconds"],
+            os.environ.get("REBAR_GATE_MAX_AGE_SECONDS"), t, "max_age_seconds", d
         ),
         "reverify_seconds": _snapshot_int(
-            os.environ.get("REBAR_GATE_REVERIFY_SECONDS"),
-            t,
-            "reverify_seconds",
-            defaults["reverify_seconds"],
+            os.environ.get("REBAR_GATE_REVERIFY_SECONDS"), t, "reverify_seconds", d
         ),
         "interval_seconds": _snapshot_int(
-            os.environ.get("REBAR_GATE_JANITOR_INTERVAL_SECONDS"),
-            t,
-            "interval_seconds",
-            defaults["interval_seconds"],
+            os.environ.get("REBAR_GATE_JANITOR_INTERVAL_SECONDS"), t, "interval_seconds", d
         ),
     }
 

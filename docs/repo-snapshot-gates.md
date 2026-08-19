@@ -165,7 +165,8 @@ tools never reach it. Tunables (env > `[snapshot]` config > documented default):
 | Setting | Env | Default | Meaning |
 |---|---|---|---|
 | temp root | `REBAR_GATE_TMPDIR` | system temp dir | base of the snapshot store (never a hardcoded `/tmp`); point it at a roomy LOCAL filesystem |
-| free-space watermark | `REBAR_GATE_FREE_WATERMARK_BYTES` | 2 GiB | reclaim snapshots when free disk drops below this |
+| free-space watermark (absolute) | `REBAR_GATE_FREE_WATERMARK_BYTES` | 2 GiB | reclaim snapshots when free disk drops below this many bytes |
+| free-space watermark (volume-relative) | `REBAR_GATE_FREE_WATERMARK_PCT` | 0 (off) | reclaim when free disk drops below this **percent of the volume** (whole points, e.g. `20` = reclaim at 80% used); clamped to 50 |
 | recency grace | `REBAR_GATE_GRACE_SECONDS` | 120 | never evict an entry used within this window |
 | max age (cold-trim) | `REBAR_GATE_MAX_AGE_SECONDS` | 7 days | evict genuinely cold entries regardless of free space |
 | integrity reverify period | `REBAR_GATE_REVERIFY_SECONDS` | 0 (off) | re-check entries for corruption every N seconds |
@@ -177,6 +178,28 @@ secondary max-age cold-trim. Eviction is `rename`-to-trash **then** `rmtree` (ne
 delete of a live entry), so a reader holding an open file keeps reading via POSIX
 delete-on-last-close; a new lookup that misses simply re-materializes. The cache is
 regenerable — losing it costs only re-materialization.
+
+**Sizing the watermark: use the percentage on a small volume.** The two watermark terms are
+combined by taking the LARGER, so the absolute floor is a hard minimum and the percentage adds
+volume-awareness. The absolute floor alone is disk-size-**blind**: 2 GiB free is comfortable
+headroom on a 500 GiB disk but 93.3% used on a 30 GiB one — i.e. already past a typical
+disk-pressure alarm, so reclamation could only ever engage AFTER the alarm had fired, inverting
+the intended ordering (the janitor reclaims; the alarm is the backstop). Set
+`REBAR_GATE_FREE_WATERMARK_PCT` to the headroom your alarm expects — e.g. `20` (reclaim at 80%
+used) under an alarm that pages above 85% used. Reclamation is **hysteretic**: a pass starts at
+the trigger and then runs on to a target a fixed `RECLAIM_TARGET_MARGIN_PCT` (5) points higher,
+so it overshoots rather than stalling on the threshold and re-firing every interval. That margin
+is an internal constant of the algorithm, **not** an env var or `[snapshot]` key. Leaving the
+percentage at its `0` default disables the volume-relative term entirely and preserves the
+absolute-floor-only behavior exactly.
+
+The value is headroom to **keep free**, not the used-% at which to act, so `20` means "reclaim
+once less than 20% is free" (= 80% used). Because `80` reads naturally as the inverse, the
+percentage is **clamped to `MAX_FREE_WATERMARK_PCT` (50)** rather than rejected: an unclamped
+`80` would demand 80% of the volume be free, making the trigger true at every plausible level so
+that every pass evicted the whole store and every gate re-materialized its snapshot from
+scratch; at `>=100` the trigger would exceed the volume outright. A janitor must never fail a
+gate over a tunable, so an out-of-range value is clamped, not an error.
 
 **EFS / NFS `flock` caveat.** Cross-process coordination (single-flight populate, the GC
 interlock) uses `fcntl.flock` with an atomic-`mkdir` fallback. `flock` semantics on networked
