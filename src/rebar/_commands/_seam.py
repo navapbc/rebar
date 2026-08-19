@@ -12,6 +12,7 @@ locked write path) holds unchanged.
 
 from __future__ import annotations
 
+import argparse
 import contextvars
 import logging
 import os
@@ -114,6 +115,38 @@ def warn_secret_screen_refused(ticket_id: str, record_label: str) -> None:
         "written. The gate/close outcome is unchanged (best-effort observability); scrub the "
         "credential from the reviewed material to restore the audit record.\n"
     )
+
+
+class WriteArgParser(argparse.ArgumentParser):
+    """The ``argparse`` parser the write commands (``claim``/``transition``) use for their
+    value/flag arguments, tuned to preserve the historical hand-rolled-loop contract that
+    ticket churlish (fd48) retired the loop in favour of:
+
+    * ``error()`` is overridden to raise :class:`CommandError` (exit **1**) instead of
+      argparse's default print-usage-and-``exit(2)``. A missing value ("expected one
+      argument") is remapped to the historical ``Error: <flag> requires a value`` prose so the
+      exit code and message stay byte-for-byte what callers/tests pinned.
+    * Constructed with ``add_help=False`` — ``--help`` is served byte-exact by the top-level
+      dispatcher from a golden file, never by this parser — and ``allow_abbrev=False`` so a
+      truncated flag stays an unknown token (no prefix/abbreviation matching, matching the
+      loop's exact-token comparison).
+
+    Callers pair it with ``parse_known_args`` so UNKNOWN tokens are silently skipped, exactly
+    as the loop skipped tokens it did not recognize.
+    """
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        m = _re.match(r"argument (\S+): expected one argument", message)
+        if m:
+            raise CommandError(f"Error: {m.group(1)} requires a value", returncode=1)
+        raise CommandError(f"Error: {message}", returncode=1)
+
+
+def write_arg_parser() -> WriteArgParser:
+    """Build a :class:`WriteArgParser` with the write-command conventions applied
+    (``add_help=False``, ``allow_abbrev=False``). Callers add their value flags and parse with
+    ``parse_known_args`` to silently skip unknown tokens."""
+    return WriteArgParser(add_help=False, allow_abbrev=False)
 
 
 def tracker_dir(repo_root=None) -> Path:

@@ -16,7 +16,7 @@ import sys
 
 from rebar import config
 from rebar._commands import gates, txn
-from rebar._commands._seam import CommandError
+from rebar._commands._seam import CommandError, write_arg_parser
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 
@@ -54,22 +54,16 @@ def _parse_assignee(args: list[str]) -> str | None:
     Returns ``None`` when ``--assignee`` is ABSENT (the "unspecified" sentinel that
     triggers the configured ``ticket.default_assignee`` fallback); returns the given
     value — possibly an explicit empty string — when the flag IS present (an explicit
-    ``--assignee ""`` clears the assignee and never falls back). Story c36c / f.ffea27."""
-    assignee: str | None = None
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a.startswith("--assignee="):
-            assignee = a[len("--assignee=") :]
-            i += 1
-        elif a == "--assignee":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --assignee requires a value", returncode=1)
-            assignee = args[i + 1]
-            i += 2
-        else:
-            i += 1
-    return assignee
+    ``--assignee ""`` clears the assignee and never falls back). Story c36c / f.ffea27.
+
+    Backed by the shared :func:`write_arg_parser` (ticket churlish/fd48): argparse's
+    default (``None``) supplies the absent sentinel, ``parse_known_args`` skips every other
+    token, ``allow_abbrev=False`` keeps a truncation an unknown token, and a value-less
+    ``--assignee`` raises :class:`CommandError` (exit 1) via the parser's ``error`` override."""
+    parser = write_arg_parser()
+    parser.add_argument("--assignee", default=None)
+    ns, _unknown = parser.parse_known_args(args)
+    return ns.assignee
 
 
 def _config_default_assignee(tracker: str) -> str:

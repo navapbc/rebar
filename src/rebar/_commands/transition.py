@@ -19,7 +19,7 @@ import os
 import sys
 
 from rebar import config
-from rebar._commands._seam import CommandError
+from rebar._commands._seam import CommandError, write_arg_parser
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
@@ -148,37 +148,27 @@ def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
     (The ``--verdict-hash`` flag was removed pre-1.0 — DE7; the story/epic close gate
     requires a certified signature via ``rebar sign``. It is now just an unknown
     token, silently skipped.)"""
-    reason = ""
-    force_reason: str | None = None
-    close_class = ""
-    caused_by = ""
-    ref = ""
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a.startswith("--reason="):
-            reason = a[len("--reason=") :]
-            i += 1
-        elif a == "--reason":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --reason requires a value", returncode=1)
-            reason = args[i + 1]
-            i += 2
-        elif a.startswith("--class="):
-            close_class = a[len("--class=") :]
-            i += 1
-        elif a == "--class":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --class requires a value", returncode=1)
-            close_class = args[i + 1]
-            i += 2
-        elif a == "--force":
-            force_reason = ""
-            i += 1
-        elif a.startswith("--force="):
-            force_reason = a[len("--force=") :]
-            i += 1
-        elif a == _RETIRED_FORCE_CLOSE or a.startswith(_RETIRED_FORCE_CLOSE + "="):
+    _reject_retired_force_close(args)
+    force_reason, rest = _extract_force(args)
+    parser = write_arg_parser()
+    parser.add_argument("--reason", default="")
+    parser.add_argument("--class", dest="close_class", default="")
+    parser.add_argument("--caused-by", dest="caused_by", default="")
+    parser.add_argument("--ref", default="")
+    ns, _unknown = parser.parse_known_args(rest)
+    return ns.reason, force_reason, ns.close_class, ns.caused_by, ns.ref
+
+
+def _reject_retired_force_close(args: list[str]) -> None:
+    """Reject the retired close-only spelling (``_RETIRED_FORCE_CLOSE``) EXPLICITLY (24f7).
+
+    ``_parse_flags`` silently skips unknown tokens, so a bare removal would have turned a
+    stale ``_RETIRED_FORCE_CLOSE`` invocation into a SILENT no-op that closes the ticket
+    through the very gate it meant to bypass. Matching it here (bare or ``=<reason>``) and
+    erroring — with a message naming ``--force`` as the replacement — keeps the failure
+    loud."""
+    for a in args:
+        if a == _RETIRED_FORCE_CLOSE or a.startswith(_RETIRED_FORCE_CLOSE + "="):
             raise CommandError(
                 f"Error: {_RETIRED_FORCE_CLOSE} was renamed to --force (ticket 24f7) and no "
                 'longer exists. Use --force="<reason>" instead — on a close it bypasses the '
@@ -186,25 +176,30 @@ def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
                 "matches `rebar claim --force`.",
                 returncode=1,
             )
-        elif a.startswith("--caused-by="):
-            caused_by = a[len("--caused-by=") :]
-            i += 1
-        elif a == "--caused-by":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --caused-by requires a value", returncode=1)
-            caused_by = args[i + 1]
-            i += 2
-        elif a.startswith("--ref="):
-            ref = a[len("--ref=") :]
-            i += 1
-        elif a == "--ref":
-            if i + 1 >= len(args):
-                raise CommandError("Error: --ref requires a value", returncode=1)
-            ref = args[i + 1]
-            i += 2
+
+
+def _extract_force(args: list[str]) -> tuple[str | None, list[str]]:
+    """Pull transition's inline-only ``--force`` out of ``args``, returning
+    ``(force_reason, remaining)``.
+
+    ``--force`` is handled here rather than by argparse because argparse cannot express an
+    inline-only optional value that is distinct from "flag absent" WITHOUT consuming a
+    following token — and transition's ``--force`` must NEVER swallow the next argv token
+    (ticket 24f7): the reason rides only via ``--force=<reason>``. ``force_reason`` is ``None``
+    when the flag is ABSENT and a (possibly empty) string when present, so the caller can tell
+    "not passed" from "passed with no value" (the None-vs-"" distinction drives the close-gate
+    bypass). ``_RETIRED_FORCE_CLOSE`` is NOT matched here — it is rejected earlier by
+    :func:`_reject_retired_force_close`."""
+    force_reason: str | None = None
+    rest: list[str] = []
+    for a in args:
+        if a == "--force":
+            force_reason = ""
+        elif a.startswith("--force="):
+            force_reason = a[len("--force=") :]
         else:
-            i += 1
-    return reason, force_reason, close_class, caused_by, ref
+            rest.append(a)
+    return force_reason, rest
 
 
 def _validate_status(label: str, value: str) -> None:
