@@ -758,3 +758,14 @@ def _main_dispatch(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# --- RP-05 S2a shadow-only derivation (no route cutover) --------------------
+# The immutable route registry rebuilds the live policy frozensets above with
+# zero delta. This derived mirror is a shadow census only: the literal
+# frozensets remain the router's authoritative source, and nothing here changes
+# dispatch, help, or execution. ``_registry`` imports only stdlib, so this stays
+# cheap and pulls in no command handlers or optional dependencies.
+from rebar._cli import _registry as _registry  # noqa: E402
+
+_DERIVED_POLICY_SETS = _registry.derive_policy_sets()

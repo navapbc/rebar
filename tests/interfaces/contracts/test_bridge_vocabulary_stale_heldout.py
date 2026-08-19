@@ -34,6 +34,7 @@ _COMPATIBILITY_FILES = {
     "docs/cli-reference.md",
     "src/rebar/_cli/__init__.py",
     "src/rebar/_cli/_jira_onboard.py",
+    "src/rebar/_cli/_registry.py",
     "src/rebar/_cli/help/bridge-fsck.txt",
     "src/rebar/_cli/help/bridge-probe.txt",
     "src/rebar/_engine_support/bridge_fsck.py",
@@ -44,6 +45,7 @@ _COMPATIBILITY_FILES = {
     "docs/user-guide.md",
     "tests/interfaces/contracts/test_help_overview_coverage.py",
     "tests/interfaces/contracts/test_schema_coverage.py",
+    "tests/unit/test_cli_registry.py",
     "tests/unit/test_gen_cli_reference.py",
     "tests/unit/test_jira_onboard.py",
 }
