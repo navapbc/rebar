@@ -53,6 +53,12 @@ def _git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
     return r
 
 
+def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
+    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
+    return r
+
+
 @pytest.fixture
 def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, Path]:
     """A tracker whose origin DECLINES every push, with one unpushed local commit.
@@ -84,7 +90,7 @@ def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
     hook = origin / "hooks" / "pre-receive"
     hook.write_text(_DECLINE_HOOK)
     hook.chmod(0o755)
-    _git(origin, "config", "core.hooksPath", str(origin / "hooks"))
+    _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
 
     # One local-only commit: the write whose push will be rejected.
     (tracker / "evidence.json").write_text('{"body": "written during the outage"}\n')

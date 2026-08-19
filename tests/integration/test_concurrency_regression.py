@@ -43,6 +43,15 @@ def _git(*args: str, cwd: Path, check: bool = True) -> subprocess.CompletedProce
     return subprocess.run(["git", *args], cwd=str(cwd), check=check, capture_output=True, text=True)
 
 
+def _bare_git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
+
+
 _CLI = _engine.in_process_cli()
 
 
@@ -259,7 +268,7 @@ def _init_bare_remote(remote: Path, cwd: Path) -> Path:
     """Create the harness's bare remote with no detached background upkeep."""
     _git("init", "-q", "--bare", str(remote), cwd=cwd)
     for key, value in _REMOTE_UPKEEP_PINS.items():
-        _git("config", key, value, cwd=remote)
+        _bare_git(remote, "config", key, value)
     return remote
 
 
@@ -355,7 +364,7 @@ def test_fixture_remote_runs_no_detached_upkeep_and_shares_no_objects(two_clones
     remote, repo_a, repo_b, _seed = two_clones
 
     for key, expected in _REMOTE_UPKEEP_PINS.items():
-        got = _git("config", "--get", key, cwd=remote, check=False).stdout.strip()
+        got = _bare_git(remote, "config", "--get", key, check=False).stdout.strip()
         assert got == expected, (
             f"the fixture's bare remote must pin {key}={expected} so no DETACHED background "
             f"gc/maintenance can repack it while a push is in flight (bug 88eb, ADR 0051); "
