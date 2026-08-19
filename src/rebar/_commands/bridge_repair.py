@@ -46,7 +46,7 @@ def _now_iso() -> str:
 
 
 def _audit_path(tracker: Path) -> str | None:
-    from rebar._commands.fsck_repair import _resolve_tracker_git_dir
+    from rebar._store.gitutil import _resolve_tracker_git_dir
 
     git_dir = _resolve_tracker_git_dir(str(tracker))
     return os.path.join(git_dir, _AUDIT_BASENAME) if git_dir else None

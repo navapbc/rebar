@@ -1,9 +1,15 @@
 """``fsck --repair`` — the live-store remediation cluster (Tier E E4, A3 34b1).
 
 Extracted from ``fsck.py`` (the diagnostic scanner) as a one-way leaf: it imports
-nothing from ``fsck``. The two shared filesystem helpers ``_ticket_dirs`` and
-``_resolve_tracker_git_dir`` live HERE and are re-imported BY ``fsck``, so the
-dependency runs one way only (diagnostic → repair), never back.
+nothing from ``fsck``. The shared filesystem helpers ``_ticket_dirs``,
+``_dir_is_archived`` and ``_resolve_tracker_git_dir`` now live in
+:mod:`rebar._store.gitutil` (ticket b432-c9dc-c1b4-4a45) — they were never about repair,
+and keeping them here forced the store layer to defer-import a command module. They are
+re-imported here at module level, NOT for convenience: several tests bind them as
+``fsck_repair`` module ATTRIBUTES (``monkeypatch.setattr(fsck_repair, "_ticket_dirs", …)``),
+and this module's own call sites resolve them through the module global, so the re-import is
+what keeps those patches effective. Do not convert it to a qualified ``gitutil._ticket_dirs``
+call.
 
 The ``--repair`` path drives the store to fsck-zero, safely and resumably: retire
 still-present folded sources (SNAPSHOT_INCONSISTENT), rebuild snapshots that dropped
@@ -23,7 +29,12 @@ from pathlib import Path
 
 from rebar._commands._repair_pause import RepairPauseError, owned_repair_pause
 from rebar._store import compat, lock
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import (  # noqa: F401  (compat re-export — see the module docstring)
+    _dir_is_archived,
+    _resolve_tracker_git_dir,
+    _ticket_dirs,
+    run_git,
+)
 from rebar.reducer import KNOWN_EVENT_TYPES
 from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
 
@@ -109,51 +120,6 @@ def _git_push(tracker: str, *args: str) -> subprocess.CompletedProcess:
             "",
             f"git {' '.join(args)} timed out after {_PUSH_TIMEOUT}s",
         )
-
-
-def _resolve_tracker_git_dir(tracker: str) -> str:
-    tracker_git = os.path.join(tracker, ".git")
-    if os.path.isfile(tracker_git):
-        with open(tracker_git, encoding="utf-8") as f:
-            gitdir = f.read().strip()
-        gitdir = gitdir[len("gitdir: ") :] if gitdir.startswith("gitdir: ") else gitdir
-        if not gitdir.startswith("/"):
-            gitdir = os.path.join(tracker, gitdir)
-        return gitdir
-    if os.path.isdir(tracker_git):
-        return tracker_git
-    return ""
-
-
-def _dir_is_archived(ticket_path: str) -> bool:
-    """True only when the ``.archived`` marker exists AND the event log net-confirms archival.
-
-    The marker is a fast-path cache, never the decision: a stale marker (reverted archive, or
-    a marker written without an ARCHIVED event) must not hide the ticket from store walks, so
-    the log check (:func:`rebar.reducer._api._is_net_archived` — ARCHIVED uuids minus
-    REVERT-targeted uuids) always confirms before a dir is skipped."""
-    if not os.path.exists(os.path.join(ticket_path, ".archived")):
-        return False
-    from rebar.reducer._api import _is_net_archived
-
-    return _is_net_archived(ticket_path)
-
-
-def _ticket_dirs(tracker: str, *, include_archived: bool = False) -> list[str]:
-    """The shared store-walk iterator: sorted ticket dirs, ACTIVE-only by default.
-
-    Skips hidden dirs (.git, .bridge_state, …): the bash `"$TRACKER_DIR"/*/` glob never
-    matched dot-dirs, and ticket ids never start with '.'. Archived tickets are excluded
-    unless ``include_archived`` — an archive is terminal (the fold at archive time leaves no
-    unfolded tail), so maintenance walks cost store ACTIVITY, not store history."""
-    dirs = sorted(
-        d
-        for d in os.listdir(tracker)
-        if not d.startswith(".") and os.path.isdir(os.path.join(tracker, d))
-    )
-    if include_archived:
-        return dirs
-    return [d for d in dirs if not _dir_is_archived(os.path.join(tracker, d))]
 
 
 def _active_snapshots(ticket_dir: str) -> list[str]:
