@@ -32,6 +32,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
+from rebar_reconciler import peer_state
 from rebar_reconciler.timeutil import utc_now_iso
 
 if TYPE_CHECKING:
@@ -453,6 +454,43 @@ class BindingLifecycle:
                 "remedy": f"BindingStore.unretire({jira_key!r}) to re-enable creation",
             },
         )
+
+    # -- rich-text emission state (morose-selfaware-unicorn) ---------------
+
+    def note_rich_emit(self, local_id: str, wire: Any) -> int | None:
+        """Record that ``wire`` was CONFIRMEDLY pushed as this binding's description.
+
+        The NAMED mutation seam for rich-emission state. It exists because the only
+        PUBLIC route to a binding record used to be ``all_bindings()`` — a read-shaped
+        query whose outer copy is shallow, so the apply path reached a LIVE entry through
+        it and wrote to it directly, bypassing lifecycle policy entirely. A query that
+        doubles as a write door has no owner and no invariants: anything holding the
+        mapping can annotate any entry, and a later deep copy at that boundary would
+        silently discard those writes instead of failing. This closes that hazard by
+        naming the operation here, where the entry's other transitions already live.
+
+        The state machine itself is NOT reimplemented: ``peer_state.note_rich_emit`` owns
+        ``rich_sha``, the change-gate, and the reset-on-changed-wire rule, and is unit
+        tested there. This resolves the entry and delegates, so the counter progression
+        is the same object's, not a second copy of it.
+
+        Returns how many times in a row the same wire has now been pushed (0 on the
+        first), or ``None`` when the local id is unbound (or its record is not a dict).
+        ``None`` rather than ``0`` because they are not the same answer: ``0`` reads as
+        "first push of this wire" and would send the caller on to do real work — a
+        read-back GET at the observe threshold — for a binding that does not exist. A
+        missing binding is nonfatal, matching today's caller, which simply returns.
+
+        Performs NO save on ANY path, and mutates the repository's OWN entry dict in
+        place. Every confirmed description push calls this, so a per-emit save would be
+        one extra whole-store rewrite and fsync per push — write amplification, not
+        parity. Durability comes from the pass's later unconditional save, exactly as it
+        does for ``set_baseline`` and the rest of the in-memory peer state.
+        """
+        entry = self._bindings.get(local_id)
+        if not isinstance(entry, dict):
+            return None
+        return peer_state.note_rich_emit(entry, wire)
 
     # -- comment-ID map (append-only comment sync; emersed-specific-mutt) ---
 
