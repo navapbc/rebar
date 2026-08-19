@@ -335,3 +335,78 @@ def test_every_class_name_is_reserved_not_just_standard(monkeypatch) -> None:
         out = mc.resolve_model_string(name)
         assert out != name, f"{name} was passed through as a literal model id"
         assert ":" in out, f"{name} did not resolve to a provider-qualified id"
+
+
+@pytest.fixture
+def _isolated_thread_loop():
+    """Save/restore this thread's event loop so ``ensure_current_event_loop`` tests never leak
+    loop state into the rest of the suite."""
+    import asyncio
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        try:
+            saved = asyncio.get_event_loop_policy().get_event_loop()
+        except RuntimeError:
+            saved = None
+    try:
+        yield
+    finally:
+        asyncio.set_event_loop(saved)
+
+
+def test_ensure_current_event_loop_installs_without_deprecation(_isolated_thread_loop) -> None:
+    """With NO loop installed, the helper returns one and leaks NO ``DeprecationWarning`` — the
+    Python 3.12 ``asyncio.get_event_loop()`` fallback that broke the provider tests (ticket
+    c7d5)."""
+    import asyncio
+    import warnings
+
+    mc = _mc()
+    asyncio.set_event_loop(None)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        loop = mc.ensure_current_event_loop()
+    assert loop is not None and not loop.is_closed()
+    # A subsequent get_event_loop (what pydantic-ai's run_sync performs) is now warning-free.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        assert asyncio.get_event_loop() is loop
+
+
+def test_ensure_current_event_loop_reuses_an_open_loop(_isolated_thread_loop) -> None:
+    """An already-installed OPEN loop is REUSED (not replaced), preserving provider client loop
+    affinity across a FallbackModel entry and the run it wraps."""
+    import asyncio
+
+    mc = _mc()
+    installed = asyncio.new_event_loop()
+    asyncio.set_event_loop(installed)
+    try:
+        assert mc.ensure_current_event_loop() is installed
+        assert mc.ensure_current_event_loop() is installed  # idempotent
+    finally:
+        installed.close()
+
+
+def test_ensure_current_event_loop_replaces_a_cleared_or_closed_loop(_isolated_thread_loop) -> None:
+    """When the thread's loop was explicitly cleared (``set_event_loop(None)`` leaves
+    ``get_event_loop`` raising) or left closed by a prior run, a fresh OPEN loop is installed
+    rather than propagating the RuntimeError or handing back a dead loop."""
+    import asyncio
+
+    mc = _mc()
+
+    # Cleared: set_event_loop(None) makes get_event_loop raise RuntimeError (set_called + None).
+    asyncio.set_event_loop(None)
+    fresh = mc.ensure_current_event_loop()
+    assert fresh is not None and not fresh.is_closed()
+
+    # Closed: a closed installed loop must not be reused.
+    closed = asyncio.new_event_loop()
+    closed.close()
+    asyncio.set_event_loop(closed)
+    replacement = mc.ensure_current_event_loop()
+    assert replacement is not closed and not replacement.is_closed()
+    replacement.close()
