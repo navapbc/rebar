@@ -323,3 +323,256 @@ class TestRebindStaleReverse:
         store.bind_confirm(local_id, "SAME-9")
         assert store.get_local_id("SAME-9") == local_id
         assert store.get_jira_key(local_id) == "SAME-9"
+
+
+# ---------------------------------------------------------------------------
+# RP-02 S1 T2 (evadable-curious-mastodon) — repository delegation.
+#
+# T2 routes the facade's persistence through ``BindingRepository`` without
+# changing its mature caller contract. These are CHARACTERIZATION tests: they
+# are green on the pre-delegation facade by design (that is the point — the
+# contract must not move), so their teeth come from defect-seeded mutation of
+# the delegating code, not from a RED-first run. The differential assertions
+# below compare the facade against the repository directly, so they keep
+# meaning after the cutover rather than freezing stale golden bytes.
+# ---------------------------------------------------------------------------
+
+import inspect  # noqa: E402
+
+from rebar_reconciler import get_rotation as _get_rotation  # noqa: E402
+from rebar_reconciler import peer_state as _peer_state  # noqa: E402
+from rebar_reconciler.binding_repository import BindingRepository  # noqa: E402
+
+_BRIDGE = Path(".bridge_state")
+
+
+def _state_bytes(tracker: Path) -> dict[str, bytes]:
+    """Every binding-state file that exists, as raw bytes."""
+    bridge = tracker / _BRIDGE
+    if not bridge.is_dir():
+        return {}
+    return {p.name: p.read_bytes() for p in sorted(bridge.iterdir()) if p.suffix == ".json"}
+
+
+class TestRepositoryDelegation:
+    """The facade stays authoritative and byte-compatible over the repository."""
+
+    def test_public_call_signatures_unchanged(self) -> None:
+        """AC1. These are the mature caller contract — the reconciler, the adapters and
+        `bridge fsck` all bind to them, so delegation must not reshape a single one.
+
+        Pins the parameter NAMES and KINDS, which is what a caller is actually bound to:
+        dropping or renaming a parameter breaks keyword callers, and reordering breaks
+        positional ones. Deliberately does NOT pin annotation text — reformatting
+        `str | None` to `Optional[str]` changes no observable behaviour, and asserting
+        the rendered string would make this a change-detector that fires on a pure
+        type-annotation edit.
+        """
+        expected = {
+            "__init__": ["self", "tracker_dir"],
+            "get_jira_key": ["self", "local_id"],
+            "get_local_id": ["self", "jira_key"],
+            "is_bound": ["self", "local_id"],
+            "is_pending": ["self", "local_id"],
+            "is_keyless_pending_within_grace": ["self", "local_id"],
+            "all_bindings": ["self"],
+            "pending_bindings": ["self"],
+            "confirmed_count": ["self"],
+            "bind_pending": ["self", "local_id"],
+            "record_pending_key": ["self", "local_id", "jira_key"],
+            "bind_confirm": ["self", "local_id", "jira_key"],
+            "unbind": ["self", "local_id"],
+            "save": ["self"],
+            "get_baseline": ["self", "local_id"],
+            "set_baseline": ["self", "local_id", "fields"],
+            "merge_baseline": ["self", "local_id", "fields"],
+            "get_jira_id": ["self", "local_id"],
+            "record_jira_id": ["self", "local_id", "jira_id"],
+            "record_comment_id": ["self", "local_comment_key", "jira_comment_id"],
+            "comment_id_for": ["self", "local_comment_key"],
+            "is_comment_mapped": ["self", "local_comment_key"],
+            "note_absent": ["self", "jira_key"],
+            "note_absent_or_rekey": ["self", "jira_key", "client"],
+            "clear_absent": ["self", "jira_key"],
+            "set_last_get": ["self", "jira_key", "pass_id"],
+            "last_get_pass": ["self", "jira_key"],
+            "is_retired": ["self", "jira_key"],
+            "unretire": ["self", "jira_key"],
+            "retired_key_for_local": ["self", "local_id"],
+            "is_retired_local": ["self", "local_id"],
+            "note_create_suppressed": ["self", "local_id", "jira_key"],
+        }
+        for name, params in expected.items():
+            assert hasattr(BindingStore, name), f"public method {name} disappeared"
+            signature = inspect.signature(getattr(BindingStore, name))
+            assert list(signature.parameters) == params, name
+            for kind in signature.parameters.values():
+                assert kind.kind is not kind.VAR_KEYWORD, (
+                    f"{name} grew **kwargs, which hides a signature change"
+                )
+
+    def test_all_bindings_stays_a_shallow_outer_copy(self, store: BindingStore) -> None:
+        """AC2. The copy depth is load-bearing and must NOT change here: the outer
+        mapping is a fresh dict (dropping a key does not unbind anything), while the
+        inner entries are the SAME objects, which is what `peer_state` overlays and the
+        rich-text handler have always relied on. S2 adds a narrow named operation as the
+        supported mutation seam; this slice keeps the shallow contract intact."""
+        store.bind_confirm("loc-A", "DIG-A")
+        snapshot = store.all_bindings()
+
+        assert snapshot is not store.all_bindings()
+        del snapshot["loc-A"]
+        assert store.get_jira_key("loc-A") == "DIG-A"
+
+        store.all_bindings()["loc-A"]["probe"] = 1
+        assert store.all_bindings()["loc-A"]["probe"] == 1
+
+    def test_pending_confirmed_and_reverse_survive_a_reload(self, tmp_path: Path) -> None:
+        """AC2. The state machine's observable answers must be identical after a real
+        round trip through the files the repository now owns."""
+        first = BindingStore(tmp_path)
+        first.bind_pending("loc-P")
+        first.record_pending_key("loc-K", "DIG-K")
+        first.bind_confirm("loc-C", "DIG-C")
+        first.save()
+
+        second = BindingStore(tmp_path)
+
+        assert second.is_pending("loc-P") is True
+        assert second.get_jira_key("loc-P") is None
+        assert second.is_pending("loc-K") is True
+        assert second.get_jira_key("loc-K") == "DIG-K"
+        assert second.is_pending("loc-C") is False
+        assert second.get_jira_key("loc-C") == "DIG-C"
+        assert second.get_local_id("DIG-C") == "loc-C"
+        assert second.confirmed_count() == 1
+        assert sorted(second.pending_bindings()) == ["loc-K", "loc-P"]
+
+    def test_facade_writes_byte_identical_state_to_the_repository(self, tmp_path: Path) -> None:
+        """AC3. Differential oracle: the same logical state persisted through the facade
+        and through the repository must produce byte-identical files. This is what makes
+        the delegation safe to land — the committed bytes do not move."""
+        via_facade = tmp_path / "facade"
+        via_repo = tmp_path / "repo"
+        (via_facade / _BRIDGE).mkdir(parents=True)
+        (via_repo / _BRIDGE).mkdir(parents=True)
+
+        store = BindingStore(via_facade)
+        store.bind_confirm("loc-A", "DIG-A")
+        store.save()
+
+        repo = BindingRepository(via_repo)
+        repo.bindings["loc-A"] = dict(store.all_bindings()["loc-A"])
+        repo.reverse["DIG-A"] = "loc-A"
+        repo.save()
+
+        assert _state_bytes(via_facade) == _state_bytes(via_repo)
+        assert set(_state_bytes(via_facade)) == {"bindings.json", "get_rotation.json"}
+
+    def test_facade_and_repository_agree_on_the_corruption_disposition(
+        self, tmp_path: Path
+    ) -> None:
+        """AC3. The exception SURFACE is part of the contract, not just the bytes: live
+        corruption fails closed through both entry points with the same error, and the
+        corrupt file survives for the operator either way."""
+        bridge = tmp_path / _BRIDGE
+        bridge.mkdir(parents=True)
+        raw = '{"bindings": {<<<<<<< HEAD\n'
+        (bridge / "bindings.json").write_text(raw, encoding="utf-8")
+
+        with pytest.raises(ValueError, match="corrupt or contains git conflict"):
+            BindingStore(tmp_path)
+        with pytest.raises(ValueError, match="corrupt or contains git conflict"):
+            BindingRepository(tmp_path)
+
+        assert (bridge / "bindings.json").read_text(encoding="utf-8") == raw
+
+    def test_peer_state_and_rotation_remain_independent_owners(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC4. `peer_state.py` and `get_rotation.py` keep their own ownership; the
+        repository must not absorb or re-implement them, or their dedicated suites stop
+        being the oracle for that behaviour.
+
+        Asserts that each collaborator IS still reached (membership, not an ordered call
+        trace — the order is delegation mechanism, not contract) and, more importantly,
+        that its OBSERVABLE effect still lands: the baseline round-trips and the rotation
+        stamp reaches the sidecar file. A re-implementation inside the repository would
+        leave the effects working but the collaborators uncalled, which the membership
+        check catches; a broken delegation shows up in the effects.
+        """
+        called: set[str] = set()
+        real_set_baseline = _peer_state.set_baseline
+        real_rotation_save = _get_rotation.save
+
+        def spy_baseline(bindings: object, local_id: str, fields: object) -> object:
+            called.add("peer_state.set_baseline")
+            return real_set_baseline(bindings, local_id, fields)  # type: ignore[arg-type]
+
+        def spy_rotation(path: object, stamps: object) -> object:
+            called.add("get_rotation.save")
+            return real_rotation_save(path, stamps)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(_peer_state, "set_baseline", spy_baseline)
+        monkeypatch.setattr(_get_rotation, "save", spy_rotation)
+
+        store = BindingStore(tmp_path)
+        store.bind_confirm("loc-A", "DIG-A")
+        store.set_baseline("loc-A", {"summary": "s"})
+        store.set_last_get("DIG-A", "pass-1")
+        store.save()
+
+        assert called == {"peer_state.set_baseline", "get_rotation.save"}
+        assert store.get_baseline("loc-A") == {"summary": "s"}
+        assert store.last_get_pass("DIG-A") == "pass-1"
+        sidecar = json.loads((tmp_path / _BRIDGE / "get_rotation.json").read_text(encoding="utf-8"))
+        assert sidecar["last_get_pass"]["DIG-A"] == "pass-1"
+        assert BindingStore(tmp_path).get_baseline("loc-A") == {"summary": "s"}
+
+    def test_no_public_attribute_exposes_a_writable_repository(self, tmp_path: Path) -> None:
+        """AC5. The facade stays authoritative. If an adapter or reconciler caller could
+        reach the repository it would be able to write binding state without passing
+        through the facade's coordination — exactly the mutation-through-query hazard
+        this epic is closing."""
+        store = BindingStore(tmp_path)
+
+        for name in dir(store):
+            if name.startswith("_"):
+                continue
+            member = getattr(store, name, None)
+            assert not isinstance(member, BindingRepository), (
+                f"public attribute {name!r} hands out the repository"
+            )
+            if callable(member) and not inspect.signature(member).parameters:
+                assert not isinstance(member(), BindingRepository), (
+                    f"public method {name}() returns the repository"
+                )
+
+    def test_top_level_insert_on_a_legacy_store_reaches_the_persisted_bytes(
+        self, tmp_path: Path
+    ) -> None:
+        """AC3 collateral invariant: the facade must ALIAS the repository's document, not
+        hold its own copy of the outer mapping.
+
+        A legacy store has no ``comment_ids`` key, so ``record_comment_id`` creates one
+        with ``setdefault`` — a TOP-LEVEL insert. A shallow copy of the document still
+        shares the inner ``bindings``/``reverse`` dicts, so it looks harmless and every
+        other assertion here still passes; but a brand-new top-level key would land only
+        in the facade's copy and never reach the bytes the repository serializes. Comment
+        identity would be silently lost and every mirrored comment re-posted on the next
+        pass (the DIG-5301 duplicate class). Found by mutation: this is the one delegation
+        defect the rest of the suite cannot see.
+        """
+        bridge = tmp_path / _BRIDGE
+        bridge.mkdir(parents=True)
+        (bridge / "bindings.json").write_text(
+            json.dumps({"version": 2, "bindings": {}, "reverse": {}}), encoding="utf-8"
+        )
+
+        store = BindingStore(tmp_path)
+        store.record_comment_id("hlc-1", "10001")
+
+        assert store.is_comment_mapped("hlc-1") is True
+        persisted = json.loads((bridge / "bindings.json").read_text(encoding="utf-8"))
+        assert persisted["comment_ids"] == {"hlc-1": "10001"}
+        assert BindingStore(tmp_path).comment_id_for("hlc-1") == "10001"
