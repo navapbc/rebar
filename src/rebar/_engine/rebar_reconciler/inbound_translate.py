@@ -27,28 +27,8 @@ This module carries NO ``"rebar_reconciler.adapters.jira"`` literal.
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
-from typing import Any, overload
-
-
-@overload
-def _rebar_env(name: str, default: str) -> str: ...
-
-
-@overload
-def _rebar_env(name: str, default: None = None) -> str | None: ...
-
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment.
-
-    Local to this module (each reconciler module keeps its own copy): the
-    reconciler modules are spec-loaded under test where a cross-module import of a
-    shared shim would not resolve.
-    """
-    return os.environ.get(f"REBAR_{name}", default)
-
+from typing import Any
 
 # Map Jira issuetype -> local ticket_type. Anything else falls through to 'task'.
 _JIRA_TYPE_MAP: dict[str, str] = {
@@ -163,16 +143,18 @@ def _event_meta() -> tuple[int, str, str, str]:
 
     # Function-body ABSOLUTE import (story e622): this module is spec-loaded by
     # path in tests, so a sibling `rebar_reconciler.*` import would not resolve —
-    # but an absolute `rebar.*` import does. The "reconciler" defaults are the
-    # legacy-Jira signature the reducer's inference keys on; sourcing them from
-    # the single source of truth keeps the writer and the inference in lockstep.
-    from rebar.reducer._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
+    # but an absolute `rebar.*` import does. The reconciler event identity
+    # (REBAR_ENV_ID/REBAR_AUTHOR, defaulting to the legacy-Jira signature when
+    # UNSET) is resolved through the owned composition-root accessor so no ambient
+    # env read remains below the seam.
+    from rebar.config import reconciler_event_identity
 
+    env_id, author = reconciler_event_identity()
     return (
         _time.time_ns(),
         str(_uuid.uuid4()),
-        _rebar_env("ENV_ID", LEGACY_JIRA_ENV_ID),
-        _rebar_env("AUTHOR", LEGACY_JIRA_AUTHOR),
+        env_id,
+        author,
     )
 
 
@@ -184,7 +166,9 @@ def _resolve_tracker_dir(repo_root: Path | None) -> Path:
     if override:
         return Path(override)
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        from rebar.config import repo_root as _owned_repo_root
+
+        repo_root = _owned_repo_root()
     return Path(repo_root) / ".tickets-tracker"  # tickets-boundary-ok
 
 
@@ -349,8 +333,8 @@ def _normalize_adf_body(body: Any, inbound_mapper: Any | None = None) -> str:
     in tests).
     """
     if inbound_mapper is None:
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
-        inbound_mapper = select_backend(load_config()).inbound
+        inbound_mapper = select_backend(compose_config()).inbound
     return inbound_mapper.normalize_rich_text(body)

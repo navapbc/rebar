@@ -8,7 +8,6 @@ same lock, gate, pass, and exit-policy spine after this module returns.
 from __future__ import annotations
 
 import argparse
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -114,11 +113,9 @@ def normalize_request(argv: list[str] | None, mode_mod: Any) -> ReconcileRequest
     only = _tokens(args.only, "--only")
     excluded = _tokens(args.except_ids, "--except")
     raw_filter = _tokens(args.filter_local_ids, "--filter-local-ids")
-    root = (
-        Path(args.repo_root)
-        if args.repo_root
-        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-    )
+    from rebar.config import repo_root as _owned_repo_root
+
+    root = Path(args.repo_root) if args.repo_root else _owned_repo_root()
     return ReconcileRequest(
         route=route,
         repo_root=root,

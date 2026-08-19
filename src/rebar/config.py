@@ -63,6 +63,7 @@ from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_sta
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
 from rebar._config_sources import repo_root_or_none as repo_root_or_none
+from rebar._config_sources import resolve_absent_retire_grace as resolve_absent_retire_grace
 from rebar._config_sources import resolve_acli_call_timeout as resolve_acli_call_timeout
 from rebar._config_sources import (
     resolve_allow_env_reidentify as resolve_allow_env_reidentify,
@@ -482,7 +483,34 @@ def compose_config(root: str | os.PathLike[str] | None = None) -> Config:
     config instead of calling ``load_config`` below the composition seam. A
     :class:`ConfigError` propagates (fail-closed startup), exactly as a direct
     ``load_config`` would."""
-    return load_config(root)
+    return load_config() if root is None else load_config(root)
+
+
+def environment_id_or_none() -> str | None:
+    """Raw ``REBAR_ENV_ID`` passthrough (``None`` when unset); no default, no error.
+    Owned accessor for the reconciler's ``last_pass`` identity reads — the caller keeps
+    its own set-but-empty handling (``resolve_environment_id`` raises ``LastPassError``;
+    ``publish`` forwards ``None`` verbatim)."""
+    return os.environ.get("REBAR_ENV_ID")
+
+
+def repo_root_env() -> str | None:
+    """Raw ``REBAR_ROOT`` passthrough (``None`` when unset). Owned accessor for the
+    read-path ``tracker_dir`` resolver, which distinguishes a supplied/env root from an
+    absent one before its git-work-tree precondition."""
+    return os.environ.get("REBAR_ROOT")
+
+
+def reconciler_event_identity() -> tuple[str, str]:
+    """``(env_id, author)`` for reconciler-authored events. ``REBAR_ENV_ID`` /
+    ``REBAR_AUTHOR`` default to the legacy-Jira signature when UNSET (a set-but-empty
+    value stays ``''``; never raises). Owned accessor for ``inbound_translate``."""
+    from rebar.reducer._version import LEGACY_JIRA_AUTHOR, LEGACY_JIRA_ENV_ID
+
+    return (
+        os.environ.get("REBAR_ENV_ID", LEGACY_JIRA_ENV_ID),
+        os.environ.get("REBAR_AUTHOR", LEGACY_JIRA_AUTHOR),
+    )
 
 
 def resolve_jira_detection() -> tuple[str, str, str, bool]:

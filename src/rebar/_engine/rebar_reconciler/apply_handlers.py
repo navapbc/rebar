@@ -54,16 +54,6 @@ from rebar_reconciler.pass_io import (
 logger = logging.getLogger(__name__)
 
 
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment.
-
-    Local to this module (each reconciler module keeps its own copy): the
-    reconciler modules are spec-loaded under test (where ``rebar_reconciler`` is the
-    test-package shadow), so a cross-module import of a shared shim would not resolve.
-    """
-    return os.environ.get(f"REBAR_{name}", default)
-
-
 @dataclass
 class BatchApplyContext:
     """Mutable per-pass context threaded through the per-action handlers.
@@ -181,7 +171,7 @@ def handle_create(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         # toward mutation_failures (reconcile.py) and drives a non-zero pass exit.
         # Default off ⇒ landing is behavior-neutral; promotion/reversion are a pure
         # flag flip.
-        if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+        if os.environ.get("REBAR_RECONCILER_FAIL_SILENT_NOOP", "0") == "1":  # read-via: inject
             outcome["error"] = f"comment-errors: {'; '.join(comment_errors)}"
     return HandlerResult(outcome)
 
@@ -207,11 +197,11 @@ def _rich_cutover_active() -> bool:
     plain-wire behaviour is byte-identical to before the cutover shipped.
     """
     try:
-        from rebar.config import ConfigError, load_config
+        from rebar.config import ConfigError, compose_config
     except ImportError:
         return False
     try:
-        return load_config().reconciler.rich_text_cutover in ("cloud", "dc", "both")
+        return compose_config().reconciler.rich_text_cutover in ("cloud", "dc", "both")
     except (ConfigError, AttributeError):
         # AttributeError is in the set deliberately: the engine is loaded as package
         # data and can run against a rebar whose config predates this key, and callers
@@ -421,7 +411,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         # drives a non-zero pass exit. Default off ⇒ behavior-neutral. If the
         # silent-no-op canary below ALSO fires, it augments (does not silently
         # replace) this reason.
-        if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+        if os.environ.get("REBAR_RECONCILER_FAIL_SILENT_NOOP", "0") == "1":  # read-via: inject
             outcome["error"] = f"comment-errors: {'; '.join(_comment_errors)}"
     # Story E (2359): sub-op telemetry — surface per-kind APPLIED counts on the
     # structured outcome (parity with apply_inbound's links_applied), so a
@@ -459,7 +449,7 @@ def handle_update(mutation: dict, ctx: BatchApplyContext) -> HandlerResult:
         # flag flip with no other code change. Augment (never silently replace) a
         # comment-errors reason already recorded above (48c8) so both sub-op
         # failures survive on the same outcome.
-        if _rebar_env("RECONCILER_FAIL_SILENT_NOOP", "0") == "1":
+        if os.environ.get("REBAR_RECONCILER_FAIL_SILENT_NOOP", "0") == "1":  # read-via: inject
             _prior = outcome.get("error")
             outcome["error"] = (
                 f"{_prior}; silent-noop: {_detail}" if _prior else f"silent-noop: {_detail}"

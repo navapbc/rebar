@@ -626,7 +626,7 @@ def _write_facade_enabled() -> bool:
     skips composing/threading the runtime and ``applier.apply`` falls back to its own
     ambient ``_load_acli`` resolution. Default (unset) is ON, behavior-preserving.
     """
-    raw = os.environ.get("REBAR_RECONCILER_WRITE_FACADE")
+    raw = os.environ.get("REBAR_RECONCILER_WRITE_FACADE")  # read-via: rollback-toggle
     if raw is None:
         return True
     return raw.strip().lower() not in {"0", "false", "off", "no"}

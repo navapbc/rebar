@@ -66,10 +66,10 @@ def _display_mode(repo_root: str | None) -> str:
     default ``auto``. Display is non-critical, so an unreadable config degrades to
     ``auto`` rather than failing. (Config discovery is $REBAR_CONFIG / rebar.toml /
     pyproject / legacy conf.)"""
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        return load_config(repo_root).ticket.display_mode
+        return compose_config(repo_root).ticket.display_mode
     except ConfigError:
         return "auto"
 

@@ -34,7 +34,6 @@ if TYPE_CHECKING:
 import importlib.util
 import json
 import logging
-import os
 import re
 import sys
 import urllib.error
@@ -204,10 +203,10 @@ def _load_acli():
     Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
     keep standalone by-path loading working.
     """
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config()).transport
+    return select_backend(compose_config()).transport
 
 
 class HeadDriftError(Exception):
@@ -573,7 +572,9 @@ def _apply_batch(
                           file is written to disk; the next pass starts fresh.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        from rebar.config import repo_root as _owned_repo_root
+
+        repo_root = _owned_repo_root()
 
     # S4: _load_acli now returns the configured backend's transport directly. The
     # transport (an AcliClient) already carries the resolved connection settings
@@ -606,11 +607,11 @@ def _apply_batch(
     # (not the transport) so a test fake transport without a jira_project
     # attribute still works. Resolved HERE (past the empty-mutations fast path)
     # so a zero-mutation pass builds no extra backend.
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler import projects_store
     from rebar_reconciler._backend_registry import select_backend
 
-    _project = select_backend(load_config()).project
+    _project = select_backend(compose_config()).project
     # Story d19d: with a seeded many-to-many mapping, the allowed write scope is the
     # store's whole project SET, not the single construction-time default. An unseeded
     # store (no projects.json) yields no keys, so fall back to the single ``_project``

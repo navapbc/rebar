@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import os
 import re
 import subprocess
 import sys
@@ -12,13 +11,15 @@ _CAP_PER_PASS = 5
 
 
 def _default_repo_root() -> Path:
-    """Repo root: REBAR_ROOT env if set, else the engine's parent.
+    """Repo root, resolved through the owned composition-root resolver
+    (explicit > ``REBAR_ROOT`` > git toplevel of cwd).
 
-    (Depth-math fallback only applies when no env is set; the rebar library/CLI
-    always export REBAR_ROOT, and the reconciler threads --repo-root.)
+    (The rebar library/CLI always export REBAR_ROOT, and the reconciler threads
+    --repo-root; this is the fallback when neither is present.)
     """
-    root = os.environ.get("REBAR_ROOT")
-    return Path(root) if root else Path(__file__).resolve().parents[4]
+    from rebar.config import repo_root
+
+    return repo_root()
 
 
 def _default_ticket_cli() -> str:
