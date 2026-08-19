@@ -90,15 +90,15 @@ def _read_status(tracker: str, ticket_id: str) -> str | None:
     return status
 
 
-def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
-    """Return the resolved id of ``ticket_id``'s parent IFF the parent exists and is
-    currently ``open`` — else ``None``.
+def _resolve_parent_in_status(tracker: str, ticket_id: str, status: str) -> str | None:
+    """Return the resolved id of ``ticket_id``'s parent IFF the parent exists and its
+    current status is ``status`` — else ``None``.
 
-    The parent-first cascade in :func:`claim_compute` / :func:`transition_compute`
-    uses this: grabbing a child (claim, or transition ``open -> in_progress``) first
-    grabs its OPEN parent. A parent that is already ``in_progress`` / ``closed`` /
-    ``blocked`` (or absent / unreadable) yields ``None`` — no cascade, the child op
-    proceeds alone."""
+    This is the lookup behind the parent-first cascade: the caller names the parent
+    status that is ELIGIBLE to be cascaded on the edge being taken (``"open"`` for
+    ``open -> in_progress``, ``"closed"`` for the ``closed -> open`` reopen). A parent
+    in any other status (or absent / unreadable) yields ``None`` — no cascade, the
+    child op proceeds alone."""
     state = reduce_ticket(os.path.join(tracker, ticket_id))
     if state is None:
         return None
@@ -107,9 +107,16 @@ def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
         return None
     parent_id = resolve_ticket_id(raw_parent, tracker) or raw_parent
     parent_state = reduce_ticket(os.path.join(tracker, parent_id))
-    if parent_state is None or parent_state.get("status") != "open":
+    if parent_state is None or parent_state.get("status") != status:
         return None
     return parent_id
+
+
+def _resolve_open_parent(tracker: str, ticket_id: str) -> str | None:
+    """``_resolve_parent_in_status`` specialized to an ``open`` parent — the lookup
+    :func:`rebar._commands.claim.claim_compute` needs for its ``open -> in_progress``
+    cascade."""
+    return _resolve_parent_in_status(tracker, ticket_id, "open")
 
 
 def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
@@ -335,10 +342,11 @@ def transition_compute(
         note = _force_note(force_reason)
         gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=note)
 
-    # Parent-first cascade (open -> in_progress only): if this ticket has an OPEN
-    # parent, transition it first (recursively up the chain) so a child is never
-    # moved to in_progress while its parent is still open. See _cascade_open_parent.
-    _cascade_open_parent(
+    # Parent-first cascade: on a cascading edge (open -> in_progress, and the
+    # closed -> open reopen), if this ticket has a parent in the eligible status,
+    # transition it first (recursively up the chain) so a child is never left ahead
+    # of its parent in the lifecycle. See _cascade_parent_first.
+    _cascade_parent_first(
         ticket_id,
         current_status,
         target_status,
@@ -384,7 +392,25 @@ def _force_note(force_reason: str | None) -> str:
     return force_reason or "(no reason given)"
 
 
-def _cascade_open_parent(
+# The cascading edges of the parent-first cascade, mapping the ``(current, target)``
+# status edge the CHILD is taking to the parent status that is ELIGIBLE to cascade on
+# it. Both entries move the parent along the SAME edge, ahead of the child:
+#
+#   open -> in_progress : an ``open`` parent is pulled into progress, so a descendant is
+#                         never in progress while an ancestor is merely open;
+#   closed -> open      : a ``closed`` parent is reopened, so a reopened descendant is
+#                         never left under a still-closed ancestor (bug
+#                         cranial-sulfur-peafowl).
+#
+# Every other edge — notably ``* -> closed`` (which has its own open-children guard) and
+# ``* -> blocked`` — is absent and therefore never cascades.
+_CASCADING_EDGES: dict[tuple[str, str], str] = {
+    ("open", "in_progress"): "open",
+    ("closed", "open"): "closed",
+}
+
+
+def _cascade_parent_first(
     ticket_id: str,
     current_status: str,
     target_status: str,
@@ -396,46 +422,54 @@ def _cascade_open_parent(
     cascade: bool,
     cascade_seen: frozenset[str] | None,
 ) -> None:
-    """Parent-first cascade for an ``open -> in_progress`` transition: if ``ticket_id``
-    has an OPEN parent, transition the parent first (recursively up the chain, via
-    :func:`transition_compute`) so a child is never moved to ``in_progress`` while its
-    parent is still ``open``. If the parent transition fails, the child is NOT
-    transitioned and the raised error names the parent as the cause (preserving the
-    parent's exit code / concurrency identity — a raced parent surfaces as exit-10 /
-    ConcurrencyError at the leaf too). ``cascade_seen`` breaks any malformed parent
-    cycle.
+    """Parent-first cascade for a cascading edge (see :data:`_CASCADING_EDGES`): if
+    ``ticket_id``'s parent sits in the status eligible for this edge, transition the
+    parent along the SAME edge first (recursively up the chain, via
+    :func:`transition_compute`) so a child never runs ahead of its parent — not into
+    ``in_progress`` while the parent is still ``open``, and not back to ``open`` while
+    the parent is still ``closed``.
 
-    A no-op unless ``cascade`` is set AND this is the ``open -> in_progress`` edge (the
-    cascade pulls an OPEN parent into progress; a blocked-ticket resume has no such
-    parent semantics). ``cascade=False`` (replay/import re-materializing a recorded
-    status verbatim) suppresses it. Mirrors :func:`claim_compute`'s cascade."""
-    if not (cascade and current_status == "open" and target_status == "in_progress"):
+    If the parent transition fails, the child is NOT transitioned and the raised error
+    names the parent as the cause (preserving the parent's exit code / concurrency
+    identity — a raced parent surfaces as exit-10 / ConcurrencyError at the leaf too).
+    ``cascade_seen`` breaks any malformed parent cycle.
+
+    A no-op unless ``cascade`` is set AND the edge is in :data:`_CASCADING_EDGES`;
+    ``cascade=False`` (replay/import re-materializing a recorded status verbatim)
+    suppresses it. Mirrors :func:`claim_compute`'s cascade, and like it is sequential
+    and fail-fast rather than transactional: a parent already moved is not rolled back
+    if the child then fails."""
+    if not cascade:
+        return
+    parent_status = _CASCADING_EDGES.get((current_status, target_status))
+    if parent_status is None:
         return
     seen = cascade_seen or frozenset()
-    parent_id = _resolve_open_parent(tracker, ticket_id)
-    if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
-        try:
-            transition_compute(
-                parent_id,
-                "open",
-                "in_progress",
-                reason=reason,
-                force_reason=force_reason,
-                repo_root=repo_root,
-                _cascade_seen=seen | {ticket_id},
-            )
-        except CommandError as exc:
-            msg = (
-                f"Error: cannot move {ticket_id} to in_progress: transitioning its "
-                f"parent {parent_id} to in_progress failed first, so the child was not "
-                f"transitioned.\n  Parent error: {exc.message}"
-            )
-            # Preserve the concurrency identity: a parent that raced surfaces as
-            # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
-            # hardcodes returncode=10.
-            if isinstance(exc, ConcurrencyMismatch):
-                raise ConcurrencyMismatch(msg) from None
-            raise CommandError(msg, returncode=exc.returncode) from None
+    parent_id = _resolve_parent_in_status(tracker, ticket_id, parent_status)
+    if parent_id is None or parent_id == ticket_id or parent_id in seen:
+        return
+    try:
+        transition_compute(
+            parent_id,
+            current_status,
+            target_status,
+            reason=reason,
+            force_reason=force_reason,
+            repo_root=repo_root,
+            _cascade_seen=seen | {ticket_id},
+        )
+    except CommandError as exc:
+        msg = (
+            f"Error: cannot move {ticket_id} to {target_status}: transitioning its "
+            f"parent {parent_id} to {target_status} failed first, so the child was not "
+            f"transitioned.\n  Parent error: {exc.message}"
+        )
+        # Preserve the concurrency identity: a parent that raced surfaces as
+        # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
+        # hardcodes returncode=10.
+        if isinstance(exc, ConcurrencyMismatch):
+            raise ConcurrencyMismatch(msg) from None
+        raise CommandError(msg, returncode=exc.returncode) from None
 
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
