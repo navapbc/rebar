@@ -371,3 +371,35 @@ def test_editing_overlay_invalidates_memo_by_content(tmp_path):
         encoding="utf-8",
     )
     assert "project.p" in registry.effective_criteria(root)
+
+
+# ── `applies_to` SHAPE validation (bug d343-47c6) ─────────────────────────────────
+# `applies_to` gates WHEN a criterion runs. Every consumer of it narrows a malformed value
+# to `[]` (`[g for g in globs if isinstance(g, str)]`, `entry.get("applies_to") or []`), and
+# an empty glob list means "ungated" for a project criterion — so a typo used to silently
+# turn the gate OFF and run the criterion on every review. It must fail at LOAD instead.
+@pytest.mark.parametrize(
+    "bad_applies_to",
+    [
+        "src/**",  # a bare string (the likeliest typo: forgot the list)
+        {"paths": ["src/**"]},  # an object
+        ["src/**", 7],  # a non-string element
+        [""],  # an empty glob (matches nothing, silently inert)
+    ],
+    ids=["bare-string", "object", "non-string-element", "empty-glob"],
+)
+def test_malformed_applies_to_rejected_at_overlay_load(tmp_path, bad_applies_to):
+    bad = {**_ROUTING, "applies_to": bad_applies_to}
+    root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": bad}, "activate": []})
+    with pytest.raises(registry.RegistryError, match="applies_to must be a list of"):
+        registry.effective_routing(root)
+
+
+@pytest.mark.parametrize("ok_applies_to", [[], ["src/**"], ["a/**", "b/*.py"]])
+def test_wellformed_applies_to_accepted_at_overlay_load(tmp_path, ok_applies_to):
+    """An EMPTY list stays legal — it is the "ungated" spelling this repo's own
+    `project.review-phase-boundaries` entry uses, so validation must not reject it."""
+    good = {**_ROUTING, "applies_to": ok_applies_to}
+    root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": good}, "activate": []})
+
+    assert registry.effective_routing(root)["project.x"]["applies_to"] == ok_applies_to

@@ -72,11 +72,39 @@ thresholds/posture are NOT in the gate YAML (they live in `criteria_routing.json
 | `cap` | `gates/code-review.yaml` → `union` step `with.cap` | integer | `3` | `>= 0` (0 = no Round-B escalation; omit/`null` = uncapped) | Max Round-B escalated overlays (bounds agent-driven fan-out). |
 | `block_threshold` | `criteria_routing.json[<criterion>]` | float | `0.95` | `0.0`–`1.0` | Pass-3 block threshold per criterion (min over a finding's criteria). |
 | `blocking_enabled` | `criteria_routing.json[<criterion>]` | bool | `false` | — | Whether a criterion can block (true only for the WS5 secrets/security keys). |
-| `applies_to` | `criteria_routing.json[<criterion>]` | list[str] (globs) | `[]` | — | Round-A glob triggers for an overlay (empty = escalation-only). |
+| `applies_to` | `criteria_routing.json[<criterion>]` | list[str] (globs) | `[]` | — | Round-A glob triggers, matched against the review's changed files. **Its empty-list meaning depends on the criterion kind — see below.** |
 
 The `cap` is a literal in the gate YAML (so calibrating it is a config edit, not a code change);
 `overlay_union` reads it from its `with.cap` input. Non-int / negative / absent `cap` → uncapped
 (documented in `overlay_union`'s contract).
+
+### `applies_to` has TWO meanings on an empty list (built-in vs project)
+
+`applies_to` is honoured for **project-owned** code-review criteria as well as built-in
+overlays: `_activated_code_review_project_criteria` (`workflow/gate_dispatch.py`) drops a
+project criterion whose globs match none of the review's changed files, resolving the globs
+through `registry.project_applies_to_globs` → `effective_routing(repo_root)` (the
+overlay-MERGED view — the PACKAGED `routing_index()` has no `project.` entries at all) and
+matching against the same changed-files list the `triggers` step uses. Before bug `d343-47c6`
+the key was stored, unvalidated, and never read on this path, so a project criterion ran on
+every review whatever it declared.
+
+That fix forces ONE key to carry OPPOSITE meanings when the list is empty:
+
+| Criterion kind | `applies_to: []` means | Why |
+|---|---|---|
+| **built-in overlay** (an id in `OVERLAY_IDS`) | **escalation-only** — never glob-fires; it can still enter Round B when the base reviewer escalates to it (`glob_triggered_overlays`) | The base reviewer is a second, independent way in, so "no globs" can safely mean "no *deterministic* trigger". |
+| **project criterion** (`project.<name>`) | **ungated** — runs on every review | A `project.` id is **not** in the closed `OVERLAY_IDS` enum, so the base reviewer can never escalate to it. "Empty = never run" would make every project criterion dead code, and it would silently retire this repo's own `project.review-phase-boundaries`. |
+
+The asymmetry is therefore forced, not chosen — but it is a real trap, so it is recorded here
+rather than left to be rediscovered. A project criterion that wants glob gating states its
+globs; one that wants to run always states `[]`, as `.rebar/criteria_routing.json` does today.
+
+Because an empty list is the *permissive* spelling for a project criterion, a malformed
+`applies_to` must not be allowed to degrade into one. `_validate_routing_entry`
+(`criteria/overlay.py`) therefore rejects any non-list, non-string element, or empty-string
+glob at overlay LOAD, with a located error — a typo fails loudly instead of silently turning
+the gate off.
 
 ## Consequences
 

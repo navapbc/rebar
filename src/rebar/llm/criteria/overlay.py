@@ -187,6 +187,56 @@ def _load_overlay(repo_root: str | None) -> dict[str, Any] | None:
     return data
 
 
+def _validate_applies_at(cid: str, ap: Any, *, where: str) -> None:
+    """Structural floor-check on ONE routing entry's ``applies_at`` sub-object (plan-review's
+    proportionate-scrutiny axes). Split out of :func:`_validate_routing_entry` so each stays
+    within the per-function complexity ceiling; the checks are unchanged."""
+    if not isinstance(ap, dict):
+        return
+    # Plan-review proportionate scrutiny is keyed on container/leaf, never ticket
+    # type. The legacy `levels`/`container_only` vocabulary is rejected with a
+    # migration hint so a stale overlay fails loudly, not silently ignored.
+    # (Code-review criteria don't carry applies_at, so this is inert for them.)
+    for legacy in ("levels", "container_only"):
+        if legacy in ap:
+            raise CriteriaError(
+                f"{where}: criterion {cid!r} applies_at.{legacy} is no longer supported "
+                "— proportionate scrutiny is keyed on container/leaf; use "
+                '\'scope\': ["container", "leaf"] (either or both) instead'
+            )
+    scope = ap.get("scope")
+    if scope is not None and (
+        not isinstance(scope, list)
+        or not scope
+        or any(s not in ("container", "leaf") for s in scope)
+    ):
+        raise CriteriaError(
+            f"{where}: criterion {cid!r} applies_at.scope must be a non-empty list of "
+            f"'container'/'leaf', got {scope!r}"
+        )
+    # `require_parent_id` (G7): a boolean axis restricting a criterion to tickets WITH a
+    # parent. bool ONLY (Python bool is a subclass of int, so check isinstance explicitly
+    # to reject int/str).
+    if "require_parent_id" in ap and not isinstance(ap["require_parent_id"], bool):
+        raise CriteriaError(
+            f"{where}: criterion {cid!r} applies_at.require_parent_id must be a boolean, "
+            f"got {ap['require_parent_id']!r}"
+        )
+    # `require_file_impact_scope` restricts a criterion to one or more persisted
+    # declaration kinds. Its declarative list shape lets criteria select another
+    # explicit scope without another routing-key type.
+    scope_requirement = ap.get("require_file_impact_scope")
+    if scope_requirement is not None and (
+        not isinstance(scope_requirement, list)
+        or not scope_requirement
+        or any(not isinstance(value, str) or not value for value in scope_requirement)
+    ):
+        raise CriteriaError(
+            f"{where}: criterion {cid!r} applies_at.require_file_impact_scope must be "
+            f"a non-empty list of strings, got {scope_requirement!r}"
+        )
+
+
 def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
     """Structural floor-check on ONE routing entry (located error). Mirrors the shape the
     packaged index carries so an overlay entry can't smuggle a malformed record past load."""
@@ -246,50 +296,20 @@ def _validate_routing_entry(cid: str, entry: Any, *, where: str) -> None:
                 f"{where}: criterion {cid!r} 'disabled' must be a boolean, "
                 f"got {entry.get('disabled')!r}"
             )
-    ap = entry.get("applies_at")
-    if isinstance(ap, dict):
-        # Plan-review proportionate scrutiny is keyed on container/leaf, never ticket
-        # type. The legacy `levels`/`container_only` vocabulary is rejected with a
-        # migration hint so a stale overlay fails loudly, not silently ignored.
-        # (Code-review criteria don't carry applies_at, so this is inert for them.)
-        for legacy in ("levels", "container_only"):
-            if legacy in ap:
-                raise CriteriaError(
-                    f"{where}: criterion {cid!r} applies_at.{legacy} is no longer supported "
-                    "— proportionate scrutiny is keyed on container/leaf; use "
-                    '\'scope\': ["container", "leaf"] (either or both) instead'
-                )
-        scope = ap.get("scope")
-        if scope is not None and (
-            not isinstance(scope, list)
-            or not scope
-            or any(s not in ("container", "leaf") for s in scope)
-        ):
+    # `applies_to` is a list of file globs gating WHEN a criterion runs against the changed
+    # files. EVERY consumer narrows a malformed value to `[]` (`entry.get("applies_to") or []`
+    # then `[g for g in globs if isinstance(g, str)]`), and an empty glob list means UNGATED
+    # for a project criterion — so a typo used to turn the gate silently OFF and run the
+    # criterion on every review (bug d343-47c6). It fails at LOAD instead. An empty LIST stays
+    # legal: that is the deliberate "ungated" spelling.
+    if "applies_to" in entry:
+        globs = entry["applies_to"]
+        if not isinstance(globs, list) or any(not isinstance(g, str) or not g for g in globs):
             raise CriteriaError(
-                f"{where}: criterion {cid!r} applies_at.scope must be a non-empty list of "
-                f"'container'/'leaf', got {scope!r}"
+                f"{where}: criterion {cid!r} applies_to must be a list of non-empty glob "
+                f"strings (an empty list means ungated), got {globs!r}"
             )
-        # `require_parent_id` (G7): a boolean axis restricting a criterion to tickets WITH a
-        # parent. bool ONLY (Python bool is a subclass of int, so check isinstance explicitly
-        # to reject int/str).
-        if "require_parent_id" in ap and not isinstance(ap["require_parent_id"], bool):
-            raise CriteriaError(
-                f"{where}: criterion {cid!r} applies_at.require_parent_id must be a boolean, "
-                f"got {ap['require_parent_id']!r}"
-            )
-        # `require_file_impact_scope` restricts a criterion to one or more persisted
-        # declaration kinds. Its declarative list shape lets criteria select another
-        # explicit scope without another routing-key type.
-        scope_requirement = ap.get("require_file_impact_scope")
-        if scope_requirement is not None and (
-            not isinstance(scope_requirement, list)
-            or not scope_requirement
-            or any(not isinstance(value, str) or not value for value in scope_requirement)
-        ):
-            raise CriteriaError(
-                f"{where}: criterion {cid!r} applies_at.require_file_impact_scope must be "
-                f"a non-empty list of strings, got {scope_requirement!r}"
-            )
+    _validate_applies_at(cid, entry.get("applies_at"), where=where)
 
 
 # ── effective (overlay-merged) views, gate-parameterized + repo-keyed ───────────────
