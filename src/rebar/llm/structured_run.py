@@ -201,12 +201,14 @@ def _run_native_output(Agent, model, mode_obj, req: RunRequest, kwargs: dict, us
     ``kwargs``. Silent-success parity (story drake): ``check_response`` still runs so a
     truncated/refused turn degrades to INDETERMINATE rather than returning a hollow verdict."""
     from rebar.llm import pai_output, structured
+    from rebar.llm.model_classes import ensure_current_event_loop
 
     agent = Agent(
         model,
         output_type=mode_obj,
         **_agent_kwargs_with_guard(kwargs, pai_output.guard_capability()),
     )
+    ensure_current_event_loop()
     with usage_log.capture_attempt_messages():
         run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
     structured.check_response(run_result.response)
@@ -237,6 +239,7 @@ def _run_prompted_output(
     from pydantic_ai.exceptions import UnexpectedModelBehavior
 
     from rebar.llm import pai_output, pai_retry, structured
+    from rebar.llm.model_classes import ensure_current_event_loop
 
     agent = Agent(
         model,
@@ -244,6 +247,7 @@ def _run_prompted_output(
         **_agent_kwargs_with_guard(kwargs, pai_retry.concision_guard()),
     )
     prompt = f"{req.instructions}\n\n{structured.schema_directive(model_cls)}"
+    ensure_current_event_loop()
     with capture_run_messages() as messages, usage_log.capture_attempt_messages():
         try:
             result = agent.run_sync(prompt, usage_limits=usage_limits)

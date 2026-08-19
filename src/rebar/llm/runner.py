@@ -39,6 +39,7 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMConfigError, LLMError
 from rebar.llm.model_classes import (
     build_fallback_model,
+    ensure_current_event_loop,
     entered_fallback_model,
     fallback_targets_for,
     primary_endpoint_for,
@@ -535,6 +536,12 @@ class PydanticAIRunner:
             try:
                 if req.mode == "text":
                     agent = Agent(model, **kwargs)
+                    # Install this thread's event loop right before the synchronous run so
+                    # pydantic-ai's `run_sync` does not resolve it through the deprecated
+                    # `asyncio.get_event_loop()` fallback (ticket c7d5). Kept adjacent to the
+                    # run — not hoisted earlier — so loop binding timing matches building the
+                    # provider/model first, preserving provider client loop affinity.
+                    ensure_current_event_loop()
                     with usage_log.collect_failure_messages(run_messages):
                         with usage_log.capture_attempt_messages():
                             run_result = agent.run_sync(req.instructions, usage_limits=usage_limits)
