@@ -308,6 +308,12 @@ def _resolve_held_lock(advisory, pass_id, repo_root, *, acquire_fn):
         return (3, None, False)
 
 
+# The composition below runs entirely in a DETACHED temp index (GIT_INDEX_FILE, set at
+# the call site) and publishes through a CAS ref-advance (update_ref with the observed
+# old OID), so it never touches the worktree or the main index and a concurrent writer
+# loses the CAS rather than corrupting state. The CAS *is* the transaction here; taking
+# the tracker write lock around it would add no safety.
+# raw-git-ok: detached temp index + CAS ref-advance; never touches the worktree or index
 def _purge_committed_reconciler_locks(repo_root: Path) -> None:
     """Remove any legacy ``.reconciler-*`` lock files still committed on the tickets
     branch (epic dust-troth-naval / C4 migration).
