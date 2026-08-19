@@ -358,3 +358,157 @@ def _strict_unknown_keys() -> bool:
     ``REBAR_CONFIG_UNKNOWN_KEYS=error`` to hard-fail (the post-deprecation cutover, or
     an early opt-in to strict config). Any other value falls back to the safe WARN."""
     return os.environ.get("REBAR_CONFIG_UNKNOWN_KEYS", "").strip().lower() == "error"
+
+
+# --------------------------------------------------------------------------- #
+# Below-seam config resolvers (RP-04 config-ownership cutover, ticket d074).
+# These OWN the ambient env / [snapshot]-config-table reads that previously sat
+# BELOW the seam in the _store / _snapshot / _io helpers. Each below-seam caller
+# now RECEIVES the resolved value from here (re-exported via ``rebar.config``)
+# instead of reading ``os.environ`` itself. Every read is LIVE per call (never
+# import-time bound) so a mid-operation override — e.g. the ``REBAR_SYNC_PUSH``
+# toggle a bulk import drives — is still observed. This is the composition/raw-input
+# seam the config-ownership gate treats as OWNED, so the env-name literals stay
+# visible to ``gen_env_registry`` here.
+# --------------------------------------------------------------------------- #
+
+
+def _positive_int(raw: str | None, default: int) -> int:
+    """Coerce a raw env value to a POSITIVE int, else ``default``.
+
+    Anything not a positive integer — missing, blank, non-numeric, zero, negative —
+    falls back to the default: a malformed knob must not crash a fetch, and a
+    non-positive floor/window/attempt count would DISARM the stall protection. Callers
+    pass ``os.environ.get("<LITERAL>")`` so every knob's name stays verbatim in the
+    source for ``gen_env_registry``."""
+    try:
+        value = int((raw or "").strip())
+    except (AttributeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def resolve_stall_abort_limits(floor_default: int, window_default: int) -> tuple[int, int]:
+    """``(floor, window)`` arming the fetch low-speed abort:
+    ``REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC`` and
+    ``REBAR_SNAPSHOT_STALL_WINDOW_SECONDS`` over the module defaults (live per call)."""
+    return (
+        _positive_int(os.environ.get("REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC"), floor_default),
+        _positive_int(os.environ.get("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS"), window_default),
+    )
+
+
+def resolve_stall_attempts(default: int) -> int:
+    """In-process fetch retry budget: ``REBAR_SNAPSHOT_STALL_ATTEMPTS`` > ``default``
+    (live per call, so a test/operator can retune without a reimport)."""
+    return _positive_int(os.environ.get("REBAR_SNAPSHOT_STALL_ATTEMPTS"), default)
+
+
+def resolve_gate_tmpdir() -> str:
+    """Snapshot-store base override ``REBAR_GATE_TMPDIR``, or ``""`` when unset (the
+    caller then falls back to ``tempfile.gettempdir()``)."""
+    return os.environ.get("REBAR_GATE_TMPDIR") or ""
+
+
+def resolve_allow_env_reidentify() -> bool:
+    """``REBAR_ALLOW_ENV_REIDENTIFY`` re-identification acknowledgement — true for
+    ``1``/``true``/``yes``/``on`` (case/space-insensitive), else false."""
+    return os.environ.get("REBAR_ALLOW_ENV_REIDENTIFY", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def resolve_lock_retries(default: int, max_retries: int) -> int:
+    """Write-path retry passes: ``REBAR_LOCK_RETRIES`` (default ``default``) clamped to
+    ``[0, max_retries]``. ``REBAR_LOCK_RETRIES=0`` restores fail-fast-on-one-budget; an
+    unset/blank/unparseable value falls back to ``default`` so a malformed knob never
+    breaks every write."""
+    raw = os.environ.get("REBAR_LOCK_RETRIES")
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return default
+    return max(0, min(value, max_retries))
+
+
+def _snapshot_table(root: str | os.PathLike[str] | None = None) -> dict:
+    """Merged raw ``[snapshot]`` config table (user < project), or ``{}`` if unreadable
+    — a broken core config degrades the janitor to env/defaults, never breaks it."""
+    try:
+        merged: dict = {}
+        up = user_config_path()
+        if up.is_file():
+            sub = _read_toml_table(up, pyproject=False).get("snapshot")
+            if isinstance(sub, dict):
+                merged.update(sub)
+        proj = _discover_project_config(root)
+        if proj is not None:
+            path, kind = proj
+            sub = _read_toml_table(path, pyproject=(kind == "pyproject")).get("snapshot")
+            if isinstance(sub, dict):
+                merged.update(sub)
+        return merged
+    except Exception:  # noqa: BLE001 - degrade to env/defaults on any config error
+        return {}
+
+
+def _snapshot_int(raw: str | None, table: dict, file_key: str, default: int) -> int:
+    """One janitor int tunable: env ``raw`` > ``[snapshot]`` ``file_key`` > ``default``."""
+    if raw is not None and raw.strip():
+        try:
+            return int(raw.strip())
+        except ValueError:
+            pass
+    fv = table.get(file_key)
+    if fv is not None and not isinstance(fv, bool):
+        try:
+            return int(fv)
+        except (TypeError, ValueError):
+            pass
+    return default
+
+
+def resolve_janitor_tunables(
+    defaults: dict[str, int], root: str | os.PathLike[str] | None = None
+) -> dict[str, int]:
+    """Snapshot-cache janitor int tunables — ``REBAR_GATE_*`` env > ``[snapshot]``
+    config table > per-knob ``defaults``. Owns the ambient env + config-table reads at
+    the composition seam; the below-seam ``JanitorConfig`` RECEIVES these values."""
+    t = _snapshot_table(root)
+    return {
+        "free_watermark_bytes": _snapshot_int(
+            os.environ.get("REBAR_GATE_FREE_WATERMARK_BYTES"),
+            t,
+            "free_watermark_bytes",
+            defaults["free_watermark_bytes"],
+        ),
+        "grace_seconds": _snapshot_int(
+            os.environ.get("REBAR_GATE_GRACE_SECONDS"),
+            t,
+            "grace_seconds",
+            defaults["grace_seconds"],
+        ),
+        "max_age_seconds": _snapshot_int(
+            os.environ.get("REBAR_GATE_MAX_AGE_SECONDS"),
+            t,
+            "max_age_seconds",
+            defaults["max_age_seconds"],
+        ),
+        "reverify_seconds": _snapshot_int(
+            os.environ.get("REBAR_GATE_REVERIFY_SECONDS"),
+            t,
+            "reverify_seconds",
+            defaults["reverify_seconds"],
+        ),
+        "interval_seconds": _snapshot_int(
+            os.environ.get("REBAR_GATE_JANITOR_INTERVAL_SECONDS"),
+            t,
+            "interval_seconds",
+            defaults["interval_seconds"],
+        ),
+    }

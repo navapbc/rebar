@@ -115,8 +115,11 @@ def store_root() -> Path:
 
     ``REBAR_GATE_TMPDIR`` overrides the base (operators point it at a roomy local FS);
     otherwise :func:`tempfile.gettempdir` is used — never a hardcoded ``/tmp``. Created
-    ``0700`` if absent."""
-    base = os.environ.get("REBAR_GATE_TMPDIR") or tempfile.gettempdir()
+    ``0700`` if absent. The override is resolved through the owned config seam
+    (:func:`rebar.config.resolve_gate_tmpdir`), not read from ``os.environ`` here."""
+    from rebar import config
+
+    base = config.resolve_gate_tmpdir() or tempfile.gettempdir()
     root = Path(base) / _STORE_DIRNAME
     root.mkdir(parents=True, exist_ok=True)
     try:

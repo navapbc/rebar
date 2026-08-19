@@ -62,11 +62,11 @@ def _effective_project() -> str:
     """The store's effective backend project: the configured ``jira.project`` verbatim,
     or the EMPTY string when it is unset. There is NO implicit ``DIG`` fallback (AC2) —
     this mirrors ``Backend.project``, which likewise no longer applies a create-time
-    default. Computed with a lazy :func:`rebar.config.load_config` so this leaf unit does
+    default. Computed with a lazy :func:`rebar.config.compose_config` so this leaf unit does
     not pull config into a hot import path."""
-    from rebar.config import load_config
+    from rebar.config import compose_config
 
-    return load_config().jira.project or ""
+    return compose_config().jira.project or ""
 
 
 # raw-git-ok: store-maintenance command, seam-internal

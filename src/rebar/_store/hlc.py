@@ -58,7 +58,7 @@ _FALSY = {"0", "false", "no", "off", ""}
 def _enabled() -> bool:
     """``REBAR_HLC`` gates the clock — default ON. ``REBAR_HLC=0`` (or false/no/off)
     is the one-release kill-switch back to raw ``physical_now()``."""
-    val = os.environ.get("REBAR_HLC")
+    val = os.environ.get("REBAR_HLC")  # read-via: subsystem-kill-switch
     if val is None:
         return True
     return val.strip().lower() not in _FALSY
@@ -68,7 +68,7 @@ def physical_now() -> int:
     """The physical clock source: ``time.time_ns()``, or the ``REBAR_HLC_NOW``
     override (the injection point the skewed-clock harness drives). A malformed
     override is ignored."""
-    override = os.environ.get("REBAR_HLC_NOW")
+    override = os.environ.get("REBAR_HLC_NOW")  # read-via: test-only-clock-injection
     if override is not None:
         try:
             return int(override.strip())

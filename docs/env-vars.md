@@ -32,7 +32,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `OPENAI_API_KEY` | `src/rebar/llm/config.py` |  |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_cli/_llm_eval_commands.py` |  |
 | `REBAR_ACLI_TIMEOUT` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_JIRA_CLI_TIMEOUT` |
-| `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_store/env_identity.py` |  |
+| `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_sources.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
@@ -41,14 +41,14 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
 | `REBAR_ENV_ID` | `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/last_pass.py` |  |
 | `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/gate_context.py` |  |
-| `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_snapshot/janitor.py` |  |
-| `REBAR_GATE_GRACE_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
-| `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
-| `REBAR_GATE_MAX_AGE_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
+| `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_config_sources.py` |  |
+| `REBAR_GATE_GRACE_SECONDS` | `src/rebar/_config_sources.py` |  |
+| `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_config_sources.py` |  |
+| `REBAR_GATE_MAX_AGE_SECONDS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_GATE_REF` | `src/rebar/llm/gate_source.py` |  |
-| `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_snapshot/janitor.py` |  |
+| `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_GATE_SOURCE` | `src/rebar/llm/gate_source.py` |  |
-| `REBAR_GATE_TMPDIR` | `src/rebar/_snapshot/repo_snapshot.py` |  |
+| `REBAR_GATE_TMPDIR` | `src/rebar/_config_sources.py` |  |
 | `REBAR_HLC` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
@@ -89,7 +89,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
-| `REBAR_LOCK_RETRIES` | `src/rebar/_store/lock.py` |  |
+| `REBAR_LOCK_RETRIES` | `src/rebar/_config_sources.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -146,9 +146,9 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_cli/_init.py`, `src/rebar/_commands/init.py`, `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/__main__.py`, `src/rebar/_engine/rebar_reconciler/applier.py`, `src/rebar/_engine/rebar_reconciler/apply_inbound.py`, `src/rebar/_engine/rebar_reconciler/apply_planning.py`, `src/rebar/_engine/rebar_reconciler/dispatch_one.py`, `src/rebar/_engine/rebar_reconciler/fetcher.py`, `src/rebar/_engine/rebar_reconciler/inbound_translate.py`, `src/rebar/_engine/rebar_reconciler/invariants.py`, `src/rebar/_engine/rebar_reconciler/pass_io.py`, `src/rebar/_engine/rebar_reconciler/reconcile.py`, `src/rebar/_engine/rebar_reconciler/request.py`, `src/rebar/_engine_support/reads.py`, `src/rebar/llm/workflow/completion_banking.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/signing.py` |  |
-| `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_snapshot/git_fetch.py` |  |
-| `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_snapshot/git_fetch.py` |  |
-| `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_snapshot/git_fetch.py` |  |
+| `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_sources.py` |  |
+| `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_sources.py` |  |
+| `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
@@ -190,12 +190,11 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 - `src/rebar/_engine/rebar_reconciler/outbound_differ.py:114` — `os.environ.get(<non-literal>)`
 - `src/rebar/_engine/rebar_reconciler/rebar_id_audit.py:30` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
-- `src/rebar/_snapshot/janitor.py:73` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:269` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:282` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:286` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:293` — `os.environ.get(<non-literal>)`
-- `src/rebar/config.py:468` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:277` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:290` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:294` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:301` — `os.environ.get(<non-literal>)`
+- `src/rebar/config.py:494` — `os.environ.get(<non-literal>)`
 - `src/rebar/grounding/harness.py:56` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/bedrock_model.py:69` — `os.environ.get(<non-literal>)`
 - `src/rebar/llm/config.py:324` — `os.environ.get(<non-literal>)`

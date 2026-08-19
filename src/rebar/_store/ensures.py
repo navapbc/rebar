@@ -242,7 +242,7 @@ def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
             return
         from rebar import config as _config
 
-        cfg = _config.load_config().ensure
+        cfg = _config.compose_config().ensure
         if not cfg.hint_enabled:
             return
         real = canonical_tracker(tracker)

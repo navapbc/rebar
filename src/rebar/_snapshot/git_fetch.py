@@ -191,35 +191,18 @@ _STALL_ATTEMPTS = 3
 _STALL_STDERR_MARKER = "operation too slow"
 
 
-def _positive_int(raw: str | None, default: int) -> int:
-    """Coerce an environment override to a positive int, else ``default``.
-
-    Callers pass ``os.environ.get("<LITERAL>")`` so every knob's name appears verbatim in
-    the source — ``scripts/gen_env_registry.py`` scrapes literal reads, and a name hidden
-    behind a variable would silently drop out of ``docs/env-vars.md``. The lookup happens
-    at CALL time, not import time, so a test (or an operator exporting into a running
-    process tree) can retune without a reimport. Anything that is not a positive integer —
-    missing, blank, non-numeric, zero, negative — falls back to the default rather than
-    raising: a malformed knob must not turn a fetch into a crash, and a non-positive
-    floor/window/attempt count would DISARM the protection entirely."""
-    try:
-        value = int((raw or "").strip())
-    except (AttributeError, ValueError):
-        return default
-    return value if value > 0 else default
-
-
 def stall_abort_args() -> list[str]:
     """The ``git -c`` pairs that arm the throughput-keyed abort on the child's curl handle.
 
     Must be spliced in BEFORE the subcommand (``git -C <root> -c ... fetch ...``); git only
-    accepts ``-c`` as a top-level option, so ``git fetch -c ...`` is a usage error."""
-    floor = _positive_int(
-        os.environ.get("REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC"),
-        _STALL_FLOOR_BYTES_PER_SEC,
-    )
-    window = _positive_int(
-        os.environ.get("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS"), _STALL_WINDOW_SECONDS
+    accepts ``-c`` as a top-level option, so ``git fetch -c ...`` is a usage error. The
+    floor/window overrides are resolved through the owned config seam
+    (:func:`rebar.config.resolve_stall_abort_limits`) — live per call — rather than read
+    from ``os.environ`` here."""
+    from rebar import config
+
+    floor, window = config.resolve_stall_abort_limits(
+        _STALL_FLOOR_BYTES_PER_SEC, _STALL_WINDOW_SECONDS
     )
     return ["-c", f"http.lowSpeedLimit={floor}", "-c", f"http.lowSpeedTime={window}"]
 
@@ -271,7 +254,9 @@ def fetch_origin(
         args += ["--end-of-options", ref]
     # The -c pairs must precede the subcommand; see stall_abort_args().
     argv = ["git", "-C", repo_root, *stall_abort_args(), *args]
-    attempts = _positive_int(os.environ.get("REBAR_SNAPSHOT_STALL_ATTEMPTS"), _STALL_ATTEMPTS)
+    from rebar import config
+
+    attempts = config.resolve_stall_attempts(_STALL_ATTEMPTS)
     for attempt in range(1, attempts + 1):
         # Re-acquire both locks PER ATTEMPT rather than holding them across the whole retry
         # budget: a peer that is waiting to fetch the same repo gets a turn between our
