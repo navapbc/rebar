@@ -175,3 +175,110 @@ def test_both_files_committed_together(tmp_path, reconcile_mod):
     assert ok is True
     assert _file_in_head(tracker_dir, ".bridge_state/bindings.json") is not None
     assert _file_in_head(tracker_dir, ".bridge_state/bindings-retired.json") is not None
+
+
+# ---------------------------------------------------------------------------
+# RP-02 S1 T3 (patterned-fossillike-betafish) — the publication boundary.
+#
+# Persistence and PUBLICATION are two different durability layers, and the
+# repository extraction must not blur them. `BindingRepository` owns the local
+# atomic file writes; publishing those files to the tickets branch stays in
+# `reconcile_helpers.py` behind a five-file allowlist. These two tests pin the
+# boundary itself: the allowlist is EXCLUSIVE, and a repository checkpoint
+# never publishes on its own.
+# ---------------------------------------------------------------------------
+
+_ALLOWLISTED = (
+    ".bridge_state/bindings.json",
+    ".bridge_state/bindings-retired.json",
+    ".bridge_state/get_rotation.json",
+    ".bridge_state/impossible_links.json",
+    ".bridge_state/peer_confirmations.json",
+)
+
+
+def _head_files(tracker_dir: Path) -> set[str]:
+    r = subprocess.run(
+        ["git", "-C", str(tracker_dir), "ls-tree", "-r", "--name-only", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return {line.strip() for line in r.stdout.splitlines() if line.strip()}
+
+
+def test_publication_stages_only_the_five_allowlisted_files(tmp_path, reconcile_mod):
+    """The allowlist is EXCLUSIVE, not merely inclusive.
+
+    The tickets worktree is shared, so it can legitimately hold unrelated dirty files —
+    another agent's work in progress, a scratch file, an editor artifact. `git add -A`
+    would sweep those into a reconciler commit, which is why publication names its files
+    explicitly. This asserts the negative half of that contract, which the existing
+    per-file idempotency tests do not: an unrelated dirty file beside the state files is
+    NOT published.
+    """
+    tracker_dir = tmp_path / ".tickets-tracker"
+    _init_tickets_git_repo(tracker_dir)
+    bridge = tracker_dir / ".bridge_state"
+    bridge.mkdir(parents=True)
+
+    for rel in _ALLOWLISTED:
+        (tracker_dir / rel).write_text(json.dumps({"seeded": rel}), encoding="utf-8")
+    # Unrelated working-tree content that must survive UNPUBLISHED.
+    (tracker_dir / "unrelated-scratch.md").write_text("operator WIP\n", encoding="utf-8")
+    (bridge / "not-allowlisted.json").write_text(json.dumps({"x": 1}), encoding="utf-8")
+
+    assert reconcile_mod._commit_binding_store_snapshot(_Stub(), tmp_path, "pass-excl") is True
+
+    published = _head_files(tracker_dir)
+    assert published == set(_ALLOWLISTED), (
+        f"publication must stage exactly the five allowlisted state files; got {published}"
+    )
+    assert "unrelated-scratch.md" not in published
+    assert ".bridge_state/not-allowlisted.json" not in published
+    # The unrelated files are untouched on disk — not published, not destroyed.
+    assert (tracker_dir / "unrelated-scratch.md").read_text(encoding="utf-8") == "operator WIP\n"
+
+
+def test_repository_checkpoints_never_publish_independently(tmp_path):
+    """A repository save is a LOCAL durability checkpoint, never a publication.
+
+    `BindingRepository.save()` / `save_retired()` write and `os.replace` local files. If
+    either also committed, every intermediate checkpoint in a pass would land its own
+    tickets-branch commit — turning one pass into a stream of commits and coupling local
+    durability to git availability. Publication stays a separate, caller-driven step.
+    """
+    from rebar_reconciler.binding_repository import BindingRepository
+
+    tracker_dir = tmp_path / ".tickets-tracker"
+    _init_tickets_git_repo(tracker_dir)
+
+    def head() -> str:
+        return subprocess.run(
+            ["git", "-C", str(tracker_dir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+
+    before = head()
+
+    repo = BindingRepository(tracker_dir)
+    repo.bindings["loc-A"] = {"jira_key": "DIG-A", "state": "confirmed"}
+    repo.reverse["DIG-A"] = "loc-A"
+    repo.save()
+    repo.save_retired({"DIG-OLD": {"local_id": "loc-old"}})
+    repo.save()
+
+    assert head() == before, "a repository checkpoint must not create a commit"
+    assert _head_files(tracker_dir) == set(), "a repository checkpoint must not publish"
+    # The writes really happened locally — this is a publication assertion, not a no-op one.
+    assert (tracker_dir / ".bridge_state" / "bindings.json").is_file()
+    assert (tracker_dir / ".bridge_state" / "bindings-retired.json").is_file()
+    staged = subprocess.run(
+        ["git", "-C", str(tracker_dir), "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert staged == "", f"a repository checkpoint must stage nothing; staged: {staged!r}"
