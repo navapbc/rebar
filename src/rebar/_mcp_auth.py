@@ -30,12 +30,13 @@ import importlib
 import ipaddress
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 from mcp.server.auth.provider import AccessToken
+
+from rebar import config as _config
 
 logger = logging.getLogger("rebar.mcp.auth")
 
@@ -406,9 +407,10 @@ class IntrospectionTokenVerifier:
     ) -> None:
         import httpx  # ships in the base deps
 
-        # The client secret is read from the env var NAMED by client_secret_env (fail-closed
-        # if unset/empty) and kept only in memory — never logged; route logging through redact.
-        secret = os.environ.get(client_secret_env) or ""
+        # The client secret is resolved at the config composition boundary from the env
+        # var NAMED by client_secret_env (fail-closed if unset/empty) and kept only in
+        # memory — never logged; route logging through redact.
+        secret = _config.read_secret_env(client_secret_env)
         if not secret:
             raise AuthConfigError(
                 f"mcp.auth_introspection_client_secret_env names env var "
@@ -653,9 +655,9 @@ def build_composite_verifier(mcp_cfg) -> CompositeTokenVerifier:
         elif strategy == "proxy":
             # Fail-closed: the shared secret MUST be present + non-empty at startup, or
             # the trusted-proxy verifier refuses to start (a proxy that can't prove
-            # itself must never be trusted). The secret is NEVER in config — the env var
-            # NAMED by auth_proxy_secret_env holds it.
-            secret = os.environ.get(mcp_cfg.auth_proxy_secret_env) or ""
+            # itself must never be trusted). The secret is NEVER in config — resolved at
+            # the composition boundary from the env var NAMED by auth_proxy_secret_env.
+            secret = _config.read_secret_env(mcp_cfg.auth_proxy_secret_env)
             if not secret:
                 raise AuthConfigError(
                     f"mcp.auth_proxy_secret_env names env var "
@@ -757,7 +759,7 @@ def _parse_static_record(record, index: int) -> tuple[str, dict]:
         env_name = record["token_env"]
         if not isinstance(env_name, str) or not env_name:
             raise AuthConfigError(f"{where} 'token_env' must be a non-empty env var name")
-        secret = os.environ.get(env_name, "")
+        secret = _config.read_secret_env(env_name)
         if not secret:
             raise AuthConfigError(
                 f"{where} 'token_env' names env var {env_name!r} which is unset or empty"

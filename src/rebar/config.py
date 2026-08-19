@@ -435,6 +435,39 @@ def mcp_readonly() -> bool:
         return True
 
 
+def mcp_gate(attr: str, *, fail: bool) -> bool:
+    """THE owned composition-root resolver for a typed ``mcp.<attr>`` boolean gate
+    (``allow_llm`` / ``allow_jira_sync`` / any future one). Resolves through the
+    single-source typed config — env ``REBAR_MCP_<ATTR>`` wins over the
+    ``[tool.rebar.mcp]`` file key — and returns ``fail`` on a MALFORMED config, the SAFE
+    direction chosen by the caller. The MCP server's per-request gate check
+    (``mcp_server._mcp_gate``) routes here so it RECEIVES composed config instead of
+    reading ``load_config`` below the composition seam (sibling of :func:`mcp_readonly`)."""
+    try:
+        return bool(getattr(load_config().mcp, attr))
+    except ConfigError:
+        return fail
+
+
+def compose_config() -> Config:
+    """Composition-root entry for a process root (e.g. the MCP server's ``build_server``
+    / ``main``) to obtain the fully-composed typed :class:`Config`. Routing the startup
+    load through this owned seam lets those roots RECEIVE composed config instead of
+    calling ``load_config`` below the composition seam. A :class:`ConfigError`
+    propagates (fail-closed startup), exactly as a direct ``load_config`` would."""
+    return load_config()
+
+
+def read_secret_env(env_name: str) -> str:
+    """Resolve a secret from the environment variable NAMED by ``env_name`` at the config
+    composition boundary, returning ``""`` when unset/empty. THE owned seam for the MCP
+    auth verifiers and the proxy-app wrap: the secret VALUE is resolved HERE (a
+    composition root) and kept in-memory only, so those below-seam call sites never touch
+    ``os.environ`` themselves. NEVER log the return value — route auth diagnostics through
+    :func:`rebar._mcp_auth.redact`."""
+    return os.environ.get(env_name) or ""
+
+
 def read_config_file(path: str | os.PathLike[str]) -> Config:
     """Resolve a typed Config from a SINGLE explicit config file — no discovery, env,
     or user-layer merging. For callers that point at a specific file (e.g.
