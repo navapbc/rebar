@@ -215,6 +215,20 @@ services:
       # and rebar-gerrit-data-disk-high already alarms on that filesystem. If the review rate
       # ever grows by orders of magnitude, add rotation rather than removing the sink.
       REBAR_USAGE_LOG: "/var/gerrit/site/reviewbot/usage.jsonl"
+      # Volume-RELATIVE headroom for the snapshot-cache janitor (bug 3a52). The janitor is the
+      # ONLY thing that bounds this store (app.py's lifespan starts it), and its stock trigger is
+      # an ABSOLUTE 2 GiB free — disk-size-blind. The snapshot store lives on the container's
+      # WRITABLE LAYER on the box's 30-GiB ROOT volume: no volume mount above covers /tmp and
+      # REBAR_GATE_TMPDIR is unset, so /tmp/rebar-gate-snapshots is root-disk storage. On 30 GiB,
+      # 2 GiB free is 93.3% used — ABOVE the 85% at which infra/terraform/monitoring_autodeploy.tf's
+      # rebar-root-disk-pressure alarm pages, so the janitor could only ever engage after the alarm
+      # had already breached, inverting the ordering infra/runbooks/review-bot-ops.md documents
+      # (janitor reclaims; alarm is the backstop). 20% headroom trips reclaim at 80% used, below
+      # the alarm floor, and matches infra/scripts/autodeploy.sh's DISK_PRESSURE_PCT=80 — chosen
+      # there for the same reason, so the two reclaimers share one pressure threshold. The janitor
+      # then runs on to 25% free (its fixed internal RECLAIM_TARGET_MARGIN_PCT) rather than
+      # stopping on the trigger, so a pass does not re-fire every interval.
+      REBAR_GATE_FREE_WATERMARK_PCT: "20"
     ports:
       # Publish on host loopback for the HOST nginx /review/ proxy. Host port is
       # single-sourced from .env (REVIEW_BOT_PORT, default 8000); container port

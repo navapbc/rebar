@@ -474,12 +474,20 @@ default. Full behavior, the HMAC trust model, and the EFS/NFS `flock` caveat are
 [snapshot]
 ref                  = "origin/main"  # default ref to verify   (env REBAR_GATE_REF)
 source               = "attested"     # attested | local        (env REBAR_GATE_SOURCE)
-free_watermark_bytes = 2147483648     # reclaim when free disk < this (2 GiB; env REBAR_GATE_FREE_WATERMARK_BYTES)
+free_watermark_bytes = 2147483648     # reclaim when free disk < this many bytes (2 GiB; env REBAR_GATE_FREE_WATERMARK_BYTES)
+free_watermark_pct   = 0              # ALSO reclaim when free disk < this % of the volume; 0 = off (env REBAR_GATE_FREE_WATERMARK_PCT)
 grace_seconds        = 120            # never evict an entry used within this window (env REBAR_GATE_GRACE_SECONDS)
 max_age_seconds      = 604800         # cold-trim entries older than this (7 days; env REBAR_GATE_MAX_AGE_SECONDS)
 reverify_seconds     = 0              # periodic integrity reverify period; 0 = off (env REBAR_GATE_REVERIFY_SECONDS)
 interval_seconds     = 300            # janitor background pass cadence (env REBAR_GATE_JANITOR_INTERVAL_SECONDS)
 ```
+
+The two watermark terms are combined by taking the **larger**, so `free_watermark_pct` adds
+volume-awareness on top of the absolute floor (which is disk-size-blind: 2 GiB free is 93% used
+on a 30 GiB root volume). It is whole percentage points as an **integer**, not a fraction. Once a
+reclamation pass starts it runs on to a target 5 points higher — a fixed internal margin
+(`RECLAIM_TARGET_MARGIN_PCT`), not a config key or env var. See
+[repo-snapshot-gates.md](repo-snapshot-gates.md) for sizing guidance.
 
 Env-only (NOT `[snapshot]` keys): `REBAR_GATE_TMPDIR` (the snapshot store's base directory;
 default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_UNGATED`
