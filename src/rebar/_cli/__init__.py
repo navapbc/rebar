@@ -124,6 +124,25 @@ _COMPACT = frozenset({"compact", "compact-all"})
 # initialization policies below.
 _BRIDGE = frozenset({"bridge", "bridge-status", "bridge-fsck"})
 _HIDDEN_ALIASES = frozenset({"bridge-status"})
+
+
+def _wants_help(rest: list[str]) -> bool:
+    """True if a bare ``--help``/``-h`` appears before any ``--`` terminator.
+
+    The dispatcher must honour a help flag in ANY position, not only ``rest[0]``:
+    ``rebar create task --help`` used to fall through to the create handler, which
+    consumed ``--help`` as the positional title and created a placeholder ticket
+    (bug b8de). ``--`` ends option scanning so a caller can still pass a literal
+    ``--help`` token as data after it.
+    """
+    for tok in rest:
+        if tok == "--":
+            return False
+        if tok in ("--help", "-h"):
+            return True
+    return False
+
+
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
 # (init-only); `import` composes writes (full init).
 _IO = frozenset({"export", "import"})
@@ -697,8 +716,11 @@ def _main_dispatch(argv: list[str]) -> int:
 
     sub, rest = first, argv[1:]
 
-    # `rebar <sub> --help|-h` as the FIRST arg after the subcommand → usage, no exec.
-    if rest and rest[0] in ("--help", "-h") and sub not in _HIDDEN_ALIASES:
+    # `rebar <sub> --help|-h` in ANY position before a `--` terminator → usage, no exec.
+    # Not just `rest[0]`: otherwise `create task --help` reaches the handler and the flag is
+    # stored as the ticket title, creating a placeholder (bug b8de). Commands that own their
+    # own `--help` are intercepted earlier and never reach here.
+    if sub not in _HIDDEN_ALIASES and _wants_help(rest):
         return _emit_subcommand_help(sub)
 
     # Unknown subcommand: error to stderr + overview to stdout, exit 1.
