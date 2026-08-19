@@ -57,6 +57,16 @@ def _require_success(completed: subprocess.CompletedProcess[bytes], description:
         raise ReclaimError(f"{description}: {detail}")
 
 
+def _run_bare_git(repo: Path, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+    """Run Git against an explicitly selected bare repository."""
+    completed = subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        capture_output=True,
+    )
+    _require_success(completed, f"git {' '.join(args)} failed")
+    return completed
+
+
 def _remote_snapshot(repo: Path) -> bytes:
     return run_git(repo, ["ls-remote", "--heads", "--tags", "origin"]).stdout
 
@@ -259,8 +269,8 @@ def _verify_restore(repo: Path, bundle: Path, bundle_refs: dict[str, str]) -> No
         _require_success(initialized, "could not initialize throwaway restore repository")
         for bundle_ref, expected_oid in bundle_refs.items():
             target_ref = "refs/restored/" + bundle_ref.removeprefix(HELPER_PREFIX)
-            run_git(restored, ["fetch", str(bundle), f"{bundle_ref}:{target_ref}"])
-            actual = run_git(restored, ["rev-parse", target_ref]).stdout.decode().strip()
+            _run_bare_git(restored, ["fetch", str(bundle), f"{bundle_ref}:{target_ref}"])
+            actual = _run_bare_git(restored, ["rev-parse", target_ref]).stdout.decode().strip()
             if actual != expected_oid:
                 raise ReclaimError(f"restored {bundle_ref} differs from its bundled OID")
 

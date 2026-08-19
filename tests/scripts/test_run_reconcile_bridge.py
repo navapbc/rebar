@@ -34,6 +34,17 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return completed
 
 
+def bare_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    return completed
+
+
 def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Create a full-history checkout plus a real tickets remote/worktree."""
     origin = tmp_path / "tickets-origin.git"
@@ -148,11 +159,11 @@ def test_every_legacy_mode_routes_and_delivers_through_one_runner(
     assert "reconcile stdout" in completed.stdout
     assert "reconcile stderr" in completed.stderr
     assert "Reconcile converged." in completed.stdout
-    assert git(origin, "show", "tickets:bridge-event.txt").stdout == "event from bridge\n"
+    assert bare_git(origin, "show", "tickets:bridge-event.txt").stdout == "event from bridge\n"
     assert (
-        git(origin, "log", "-1", "--format=%s", "tickets").stdout.strip()
+        bare_git(origin, "log", "-1", "--format=%s", "tickets").stdout.strip()
         == "chore: sync events from rebar reconciler [run run-123]"
     )
-    assert git(origin, "log", "-1", "--format=%an <%ae>", "tickets").stdout.strip() == (
+    assert bare_git(origin, "log", "-1", "--format=%an <%ae>", "tickets").stdout.strip() == (
         "Bridge Bot <bridge@example.com>"
     )

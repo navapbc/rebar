@@ -29,6 +29,12 @@ def _git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+def _bare_git(repo: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "--git-dir", str(repo), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
 def _make_repo(path: Path, *, config_toml: str = "", origin: Path | None = None) -> Path:
     path.mkdir(parents=True)
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
@@ -87,7 +93,7 @@ def test_custom_dir_and_branch_init_and_sync_roundtrip(
     assert tid
 
     # The auto-push landed on the CUSTOM remote branch (not the default 'tickets').
-    refs = _git(remote, "for-each-ref", "--format=%(refname)")
+    refs = _bare_git(remote, "for-each-ref", "--format=%(refname)")
     assert "refs/heads/rebar-tickets" in refs
     assert "refs/heads/tickets" not in refs
 

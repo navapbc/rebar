@@ -64,6 +64,13 @@ def _git(d: Path, *a: str, check: bool = True) -> subprocess.CompletedProcess[st
     return r
 
 
+def _bare_git(d: Path, *a: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
+    return r
+
+
 def _ident(d: Path) -> None:
     _git(d, "config", "user.email", "t@e.com")
     _git(d, "config", "user.name", "T")
@@ -100,7 +107,7 @@ def rejecting_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[P
     hook = origin / "hooks" / "pre-receive"
     hook.write_text(_GH013_HOOK)
     hook.chmod(0o755)
-    _git(origin, "config", "core.hooksPath", str(origin / "hooks"))
+    _bare_git(origin, "config", "core.hooksPath", str(origin / "hooks"))
 
     # One local-only commit: the write whose push will be rejected.
     (tracker / "evidence.json").write_text('{"body": "evidence recorded during the outage"}\n')
