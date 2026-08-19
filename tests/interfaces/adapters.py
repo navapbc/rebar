@@ -54,9 +54,43 @@ class Outcome:
         """True iff this is the ONE shared concurrency-rejection identity."""
         return (not self.ok) and self.code == CONCURRENCY_CODE
 
+    @property
+    def is_param_gap(self) -> bool:
+        """True iff a contract param was requested that THIS transport does not expose.
 
-# Sentinels for the two states most parity tests assert on.
+        This is a DISTINCT outcome from a rule rejection: the surface never
+        advertised the parameter (e.g. the MCP force/reason/caused_by/ref gaps),
+        so the write op was not even attempted. The write-parity oracle maps this
+        to its own ``PARAM_NOT_EXPOSED`` classification rather than collapsing it
+        into a bare rejection, so closing the gap flips the classification and
+        trips a strict-xfail.
+        """
+        return (not self.ok) and self.error_type == PARAM_NOT_EXPOSED_ERROR
+
+
+# The typed identity for "this transport does not expose the requested param".
+PARAM_NOT_EXPOSED_ERROR = "ParamNotExposed"
+
+# Sentinels for the states parity tests assert on.
 OK = Outcome(ok=True)
+NOT_EXPOSED = Outcome(ok=False, error_type=PARAM_NOT_EXPOSED_ERROR)
+
+# The reason-carrying contract params under test on the write ops (transition
+# adds all five; claim exposes only ``force``). ``force_close`` is intentionally
+# absent — blusterous-earthly-kitten retired it in favor of ``force``.
+TRANSITION_WRITE_PARAMS = ("force", "reason", "close_class", "caused_by", "ref")
+
+
+def _force_cli_args(force: str | None) -> list[str]:
+    """Spell the unified ``--force[=<reason>]`` surface for the CLI.
+
+    ``None`` means "not forcing" (no flag); ``""`` is a bare ``--force`` (the
+    engine records ``"(no reason given)"``); any other string rides inline as
+    ``--force=<reason>`` — byte-identically for ``claim`` and ``transition``.
+    """
+    if force is None:
+        return []
+    return ["--force"] if force == "" else [f"--force={force}"]
 
 
 class Adapter:
@@ -73,8 +107,21 @@ class Adapter:
     def create(self, ticket_type: str, title: str, **kw: Any) -> str: ...
     def show(self, tid: str) -> dict: ...
     def list(self, **filters: Any) -> list[dict]: ...
-    def transition(self, tid: str, current: str, target: str) -> Outcome: ...
-    def claim(self, tid: str, assignee: str | None = None) -> Outcome: ...
+    def transition(
+        self,
+        tid: str,
+        current: str,
+        target: str,
+        *,
+        force: str | None = None,
+        reason: str | None = None,
+        close_class: str | None = None,
+        caused_by: str | None = None,
+        ref: str | None = None,
+    ) -> Outcome: ...
+    def claim(
+        self, tid: str, assignee: str | None = None, *, force: str | None = None
+    ) -> Outcome: ...
     def comment(self, tid: str, body: str) -> None: ...
     def tag(self, tid: str, tag: str) -> None: ...
     def link(self, a: str, b: str, relation: str) -> None: ...
@@ -102,16 +149,41 @@ class LibraryAdapter(Adapter):
     def list(self, **filters: Any) -> list[dict]:
         return self._r.list_tickets(**filters)
 
-    def transition(self, tid: str, current: str, target: str) -> Outcome:
+    def transition(
+        self,
+        tid: str,
+        current: str,
+        target: str,
+        *,
+        force: str | None = None,
+        reason: str | None = None,
+        close_class: str | None = None,
+        caused_by: str | None = None,
+        ref: str | None = None,
+    ) -> Outcome:
+        kw: dict[str, Any] = {}
+        if force is not None:
+            kw["force"] = force
+        if reason is not None:
+            kw["reason"] = reason
+        if close_class is not None:
+            kw["close_class"] = close_class
+        if caused_by is not None:
+            kw["caused_by"] = caused_by
+        if ref is not None:
+            kw["ref"] = ref
         try:
-            self._r.transition(tid, current, target)
+            self._r.transition(tid, current, target, **kw)
             return OK
         except self._r.RebarError as exc:
             return self._reject(exc)
 
-    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
+    def claim(self, tid: str, assignee: str | None = None, *, force: str | None = None) -> Outcome:
+        kw: dict[str, Any] = {}
+        if force is not None:
+            kw["force"] = force
         try:
-            self._r.claim(tid, assignee=assignee)
+            self._r.claim(tid, assignee=assignee, **kw)
             return OK
         except self._r.RebarError as exc:
             return self._reject(exc)
@@ -205,13 +277,35 @@ class CliAdapter(Adapter):
                 args.append(f"{flag}={val}")
         return self._ok_json(*args)
 
-    def transition(self, tid: str, current: str, target: str) -> Outcome:
-        return self._outcome(self._run("transition", tid, current, target))
+    def transition(
+        self,
+        tid: str,
+        current: str,
+        target: str,
+        *,
+        force: str | None = None,
+        reason: str | None = None,
+        close_class: str | None = None,
+        caused_by: str | None = None,
+        ref: str | None = None,
+    ) -> Outcome:
+        args = ["transition", tid, current, target]
+        if close_class is not None:
+            args += ["--class", close_class]
+        if reason is not None:
+            args += ["--reason", reason]
+        if caused_by is not None:
+            args += ["--caused-by", caused_by]
+        if ref is not None:
+            args += ["--ref", ref]
+        args += _force_cli_args(force)
+        return self._outcome(self._run(*args))
 
-    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
+    def claim(self, tid: str, assignee: str | None = None, *, force: str | None = None) -> Outcome:
         args = ["claim", tid]
         if assignee:
             args.append(f"--assignee={assignee}")
+        args += _force_cli_args(force)
         return self._outcome(self._run(*args))
 
     @staticmethod
@@ -295,6 +389,21 @@ class McpAdapter(Adapter):
 
         self._asyncio = asyncio
         self._srv = build_server()
+        self._schema_cache: dict[str, set[str]] = {}
+
+    def _tool_params(self, tool: str) -> set[str]:
+        """The parameter names THIS MCP tool advertises in its inputSchema.
+
+        This is the transport-faithful capability surface — exactly what an MCP
+        client sees — so it is the honest signal for "does this surface expose
+        the param?". When a sibling change (scratchy-leprous-galago) threads a
+        gap param onto the tool, it appears here and the oracle's strict-xfail
+        for that row flips to an xpass, forcing the marker's removal.
+        """
+        if not self._schema_cache:
+            for t in self._asyncio.run(self._srv.list_tools()):
+                self._schema_cache[t.name] = set((t.inputSchema or {}).get("properties", {}))
+        return self._schema_cache.get(tool, set())
 
     def _call(self, tool: str, **args: Any) -> Any:
         return _unwrap(self._asyncio.run(self._srv.call_tool(tool, args)))
@@ -311,21 +420,45 @@ class McpAdapter(Adapter):
     def list(self, **filters: Any) -> list[dict]:
         return self._call("list_tickets", **filters)
 
-    def transition(self, tid: str, current: str, target: str) -> Outcome:
+    def transition(
+        self,
+        tid: str,
+        current: str,
+        target: str,
+        *,
+        force: str | None = None,
+        reason: str | None = None,
+        close_class: str | None = None,
+        caused_by: str | None = None,
+        ref: str | None = None,
+    ) -> Outcome:
+        requested = {
+            "force": force,
+            "reason": reason,
+            "close_class": close_class,
+            "caused_by": caused_by,
+            "ref": ref,
+        }
+        exposed = self._tool_params("transition_ticket")
+        for name, val in requested.items():
+            if val is not None and name not in exposed:
+                return NOT_EXPOSED
+        args = {"ticket_id": tid, "current_status": current, "target_status": target}
+        args.update({k: v for k, v in requested.items() if v is not None})
         try:
-            self._call(
-                "transition_ticket",
-                ticket_id=tid,
-                current_status=current,
-                target_status=target,
-            )
+            self._call("transition_ticket", **args)
             return OK
         except Exception as exc:  # noqa: BLE001 — parity adapter: any tool failure is uniformly mapped to a structured Outcome via _reject
             return self._reject(exc)
 
-    def claim(self, tid: str, assignee: str | None = None) -> Outcome:
+    def claim(self, tid: str, assignee: str | None = None, *, force: str | None = None) -> Outcome:
+        if force is not None and "force" not in self._tool_params("claim_ticket"):
+            return NOT_EXPOSED
+        args: dict[str, Any] = {"ticket_id": tid, "assignee": assignee}
+        if force is not None:
+            args["force"] = force
         try:
-            self._call("claim_ticket", ticket_id=tid, assignee=assignee)
+            self._call("claim_ticket", **args)
             return OK
         except Exception as exc:  # noqa: BLE001 — parity adapter: any tool failure is uniformly mapped to a structured Outcome via _reject
             return self._reject(exc)
