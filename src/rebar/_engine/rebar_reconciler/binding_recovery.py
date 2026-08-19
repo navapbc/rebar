@@ -30,6 +30,7 @@ hard one — exactly the incident the retired-first write order exists to preven
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -245,6 +246,40 @@ def classify_interrupted_retirements(
     return RetirementRepairOutcome(completed=tuple(completed), aborted=tuple(aborted))
 
 
+def _report_retirement_repair(outcome: RetirementRepairOutcome) -> None:
+    """Announce a completion or a refusal on stderr; say NOTHING when neither happened.
+
+    A repair mutates durable binding state that nobody asked for, in the middle of a pass
+    whose operator asked for a sync. A silent one is indistinguishable from a store that
+    was coherent all along, so the change has to be attributable to the pass that made it.
+
+    Silence on the empty outcome is the load-bearing half. Every write-bearing pass reaches
+    this, and in a healthy store every pass finds nothing; a per-pass "nothing to repair"
+    line would be the overwhelming majority of what this ever prints and would train
+    operators to skip the one line that matters. So the healthy pass says nothing at all.
+
+    Refusals get their own line, and it is the more important of the two: a completion is
+    the system repairing itself, while a refusal is an inconsistent store that will NOT fix
+    itself and needs a human to adjudicate. Each refusal carries its reason, because
+    "refused" without the disagreement names no next step.
+
+    Why stderr and not the pass's structured ``sync_logger``: this owner is deliberately
+    given no logger. Every other reconciler observation of this kind — the rich-reemit
+    lines in ``apply_handlers``, the recovery-failure line in ``run_differs`` — uses the
+    same ``RECON:`` stderr convention, so an operator reads them together. Threading the
+    logger down would also have to widen the single call line in ``reconcile.py``, which
+    sits at 799 of the 800-line cap and cannot afford the wrap. Promoting these to
+    structured pass events is worth doing when that file is next split; it is recorded as
+    a residual gap rather than smuggled in here.
+    """
+    if outcome.completed:
+        keys = ",".join(repair.jira_key for repair in outcome.completed)
+        print(f"RECON: retirement_repair_completed keys={keys}", file=sys.stderr)
+    if outcome.aborted:
+        refused = ",".join(f"{abort.jira_key}:{abort.reason}" for abort in outcome.aborted)
+        print(f"RECON: retirement_repair_refused keys={refused}", file=sys.stderr)
+
+
 class BindingRecovery:
     """Owns incomplete-operation recovery over the repository's own dictionaries."""
 
@@ -332,6 +367,35 @@ class BindingRecovery:
                 if failure_sink is not None:
                     failure_sink.append({"local_id": local_id, "reason": repr(exc)})
         return recovered
+
+    def repair_at_write_boundary(self, *, persist: bool, scoped: bool) -> RetirementRepairOutcome:
+        """The ONLY door a reconcile pass may use to complete interrupted retirements.
+
+        Two conditions have to hold, and the guard lives HERE rather than at the call site
+        so the spine carries one unconditional line and cannot drift from the policy:
+
+        * ``persist`` — a cap-0 mode (dry-run, reconcile-check) is documented read-only, and
+          completing a retirement is a write. The overlap simply survives to the next
+          write-bearing pass, which is the correct outcome: a read-only command that
+          silently mutated the store would be the more surprising bug.
+        * ``not scoped`` — a filtered pass reasons about a hand-picked subset of tickets, so
+          finishing retirements for identities outside that scope is a scope leak. The
+          repair is store-wide by nature (it walks every tombstone) and cannot be narrowed
+          honestly, so a scoped pass declines the whole operation rather than half of it.
+
+        Refusing is FREE: no classification runs, nothing is read from the repository, and
+        nothing is reported. That matters because this is reached on every read-only pass,
+        and a guard that classified first and discarded the answer would make the read-only
+        path pay for a repair it is forbidden to perform.
+
+        Returns an EMPTY :class:`RetirementRepairOutcome` when refused — the same type the
+        admitted path returns, so a caller never has to branch on "was I allowed?".
+        """
+        if not persist or scoped:
+            return RetirementRepairOutcome()
+        outcome = self.complete_interrupted_retirements()
+        _report_retirement_repair(outcome)
+        return outcome
 
     def complete_interrupted_retirements(self) -> RetirementRepairOutcome:
         """Finish retirements the retired-first order left half-done (ADR 0099 §5).

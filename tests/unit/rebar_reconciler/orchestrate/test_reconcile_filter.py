@@ -79,6 +79,14 @@ class FakeBindingStore:
     def confirmed_count(self) -> int:
         return len(self._local_to_jira)
 
+    # -- write-boundary interface (RP-02 S3 T2, flamboyant-possessive-blackbuck): same
+    #    maintenance as the walk interface above — the load phase now calls this once per
+    #    pass. A no-op is faithful, not a stub of convenience: this fake holds no retired
+    #    state, so a real store over the same data would find no candidate and write
+    #    nothing. The filtered-pass tests below assert the SCOPE gate separately. -------
+    def repair_at_write_boundary(self, *, persist: bool, scoped: bool) -> None:
+        return None
+
     def get_baseline(self, local_id: str) -> dict | None:
         return None
 
