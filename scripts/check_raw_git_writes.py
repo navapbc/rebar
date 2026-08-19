@@ -36,6 +36,22 @@ Two deterministic layers, each matched to what is statically decidable:
     in the name set: their bodies fire the opaque class at the wrapper
     internal and take a delegation marker, sanctioning callers transitively.
     Any fresh thin wrapper's body fires fail-closed the same way.
+  - R3: a COMPOSITION of the reconciler seam's MUTATION PRIMITIVES made from
+    outside the write seam itself. R1/R2 enforce the MECHANISM rule ("no raw
+    subprocess git"); R3 enforces the PROTOCOL rule ("tracker mutations go
+    through the atomic transaction"). The seam's primitives — ``add``,
+    ``commit``, ``commit_tree``, ``read_tree``, ``rm_cached``, ``update_ref``
+    and ``write_tree`` in ``git_adapter.py`` — are sanctioned exports, so
+    before R3 any caller could compose them into a hand-rolled non-atomic
+    stage+commit and every individual call passed. R3 binds on the RECEIVER,
+    not the bare attribute: ``add``/``commit`` are ubiquitous method names, so
+    a call fires only where the receiver resolves to a git-adapter module —
+    the module's own name (``git_adapter.add(…)``, ``pkg.git_adapter.add(…)``),
+    an ``as``-alias, a name bound by a dynamic module loader
+    (``ga = _load("….git_adapter", "git_adapter.py")``), or a primitive
+    ``from``-imported out of a git-adapter module. Read/query exports never
+    fire, and neither does ``commit_email`` — despite the name it is
+    ``git log -1 --format=%ae``, a read.
 - **Layer W** (workflows + shell, cwd-aware within-step) over
   ``.github/workflows/*.yml`` run-blocks and ``scripts/*.sh``: a git mutation
   verb fires ONLY when the same step/script block establishes tracker
@@ -43,13 +59,27 @@ Two deterministic layers, each matched to what is statically decidable:
   ``git -C <tracker-path>``, or a ``working-directory:`` naming it. Ordinary
   repo commits in workflows (docs/artifacts) never fire.
 
+R3's SANCTIONED ENTRY SET is the reconciler write-seam modules themselves —
+``git_adapter.py`` (where the primitives are defined), ``_ref_lock.py`` and
+``_ref_lock_push.py`` (the ref-lock transaction they are composed under).
+Files are matched by module name, symmetrically with the receiver binding
+above: a module literally named ``git_adapter`` IS the git-adapter by the same
+rule that makes a receiver bound to it a git-adapter call. RESIDUAL, stated
+plainly: this is a per-FILE trust boundary, coarser than the per-FUNCTION
+``# raw-git-ok:`` markers inside ``git_adapter.py``, so a non-atomic
+composition ADDED inside one of those three files would be sanctioned without
+a marker. That is accepted deliberately — those files are the transaction, and
+a locked selective-commit helper (see ticket 11a9-b11b-e93d-4832) belongs in
+them — but it is a widening, not a free win.
+
 Sanction is a single INLINE MARKER with a MANDATORY reason — no external
 allowlist file: ``# raw-git-ok: <reason>`` on the offending line, on the
 enclosing function (the line above ``def``, the ``def`` line, or the first
 body line), or anywhere in the workflow step / shell block. A marker without
-a reason fails the lint. This is deliberately a different marker from
-``# tickets-boundary-ok`` (boundary-crossing READ/layout sanction); this one
-sanctions raw WRITES.
+a reason fails the lint. One marker vocabulary covers all three rules, so the
+``marker-without-reason`` violation applies to R3 unchanged. This is
+deliberately a different marker from ``# tickets-boundary-ok``
+(boundary-crossing READ/layout sanction); this one sanctions raw WRITES.
 
 ACCEPTED RESIDUAL: argv construction that crosses function boundaries or is
 computed dynamically (beyond the local intra-function tracking) resolves as
@@ -91,6 +121,21 @@ MUTATION_VERBS = frozenset(
 WRAPPER_NAMES = frozenset({"run_git", "run_git_write", "_run_git", "_git"})
 SUBPROC_FUNCS = frozenset({"run", "call", "check_call", "check_output", "Popen"})
 TRACKER_DIR_NAME = ".tickets-tracker"
+
+# R3 — the reconciler write seam's composition rule.
+# The module whose exports are the seam's primitives; a receiver resolving to it
+# is what makes an ``add``/``commit`` call a GIT call rather than an ordinary one.
+SEAM_MODULE_NAME = "git_adapter"
+# The primitives that MUTATE git state (index, object db, refs). Read/query exports
+# are absent by design, and so is ``commit_email`` — despite the name it runs
+# ``git log -1 --format=%ae`` (git_adapter.py), a read, not a commit.
+SEAM_MUTATION_PRIMITIVES = frozenset(
+    {"add", "commit", "commit_tree", "read_tree", "rm_cached", "update_ref", "write_tree"}
+)
+# Modules that ARE the write seam: R3 never fires inside them (see the header's
+# RESIDUAL note on this per-file trust boundary). Matched by module name so the
+# rule reads the same way in the repo tree and in the tests' synthetic trees.
+SEAM_INTERNAL_MODULES = frozenset({"git_adapter", "_ref_lock", "_ref_lock_push"})
 
 _MARKER_RE = re.compile(r"#\s*raw-git-ok:(.*)$")
 _CD_TRACKER_RE = re.compile(r"\bcd\s+[^\n;|&]*" + re.escape(TRACKER_DIR_NAME))
@@ -139,7 +184,10 @@ _TEACHING = (
     "rebar._store.event_append / rebar._commands.txn) or the reconciler seam\n"
     "(rebar_reconciler/git_adapter.py, _ref_lock.py). If this raw write is\n"
     "genuinely seam-internal (or targets a disposable sandbox repo, not the\n"
-    "tracker), add an inline marker with a reason:  # raw-git-ok: <reason>"
+    "tracker), add an inline marker with a reason:  # raw-git-ok: <reason>\n"
+    "A [seam-composition] hit means the git-adapter's mutation primitives were\n"
+    "composed by hand outside the write seam: run the mutation through the\n"
+    "atomic locked transaction instead of stacking add/commit/update-ref."
 )
 
 
@@ -184,6 +232,88 @@ def _function_marker(
 # ---------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _SeamBindings:
+    """Per-file R3 bindings: what, in THIS module, refers to the git adapter.
+
+    ``receivers`` are extra names that hold the git-adapter module (``as``-aliases
+    and dynamic-loader assignments); the module's own name always counts and is
+    not listed. ``primitives`` are mutation primitives ``from``-imported out of a
+    git-adapter module, so a BARE call to them is a seam call. ``enabled`` is
+    False inside the write seam's own modules, switching R3 off wholesale — the
+    module NAME alone binds a receiver, so an empty binding set is NOT enough to
+    turn the rule off.
+    """
+
+    receivers: frozenset[str]
+    primitives: frozenset[str]
+    enabled: bool = True
+
+
+_NO_SEAM = _SeamBindings(frozenset(), frozenset(), enabled=False)
+
+
+def _names_seam_module(text: str) -> bool:
+    """Does *text* name the git-adapter module? Accepts a dotted module path
+    (``rebar_reconciler.git_adapter``) or a file name (``git_adapter.py``)."""
+    stem = text[:-3] if text.endswith(".py") else text
+    return stem.rsplit("/", 1)[-1].rsplit(".", 1)[-1] == SEAM_MODULE_NAME
+
+
+def _seam_import_bindings(node: ast.Import | ast.ImportFrom) -> tuple[set[str], set[str]]:
+    """(receiver aliases, bare primitive names) contributed by one import statement."""
+    receivers: set[str] = set()
+    primitives: set[str] = set()
+    if isinstance(node, ast.Import):
+        for a in node.names:
+            if a.asname and _names_seam_module(a.name):
+                receivers.add(a.asname)
+        return receivers, primitives
+    from_seam = node.module is not None and _names_seam_module(node.module)
+    for a in node.names:
+        if a.asname and a.name == SEAM_MODULE_NAME:
+            receivers.add(a.asname)
+        elif from_seam and a.name in SEAM_MUTATION_PRIMITIVES:
+            primitives.add(a.asname or a.name)
+    return receivers, primitives
+
+
+def _seam_loader_receivers(node: ast.Assign) -> set[str]:
+    """Names bound by a dynamic module load of the git adapter, e.g.
+    ``ga = _load("rebar_reconciler.git_adapter", "git_adapter.py")``."""
+    if not isinstance(node.value, ast.Call):
+        return set()
+    named = any(
+        isinstance(arg, ast.Constant)
+        and isinstance(arg.value, str)
+        and _names_seam_module(arg.value)
+        for arg in node.value.args
+    )
+    if not named:
+        return set()
+    return {t.id for t in node.targets if isinstance(t, ast.Name)}
+
+
+def _seam_bindings(tree: ast.Module) -> _SeamBindings:
+    """Resolve the whole module's git-adapter bindings once, up front.
+
+    Module-wide (not scope-local) on purpose: an import at module level must bind
+    for calls inside every function, and the loader idiom appears inside function
+    bodies. Over-binding a name is harmless — the primitive-name check still gates
+    the emission — while under-binding would silently drop a real composition.
+    """
+    receivers: set[str] = set()
+    primitives: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            r, p = _seam_import_bindings(node)
+            receivers |= r
+            primitives |= p
+        elif isinstance(node, ast.Assign):
+            receivers |= _seam_loader_receivers(node)
+    return _SeamBindings(frozenset(receivers), frozenset(primitives))
+
+
 def _git_subcommand(tokens: list[str | None]) -> str | _Opaque | None:
     """The git subcommand from resolved argv tokens, skipping global options.
 
@@ -217,12 +347,14 @@ class _ScopeLinter:
         subproc_aliases: set[str],
         func_sanction: str | None,
         hits: list[Hit],
+        seam: _SeamBindings = _NO_SEAM,
     ) -> None:
         self.rel_path = rel_path
         self.reasons = reasons
         self.subproc_aliases = subproc_aliases
         self.func_sanction = func_sanction
         self.hits = hits
+        self.seam = seam
         self.local_lists: dict[str, list[str | None] | None] = {}
         self.local_strs: dict[str, str | None] = {}
 
@@ -322,7 +454,37 @@ class _ScopeLinter:
             return func.attr
         return None
 
+    def _seam_primitive(self, func: ast.AST) -> str | None:
+        """The git-adapter mutation primitive this callable names, if any (R3)."""
+        if not self.seam.enabled:
+            return None
+        if isinstance(func, ast.Name):
+            return func.id if func.id in self.seam.primitives else None
+        if not isinstance(func, ast.Attribute) or func.attr not in SEAM_MUTATION_PRIMITIVES:
+            return None
+        recv = func.value
+        # The receiver's OWN trailing name is the discriminator, so both
+        # ``git_adapter.add(…)`` and ``pkg.git_adapter.add(…)`` bind, while
+        # ``session.commit()`` / ``seen.add(x)`` do not.
+        if isinstance(recv, ast.Name):
+            name = recv.id
+        elif isinstance(recv, ast.Attribute):
+            name = recv.attr
+        else:
+            return None
+        if name == SEAM_MODULE_NAME or name in self.seam.receivers:
+            return func.attr
+        return None
+
     def _check_call(self, call: ast.Call) -> None:
+        primitive = self._seam_primitive(call.func)
+        if primitive is not None:
+            self._emit(
+                call,
+                "seam-composition",
+                f"git-adapter mutation primitive {primitive}() composed outside the write seam",
+            )
+            return
         if self._is_raw_subprocess(call.func):
             self._check_raw_subprocess(call)
             return
@@ -405,13 +567,23 @@ class _ScopeLinter:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 sanction = _function_marker(stmt, self.reasons) or self.func_sanction
                 sub = _ScopeLinter(
-                    self.rel_path, self.reasons, self.subproc_aliases, sanction, self.hits
+                    self.rel_path,
+                    self.reasons,
+                    self.subproc_aliases,
+                    sanction,
+                    self.hits,
+                    self.seam,
                 )
                 sub.run(stmt.body)
                 continue
             if isinstance(stmt, ast.ClassDef):
                 sub = _ScopeLinter(
-                    self.rel_path, self.reasons, self.subproc_aliases, self.func_sanction, self.hits
+                    self.rel_path,
+                    self.reasons,
+                    self.subproc_aliases,
+                    self.func_sanction,
+                    self.hits,
+                    self.seam,
                 )
                 sub.run(stmt.body)
                 continue
@@ -490,7 +662,9 @@ def _scan_python_file(path: Path, rel: Path) -> tuple[list[Hit], list[Violation]
     except SyntaxError:
         return [], violations
     hits: list[Hit] = []
-    linter = _ScopeLinter(rel, reasons, _subproc_aliases(tree), None, hits)
+    # R3 is off inside the write seam itself — those modules ARE the transaction.
+    seam = _NO_SEAM if rel.stem in SEAM_INTERNAL_MODULES else _seam_bindings(tree)
+    linter = _ScopeLinter(rel, reasons, _subproc_aliases(tree), None, hits, seam)
     linter.run(tree.body)
     return hits, violations
 
