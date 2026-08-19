@@ -99,9 +99,11 @@ def test_deletion_impact_is_a_registered_overlay_with_routing():
     entry = idx["deletion-impact"]
     assert entry["exec"] == "AGENT"
     assert entry["applies_to"] == []  # content-triggered, not glob
-    assert entry["blocking_enabled"] is False  # ADVISORY — no new BLOCK source
-    # advisory posture flows through threshold_for as (default, non-blocking)
-    assert reg.threshold_for(["deletion-impact"]) == (0.95, False)
+    # ticket cranial-goodly-seahog flipped deletion-impact advisory->blocking@0.60 from the
+    # code-v3 sidecar calibration (a dangling reference to a removed def/class is high-precision).
+    assert entry["blocking_enabled"] is True
+    # blocking posture flows through threshold_for as (calibrated threshold, blocking)
+    assert reg.threshold_for(["deletion-impact"]) == (0.60, True)
 
 
 def test_deletion_impact_flag_key_is_underscored():

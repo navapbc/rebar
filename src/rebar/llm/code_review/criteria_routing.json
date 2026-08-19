@@ -88,9 +88,10 @@
       "**/cli*",
       "**/mcp_server*"
     ],
-    "default_posture": "advisory",
-    "block_threshold": 0.95,
-    "blocking_enabled": false
+    "_comment": "ticket cranial-goodly-seahog: flipped advisory->blocking@0.51 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py). Break-in-caller api changes are high-precision (validity>=0.95 on every would-block finding) and low-volume; the 0.51 threshold blocks only non-nit verifier-confirmed findings.",
+    "default_posture": "blocking",
+    "block_threshold": 0.51,
+    "blocking_enabled": true
   },
   "iac": {
     "exec": "AGENT",
@@ -131,12 +132,12 @@
     "nit_suppressed": true
   },
   "deletion-impact": {
-    "_comment": "story f983: CONTENT-triggered (not glob) overlay \u2014 registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ADVISORY (blocking_enabled=false): a now-dangling reference is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
+    "_comment": "story f983: CONTENT-triggered (not glob) overlay \u2014 registry.content_triggered_overlays fires it when the diff removes a def/class/signature, so applies_to is empty. ticket cranial-goodly-seahog: flipped advisory->blocking@0.60 from the code-v3 sidecar calibration \u2014 a now-dangling reference to a removed def/class is a high-precision defect (validity>=0.95 on would-block findings); still verified in Pass-2 and decided in Pass-3.",
     "exec": "AGENT",
     "applies_to": [],
-    "default_posture": "advisory",
-    "block_threshold": 0.95,
-    "blocking_enabled": false
+    "default_posture": "blocking",
+    "block_threshold": 0.60,
+    "blocking_enabled": true
   },
   "scope-intent": {
     "_comment": "story 3c5d: CONTENT-triggered (not glob) overlay \u2014 fires ONLY when >=1 ticket resolves from the commit's rebar-ticket: trailer, so applies_to is empty. It reviews the diff against the UNION scope/AC of those tickets (injected as its per-overlay ticket_context; base + every other overlay stay ticket-blind). ADVISORY (blocking_enabled=false): scope drift is a coach-not-block finding, verified in Pass-2 and decided in Pass-3 like every other overlay.",
@@ -145,6 +146,22 @@
     "default_posture": "advisory",
     "block_threshold": 0.95,
     "blocking_enabled": false
+  },
+  "regression": {
+    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Flipped advisory->blocking@0.54 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py): a finding tagged `regression` that survives Pass-3 verification is a high-precision defect (validity>=0.95 on would-block findings). Any finding whose criteria include `regression` now blocks at 0.54 (min-threshold/any-enabled resolution).",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.54,
+    "blocking_enabled": true
+  },
+  "error-handling": {
+    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings).",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.50,
+    "blocking_enabled": true
   },
   "secret-detection": {
     "exec": "DET",

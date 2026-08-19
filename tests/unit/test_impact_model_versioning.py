@@ -87,11 +87,22 @@ def test_code_review_approved_blocking_criteria_set() -> None:
 
     idx = registry.routing_index()
     blocking = {c for c, v in idx.items() if isinstance(v, dict) and v.get("blocking_enabled")}
-    # The APPROVED hard-block set: the two pre-existing exec:DET security detectors PLUS the
+    # The APPROVED hard-block set: the two pre-existing exec:DET security detectors; the
     # `security` AGENT criterion that b9c0 (2026-07-12) flipped on at the 9f25-derived threshold
-    # — the first LLM criterion permitted to block. Any addition beyond these three must be a
-    # deliberate, re-approved change (this pin forces it).
-    assert blocking == {"secret-detection", "high-critical-security", "security"}
+    # (the first LLM criterion permitted to block); PLUS the four criteria ticket
+    # cranial-goodly-seahog flipped on from the code-v3 sidecar calibration
+    # (docs/experiments/calibrate_code_review_thresholds.py): api-compat@0.51,
+    # deletion-impact@0.60, and the two base dimensions regression@0.54 and error-handling@0.50.
+    # Any addition beyond this set must be a deliberate, re-approved change (this pin forces it).
+    assert blocking == {
+        "secret-detection",
+        "high-critical-security",
+        "security",
+        "api-compat",
+        "deletion-impact",
+        "regression",
+        "error-handling",
+    }
     for c in ("secret-detection", "high-critical-security"):
         assert idx[c].get("exec") == "DET"
     # `security` is the deliberate exception to the old "only DET blocks" invariant.

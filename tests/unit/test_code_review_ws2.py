@@ -63,10 +63,20 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
         assert idx[key]["blocking_enabled"] is True, f"{key} is the WS5-flipped blocking criterion"
     assert reg.threshold_for(["high-critical-security"])[1] is True
     # b9c0 (2026-07-12) added `security` as the first serious-tier AGENT blocking criterion, at
-    # the 9f25-derived threshold; the approved blocking set is now exactly these three, and no
-    # other overlay blocks (adding a fourth must be a deliberate, re-approved change).
+    # the 9f25-derived threshold. ticket cranial-goodly-seahog then flipped four more from the
+    # code-v3 sidecar calibration (api-compat@0.51, deletion-impact@0.60, regression@0.54,
+    # error-handling@0.50); the approved blocking set is now exactly these seven, and adding an
+    # eighth must be a deliberate, re-approved change.
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
-    assert set(blocking) == {"secret-detection", "high-critical-security", "security"}
+    assert set(blocking) == {
+        "secret-detection",
+        "high-critical-security",
+        "security",
+        "api-compat",
+        "deletion-impact",
+        "regression",
+        "error-handling",
+    }
 
 
 def test_applies_to_globs_single_source_and_escalation_only():
