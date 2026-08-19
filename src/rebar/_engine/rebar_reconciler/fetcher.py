@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import re
 import sys
 import time
@@ -34,6 +33,7 @@ if TYPE_CHECKING:
 # ``outbound_differ``'s ``from rebar_reconciler._loader import lazy_load``) because
 # this module is also loaded standalone via ``importlib.util.spec_from_file_location``,
 # where a RELATIVE runtime import has no package to resolve against.
+from rebar.config import repo_root_env
 from rebar_reconciler._backend import BackendPaginationStallError
 from rebar_reconciler.fetch_paging import (  # noqa: F401
     _ACLI_CEILING,
@@ -116,10 +116,10 @@ def _load_acli():
     Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to
     keep standalone by-path loading working.
     """
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config()).transport
+    return select_backend(compose_config()).transport
 
 
 # Canonical dotted key matching the codebase convention used by __main__'s
@@ -504,7 +504,7 @@ def _build_snapshot(
             (see the base-query loop below).
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(repo_root_env() or Path(__file__).resolve().parents[4])
 
     # S4: _load_acli returns the configured backend's transport directly (a
     # TicketTransport carrying its resolved connection settings).
@@ -514,10 +514,10 @@ def _build_snapshot(
     # (ticket 97f2/bbf1) — the UN-defaulted configured project: an absent/invalid
     # value must raise in jql_active() to fail the pass closed rather than search
     # unscoped (so we do NOT read client.jira_project, which defaults to "DIG").
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    _query_project = select_backend(load_config()).query_project
+    _query_project = select_backend(compose_config()).query_project
 
     # Multi-project fan-out (story 1734): projects.json is the authoritative sync
     # list. An UNSEEDED store falls back to ``[_query_project]`` (pre-1734
@@ -623,7 +623,7 @@ def fetch_snapshot(
     depend on it.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        repo_root = Path(repo_root_env() or Path(__file__).resolve().parents[4])
 
     snapshot = _build_snapshot(pass_id, repo_root)
 

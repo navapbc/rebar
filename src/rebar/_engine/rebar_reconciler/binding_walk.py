@@ -45,7 +45,6 @@ unified applier.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -53,9 +52,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
-# The convergence-foundation grace default (twin of binding_store /
-# classify defaults; kept in lock-step).
-_DEFAULT_ABSENT_RETIRE_GRACE = 3
+# The convergence-foundation grace default lives in the owned
+# ``config.resolve_absent_retire_grace`` resolver (twin of binding_store).
 
 # The Jira workflow status a terminal local ticket is driven to (ADR 0029: the
 # reverse status map treats Done as terminal; the annotation labels preserve the
@@ -85,14 +83,11 @@ class BindingWalkResult:
 
 
 def _resolve_grace() -> int:
-    """Resolve the consecutive-404 retire grace (matches binding_store)."""
-    raw = os.environ.get("RECONCILER_ABSENT_RETIRE_GRACE")
-    if raw is None:
-        return _DEFAULT_ABSENT_RETIRE_GRACE
-    try:
-        return max(1, int(raw))
-    except (TypeError, ValueError):
-        return _DEFAULT_ABSENT_RETIRE_GRACE
+    """Resolve the consecutive-404 retire grace through the owned composition-root
+    resolver (matches binding_store)."""
+    from rebar.config import resolve_absent_retire_grace
+
+    return resolve_absent_retire_grace()
 
 
 def compute_binding_walk_mutations(

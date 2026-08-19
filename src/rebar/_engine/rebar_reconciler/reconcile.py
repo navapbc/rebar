@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -207,7 +206,9 @@ def reconcile_once(
         where N is the number of mutations dispatched in this pass.
     """
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        from rebar.config import reconciler_repo_root as _owned_repo_root
+
+        repo_root = _owned_repo_root()
     ctx = _PassContext(
         pass_id=pass_id,
         repo_root=repo_root,

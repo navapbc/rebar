@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 
 # ``_call_with_retry`` moved to dispatch_apply_phases (ticket a3fa, to make room for the
@@ -154,7 +153,9 @@ def create_one(
 
         # Persist local_id -> jira_key in mapping.json atomically
         if repo_root is None:
-            repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+            from rebar.config import reconciler_repo_root as _owned_repo_root
+
+            repo_root = _owned_repo_root()
         mapping_path = repo_root / "bridge_state" / "mapping.json"
         _write_mapping_atomic(mapping_path, local_id, hit_key)
 
@@ -271,11 +272,9 @@ def create_one(
                 import uuid as _uuid
 
                 from rebar._store.canonical import canonical_str
+                from rebar.config import reconciler_repo_root as _owned_repo_root
 
-                _alert_root = (
-                    repo_root
-                    or Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-                ) / ".tickets-tracker"
+                _alert_root = (repo_root or _owned_repo_root()) / ".tickets-tracker"
                 # F7: defensive guard — if local_id is falsy the alert directory
                 # would resolve to .tickets-tracker root and pollute it. Prefer
                 # the jira_key, falling back to a uuid so the alert always lands

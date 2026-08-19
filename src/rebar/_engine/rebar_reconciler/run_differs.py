@@ -72,10 +72,10 @@ def _load_reconcile_backend():
     Lazily imports ``load_config``/``select_backend`` to avoid import cycles and to keep
     standalone by-path loading working.
     """
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config())
+    return select_backend(compose_config())
 
 
 def _emit_outbound_field_alerts(
@@ -682,10 +682,10 @@ def _run_differs_binding_walk(ctx: Any, mutations, outbound_diff_client) -> None
     # shared iteration — breaker-gated before any mutation (13eb / 444d).
     binding_walk_mod = _load("reconcile_binding_walk", "binding_walk.py")
     classify_mod = _load("reconcile_classify", "classify.py")
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        _max_acting_fraction = load_config().reconciler.max_acting_fraction
+        _max_acting_fraction = compose_config().reconciler.max_acting_fraction
     except ConfigError:
         _max_acting_fraction = 0.10
     _active_local_ids = {t.get("ticket_id") for t in local_tickets if t.get("ticket_id")}

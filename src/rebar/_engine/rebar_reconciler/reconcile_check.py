@@ -299,10 +299,10 @@ def reconcile_check(
         ``orphaned_jira``, ``unbound_local``, ``unbound_jira``.
     """
     if backend is None:
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
-        backend = select_backend(load_config())
+        backend = select_backend(compose_config())
 
     # Build lookup maps
     local_by_id: dict[str, dict[str, Any]] = {}

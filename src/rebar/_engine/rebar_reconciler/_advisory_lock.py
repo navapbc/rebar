@@ -63,10 +63,10 @@ def _load_ref_lock():
 
 
 def _reconciler_config():
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        return load_config().reconciler
+        return compose_config().reconciler
     except ConfigError:
         return None
 
@@ -79,12 +79,12 @@ def _lock_lease_secs() -> int:
 def _lock_remote(repo_root: Path) -> str | None:
     """The sync remote the ref lock is authoritative on, or None if it is not a
     configured remote of *repo_root* (single-clone / test → pure-local CAS)."""
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     git_adapter = lazy_load("rebar_reconciler.git_adapter", "git_adapter.py")
 
     try:
-        remote = load_config().sync.remote or "origin"
+        remote = compose_config().sync.remote or "origin"
     except ConfigError:
         remote = "origin"
     check = git_adapter.remote_get_url(repo_root, remote)

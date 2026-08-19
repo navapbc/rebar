@@ -86,10 +86,10 @@ def _resolve_inbound_mapper(inbound_mapper: Any | None) -> Any:
     may not resolve config."""
     if inbound_mapper is not None:
         return inbound_mapper
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config()).inbound
+    return select_backend(compose_config()).inbound
 
 
 def _resolve_sanitizer(sanitizer: Any | None) -> Any:
@@ -97,10 +97,10 @@ def _resolve_sanitizer(sanitizer: Any | None) -> Any:
     backend (ticket 21ca; same injection seam as :func:`_resolve_inbound_mapper`)."""
     if sanitizer is not None:
         return sanitizer
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    return select_backend(load_config()).sanitizer
+    return select_backend(compose_config()).sanitizer
 
 
 class _IdentityCodec:
@@ -143,10 +143,10 @@ def _resolve_codec(codec: Any | None) -> Any:
     the identity, preserving today's behaviour."""
     if codec is not None:
         return codec
-    from rebar.config import load_config
+    from rebar.config import compose_config
     from rebar_reconciler._backend_registry import select_backend
 
-    resolved = getattr(select_backend(load_config()).outbound, "comment_codec", None)
+    resolved = getattr(select_backend(compose_config()).outbound, "comment_codec", None)
     return resolved if resolved is not None else _IdentityCodec()
 
 
