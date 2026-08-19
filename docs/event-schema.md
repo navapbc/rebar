@@ -258,7 +258,7 @@ mint overrides to `"jira"` (story e622).
 **Jira-inbound + import are RECORDED, not inferred (story e622).** Two writers bypass
 `composer.create_core` and stamp the channel on the CREATE `data` themselves:
 
-- **Inbound Jira.** `apply_inbound_records._inbound_create_write_create_event` assembles
+- **Inbound Jira.** `apply_inbound_events._inbound_create_write_create_event` assembles
   the CREATE `data` directly and writes it via `_write_event_file`; it now sets
   `data["creation_channel"] = validate_creation_channel("jira")` (validated against the
   same closed vocabulary `create_core` enforces). Because this is a real recorded value,

@@ -42,10 +42,13 @@ import check_config_ownership as gate
 import config_ownership_exceptions as exceptions
 import pytest
 
-# The 30 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
+# The 31 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
 # emits and the exception registry stores). ``_pass_lock_lifecycle.py`` was extracted
 # from ``__main__.py`` (ticket 638a-3746-e58a-4929, module-size cap) and carries the
 # pass-lock cluster with it, so it inherits __main__'s ownership rather than escaping it.
+# ``apply_inbound_events.py`` was extracted the same way from ``apply_inbound_records.py``
+# (ticket 6f51-f8a4-b4fb-450c) and carries the inbound event-writing cluster, so it
+# inherits that file's ownership rather than escaping this gate.
 _OWNED_FILES = (
     "_engine/rebar_reconciler/__main__.py",
     "_engine/rebar_reconciler/_advisory_lock.py",
@@ -54,6 +57,7 @@ _OWNED_FILES = (
     "_engine/rebar_reconciler/applier.py",
     "_engine/rebar_reconciler/apply_handlers.py",
     "_engine/rebar_reconciler/apply_inbound.py",
+    "_engine/rebar_reconciler/apply_inbound_events.py",
     "_engine/rebar_reconciler/apply_inbound_records.py",
     "_engine/rebar_reconciler/apply_planning.py",
     "_engine/rebar_reconciler/binding_store.py",

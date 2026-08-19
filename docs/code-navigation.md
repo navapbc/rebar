@@ -58,7 +58,7 @@ find_referencing_symbols("AcliRestMixin/set_entity_property",
 
 - `src/rebar/_engine/rebar_reconciler/dispatch_one.py:321` —
   `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
-- `src/rebar/_engine/rebar_reconciler/apply_inbound_records.py:231` —
+- `src/rebar/_engine/rebar_reconciler/apply_inbound_events.py:214` —
   `_call_with_retry(client.set_entity_property, jira_key, "local_id", local_id)`
 - `src/rebar/_engine/rebar_reconciler/binding_store.py:517` —
   `client.set_entity_property(keyed, "local_id", local_id)`
@@ -77,7 +77,7 @@ The discriminator is the **static type of the receiver**, not "untyped" in any l
   so the `client._direct_rest_put_raw` call at `:98` is **found**.
 - `dispatch_one.py:191` `def create_one(mutation: dict, client, ...)` — an unannotated parameter,
   i.e. implicit `Any` → **missed**.
-- `apply_inbound_records.py:228`
+- `apply_inbound_events.py:206`
   `def _inbound_create_writeback_jira(client, jira_key, local_id, tracker_dir) -> None:` —
   unannotated, implicit `Any` → **missed**.
 - `binding_store.py:479` `def recover_pending_bindings(self, client: Any, *, failure_sink=...)`
