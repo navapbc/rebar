@@ -83,14 +83,22 @@ _ROWS: list[tuple[str, str, str]] = [
         "apply_planning.py L267: legacy env read of REBAR_ROOT.",
     ),
     (
-        "_engine/rebar_reconciler/binding_store.py",
+        "_engine/rebar_reconciler/binding_lifecycle.py",
         "RECONCILER_ABSENT_RETIRE_GRACE",
-        "binding_store.py L538: legacy env read of RECONCILER_ABSENT_RETIRE_GRACE.",
+        "binding_lifecycle.py L314: legacy env read of RECONCILER_ABSENT_RETIRE_GRACE, MOVED "
+        "here from binding_store.py with the note_absent absence policy it parameterizes "
+        "(RP-02 S2 T2). Still ambient and byte-identical to the pre-move read — no behaviour, "
+        "default or clamp changed; only the owning module did. Cutting it to the configuration "
+        "seam remains RP-04 S7.3.a's slice (ticket best-kingly-monkey tracks the retarget).",
     ),
     (
-        "_engine/rebar_reconciler/binding_store.py",
+        "_engine/rebar_reconciler/binding_lifecycle.py",
         "os.environ.get",
-        "binding_store.py L110: legacy dynamic env read (os.environ.get).",
+        "binding_lifecycle.py L69: legacy dynamic env read (os.environ.get) inside the "
+        "_env_int defensive parser, MOVED here from binding_store.py with the absence policy "
+        "it serves (RP-02 S2 T2). Still ambient and byte-identical to the pre-move read. "
+        "Cutting it to the configuration seam remains RP-04 S7.3.a's slice (ticket "
+        "best-kingly-monkey tracks the retarget).",
     ),
     (
         "_engine/rebar_reconciler/binding_walk.py",
