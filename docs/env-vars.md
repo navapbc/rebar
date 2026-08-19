@@ -139,7 +139,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_PREVIEW_TIMEOUT` | `src/rebar/_config_sources.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
-| `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/__main__.py` |  |
+| `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/_pass_lock_lifecycle.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
 | `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
 | `REBAR_ROOT` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |

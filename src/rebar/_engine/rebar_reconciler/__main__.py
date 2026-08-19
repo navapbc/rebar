@@ -20,7 +20,6 @@ import datetime
 import importlib
 import importlib.util
 import json
-import os
 import sys
 from collections.abc import Callable
 from enum import Enum
@@ -29,6 +28,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 from rebar_reconciler._heartbeat import Heartbeat as _Heartbeat
+
+# The pass-lock lifecycle cluster, extracted to a sibling module (module-size cap).
+# Imported INTO this namespace on purpose: main() calls these as module globals, so
+# the suite's patch.object(main_mod, …) targets keep resolving to what main() reads.
+from rebar_reconciler._pass_lock_lifecycle import (
+    _acquire_or_adopt_pass_lock,
+    _lock_steal_enabled,
+    _purge_committed_reconciler_locks,
+    _resolve_held_lock,
+)
 
 # Defensive rebar bootstrap (Tier E E5b): the reconciler now imports the
 # in-package ``rebar.*`` store/reducer at runtime. The supported launchers
@@ -259,102 +268,6 @@ def _run_reconcile_check(repo_root: Path) -> int:
     except Exception as exc:  # noqa: BLE001 — CLI top-level: log and return exit code 1
         print(f"ERROR: reconcile-check failed: {exc}", file=sys.stderr)
         return 1
-
-
-_LEGACY_LOCK_FILES = (".reconciler-pass-lock", ".reconciler-phase-gate")
-
-
-def _lock_steal_enabled() -> bool:
-    """Whether the held-lock path may steal an expired lease (story 9622).
-
-    Kill-switch ``REBAR_RECONCILER_LOCK_STEAL`` — default ON. Only an explicit
-    falsy value (``0``/``false``/``no``/``off``/empty) reverts to the old
-    unconditional exit-3 behavior (ops back-out without a deploy).
-    """
-    raw = os.environ.get("REBAR_RECONCILER_LOCK_STEAL", "1")  # read-via: kill-switch
-    return raw.strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-        "",
-    )
-
-
-def _resolve_held_lock(advisory, pass_id, repo_root, *, acquire_fn):
-    """Resolve a HELD pass lock via steal (story 9622). Steal-enabled precondition.
-
-    Returns ``(exit_code, lock_oid, acquired)``:
-      - steal wins (a new oid)              -> ``(None, stolen_oid, True)``  [case 1: adopt]
-      - steal None + ref still held          -> ``(3, None, False)``          [case 2: live holder]
-      - steal None + freed + acquire wins    -> ``(None, acquired_oid, True)``[case 3a]
-      - steal None + freed + acquire loses   -> ``(3, None, False)``          [case 3b]
-
-    ``steal()`` (via ``advisory.steal_pass_lock``) IS the skew-proof expiry test —
-    a returned oid means the lease was stale. ``None`` means the holder is live OR
-    the ref freed during the steal sleep; a re-read discriminates. On the freed
-    fork we acquire normally via ``acquire_fn`` (a lost race raises
-    ``advisory.ReconcileLockError`` -> yield).
-    """
-    stolen_oid = advisory.steal_pass_lock(pass_id, repo_root)
-    if stolen_oid is not None:
-        return (None, stolen_oid, True)
-    if advisory.check_pass_lock(repo_root):
-        return (3, None, False)
-    # freed during our steal sleep -> acquire normally (win: proceed; lose: yield).
-    try:
-        return (None, acquire_fn(), True)
-    except advisory.ReconcileLockError:
-        return (3, None, False)
-
-
-def _purge_committed_reconciler_locks(repo_root: Path) -> None:
-    """Remove any legacy ``.reconciler-*`` lock files still committed on the tickets
-    branch (epic dust-troth-naval / C4 migration).
-
-    The lock moved to ``refs/reconciler/*``; a repo initialized under the old file
-    backend may still carry committed ``.reconciler-pass-lock`` / ``.reconciler-phase-gate``
-    blobs on the ``tickets`` branch. This deletes them once via a single ref-advance
-    CAS commit. Idempotent (no-op when none are present) and best-effort: any git
-    failure is logged and swallowed so it never aborts the pass.
-    """
-    from rebar_reconciler import git_adapter
-
-    try:
-        present = [
-            f
-            for f in _LEGACY_LOCK_FILES
-            if git_adapter.cat_file_exists(repo_root, f"{git_adapter.TICKETS_BRANCH}:{f}")
-        ]
-        if not present:
-            return
-        old = git_adapter.rev_parse(
-            repo_root, git_adapter.TICKETS_BRANCH, check=True
-        ).stdout.strip()
-        # Prune the legacy paths in a DETACHED temp index (read-tree → rm --cached →
-        # write-tree → commit-tree), then CAS-advance refs/heads/tickets — the main
-        # worktree/index is never touched, and the CAS makes a concurrent writer safe.
-        env = {**os.environ, "GIT_INDEX_FILE": str(repo_root / ".git" / "reconciler-purge-index")}
-        git_adapter.read_tree(repo_root, old, env=env)
-        git_adapter.rm_cached(repo_root, *present, env=env)
-        new_tree = git_adapter.write_tree(repo_root, env=env)
-        new_commit = git_adapter.commit_tree(
-            repo_root,
-            new_tree,
-            parent=old,
-            message=(
-                "chore(reconciler): drop legacy .reconciler-* lock files "
-                "(moved to refs/reconciler/*)"
-            ),
-            env=env,
-        )
-        git_adapter.update_ref(repo_root, git_adapter.TICKETS_REF, new_commit, old)
-        print(
-            f"reconcile: purged legacy committed lock files {present} from the tickets branch",
-            file=sys.stderr,
-        )
-    except Exception as exc:  # noqa: BLE001 — migration is best-effort, never aborts the pass
-        print(f"WARN: legacy .reconciler-* purge skipped: {exc!r}", file=sys.stderr)
 
 
 def _optional_request_kwargs(
@@ -607,13 +520,6 @@ def _run_with_last_pass(
     if getattr(target_mode, "value", None) == "dry-run":
         return run()
     return finalize(repo_root, pass_id, run)
-
-
-def _acquire_or_adopt_pass_lock(advisory, pass_id: str, repo_root: Path, adopted: str | None):
-    """Adopt a lock acquired during steal resolution, or acquire it once here."""
-    if adopted is not None:
-        return adopted
-    return advisory.acquire_pass_lock(pass_id, repo_root)
 
 
 def _emit_operation_shadow(repo_root) -> None:
