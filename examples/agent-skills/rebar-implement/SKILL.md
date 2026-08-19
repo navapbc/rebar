@@ -141,17 +141,20 @@ Set up an isolated workspace so the stack builds cleanly on current `main` and n
 the user's checkout.
 
 1. **Fetch and branch from `origin/main` in a new worktree, then `cd` into it.** Per the
-   project's convention; the rebar default is
-   `git fetch origin && git worktree add <path> -b <branch> origin/main`. Verify you are on it
-   and it contains current `origin/main` (`git rev-parse --show-toplevel`,
-   `git log --oneline origin/main -1`). **`cd` into the worktree and run every subsequent
-   command — edits, gates, `rebar`, ticket closes, and `git` — from inside it**, never from
-   the primary checkout, so they all act on this worktree's branch.
-2. **Set up the local environment.** Activate the project's local build/venv per its docs (for
-   rebar: `source .venv/bin/activate`, or `make install` first if absent) and **confirm the
-   tools resolve to the worktree**, not a stale global install (`which rebar` → the worktree's
-   binary). Shell state does not persist between commands — re-activate in each command or call
-   binaries by path.
+   project's convention; the rebar default is `git fetch origin && make worktree name=<branch>`,
+   which branches from current `origin/main` **and provisions the worktree's virtualenv** (plain
+   `git worktree add <path> -b <branch> origin/main` does not). Verify you are on it and it
+   contains current `origin/main` (`git rev-parse --show-toplevel`, `git log --oneline
+   origin/main -1`). **`cd` into the worktree and run every subsequent command — edits, gates,
+   `rebar`, ticket closes, and `git` — from inside it**, never from the primary checkout, so they
+   all act on this worktree's branch.
+2. **Set up the local environment, and run every command with the worktree venv first on
+   `PATH`.** Use `env PATH="$PWD/.venv/bin:$PATH" <cmd>` (or activate in each command — shell
+   state does not persist between them), and run `make install` once so the pre-commit hook is
+   wired. **Confirm the tools resolve to the worktree**, not a stale global install
+   (`which rebar` → the worktree's binary). A fresh worktree's venv is not on the ambient
+   `PATH`, so skipping this makes `git commit` fail on a missing `ruff`/`mypy` even when the
+   code is clean — see `docs/local-dev-env.md`.
 3. **Install the review hook if the flow needs one.** For the Gerrit default, install the
    `commit-msg` hook in the fresh worktree so commits carry a `Change-Id`.
 4. **Start the session log.** `rebar session-log start --summary "Implement <epic alias>: <title>"`
