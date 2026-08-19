@@ -449,6 +449,43 @@ def build_fallback_model(
     return FallbackModel(*models, fallback_on=should_fall_back), candidates
 
 
+def ensure_current_event_loop() -> Any:
+    """Return this thread's current event loop, installing one first if absent — WITHOUT
+    tripping the Python 3.12+ ``asyncio.get_event_loop()`` "no current event loop"
+    ``DeprecationWarning`` (ticket c7d5).
+
+    pydantic-ai's synchronous ``Agent.run_sync`` resolves its loop through
+    ``asyncio.get_event_loop()``, whose no-loop fallback is deprecated and warns when nothing
+    has installed a loop on the calling thread. Pre-installing the loop the sync run will use
+    — the exact loop ``get_event_loop()`` would otherwise lazily create — silences the
+    fallback while preserving the current lifecycle: an OPEN already-installed loop is REUSED
+    (so a ``FallbackModel`` async-context entry and the subsequent run bind to ONE loop,
+    keeping provider HTTP-client loop affinity — upstream pydantic-ai #748), and a fresh loop
+    is created only when the thread has none, has one that was explicitly cleared
+    (``set_event_loop(None)`` leaves ``get_event_loop`` raising ``RuntimeError``), or has one
+    that is already closed. Uses public asyncio API only: promote the deprecation to an error
+    solely to detect the "no loop installed" case, never leaking it.
+    """
+    import asyncio
+    import warnings
+
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        try:
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                return loop
+        except (DeprecationWarning, RuntimeError):
+            pass  # no loop installed / explicitly cleared on this thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    return loop
+
+
 @contextmanager
 def entered_fallback_model(model: Any) -> Iterator[Any]:
     """Drive ``model``'s async context manager around a SYNCHRONOUS run.
@@ -456,16 +493,11 @@ def entered_fallback_model(model: Any) -> Iterator[Any]:
     ``FallbackModel.__aenter__`` enters every sub-model "so their providers can manage HTTP
     client lifecycle" — but ``agent.run_sync`` never enters the model (only ``async with
     agent`` does), so without this the sub-providers pydantic-ai owns are neither entered nor
-    closed. Uses the SAME loop resolution ``run_sync`` itself performs (``asyncio``'s current
-    loop, created if absent) so the wrapper's lock and the run bind to one loop. Exit is
-    best-effort, matching ``ProviderSession.close``: teardown never raises out over a result."""
-    import asyncio
-
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:  # no current loop on this thread yet
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    closed. Binds the wrapper's entry and the run to ONE loop via
+    :func:`ensure_current_event_loop` (the same loop ``run_sync`` resolves through
+    ``asyncio.get_event_loop()``). Exit is best-effort, matching ``ProviderSession.close``:
+    teardown never raises out over a result."""
+    loop = ensure_current_event_loop()
     loop.run_until_complete(model.__aenter__())
     try:
         yield model
