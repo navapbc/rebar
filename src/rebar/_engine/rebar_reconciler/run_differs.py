@@ -410,9 +410,15 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
     outbound_diff_client = backend.transport
 
     # Filtered passes skip pending-binding recovery to avoid finalizing
-    # bindings for non-test tickets (scope leak).
+    # bindings for non-test tickets (scope leak). A no-write pass (preview /
+    # legacy --mode dry-run) also skips it: recovery's keyed-pending branch issues
+    # REMOTE add_label / set_entity_property writes, which a documented no-write pass
+    # must not perform (bug 7851). This mirrors the sibling invariant-filing gate
+    # (skip_invariant_filing = (not persist) or bool(scoped_ids)) and the
+    # interrupted-retirement write-boundary gate composed in reconcile.py. The
+    # scoped check is first so a scoped pass never depends on the persist axis.
     ctx.recovery_failures = 0
-    if not scoped_ids:
+    if not scoped_ids and ctx.persist:
         recovery_failures: list[dict[str, Any]] = []
         try:
             binding_store.recover_pending_bindings(
