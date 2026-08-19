@@ -661,22 +661,15 @@ def test_capability_stamp_and_fail_closed(
     work = store_copy
     tracker = work / ".tickets-tracker"
 
-    # The scratch mapping (one + two + zero + legacy) is written to the WORKTREE by
-    # `bridge_projects_set` but never committed. In normal production a committed
-    # `.bridge_state/projects.json` blob always exists, so `run_ensures`'s `projects-seed`
-    # unit (tree-check keyed on that blob) skips and the worktree mapping survives. The base
-    # copy's `scrub_bridge_state(commit=True)` committed the blob's REMOVAL, so here the tree
-    # has NO blob — and `projects-seed` runs BEFORE `projects-compat-stamp`. Without this
-    # commit, `projects-seed` re-seeds a legacy-only mapping over the worktree (project_count
-    # → 0) and the stamp unit then no-ops on a "single-project mapping (0)". Commit the
-    # mapping so the tree-check finds it, `projects-seed` skips, and the ">1 project"
-    # precondition actually holds when the stamp unit reads it.
-    subprocess.run(["git", "add", ".bridge_state/projects.json"], cwd=tracker, check=True)
-    subprocess.run(
-        ["git", "commit", "-q", "--no-verify", "-m", "commit scratch mapping (368f scenario 9)"],
-        cwd=tracker,
-        check=True,
-    )
+    # The scratch mapping (one + two + zero + legacy) is written AND committed by
+    # `bridge_projects_set` itself (it routes through `commit_and_push_tickets_branch`,
+    # which commits under the write lock regardless of push policy — see ticket fea4).
+    # So a committed `.bridge_state/projects.json` blob already exists
+    # by the time this scenario runs: `run_ensures`'s `projects-seed` unit (tree-check keyed
+    # on that blob) skips, the mapping survives, and the ">1 project" precondition holds when
+    # the stamp unit reads it. No manual commit is needed here — an earlier one existed only
+    # while `bridge_projects_set` wrote to the worktree without committing, and it now fails
+    # with "nothing to commit" (ticket b783).
 
     # The mapping now holds >1 project (one + two + zero + legacy); converging stamps it.
     list(run_ensures(str(tracker)))

@@ -157,3 +157,49 @@ def test_invalid_key_is_rebarerror_through_lib_and_mcp(repo: Path) -> None:
 
     after = projects_file.read_bytes() if projects_file.exists() else None
     assert after == before
+
+
+def test_bridge_projects_set_commits_and_leaves_a_clean_tree(repo: Path) -> None:
+    """``bridge_projects_set`` commits the mapping itself and leaves NOTHING staged or
+    dirty in the tracker (ticket b783).
+
+    Regression for the live-DC rehearsal defect: since the write routes through
+    ``commit_and_push_tickets_branch`` (commit under the write lock, independent of push
+    policy — ticket fea4), a follow-up manual ``git add``/``git commit`` finds "nothing to
+    commit" and fails. This asserts the invariant that made that manual commit stale: after
+    the call the blob is in the committed tree AND the working tree is clean.
+    """
+    rebar.bridge_projects_set("REB", ["rebar"], repo_root=str(repo))
+    tracker = repo / ".tickets-tracker"
+
+    # The mapping blob is tracked (committed), not merely present in the worktree.
+    tracked = subprocess.run(
+        ["git", "ls-files", ".bridge_state/projects.json"],
+        cwd=tracker,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert tracked.strip() == ".bridge_state/projects.json", (
+        "bridge_projects_set did not commit the projects.json blob"
+    )
+
+    # And the committed blob carries the mapping we just wrote.
+    committed = subprocess.run(
+        ["git", "show", "HEAD:.bridge_state/projects.json"],
+        cwd=tracker,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert json.loads(committed)["projects"] == {"REB": {"repos": ["rebar"]}}
+
+    # Nothing is left staged or dirty — a subsequent `git commit` would find nothing.
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=tracker,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert porcelain == "", f"bridge_projects_set left an unclean tracker tree: {porcelain!r}"
