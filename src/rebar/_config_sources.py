@@ -512,3 +512,78 @@ def resolve_janitor_tunables(
             defaults["interval_seconds"],
         ),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Below-seam CLI/command resolvers (RP-04 config-ownership cutover, ticket 9515).
+# These OWN the ambient env reads that previously sat BELOW the composition seam in
+# the ``_cli`` / ``_commands`` helpers. Each below-seam caller now RECEIVES the
+# resolved value from here (re-exported via ``rebar.config``) instead of reading
+# ``os.environ`` itself. All are entry-time (the CLI resolves each once at entry), so
+# a plain resolver is correct. Leaf-safe: they touch only stdlib, so this module keeps
+# its no-``rebar.config``-import invariant. The env-name literals stay visible to
+# ``gen_env_registry`` here.
+# --------------------------------------------------------------------------- #
+
+
+def repo_root_or_none(explicit: str | os.PathLike[str] | None = None) -> str | None:
+    """Repo root with precedence ``explicit`` > ``REBAR_ROOT`` > git toplevel of cwd,
+    or ``None`` when NONE resolve — the NOT-FOUND signal the init bootstraps need.
+
+    Mirrors :func:`repo_root`'s precedence but REPORTS not-found instead of defaulting
+    to ``Path.cwd()`` (both init call sites must distinguish "no repo" to emit the
+    "not a git repository" error / return ``None``). ``explicit`` and ``REBAR_ROOT`` are
+    realpath-normalized; the git toplevel is returned verbatim. Owns the ``REBAR_ROOT``
+    read at the composition seam."""
+    if explicit:
+        return os.path.realpath(str(explicit))
+    env = os.environ.get("REBAR_ROOT")
+    if env:
+        return os.path.realpath(env)
+    try:
+        cp = subprocess.run(
+            ["git", "-C", ".", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"},
+            check=False,
+        )
+    except OSError:
+        return None
+    out = cp.stdout.strip()
+    return out if cp.returncode == 0 and out else None
+
+
+def resolve_otlp_endpoint(explicit: str | None = None) -> str:
+    """The OTLP trace-sink endpoint: an explicit ``--otlp-endpoint`` wins, else the
+    standard ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var, else ``""`` (no sink). Owns the
+    env read for :func:`rebar._cli._llm_eval_commands`'s config-init snippet."""
+    return explicit or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT") or ""
+
+
+def resolve_detected_by(explicit: str | None = None) -> str | None:
+    """The detection-channel value: an explicit param wins (an explicit empty string
+    SUPPRESSES the env default), else the ``REBAR_DETECTED_BY`` env var, else ``None``.
+    Owns the env read for :func:`rebar._commands.composer`'s detection-channel capture;
+    the caller still strips/normalizes and drops an empty result."""
+    return explicit if explicit is not None else os.environ.get("REBAR_DETECTED_BY")
+
+
+def resolve_os_actor(tracker: str | os.PathLike[str]) -> str:
+    """The audit actor for a store operation: the git ``user.email`` configured for the
+    ``tracker`` dir (``git -C <tracker> config user.email``), else ``$USER``, else
+    ``"unknown"``. Shared owned seam for the ``_actor`` helpers in
+    :mod:`rebar._commands.bridge_repair` and :mod:`rebar._commands.tracker_maintenance`
+    — it TAKES the tracker dir so each caller keeps its dir-scoped identity."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(tracker), "config", "user.email"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except OSError:
+        pass
+    return os.environ.get("USER") or "unknown"

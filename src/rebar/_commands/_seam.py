@@ -382,7 +382,7 @@ def _apply_authorship(event: dict, ticket_id, event_type, data, tracker, repo_ro
     bypass this local gate, but cannot forge a signature the merge-gate will accept.
     """
     try:
-        cfg = config.load_config(repo_root)
+        cfg = config.compose_config(repo_root)
         require_auth = cfg.identity.require_authenticated
         signing_key = cfg.identity.signing_key
     except Exception:  # noqa: BLE001 — a malformed config must never break an unrelated write

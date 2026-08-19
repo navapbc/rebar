@@ -105,7 +105,7 @@ def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
     if not os.path.isdir(ticket_dir):
         return False
     try:
-        cfg = _config.load_config(os.path.dirname(tracker)).compact
+        cfg = _config.compose_config(os.path.dirname(tracker)).compact
         threshold, horizon = cfg.threshold, cfg.COMPACTION_HORIZON_NS
     except Exception:  # noqa: BLE001 — an unreadable config must never fail a close
         return False
@@ -300,7 +300,7 @@ def maybe_compact(tracker: str, ticket_id: str, *, repo_root=None) -> None:
         from rebar import config as _config
 
         try:
-            cfg = _config.load_config(
+            cfg = _config.compose_config(
                 repo_root if repo_root is not None else os.path.dirname(tracker)
             ).compact
         except Exception:  # noqa: BLE001 — an unreadable config must never fail a close

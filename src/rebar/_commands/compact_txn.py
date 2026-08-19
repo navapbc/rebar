@@ -183,7 +183,7 @@ def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
     still held. The hook writes a ``reached`` marker (its PID) and then blocks until a
     ``release`` file appears, so the test controls the kill point deterministically
     with no timing race. Guarded entirely by the env var: unset ⇒ immediate return."""
-    barrier = os.environ.get("REBAR_TEST_COMPACT_RENAME_BARRIER")
+    barrier = os.environ.get("REBAR_TEST_COMPACT_RENAME_BARRIER")  # read-via: test-failpoint
     if not barrier or n_renamed != 1:
         return
     bdir = Path(barrier)

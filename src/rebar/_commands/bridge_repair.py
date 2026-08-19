@@ -71,20 +71,9 @@ def _record_audit(tracker: Path, record: dict) -> str | None:
 
 def _actor(tracker: Path) -> str:
     """Who ran this, for the audit line — the git identity over ``$USER``."""
-    import subprocess
+    from rebar import config
 
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(tracker), "config", "user.email"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except OSError:
-        pass
-    return os.environ.get("USER") or "unknown"
+    return config.resolve_os_actor(tracker)
 
 
 def _retired_keys(tracker: Path) -> set[str]:

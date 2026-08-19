@@ -22,7 +22,6 @@ precedent in :mod:`rebar._cli._llm_commands`.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 # The env var the secret token lives in — NEVER persisted to a config file.
@@ -32,35 +31,29 @@ _TOKEN_ENV = "JIRA_API_TOKEN"
 class _Detected:
     """The resolved (non-secret) Jira coordinates + whether the secret token is set."""
 
-    __slots__ = ("api_token", "project", "url", "user")
+    __slots__ = ("project", "token_present", "url", "user")
 
-    def __init__(self, url: str, user: str, project: str, api_token: str) -> None:
-        self.url, self.user, self.project, self.api_token = url, user, project, api_token
+    def __init__(self, url: str, user: str, project: str, token_present: bool) -> None:
+        self.url, self.user, self.project, self.token_present = url, user, project, token_present
 
 
 def _detect() -> _Detected:
-    """Resolve the current Jira settings in-process, mirroring the reconciler's
+    """Resolve the current Jira settings in-process through the owned config seam
+    (:func:`rebar.config.resolve_jira_detection`), which mirrors the reconciler's
     ``resolve_jira_settings`` precedence (env ``JIRA_URL/USER/PROJECT`` over
-    ``load_config().jira.*``; the secret ``JIRA_API_TOKEN`` is env-only). The engine
-    ``rebar_reconciler`` package is import-path-scoped to subprocesses, so we read
-    the same typed config directly rather than importing it. A malformed config
-    degrades to env-only (matching the resolver's fail-soft behavior). This includes a
+    ``load_config().jira.*``; the secret ``JIRA_API_TOKEN`` is env-only, resolved at the
+    credential boundary and reported only as a presence flag). The engine
+    ``rebar_reconciler`` package is import-path-scoped to subprocesses, so detection
+    reuses the composed typed config rather than importing it. A malformed config
+    degrades to env-only there (matching the resolver's fail-soft behavior), including a
     non-https ``jira.url`` rejection (``InsecureUrlError``, a ``ConfigError`` subclass):
     detection is best-effort so the wizard stays usable to FIX a bad url — the loud
     enforcement lives on the WRITE path (``write_jira_config`` refuses to persist a
     cleartext url) and in the reconciler resolver (bug bdb8)."""
-    from rebar.config import ConfigError, load_config
+    from rebar import config
 
-    url = user = project = ""
-    try:
-        jira = load_config().jira
-        url, user, project = jira.url, jira.user, jira.project
-    except ConfigError:
-        pass
-    url = os.environ.get("JIRA_URL") or url
-    user = os.environ.get("JIRA_USER") or user
-    project = os.environ.get("JIRA_PROJECT") or project
-    return _Detected(url, user, project, os.environ.get(_TOKEN_ENV, ""))
+    url, user, project, token_present = config.resolve_jira_detection()
+    return _Detected(url, user, project, token_present)
 
 
 def _prompt_value(label: str, current: str) -> str:
@@ -141,7 +134,7 @@ def jira_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
     sys.stdout.write(_detected_line("url", current.url))
     sys.stdout.write(_detected_line("user", current.user))
     sys.stdout.write(_detected_line("project", current.project))
-    token_present = bool(current.api_token)
+    token_present = current.token_present
     token_state = f"set (env {_TOKEN_ENV})" if token_present else "(missing — env only)"
     sys.stdout.write(f"  token    {token_state}\n\n")
 
@@ -188,7 +181,7 @@ def jira_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
             "\nSkipped validation (--no-validate). Run `rebar bridge check-access` to verify.\n"
         )
         return 0
-    if not token_present and not os.environ.get(_TOKEN_ENV):
+    if not token_present:
         sys.stdout.write(
             f"\n{_TOKEN_ENV} is not set, so the live bridge check-access is skipped.\n"
             f"  Export {_TOKEN_ENV}, then run `rebar bridge check-access` to validate.\n"

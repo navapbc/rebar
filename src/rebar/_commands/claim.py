@@ -72,7 +72,7 @@ def _config_default_assignee(tracker: str) -> str:
     ``.rebar/`` live — the same cfg root the plan-review gate uses. A malformed config
     must never break a claim, so any load error degrades to no default."""
     try:
-        return config.load_config(root=os.path.dirname(tracker)).ticket.default_assignee or ""
+        return config.compose_config(root=os.path.dirname(tracker)).ticket.default_assignee or ""
     except Exception:  # noqa: BLE001 — non-critical: fall back to no default, never fail the claim
         return ""
 

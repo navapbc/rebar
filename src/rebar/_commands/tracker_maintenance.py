@@ -126,10 +126,9 @@ def _actor(tracker: str) -> str:
     being read months later by someone reconstructing what happened to the store, and
     ``$USER`` is often a shared/system account (and simply unset in CI), whereas the git
     email is the same identity rebar already attributes events to."""
-    email = _git(tracker, "config", "user.email")
-    if email.returncode == 0 and email.stdout.strip():
-        return email.stdout.strip()
-    return os.environ.get("USER") or "unknown"
+    from rebar import config
+
+    return config.resolve_os_actor(tracker)
 
 
 def _take_backup_ref(tracker: str) -> str | None:

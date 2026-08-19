@@ -168,7 +168,7 @@ def cli(argv: list[str]) -> int:
     p.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
     args = p.parse_args(argv)
 
-    cfg = config.load_config(root=args.root)
+    cfg = config.compose_config(root=args.root)
     if not cfg.verify.require_ticket_for_commit:
         # Staged-rollout / override: the gate is off, so this is a no-op pass.
         print("verify-commit-ticket: gate disabled (verify.require_ticket_for_commit=false)")
