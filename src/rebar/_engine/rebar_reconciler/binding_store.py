@@ -101,11 +101,11 @@ def _now_iso() -> str:
     return utc_now_iso()
 
 
-# Bug 1e08-1a35-0267-4ca6 — the absence retirement grace. Both the default and its
-# defensive ambient parse (``_env_int``) now live in ``binding_lifecycle``, beside the
-# ``note_absent`` policy they parameterize; this is an ALIAS, not a second source of
-# truth, kept because the constant is part of this module's long-standing inspection
-# surface (the 3b5f tombstone oracle drives retirement to grace through it).
+# Bug 1e08-1a35-0267-4ca6 — the absence retirement grace default. The env read itself is
+# owned by ``rebar.config.resolve_absent_retire_grace`` (RP-04 S7.3.a); this constant is
+# the shared fallback default, defined in ``binding_lifecycle``. This is an ALIAS, not a
+# second source of truth, kept because the constant is part of this module's long-standing
+# inspection surface (the 3b5f tombstone oracle drives retirement to grace through it).
 _DEFAULT_ABSENT_RETIRE_GRACE = binding_lifecycle._DEFAULT_ABSENT_RETIRE_GRACE
 
 

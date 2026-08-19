@@ -29,7 +29,6 @@ on a negative answer.
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from rebar_reconciler import peer_state
@@ -47,37 +46,11 @@ def _now_iso() -> str:
     return utc_now_iso()
 
 
-# Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
-# reconciler's only int-valued binding env vars; parsed defensively below so a
-# typo'd ops value degrades to the default rather than aborting the pass.
+# Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) default. The consecutive-404 retire
+# grace is read through the owned ``rebar.config.resolve_absent_retire_grace`` accessor
+# (RP-04 S7.3.a); this constant is the shared default it falls back to, aliased by
+# ``binding_store`` — a plain constant, not an ambient read.
 _DEFAULT_ABSENT_RETIRE_GRACE = 3
-
-
-def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
-    """Parse an int env var defensively: malformed → default; clamp >= minimum.
-
-    The reconciler has no dotted-config reader, so lifecycle knobs are env
-    vars (matches fetcher.py / applier.py). A typo'd value (e.g. ``"abc"``)
-    must NOT abort the pass — fall back to the documented default.
-
-    Moved here from ``binding_store`` with the absence policy it parameterizes (RP-02
-    S2 T2). The SOURCING is deliberately byte-identical to the pre-move read — a direct
-    ambient ``os.environ`` lookup, not a configuration-seam call — because cutting it to
-    that seam is RP-04 S7.3.a's slice, not this one. Both legacy-exception rows in
-    ``scripts/config_ownership_exceptions.py`` were re-registered under this module's
-    path in the same change (the gate keys them on path + symbol).
-    """
-    raw = os.environ.get(name)
-    if raw is None:
-        value = default
-    else:
-        try:
-            value = int(raw)
-        except (ValueError, TypeError):
-            value = default
-    if minimum is not None and value < minimum:
-        value = minimum
-    return value
 
 
 class BindingLifecycle:
@@ -312,11 +285,9 @@ class BindingLifecycle:
             return
         entry["absent_404_count"] = int(entry.get("absent_404_count", 0)) + 1
         entry["updated_at"] = _now_iso()
-        grace = _env_int(
-            "RECONCILER_ABSENT_RETIRE_GRACE",
-            _DEFAULT_ABSENT_RETIRE_GRACE,
-            minimum=1,
-        )
+        from rebar.config import resolve_absent_retire_grace
+
+        grace = resolve_absent_retire_grace()
         if entry["absent_404_count"] >= grace:
             self.retire(local_id, jira_key, entry)
 
