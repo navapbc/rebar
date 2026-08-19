@@ -241,6 +241,24 @@ def test_one_project_base_query_failure_does_not_abort_pass(fetcher, tmp_path, m
     ), alerts
 
 
+def test_single_mapped_unknown_project_fails_closed(fetcher, tmp_path, monkeypatch):
+    """The BOUNDARY of skip-and-continue (ticket f643): with only ONE mapped project,
+    an unknown/failed key has no sibling to protect, so the pass FAILS CLOSED — the
+    transport error propagates rather than degrading to an empty snapshot.
+
+    ``_isolate_projects = len(project_list) > 1`` gates the skip: multi-project maps
+    skip-and-continue (see ``test_one_project_base_query_failure_does_not_abort_pass``),
+    a single mapped unknown project re-raises. This pins the exact line the operator
+    decision asked to record and prevents a silent empty read on a one-project map."""
+    monkeypatch.setenv("JIRA_PROJECT", "BAD")
+    _seed_projects(tmp_path, {"BAD": ["rb"]})
+    client = _PartialFailClient({}, failing_project="BAD")
+
+    with patch.object(fetcher, "_load_acli", return_value=client):
+        with pytest.raises(urllib.error.HTTPError):
+            fetcher.compute_snapshot("single-badproject", repo_root=tmp_path)
+
+
 # --- stamping: bridge_project + repos on inbound create --------------------
 
 

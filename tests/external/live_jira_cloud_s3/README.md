@@ -47,7 +47,8 @@ production tickets remote. The S3 prefix is deleted on teardown.
 
 Plus a negative control from the prior-failure lesson (the deleted harness at git
 `ab9c452dd3` seeded non-existent project keys and expected an inbound fetch to succeed):
-an UNKNOWN mapped project must FAIL CLOSED — `test_unknown_project_fails_closed`.
+an UNKNOWN mapped project (among several) is SKIPPED and the pass continues over the
+others — `test_unknown_project_skips_and_continues`.
 
 ## Running it
 
