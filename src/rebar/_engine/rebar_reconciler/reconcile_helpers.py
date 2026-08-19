@@ -166,6 +166,14 @@ def preflight_status_mapping(mutations) -> None:
             )
 
 
+# The selective 5-file staging below cannot use the shared locked commit seam yet:
+# push.commit_and_push_tickets_branch stages with `git add -A`, which sweeps in
+# .bridge_state/last-pass.json (deliberately excluded here) and so advances the tickets
+# HEAD on every idempotent pass, turning test_reconcile_idempotency.py::
+# test_unchanged_second_pass_preserves_binding_store_bytes_and_head RED. Determined in
+# ticket 6454-d06e-7361-4e3d, which reverted that conversion for exactly this reason.
+# Ticket 11a9-b11b-e93d-4832 owns giving the seam a pathspec so this marker can go.
+# raw-git-ok: selective staging; the `add -A` seam breaks reconcile idempotency (6454-d06e)
 def _commit_binding_store_snapshot(
     _binding_store: Any,
     repo_root: Path,

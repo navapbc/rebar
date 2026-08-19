@@ -42,11 +42,14 @@ import check_config_ownership as gate
 import config_ownership_exceptions as exceptions
 import pytest
 
-# The 29 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
-# emits and the exception registry stores).
+# The 30 files this slice owns, as paths relative to ``src/rebar/`` (the form the gate
+# emits and the exception registry stores). ``_pass_lock_lifecycle.py`` was extracted
+# from ``__main__.py`` (ticket 638a-3746-e58a-4929, module-size cap) and carries the
+# pass-lock cluster with it, so it inherits __main__'s ownership rather than escaping it.
 _OWNED_FILES = (
     "_engine/rebar_reconciler/__main__.py",
     "_engine/rebar_reconciler/_advisory_lock.py",
+    "_engine/rebar_reconciler/_pass_lock_lifecycle.py",
     "_engine/rebar_reconciler/_preflight.py",
     "_engine/rebar_reconciler/applier.py",
     "_engine/rebar_reconciler/apply_handlers.py",
@@ -78,12 +81,15 @@ _OWNED_FILES = (
 
 # The enumerated owned-in-place allowlist: file -> exact number of ``# read-via:`` marked
 # lines it may carry. Everything else must be ZERO.
-#   __main__.py           REBAR_RECONCILER_LOCK_STEAL       (kill-switch)          1 line
+#   _pass_lock_lifecycle.py REBAR_RECONCILER_LOCK_STEAL     (kill-switch)          1 line
 #   reconcile_helpers.py  REBAR_RECONCILER_WRITE_FACADE     (AC6 rollback toggle) 1 line
 #   apply_handlers.py     REBAR_RECONCILER_FAIL_SILENT_NOOP (failure-injection)   3 lines
 #   apply_inbound.py      REBAR_RECONCILER_CONFLICT_PARENT_ID (operator override) 1 line
+# The LOCK_STEAL line moved out of __main__.py with _lock_steal_enabled when the
+# pass-lock cluster was extracted; __main__.py now budgets ZERO. The cap is unchanged
+# at 6 because the line RELOCATED — no read was added, and none was blanket-marked.
 _MARKER_BUDGET = {
-    "_engine/rebar_reconciler/__main__.py": 1,
+    "_engine/rebar_reconciler/_pass_lock_lifecycle.py": 1,
     "_engine/rebar_reconciler/reconcile_helpers.py": 1,
     "_engine/rebar_reconciler/apply_handlers.py": 3,
     "_engine/rebar_reconciler/apply_inbound.py": 1,
