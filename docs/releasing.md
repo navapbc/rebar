@@ -147,6 +147,16 @@ enforced by **zizmor scoped to `release.yml`** under `make lint` (which also run
 **actionlint across all workflows** — bug 8002); the rebar-specific structure is pinned by
 `tests/unit/test_release_workflow_pins.py`.
 
+**zizmor online/offline split (bug 7a03).** `make lint` runs zizmor **offline** when no
+GitHub token is present in the environment — the portable local default, so a contributor
+needs no credential and gets a warning-free clean lint (the Makefile passes `--offline`
+explicitly to suppress zizmor's "running in offline mode" WARN). CI provides `GH_TOKEN`
+(the automatic, read-only job token) to the same step, so it runs **online** and additionally
+executes zizmor's five token-backed audits — `impostor-commit`, `ref-confusion`,
+`known-vulnerable-actions`, `stale-action-refs`, and `ref-version-mismatch` — which need a
+GitHub client to read live action metadata. The mode is chosen inside the Makefile, so local
+and CI invoke one recipe: an offline fallback everywhere, the full online audit set in CI.
+
 **(a) Actions are pinned to full 40-char commit SHAs.** Every `uses:` names a specific
 commit with a trailing `# vX.Y.Z` comment for readability, e.g.
 `actions/checkout@9c091bb...  # v7.0.0`. Resolve the SHA for an action's current stable
