@@ -1,0 +1,158 @@
+# Project dogfood corpus for Pass-1 CI-gate compatibility. Cases are drawn from several
+# different CI systems on purpose: the criterion is triggered by a declarative glob set, so the
+# rubric must recognise an ungrandfathered hard-fail gate without any vendor vocabulary. Each
+# fire case pairs with a nearest non-finding control that differs only by its compatibility
+# guard, its warn-only posture, or its descriptive (non-operative) nature.
+prompt: code-review-project-ci-gate-compat
+model: anthropic:claude-sonnet-4-6
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 1.0
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: Fire cases emit schema-valid findings and pass cases emit none.
+
+dataset:
+  - id: CG-F1
+    expect: finding
+    note: new required step demands a manifest file that pre-change branches do not carry
+    diff: |
+      --- a/.github/workflows/ci.yml
+      +++ b/.github/workflows/ci.yml
+      @@
+      +      - name: Require impact manifest
+      +        run: test -f .ci/impact-manifest.json
+  - id: CG-F2
+    expect: finding
+    note: whole-tree size cap with no baseline of pre-existing violations
+    diff: |
+      --- a/.gitlab-ci.yml
+      +++ b/.gitlab-ci.yml
+      @@
+      +size-cap:
+      +  script:
+      +    - python scripts/check_size.py --all-files --max 800
+  - id: CG-F3
+    expect: finding
+    note: trailer gate applied to every commit in the branch with no effective-date cutoff
+    diff: |
+      --- a/Jenkinsfile
+      +++ b/Jenkinsfile
+      @@
+      +stage('Trailer') {
+      +  sh 'git log --format=%B origin/main..HEAD | grep -q "^tracker-id:" || exit 1'
+      +}
+  - id: CG-F4
+    expect: finding
+    note: an advisory check is promoted to failing with no grace period
+    diff: |
+      --- a/.circleci/config.yml
+      +++ b/.circleci/config.yml
+      @@
+      -      - run: lint-docs || true
+      +      - run: lint-docs
+  - id: CG-F5
+    expect: finding
+    note: freshness check fails whenever the lockfile predates the manifest, unconditionally
+    diff: |
+      --- a/azure-pipelines.yml
+      +++ b/azure-pipelines.yml
+      @@
+      +- script: |
+      +    test deps.lock -nt deps.toml
+      +  displayName: Lockfile must be newer than the manifest
+  - id: CG-F6
+    expect: finding
+    note: new coverage floor applied to the whole repository with no ratchet
+    diff: |
+      --- a/.buildkite/pipeline.yml
+      +++ b/.buildkite/pipeline.yml
+      @@
+      +  - label: coverage
+      +    command: coverage report --fail-under=90
+  - id: CG-N1
+    expect: pass
+    note: the same manifest gate, guarded by an if-present test
+    diff: |
+      --- a/.github/workflows/ci.yml
+      +++ b/.github/workflows/ci.yml
+      @@
+      +      - name: Require impact manifest
+      +        if: hashFiles('.ci/impact-manifest.json') != ''
+      +        run: test -f .ci/impact-manifest.json
+  - id: CG-N2
+    expect: pass
+    note: the size cap is scoped to the files this change touches
+    diff: |
+      --- a/.gitlab-ci.yml
+      +++ b/.gitlab-ci.yml
+      @@
+      +size-cap:
+      +  script:
+      +    - python scripts/check_size.py --changed-only --max 800
+  - id: CG-N3
+    expect: pass
+    note: the new floor ships with a recorded baseline that grandfathers existing violations
+    diff: |
+      --- a/.buildkite/pipeline.yml
+      +++ b/.buildkite/pipeline.yml
+      @@
+      +  - label: coverage
+      +    command: coverage report --baseline .ci/coverage-baseline.json --no-regress
+  - id: CG-N4
+    expect: pass
+    note: the new step is explicitly allowed to fail, so it cannot break a branch
+    diff: |
+      --- a/.circleci/config.yml
+      +++ b/.circleci/config.yml
+      @@
+      +      - run:
+      +          command: lint-docs
+      +          when: always
+      +          no_output_timeout: 5m
+      +      - run: echo "advisory only" || true
+  - id: CG-N5
+    expect: pass
+    note: the change removes a gate rather than adding one
+    diff: |
+      --- a/Jenkinsfile
+      +++ b/Jenkinsfile
+      @@
+      -stage('Trailer') {
+      -  sh 'git log --format=%B origin/main..HEAD | grep -q "^tracker-id:" || exit 1'
+      -}
+  - id: CG-N6
+    expect: pass
+    note: documentation describing an existing gate, not an operative pipeline change
+    diff: |
+      --- a/docs/ci.md
+      +++ b/docs/ci.md
+      @@
+      +The coverage job fails a build below the recorded baseline; older branches are exempt.
+
+gold_set:
+  - input: "A new required build step demands a manifest file that branches created before the change do not carry."
+    label: finding
+  - input: "A size cap is applied to every file in the tree with no baseline for pre-existing violations."
+    label: finding
+  - input: "A commit-trailer check is applied to every commit on the branch with no effective-date cutoff."
+    label: finding
+  - input: "An advisory check is promoted to a failing one with no grace period for open branches."
+    label: finding
+  - input: "A freshness assertion fails unconditionally whenever the lockfile predates the manifest."
+    label: finding
+  - input: "A repository-wide coverage floor is added with no ratchet against the current level."
+    label: finding
+  - input: "The manifest gate runs only when the manifest file is already present."
+    label: pass
+  - input: "The size cap is scoped to the files the change itself touches."
+    label: pass
+  - input: "The new floor ships with a recorded baseline that grandfathers existing violations."
+    label: pass
+  - input: "The new step is explicitly allowed to fail, so it cannot break a branch."
+    label: pass
+  - input: "The change removes an existing gate rather than adding one."
+    label: pass
+  - input: "Documentation describes an existing gate without changing pipeline behaviour."
+    label: pass

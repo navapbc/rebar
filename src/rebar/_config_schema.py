@@ -557,6 +557,19 @@ class TrackerConfig:
 
 
 @dataclass
+class CodeReviewConfig:
+    """Project-declared inputs to the code-review gate's criteria routing."""
+
+    # The file globs that identify THIS project's CI / pipeline configuration. Empty means
+    # "use whatever the criteria routing declares"; a non-empty value REPLACES the routing
+    # `applies_to` of any criterion whose entry points at `code_review.ci_config_globs`, so a
+    # project with an unusual pipeline layout declares its paths instead of waiting for rebar
+    # to enumerate them. Vendor-neutral by construction: rebar never inspects the values.
+    # read-via: llm/code_review/registry.py project_applies_to_globs
+    ci_config_globs: list[str] = field(default_factory=list)
+
+
+@dataclass
 class CodeHealthConfig:
     """Scan roots and module-size policy for the code-health metrics."""
 
@@ -588,6 +601,10 @@ class Config:
     tracker: TrackerConfig = field(default_factory=TrackerConfig)
     ensure: EnsureConfig = field(default_factory=EnsureConfig)
     code_health: CodeHealthConfig = field(default_factory=CodeHealthConfig)
+    # Resolved by dotted name from a criterion's `applies_to_config_key`, so there is no
+    # literal `.code_review` attribute access anywhere.
+    # read-via: llm/code_review/registry.py _config_globs (getattr by section name)
+    code_review: CodeReviewConfig = field(default_factory=CodeReviewConfig)
 
     @classmethod
     def from_mapping(cls, raw: dict | None, *, source: str = "", strict: bool = False) -> Config:
@@ -616,6 +633,7 @@ _SECTION_CLASSES: dict[str, type] = {
     "tracker": TrackerConfig,
     "ensure": EnsureConfig,
     "code_health": CodeHealthConfig,
+    "code_review": CodeReviewConfig,
 }
 
 # section -> {deprecated_key -> canonical_key}, consumed by the coerce_sparse loop below. Every
