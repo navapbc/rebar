@@ -21,7 +21,6 @@ and does not import the concrete class.
 
 from __future__ import annotations
 
-import os
 import sys
 import urllib.error
 from dataclasses import dataclass
@@ -83,12 +82,6 @@ from rebar_reconciler.outbound_labels import (  # noqa: F401
 # eefd made it compare in canonical shape via an injected SupportsLinks capability.
 from rebar_reconciler.outbound_links import _diff_links
 
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment."""
-    return os.environ.get(f"REBAR_{name}", default)
-
-
 # ---------------------------------------------------------------------------
 # Bug 1e08-1a35-0267-4ca6 — bound-but-absent direct-GET sentinels / config
 # ---------------------------------------------------------------------------
@@ -107,21 +100,6 @@ _TRANSPORT_ERROR = object()  # _safe_get_issue: non-404 HTTPError / URLError / t
 # applier.py). Parsed defensively at use-site so a typo'd ops value degrades to
 # the default rather than aborting the pass.
 _DEFAULT_ABSENT_GET_BUDGET = 20
-
-
-def _env_int(name: str, default: int, *, minimum: int | None = None) -> int:
-    """Parse an int env var defensively: malformed → default; clamp >= minimum."""
-    raw = os.environ.get(name)
-    if raw is None:
-        value = default
-    else:
-        try:
-            value = int(raw)
-        except (ValueError, TypeError):
-            value = default
-    if minimum is not None and value < minimum:
-        value = minimum
-    return value
 
 
 def _rest_issue_to_snapshot_fields(issue: dict[str, Any]) -> dict[str, Any]:
@@ -338,10 +316,10 @@ def compute_outbound_mutations(
     # omits any of them resolves it through the neutral registry seam instead —
     # naming no vendor symbol here.
     if outbound_mapper is None or inbound_mapper is None or links is None:
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
-        _backend = select_backend(load_config())
+        _backend = select_backend(compose_config())
         if outbound_mapper is None:
             outbound_mapper = _backend.outbound
         if inbound_mapper is None:
@@ -486,10 +464,10 @@ def _compute_outbound_select_absent_gets(
     # (default 20), overridden by env REBAR_RECONCILER_DELETION_PROBE_LIMIT (deprecated
     # alias RECONCILER_ABSENT_GET_BUDGET), then `rebar -c reconciler.deletion_probe_limit=…`.
     # An unreadable config falls back to the default rather than failing the pass.
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        _budget = load_config().reconciler.deletion_probe_limit
+        _budget = compose_config().reconciler.deletion_probe_limit
     except ConfigError:
         _budget = _DEFAULT_ABSENT_GET_BUDGET
     _absent_candidates: list[str] = []

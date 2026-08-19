@@ -123,14 +123,14 @@ def _ensure_inbound_assignee_identity(assignee, repo_root) -> None:
     display_name = _extract_name(assignee) or assignee.get("display") or ""
     try:
         import rebar
-        from rebar.config import load_config
+        from rebar.config import compose_config
         from rebar_reconciler._backend_registry import select_backend
 
         # S4: provider identity + creation channel come from the configured backend
         # (routes through the Backend port), not a hard-coded provider literal — asked
         # for its FAMILY, since the store vocabulary is per-family, not per-deployment
         # (see _identity_provider_for, bug 5f48).
-        provider = _identity_provider_for(select_backend(load_config()))
+        provider = _identity_provider_for(select_backend(compose_config()))
 
         rebar.ensure_identity_for(
             provider,

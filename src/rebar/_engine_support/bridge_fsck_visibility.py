@@ -15,7 +15,6 @@ LAZILY, only when the diagnostic runs, so nothing here is reachable from core
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -55,7 +54,7 @@ def audit_mapped_project_visibility(
     repo_root: Path,
     *,
     probe: object | None = None,
-    env: dict[str, str] | None = None,
+    env: dict[str, str],
     access_check_mod: ModuleType | None = None,
 ) -> dict:
     """Opt-in, credential-conditional, READ-ONLY, ADVISORY live visibility check.
@@ -70,7 +69,7 @@ def audit_mapped_project_visibility(
     advisory verdict. Returns a JSON-serializable dict; the caller renders it to
     stderr and never lets it change bridge fsck's exit contract.
     """
-    src = os.environ if env is None else env
+    src = env
     creds_present = all(src.get(key) for key in _JIRA_CRED_KEYS)
     if probe is None and not creds_present:
         return {

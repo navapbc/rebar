@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -55,11 +54,6 @@ from rebar_reconciler.inbound_translate import (
 from rebar_reconciler.pass_io import _write_mapping_atomic
 
 logger = logging.getLogger(__name__)
-
-
-def _rebar_env(name: str, default: str | None = None) -> str | None:
-    """Read ``REBAR_<name>`` from the environment (module-local; see applier)."""
-    return os.environ.get(f"REBAR_{name}", default)
 
 
 def _apply_inbound_create(
@@ -102,9 +96,9 @@ def _apply_inbound_create(
         bound_local_id = binding_store.get_local_id(jira_key)
         if bound_local_id:
             if repo_root is None:
-                repo_root = Path(
-                    os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4]
-                )
+                from rebar.config import reconciler_repo_root as _owned_repo_root
+
+                repo_root = _owned_repo_root()
             mapping_path = repo_root / "bridge_state" / "mapping.json"
             _write_mapping_atomic(mapping_path, bound_local_id, jira_key)
             return ApplyResult(
@@ -241,7 +235,8 @@ def _apply_inbound_conflict(mutation, **_kwargs) -> ApplyResult:
     jira_key = mutation.target
     local_id = payload.get("local_id", "")
     reason = payload.get("reason", "unspecified")
-    parent_id = payload.get("parent_id") or _rebar_env("RECONCILER_CONFLICT_PARENT_ID", "")
+    parent_env = os.environ.get("REBAR_RECONCILER_CONFLICT_PARENT_ID", "")  # read-via: override
+    parent_id = payload.get("parent_id") or parent_env
     title = f"[Reconciler conflict]: pair ({local_id!r}, {jira_key!r}) -> {reason}"
     description = (
         f"Reconciler detected a conflict on (local_id={local_id!r}, "

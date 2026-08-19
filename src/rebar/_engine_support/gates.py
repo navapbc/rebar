@@ -144,10 +144,10 @@ def _clarity_threshold(repo_root: str | None, config_file: str | None) -> int:
     legacy ``.rebar/config.conf`` + env ``REBAR_TICKET_CLARITY_THRESHOLD``, default 5).
     An explicit ``config_file`` reads that one file; otherwise the layered loader runs.
     A malformed config falls back to the default — clarity is a non-critical gate."""
-    from rebar.config import ConfigError, load_config, read_config_file
+    from rebar.config import ConfigError, compose_config, read_config_file
 
     try:
-        cfg = read_config_file(config_file) if config_file else load_config(root=repo_root)
+        cfg = read_config_file(config_file) if config_file else compose_config(root=repo_root)
         return cfg.ticket_clarity.threshold
     except ConfigError:
         return 5

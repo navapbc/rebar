@@ -271,7 +271,8 @@ def _lock_steal_enabled() -> bool:
     falsy value (``0``/``false``/``no``/``off``/empty) reverts to the old
     unconditional exit-3 behavior (ops back-out without a deploy).
     """
-    return os.environ.get("REBAR_RECONCILER_LOCK_STEAL", "1").strip().lower() not in (
+    raw = os.environ.get("REBAR_RECONCILER_LOCK_STEAL", "1")  # read-via: kill-switch
+    return raw.strip().lower() not in (
         "0",
         "false",
         "no",
@@ -499,7 +500,9 @@ def run_pass_result(
 ) -> PassResult:
     """Execute and classify one pass, returning its structured detail in-process."""
     if repo_root is None:
-        repo_root = Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
+        from rebar.config import reconciler_repo_root as _owned_repo_root
+
+        repo_root = _owned_repo_root()
 
     reconcile = _try_load_step("reconcile")
     if reconcile is None:
@@ -578,11 +581,9 @@ def _dry_run_enumeration_exit(request) -> int | None:
     if not request.dry_run_enumerate:
         return None
     repo_root = request.repo_root
-    resolved_root = (
-        repo_root
-        if repo_root is not None
-        else Path(os.environ.get("REBAR_ROOT") or Path(__file__).resolve().parents[4])
-    )
+    from rebar.config import reconciler_repo_root as _owned_repo_root
+
+    resolved_root = repo_root if repo_root is not None else _owned_repo_root()
     tickets_dir = resolved_root / ".tickets-tracker"
     if not tickets_dir.is_dir():
         return 0

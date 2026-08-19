@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -689,7 +690,7 @@ def main(argv: list[str] | None = None) -> int:
             format_visibility_advisory,
         )
 
-        verdict = audit_mapped_project_visibility(tracker_path.parent)
+        verdict = audit_mapped_project_visibility(tracker_path.parent, env=dict(os.environ))
         for line in format_visibility_advisory(verdict):
             print(line, file=sys.stderr)
 
