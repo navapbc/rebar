@@ -3,6 +3,15 @@
 Maps local ticket IDs ↔ Jira issue keys.  Persisted as JSON at
 `.tickets-tracker/.bridge_state/bindings.json` on the tickets branch.  # tickets-boundary-ok
 
+Persistence is NOT implemented here.  ``BindingRepository`` (RP-02 S1) is the sole owner
+of the four binding-state files — the live store, the retired sidecar, the GET-rotation
+sidecar, and the best-effort lifecycle alert log — together with their load rules, their
+exact committed bytes, and their asymmetric failure dispositions (live fails CLOSED,
+retired and rotation fail OPEN).  This module is the LIFECYCLE facade over it:
+bind/confirm/retire/tombstone/comment bookkeeping.  It mutates the repository's OWN
+dictionaries in place — they are handed out by reference, never copied — and then calls
+``save()``, which is the single persistence boundary.
+
 Write-ahead protocol (story 9622): bind_pending + save(); create_issue() →
 DIG-NNNN; record_pending_key + save() — persisted on the STILL-pending entry
 BEFORE the rebar-id label is attached; plant the label/property; bind_confirm +
@@ -23,9 +32,7 @@ HLC → Jira comment ID) makes comment mirroring append-only/idempotent.
 
 from __future__ import annotations
 
-import json
 import os
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +40,7 @@ if TYPE_CHECKING:
     from ._backend import TicketTransport
 
 from rebar_reconciler import get_rotation, peer_state
+from rebar_reconciler.binding_repository import BindingRepository
 from rebar_reconciler.timeutil import utc_now_iso
 
 
@@ -84,15 +92,6 @@ def _now_iso() -> str:
     # local spelling used across this module's call sites.
     return utc_now_iso()
 
-
-_EMPTY_STORE: dict[str, Any] = {
-    "version": 2,
-    "bindings": {},
-    "reverse": {},
-    # emersed-specific-mutt: append-only comment sync map, local_comment_key(HLC)
-    # -> Jira comment ID. Accessed via setdefault/get so legacy stores still record.
-    "comment_ids": {},
-}
 
 # Bug 1e08-1a35-0267-4ca6 — binding lifecycle (GC) defaults. These are the
 # reconciler's only int-valued binding env vars; parsed defensively below so a
@@ -147,161 +146,59 @@ def _current_key_by_id(client: TicketTransport, jira_id: str) -> str:
 class BindingStore:
     """Bidirectional local-id ↔ jira-key binding store.
 
-    Mutations are in-memory until ``save()`` (tempfile + ``os.replace``, atomic).
+    The LIFECYCLE facade over :class:`BindingRepository`: this class owns
+    bind/confirm/retire/tombstone/comment policy, the repository owns every byte on
+    disk. Mutations are in-memory until ``save()``, which delegates the atomic write.
     """
 
     def __init__(self, tracker_dir: Path) -> None:
-        self._path = tracker_dir / ".bridge_state" / "bindings.json"
-        self._get_rotation_path = self._path.with_name("get_rotation.json")
-        # Bug 1e08: retired (soft-deleted) bindings live in a sibling file so the
-        # live store stays clean and retirement is reversible.
-        self._retired_path = tracker_dir / ".bridge_state" / "bindings-retired.json"
-        # repo_root: lifecycle alerts (binding-retired, retired-file-corrupt) key off
-        # it. tracker_dir is ``<repo_root>/.tickets-tracker``.
-        self._repo_root = tracker_dir.parent
-        self._data = self._load()
-        self._get_rotation = get_rotation.load(self._get_rotation_path)
-        get_rotation.merge_legacy(self._get_rotation, self._data["bindings"])
-        self._retired: set[str] = self._load_retired()
+        """Open the binding state under ``tracker_dir``. READS ONLY — never writes.
+
+        Every attribute below is an ALIAS for the repository's own object, never a copy:
+        the lifecycle methods, the ``peer_state`` delegates and the rich-text handler all
+        mutate ``bindings`` / ``reverse`` / the rotation stamps / the retired set IN
+        PLACE, so a defensive copy here would silently discard those writes. The
+        repository does not materialize ``.bridge_state`` either; the first :meth:`save`
+        creates it.
+
+        Failure dispositions come from the repository unchanged: a corrupt live store
+        raises ``ValueError`` (fail CLOSED, to avoid mass-duplicating Jira issues); a
+        corrupt retired file degrades to an empty set plus a deduped alert (fail OPEN).
+        """
+        self._repo = BindingRepository(tracker_dir)
+        # The four locations the repository writes, mirrored here so the facade's
+        # long-standing inspection surface is unchanged. They are READ-ONLY labels now:
+        # the live store, the bug-1e08 retired sidecar (soft deletes live beside the live
+        # store so retirement stays reversible), the GET-rotation sidecar, and the repo
+        # root the lifecycle alerts are keyed off (``<repo_root>/.tickets-tracker`` is
+        # ``tracker_dir``). Nothing here opens them — the repository does.
+        self._path = self._repo.path
+        self._retired_path = self._repo.retired_path
+        self._get_rotation_path = self._repo.rotation_path
+        self._repo_root = self._repo.repo_root
+        self._data = self._repo.data
+        self._get_rotation = self._repo.rotation
+        self._retired: set[str] = self._repo.retired_keys()
         # Bug 3b5f: reverse of the retired file — {local_id: jira_key} — so the
         # outbound differ can ask "was THIS local ticket confirmed-deleted?" without
         # re-reading the file per unbound ticket. Kept in lock-step with ``_retired``
         # by ``_retire``/``unretire``; a legacy list-form file degrades to empty.
-        self._retired_locals: dict[str, str] = {
-            str(entry["local_id"]): key
-            for key, entry in self._retired_entries().items()
-            if isinstance(entry, dict) and entry.get("local_id")
-        }
+        self._retired_locals: dict[str, str] = self._repo.retired_locals()
 
-    # -- persistence -------------------------------------------------------
-
-    def _load(self) -> dict[str, Any]:
-        if self._path.exists():
-            try:
-                with open(self._path, encoding="utf-8") as f:
-                    return json.load(f)
-            except (json.JSONDecodeError, ValueError, OSError) as exc:
-                # Fail CLOSED: a corrupt/conflict-marked bindings.json degrading to an
-                # empty store would treat every ticket as unbound → mass duplicate
-                # creates. Abort instead; recover by resolving the conflict or restoring
-                # the file from the tickets branch.
-                raise ValueError(
-                    f"bindings.json is corrupt or contains git conflict markers "
-                    f"and cannot be parsed — aborting reconcile pass to prevent "
-                    f"duplicate Jira mutations. File: {self._path}. "  # tickets-boundary-ok
-                    f"Original error: {exc}. "
-                    f"Recovery: resolve the merge conflict or restore the file "  # tickets-boundary-ok  # noqa: E501
-                    f"from the tickets branch with: "
-                    f"git show tickets:.tickets-tracker/.bridge_state/bindings.json"  # tickets-boundary-ok  # noqa: E501
-                ) from exc
-        return json.loads(json.dumps(_EMPTY_STORE))  # deep copy
-
-    def _load_retired(self) -> set[str]:
-        """Load the retired-binding set. FAIL-OPEN (bug 1e08, I2).
-
-        Contrast bindings.json (fail-closed): a retired binding wrongly treated as
-        live costs one wasted GET (it re-404s → re-retires), never a re-emit — so a
-        corrupt retired file degrades to an empty set + a deduped alert.
-        """
-        if not self._retired_path.exists():
-            return set()
-        try:
-            with open(self._retired_path, encoding="utf-8") as f:
-                data = json.load(f)
-            retired = data.get("retired", {})
-            if isinstance(retired, dict):
-                return set(retired.keys())
-            if isinstance(retired, list):
-                return set(retired)
-            return set()
-        except (json.JSONDecodeError, ValueError, OSError) as exc:
-            self._alert(
-                key="retired-file-corrupt",
-                record={
-                    "kind": "binding-retired-file-corrupt",
-                    "path": str(self._retired_path),
-                    "error": repr(exc),
-                },
-            )
-            return set()
-
-    def _retired_entries(self) -> dict[str, Any]:
-        """Read the retired-file's full {jira_key: entry} map (fail-open)."""
-        if not self._retired_path.exists():
-            return {}
-        try:
-            with open(self._retired_path, encoding="utf-8") as f:
-                data = json.load(f)
-            retired = data.get("retired", {})
-            return retired if isinstance(retired, dict) else {}
-        except (json.JSONDecodeError, ValueError, OSError):
-            return {}
-
-    def _save_retired(self, entries: dict[str, Any]) -> None:
-        """Atomically persist the retired-binding map (tempfile + os.replace)."""
-        self._retired_path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            dir=str(self._retired_path.parent),
-            prefix="bindings_retired_",
-            suffix=".tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"version": 1, "retired": entries}, f, indent=2, sort_keys=True)
-                f.write("\n")
-            os.replace(tmp, str(self._retired_path))
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
-
-    def _alert(self, key: str, record: dict[str, Any]) -> None:
-        """Append a deduped alert to bridge_alerts (best-effort).
-
-        Loaded lazily by file path so the binding store stays importable in
-        isolation (the test tree loads it via spec_from_file_location). Any
-        failure here is swallowed — alerting must never break a sync pass.
-        """
-        try:
-            import importlib.util as _ilu
-
-            alert_path = Path(__file__).parent / "alert_store.py"
-            spec = _ilu.spec_from_file_location("rebar_reconciler.alert_store", alert_path)
-            if spec is None or spec.loader is None:
-                return
-            alert_mod = _ilu.module_from_spec(spec)
-            spec.loader.exec_module(alert_mod)
-            full_record = {**record, "key": key, "resolved": False}
-            if not alert_mod.is_deduped(key, self._repo_root):
-                alert_mod.append(full_record, self._repo_root)
-        except Exception:  # noqa: BLE001 — alerting is best-effort
-            pass
+    # -- persistence (delegated to BindingRepository) -----------------------
 
     def save(self) -> None:
-        """Persist rotation first, then atomically replace bindings with safe fallback state."""
-        if get_rotation.save(self._get_rotation_path, self._get_rotation):
-            for entry in self._data["bindings"].values():
-                entry.pop("last_get_pass", None)
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            dir=str(self._path.parent),
-            prefix="bindings_",
-            suffix=".tmp",
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2, sort_keys=True)
-                f.write("\n")
-            os.replace(tmp, str(self._path))
-        except BaseException:
-            # Clean up temp file on any failure
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        """Persist the pass's state through the repository. UNCONDITIONAL.
+
+        :meth:`BindingRepository.save` owns the ordering and the failure asymmetry: the
+        GET-rotation sidecar is written FIRST and the legacy inline ``last_get_pass``
+        floor is scrubbed from the live entries only once that write durably took it, so
+        a fail-open rotation write never loses the floor and never aborts the save. The
+        live replacement is atomic and fails CLOSED (raises) — a lost binding write is
+        exactly what makes the next pass create duplicate Jira issues. No dirty-gating
+        and no write elision: an unchanged store is still rewritten.
+        """
+        self._repo.save()
 
     # -- queries -----------------------------------------------------------
 
@@ -345,6 +242,14 @@ class BindingStore:
         return _age_seconds(entry.get("created_at")) < _INDEX_LAG_GRACE_SECONDS
 
     def all_bindings(self) -> dict[str, dict]:
+        """A SHALLOW copy of the ``{local_id: entry}`` map.
+
+        Fresh outer mapping (so a caller may iterate it while the lifecycle adds or
+        removes bindings), but the inner entry dicts are the LIVE ones. Callers rely on
+        that: the baseline advance and the rich-text handler mutate an entry they got
+        from here and expect the next ``save()`` to persist it. Deep-copying would
+        silently drop those writes.
+        """
         return dict(self._data["bindings"])
 
     def pending_bindings(self) -> list[str]:
@@ -589,7 +494,7 @@ class BindingStore:
         self._data["reverse"].pop(jira_key, None)
         self._data["reverse"][current_key] = local_id
         self.save()
-        self._alert(
+        self._repo.alert(
             key=f"binding-rekeyed:{jira_key}",
             record={
                 "kind": "binding-rekeyed",
@@ -601,15 +506,21 @@ class BindingStore:
         return True
 
     def _retire(self, local_id: str, jira_key: str, entry: dict[str, Any]) -> None:
-        """Soft-delete a binding: move it to the retired file + alert."""
-        retired_entries = self._retired_entries()
+        """Soft-delete a binding: move it to the retired file + alert.
+
+        RETIRED FIRST, live second (both writes go through the repository): the entry
+        must be durable in the retired file BEFORE the live binding is dropped, or a
+        crash between the two would lose it from both and make a soft delete
+        indistinguishable from a hard one.
+        """
+        retired_entries = self._repo.retired_entries()
         retired_entries[jira_key] = {
             "local_id": local_id,
             "retired_at": _now_iso(),
             "absent_404_count": int(entry.get("absent_404_count", 0)),
             "last_jira_key": jira_key,
         }
-        self._save_retired(retired_entries)
+        self._repo.save_retired(retired_entries)
         self._retired.add(jira_key)
         self._retired_locals[local_id] = jira_key
         # Remove the live binding (reversible: the entry survives in the
@@ -617,7 +528,7 @@ class BindingStore:
         self._data["bindings"].pop(local_id, None)
         self._data["reverse"].pop(jira_key, None)
         self.save()
-        self._alert(
+        self._repo.alert(
             key=f"binding-retired:{jira_key}",
             record={
                 "kind": "binding-retired",
@@ -684,16 +595,16 @@ class BindingStore:
         Returns True when a tombstone was actually lifted; False (a no-op) when the
         key was not retired, so the call is idempotent.
         """
-        retired_entries = self._retired_entries()
+        retired_entries = self._repo.retired_entries()
         entry = retired_entries.pop(jira_key, None)
         if entry is None and jira_key not in self._retired:
             return False
-        self._save_retired(retired_entries)
+        self._repo.save_retired(retired_entries)
         self._retired.discard(jira_key)
         for local_id, key in list(self._retired_locals.items()):
             if key == jira_key:
                 del self._retired_locals[local_id]
-        self._alert(
+        self._repo.alert(
             key=f"binding-unretired:{jira_key}",
             record={
                 "kind": "binding-unretired",
@@ -710,7 +621,7 @@ class BindingStore:
         create looks identical to a healthy steady state. The alert names the route
         back so the operator does not have to hand-edit retired state.
         """
-        self._alert(
+        self._repo.alert(
             key=f"outbound-create-suppressed:{local_id}",
             record={
                 "kind": "outbound-create-suppressed",
