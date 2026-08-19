@@ -267,3 +267,169 @@ def test_transition_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
 
     assert _status(child, rebar_repo) == "in_progress"
     assert _status(parent, rebar_repo) == "open"  # NOT cascaded
+
+
+# --------------------------------------------------------------------------- reopen
+
+
+def _closed_chain(repo: Path, depth: int) -> list[str]:
+    """Create a parent chain ``depth`` deep (root first) and close it bottom-up, which
+    is the only order the unresolved-open-children guard permits."""
+    chain: list[str] = []
+    parent: str | None = None
+    for i in range(depth):
+        kind = "epic" if i == 0 else ("story" if i < depth - 1 else "task")
+        chain.append(rebar.create_ticket(kind, f"n{i}", parent=parent, repo_root=str(repo)))
+        parent = chain[-1]
+    for tid in reversed(chain):
+        rebar.transition(tid, "open", "closed", repo_root=str(repo))
+    return chain
+
+
+def test_reopen_child_reopens_closed_parent(rebar_repo: Path) -> None:
+    """The bug: reopening a child left its CLOSED parent closed, so the store held a
+    closed parent with a non-closed child."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    rebar.reopen(child, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "open"  # cascaded
+
+
+def test_reopen_cascades_through_multiple_closed_levels(rebar_repo: Path) -> None:
+    grand, parent, child = _closed_chain(rebar_repo, 3)
+
+    rebar.reopen(child, repo_root=str(rebar_repo))
+
+    for t in (grand, parent, child):
+        assert _status(t, rebar_repo) == "open", f"{t} not cascaded"
+
+
+def test_reopen_does_not_disturb_already_open_parent(rebar_repo: Path) -> None:
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+
+    rebar.reopen(child, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "open"  # untouched no-op
+
+
+def test_reopen_does_not_disturb_in_progress_parent(rebar_repo: Path) -> None:
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.claim(parent, assignee="owner", repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+
+    rebar.reopen(child, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "in_progress"  # not dragged backwards
+
+
+def test_reopen_parent_failure_aborts_child_with_attributed_error(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-fast, no partial cascade: a raced parent keeps its concurrency identity
+    (exit 10) at the leaf and the child is NOT reopened."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    orig = txn.transition_core
+
+    def fake_transition_core(tracker, ticket_id, current, target, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == parent:
+            raise ConcurrencyMismatch("simulated parent reopen failure")
+        return orig(tracker, ticket_id, current, target, **kw)
+
+    monkeypatch.setattr(txn, "transition_core", fake_transition_core)
+
+    with pytest.raises(rebar.ConcurrencyError) as ei:
+        rebar.reopen(child, repo_root=str(rebar_repo))
+
+    assert ei.value.returncode == 10
+    msg = str(ei.value)
+    assert parent in msg, f"error must name the parent: {msg}"
+    assert child in msg
+    assert "parent" in msg.lower()
+    assert _status(child, rebar_repo) == "closed"  # child NOT reopened
+
+
+def test_cli_reopen_cascade_smoke(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI parity: `rebar reopen <child>` cascades to the closed parent too."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    rc = _cli.main(["reopen", child])
+    capsys.readouterr()
+
+    assert rc == 0
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "open"
+
+
+def test_reopen_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
+    """`cascade=False` (per-ticket state replay, e.g. NDJSON import) opts out of the
+    reopen cascade exactly as it does for the open -> in_progress edge."""
+    from rebar._commands.transition import transition_compute
+
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    transition_compute(child, "closed", "open", cascade=False, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "open"
+    assert _status(parent, rebar_repo) == "closed"  # NOT cascaded
+
+
+# ------------------------------------------------- cascade TOCTOU benign-race parity
+
+
+def test_transition_benign_parent_race_still_moves_child(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parity with `claim`'s cascade: the cascade decision reads the parent's status
+    WITHOUT the write lock, so a peer can move the parent off the eligible status in
+    between. When the parent op then fails but the parent has ALREADY left that status,
+    the cascade's purpose is met — that is benign and the child still moves."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+
+    orig = txn.transition_core
+
+    def racing_transition_core(tracker, ticket_id, current, target, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == parent:
+            # Simulate the peer that won the race: the parent leaves `open` under the
+            # lock, and OUR parent transition is rejected.
+            orig(tracker, ticket_id, "open", "blocked", **kw)
+            raise ConcurrencyMismatch("parent progressed concurrently")
+        return orig(tracker, ticket_id, current, target, **kw)
+
+    monkeypatch.setattr(txn, "transition_core", racing_transition_core)
+
+    rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"  # benign — child still moved
+    assert _status(parent, rebar_repo) == "blocked"  # the peer's write stands
+
+
+def test_reopen_benign_parent_race_still_reopens_child(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same benign-race rule on the reopen edge: a parent already dragged off
+    `closed` by a peer is benign, so the child is still reopened."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    orig = txn.transition_core
+
+    def racing_transition_core(tracker, ticket_id, current, target, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == parent:
+            orig(tracker, ticket_id, "closed", "open", **kw)
+            raise ConcurrencyMismatch("parent reopened concurrently")
+        return orig(tracker, ticket_id, current, target, **kw)
+
+    monkeypatch.setattr(txn, "transition_core", racing_transition_core)
+
+    rebar.reopen(child, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "open"  # benign — child still reopened
+    assert _status(parent, rebar_repo) == "open"

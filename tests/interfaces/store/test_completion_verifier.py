@@ -479,9 +479,9 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
         description="Body.\n\n## Acceptance Criteria\n- [ ] z\n",
         repo_root=str(rebar_repo),
     )
-    # Reach the "closed+certified direct child with an OPEN grandchild" state legitimately:
-    # the open-children guard cannot be bypassed (not even with --force, warty-karma-matte) and
-    # a closed parent can't gain new children — so close the grandchild, then the child (each
+    # Reach the "closed+certified direct child with an OPEN grandchild" state: the
+    # open-children guard cannot be bypassed (not even with --force, warty-karma-matte) and a
+    # closed parent can't gain new children — so close the grandchild, then the child (each
     # passes the guard with NO force), then REOPEN the grandchild. (A grandchild reopened after
     # its ancestors closed is exactly the case the verifier must not recurse into.)
     # Starting work on the grandchild cascades its ancestors (child, epic) to in_progress too
@@ -491,8 +491,17 @@ def test_child_closure_does_not_recurse_grandchildren(rebar_repo: Path) -> None:
     _t.transition_compute(rid(child), "in_progress", "closed", repo_root=str(rebar_repo))
     rebar.sign_manifest(child, ["completion-verifier: PASS"], repo_root=str(rebar_repo))
     assert rebar.verify_signature(child, repo_root=str(rebar_repo))["verdict"] == "certified"
-    _t.transition_compute(rid(grandchild), "closed", "open", repo_root=str(rebar_repo))  # reopen
+    # `cascade=False` on the reopen: an ordinary `reopen` now carries the parent-first cascade
+    # on the `closed -> open` edge (bug cranial-sulfur-peafowl), which would drag the closed
+    # child back open and dissolve the very state under test. The state is still reachable in
+    # the field — an offline clone's merge, or a `cascade=False` state replay (NDJSON import) —
+    # so the verifier's non-recursion still has to hold; `cascade=False` is the seam that
+    # synthesizes it here without re-introducing the bug.
+    _t.transition_compute(
+        rid(grandchild), "closed", "open", cascade=False, repo_root=str(rebar_repo)
+    )
     assert rebar.show_ticket(grandchild, repo_root=str(rebar_repo))["status"] == "open"
+    assert rebar.show_ticket(child, repo_root=str(rebar_repo))["status"] == "closed"
 
     r = rebar.llm.verify_completion(
         epic,
