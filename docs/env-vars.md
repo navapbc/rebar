@@ -154,7 +154,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_VERIFY_OVERLAP_ENABLED` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` |
 | `REBAR_VERIFY_PREFETCH` | `src/rebar/llm/workflow/gate_ops.py` |  |
 | `RECONCILER_ABSENT_GET_BUDGET` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
-| `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_sources.py`, `src/rebar/_engine/rebar_reconciler/binding_lifecycle.py` |  |
+| `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_sources.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_MAX_HOLDBACK_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -178,7 +178,6 @@ These reads pass a non-literal name argument, so the concrete variable name is n
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
 - `src/rebar/_config_sources.py:616` — `os.environ.get(<non-literal>)`
-- `src/rebar/_engine/rebar_reconciler/binding_lifecycle.py:72` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:295` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:308` — `os.environ.get(<non-literal>)`
