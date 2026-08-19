@@ -349,7 +349,7 @@ def plan_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     # (veiny-trout-brink), so an explicit caller model sizes the verify request correctly.
     verify_model = _verifier_cfg(resolve_gate_config(ctx.repo_root)).model
     try:
-        headroom = float(_config.load_config(ctx.repo_root).verify.verify_window_headroom)
+        headroom = float(_config.compose_config(ctx.repo_root).verify.verify_window_headroom)
     except Exception:  # noqa: BLE001 — config unreadable → the documented default
         headroom = sizing.DEFAULT_VERIFY_WINDOW_HEADROOM
     chunks, _omitted = sizing.verify_request_chunks(findings, model=verify_model, headroom=headroom)

@@ -96,7 +96,7 @@ def _remediation_decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
     from rebar import config as _config
 
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → conservative full review (no remediation)
         return None
     return attest.remediation_mode_candidate(
@@ -213,7 +213,7 @@ def _maybe_apply_rising_floor(
     if not (remediation and remediation.get("eligible")):
         return
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-floored
         return
     advisory = verdict.get("advisory") or []
@@ -371,7 +371,7 @@ def _maybe_apply_completion_floor(
     if not getattr(ctx, "has_children", False):
         return
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-floored
         return
     if not verify_cfg.completion_floor_active:
@@ -771,7 +771,7 @@ def _run_plan_review(
     if emit_sidecar:
         from rebar import config as _overlap_config
 
-        if _overlap_config.load_config(repo_root).verify.suggest_duplicate_tickets:
+        if _overlap_config.compose_config(repo_root).verify.suggest_duplicate_tickets:
             from rebar.llm.overlap.wire import overlap_findings
 
             verdict["overlap"] = overlap_findings(

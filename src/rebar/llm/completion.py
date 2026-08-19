@@ -212,7 +212,7 @@ def _verify_completion_inner(
     from rebar.llm.workflow.completion_criteria import explicit_completion_criteria
 
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → packaged defaults, floor still applies
         verify_cfg = VerifyConfig()
     # Lever-1 floor scales with the ticket's explicit checkbox count. A ticket with no

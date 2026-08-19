@@ -275,7 +275,7 @@ def code_review_enabled(repo_root=None) -> bool:
     from rebar import config as _config
 
     try:
-        return bool(_config.load_config(repo_root).verify.enable_code_review)
+        return bool(_config.compose_config(repo_root).verify.enable_code_review)
     except Exception:  # noqa: BLE001 — unreadable config ⇒ treat as disabled (inert/safe)
         return False
 

@@ -168,7 +168,7 @@ def decision(ticket_id: str, repo_root) -> dict[str, Any] | None:
     from rebar import config as _config
 
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → conservative full review (no drift floor)
         return None
     return drift_floor_candidate(
@@ -307,7 +307,7 @@ def maybe_apply(
     if drifted_raw is None:  # drift set unknown → fail-safe: never suppress
         return
     try:
-        verify_cfg = _config.load_config(repo_root).verify
+        verify_cfg = _config.compose_config(repo_root).verify
     except Exception:  # noqa: BLE001 — config unreadable → run un-floored
         return
     blocking = verdict.get("blocking") or []

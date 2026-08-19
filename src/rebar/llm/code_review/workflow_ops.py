@@ -661,7 +661,7 @@ def apply_region_gated_floor(
 
         if not key:
             return
-        vcfg = _config.load_config(repo_root).verify
+        vcfg = _config.compose_config(repo_root).verify
         advisory = verdict.get("advisory") or []
         if not advisory:
             return

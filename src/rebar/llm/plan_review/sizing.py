@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -121,13 +120,9 @@ def plan_budget_cap(ctx: PlanContext) -> float:
     """The per-plan budget cap in USD: a base cap scaled by centrality (a central plan
     earns up to 2× scrutiny), overridable by ``REBAR_PLAN_REVIEW_BUDGET`` (the base,
     before centrality scaling)."""
-    base = DEFAULT_BUDGET_CAP_USD
-    raw = os.environ.get("REBAR_PLAN_REVIEW_BUDGET", "").strip()
-    if raw:
-        try:
-            base = float(raw)
-        except ValueError:
-            pass
+    from rebar import config as _config
+
+    base = _config.resolve_plan_review_budget(DEFAULT_BUDGET_CAP_USD)
     return round(base * (1.0 + ctx.centrality), 4)
 
 
