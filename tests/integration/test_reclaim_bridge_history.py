@@ -29,6 +29,21 @@ def _git(
     )
 
 
+def _bare_git(
+    repo: Path,
+    *args: str,
+    check: bool = True,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", "--git-dir", str(repo), *args],
+        check=check,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+
 def _write(repo: Path, relative: str, content: str) -> None:
     target = repo / relative
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -99,7 +114,7 @@ def reclaim_fixture(tmp_path: Path) -> ReclaimFixture:
     _git(seed, "push", "-q", "origin", "tickets:tickets")
     _git(seed, "tag", PROTECTED_TAG.removeprefix("refs/tags/"), protected_tag_tip)
     _git(seed, "push", "-q", "origin", PROTECTED_TAG)
-    _git(remote, "symbolic-ref", "HEAD", "refs/heads/tickets")
+    _bare_git(remote, "symbolic-ref", "HEAD", "refs/heads/tickets")
 
     subprocess.run(
         [
@@ -160,6 +175,10 @@ def _ref(repo: Path, ref: str) -> str:
     return _git(repo, "rev-parse", ref).stdout.strip()
 
 
+def _bare_ref(repo: Path, ref: str) -> str:
+    return _bare_git(repo, "rev-parse", ref).stdout.strip()
+
+
 def _count(repo: Path, ref: str, *, merges: bool = False) -> int:
     args = ["rev-list", "--count"]
     if merges:
@@ -177,8 +196,8 @@ def test_dry_run_preserves_graph_and_head_tree_without_publishing(
     reclaim_fixture: ReclaimFixture, tmp_path: Path
 ) -> None:
     fixture = reclaim_fixture
-    source_before = _ref(fixture.remote, "refs/heads/tickets")
-    tag_before = _ref(fixture.remote, PROTECTED_TAG)
+    source_before = _bare_ref(fixture.remote, "refs/heads/tickets")
+    tag_before = _bare_ref(fixture.remote, PROTECTED_TAG)
     old_commits = _count(fixture.scratch, fixture.old_tip)
     old_merges = _count(fixture.scratch, fixture.old_tip, merges=True)
     old_tree = _ref(fixture.scratch, f"{fixture.old_tip}^{{tree}}")
@@ -204,8 +223,8 @@ def test_dry_run_preserves_graph_and_head_tree_without_publishing(
     )
     for path, content in fixture.state_files.items():
         assert _git(fixture.scratch, "show", f"{rewritten}:{path}").stdout == content
-    assert _ref(fixture.remote, "refs/heads/tickets") == source_before == fixture.old_tip
-    assert _ref(fixture.remote, PROTECTED_TAG) == tag_before == fixture.protected_tag_tip
+    assert _bare_ref(fixture.remote, "refs/heads/tickets") == source_before == fixture.old_tip
+    assert _bare_ref(fixture.remote, PROTECTED_TAG) == tag_before == fixture.protected_tag_tip
     assert (
         _git(
             fixture.scratch, "show-ref", "--verify", "--quiet", PROTECTED_TAG, check=False
@@ -277,8 +296,8 @@ def test_cli_never_invokes_push_and_leaves_source_refs_exact(
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
-    source_before = _ref(fixture.remote, "refs/heads/tickets")
-    tag_before = _ref(fixture.remote, PROTECTED_TAG)
+    source_before = _bare_ref(fixture.remote, "refs/heads/tickets")
+    tag_before = _bare_ref(fixture.remote, PROTECTED_TAG)
     environment = {
         "PATH": f"{wrapper_dir}:{Path(git_executable).parent}:/usr/bin:/bin",
         "REAL_GIT": git_executable,
@@ -291,8 +310,8 @@ def test_cli_never_invokes_push_and_leaves_source_refs_exact(
     assert completed.returncode == 0, completed.stderr
     calls = record.read_text(encoding="utf-8").splitlines()
     assert not [call for call in calls if re.match(r"(?:-C\s+\S+\s+)?push(?:\s|$)", call)]
-    assert _ref(fixture.remote, "refs/heads/tickets") == source_before
-    assert _ref(fixture.remote, PROTECTED_TAG) == tag_before
+    assert _bare_ref(fixture.remote, "refs/heads/tickets") == source_before
+    assert _bare_ref(fixture.remote, PROTECTED_TAG) == tag_before
 
 
 def test_unrelated_remote_ref_movement_does_not_fail_dry_run(
@@ -322,8 +341,8 @@ def test_unrelated_remote_ref_movement_does_not_fail_dry_run(
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
-    source_before = _ref(fixture.remote, "refs/heads/tickets")
-    tag_before = _ref(fixture.remote, PROTECTED_TAG)
+    source_before = _bare_ref(fixture.remote, "refs/heads/tickets")
+    tag_before = _bare_ref(fixture.remote, PROTECTED_TAG)
     environment = {
         "PATH": f"{wrapper_dir}:{Path(git_executable).parent}:/usr/bin:/bin",
         "REAL_GIT": git_executable,
@@ -335,10 +354,10 @@ def test_unrelated_remote_ref_movement_does_not_fail_dry_run(
 
     completed = _run_script(fixture, env=environment)
 
-    assert _ref(fixture.remote, "refs/heads/unrelated") == fixture.protected_tag_tip
+    assert _bare_ref(fixture.remote, "refs/heads/unrelated") == fixture.protected_tag_tip
     assert completed.returncode == 0, completed.stderr
-    assert _ref(fixture.remote, "refs/heads/tickets") == source_before
-    assert _ref(fixture.remote, PROTECTED_TAG) == tag_before
+    assert _bare_ref(fixture.remote, "refs/heads/tickets") == source_before
+    assert _bare_ref(fixture.remote, PROTECTED_TAG) == tag_before
 
 
 def test_rewritten_branch_accepts_small_representative_writer_push(
@@ -368,13 +387,13 @@ def test_rewritten_branch_accepts_small_representative_writer_push(
         str(published),
         "refs/heads/rewritten-tickets:refs/heads/tickets",
     )
-    _git(published, "symbolic-ref", "HEAD", "refs/heads/tickets")
-    _git(published, "repack", "-Ad")
+    _bare_git(published, "symbolic-ref", "HEAD", "refs/heads/tickets")
+    _bare_git(published, "repack", "-Ad")
     before = (
         int(
             next(
                 line.split(": ", 1)[1]
-                for line in _git(published, "count-objects", "-v").stdout.splitlines()
+                for line in _bare_git(published, "count-objects", "-v").stdout.splitlines()
                 if line.startswith("size-pack: ")
             )
         )
@@ -390,12 +409,12 @@ def test_rewritten_branch_accepts_small_representative_writer_push(
     )
     _commit(writer, "append representative review-bot event")
     _git(writer, "push", "-q", "origin", "tickets")
-    _git(published, "repack", "-Ad")
+    _bare_git(published, "repack", "-Ad")
     after = (
         int(
             next(
                 line.split(": ", 1)[1]
-                for line in _git(published, "count-objects", "-v").stdout.splitlines()
+                for line in _bare_git(published, "count-objects", "-v").stdout.splitlines()
                 if line.startswith("size-pack: ")
             )
         )

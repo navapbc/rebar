@@ -117,6 +117,13 @@ def _git(d: Path, *a: str) -> subprocess.CompletedProcess:
     return r
 
 
+def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess:
+    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
+    return r
+
+
 def test_push_reaches_nonorigin_remote_end_to_end(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -146,7 +153,7 @@ def test_push_reaches_nonorigin_remote_end_to_end(
     # The bare remote has no 'tickets' commit yet; push must advance it via the configured remote.
     push.push_tickets_branch(str(tracker))  # best-effort; never raises
 
-    landed = _git(github, "rev-parse", "tickets").stdout.strip()
+    landed = _bare_git(github, "rev-parse", "tickets").stdout.strip()
     assert landed == head, "push did not reach the configured (non-origin) 'github' remote"
 
 
@@ -188,7 +195,7 @@ def test_push_config_file_remote_end_to_end(tmp_path: Path) -> None:
     cfg.reset_config_cache()
 
     push.push_tickets_branch(str(tracker))  # best-effort; never raises
-    assert _git(bare, "rev-parse", "tickets").stdout.strip() == head
+    assert _bare_git(bare, "rev-parse", "tickets").stdout.strip() == head
 
 
 def test_fsck_push_pending_names_configured_remote(

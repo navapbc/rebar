@@ -47,6 +47,10 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
     return _run(["git", *args], cwd=repo, env=env).stdout.strip()
 
 
+def _bare_git(repo: Path, *args: str, env: dict[str, str] | None = None) -> str:
+    return _run(["git", "--git-dir", str(repo), *args], cwd=repo.parent, env=env).stdout.strip()
+
+
 def _write_incompressible(path: Path, byte_count: int) -> None:
     remaining = byte_count
     with path.open("wb") as stream:
@@ -103,9 +107,9 @@ def _ticket_server(
     served.mkdir()
     bare = served / "tickets.git"
     _run(["git", "clone", "--quiet", "--bare", str(source), str(bare)], cwd=root)
-    _git(bare, "fetch", str(source), "+tickets:tickets")
-    _git(bare, "repack", "-a", "-d")
-    _git(bare, "prune", "--expire=now")
+    _bare_git(bare, "fetch", str(source), "+tickets:tickets")
+    _bare_git(bare, "repack", "-a", "-d")
+    _bare_git(bare, "prune", "--expire=now")
 
     global_config = root / "daemon.gitconfig"
     global_config.write_text("[uploadpack]\n\tallowFilter = true\n", encoding="utf-8")
@@ -442,6 +446,6 @@ def test_blobless_tickets_reconverges_and_pushes(
     assert (tracker / "remote-event.json").read_text(encoding="utf-8") == '{"side":"remote"}\n'
     assert (tracker / ".bridge_state" / "cursor").read_text(encoding="utf-8") == "local\n"
     _git(tracker, "push", "origin", "HEAD:tickets")
-    assert _git(small_ticket_server.bare, "rev-parse", "tickets") == _git(
+    assert _bare_git(small_ticket_server.bare, "rev-parse", "tickets") == _git(
         tracker, "rev-parse", "HEAD"
     )
