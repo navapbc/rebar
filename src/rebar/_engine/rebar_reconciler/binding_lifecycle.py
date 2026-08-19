@@ -20,8 +20,10 @@ scratch: the file is shared with other writers and carries per-entry state this 
 not own (baseline/peer_state overlays, fields a newer rebar wrote), so unknown and legacy
 keys must survive every transition.
 
-Deliberately NOT here: GET rotation and pending-binding recovery. Those stay with
-``BindingStore``, which remains the FACADE and the only public door to binding state — and
+Deliberately NOT here: GET rotation, which stays with ``BindingStore``, and
+incomplete-operation recovery, which is ``BindingRecovery``'s (RP-02 S3) — it drives the
+transitions below to finish a create or a retirement a crash cut in half. ``BindingStore``
+remains the FACADE and the only public door to binding state — and
 which is also where the ``note_absent_or_rekey`` coordinator lives: it performs the by-id
 client lookup, asks :meth:`rekey` to swap the indexes, and falls through to :meth:`note_absent`
 on a negative answer.
