@@ -92,7 +92,7 @@ def compact_cli(
     # A --threshold= flag below still overrides. A malformed config is reported as a
     # clean error (exit 1), not an uncaught traceback.
     try:
-        _cfg = config.load_config(repo_root).compact
+        _cfg = config.compose_config(repo_root).compact
         threshold = _cfg.threshold
         horizon = _cfg.COMPACTION_HORIZON_NS
     except config.ConfigError as exc:
@@ -526,7 +526,7 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     try:
-        _cfg = config.load_config(repo_root).compact
+        _cfg = config.compose_config(repo_root).compact
         threshold, horizon = _cfg.threshold, _cfg.COMPACTION_HORIZON_NS
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")

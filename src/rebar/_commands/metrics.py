@@ -136,7 +136,7 @@ def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
     until = until if until and until.strip() else default_until
 
     root = str(config.repo_root(repo_root) if repo_root is not None else config.repo_root())
-    code_health = config.load_config(root).code_health
+    code_health = config.compose_config(root).code_health
     ctx = SimpleNamespace(
         repo_root=root,
         since=since,

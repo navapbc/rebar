@@ -10,7 +10,6 @@ existing importers dispatch to them unchanged.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 
 
@@ -233,6 +232,7 @@ def _llm_setup(args: argparse.Namespace) -> int:
 
     import rebar
     from rebar import _optional
+    from rebar import config as _rebar_config
     from rebar.llm import config as _cfg
 
     backends = _cfg.available_backends()
@@ -257,7 +257,7 @@ def _llm_setup(args: argparse.Namespace) -> int:
 
     # Optionally configure the OTLP tracing sink (write-only): an explicit
     # --otlp-endpoint, else the standard OTEL env var if set.
-    otlp = args.otlp_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
+    otlp = _rebar_config.resolve_otlp_endpoint(args.otlp_endpoint)
     snippet = f'[tool.rebar.llm]\nmodel = "{_cfg.DEFAULT_MODEL}"\n'
     if otlp:
         snippet += (

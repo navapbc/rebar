@@ -181,18 +181,9 @@ def _resolve_repo_root(repo_root) -> str | None:
     (explicit > REBAR_ROOT > git toplevel of cwd) so init writes the
     tracker exactly where every command (config.tracker_dir) and the auto-init gate
     look for it. Returns None only when no root resolves (→ "not a git repo")."""
-    if repo_root:
-        return os.path.realpath(str(repo_root))
-    env = os.environ.get("REBAR_ROOT")
-    if env:
-        return os.path.realpath(env)
-    cp = subprocess.run(
-        ["git", "-C", ".", "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        env={**os.environ, "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"},
-    )
-    return cp.stdout.strip() if cp.returncode == 0 and cp.stdout.strip() else None
+    from rebar import config
+
+    return config.repo_root_or_none(repo_root)
 
 
 def _tracker_exclude_entry(repo: str, tracker: str) -> str | None:

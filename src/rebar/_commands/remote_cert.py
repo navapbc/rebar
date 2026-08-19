@@ -33,7 +33,7 @@ def cli(argv: list[str]) -> int:
     args = p.parse_args(argv)
 
     try:
-        cfg = config.load_config(root=args.root)
+        cfg = config.compose_config(root=args.root)
     except config.ConfigError as exc:
         print(f"remote-cert: {exc}", file=sys.stderr)
         return 2

@@ -250,9 +250,9 @@ def create_core(
     # Detection-channel capture (ticket d3ed): explicit param wins over the env var
     # (an explicit empty string suppresses it); strip+lowercase, empty -> unset,
     # never blocks the create. Present-only, mirroring source_* above.
-    _detected_candidate = (
-        detected_by if detected_by is not None else os.environ.get("REBAR_DETECTED_BY")
-    )
+    from rebar import config as _config
+
+    _detected_candidate = _config.resolve_detected_by(detected_by)
     if _detected_candidate is not None:
         _detected_norm = _detected_candidate.strip().lower()
         if _detected_norm:

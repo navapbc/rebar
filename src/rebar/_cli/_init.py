@@ -19,25 +19,9 @@ tracker — the middleware returns immediately.
 from __future__ import annotations
 
 import logging
-import os
-import subprocess
 import sys
 
 _log = logging.getLogger(__name__)
-
-
-def _git_toplevel() -> str | None:
-    try:
-        r = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-    except OSError:
-        return None
-    out = r.stdout.strip()
-    return out if (r.returncode == 0 and out) else None
 
 
 def _resolve_repo_root() -> str:
@@ -47,9 +31,9 @@ def _resolve_repo_root() -> str:
     """
     # Same precedence as config.repo_root (REBAR_ROOT > git) so the
     # gate inspects the SAME repo the commands operate on and init writes to.
-    root = os.environ.get("REBAR_ROOT")
-    if not root:
-        root = _git_toplevel()
+    from rebar import config
+
+    root = config.repo_root_or_none()
     if not root:
         sys.stderr.write(
             "Error: not inside a git repository (set REBAR_ROOT or run inside the repo)\n"
@@ -237,7 +221,7 @@ def ensure_store_mounted_best_effort() -> None:
         # Resolve the repo root with the REBAR_ROOT > git precedence. Unlike
         # ensure_initialized this must not raise when there is no repo — a no-store
         # command (e.g. `rebar explain`) may run outside any git repo.
-        root = os.environ.get("REBAR_ROOT") or _git_toplevel()
+        root = config.repo_root_or_none()
         if not root:
             return
         if config.tracker_dir(root).is_dir():

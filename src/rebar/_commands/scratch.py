@@ -34,7 +34,7 @@ def base_dir(repo_root=None) -> str:
     ``<repo_root or config.repo_root()>/.rebar/scratch``. Scratch is best-effort
     infra, so a malformed config falls back to the default rather than erroring."""
     try:
-        base = config.load_config(repo_root).scratch.base_dir
+        base = config.compose_config(repo_root).scratch.base_dir
     except config.ConfigError:
         base = ""
     if base:

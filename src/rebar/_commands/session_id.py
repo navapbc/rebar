@@ -54,7 +54,7 @@ _REMOTE_SESSION_VAR = "CLAUDE_CODE_REMOTE_SESSION_ID"
 def _first_nonempty(*varnames: str) -> str | None:
     """Return the first env var (in order) whose value is non-empty after strip, else None."""
     for var in varnames:
-        val = os.environ.get(var)
+        val = os.environ.get(var)  # read-via: harness-protocol-env
         if val and val.strip():
             return val
     return None

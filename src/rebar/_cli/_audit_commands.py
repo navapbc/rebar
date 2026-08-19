@@ -142,7 +142,7 @@ def _audit_serve(args: list[str]) -> int:
     # Resolve the gate flag from config (honors REBAR_ROOT / REBAR_UI_ENABLED / -c).
     from rebar import config
 
-    if not config.load_config().ui.enabled:
+    if not config.compose_config().ui.enabled:
         sys.stderr.write(
             "Error: the audit web UI is disabled. Set `[ui] enabled = true` (config key "
             "`ui.enabled`) to enable `rebar audit serve`.\n"

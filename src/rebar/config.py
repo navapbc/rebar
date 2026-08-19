@@ -62,12 +62,16 @@ from rebar._config_sources import _map_legacy_env as _map_legacy_env
 from rebar._config_sources import _pyproject_rebar_state as _pyproject_rebar_state
 from rebar._config_sources import config_file as config_file
 from rebar._config_sources import layer_llm_config_file as layer_llm_config_file
+from rebar._config_sources import repo_root_or_none as repo_root_or_none
 from rebar._config_sources import (
     resolve_allow_env_reidentify as resolve_allow_env_reidentify,
 )
+from rebar._config_sources import resolve_detected_by as resolve_detected_by
 from rebar._config_sources import resolve_gate_tmpdir as resolve_gate_tmpdir
 from rebar._config_sources import resolve_janitor_tunables as resolve_janitor_tunables
 from rebar._config_sources import resolve_lock_retries as resolve_lock_retries
+from rebar._config_sources import resolve_os_actor as resolve_os_actor
+from rebar._config_sources import resolve_otlp_endpoint as resolve_otlp_endpoint
 from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits
 from rebar._config_sources import resolve_stall_attempts as resolve_stall_attempts
 from rebar._operation_config import ENVELOPE_VERSION as ENVELOPE_VERSION
@@ -457,13 +461,37 @@ def mcp_gate(attr: str, *, fail: bool) -> bool:
         return fail
 
 
-def compose_config() -> Config:
+def compose_config(root: str | os.PathLike[str] | None = None) -> Config:
     """Composition-root entry for a process root (e.g. the MCP server's ``build_server``
-    / ``main``) to obtain the fully-composed typed :class:`Config`. Routing the startup
-    load through this owned seam lets those roots RECEIVE composed config instead of
-    calling ``load_config`` below the composition seam. A :class:`ConfigError`
-    propagates (fail-closed startup), exactly as a direct ``load_config`` would."""
-    return load_config()
+    / ``main``) or a CLI command arm to obtain the fully-composed typed :class:`Config`
+    for a repo ``root`` (``None`` = discover from cwd). Routing the load through this
+    owned seam lets those roots and the ``_cli`` / ``_commands`` helpers RECEIVE composed
+    config instead of calling ``load_config`` below the composition seam. A
+    :class:`ConfigError` propagates (fail-closed startup), exactly as a direct
+    ``load_config`` would."""
+    return load_config(root)
+
+
+def resolve_jira_detection() -> tuple[str, str, str, bool]:
+    """Resolve the current (non-secret) Jira coordinates + whether the secret token is
+    set, for the onboarding wizard's in-process detection. Returns
+    ``(url, user, project, token_present)``.
+
+    ``load_config().jira`` ALREADY layers the ``JIRA_URL`` / ``JIRA_USER`` /
+    ``JIRA_PROJECT`` env over the config file, so this owns that composition once (no
+    below-seam re-read); a :class:`ConfigError` degrades to the empty/env-only coordinates
+    (fail-soft, matching the reconciler resolver — a bad ``jira.url`` must not block the
+    wizard that FIXES it). The secret ``JIRA_API_TOKEN`` is resolved through the
+    credential seam :func:`read_secret_env` and reported only as a presence flag — the
+    value never leaves this boundary."""
+    url = user = project = ""
+    try:
+        jira = load_config().jira
+        url, user, project = jira.url, jira.user, jira.project
+    except ConfigError:
+        pass
+    token_present = bool(read_secret_env("JIRA_API_TOKEN"))
+    return url, user, project, token_present
 
 
 def resolve_push_mode(root: str | os.PathLike[str] | None = None) -> str:

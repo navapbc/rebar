@@ -76,10 +76,10 @@ def gate_enabled(
     stronger signature gate fail-CLOSES independently, and a missing attestation is
     itself the "not validated" signal CI checks.
     """
-    from rebar.config import ConfigError, load_config
+    from rebar.config import ConfigError, compose_config
 
     try:
-        return bool(getattr(load_config(cfg_root).verify, attr))
+        return bool(getattr(compose_config(cfg_root).verify, attr))
     except ConfigError as exc:
         print(
             f"Warning: could not read rebar config ({exc}); {gate_label} is skipped "
@@ -187,9 +187,9 @@ def description_cap_warning(
     if not description:
         return None
     try:
-        from rebar.config import load_config
+        from rebar.config import compose_config
 
-        limit = int(load_config(cfg_root).verify.max_ticket_description_chars)
+        limit = int(compose_config(cfg_root).verify.max_ticket_description_chars)
         chars = len(description)
         if chars <= limit:
             return None

@@ -46,9 +46,9 @@ TRAIL_KEY = "auto_resume_trail"
 
 def _max_resumes(cfg_root: str | None) -> int:
     """The configured resumption bound, ``verify.auto_resume_max`` (default 2; 0 disables)."""
-    from rebar.config import load_config
+    from rebar.config import compose_config
 
-    return int(load_config(cfg_root).verify.auto_resume_max)
+    return int(compose_config(cfg_root).verify.auto_resume_max)
 
 
 def _cache_credited_count(result: dict[str, Any]) -> int:

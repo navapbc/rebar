@@ -506,7 +506,7 @@ def cli(argv: list[str]) -> int:
     args = p.parse_args(argv)
 
     try:
-        cfg = config.load_config(root=args.root)
+        cfg = config.compose_config(root=args.root)
     except config.ConfigError as exc:
         print(f"verify-identity: {exc}", file=sys.stderr)
         return 2
