@@ -228,11 +228,24 @@ class BindingStore:
     def all_bindings(self) -> dict[str, dict]:
         """A SHALLOW copy of the ``{local_id: entry}`` map.
 
-        Fresh outer mapping (so a caller may iterate it while the lifecycle adds or
-        removes bindings), but the inner entry dicts are the LIVE ones. Callers rely on
-        that: the baseline advance and the rich-text handler mutate an entry they got
-        from here and expect the next ``save()`` to persist it. Deep-copying would
-        silently drop those writes.
+        Fresh outer mapping, so a caller may iterate it while the lifecycle adds or
+        removes bindings; the inner entry dicts are the LIVE ones, so what a caller reads
+        through here is current state and not a snapshot taken at call time.
+
+        This is now a READ-ONLY query in practice. It used to be described as a write
+        seam — "the baseline advance and the rich-text handler mutate an entry they got
+        from here" — and neither half of that survives inspection: the rich-text handler
+        was cut to :meth:`note_rich_emit` in RP-02 S3 T3 (``likeminded-wearproof-barracuda``),
+        and the baseline advance never wrote through this query at all, because
+        :meth:`set_baseline` reaches the repository's own dictionaries directly. Writing
+        through a read-shaped call is an unowned seam — a mutation this facade never saw
+        and can enforce no invariant on — so the named operations own writes and a standing
+        allowlist census keeps new callers of this query classified as reads.
+
+        The shallowness still matters and must not become a deep copy. Callers iterate it
+        expecting live entries, and a deep copy would hand them a stale view; the top-level
+        aliasing is separately load-bearing, since a copy of the outer document loses any
+        NEW top-level key a write adds (ADR 0099 §2 and §3).
         """
         return dict(self._data["bindings"])
 
@@ -323,9 +336,14 @@ class BindingStore:
         is a thin delegate, so the mature caller contract stays on ``BindingStore``.
 
         Returns the consecutive-identical-push count (0 on the first push of a wire), or
-        ``None`` when the local id is unbound — distinct from ``0``, which would read as
-        a first push and trigger the caller's read-back for a binding that is not there.
-        A missing binding is nonfatal.
+        ``None`` when the local id is unbound. A missing binding is nonfatal.
+
+        ``None`` rather than ``0`` is defensive, and the hazard it guards is LATENT rather
+        than present: the caller compares against an equality threshold that is currently
+        2, so a ``0`` would not in fact trigger anything today. It would the moment that
+        threshold were lowered to 0 or 1, and then a read-back would fire for a binding
+        that is not there. Saying so plainly beats implying a live trap, which is how a
+        defensive choice loses the reason it was made.
 
         Performs NO save: every confirmed description push reaches this, and durability
         comes from the pass's later unconditional :meth:`save`, so persisting per emit
