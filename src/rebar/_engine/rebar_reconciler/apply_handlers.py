@@ -237,21 +237,22 @@ def _observe_rich_reemit(
     behaviour. The cost is bounded to one extra REST call per divergence episode
     (the threshold is an equality, so the episode does not re-charge every pass).
 
-    ``all_bindings`` rebuilds the outer mapping on each call, so this is O(bindings)
-    per description push rather than a lookup. That is deliberate: it is the only
-    PUBLIC way to reach a binding record, ``binding_store.py`` sits at the module-size
-    cap and cannot carry a narrower accessor, and the work is a few thousand dict
-    inserts against a REST round-trip in the same breath. If that file is ever split
-    along a call-graph seam, give it a single-entry accessor and use it here.
+    The record goes through ``binding_store.note_rich_emit`` — the store's NAMED door
+    onto this state (RP-02 S2 T3 ``morose-selfaware-unicorn``) — and not through
+    ``all_bindings()``. That query is READ-shaped: it hands back a fresh outer mapping
+    whose inner entries are still the live ones, so reaching an entry through it in
+    order to write was an unowned write seam, a mutation the store never saw and could
+    therefore enforce no invariant on. The operation returns the consecutive-push count,
+    or ``None`` when the local id is unbound — deliberately distinct from ``0`` ("first
+    push"), so the single equality below handles the missing binding and the
+    below-threshold case in one expression without letting ``None`` through. It saves
+    nothing of its own; durability comes from the pass's later unconditional store save.
     """
     wire = fields_synced.get("description")
     if wire is None or ctx.binding_store is None or not _rich_cutover_active():
         return
     try:
-        entry = ctx.binding_store.all_bindings().get(local_id)
-        if not isinstance(entry, dict):
-            return
-        if peer_state.note_rich_emit(entry, wire) != peer_state.RICH_REEMIT_OBSERVE_AT:
+        if ctx.binding_store.note_rich_emit(local_id, wire) != peer_state.RICH_REEMIT_OBSERVE_AT:
             return
         if not jira_key or ctx.client is None:
             return
