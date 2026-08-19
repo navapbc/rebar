@@ -307,8 +307,22 @@ def test_unchanged_second_pass_preserves_binding_store_bytes_and_head(
 
     # Advance the external clock deterministically so the pre-fix timestamp
     # rewrite cannot hide behind two passes landing in the same second.
+    #
+    # RP-02 S2 T2 moved the absence/tombstone/comment cluster (clear_absent + its
+    # siblings) out of binding_store and into binding_lifecycle, where they resolve
+    # their OWN module-level _now_iso. Freezing the clock only on binding_store no
+    # longer reaches those moved operations, so this oracle broadens the freeze to
+    # BOTH module clocks (bug 02c4). NOTE: on a fully in-window idempotent pass the
+    # moved absence ops never execute (their two call sites — binding_walk and
+    # outbound_differ — are gated on an out-of-window-but-alive key), so this is
+    # defense-in-depth: it keeps the no-churn contract deterministically pinned on
+    # binding_lifecycle for any future healthy-pass write, matching the direct
+    # unit-tier guard test_binding_lifecycle.py::
+    # test_clear_absent_does_not_dirty_an_entry_with_no_absence.
     binding_store_mod = sys.modules["reconcile_binding_store"]
+    lifecycle_mod = sys.modules["rebar_reconciler.binding_lifecycle"]
     monkeypatch.setattr(binding_store_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
+    monkeypatch.setattr(lifecycle_mod, "_now_iso", lambda: "2099-01-01T00:00:00Z")
 
     result2 = _run_pass(reconciler_modules, state, git_repo, monkeypatch, "baseline-idempotency")
     second_head = subprocess.run(
