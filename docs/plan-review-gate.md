@@ -89,7 +89,10 @@ The gate has **two layers**:
   is too big to review in full even one criterion at a time → "reduce/decompose"),
   **P10** (verification-presence), and **P11** (AC vagueness).
   P2/P3 (file/package resolution via the grounding oracle) are coverage-only;
-  P4's AC-count and file-impact signals, P6, and P7 are advisory.
+  P4's AC-count and file-impact signals, P6, and P7 are advisory. That
+  blocking / never-blocking line is also the module seam: the four checks that can
+  never block live in `det_advisory.py`, P9 in `det_lint.py`, P10/P11 in
+  `det_clarity.py`, all re-exported from `det_floor.py`, which stays the entry point.
 
   **Clarity floor P10 + P11 (ticket 49b8; `det_clarity.py`, the same module-size
   seam as `det_lint`).** Two BLOCKING checks added after backtests over the 7-day
