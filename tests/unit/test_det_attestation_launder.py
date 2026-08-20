@@ -22,6 +22,13 @@ def _ac(*items: str) -> str:
     return "## Acceptance Criteria\n" + "\n".join(items) + "\n"
 
 
+# ADR 0101 renamed the tag to `[non-codebase]` and retained `[operator-attested]` as an
+# accepted compatibility alias. The laundering guard's whole job — rejecting a tagged
+# criterion whose proof is repo-resident — must be identical under either spelling, so every
+# fire/no-fire case below is parametrized over BOTH rather than trusting the legacy one.
+_TAGS = ("[non-codebase]", "[operator-attested]")
+
+
 # ── repo_evidence_citations: what counts as repo evidence ────────────────────────
 
 
@@ -78,11 +85,12 @@ def test_urls_are_scrubbed_before_matching() -> None:
     )
 
 
-def test_url_embedding_a_repo_shaped_path_does_not_fire_the_gap() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_url_embedding_a_repo_shaped_path_does_not_fire_the_gap(tag: str) -> None:
     """The URL scrub must apply on the laundering path too: a link whose URL path embeds a
     repo-shaped fragment, even introduced by an evidence word, is external evidence."""
     plan = _ac(
-        "- [x] [operator-attested] rollout green; evidence: "
+        f"- [x] {tag} rollout green; evidence: "
         "https://ci.example.com/artifacts/tests/unit/test_scan_scoping.py.html",
         "      provenance: environment=production; principal=ops-oncall; "
         "privilege_posture=production-equivalent; instrument=live-call — CI dashboard",
@@ -97,10 +105,11 @@ def test_dotted_config_key_without_slash_is_not_a_citation() -> None:
 # ── laundering_gaps: which AC items fire ─────────────────────────────────────────
 
 
-def test_tagged_item_citing_repo_path_fires() -> None:
-    plan = _ac(
-        "- [x] [operator-attested] scan scoping holds; proxy: tests/unit/test_scan_scoping.py"
-    )
+@pytest.mark.parametrize("tag", _TAGS)
+def test_tagged_item_citing_repo_path_fires(tag: str) -> None:
+    """The headline case: a tagged criterion whose proof is a repo path is laundering under
+    either spelling of the tag."""
+    plan = _ac(f"- [x] {tag} scan scoping holds; proxy: tests/unit/test_scan_scoping.py")
     gaps = launder.laundering_gaps(plan)
     assert len(gaps) == 1
     line, cites = gaps[0]
@@ -108,9 +117,11 @@ def test_tagged_item_citing_repo_path_fires() -> None:
     assert "tests/unit/test_scan_scoping.py" in cites
 
 
-def test_citation_on_continuation_line_fires() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_citation_on_continuation_line_fires(tag: str) -> None:
+    """The block scan reaches indented continuation lines for both spellings."""
     plan = _ac(
-        "- [ ] [operator-attested] behavior verified",
+        f"- [ ] {tag} behavior verified",
         "      evidence: tests/unit/test_scan_scoping.py::test_fsck_default_skips_archived",
     )
     gaps = launder.laundering_gaps(plan)
@@ -123,18 +134,23 @@ def test_untagged_item_citing_repo_path_does_not_fire() -> None:
     assert launder.laundering_gaps(plan) == []
 
 
-def test_tagged_external_item_with_provenance_does_not_fire() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_tagged_external_item_with_provenance_does_not_fire(tag: str) -> None:
+    """The no-fire half of parity: legitimately external evidence stays unblocked under either
+    spelling — the alias must not become a stricter (or looser) tag than the canonical one."""
     plan = _ac(
-        "- [ ] [operator-attested] the prod deploy is confirmed live",
+        f"- [ ] {tag} the prod deploy is confirmed live",
         "      provenance: environment=production; principal=release-operator; "
         "privilege_posture=production-equivalent; instrument=live-call — console shows green",
     )
     assert launder.laundering_gaps(plan) == []
 
 
-def test_citation_outside_the_tagged_items_block_does_not_fire() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_citation_outside_the_tagged_items_block_does_not_fire(tag: str) -> None:
+    """Scoping to the tagged item's own block is spelling-independent."""
     plan = _ac(
-        "- [ ] [operator-attested] the prod deploy is confirmed live",
+        f"- [ ] {tag} the prod deploy is confirmed live",
         "- [ ] the parser handles tests/unit/test_parser.py fixtures",
     )
     assert launder.laundering_gaps(plan) == []
@@ -159,14 +175,14 @@ def test_live_grunion_ac19_text_fires() -> None:
 # ── mixed criteria vs orientation prose (tickets 7f69/5796 false-positive class) ─
 
 
-def test_mixed_criterion_naming_a_test_file_fires() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_mixed_criterion_naming_a_test_file_fires(tag: str) -> None:
     """A tagged AC whose repo-verifiable HALF names a test file fires even when the
     external half carries a complete provenance line — the authoring policy is SPLIT
     (evidence-kind's mixed_evidence_is_split), and test artifacts are inherently
     completion evidence, never orientation."""
     plan = _ac(
-        "- [ ] [operator-attested] `pytest tests/e2e/test_live_probe.py` exits 0 "
-        "against the prod endpoint",
+        f"- [ ] {tag} `pytest tests/e2e/test_live_probe.py` exits 0 against the prod endpoint",
         "      provenance: environment=production; principal=ops-oncall; "
         "privilege_posture=production-equivalent; instrument=live-call — exit code in console",
     )
@@ -175,41 +191,44 @@ def test_mixed_criterion_naming_a_test_file_fires() -> None:
     assert "tests/e2e/test_live_probe.py" in gaps[0][1]
 
 
-def test_orientation_prose_path_with_external_provenance_does_not_fire() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_orientation_prose_path_with_external_provenance_does_not_fire(tag: str) -> None:
     """A legitimately-external AC whose prose mentions a non-test file for ORIENTATION
     (no evidence marker introduces it) must not be blocked."""
     plan = _ac(
-        "- [ ] [operator-attested] the fix shipped in src/rebar/_store/sync.py is deployed to prod",
+        f"- [ ] {tag} the fix shipped in src/rebar/_store/sync.py is deployed to prod",
         "      provenance: environment=production; principal=release-operator; "
         "privilege_posture=production-equivalent; instrument=live-call — dashboard green",
     )
     assert launder.laundering_gaps(plan) == []
 
 
-def test_non_test_path_introduced_by_evidence_marker_fires() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_non_test_path_introduced_by_evidence_marker_fires(tag: str) -> None:
     """The same non-test path IS a citation when the line presents it as the proof."""
-    plan = _ac(
-        "- [x] [operator-attested] rollout steps recorded; proof: docs/runbook.md section applied"
-    )
+    plan = _ac(f"- [x] {tag} rollout steps recorded; proof: docs/runbook.md section applied")
     gaps = launder.laundering_gaps(plan)
     assert len(gaps) == 1
     assert "docs/runbook.md" in gaps[0][1]
 
 
-def test_marker_after_the_path_does_not_make_it_evidence() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_marker_after_the_path_does_not_make_it_evidence(tag: str) -> None:
     """The evidence word must INTRODUCE the citation (precede it on the line): a path whose
     own deployment is externally verified is orientation, not repo proof."""
     plan = _ac(
-        "- [ ] [operator-attested] src/rebar/store.py deployment is verified in prod console",
+        f"- [ ] {tag} src/rebar/store.py deployment is verified in prod console",
         "      provenance: environment=production; principal=ops-oncall; "
         "privilege_posture=production-equivalent; instrument=live-call — console green",
     )
     assert launder.laundering_gaps(plan) == []
 
 
-def test_same_citation_on_two_lines_reported_once() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_same_citation_on_two_lines_reported_once(tag: str) -> None:
+    """De-duplication of a repeated citation is spelling-independent."""
     plan = _ac(
-        "- [x] [operator-attested] holds; proxy: tests/unit/test_scan_scoping.py",
+        f"- [x] {tag} holds; proxy: tests/unit/test_scan_scoping.py",
         "      evidence: tests/unit/test_scan_scoping.py",
     )
     gaps = launder.laundering_gaps(plan)
@@ -217,9 +236,10 @@ def test_same_citation_on_two_lines_reported_once() -> None:
     assert gaps[0][1] == ["tests/unit/test_scan_scoping.py"]
 
 
-def test_bare_test_symbol_fires_without_a_marker() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_bare_test_symbol_fires_without_a_marker(tag: str) -> None:
     """Test symbols are evidence-shaped on their own — no marker word needed."""
-    plan = _ac("- [x] [operator-attested] behavior holds, test_fsck_default_skips_archived passes")
+    plan = _ac(f"- [x] {tag} behavior holds, test_fsck_default_skips_archived passes")
     gaps = launder.laundering_gaps(plan)
     assert len(gaps) == 1
     assert "test_fsck_default_skips_archived" in gaps[0][1]

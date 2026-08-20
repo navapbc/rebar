@@ -15,6 +15,8 @@ about whether the declared values are CORRECT — that stays with the AGENT-tier
 
 from __future__ import annotations
 
+import pytest
+
 from rebar.llm.plan_review.det_measurement_provenance import (
     provenance_gaps,
     provenance_issues,
@@ -32,25 +34,33 @@ def _plan(*lines: str) -> str:
     return "## Acceptance Criteria\n" + "\n".join(lines) + "\n"
 
 
-def test_complete_declaration_has_no_gap() -> None:
-    """A fully-declared [operator-attested] AC is clean — the lint must not nag a correct plan."""
+# ADR 0101 renamed the tag to `[non-codebase]` and kept `[operator-attested]` as an accepted
+# compatibility alias. The contract is spelling-independent, so every case runs under BOTH.
+_TAGS = ("[non-codebase]", "[operator-attested]")
+
+
+@pytest.mark.parametrize("tag", _TAGS)
+def test_complete_declaration_has_no_gap(tag: str) -> None:
+    """A fully-declared non-codebase AC is clean — the lint must not nag a correct plan.
+    Both accepted spellings of the tag must reach the same clean verdict."""
     text = _plan(
-        "- [ ] [operator-attested] the suite passes, evidenced by the Gerrit change id",
+        f"- [ ] {tag} the suite passes, evidenced by the Gerrit change id",
         f"      {_GOOD}",
     )
     assert provenance_gaps(text) == []
     assert provenance_issues(text) == []
 
 
-def test_attested_item_with_no_declaration_is_flagged() -> None:
-    """An [operator-attested] AC carrying NO provenance line at all is the core gap this
-    lint exists to catch — the wrong-account and privilege-that-cannot-fail escapes both
-    entered through exactly this hole."""
-    text = _plan("- [ ] [operator-attested] the suite passes, evidenced by the Gerrit change id")
+@pytest.mark.parametrize("tag", _TAGS)
+def test_attested_item_with_no_declaration_is_flagged(tag: str) -> None:
+    """A tagged AC carrying NO provenance line at all is the core gap this lint exists to
+    catch — the wrong-account and privilege-that-cannot-fail escapes both entered through
+    exactly this hole. The alias must not be a way to skip the declaration."""
+    text = _plan(f"- [ ] {tag} the suite passes, evidenced by the Gerrit change id")
     gaps = provenance_gaps(text)
     assert len(gaps) == 1
     ac_line, reasons = gaps[0]
-    assert "[operator-attested]" in ac_line
+    assert tag in ac_line
     assert reasons, "a gap must explain what is missing"
     issues = provenance_issues(text)
     assert len(issues) == 1
