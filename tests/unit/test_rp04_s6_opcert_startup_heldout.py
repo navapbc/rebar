@@ -228,8 +228,10 @@ def test_both_chains_sign_from_composed_signer_without_env(tmp_path, monkeypatch
     signer = compose_signer(cfg)
     kw = {fn_kw: _pass_completion if kind == "completion-verifier" else _pass_review_plan}
     try:
-        # Prove the binding — not the env — is the key source.
-        assert "REBAR_OPCERT_KEY_PATH" not in os.environ
+        # Prove the binding — not the env — is the key source. Bind membership to a bool
+        # first: a bare `... not in os.environ` renders the WHOLE environment on failure.
+        seam_env_present = "REBAR_OPCERT_KEY_PATH" in os.environ
+        assert not seam_env_present
         fields = jobs.run_job(ticket_id=tid, kind=kind, cfg=cfg, signer=signer, **kw)
     finally:
         signer.cleanup()
