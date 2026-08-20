@@ -17,9 +17,16 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+_TESTS_DIR = Path(__file__).resolve().parents[1]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _child_diag import child_failure_detail  # noqa: E402
 
 _JS_DIR = Path(__file__).parent / "js"
 _BUNDLE = _JS_DIR / "dist" / "roundtrip.mjs"
@@ -61,7 +68,7 @@ def bpmn_harness():
             timeout=60,
         )
         if not proc.stdout.strip():
-            raise AssertionError(f"harness produced no output; stderr:\n{proc.stderr}")
+            raise AssertionError(f"harness produced no output; {child_failure_detail(proc)}")
         resp = json.loads(proc.stdout)
         if not resp.get("ok"):
             raise AssertionError(f"harness error: {resp.get('error')}")
@@ -103,9 +110,7 @@ def browser_runner():
             timeout=150,
         )
         if not proc.stdout.strip():
-            raise AssertionError(
-                f"{script_name} produced no output; stderr:\n{proc.stderr[-1500:]}"
-            )
+            raise AssertionError(f"{script_name} produced no output; {child_failure_detail(proc)}")
         return json.loads(proc.stdout)
 
     return run

@@ -319,10 +319,7 @@ def _no_repo_root_leaks() -> Iterator[None]:
                         # surfaces the leak. Suppressing keeps a permissions or
                         # races race from masking the real failure.
                         pass
-            pytest.fail(
-                "Test leaked new entries into REPO_ROOT (use tmp_path or a "
-                f"sandboxed temp dir): {sorted(leaked)}"
-            )
+            pytest.fail(_leak_failure_message(leaked))
 
 
 @pytest.fixture(autouse=True)
@@ -606,6 +603,7 @@ def block_extra() -> Iterator[Any]:
 # exercise the same code (tests/unit/test_repo_isolation_guard.py).
 
 from _isolation import head as _repo_head  # noqa: E402
+from _isolation import leak_failure_message as _leak_failure_message  # noqa: E402
 from _isolation import porcelain as _repo_porcelain  # noqa: E402
 
 

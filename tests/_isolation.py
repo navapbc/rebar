@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from collections.abc import Iterable
 from types import SimpleNamespace
 
 _run_process = subprocess.run
@@ -82,3 +83,20 @@ def porcelain(root) -> set[str] | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return {line for line in out.splitlines() if line.strip()}
+
+
+def leak_failure_message(leaked: Iterable[str]) -> str:
+    """The REPO_ROOT leak guard's failure text for *leaked* entries.
+
+    The guard diffs REPO_ROOT around each test, so it cannot tell a leak from a
+    write that landed from outside the suite — the message names both causes
+    rather than asserting the one it cannot know.
+    """
+    return (
+        f"New entries appeared in REPO_ROOT during this test: {sorted(leaked)}\n"
+        "If this test created them, sandbox it — write under tmp_path (or "
+        "another disposable temp dir) instead of the checkout.\n"
+        "If it did not, a concurrent write from outside the suite looks "
+        "identical here: a detached run shares this checkout with whatever "
+        "else is touching it (an external commit, build, or editor)."
+    )
