@@ -12,6 +12,54 @@ Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `e
 - `--quiet` / `-q` — suppress the text confirmation line only; errors, exit codes, JSON output, and `link`'s machine-readable REDIRECT record are untouched.
 - `--output <text|json>` / `-o <mode>` — verbs that already accepted `--output` (`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON shapes unchanged; the newly-covered verbs emit one uniform mutation envelope `{"outcome": "<verb-past>"|"noop", "subject": <id/edge>, "detail": <str>}` — **pre-1.0 UNSTABLE**: the envelope's field set may still change before 1.0. `--quiet` together with `--output json` still prints the JSON.
 
+### Verb inventory: no-op-capable vs always-writes
+
+Which verbs can report `no change: <reason>` (an idempotent re-run writes no event and still exits 0) and which write on every invocation. This table is generated from `MUTATION_VERBS` in the generator, whose key set is checked against `rebar._cli._CONFIRM_SCOPE`: a verb added to the confirmation channel without a classification fails the drift gate.
+
+| Verb | Classification | No-op condition / why it always writes |
+|------|----------------|----------------------------------------|
+| `archive` | no-op-capable | the ticket is already archived |
+| `attach-commits` | always-writes | every invocation appends the attachment event |
+| `claim` | always-writes | claiming an already-claimed ticket is a concurrency error (exit 10), not a no-op |
+| `comment` | always-writes | every invocation appends a COMMENT event |
+| `create` | always-writes | every invocation appends a CREATE event |
+| `edit` | always-writes | every invocation appends an EDIT event for the named fields |
+| `idea` | always-writes | every invocation appends a CREATE event of type `idea` |
+| `link` | no-op-capable | the identical edge (same source, target, relation) already exists |
+| `reopen` | always-writes | reopening a ticket that is not closed is a status mismatch, not a no-op |
+| `revert` | always-writes | every invocation appends a REVERT event |
+| `session-log` | always-writes | every invocation starts a log or appends an entry to one |
+| `set-file-impact` | always-writes | every invocation appends the declaration event |
+| `set-verify-commands` | always-writes | every invocation appends the declaration event |
+| `tag` | no-op-capable | the tag is already on the ticket |
+| `transition` | no-op-capable | the ticket is already at the target status |
+| `unlink` | always-writes | removing an absent edge is an error, not a no-op |
+| `untag` | no-op-capable | the tag is not on the ticket |
+
+### Confirmation-line record (pre-`42cd70b889` → today)
+
+The golden record of the normalization: what each verb printed before the confirmation channel landed, and what it prints now. Every datum of the old form survives in the new line (the per-verb exact-line assertions live in `tests/unit/test_mutation_confirmations.py`).
+
+| Verb | Before | Today |
+|------|--------|-------|
+| `archive` | (silent) | `archived <id>` / `no change: <id> already archived` |
+| `attach-commits` | (silent) | `commits attached to <id>: <n>` |
+| `claim` | `CLAIMED: <id> (assignee: <who>)` | `claimed <id>: open -> in_progress (assignee <who>)` |
+| `comment` | (silent) | `comment added to <id>` |
+| `create` | `Created ticket <alias> (<id>): <title>` plus a second, bare `<id>` line | `created <alias> (<id>): <title>` |
+| `edit` | (silent) | `edited <id>: <field names>` (field NAMES only, never their values) |
+| `idea` | `Created idea <alias> (<id>): <title>` plus a second, bare `<id>` line | `created idea <alias> (<id>): <title>` |
+| `link` | (silent; only the machine-readable REDIRECT record when the hierarchy resolver promotes the edge) | `linked <src> -> <dst> (<relation>)` / `no change: already linked <src> -> <dst> (<relation>)` |
+| `reopen` | (silent — it delegated to `transition <id> closed open`, whose text output was emitted on closes only) | `reopened <id>: closed -> open` |
+| `revert` | `Reverted event '<uuid>' on ticket '<id>'` | `reverted <id>: event <uuid>` |
+| `session-log` | the raw JSON result document | `session-log started <alias> (<id>)` / `session-log appended to <id>` |
+| `set-file-impact` | (silent) | `impact set on <id>: <n> paths` / `impact set on <id>: none declared` |
+| `set-verify-commands` | (silent) | `verify-commands set on <id>: <n>` |
+| `tag` | (silent) | `tagged <id>: +<tag>` / `no change: tag <tag> already on <id>` |
+| `transition` | `UNBLOCKED: <ids\|none>` on a close only (silent on every other target); `No transition needed` on a no-op | `transitioned <id>: <from> -> <to>; unblocked: <ids\|none>` / `no change: <id> already <status>` |
+| `unlink` | (silent) | `unlinked <src> -/-> <dst> (<relation>)` |
+| `untag` | (silent) | `untagged <id>: -<tag>` / `no change: tag <tag> not on <id>` |
+
 ## Help-backed subcommands
 
 The 54 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`):
