@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,20 @@ DONE = "DONE_ENRICH"
 QUEUE_EVENT_TYPES = (ENQUEUE, CLAIM, DONE)
 
 _NS_PER_MIN = 60 * 1_000_000_000
+
+_GATE_MARKER_NAME = "enrich-gate.json"
+
+# How long a gate marker may be trusted before the full scan is forced again.
+#
+# The marker is a CACHE, and a cache on a shared store needs an expiry that bounds every way
+# it can go wrong. Ten minutes is chosen to sit well inside the default 60-minute enrichment
+# soak: a marker can therefore never span a whole soak window, so the worst case for a marker
+# that went stale without being invalidated is a drain deferred by <= 10 minutes on a feature
+# whose latency budget is already measured in tens of minutes — never a drain that is LOST.
+# That is exactly the crash window the TTL exists for: if a process dies between appending a
+# queue event and clearing the marker (step 3 below), the stale marker survives, and only the
+# TTL retires it. Bounded delay, never permanent loss.
+_GATE_MARKER_TTL_NS = 10 * _NS_PER_MIN
 
 
 def _now_ns() -> int:
@@ -66,11 +81,16 @@ def _append(ticket_id: str, event_type: str, data: dict, repo_root) -> bool:
     from rebar._commands._seam import append_event
 
     try:
-        append_event(ticket_id, event_type, data, Path(_tracker(repo_root)), repo_root=repo_root)
-        return True
+        tracker = _tracker(repo_root)
+        append_event(ticket_id, event_type, data, Path(tracker), repo_root=repo_root)
     except Exception:
         logger.warning("%s append failed; continuing", event_type, exc_info=True)
         return False
+    # ENQUEUE / CLAIM / DONE all funnel through here, so this one call is the complete
+    # invalidation of the gate marker's "nothing can be pending yet" claim: any queue state
+    # change drops the marker and the next probe re-scans (bug moist-short-lionfish).
+    _clear_gate_marker(tracker)
+    return True
 
 
 def enqueue(ticket_id: str, *, soak_min: float, repo_root=None, now_ns: int | None = None) -> bool:
@@ -191,9 +211,153 @@ def reduce_ticket(ticket_id: str, tracker: str, *, now_ns: int | None = None) ->
     return state
 
 
+# --- O(1) gate fast path (bug 958e-f4b3-275c-4154 / moist-short-lionfish) -------------------
+#
+# ``enrich_drain.maybe_drain`` probes ``pending_enrichment`` on EVERY ticket store write, and
+# the honest answer is "nothing is soaked" almost every time. Paying for that answer with a
+# full store walk — one ``reduce_ticket`` per ticket directory, each doing three ``listdir``s
+# plus two ``isdir`` stats — measured ~24k filesystem metadata syscalls and 486 ms against a
+# 20 ms gate budget on 100% of writes, and 2.8-3.6 s under concurrent agents contending on
+# kernel vnode state.
+#
+# The fix is to remember the ANSWER rather than recompute it. The queue is a soak queue, so a
+# quiet store is not merely quiet now — it is provably quiet until the earliest instant any
+# live entry could become pending. One scan can compute that instant, and every probe before
+# it is then answerable in O(1) with a single small file read.
+#
+# The marker is machine-local cache state, so it lives in the repo-local ``.rebar`` directory
+# (the tracker's SIBLING, the same place ``enrich_drain._drain_lock_path`` uses) and NEVER
+# inside the tracker — the tracker is a git-backed shared store that auto-commits and
+# auto-pushes, and a per-host cache file has no business travelling to every clone.
+#
+# Three rules keep it honest:
+#   1. It is only ever trusted to say "nothing is pending" (a fast ``[]``). It can never
+#      manufacture a pending ticket, so a wrong marker costs a delayed drain, never a wrong
+#      one.
+#   2. Every queue append clears it (see ``_append``), so a state change is never hidden.
+#   3. It expires (``_GATE_MARKER_TTL_NS``), so even a marker that outlives its invalidation
+#      is retired on a clock rather than trusted forever.
+#
+# ACCEPTED RACE, and rule 3 is its bound. Two windows let a marker outlive its invalidation:
+# a process dying between appending a queue event and clearing the marker, and an append that
+# lands DURING a scan, whose clear is then overwritten by the marker that same scan writes
+# afterwards. Neither is excluded here, deliberately:
+#   * The harm is a DEFERRED drain, never a wrong or lost one — the marker can only ever say
+#     "nothing is pending", so the worst case is that a soaked ticket waits out the TTL.
+#   * That wait is <= 10 minutes on a feature whose soak is 60 minutes by default, i.e. inside
+#     the latency this queue already accepts by design.
+#   * Closing it means adding cross-process serialization (a generation token, or taking the
+#     store lock across the scan) to a path whose entire purpose is to be cheaper than a
+#     store walk — more machinery, and more contention, than the delay it would prevent.
+# Revisit if the soak ever drops near the TTL, which would stop the bound being comfortable.
+# Every read and write is best-effort: a missing, empty, truncated, non-JSON, wrong-typed or
+# otherwise unusable marker degrades to the full scan, which is the pre-existing behaviour.
+
+
+def _gate_marker_path(tracker: str) -> str:
+    """The gate marker file, in the repo-local ``.rebar`` dir beside *tracker*."""
+    return os.path.join(os.path.dirname(tracker), ".rebar", _GATE_MARKER_NAME)
+
+
+def _clear_gate_marker(tracker: str) -> None:
+    """Drop the marker so the next probe re-scans. Best-effort and silent: this runs on the
+    store write path, where a cache-maintenance failure must never surface as an error."""
+    try:
+        os.unlink(_gate_marker_path(tracker))
+    except OSError:
+        pass
+    except Exception:  # pragma: no cover — path resolution on an exotic tracker value
+        logger.debug("enrich gate: could not clear marker", exc_info=True)
+
+
+def _read_gate_marker(tracker: str) -> tuple[int | None, int] | None:
+    """``(next_eligible_ns, written_ns)`` from the marker, or ``None`` if it cannot be
+    trusted. Anything unexpected — absent, unreadable, not JSON, not an object, missing or
+    wrong-typed fields — is reported as untrusted rather than raised, because the caller's
+    fallback (a full scan) is always correct and an exception here is not."""
+    try:
+        with open(_gate_marker_path(tracker), encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        logger.debug("enrich gate: marker unreadable; falling back to a full scan", exc_info=True)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    written = payload.get("written_ns")
+    nxt = payload.get("next_eligible_ns")
+    if not isinstance(written, int) or isinstance(written, bool):
+        return None
+    if nxt is not None and (not isinstance(nxt, int) or isinstance(nxt, bool)):
+        return None
+    return (nxt, written)
+
+
+def _gate_marker_says_quiet(now_ns: int, tracker: str) -> bool:
+    """True iff a live marker proves nothing can be pending at *now_ns*. ``next_eligible_ns``
+    is ``None`` when the last scan found no live entry at all — then only the TTL limits the
+    fast path."""
+    marker = _read_gate_marker(tracker)
+    if marker is None:
+        return False
+    next_eligible, written = marker
+    # A marker stamped in the FUTURE is untrusted, not infinitely fresh. The TTL is a
+    # subtraction, so a clock that stepped backwards (or a marker from a host whose clock ran
+    # fast) makes this negative and the TTL could never elapse — turning the bounded-delay
+    # guarantee into an unbounded one. Out-of-range in EITHER direction means rescan.
+    if not 0 <= now_ns - written < _GATE_MARKER_TTL_NS:
+        return False
+    return next_eligible is None or now_ns < next_eligible
+
+
+def _write_gate_marker(tracker: str, now_ns: int, next_eligible_ns: int | None) -> None:
+    """Record "nothing can be pending before *next_eligible_ns*" as of *now_ns*.
+
+    Written via a temp file in the same directory plus ``os.replace`` so a concurrent reader
+    sees either the old marker or the new one, never a torn half-file. Best-effort throughout:
+    failing to write the marker only forfeits the fast path, and must not fail the probe."""
+    path = _gate_marker_path(tracker)
+    payload = {"next_eligible_ns": next_eligible_ns, "written_ns": now_ns}
+    tmp: str | None = None
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".enrich-gate-", dir=os.path.dirname(path))
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        os.replace(tmp, path)
+        tmp = None
+    except Exception:
+        logger.debug("enrich gate: could not write marker %s", path, exc_info=True)
+    finally:
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+def _entry_eligible_ns(state: dict[str, Any]) -> int | None:
+    """The earliest instant this ticket's queue entry could become pending, or ``None`` if it
+    is not live at all. A never-enqueued or already-DONE entry contributes nothing; a claim
+    with a still-live lease defers eligibility to the lease expiry; anything else is gated
+    only by its soak deadline."""
+    if not state.get("enqueued") or state.get("done"):
+        return None
+    not_before = int(state.get("not_before_ns") or 0)
+    if state.get("claimed"):
+        return max(not_before, int(state.get("lease_expires_ns") or 0))
+    return not_before
+
+
 def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
-    """All ticket ids past soak, unclaimed-or-lease-expired, with no later DONE."""
+    """All ticket ids past soak, unclaimed-or-lease-expired, with no later DONE.
+
+    Answers from the O(1) gate marker when one proves the store is quiet (see the block
+    comment above); otherwise falls back to the full scan and, in that SAME pass, records the
+    marker for subsequent probes."""
+    if _gate_marker_says_quiet(now_ns, tracker):
+        return []
     out: list[str] = []
+    soonest: int | None = None
     try:
         entries = os.listdir(tracker)
     except OSError:
@@ -201,8 +365,16 @@ def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
     for name in entries:
         if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
             continue
-        if reduce_ticket(name, tracker, now_ns=now_ns)["pending"]:
+        state = reduce_ticket(name, tracker, now_ns=now_ns)
+        if state["pending"]:
             out.append(name)
+        eligible = _entry_eligible_ns(state)
+        if eligible is not None and (soonest is None or eligible < soonest):
+            soonest = eligible
+    if out:
+        _clear_gate_marker(tracker)
+    else:
+        _write_gate_marker(tracker, now_ns, soonest)
     return sorted(out)
 
 
