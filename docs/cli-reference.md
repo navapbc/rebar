@@ -596,6 +596,7 @@ Usage: rebar transition <ticket_id> <current_status> <target_status> [--class=<v
   Bug-only dispositions not_a_bug/escalated REQUIRE --reason=<text> (why no defect exists / where the work was escalated to) unless a live replacement link stands in.
   --reason=<text>: admitted only on a close whose --class is reason-required (obsolete, wontfix, not_a_bug, or escalated); it records the administrative close reason. Force audit text must ride on --force=<reason>.
   With the completion gate enabled, an administrative disposition (or duplicate/not_a_bug/escalated on a bug) skips verification only when its evidence holds: a live duplicates/supersedes link, or the required close reason.
+  With the plan-review close gate enabled, only the LINK-BACKED dispositions duplicate/superseded skip the attestation, and only against a live duplicates/supersedes link; the close is recorded with the distinct 'disposition' verdict, not as a --force bypass. Reason-required obsolete/wontfix still need the attestation.
   --ref=<ref>: Completion close gate: verify (and sign) against the committed tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit while your worktree stays at the epic tip; default HEAD.
 ```
 
