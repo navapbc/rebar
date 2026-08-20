@@ -72,7 +72,7 @@
       "trigger": [
         {
           "text_all": [
-            "\\[operator-attested\\]"
+            "\\[(?:non-codebase|operator-attested)\\]"
           ]
         }
       ]

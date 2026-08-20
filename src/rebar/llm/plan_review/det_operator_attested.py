@@ -1,9 +1,10 @@
-"""Operator-attested evidence-kind advisory DET lint (R2, ticket b080, epic 6982;
-ADR-0043 x ADR-0016).
+"""Non-codebase evidence-kind advisory DET lint (R2, ticket b080, epic 6982;
+ADR-0043 x ADR-0101 x ADR-0016).
 
 Two work tickets (115b, 8c4f) burned close-gate cycles because their ACs had "done"
 evidence that inherently lives OUTSIDE the codebase (live-store fsck surgery, changes
-landed through Gerrit) but were not tagged ``[operator-attested]`` (ADR-0043), so the
+landed through Gerrit) but were not tagged ``[non-codebase]`` (ADR-0043, ADR-0101; the
+alias ``[operator-attested]`` is also accepted), so the
 completion verifier failed hunting for code proof. This prompt-less DET lint (ADR-0016)
 surfaces that at PLAN time. It is ADVISORY — surfaced through ``p6_ac_quality``
 (:mod:`.det_floor`), which never blocks — and is self-gated by the deterministic lexicon
@@ -37,12 +38,15 @@ def ac_item_lines(text: str) -> list[str]:
     return out
 
 
-# The canonical [operator-attested] tag matcher (ADR-0043). OWNED here and re-exported by
+# The canonical tag matcher (ADR-0043, ADR-0101). Accepts two spellings: the canonical
+# [non-codebase] and the compatibility alias [operator-attested]. OWNED here and re-exported by
 # workflow_ops (:data:`workflow_ops._OPERATOR_ATTESTED_AC_RE`) so the plan-time lint and the
 # completion-verifier enrichment agree on "tagged" by construction. Matching is exact on the
-# hyphenated token: a near-miss like [operator_attested] is NOT a match.
+# hyphenated tokens: a near-miss like [operator_attested] is NOT a match. The alternation is
+# non-capturing so the single capturing group stays the criterion text — workflow_ops calls
+# .findall() on this pattern and requires plain strings.
 _OPERATOR_ATTESTED_TAG_RE = re.compile(
-    r"^\s*-\s*\[[ xX]?\]\s*\[operator-attested\]\s*(.+?)\s*$",
+    r"^\s*-\s*\[[ xX]?\]\s*\[(?:non-codebase|operator-attested)\]\s*(.+?)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 
