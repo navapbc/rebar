@@ -19,8 +19,110 @@ import importlib
 import subprocess
 import sys
 
+import pytest
+
 from rebar._cli import _parser
-from rebar._cli._parser import ParseError, RebarArgumentParser
+from rebar._cli._parser import (
+    ParseError,
+    RebarArgumentParser,
+    guard_parse_errors,
+    render_parse_error,
+)
+
+# --- The parse-error seam: render_parse_error + guard_parse_errors --------
+#
+# These two functions are the central mechanism the whole migration relies on
+# to keep parse-failure behavior byte-identical to argparse's native
+# exit-2-with-usage contract. They are exercised indirectly by the held-out
+# byte-parity oracle; these pin their observable contract directly so a
+# regression that drops the usage line or the exit code can never pass.
+
+
+def test_render_parse_error_reproduces_argparse_stderr_and_exit_code(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """It writes the usage block then ``<prog>: error: <msg>`` and returns 2."""
+
+    exc = ParseError("argument x: invalid choice", prog="rebar demo", usage="usage: rebar demo x\n")
+
+    code = render_parse_error(exc)
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert err == "usage: rebar demo x\nrebar demo: error: argument x: invalid choice\n"
+
+
+def test_render_parse_error_without_usage_emits_only_the_error_line(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A hand-built ParseError (``usage=None``) still returns 2 and names the error."""
+
+    code = render_parse_error(ParseError("boom", prog="rebar demo"))
+
+    assert code == 2
+    assert capsys.readouterr().err == "rebar demo: error: boom\n"
+
+
+def test_guard_parse_errors_translates_parse_error_to_systemexit_2(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A wrapped handler that raises ParseError exits 2 with usage+error on stderr."""
+
+    @guard_parse_errors
+    def handler() -> int:
+        raise ParseError("bad", prog="rebar demo", usage="usage: rebar demo\n")
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler()
+
+    assert excinfo.value.code == 2
+    assert capsys.readouterr().err == "usage: rebar demo\nrebar demo: error: bad\n"
+
+
+def test_guard_parse_errors_lets_help_systemexit_propagate_unchanged() -> None:
+    """A ``--help``-style ``SystemExit(0)`` passes through the guard untouched."""
+
+    @guard_parse_errors
+    def handler() -> int:
+        raise SystemExit(0)
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler()
+
+    assert excinfo.value.code == 0
+
+
+def test_guard_parse_errors_returns_handler_value_on_success() -> None:
+    """A successful handler's return value is passed through unchanged."""
+
+    @guard_parse_errors
+    def handler() -> int:
+        return 7
+
+    assert handler() == 7
+
+
+# --- Migrated reject path routes through the factory (AC1 de-duplication) --
+
+
+def test_audit_cli_unknown_subcommand_exits_2_through_the_factory(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The de-duplicated audit handler rejects unknown argv via the shared factory.
+
+    Post-migration, audit's rejected-argv path is the ONE argparse grammar
+    (AC1): an unknown subcommand raises ParseError and is rendered as argparse's
+    exit-2 usage/error, not a bespoke hand-rolled banner.
+    """
+
+    from rebar._cli._audit_commands import audit_cli
+
+    code = audit_cli(["definitely-not-a-subcommand"])
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert err.startswith("usage: rebar audit")
+    assert "rebar audit: error:" in err
 
 
 def _resolve(ref: str):
