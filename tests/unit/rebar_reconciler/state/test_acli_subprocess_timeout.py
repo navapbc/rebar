@@ -12,11 +12,14 @@ tests are skipped on non-POSIX (no ``os.killpg``).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 
@@ -28,14 +31,82 @@ POSIX_ONLY = pytest.mark.skipif(os.name != "posix", reason="process-group reapin
 
 
 # ---------------------------------------------------------------------------
+# Test-only timing windows
+# ---------------------------------------------------------------------------
+# These drive the existing module seams ``_acli_call_timeout`` /
+# ``_ACLI_GRACE_SECONDS`` / ``_ACLI_DRAIN_SECONDS``. The production defaults
+# (120s / 3s / 2s) are untouched — nothing here changes shipped behavior.
+#
+# Direction matters. A reap test needs its fake child to still be HANGING when the
+# deadline fires, and every hanging fake sleeps for an hour, so a SMALLER window
+# makes the timeout MORE certain, never less: no amount of host load can let the
+# child finish first. What a small window could break is ORDERING — three reap
+# tests assert on something the child must have completed first (a grandchild
+# pidfile, a spawn counter, flushed partial stdout). Rather than pick a window big
+# enough to out-race interpreter startup (a wall-clock bet a loaded runner
+# eventually loses), :func:`real_child` makes the parent WAIT for the child to
+# signal readiness, so the injected window is spent purely on the hang. That is
+# what makes these values load-independent rather than merely small.
+_REAP_CALL_TIMEOUT = 0.2
+_REAP_GRACE_SECONDS = 0.1
+_REAP_DRAIN_SECONDS = 0.1
+
+# The opposite class: a fake child that must COMPLETE. Here the timeout is a
+# hang-guard, not a pass condition — a healthy run finishes in milliseconds and
+# never approaches it, so it costs no wall time AND cannot be lost to a slow host.
+# (The module used to impose an autouse 1s ceiling on these too, which was a latent
+# load flake in exactly that direction.)
+_COMPLETING_CHILD_TIMEOUT = 30.0
+
+# Ceilings for the two poll loops below. Deliberately generous: they exist so a
+# broken spawn fails loudly instead of hanging the suite, never as a pass
+# condition, so raising them can only trade a hang for a clearer failure.
+_POLL_CEILING_SECONDS = 30.0
+_POLL_INTERVAL_SECONDS = 0.005
+
+
+def _wait_until_gone(pids) -> set[int]:
+    """Poll until none of *pids* exists; return whichever survived the ceiling.
+
+    An existence probe (``kill(pid, 0)``) polled to a transition, rather than a
+    single check after a sleep: the group kill is asynchronous w.r.t. the children
+    actually dying, so the only correct question is "has it happened yet?".
+    """
+    remaining = set(pids)
+    deadline = time.monotonic() + _POLL_CEILING_SECONDS
+    while remaining and time.monotonic() < deadline:
+        for pid in tuple(remaining):
+            try:
+                os.kill(pid, 0)  # 0 == existence probe
+            except ProcessLookupError:
+                remaining.discard(pid)
+        if remaining:
+            time.sleep(_POLL_INTERVAL_SECONDS)
+    return remaining
+
+
+# ---------------------------------------------------------------------------
 # Fake-binary programs (run as the `acli` executable)
 # ---------------------------------------------------------------------------
+
+# Every hanging fake finishes its setup by creating the file named as its LAST
+# argv element. :func:`real_child` polls for that file before handing the process
+# back to ``_run_acli`` — which measures its deadline from ``communicate()``, i.e.
+# AFTER the wrapper returns. So "the child finished setting up" is an observed
+# event, never an inference from elapsed time.
+_SIGNAL_READY = """
+def _ready():
+    import sys
+    open(sys.argv[-1], "w").close()
+"""
 
 # Forks a grandchild that inherits the stdout PIPE and hangs forever, writes the
 # grandchild PID to a pidfile, then the child itself hangs holding the pipe. This
 # is the exact gotcha-1 shape: subprocess.run(timeout=) would orphan the
 # grandchild; only a process-GROUP kill reaps it.
-_GRANDCHILD_HANG = r"""
+_GRANDCHILD_HANG = (
+    _SIGNAL_READY
+    + r"""
 import os, sys, time
 pidfile = sys.argv[1]
 pid = os.fork()
@@ -43,43 +114,61 @@ if pid == 0:
     # grandchild: keep the inherited stdout pipe open and hang
     with open(pidfile, "w") as f:
         f.write(str(os.getpid()))
+    _ready()  # signal only once the pidfile is complete
     time.sleep(3600)
     os._exit(0)
 # parent (the direct child): also hang, holding the pipe
 time.sleep(3600)
 """
+)
 
 # A simple child that just hangs (no grandchild) — used for retry/spawn-count tests.
-_SIMPLE_HANG = r"""
+_SIMPLE_HANG = (
+    _SIGNAL_READY
+    + r"""
 import time
+_ready()
 time.sleep(3600)
 """
+)
 
 # Appends a marker per invocation so we can count spawns, then hangs.
-_COUNT_THEN_HANG = r"""
+_COUNT_THEN_HANG = (
+    _SIGNAL_READY
+    + r"""
 import sys, time
 with open(sys.argv[1], "a") as f:
     f.write("x")
+_ready()  # signal only once the spawn marker is on disk
 time.sleep(3600)
 """
+)
 
 # Emits a truncated multibyte UTF-8 lead byte on stdout then hangs. With
 # errors='strict' the cleanup-path decode would raise UnicodeDecodeError; with
 # errors='replace' it must not.
-_TRUNCATED_UTF8_THEN_HANG = r"""
+_TRUNCATED_UTF8_THEN_HANG = (
+    _SIGNAL_READY
+    + r"""
 import sys, time
 sys.stdout.buffer.write(b"ok-\xe2\x82")
 sys.stdout.buffer.flush()
+_ready()  # signal only once the truncated lead byte is in the pipe
 time.sleep(3600)
 """
+)
 
 # Emits partial stdout then hangs — to assert partial capture on timeout.
-_PARTIAL_THEN_HANG = r"""
+_PARTIAL_THEN_HANG = (
+    _SIGNAL_READY
+    + r"""
 import sys, time
 sys.stdout.write("partial-output-here")
 sys.stdout.flush()
+_ready()  # signal only once the partial output is in the pipe
 time.sleep(3600)
 """
+)
 
 # A fast no-op that prints valid JSON and exits 0 — used by the classification
 # guard so client methods complete without timing out.
@@ -94,33 +183,61 @@ def _fake_cmd(program: str, *args: str) -> list[str]:
     return [sys.executable, "-c", program, *args]
 
 
-@pytest.fixture(autouse=True)
-def _short_timeout(monkeypatch):
-    """Use a small per-call timeout so tests stay fast."""
-    monkeypatch.setenv("REBAR_ACLI_TIMEOUT", "1")
-    # Shrink grace/drain too so the reap window is tight in tests.
-    monkeypatch.setattr(acli_subprocess, "_ACLI_GRACE_SECONDS", 1)
-    monkeypatch.setattr(acli_subprocess, "_ACLI_DRAIN_SECONDS", 1)
+class _RealChild(NamedTuple):
+    """Handles for a test that drives real hanging children through ``_run_acli``."""
+
+    ready: Path
+    """Pass as the LAST argv element of every fake; the child creates it when set up."""
+
+    pids: list[int]
+    """Parent-side PID of every child actually spawned, in spawn order."""
+
+    backoffs: list[float]
+    """Logical retry delays, recorded rather than slept."""
 
 
 @pytest.fixture
-def short_read_retry_timing(monkeypatch):
-    """Install short retry timing and observe each real child from the parent."""
-    real_popen = acli_subprocess.subprocess.Popen
-    spawned_pids: list[int] = []
-    backoffs: list[float] = []
+def real_child(tmp_path, monkeypatch) -> _RealChild:
+    """Drive real hanging children on sub-second windows, ordered by readiness.
 
-    def recording_popen(*args, **kwargs):
+    Installs the small reap windows, records every spawned PID and every logical
+    retry backoff (without sleeping it), and — the load-bearing part — blocks
+    inside ``Popen`` until the child signals that its setup is done. ``_run_acli``
+    starts its deadline at ``communicate()``, after this wrapper returns, so the
+    injected window covers the hang and nothing else.
+
+    Nothing here asserts an elapsed time. The wait polls for an observable file and
+    carries a ceiling only so a broken spawn fails instead of wedging the suite; a
+    child that exits without signalling short-circuits it immediately.
+    """
+    ready = tmp_path / "child-ready"
+    pids: list[int] = []
+    backoffs: list[float] = []
+    real_popen = acli_subprocess.subprocess.Popen
+
+    def ready_gated_popen(*args, **kwargs):
+        ready.unlink(missing_ok=True)  # every attempt signals afresh
         process = real_popen(*args, **kwargs)
-        spawned_pids.append(process.pid)
+        pids.append(process.pid)
+        deadline = time.monotonic() + _POLL_CEILING_SECONDS
+        while not ready.exists() and process.poll() is None:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(_POLL_INTERVAL_SECONDS)
         return process
 
-    monkeypatch.setattr(acli_subprocess.subprocess, "Popen", recording_popen)
-    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: 0.1)
-    monkeypatch.setattr(acli_subprocess, "_ACLI_GRACE_SECONDS", 0.1)
-    monkeypatch.setattr(acli_subprocess, "_ACLI_DRAIN_SECONDS", 0.1)
+    monkeypatch.setattr(acli_subprocess.subprocess, "Popen", ready_gated_popen)
+    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: _REAP_CALL_TIMEOUT)
+    monkeypatch.setattr(acli_subprocess, "_ACLI_GRACE_SECONDS", _REAP_GRACE_SECONDS)
+    monkeypatch.setattr(acli_subprocess, "_ACLI_DRAIN_SECONDS", _REAP_DRAIN_SECONDS)
     monkeypatch.setattr(acli_subprocess, "_backoff_sleep", backoffs.append)
-    return spawned_pids, backoffs
+    return _RealChild(ready=ready, pids=pids, backoffs=backoffs)
+
+
+@pytest.fixture
+def completing_child_timeout(monkeypatch):
+    """Bound a fake child that must COMPLETE with a hang-guard, not a pass condition."""
+    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: _COMPLETING_CHILD_TIMEOUT)
 
 
 # ---------------------------------------------------------------------------
@@ -129,43 +246,39 @@ def short_read_retry_timing(monkeypatch):
 
 
 @POSIX_ONLY
-def test_grandchild_process_group_reaped(tmp_path):
+def test_grandchild_process_group_reaped(tmp_path, real_child):
     """A hung child + pipe-holding grandchild are reaped; no orphaned group remains.
 
-    Asserts (a) AcliTimeoutError within ~call_timeout+GRACE+DRAIN and (b) the
-    grandchild's process group is gone — polled, not asserted instantaneously
-    (spike note: the grandchild can die just after a naive check).
+    Asserts (a) AcliTimeoutError terminates the call and (b) the grandchild's
+    process group is gone — polled, not asserted instantaneously (spike note: the
+    grandchild can die just after a naive check). The grandchild signals readiness
+    only after writing its pidfile, so the pidfile assertion below is ordered by an
+    observed event rather than by the injected window out-racing interpreter start.
     """
     pidfile = tmp_path / "grandchild.pid"
     start = time.monotonic()
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [str(pidfile)],
+            [str(pidfile), str(real_child.ready)],
             acli_cmd=_fake_cmd(_GRANDCHILD_HANG),
             retry_on_timeout=False,
         )
     elapsed = time.monotonic() - start
-    # call_timeout(1) + GRACE(1) + DRAIN(1) with headroom.
-    # timing: hang-guard — reap-hang guard; 10s dwarfs the 0.2s grace window
+    # Injected window: call_timeout(0.2) + GRACE(0.1) + DRAIN(0.1) ~= 0.4s total. The
+    # ceiling below stays at 10s and is deliberately NOT shrunk alongside it.
+    # timing: hang-guard — 10s is ~25x the 0.4s injected reap window
     assert elapsed < 10, f"reap took too long: {elapsed:.1f}s"
 
     # The grandchild wrote its PID; its process group must be gone. Poll, because
     # the kill+reap is asynchronous w.r.t. the grandchild actually dying.
     assert pidfile.exists(), "grandchild never recorded its PID"
     gpid = int(pidfile.read_text())
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            os.kill(gpid, 0)  # 0 == existence probe
-        except ProcessLookupError:
-            break  # gone — reaped
-        time.sleep(0.05)
-    else:
+    survivors = _wait_until_gone([gpid])
+    if survivors:
         # Final cleanup so we never leak in CI, then fail loudly.
-        try:
-            os.kill(gpid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        for pid in survivors:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, signal.SIGKILL)
         pytest.fail(f"grandchild PID {gpid} survived the process-group reap")
 
 
@@ -175,50 +288,51 @@ def test_grandchild_process_group_reaped(tmp_path):
 
 
 @POSIX_ONLY
-def test_write_not_retried_on_timeout(tmp_path):
-    """retry_on_timeout=False -> exactly ONE spawn, then AcliTimeoutError."""
+def test_write_not_retried_on_timeout(tmp_path, real_child):
+    """retry_on_timeout=False -> exactly ONE spawn, then AcliTimeoutError.
+
+    The child appends its spawn marker BEFORE signalling ready, so the count below
+    reads a settled file: a second spawn would be visible however slow the host is.
+    """
     counter = tmp_path / "spawns"
     counter.write_text("")
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [str(counter)],
+            [str(counter), str(real_child.ready)],
             acli_cmd=_fake_cmd(_COUNT_THEN_HANG),
             retry_on_timeout=False,
         )
     assert counter.read_text() == "x", "a timed-out WRITE must not be retried"
+    assert len(real_child.pids) == 1, f"expected one spawn, got {real_child.pids}"
 
 
 @POSIX_ONLY
-def test_read_retried_then_terminal(short_read_retry_timing):
-    """retry_on_timeout=True -> retries up to _MAX_ATTEMPTS then AcliTimeoutError."""
-    spawned_pids, backoffs = short_read_retry_timing
+def test_read_retried_then_terminal(real_child):
+    """retry_on_timeout=True -> retries up to _MAX_ATTEMPTS then AcliTimeoutError.
 
+    Every attempt is gated on its child signalling ready, so "three real sessions"
+    is proven by three observed spawns rather than by three deadlines happening to
+    outlast three interpreter starts. The retry schedule is recorded, not slept.
+    """
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [],
+            [str(real_child.ready)],
             acli_cmd=_fake_cmd(_SIMPLE_HANG),
             retry_on_timeout=True,
         )
 
-    assert len(spawned_pids) == acli_subprocess._MAX_ATTEMPTS, (
+    assert len(real_child.pids) == acli_subprocess._MAX_ATTEMPTS, (
         "a READ should retry up to _MAX_ATTEMPTS times before going terminal"
     )
-    assert len(set(spawned_pids)) == len(spawned_pids), (
+    assert len(set(real_child.pids)) == len(real_child.pids), (
         "each retry must spawn a distinct child session"
     )
-    assert backoffs == [2, 4], f"expected logical retry backoff [2, 4], got {backoffs}"
+    assert real_child.backoffs == [2, 4], (
+        f"expected logical retry backoff [2, 4], got {real_child.backoffs}"
+    )
 
-    remaining = set(spawned_pids)
-    deadline = time.monotonic() + 5
-    while remaining and time.monotonic() < deadline:
-        for pid in tuple(remaining):
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                remaining.remove(pid)
-        if remaining:
-            time.sleep(0.01)
-    assert not remaining, f"timed-out ACLI child PIDs survived cleanup: {sorted(remaining)}"
+    survivors = _wait_until_gone(real_child.pids)
+    assert not survivors, f"timed-out ACLI child PIDs survived cleanup: {sorted(survivors)}"
 
 
 def test_acli_timeout_error_is_not_builtin_timeout_error():
@@ -238,27 +352,33 @@ def test_acli_timeout_error_is_not_builtin_timeout_error():
 
 
 @POSIX_ONLY
-def test_truncated_utf8_does_not_crash_reap_path():
+def test_truncated_utf8_does_not_crash_reap_path(real_child):
     """errors='replace' -> a truncated multibyte lead must not raise on the reap path.
 
     With errors='strict', communicate()'s final decode raises UnicodeDecodeError
     on the cleanup path, masking the timeout. The terminal error must be
-    AcliTimeoutError, not UnicodeDecodeError.
+    AcliTimeoutError, not UnicodeDecodeError. The child signals ready only after
+    the lead byte is in the pipe, so the decode path is always exercised.
     """
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [],
+            [str(real_child.ready)],
             acli_cmd=_fake_cmd(_TRUNCATED_UTF8_THEN_HANG),
             retry_on_timeout=False,
         )
 
 
 @POSIX_ONLY
-def test_partial_stdout_captured_on_timeout():
-    """Partial stdout emitted before the hang is carried on AcliTimeoutError."""
+def test_partial_stdout_captured_on_timeout(real_child):
+    """Partial stdout emitted before the hang is carried on AcliTimeoutError.
+
+    The child flushes stdout BEFORE signalling ready, so the bytes are already in
+    the pipe when the injected window starts — the capture assertion no longer
+    depends on the deadline outlasting interpreter startup.
+    """
     with pytest.raises(acli_subprocess.AcliTimeoutError) as ei:
         acli_subprocess._run_acli(
-            [],
+            [str(real_child.ready)],
             acli_cmd=_fake_cmd(_PARTIAL_THEN_HANG),
             retry_on_timeout=False,
         )
@@ -267,7 +387,7 @@ def test_partial_stdout_captured_on_timeout():
 
 
 @POSIX_ONLY
-def test_check_mutation_failure_not_called_on_killed_child(monkeypatch):
+def test_check_mutation_failure_not_called_on_killed_child(monkeypatch, real_child):
     """A killed child must never reach _check_mutation_failure (no fabricated success)."""
     called = {"n": 0}
     real = acli_subprocess._check_mutation_failure
@@ -279,7 +399,7 @@ def test_check_mutation_failure_not_called_on_killed_child(monkeypatch):
     monkeypatch.setattr(acli_subprocess, "_check_mutation_failure", _spy)
     with pytest.raises(acli_subprocess.AcliTimeoutError):
         acli_subprocess._run_acli(
-            [],
+            [str(real_child.ready)],
             acli_cmd=_fake_cmd(_SIMPLE_HANG),
             retry_on_timeout=False,
         )
@@ -403,9 +523,15 @@ def test_rate_limit_backoff_none_for_non_429() -> None:
     assert acli_subprocess._rate_limit_backoff(0, None) is None
 
 
-def test_run_acli_429_retries_with_rate_limit_backoff(tmp_path, monkeypatch, caplog) -> None:
+def test_run_acli_429_retries_with_rate_limit_backoff(
+    tmp_path, monkeypatch, caplog, completing_child_timeout
+) -> None:
     """A 429 exit routes through the rate-limit backoff (honoring Retry-After), the call
-    succeeds on retry, and NO uniform 2s sleep is used (add-on, not double-sleep)."""
+    succeeds on retry, and NO uniform 2s sleep is used (add-on, not double-sleep).
+
+    Both fake children must COMPLETE here, so the call timeout is a generous
+    hang-guard rather than the module-wide 1s this test used to inherit — that
+    ceiling was a latent flake whenever two interpreter starts exceeded a second."""
     monkeypatch.setenv("FAKE_429_COUNTER", str(tmp_path / "n"))
     delays: list[float] = []
     # Patch the narrow retry-backoff SEAM, not the module-global time.sleep. The

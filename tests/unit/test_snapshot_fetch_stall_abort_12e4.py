@@ -39,9 +39,17 @@ def repo(tmp_path):
 
 @pytest.fixture
 def tight_stall(monkeypatch):
-    """Shrink the abort window so the test is quick; the *mechanism* is unchanged."""
+    """Shrink the abort window so the test is quick; the *mechanism* is unchanged.
+
+    One second is the smallest window git's ``http.lowSpeedTime`` expresses, and the
+    sibling dribble test below already proves git honors it. Shrinking it is safe in
+    one direction only: the remote sends ZERO bytes, so a shorter window makes the
+    stall abort more certain, never less — a loaded host can delay the abort but
+    cannot manufacture throughput. Nothing here asserts elapsed time; the pass
+    condition is the failure REASON, under a ceiling 60x the window.
+    """
     monkeypatch.setenv("REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC", "1000")
-    monkeypatch.setenv("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS", "2")
+    monkeypatch.setenv("REBAR_SNAPSHOT_STALL_WINDOW_SECONDS", "1")
     monkeypatch.setenv("REBAR_SNAPSHOT_STALL_ATTEMPTS", "1")
     # The wall-clock ceiling stays FAR above the abort window, so a test that passes can
     # only have passed because the throughput check fired — not because time ran out.
