@@ -169,13 +169,15 @@ tools never reach it. Tunables (env > `[snapshot]` config > documented default):
 | free-space watermark (volume-relative) | `REBAR_GATE_FREE_WATERMARK_PCT` | 0 (off) | reclaim when free disk drops below this **percent of the volume** (whole points, e.g. `20` = reclaim at 80% used); clamped to 50 |
 | recency grace | `REBAR_GATE_GRACE_SECONDS` | 120 | never evict an entry used within this window |
 | max age (cold-trim) | `REBAR_GATE_MAX_AGE_SECONDS` | 7 days | evict genuinely cold entries regardless of free space |
+| store-size cap | `REBAR_GATE_MAX_BYTES` | 0 (off) | cap the store's OWN size in bytes (checked against the running byte total, not free disk); evict LRU down to 5% below the cap |
 | integrity reverify period | `REBAR_GATE_REVERIFY_SECONDS` | 0 (off) | re-check entries for corruption every N seconds |
 | janitor interval | `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | 300 | background reclamation cadence |
 
 **Disk-cap behavior.** A single background janitor (off the hot path) reclaims under the
-free-space watermark using LRU by touch-on-read `mtime`, skipping the grace window, with a
-secondary max-age cold-trim. Eviction is `rename`-to-trash **then** `rmtree` (never an in-place
-delete of a live entry), so a reader holding an open file keeps reading via POSIX
+free-space watermark using LRU by touch-on-read `mtime`, skipping the grace window, backstopped
+by the `max_bytes` byte-total cap and a secondary max-age cold-trim. Eviction is
+`rename`-to-trash **then** `rmtree` (never an in-place delete of a live entry), so a reader
+holding an open file keeps reading via POSIX
 delete-on-last-close; a new lookup that misses simply re-materializes. The cache is
 regenerable — losing it costs only re-materialization.
 
@@ -200,6 +202,17 @@ percentage is **clamped to `MAX_FREE_WATERMARK_PCT` (50)** rather than rejected:
 that every pass evicted the whole store and every gate re-materialized its snapshot from
 scratch; at `>=100` the trigger would exceed the volume outright. A janitor must never fail a
 gate over a tunable, so an out-of-range value is clamped, not an error.
+
+**Sizing the store-size cap: use it on a big or shared volume.** The watermark asks "is the
+DISK running out?", which on a 4 TB or shared volume is never true — so the cache itself can grow
+unboundedly while the janitor stays idle (a single pinned ticket-store entry is ~861 MiB, one per
+distinct tickets SHA). `REBAR_GATE_MAX_BYTES` caps the store's own footprint instead, measured
+against the running byte total the populate paths maintain incrementally (never a hot-path `du`).
+Size it at a few times a working set's worth of entries so ordinary reuse still hits the cache —
+the cap is a ceiling, not a purge: an armed pass evicts LRU-first only down to a target 5% below
+the cap (`RECLAIM_TARGET_MARGIN_PCT` again, mirrored) and stops. The grace window still protects
+a just-used entry, so a cap set below one working set will report `skipped_grace` rather than
+evict live snapshots out from under a running gate. `0` (the default) leaves the cap off.
 
 **EFS / NFS `flock` caveat.** Cross-process coordination (single-flight populate, the GC
 interlock) uses `fcntl.flock` with an atomic-`mkdir` fallback. `flock` semantics on networked

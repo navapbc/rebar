@@ -478,6 +478,7 @@ free_watermark_bytes = 2147483648     # reclaim when free disk < this many bytes
 free_watermark_pct   = 0              # ALSO reclaim when free disk < this % of the volume; 0 = off, clamped to 50 (env REBAR_GATE_FREE_WATERMARK_PCT)
 grace_seconds        = 120            # never evict an entry used within this window (env REBAR_GATE_GRACE_SECONDS)
 max_age_seconds      = 604800         # cold-trim entries older than this (7 days; env REBAR_GATE_MAX_AGE_SECONDS)
+max_bytes            = 0              # cap the snapshot store's own size in bytes; 0 = off (env REBAR_GATE_MAX_BYTES)
 reverify_seconds     = 0              # periodic integrity reverify period; 0 = off (env REBAR_GATE_REVERIFY_SECONDS)
 interval_seconds     = 300            # janitor background pass cadence (env REBAR_GATE_JANITOR_INTERVAL_SECONDS)
 ```
@@ -490,6 +491,14 @@ reclamation pass starts it runs on to a target 5 points higher — a fixed inter
 (`20` = reclaim at 80% used), and because `80` reads naturally as the inverse it is clamped to
 `MAX_FREE_WATERMARK_PCT` (50) rather than rejected. See
 [repo-snapshot-gates.md](repo-snapshot-gates.md) for sizing guidance.
+
+`max_bytes` is a separate, independent backstop: a cap on the **store's own size**, checked
+against the incrementally-maintained running byte total rather than free disk, so the cache
+cannot grow without bound on a large or shared volume that never approaches the watermark. When
+the total exceeds the cap the janitor evicts LRU-by-`mtime` — under the same grace window as the
+watermark term — down to a target 5 points below the cap (the same fixed
+`RECLAIM_TARGET_MARGIN_PCT` hysteresis, mirrored). `0`, the default, disables the cap entirely
+and preserves the free-space-only behavior exactly.
 
 Env-only (NOT `[snapshot]` keys): `REBAR_GATE_TMPDIR` (the snapshot store's base directory;
 default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_UNGATED`

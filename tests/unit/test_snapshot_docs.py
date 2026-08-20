@@ -61,6 +61,7 @@ def test_config_md_documents_snapshot_section_and_flags():
         "rebar_gate_free_watermark_bytes",
         "rebar_gate_grace_seconds",
         "rebar_gate_max_age_seconds",
+        "rebar_gate_max_bytes",
         "rebar_gate_reverify_seconds",
         "rebar_gate_janitor_interval_seconds",
     ):

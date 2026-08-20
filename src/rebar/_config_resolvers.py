@@ -191,6 +191,10 @@ def resolve_janitor_tunables(
         "max_age_seconds": _snapshot_int(
             os.environ.get("REBAR_GATE_MAX_AGE_SECONDS"), t, "max_age_seconds", d
         ),
+        # Store-size cap in BYTES (ADR 0005's byte-total backstop). 0 = off, like
+        # free_watermark_pct and reverify_seconds — an unset deployment keeps today's
+        # free-space-only behaviour.
+        "max_bytes": _snapshot_int(os.environ.get("REBAR_GATE_MAX_BYTES"), t, "max_bytes", d),
         "reverify_seconds": _snapshot_int(
             os.environ.get("REBAR_GATE_REVERIFY_SECONDS"), t, "reverify_seconds", d
         ),

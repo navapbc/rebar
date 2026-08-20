@@ -518,3 +518,125 @@ def test_absolute_floor_still_governs_when_it_is_the_larger_term(store, repo, mo
     res = janitor.run_gc(store, config=cfg, now=now, free_bytes=int(1.5 * _GIB))
     assert res.evicted >= 1
     assert not entry.exists()
+
+
+# --------------------------------------------------------------------------------------
+# Bug 3907 — the ADR-promised byte-total backstop + accounting for the tickets- entries
+#
+# ADR 0005 D5 ("backstopped by the byte total") and the janitor's own module contract both
+# promise a THIRD reclamation trigger driven by the incrementally-maintained byte total.
+# _gc_pass read only free space and mtime, so the promise was inert; and materialize_tickets
+# populated the store's LARGEST entries (~861 MiB each in the wild) without ever calling
+# add_bytes, so the total those triggers would read under-counted them to zero.
+# --------------------------------------------------------------------------------------
+def test_max_bytes_cap_evicts_when_over_budget(store, repo):
+    """The byte-total backstop is the ONLY term left armed here: free space is abundant
+    (``free_bytes`` far above the watermark), the cold-trim is disarmed (``max_age`` huge) and
+    every entry is outside the grace window. An eviction can therefore only come from the cap."""
+    now = time.time()
+    # DISTINCT mtimes, oldest first: LRU order must be well-defined, or "which entry goes
+    # first" would fall through to filesystem iteration order and the assertion below would
+    # be an order-dependent flake rather than a statement about LRU.
+    entries = [
+        _populate(repo, store, f"f{i}.txt", "x" * 4096, mtime=now - 10_000 + i * 100)[1]
+        for i in range(4)
+    ]
+    total = cache.byte_total(store)
+    assert total > 0
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=1,  # free-space term disarmed
+        free_watermark_pct=0,
+        grace_seconds=120,
+        max_age_seconds=10**9,  # cold-trim disarmed
+        max_bytes=total // 2,  # ... leaving only the cap
+    )
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert res.skipped is None, "the pass must actually run (not lose the gc lock)"
+    assert res.evicted >= 1, "byte_total over the cap must reclaim"
+    # The algorithmic property, not a wall-clock or disk-size assertion: reclaim continues
+    # until the running total is back under the cap, and it stops there rather than draining
+    # the whole store.
+    assert cache.byte_total(store) <= cfg.max_bytes
+    assert entries[-1].exists(), "a cap is not a purge — the most recent entry survives"
+    # LRU order: the oldest entry goes first.
+    assert not entries[0].exists()
+
+
+def test_max_bytes_cap_off_by_default_changes_nothing(store, repo):
+    """``max_bytes`` defaults to 0 = off (the ``free_watermark_pct`` precedent), so an
+    existing deployment that sets no cap keeps exactly today's behaviour."""
+    now = time.time()
+    assert janitor.JanitorConfig().max_bytes == janitor.DEFAULT_MAX_BYTES == 0
+    _sha, entry = _populate(repo, store, "a.txt", "x" * 4096, mtime=now - 10_000)
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=1, grace_seconds=120, max_age_seconds=10**9, max_bytes=0
+    )
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+    assert res.evicted == 0
+    assert entry.exists()
+
+
+def test_materialize_tickets_accounts_its_bytes(store, repo):
+    """``materialize_tickets`` is a SECOND populate path alongside ``cache.acquire``; ADR 0005
+    D2 requires the byte total to be maintained INCREMENTALLY, so it owes the same
+    ``add_bytes`` its sibling pays. Without it the entries that dominate the store count zero
+    and every size-driven trigger reads a total that is arbitrarily wrong."""
+    _commit(repo, "seed.txt", "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+    _commit(repo, "t.json", "T" * 200_000)
+    _git(repo, "checkout", "--quiet", "-")
+
+    before = cache.byte_total(store)
+    dest = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+    real = cache.entry_size(dest)
+
+    assert real > 0, "the entry must actually hold bytes"
+    assert cache.byte_total(store) == before + real, "populated bytes must be accounted once"
+
+    # Idempotent: a cache HIT re-uses the entry and must not double-count it.
+    rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)
+    assert cache.byte_total(store) == before + real
+
+    # And the incremental total agrees with the authoritative walk (what startup_sweep does).
+    assert cache.byte_total(store) == sum(
+        cache.entry_size(e) for e in store.iterdir() if janitor._is_entry(e)
+    )
+
+
+def test_cap_reclaims_a_tickets_entry_end_to_end(store, repo):
+    """The two halves compose: an accounted ``tickets-<sha>`` entry is what pushes the store
+    over the cap, and the cap is what reclaims it — the trigger fires end-to-end on the entry
+    kind that actually dominates the store."""
+    now = time.time()
+    _commit(repo, "seed.txt", "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+    _commit(repo, "t.json", "T" * 200_000)
+    _git(repo, "checkout", "--quiet", "-")
+    dest = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+    os.utime(dest, (now - 10_000, now - 10_000))  # outside the grace window
+
+    total = cache.byte_total(store)
+    assert total >= cache.entry_size(dest) > 0
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=1,
+        grace_seconds=120,
+        max_age_seconds=10**9,
+        max_bytes=total // 2,
+    )
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+    assert res.evicted >= 1
+    assert not dest.exists(), "the tickets- entry must be reclaimable by the cap"
+    assert cache.byte_total(store) <= cfg.max_bytes
+
+
+def test_max_bytes_resolved_from_env_and_snapshot_table(tmp_path, monkeypatch):
+    """The knob rides the SAME owned config seam as every other janitor tunable:
+    ``REBAR_GATE_MAX_BYTES`` env > ``[snapshot] max_bytes`` > documented default."""
+    monkeypatch.setenv("REBAR_GATE_MAX_BYTES", "12345")
+    assert janitor.JanitorConfig.from_env().max_bytes == 12345
+
+    monkeypatch.delenv("REBAR_GATE_MAX_BYTES")
+    proj = _init_repo(tmp_path / "proj")
+    (proj / "rebar.toml").write_text("[snapshot]\nmax_bytes = 6789\n")
+    assert janitor.JanitorConfig.from_env(repo_root=str(proj)).max_bytes == 6789

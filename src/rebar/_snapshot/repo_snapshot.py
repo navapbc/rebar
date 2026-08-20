@@ -699,6 +699,20 @@ def materialize_tickets(
                 raise
         else:
             _fsync_dir(dest.parent)
+            # We WON the populate race, so account this entry's bytes exactly once. The
+            # ticket-store entries are the largest thing in the store, and without this the
+            # janitor's running byte total — and therefore its byte-total cap — simply cannot
+            # see them. Mirrors ``cache.acquire``'s add_bytes on its own populate branch; the
+            # cache-hit and lost-race paths above deliberately do NOT account (already counted
+            # / the winner counts it). Deferred import: ``cache`` imports THIS module, so a
+            # module-level import would be a cycle.
+            from rebar._snapshot.cache import add_bytes as _add_bytes
+            from rebar._snapshot.cache import entry_size as _entry_size
+
+            try:
+                _add_bytes(_entry_size(dest), store)
+            except OSError:  # pragma: no cover - best effort, like the janitor's fs calls
+                pass  # accounting is bookkeeping; it must never fail a materialization
         return str(dest)
     except BaseException:
         shutil.rmtree(build, ignore_errors=True)
