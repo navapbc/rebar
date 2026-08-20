@@ -222,6 +222,23 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             pytrace=False,
         )
 
+    # (c) Hard-FAIL collection when the live-Jira tests carry an xdist_group mark that
+    #     the selected scheduler will silently DISCARD — pytest-xdist honours the mark
+    #     only under `--dist loadgroup`. Pure predicate in tests/_live_jira_confinement.py
+    #     so it is testable without spawning pytest; a no-op unless live creds are present.
+    #
+    #     UsageError, not pytest.fail(), UNLIKE arm (b) above: this arm can only fire under
+    #     `-n>0`, and from the xdist controller's collection hook a pytest.fail() escapes as a
+    #     20-line `INTERNALERROR>` traceback that buries the message under a stack the reader
+    #     did not cause. The condition IS a usage error — the wrong `--dist` for this selection
+    #     — so UsageError renders it as a clean `ERROR: …` banner (exit 4) with the remedy
+    #     legible. A guard whose whole value is a clear message must not look like a crash.
+    import _live_jira_confinement
+
+    unconfined = _live_jira_confinement.unconfined_live_jira_reason(config, items)
+    if unconfined is not None:
+        raise pytest.UsageError(unconfined)
+
 
 # Directories whose tests are network-isolated by the socket guard.
 _NETWORK_GUARDED_TIERS = (

@@ -152,6 +152,11 @@ def test_reconcile_intercepted_dry_run_default(
 
 
 @pytest.mark.integration
+# Reaches the SAME live Jira project as tests/integration/test_reconcile_live_e2e.py, so it
+# must share their xdist group: without this mark it lands on a different worker under
+# `--dist loadgroup` and races the confined group. Module-scope pytestmark is wrong here —
+# this file is overwhelmingly non-live tests.
+@pytest.mark.xdist_group("live_reconcile_e2e")
 def test_reconcile_dry_run_against_live_jira(rebar_repo: Path) -> None:
     """External integration check: `rebar reconcile` runs a real dry-run against
     the configured live Jira. Excluded from the default run (``-m "not
