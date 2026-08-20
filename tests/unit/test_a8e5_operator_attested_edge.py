@@ -11,6 +11,12 @@ from rebar.llm.plan_review.workflow_ops import (
 
 pytestmark = pytest.mark.unit
 
+# ADR 0101 renamed the acceptance-criterion tag to `[non-codebase]`, keeping
+# `[operator-attested]` as an accepted compatibility alias. The enrichment edge cases below
+# run under BOTH spellings so the alias has an explicit regression suite, rather than the
+# legacy cases merely continuing to pass by accident.
+_TAGS = ("[non-codebase]", "[operator-attested]")
+
 
 def test_parser_is_case_insensitive_on_the_token() -> None:
     desc = "## Acceptance Criteria\n- [ ] [OPERATOR-ATTESTED] the drill is run in prod quarterly\n"
@@ -31,12 +37,13 @@ def test_parser_ignores_untagged_criteria() -> None:
     assert operator_attested_ac_texts(desc) == []
 
 
-def test_enrich_leaves_non_operator_attested_ac_finding_alone() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_enrich_leaves_non_operator_attested_ac_finding_alone(tag: str) -> None:
     # A finding flagging a NON-operator-attested AC keeps its ac_unverifiable (still floored).
     desc = (
         "## Acceptance Criteria\n"
         "- [ ] the parser handles empty input\n"
-        "- [ ] [operator-attested] the deploy is confirmed live\n"
+        f"- [ ] {tag} the deploy is confirmed live\n"
     )
     findings = [
         {
@@ -61,8 +68,9 @@ def test_enrich_underscore_near_miss_does_not_clear() -> None:
     assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "missing_oracle"
 
 
-def test_enrich_is_a_noop_when_no_finding_references_the_oa_ac() -> None:
-    desc = "## Acceptance Criteria\n- [ ] [operator-attested] the deploy is confirmed live\n"
+@pytest.mark.parametrize("tag", _TAGS)
+def test_enrich_is_a_noop_when_no_finding_references_the_oa_ac(tag: str) -> None:
+    desc = f"## Acceptance Criteria\n- [ ] {tag} the deploy is confirmed live\n"
     findings = [
         {"finding": "unrelated concern about naming", "evidence": ["src/x.py"], "location": "x"}
     ]
@@ -71,9 +79,10 @@ def test_enrich_is_a_noop_when_no_finding_references_the_oa_ac() -> None:
     assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "missing_oracle"
 
 
-def test_enrich_handles_missing_verif_and_bad_shapes() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_enrich_handles_missing_verif_and_bad_shapes(tag: str) -> None:
     # Fail-safe: a finding with no verification, or a non-dict severity_attributes, never crashes.
-    desc = "## Acceptance Criteria\n- [ ] [operator-attested] the deploy is confirmed live\n"
+    desc = f"## Acceptance Criteria\n- [ ] {tag} the deploy is confirmed live\n"
     findings = [
         {"finding": "the deploy is confirmed live", "evidence": ["the deploy is confirmed live"]},
         {"finding": "no verif"},
@@ -84,22 +93,24 @@ def test_enrich_handles_missing_verif_and_bad_shapes() -> None:
     assert verifs[0]["severity_attributes"].get("ac_unverifiable") == "none"
 
 
-def test_enrich_no_ac_unverifiable_still_flags_but_impact_unchanged() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_enrich_no_ac_unverifiable_still_flags_but_impact_unchanged(tag: str) -> None:
     # A finding referencing the OA AC but with ac_unverifiable already "none": operator_attested
     # may be flagged (observability) and impact stays 0.0 — nothing to clear, no crash.
-    desc = "## Acceptance Criteria\n- [ ] [operator-attested] the deploy is confirmed live\n"
+    desc = f"## Acceptance Criteria\n- [ ] {tag} the deploy is confirmed live\n"
     findings = [{"finding": "x", "evidence": ["the deploy is confirmed live"], "location": "AC"}]
     verifs = {0: {"severity_attributes": {}, "binary": {}}}
     enrich_operator_attested(findings, verifs, desc)
     assert review_kernel.impact_plan(verifs[0]["severity_attributes"]) < 0.85
 
 
-def test_operator_attested_finding_survives_on_other_axes() -> None:
+@pytest.mark.parametrize("tag", _TAGS)
+def test_operator_attested_finding_survives_on_other_axes(tag: str) -> None:
     """Clearing ac_unverifiable removes ONLY that axis's hard-override contribution — a finding
     that ALSO scores on another axis (here divergent_implementation=contradicts_reality, a
     plan-v4 floor grade) still produces impact and survives (the clear is not a blanket drop of
     the finding)."""
-    desc = "## Acceptance Criteria\n- [ ] [operator-attested] the deploy is confirmed live\n"
+    desc = f"## Acceptance Criteria\n- [ ] {tag} the deploy is confirmed live\n"
     findings = [
         {
             "finding": "the AC cannot be verified in-session AND the plan diverges from the parent",
