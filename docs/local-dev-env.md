@@ -421,3 +421,51 @@ REBAR_REQUIRE_EXTRAS=1 pytest -m "not integration and not external"
 
 Nothing these extras unlock needs network or cloud credentials; the suite's own
 network guard still applies.
+
+### Validating the whole tree locally (and whether detached runs are trustworthy)
+
+A serial local run of the full suite takes hours on a dev machine and exceeds most agent
+tool timeouts, so the tree is usually covered either in chunks or by detaching the run.
+
+**Detached runs ARE trustworthy — but only if nothing else touches the checkout while one
+is in flight.** The suite is not sensitive to being detached as such: an absent controlling
+terminal, `stdin` at `/dev/null`, and a different process session change nothing. What
+breaks a detached run is that detaching it is precisely what frees you to keep working in
+the same worktree, and several guards compare whole-checkout state before and after **each
+test**. A concurrent commit, rebase, branch switch, or stray file therefore fails whichever
+test happened to straddle it — an arbitrary, innocent one, different on each run:
+
+* `_no_repo_root_leaks` (`tests/conftest.py`) — a new top-level entry in the checkout.
+  It also **deletes** what it finds, so a file you create mid-run can disappear.
+* `_no_repo_commits` (`tests/conftest.py`) — "Test moved the repo HEAD (X -> Y)".
+
+Both fire in **teardown**, so the run reports the test as *passed* AND raises an error: a
+tail reading `N passed, 1 error` is one run reporting both, not a contradiction. A killed
+child process (a reaped run) shows up separately, as a harness probe that produced no
+output; those diagnostics now report the child's `returncode`, so a `-9`/`SIGKILL` marks an
+external kill rather than a product failure.
+
+So, in order of preference:
+
+1. **Run it from a worktree you are not editing.** `make worktree name=<something>` and
+   leave it alone until it finishes. This is the whole fix — with no concurrent writer,
+   none of the guards above can misfire.
+2. **Use the CI selection and flags,** which are far faster and add a per-test hang guard.
+   `pytest-xdist` and `pytest-timeout` are already pinned in `[dev]` for local↔CI parity,
+   but they are **not** enabled by `addopts`, so a bare `pytest` is serial with no timeout:
+
+   ```sh
+   pytest -m "not integration and not external" -q \
+     -n "$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || nproc)" --dist worksteal \
+     -p no:cacheprovider --timeout=300 --timeout-method=thread \
+     --basetemp="$(mktemp -d)"
+   ```
+
+3. **If you must detach, do not work in that checkout until it exits** — not even a
+   `git commit`. Park edits in a different worktree.
+
+Do **not** conclude that an error from a detached run is spurious. Read it: if it names a
+repo-state guard or a `returncode` that is negative, it is an artifact of a concurrent
+writer or a reap and the guidance above prevents it; anything else is a real failure and a
+flaky test is a bug to root-cause, never a retry (see `CONTRIBUTING.md` §6). Background:
+bug `f0fb-de7a-b315-4508`.
