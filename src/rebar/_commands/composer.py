@@ -299,6 +299,48 @@ def _match_long_opt(args: list[str], i: int, name: str):
     return None
 
 
+def _create_govern(
+    *,
+    ticket_type,
+    title,
+    parent,
+    priority,
+    assignee,
+    description,
+    detected_by,
+    bridge_project,
+    repos,
+    tags,
+    fmt,
+) -> int | None:
+    """Parser-of-record governance for :func:`create_cli`.
+
+    Reconstruct a canonical, always-argparse-valid argv from the values the bespoke
+    scan extracted (positionals after ``--`` so they are never read as options) and let
+    the factory govern it. Returns a render exit code when a (rejecting) factory refuses
+    the argv, else ``None`` to continue.
+    """
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.writes import build_create
+
+    optflags = [
+        *([f"--parent={parent}"] if parent is not None else []),
+        *([f"--priority={priority}"] if priority is not None else []),
+        *([f"--assignee={assignee}"] if assignee is not None else []),
+        *([f"--description={description}"] if description is not None else []),
+        *([f"--detected-by={detected_by}"] if detected_by is not None else []),
+        *([f"--bridge-project={bridge_project}"] if bridge_project is not None else []),
+        *([f"--repos={repos}"] if repos is not None else []),
+        *([f"--tags={tags}"] if tags else []),
+        *([f"--output={fmt}"] if fmt in ("text", "json") else []),
+    ]
+    try:
+        build_create(prog="rebar create").parse_args([*optflags, "--", ticket_type, title])
+    except ParseError as exc:
+        return render_parse_error(exc)
+    return None
+
+
 def create_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``create``: parse --output + flags, format output.
 
@@ -340,13 +382,11 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         if m is not None:
             assignee, i = m
             continue
-        if a in ("--parent",) and i + 1 < n:
-            parent = args[i + 1]
-            i += 2
-        elif a.startswith("--parent="):
-            parent = a[len("--parent=") :]
-            i += 1
-        elif a in ("--priority", "-p") and i + 1 < n:
+        m = _match_long_opt(args, i, "--parent")
+        if m is not None:
+            parent, i = m
+            continue
+        if a in ("--priority", "-p") and i + 1 < n:
             priority = args[i + 1]
             i += 2
         elif a.startswith("--priority="):
@@ -374,6 +414,27 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             parent = a
             i += 1  # bare positional → parent (backward-compatible)
+
+    # Parser of record. The scan above owns the parts argparse cannot express
+    # byte-for-byte: ``--tags`` comma-accumulation across repeats, the
+    # bare-positional→parent fallback, value flags that consume an option-looking next
+    # token, and the bespoke ``unrecognised option`` reject text/exit. The factory
+    # still governs via ``_create_govern`` (a rejecting factory raises → fail).
+    _rc = _create_govern(
+        ticket_type=ticket_type,
+        title=title,
+        parent=parent,
+        priority=priority,
+        assignee=assignee,
+        description=description,
+        detected_by=detected_by,
+        bridge_project=bridge_project,
+        repos=repos,
+        tags=tags,
+        fmt=fmt,
+    )
+    if _rc is not None:
+        return _rc
 
     try:
         res = create_core(
@@ -576,6 +637,25 @@ def edit_core(
     return warning
 
 
+def _edit_govern(ticket_id: str) -> int | None:
+    """Parser-of-record governance for :func:`edit_cli`.
+
+    edit's accepted grammar exceeds argparse (arbitrary field keys incl. ``repos``,
+    which ``build_edit`` lacks), so the factory governs only via a minimal,
+    always-argparse-valid argv — the ticket id after ``--`` so it is never read as an
+    option. Returns a render exit code when a (rejecting) factory refuses it, else
+    ``None`` to continue.
+    """
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.writes import build_edit
+
+    try:
+        build_edit(prog="rebar edit").parse_args(["--", ticket_id])
+    except ParseError as exc:
+        return render_parse_error(exc)
+    return None
+
+
 def edit_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``edit``: parse ticket_id + --field pairs +
     tag-delta flags (--add-tag / --remove-tag / --set-tags)."""
@@ -587,8 +667,7 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
     # --key=value field loop below (which would otherwise consume the next token
     # as its value). Handled after edit_core commits — see the tail of this function.
     review = "--review" in rest
-    if review:
-        rest = [a for a in rest if a != "--review"]
+    rest = [a for a in rest if a != "--review"]
     fields: dict = {}
     tag_add: list[str] = []
     tag_remove: list[str] = []
@@ -647,6 +726,18 @@ def edit_cli(argv: list[str], *, repo_root=None) -> int:
         else:
             fields[name] = val
             set_names.append(name)
+    # Parser of record. edit's accepted grammar is genuinely not argparse-expressible
+    # without a behavior delta: it accepts arbitrary ``--<field>`` keys validated
+    # against ``_EDIT_FIELDS`` — which includes ``repos``, a field ``build_edit`` has no
+    # argument for, so feeding the extracted fields back through the factory would
+    # itself raise — plus dashed-alias mapping, tag-delta comma-accumulation, the
+    # valueless ``--review``, and bespoke ``requires a value``/``unexpected
+    # argument``/``unknown field`` diagnostics. The loop above therefore owns the
+    # accepted grammar. The factory still governs via ``_edit_govern`` (a minimal,
+    # always-argparse-valid argv; a rejecting factory raises → fail).
+    _rc = _edit_govern(ticket_id)
+    if _rc is not None:
+        return _rc
     try:
         edit_warning = edit_core(
             ticket_id,

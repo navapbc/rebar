@@ -257,6 +257,14 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
 
+    from rebar._cli._parsers.core.delete import build as build_delete
+
+    # Parser of record for delete's accepted grammar; the imperative scan below is
+    # retained because the ticket id is permissive (``--``/option-looking) and the
+    # exact-one-positional arity and ``requires --user-approved`` diagnostics are not a
+    # single argparse spec.
+    build_delete(prog="rebar delete").parse_known_args(rest)
+
     user_approved = False
     positional: list[str] = []
     for a in rest:

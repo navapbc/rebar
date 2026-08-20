@@ -80,6 +80,9 @@ def compact_cli(
     (see :func:`compact_all_cli`). Absent, the fold builds its own per-ticket map as before."""
     if len(argv) < 1:
         return _usage()
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.compact import build_compact
+
     tracker = str(config.tracker_dir(repo_root))
     raw = argv[0]
     ticket_id = resolve_ticket_id(raw, tracker)
@@ -98,20 +101,27 @@ def compact_cli(
     except config.ConfigError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
-    skip_sync = False
-    no_commit = False
+    # Bespoke reject guard, kept ahead of the factory: compact's value flags are
+    # equals-only (the space form is rejected) and its ticket id is permissive and may
+    # look like an option, neither of which argparse matches byte-for-byte; and the
+    # reject must fire only AFTER the ticket id resolves so a bad id still wins over a
+    # bad flag. The factory below is the parser of record for the accepted values.
     for a in argv[1:]:
-        if a.startswith("--threshold="):
-            threshold = int(a[len("--threshold=") :])
-        elif a.startswith("--horizon="):
-            horizon = int(a[len("--horizon=") :])
-        elif a == "--skip-sync":
-            skip_sync = True
-        elif a == "--no-commit":
-            no_commit = True
-        else:
+        if not (
+            a.startswith(("--threshold=", "--horizon=")) or a in ("--skip-sync", "--no-commit")
+        ):
             sys.stderr.write(f"Error: unknown argument '{a}'\n")
             return _usage()
+    try:
+        ns = build_compact(prog="rebar compact").parse_args([*argv[1:], "--", raw])
+    except ParseError as exc:
+        return render_parse_error(exc)
+    if ns.threshold is not None:
+        threshold = int(ns.threshold)
+    if ns.horizon is not None:
+        horizon = int(ns.horizon)
+    skip_sync = ns.skip_sync
+    no_commit = ns.no_commit
 
     if not (
         os.path.isdir(tracker)
@@ -519,6 +529,25 @@ def compact_all_cli(argv: list[str], *, repo_root=None) -> int:
     dry_run, limit, no_commit, include_archived, early_rc = _compact_all_parse(argv)
     if early_rc is not None:
         return early_rc
+
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.compact import build_compact_all
+
+    # The factory is the parser of record: its namespace drives the four selection
+    # toggles below. ``_compact_all_parse`` above is retained ONLY for the two things
+    # argparse cannot express byte-exactly — the bespoke ``unknown option`` reject
+    # (exit 1, not argparse's 2) and the ``--help``/``-h`` early-exit to stdout — so by
+    # the time we parse, ``argv`` holds only accepted flags and the factory never
+    # rejects a real invocation (a rejecting factory injected by the governance test
+    # does, which is the point).
+    try:
+        ns = build_compact_all(prog="rebar compact-all").parse_args(argv)
+    except ParseError as exc:
+        return render_parse_error(exc)
+    dry_run = ns.dry_run
+    limit = int(ns.limit) if ns.limit is not None else 0
+    no_commit = ns.no_commit
+    include_archived = ns.include_archived
 
     tracker = str(config.tracker_dir(repo_root))
     if not os.path.isdir(tracker):

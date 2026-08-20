@@ -274,9 +274,33 @@ def session_log_cli(argv: list[str]) -> int:
     if not argv:
         print(_USAGE)
         return 1
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.writes import build_session_log
+
     verb, rest = argv[0], argv[1:]
     try:
         opts, positionals = _parse_opts(rest)
+    except CommandError as exc:
+        print(exc.message, file=sys.stderr)
+        return exc.returncode
+
+    # Parser of record. ``_parse_opts`` above owns session-log's accepted grammar
+    # because argparse cannot match it byte-for-byte: the options are equals-only, a
+    # bare ``--`` ends option parsing so an entry may begin with ``-``, the reject
+    # wording/exit differ, and the per-verb positional arity (``start`` takes none,
+    # ``append`` exactly one) is a bespoke rc-1 diagnostic. We reconstruct a canonical,
+    # always-argparse-valid argv (entry capped to one slot so the bespoke arity check
+    # still wins) and let the factory govern it — a rejecting factory raises and fails.
+    optflags = [
+        f"--{key.replace('_', '-')}={value}" for key, value in opts.items() if value is not None
+    ]
+    norm = [*optflags, "--", verb, *positionals[:1]]
+    try:
+        build_session_log(prog="rebar session-log").parse_args(norm)
+    except ParseError as exc:
+        return render_parse_error(exc)
+
+    try:
         if verb == "start":
             if positionals:
                 raise CommandError(f"Error: 'start' takes no positional args\n{_USAGE}")

@@ -255,6 +255,11 @@ def _grounding_info(argv: list[str]) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    from rebar._cli._parsers.core.grounding import build as build_grounding
+
+    # Parser of record for grounding-info's accepted grammar; the surplus-positional
+    # ``Usage:`` guard below is retained as the bespoke reject.
+    build_grounding(prog="rebar grounding-info").parse_known_args(rest)
     if rest:
         sys.stderr.write("Usage: rebar grounding-info [--output json]\n")
         return 1

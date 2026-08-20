@@ -138,8 +138,13 @@ def _confirm_link(outcome: dict | None, record: dict | None) -> None:
 
 def link_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``link``: parse --dry-run, resolve, delegate."""
+    from rebar._cli._parsers.core.writes import build_link
     from rebar._commands import _confirm
 
+    # The factory is the parser of record for the accepted grammar; the raw slicing
+    # below is retained only where argparse cannot match (permissive option-looking
+    # ids, literal ``--dry-run`` membership, and ``--`` treated as a relation value).
+    build_link(prog="rebar link").parse_known_args(argv)
     dry_run = "--dry-run" in argv
     rest = [a for a in argv if a != "--dry-run"]
     if len(rest) < 3:
@@ -242,6 +247,9 @@ def revert_core(ticket_id: str, target_uuid: str, reason: str = "", *, repo_root
 
 def revert_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``revert``: parse args, print the confirmation."""
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.writes import build_revert
+
     if len(argv) < 2:
         print(_REVERT_USAGE, file=sys.stderr)
         return 1
@@ -254,6 +262,17 @@ def revert_cli(argv: list[str], *, repo_root=None) -> int:
             print(f"Error: unknown argument '{arg}'", file=sys.stderr)
             print(_REVERT_USAGE, file=sys.stderr)
             return 1
+
+    # Parser of record. ``--reason`` is equals-only (the space form is rejected as an
+    # unknown argument) and the two id positionals are permissive and may look like
+    # options, neither of which argparse matches byte-for-byte; the guard above owns
+    # those. We reconstruct a canonical argv (ids after ``--`` so they are never read as
+    # options) and let the factory govern it — a rejecting factory raises and fails.
+    norm = [*(["--reason=" + reason] if reason else []), "--", ticket_id, target_uuid]
+    try:
+        build_revert(prog="rebar revert").parse_args(norm)
+    except ParseError as exc:
+        return render_parse_error(exc)
     try:
         resolved = revert_core(ticket_id, target_uuid, reason, repo_root=repo_root)
     except CommandError as exc:

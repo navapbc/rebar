@@ -42,20 +42,23 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
         return 1
 
     title = rest[0]
-    description = None
+    # Bespoke reject guard (byte-exact "unexpected argument" text + exit 1); the
+    # factory below is the parser of record for the ACCEPTED --description grammar.
     i, n = 1, len(rest)
     while i < n:
         a = rest[i]
         if a in ("--description", "-d") and i + 1 < n:
-            description = rest[i + 1]
             i += 2
         elif a.startswith("--description="):
-            description = a[len("--description=") :]
             i += 1
         else:
             print(f"Error: unexpected argument '{a}'", file=sys.stderr)
             print(_USAGE, file=sys.stderr)
             return 1
+    from rebar._cli._parsers.core.writes import build_idea
+
+    ns, _extra = build_idea(prog="rebar idea").parse_known_args(rest[1:])
+    description = ns.description
 
     try:
         res = composer.create_core(
