@@ -173,9 +173,9 @@ def test_fail_verdict_carries_remediation_guidance(rebar_repo: Path) -> None:
     assert "comment" in lowered
     assert "evidence" in lowered
     # External evidence is admissible from ticket text only through the exact
-    # operator-attested classification contract; untagged criteria retain the
+    # non-codebase classification contract; untagged criteria retain the
     # codebase-verifiable default and cannot pass from a comment alone.
-    assert "[operator-attested]" in guidance
+    assert "[non-codebase]" in guidance
     assert "external" in lowered
     assert "codebase-verifiable" in lowered
     assert "untagged" in lowered
