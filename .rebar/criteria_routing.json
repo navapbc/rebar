@@ -85,6 +85,24 @@
       "block_threshold": 0.9,
       "blocking_enabled": false,
       "applies_to": []
+    },
+    "concurrency": {
+      "trigger_tokens": [
+        ".lock",
+        "retry",
+        "Popen",
+        "setsid",
+        "fork",
+        "stage_and_commit",
+        "push_tickets_branch",
+        "refs/reconciler/"
+      ],
+      "applies_to": [
+        "**/_store/**",
+        "**/lock*",
+        "**/enrich_drain*",
+        ".github/workflows/**"
+      ]
     }
   },
   "activate": {

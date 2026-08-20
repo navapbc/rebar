@@ -676,6 +676,48 @@ located configuration error instead of being silently skipped. A missing eval
 spec likewise reports both the logical criterion id and the expected
 code-review eval-spec path.
 
+### Project dogfood: concurrency trigger tiers
+
+The concurrency code-review overlay ships with a **two-layer trigger** design that rebar
+itself dogfoods, and that any project can copy.
+
+- **Committed high-precision tier.** `src/rebar/llm/code_review/registry.py` carries a
+  literal-substring token list (`_CONCURRENCY_TOKENS`: `Mutex`, `RwLock`, `synchronized`,
+  `volatile`, `@GuardedBy`, `pthread_`, `sync.WaitGroup`, `FOR UPDATE`, `SKIP LOCKED`, …) chosen to
+  fire only on explicit synchronization primitives across common stacks. It deliberately
+  **excludes** noisy vocabulary (`.lock`, `retry`, `Popen`, bare `fork`, async/await) that
+  produces false positives, so it stays stack-agnostic and low-noise for every project.
+- **Project noisy tier.** A project layers repository-specific vocabulary into the
+  `code_review.concurrency` entry of its `.rebar/criteria_routing.json`, using the additive
+  `trigger_tokens` (literal substrings unioned into `content_triggered_overlays`) and
+  `applies_to` (globs unioned into `glob_triggered_overlays`) keys. Project tokens are unioned
+  with — never replace — the committed tier. Because `concurrency` is a **built-in** overlay id,
+  the entry must carry **only** those two additive keys: `effective_routing` merges an
+  un-prefixed built-in entry per-key over the committed routing (a re-tune), so a stray
+  `block_threshold`/`default_posture`/`blocking_enabled` would silently override the committed
+  overlay's calibration rather than extend its triggers.
+
+**The fire-rate tradeoff (measured on this repo).** rebar is concurrency-heavy (multi-process
+writers over a git-backed store, file locks, detached children, CI push contention), so it is
+both the ideal dogfood target and a worst case for over-fire. Measured over the last 300
+non-merge `origin/main` commits — by replaying each commit's diff through
+`content_triggered_overlays` (committed-only vs. with the noisy tier), a reproducible scan —
+the committed high-precision tier fires on **13.3%** of diffs (40/300); adding the noisy tier
+(`.lock`, `retry`, `Popen`, `fork`, …) fires on a further **22.0%** (66/300), for 35.3%
+combined. That extra noise is **load-bearing here**: three of the four traced corpus races
+trigger only through noisy-tier vocabulary (`index.lock` via the `.lock` token, `retry`,
+`Popen`), which is exactly why this repo opts into it — in the project overlay, not the
+committed list, so other projects are not saddled with rebar's noise.
+
+**This repo's entry (the worked example).** rebar's own `.rebar/criteria_routing.json` carries
+a `code_review.concurrency` entry whose `trigger_tokens` add `.lock`, `retry`, `Popen`,
+`setsid`, `fork`, `stage_and_commit`, `push_tickets_branch`, `refs/reconciler/`, and whose
+`applies_to` adds `**/_store/**`, `**/lock*`, `**/enrich_drain*`, `.github/workflows/**`. A diff
+touching `index.lock` — caught by the `.lock` token, which is absent from the committed
+high-precision list — fires the overlay under this repo's effective routing but not under
+committed-only routing, the same dogfood-by-example pattern as `project.portability` and
+`project.review-phase-boundaries` above.
+
 ## Pluggable output contracts (each operation declares its own shape)
 
 The runner no longer hardcodes the findings model: the **structured-output contract** is
