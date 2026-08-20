@@ -33,6 +33,48 @@ def _criteria() -> list[dict]:
     ]
 
 
+def _criteria_both_kind_spellings() -> list[dict]:
+    """Criteria carrying BOTH out-of-codebase `kind` spellings (ADR 0101). Deliberately a
+    separate fixture from :func:`_criteria` so the shared one keeps its pinned shape."""
+    return [
+        {
+            "criterion": "AC1: the widget renders",
+            "met": True,
+            "citation": {"kind": "source", "description": "src/w.py:10-20"},
+            "kind": "codebase-verifiable",
+        },
+        {
+            "criterion": "AC2: deployed to prod",
+            "met": True,
+            "citation": {"kind": "source", "description": "comment: deploy #42"},
+            "kind": "non-codebase",
+        },
+        {
+            # The legacy alias, still carried by 827 tickets' immutable verdict events.
+            "criterion": "AC3: the drill ran on the live box",
+            "met": True,
+            "citation": {"kind": "source", "description": "comment: drill 2026-08-20"},
+            "kind": "operator-attested",
+        },
+    ]
+
+
+def test_reconcile_preserves_both_out_of_codebase_kind_spellings() -> None:
+    """The reconciler passes `kind` through verbatim for the canonical value AND the legacy
+    alias. It classifies nothing itself, so a historical verdict must survive the round trip
+    unaltered rather than being normalised to the new spelling."""
+    from rebar.llm.completion import reconcile_verdict
+
+    v = {"verdict": "PASS", "findings": [], "criteria": _criteria_both_kind_spellings()}
+    reconcile_verdict(v)  # mutates in place; returns None
+    assert v["verdict"] == "PASS"
+    assert [c["kind"] for c in v["criteria"]] == [
+        "codebase-verifiable",
+        "non-codebase",
+        "operator-attested",
+    ]
+
+
 # ── HAPPY PATH (shared with the implementer) ────────────────────────────────────────────
 def test_reconcile_pass_with_criteria_stays_pass() -> None:
     """A PASS verdict that carries a populated positive `criteria[]` (and empty `findings`) is

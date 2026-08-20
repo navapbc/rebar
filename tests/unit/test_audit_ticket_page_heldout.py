@@ -81,6 +81,47 @@ def test_gate_strip_shows_all_three_states_counts_and_anchors(store: Path) -> No
     assert len(re.findall(r'href="#[\w-]+"', body)) >= 3, "fewer than 3 in-page anchors"
 
 
+def test_both_out_of_codebase_kind_spellings_render(store: Path) -> None:
+    """ADR 0101 renamed the out-of-codebase criterion `kind` to `non-codebase`, keeping
+    `operator-attested` accepted because 827 tickets in the live store hold that value in
+    immutable COMPLETION_VERDICT events. The page must flag an unmet criterion of EITHER
+    spelling as lacking its attestation, and must not flag a codebase-verifiable one.
+
+    Deliberately its own ticket and fixture rather than extra rows on the gate-strip test's:
+    that test pins a `1/2` met-count, so adding criteria there would break an assertion that
+    is about counting, not about evidence kinds.
+    """
+    r = str(store)
+    tid = _new_ticket(r, "kind-spellings")
+    H.emit_completion_pass(
+        r,
+        tid,
+        [
+            {"criterion": "k1", "met": False, "kind": "non-codebase", "citation": None},
+            {"criterion": "k2", "met": False, "kind": "operator-attested", "citation": None},
+            {"criterion": "k3", "met": False, "kind": "codebase-verifiable", "citation": None},
+        ],
+    )
+    body = _get(r, f"/ticket/{tid}").text
+    for criterion in ("k1", "k2", "k3"):
+        assert criterion in body, f"criterion {criterion} did not render"
+    from rebar.audit.page import _completion_section
+
+    rows = _completion_section(
+        {
+            "sidecar": {
+                "verdict": "PASS",
+                "criteria": [
+                    {"criterion": "k1", "met": False, "kind": "non-codebase"},
+                    {"criterion": "k2", "met": False, "kind": "operator-attested"},
+                    {"criterion": "k3", "met": False, "kind": "codebase-verifiable"},
+                ],
+            }
+        }
+    )["criteria"]
+    assert [row["lacking"] for row in rows] == [True, True, False]
+
+
 # ── AC2: detail sections in fixed order plan → completion → code ─────────────
 @pytest.mark.parametrize("fail_gate", ["plan", "completion"])
 def test_sections_render_in_fixed_order(store: Path, fail_gate: str) -> None:
