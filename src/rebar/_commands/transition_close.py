@@ -440,14 +440,24 @@ def close_ticket(
         if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
             from rebar._commands import gates
 
-            check = gates.close_plan_review_gate_check(ticket_id, ticket_state, repo_root=repo_root)
+            check = gates.close_plan_review_gate_check(
+                ticket_id,
+                ticket_state,
+                repo_root=repo_root,
+                close_class=close_class,
+                tracker=tracker,
+            )
             if not check.get("ok"):
                 _raise_plan_review_close_gate_error(ticket_id, check)
             if check.get("verdict") != "disabled":
 
                 def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
                     locked_check = gates.close_plan_review_gate_check(
-                        ticket_id, locked_state, repo_root=repo_root
+                        ticket_id,
+                        locked_state,
+                        repo_root=repo_root,
+                        close_class=close_class,
+                        tracker=tracker,
                     )
                     if not locked_check.get("ok"):
                         _raise_plan_review_close_gate_error(ticket_id, locked_check)
