@@ -3,7 +3,7 @@
 A deterministic, pre-LLM close precheck: when the completion-verification close gate
 would dispatch the verifier, a ticket whose ``## Acceptance Criteria`` section still
 contains unchecked ``- [ ]`` items fails the close BEFORE any LLM call — except items
-whose text begins with the ``[operator-attested]`` tag (their done-evidence legitimately
+whose text begins with the ``[non-codebase]`` tag (their done-evidence legitimately
 lives outside the snapshot). Same harness as test_completion_gate.py: monkeypatch
 ``rebar.llm.verify_completion`` (the gate calls it by module attribute) — no model, no
 network.
@@ -77,7 +77,7 @@ def test_unchecked_box_blocks_before_any_llm_call(rebar_repo: Path, monkeypatch)
     assert ei.value.returncode == 1
     # Load-bearing tokens, not exact prose: the offending item and the two remediations.
     assert "docs updated" in ei.value.stderr
-    assert "operator-attested" in ei.value.stderr.lower()
+    assert "non-codebase" in ei.value.stderr.lower()
     assert _status(tid, rebar_repo) == "in_progress"
 
 

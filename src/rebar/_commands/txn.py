@@ -529,7 +529,7 @@ def claim_core(
 def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
     """Fail the close (CommandError, exit 1) when unchecked ``- [ ]`` AC items remain.
 
-    Deterministic, pre-LLM. Items whose text begins with ``[operator-attested]`` (the
+    Deterministic, pre-LLM. Items whose text begins with ``[non-codebase]`` (the
     shared ADR-0043 tag) are exempt. Silently returns on any read / reduce failure so an
     unreadable ticket is never blocked here (other guards own that)."""
     try:
@@ -553,7 +553,7 @@ def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
         f"Error: ticket {ticket_id} has unchecked Acceptance Criteria items:\n"
         f"{items_fmt}\n"
         "Resolve each item before closing, then check the box (edit the description).\n"
-        "Items with done-evidence outside the snapshot may be tagged [operator-attested] "
+        "Items with done-evidence outside the snapshot may be tagged [non-codebase] "
         "to exempt them from this check.\n"
         'To override: --force="<reason>"',
         returncode=1,
@@ -561,11 +561,11 @@ def ensure_ac_boxes_checked(ticket_id: str, tracker: str) -> None:
 
 
 def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
-    """Fail the close (CommandError, exit 1) on an invalid ``[operator-attested]`` AC item.
+    """Fail the close (CommandError, exit 1) on an invalid ``[non-codebase]`` AC item.
 
     Deterministic, pre-LLM (bug 2f56-313f-6175-41b1). The completion verifier classifies
     criteria SOLELY from the author tag (ADR-0043) — by design it never second-guesses
-    ``[operator-attested]`` — so a LAUNDERED tag (a code-verifiable criterion tagged to dodge
+    ``[non-codebase]`` — so a LAUNDERED tag (a code-verifiable criterion tagged to dodge
     repository verification) must be rejected HERE, before the tag buys anything. Two checks,
     in remedy order:
 
@@ -594,10 +594,10 @@ def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
             f"  {line.strip()}\n    cites: {', '.join(cites)}" for line, cites in laundered
         )
         raise CommandError(
-            f"Error: ticket {ticket_id} has [operator-attested] Acceptance Criteria items "
+            f"Error: ticket {ticket_id} has [non-codebase] Acceptance Criteria items "
             f"whose evidence is repository-resident (attestation laundering):\n{items_fmt}\n"
             "A criterion proved by exact repo paths/symbols is code-verifiable: remove the "
-            "[operator-attested] tag and let the completion verifier check the repository.\n"
+            "[non-codebase] tag and let the completion verifier check the repository.\n"
             "If the criterion MIXES repository and external evidence, SPLIT it: move the "
             "repo-verifiable half (the cited paths/symbols above) to a new UNTAGGED "
             "criterion, and keep the external outcome tagged with its provenance: line.\n"
@@ -611,7 +611,7 @@ def ensure_attested_items_valid(ticket_id: str, tracker: str) -> None:
     if provenance_gaps:
         items_fmt = "\n".join(f"  {line.strip()}" for line, _ in provenance_gaps)
         raise CommandError(
-            f"Error: ticket {ticket_id} has [operator-attested] Acceptance Criteria items "
+            f"Error: ticket {ticket_id} has [non-codebase] Acceptance Criteria items "
             f"without a complete 'provenance:' continuation line:\n{items_fmt}\n"
             "Each tagged item needs an indented continuation line under its checkbox:\n"
             "  provenance: environment=<v>; principal=<v>; "

@@ -222,7 +222,7 @@ def test_ac_precheck_fires_before_referencing_commit_check(rebar_repo: Path, mon
 
 def test_block_message_teaches_remediation(rebar_repo: Path, monkeypatch) -> None:
     """The teaching message carries the load-bearing remediation tokens: check the box,
-    the [operator-attested] escape for externally-evidenced items, and --force."""
+    the [non-codebase] escape for externally-evidenced items, and --force."""
     _commit(rebar_repo)
     _enable(rebar_repo)
     monkeypatch.setattr(rebar.llm, "verify_completion", _never)
@@ -232,5 +232,5 @@ def test_block_message_teaches_remediation(rebar_repo: Path, monkeypatch) -> Non
     low = err.lower()
     assert "publish the doc" in err
     assert "tell the team" in err
-    assert "operator-attested" in low
+    assert "non-codebase" in low
     assert "--force" in err

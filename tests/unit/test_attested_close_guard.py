@@ -1,7 +1,7 @@
 """Close-path attested-item guard (bug 2f56-313f-6175-41b1).
 
 The completion verifier classifies ACs SOLELY from the author tag (ADR-0043) — by design it
-never second-guesses ``[operator-attested]``. The rejection point for a LAUNDERED tag (a
+never second-guesses the non-codebase tag. The rejection point for a LAUNDERED tag (a
 code-verifiable criterion tagged to dodge repository verification) must therefore be
 deterministic and pre-LLM. :func:`rebar._commands.txn.ensure_attested_items_valid` is that
 guard: it blocks the close when a tagged AC item cites exact repo path/symbol evidence
@@ -52,7 +52,7 @@ def test_mistagged_code_verifiable_item_blocks_close(monkeypatch) -> None:
         txn.ensure_attested_items_valid(_TID, "/nonexistent-tracker")
     msg = str(ei.value)
     assert "tests/unit/test_scan_scoping.py" in msg
-    assert "operator-attested" in msg.lower()
+    assert "non-codebase" in msg.lower()
     # The remedy: untag and let the completion verifier check the repository.
     assert "tag" in msg.lower()
     assert ei.value.returncode == 1
