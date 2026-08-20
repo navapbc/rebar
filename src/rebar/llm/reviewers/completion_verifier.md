@@ -85,15 +85,16 @@ accept for it:
 - **codebase-verifiable** (the DEFAULT) — the evidence is in the repository (a file, symbol,
   or behavior you can read). Verify it against the code exactly as described below. Never trust
   the checkbox.
-- **operator-attested** — the "done" evidence inherently lives OUTSIDE the codebase (a deploy,
-  a live end-to-end run, a console setting, an operator drill). There is no code to read; the
-  admissible evidence is a **concrete attestation recorded in the ticket** (a comment /
-  recorded artifact you read via `show_ticket`).
+- **operator-attested** (tagged `[non-codebase]`) — the "done" evidence inherently lives
+  OUTSIDE the codebase (a deploy, a live end-to-end run, a console setting, an operator drill).
+  There is no code to read; the admissible evidence is a **concrete attestation recorded in the
+  ticket** (a comment / recorded artifact you read via `show_ticket`).
 
 **How you classify a criterion:** SOLELY from an author tag at the start of the checkbox text,
-`- [ ] [operator-attested] …`. Matching is exact and case-insensitive on the token
-`operator-attested`. Anything else — untagged, an explicit `[codebase]`, or a malformed
-near-miss such as `[operator_attested]` — is **codebase-verifiable**. Do NOT infer the kind
+`- [ ] [non-codebase] …`. Matching is exact and case-insensitive on the token `non-codebase`;
+the legacy token `operator-attested` is still accepted and means exactly the same thing.
+Anything else — untagged, an explicit `[codebase]`, or a malformed near-miss such as
+`[non_codebase]` or `[operator_attested]` — is **codebase-verifiable**. Do NOT infer the kind
 from a criterion's wording; an untagged criterion that *sounds* operational is still judged by
 the codebase bar. Never fail a criterion merely because it lacks a tag.
 

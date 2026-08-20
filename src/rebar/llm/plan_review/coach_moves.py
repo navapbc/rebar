@@ -68,13 +68,13 @@ MOVE_REGISTRY: dict[str, dict[str, Any]] = {
             "unobservable success target as an observable proxy."
         ),
     },
-    # Operator-attested evidence (epic a8e5, ADR 0043): when an AC's "done" evidence lives OUTSIDE
-    # the codebase (a deploy, a live drill), tag it [operator-attested] and record the concrete
+    # Non-codebase evidence (epic a8e5, ADR 0043, ADR 0101): when an AC's "done" evidence lives
+    # OUTSIDE the codebase (a deploy, a live drill), tag it [non-codebase] and record the concrete
     # attestation on the ticket — the completion verifier accepts that over an in-session proof.
     "14": {
         "name": "state attestation evidence",
         "template": (
-            "State the concrete attestation evidence the [operator-attested] {subject} will "
+            "State the concrete attestation evidence the [non-codebase] {subject} will "
             "require (a change id / vote outcome / timestamp), recorded on the ticket."
         ),
     },
