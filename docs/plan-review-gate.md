@@ -987,6 +987,29 @@ A non-empty `--force` reason bypasses this and completion verification while ret
 audit comment. Closing `idea → closed` also bypasses the plan gate because it is a rejection,
 not delivery. Neither bypass relaxes the structural child-closure invariant.
 
+### Link-backed administrative dispositions — the `disposition` verdict
+
+A close carrying `--class=superseded` or `--class=duplicate` **against a live replacement
+link** skips the attestation requirement and reports the distinct verdict `disposition`.
+The gate exists to certify work about to be done, or just done; neither applies to a ticket
+whose work landed elsewhere and which is being closed as a bookkeeping act. Worse, the
+requirement was unsatisfiable by construction: `review-plan` correctly BLOCKs a plan whose
+edits already exist, so the more truly superseded a ticket was the more certainly it could
+never earn the attestation, leaving `--force` — which records no signature — as the only exit.
+
+Two conditions must BOTH hold, and the exemption is deliberately narrow:
+
+- the class is **link-backed** administrative vocabulary — only `superseded` and
+  `duplicate`. `obsolete` and `wontfix` are **reason**-required, justified by operator prose
+  no gate can verify, so they still require the attestation;
+- the claimed replacement link is **live**, checked with the very predicate the
+  completion-verification close gate already uses (`close_precheck._has_live_replacement_link`),
+  so the two gates cannot drift on what counts as evidence. No live link ⇒ no exemption.
+
+`disposition` is a separate verdict from the ticket-type `exempt` precisely so the audit
+trail distinguishes an evidence-backed administrative close from a type exemption and from
+an unaudited `--force` bypass.
+
 ### AC-checkbox completeness precheck (deterministic, pre-LLM)
 
 Before the completion verifier runs, the close gate performs a deterministic check: if the
