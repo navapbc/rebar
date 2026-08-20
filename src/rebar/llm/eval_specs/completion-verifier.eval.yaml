@@ -150,8 +150,10 @@ dataset:
         from src.parse import parse_line
       src/b.py: |
         from src.parse import parse_line
-  # --- operator-attested criterion kind (ticket 7226 / ADR 0043). The attestation lives
-  # --- IN ticket_context (the text the solver injects as the ticket the verifier reads).
+  # --- out-of-codebase criterion kind (ticket 7226 / ADR 0043; renamed by ADR 0101). The
+  # --- attestation lives IN ticket_context (the text the solver injects as the ticket the
+  # --- verifier reads). The canonical tag is [non-codebase]; the CV-operator-attested-* pair
+  # --- below is RETAINED unchanged as coverage that the legacy alias still classifies.
   - id: CV-operator-attested-concrete
     corpus: rebar
     expect: pass
@@ -173,6 +175,33 @@ dataset:
     ticket_context: |
       ## Acceptance Criteria
       - [ ] [operator-attested] the fix is deployed to prod and the two-vote gate passes on it
+
+      ## Comments
+      done, verified live.
+    files:
+      README.md: |
+        # service — no code implements the deploy criterion; it is operational.
+  - id: CV-non-codebase-concrete
+    corpus: rebar
+    expect: pass
+    note: "Canonical [non-codebase] tag; the attestation names a change id + vote outcome + timestamp → MET (no code to check)."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] [non-codebase] the fix is deployed to prod and the two-vote gate passes on it
+
+      ## Comments
+      Deployed change 492 to prod on 2026-07-10 18:04 UTC; both gate votes present
+      (LLM-Review +1, Verified +1); the change submitted and replicated to the mirror at 40e42c9.
+    files:
+      README.md: |
+        # service — no code implements the deploy criterion; it is operational.
+  - id: CV-non-codebase-vague
+    corpus: rebar
+    expect: fail
+    note: "Same canonical-tagged criterion, but the attestation is vague ('done, verified live') → NOT MET; the finding cites the ticket."
+    ticket_context: |
+      ## Acceptance Criteria
+      - [ ] [non-codebase] the fix is deployed to prod and the two-vote gate passes on it
 
       ## Comments
       done, verified live.
