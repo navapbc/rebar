@@ -18,10 +18,13 @@ temp+rename. The marker is a *hint* for the write-path pending-nudge and the
 ``rebar fsck`` ``ensures: N/M applied`` line — it NEVER gates whether a unit runs
 (units are always re-run and self-check).
 
-The unit *implementations* live in :mod:`rebar._commands.init` (they own the
-``.gitignore``/``.gitattributes`` content constants); :func:`run_ensures`
-lazy-imports them so the hot-path helpers here (:func:`registry_ids`,
-:func:`applied_ids`) never pull ``init`` into a write path.
+The content/config unit *implementations* live in
+:mod:`rebar._commands._init_ensures` (they own the ``.gitignore``/``.gitattributes``
+content constants) and stay re-exported from :mod:`rebar._commands.init`, which is the
+name :func:`_registry` and the docs reach them by; ``untrack-runtime-markers`` is
+defined in ``init`` itself (it has no content template and reads that module's
+``_UNTRACK_BATCH``). :func:`run_ensures` lazy-imports them so the hot-path helpers here
+(:func:`registry_ids`, :func:`applied_ids`) never pull ``init`` into a write path.
 """
 
 from __future__ import annotations
