@@ -25,13 +25,13 @@ _OUTPUT_SCHEMA = "completion_verdict"
 # one chokepoint both the agentic and deterministic child-closure verdicts pass through). It
 # points callers at the evidence path defined by the criterion kind: repository proof for the
 # codebase-verifiable default, or a concrete ticket attestation for an exactly tagged
-# operator-attested criterion. Kept deliberately generic and focused on completing or documenting
+# non-codebase criterion. Kept deliberately generic and focused on completing or documenting
 # the work rather than bypassing the gate.
 COMPLETION_REMEDIATION_GUIDANCE = (
     "How to resolve the unmet criteria: use the evidence path that matches each one. For "
     "codebase-verifiable work, complete any unfinished work and make its proof discoverable "
     "in the repository. For evidence that inherently lives outside the repository, mark the "
-    "criterion with the exact `[operator-attested]` tag and add a comment to this ticket that "
+    "criterion with the exact `[non-codebase]` tag and add a comment to this ticket that "
     "documents the concrete artifacts that meet it (commands and their output, links, or the "
     "reasoning that ties the evidence to the criterion). The completion verifier reads this "
     "ticket's comments, so properly tagged evidence you record there is taken into account on "
@@ -54,9 +54,9 @@ INSUFFICIENT_EVIDENCE_REMEDIATION = (
     "discoverable: add an UNTAGGED comment to this ticket citing the exact test function "
     "names, file paths, and merge SHAs that prove each criterion, then re-verify — the "
     "completion verifier reads this ticket's comments, so recorded evidence is taken into "
-    "account on the next verification. Do NOT tag code-verifiable criteria as "
-    "`[operator-attested]`: that tag is reserved for evidence that inherently lives outside "
-    "the repository."
+    "account on the next verification. The `[non-codebase]` tag is reserved for evidence "
+    "that inherently lives outside the repository: a criterion a test file, a file path, "
+    "or a merge SHA can prove IS in the codebase, so it is not non-codebase."
 )
 # Bounded completion verification wants a DECISIVE model, not a maximally-thorough one: the
 # framework default (opus) over-explores — it rabbit-holes on confirming code is "wired",
