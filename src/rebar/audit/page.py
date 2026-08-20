@@ -25,6 +25,10 @@ SERIES_LABEL: dict[str, str] = {
     "indeterminate": "Indeterminate",
 }
 
+# Criterion `kind` values whose evidence lives outside the repository (ADR 0101). The
+# legacy spelling stays accepted so persisted verdicts keep rendering; match is exact.
+OUT_OF_CODEBASE_KINDS: frozenset[str] = frozenset({"non-codebase", "operator-attested"})
+
 
 def _one_decimal(value: Any) -> str | None:
     """Format a score to one decimal, or ``None`` when it is not a number."""
@@ -326,7 +330,7 @@ def _completion_section(completion: dict | None) -> dict:
                     "met": met,
                     "kind": kind,
                     "citation": c.get("citation"),
-                    "lacking": kind == "operator-attested" and not met,
+                    "lacking": kind in OUT_OF_CODEBASE_KINDS and not met,
                 }
             )
         return {"ran": True, "is_pass": True, "criteria": rows}
