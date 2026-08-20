@@ -429,6 +429,26 @@ call-sites (and `rebar.llm.prompting.prompts.<name>` attribute access) are uncha
 cache-split helpers (`split_volatile`/`strip_volatile_marker`/`resolve_prompt_cached`)
 stay in `prompts.py` (they call `resolve_prompt`).
 
+It was split a second time (epic 5ca8 / `deft-effortless-greatdane`) along its
+**resolver / model** seam, because 789 lines left no room to edit it. `prompts.py` keeps
+the RESOLVER — which bytes are a given prompt's bytes (packaged `reviewers/*.md` vs a
+project `.rebar/prompts/<id>.md` override), the derived reviewer catalog over them, the
+front-matter contract, variant overlays, index regeneration, and reviewer selection: all
+of it filesystem- and catalog-bound. The I/O-free half — *what a prompt is* — moved to
+`src/rebar/llm/prompting/prompt_model.py`: the `Prompt`/`Reviewer` value types, the
+`ReviewerError`/`PromptNotFound` error vocabulary, the closed `EXECUTION_MODES` enum, and
+the text grammar a prompt is written in (`_VAR`/`template_variables`/`_render_strict`,
+the `<!--base-->` and `<!--volatile-->` markers with `split_volatile`/
+`strip_volatile_marker`, `SHARED_STANCE_PREAMBLE`/`shared_plan_prefix`, and
+`prompt_content_hash`). Every call-graph edge across that seam points one way — the
+resolver constructs these types, raises these errors, and renders through these helpers,
+and nothing in `prompt_model` calls back — so the new module is a LEAF with no import
+cycle. `prompts.py` re-exports all fifteen moved names, which is what keeps both
+`from rebar.llm.prompting.prompts import …` call-sites and the resolver's own late
+binding unchanged: the two monkeypatch welds in the test suite (`prompts._catalog_dir`,
+`prompts._prompt_file`) sit on the resolver side and were deliberately not moved. The
+seam is pinned by `tests/unit/test_prompt_model_module_seam.py`.
+
 `src/rebar/_engine/rebar_reconciler/applier.py` was **split** along its
 dispatch/handlers seam (epic 5ca8 / `self-waltz-ace`): the per-action batch
 orchestration that wraps `batch_dispatch`'s `create_one`/`update_one`/`delete_one`
