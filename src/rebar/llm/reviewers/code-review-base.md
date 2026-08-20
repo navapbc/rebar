@@ -67,6 +67,7 @@ but do not pad. The catalog:
 - `tests` — test sufficiency / regression coverage for the change.
 - `llm-prompts` — prompt, contract, or output-schema changes to LLM surfaces.
 - `deletion-impact` — a removed/renamed def/class/signature that may leave dangling references (this overlay also fires automatically on such diffs).
+- `concurrency` — threads, async tasks, multiprocessing, locks, channels, shared/global mutable state, file/DB locking.
 - `scope-intent` — the diff drifts outside the scope/AC of the commit's rebar-ticket(s) (this overlay fires automatically from the commit trailer, not from your recommendation).
 - `surface-parity` — a write-op's parameter/guard/required-field surface changed on one adapter (lib/CLI/MCP) without the sibling surfaces updated in lockstep (this overlay also fires automatically when a write-surface adapter file changes).
 

@@ -132,3 +132,88 @@ def test_overlay_union_step_threads_repo_root(tmp_path):
     # And WITHOUT repo_root the same diff does not fire performance (proves the threading matters).
     out_no_root = _run_op("overlay_union", {"changed_files": ["x.py"], "diff_text": diff})
     assert out_no_root["include_performance"] is False
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# S2 (bd21 errable-tricksome-ape): register the "concurrency" built-in overlay + its COMMITTED
+# high-precision trigger tokens. Happy-path spec (the implementer sees ONLY this block).
+# ══════════════════════════════════════════════════════════════════════════════════════════
+def test_concurrency_registered_in_overlay_vocabulary():
+    """The `concurrency` id is a first-class member of the closed overlay vocabulary."""
+    assert "concurrency" in reg.OVERLAY_IDS
+    assert "concurrency" in reg.overlay_id_enum()
+
+
+def test_concurrency_committed_token_fires_on_added_line():
+    """A COMMITTED high-precision token (no project overlay needed) fires `concurrency` when it
+    appears on an added diff line — the corpus-derived `start_new_session=True` hunk."""
+    diff = (
+        "--- a/proc.py\n+++ b/proc.py\n@@ -10,3 +10,4 @@\n"
+        "     env = os.environ.copy()\n"
+        "+    subprocess.Popen(cmd, start_new_session=True)\n"
+    )
+    assert "concurrency" in reg.content_triggered_overlays(diff)
+
+
+def test_concurrency_routing_posture_is_advisory():
+    """The committed routing entry resolves `concurrency` to advisory / 0.95 / blocking-disabled."""
+    threshold, blocking_enabled = reg.threshold_for(["concurrency"])
+    assert threshold == 0.95
+    assert blocking_enabled is False
+
+
+# ── EDGE: removing synchronization is concurrency-introducing (fires on a `-` line) ──────────
+def test_concurrency_committed_token_fires_on_removed_sync_line():
+    diff = (
+        "--- a/store.go\n+++ b/store.go\n@@ -5,7 +5,6 @@\n"
+        " type Store struct {\n"
+        "-\tmu sync.Mutex\n"
+        " \tdata map[string]string\n"
+    )
+    assert "concurrency" in reg.content_triggered_overlays(diff)
+
+
+# ── NEGATIVE CONTROL: the deliberately-EXCLUDED async/await family must NOT fire ─────────────
+def test_async_await_only_diff_does_not_fire_concurrency():
+    diff = (
+        "--- a/handler.py\n+++ b/handler.py\n@@ -1,2 +1,3 @@\n"
+        "+async def handler(req):\n"
+        "+    result = await fetch(req)\n"
+        "+    return result\n"
+    )
+    assert "concurrency" not in reg.content_triggered_overlays(diff)
+
+
+# ── NEGATIVE CONTROL: a committed token only on a CONTEXT (unprefixed) line must NOT fire ────
+def test_context_line_only_token_does_not_fire_concurrency():
+    # The `sync.Mutex` line is UNCHANGED context (leading space), not an add/remove — no trigger.
+    diff = "--- a/store.go\n+++ b/store.go\n@@ -5,7 +5,8 @@\n \tmu sync.Mutex\n+\tname string\n"
+    assert "concurrency" not in reg.content_triggered_overlays(diff)
+
+
+# ── REGRESSION: the committed deletion-impact behavior is unchanged by the new token scan ────
+def test_deletion_impact_still_fires_and_no_false_concurrency():
+    diff = "--- a/x.py\n+++ b/x.py\n@@ -1,2 +0,0 @@\n-def helper(x):\n-    return x\n"
+    out = reg.content_triggered_overlays(diff)
+    assert "deletion-impact" in out
+    assert "concurrency" not in out
+
+
+# ── E2E: the real overlay_union step emits include_concurrency for a committed-token diff ────
+def test_overlay_union_emits_include_concurrency():
+    diff = (
+        "--- a/proc.py\n+++ b/proc.py\n@@ -10,3 +10,4 @@\n"
+        "+    subprocess.Popen(cmd, start_new_session=True)\n"
+    )
+    out = _run_op("overlay_union", {"changed_files": ["proc.py"], "diff_text": diff})
+    assert out["include_concurrency"] is True
+    assert "concurrency" in out["to_run"]
+    # A concurrency-free diff leaves the flag off.
+    out2 = _run_op(
+        "overlay_union",
+        {
+            "changed_files": ["proc.py"],
+            "diff_text": "--- a/p.py\n+++ b/p.py\n@@ -1 +1 @@\n+x = 1\n",
+        },
+    )
+    assert out2["include_concurrency"] is False

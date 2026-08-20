@@ -92,6 +92,7 @@ steps:
       model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.triggers.outputs.include_security }}" }
+        - { prompt: code-review-concurrency, when: "${{ steps.triggers.outputs.include_concurrency }}" }
         - { prompt: code-review-performance, when: "${{ steps.triggers.outputs.include_performance }}" }
         - { prompt: code-review-i18n, when: "${{ steps.triggers.outputs.include_i18n }}" }
         - { prompt: code-review-a11y, when: "${{ steps.triggers.outputs.include_a11y }}" }
@@ -131,6 +132,7 @@ steps:
       model_ladder: [frontier]
       criteria:
         - { prompt: code-review-security, when: "${{ steps.union.outputs.include_security }}" }
+        - { prompt: code-review-concurrency, when: "${{ steps.union.outputs.include_concurrency }}" }
         - { prompt: code-review-performance, when: "${{ steps.union.outputs.include_performance }}" }
         - { prompt: code-review-i18n, when: "${{ steps.union.outputs.include_i18n }}" }
         - { prompt: code-review-a11y, when: "${{ steps.union.outputs.include_a11y }}" }

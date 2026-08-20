@@ -148,6 +148,14 @@
     "block_threshold": 0.95,
     "blocking_enabled": false
   },
+  "concurrency": {
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "advisory",
+    "block_threshold": 0.95,
+    "blocking_enabled": false,
+    "_comment": "Committed high-precision concurrency-race overlay (epic spoiled-theatrical-parrot). Ships ADVISORY; calibrate on real fire data before flipping blocking_enabled true. Token tier grounded in Lu et al. ASPLOS'08, Tu et al. ASPLOS'19, RacerD, CodeQL CERT concurrency packs."
+  },
   "regression": {
     "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Flipped advisory->blocking@0.54 from the code-v3 sidecar calibration (docs/experiments/calibrate_code_review_thresholds.py): a finding tagged `regression` that survives Pass-3 verification is a high-precision defect (validity>=0.95 on would-block findings). Any finding whose criteria include `regression` now blocks at 0.54 (min-threshold/any-enabled resolution).",
     "exec": "AGENT",

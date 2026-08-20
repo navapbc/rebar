@@ -48,6 +48,7 @@ OVERLAY_IDS: tuple[str, ...] = (
     "tests",  # test sufficiency / regression coverage for the change
     "llm-prompts",  # prompt/contract/output-schema changes to LLM surfaces
     "deletion-impact",  # (content-triggered) removed def/class/signature → dangling references
+    "concurrency",  # (content-triggered) threads/async/multiprocessing/locks/channels — races
     "scope-intent",  # (content-triggered) diff vs the UNION scope/AC of the commit's tickets
     "surface-parity",  # (glob-triggered) a write-op's param/guard/required-field surface changed
     # on one adapter (lib/CLI/MCP) without the siblings updated in lockstep
@@ -362,6 +363,52 @@ _REMOVED_DECL_RE = re.compile(
     r"(?:" + "|".join(_REMOVED_DECL_PATTERNS) + r")"
 )
 
+# Committed high-precision concurrency-race trigger tokens (distinct from the per-project
+# `trigger_tokens` mechanism above). A literal substring on an added/removed diff line body
+# fires the built-in `concurrency` overlay.
+_CONCURRENCY_TOKENS: tuple[str, ...] = (
+    "Mutex",
+    "RwLock",
+    "Lock(",
+    "Semaphore",
+    "synchronized",
+    "volatile",
+    "@GuardedBy",
+    "Interlocked.",
+    "Atomics.",
+    "pthread_",
+    "flock",
+    "fcntl.",
+    "O_EXCL",
+    "mkstemp",
+    "Thread(",
+    "go func(",
+    "tokio::spawn",
+    "Task.Run(",
+    "worker_threads",
+    "new Worker(",
+    "multiprocessing.",
+    "asyncio.create_task",
+    "asyncio.gather",
+    "concurrent.futures",
+    "os.fork(",
+    "cluster.fork(",
+    "sync.WaitGroup",
+    "sync.Once",
+    "make(chan ",
+    "atomic.",
+    "FOR UPDATE",
+    "SKIP LOCKED",
+    "SERIALIZABLE",
+    "advisory_lock",
+    "NOWAIT",
+    "BEGIN IMMEDIATE",
+    "start_new_session",
+    "compare-and-swap",
+    "coroutineScope",
+    "launch {",
+)
+
 
 def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> list[str]:
     """The overlays triggered by the DIFF CONTENT (the ``content`` operand of ``overlay_union``,
@@ -380,6 +427,8 @@ def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> 
     fired: set[str] = set()
     if _has_removed_declaration(diff_text):
         fired.add("deletion-impact")
+    if _has_concurrency_token(diff_text):
+        fired.add("concurrency")
     _scan_project_tokens(diff_text, project_trigger_extensions(repo_root), fired)
     return [oid for oid in OVERLAY_IDS if oid in fired]
 
@@ -391,6 +440,20 @@ def _has_removed_declaration(diff_text: str) -> bool:
         if not raw.startswith("-") or raw.startswith("---"):
             continue
         if _REMOVED_DECL_RE.search(raw[1:]):  # strip the diff marker; keep the indentation
+            return True
+    return False
+
+
+def _has_concurrency_token(diff_text: str) -> bool:
+    """Whether any added (``+``) or removed (``-``) line body — excluding the ``+++``/``---``
+    file headers — contains a committed :data:`_CONCURRENCY_TOKENS` literal substring."""
+    for raw in diff_text.splitlines():
+        if raw.startswith("+++") or raw.startswith("---"):
+            continue
+        if not (raw.startswith("+") or raw.startswith("-")):
+            continue
+        body = raw[1:]
+        if any(tok in body for tok in _CONCURRENCY_TOKENS):
             return True
     return False
 
