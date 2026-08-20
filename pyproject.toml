@@ -224,7 +224,7 @@ dev = [
     # the pre-commit hook, and CI all run the IDENTICAL ruff: ruff changes format/lint
     # rules between releases, so an unpinned floor lets local and CI drift (green here,
     # red there). Bump deliberately (and in lock-step with the pre-commit usage).
-    "ruff==0.16.2",
+    "ruff==0.16.3",
     # Provider wrapper shell is checked identically on every developer and CI host.
     # shellcheck-py 0.11.0.1 packages the upstream ShellCheck 0.11.0 binary.
     "shellcheck-py==0.11.0.1",
