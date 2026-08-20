@@ -30,11 +30,11 @@ PROMPT = REPO / ".rebar" / "prompts" / "plan-review-project-measurement-provenan
 # deliberately updated this digest when the built-in evidence-kind validator extended the
 # cross-client contract.
 CONTRACT_DIGESTS: dict[str, tuple[str, int]] = {
-    "src/rebar/llm/reviewers/plan_review_F1.md": ("55272f1413a044eb", 1),
-    "src/rebar/llm/reviewers/plan_review_E2.md": ("67326b3e8226ec77", 1),
-    "src/rebar/llm/reviewers/plan_review_E6.md": ("975ade3a3d70c3fe", 1),
-    "src/rebar/llm/plan_review/coach_moves.py": ("cda82d9f1d54416b", 2),
-    "docs/plan-review-criteria-guide.md": ("b9885d2952d216dc", 7),
+    "src/rebar/llm/reviewers/plan_review_F1.md": ("c9ae05352df0062f", 1),
+    "src/rebar/llm/reviewers/plan_review_E2.md": ("5ff7cfbe9435dc36", 1),
+    "src/rebar/llm/reviewers/plan_review_E6.md": ("fc186146df6042b4", 1),
+    "src/rebar/llm/plan_review/coach_moves.py": ("8a0e69dc6c95e808", 2),
+    "docs/plan-review-criteria-guide.md": ("fbc6da30ded5d2ae", 12),
 }
 
 
@@ -42,7 +42,10 @@ def _contract_lines(blob: str) -> list[str]:
     return [
         ln.strip()
         for ln in blob.splitlines()
-        if "OPERATOR-ATTESTED RULE" in ln or "[operator-attested]" in ln
+        if "OPERATOR-ATTESTED RULE" in ln
+        or "NON-CODEBASE RULE" in ln
+        or "[operator-attested]" in ln
+        or "[non-codebase]" in ln
     ]
 
 

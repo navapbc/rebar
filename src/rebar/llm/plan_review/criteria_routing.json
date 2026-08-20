@@ -1238,11 +1238,11 @@
     "checklist": [
       {
         "key": "acceptance_items_classified",
-        "check": "Visit every acceptance-criterion checkbox independently. Classify the completion evidence as codebase-verifiable, operator-attested, mixed, or insufficient. Repository classification requires affirmative evidence from an exact file path and symbol; ambiguous or unlocatable cases are insufficient and abstain."
+        "check": "Visit every acceptance-criterion checkbox independently. Classify the completion evidence as codebase-verifiable, non-codebase (the kind tagged [non-codebase], or the still-accepted legacy [operator-attested]), mixed, or insufficient. Repository classification requires affirmative evidence from an exact file path and symbol; ambiguous or unlocatable cases are insufficient and abstain."
       },
       {
         "key": "evidence_kind_matches_tag",
-        "check": "For a single-kind criterion, the exact case-insensitive [operator-attested] tag appears only when completion proof is an outside-world event or live-state outcome. FIRE on an untagged/malformed external outcome, or on a tagged repository fact grounded by exact path/symbol evidence; explain that ticket comments cannot substitute for repository proof."
+        "check": "For a single-kind criterion, an exact case-insensitive tag — the canonical [non-codebase], or the still-accepted legacy [operator-attested] — appears only when completion proof is an outside-world event or live-state outcome. FIRE on an untagged/malformed external outcome (a near-miss such as [non_codebase] or [operator_attested] is malformed, not a tag), or on a tagged repository fact grounded by exact path/symbol evidence; explain that ticket comments cannot substitute for repository proof."
       },
       {
         "key": "mixed_evidence_is_split",

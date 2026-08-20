@@ -39,7 +39,7 @@ Checklist:
 
 Decide whether an executing agent could act on this plan WITHOUT stopping to ask a clarifying question. Run the 6-signal ambiguity scan: (1) undefined scope boundaries ('improve performance' — of what, by how much); (2) implicit acceptance criteria (types/size limits unstated); (3) conflicting signals (title says X, body Y); (4) missing persona (admin vs end-user); (5) unstated constraints (an API with no auth/rate-limit mention); (6) ambiguous priority (essential vs nice-to-have unranked). A referenced output field or sentinel value with no stated source/provenance, and a derived metric with no computation or aggregation protocol, are ordinary data-design ambiguities under signals (1)/(2) even when their dataclass or enum shape is clear; route them here, not through an LLM overlay. Plus flag any scope bullet that is a PLACEHOLDER not a decision: contains 'verify whether', 'check if', 'TBD', 'figure out', 'depends on investigation', or defers a real design choice to the executor ('choose an appropriate X'). SEVERITY: an ambiguity that BLOCKS planning ('cannot proceed without this') is MAJOR; a defaultable gap ('assume X unless told') is MINOR. ANTI-FP: never flag something clearly inferrable from the parent epic or an obvious convention. PASS if the plan is executable without clarification.
 
-DEFAULTABLE-GAPS COACHING: a MINOR defaultable gap ('assume X unless told otherwise') is coached as 'state the default in the plan', NOT as 'answer this question' — the productive fix is a stated default the executor can act on, not a round-trip back to the author. OPERATOR-ATTESTED RULE: treat a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as sufficiently specified when its 'done' evidence lives outside the codebase and is a concrete attestation recorded on the ticket (change id / vote / timestamp).
+DEFAULTABLE-GAPS COACHING: a MINOR defaultable gap ('assume X unless told otherwise') is coached as 'state the default in the plan', NOT as 'answer this question' — the productive fix is a stated default the executor can act on, not a round-trip back to the author. NON-CODEBASE RULE: treat a criterion whose checkbox text begins with the exact case-insensitive tag `[non-codebase]` as sufficiently specified when its 'done' evidence lives outside the codebase and is a concrete attestation recorded on the ticket (change id / vote / timestamp).
 
 Checklist:
 - No undefined scope boundaries ('improve performance' — of what, by how much).
@@ -96,7 +96,7 @@ Checklist:
 
 Check that the work has a clear way to be verified done and that the steps actually reach the stated end-state (a two-step check: identify the proving command for each claim, then confirm the union of steps proves every criterion). Binary checks: (a) every completion-relevant claim has a concrete proving command/check that would produce evidence on success (not 'should work'); (b) the claim is free of red-flag hedges ('should', 'probably', 'seems'); (c) every acceptance criterion maps to at least one described step; (d) the UNION of the steps actually reaches the stated end-state — no gap between 'what we'll do' and 'what done looks like'; (e) user-facing flows have an end-to-end check or a documented rationale for its absence; (f) PROVING-COMMAND-EXERCISES-THE-CHANGE: when the plan CUTS OVER or DEFAULTS to a new code path, at least one acceptance criterion EXERCISES that path as it will run in production (e.g. end-to-end against the live model/dependency) — a proving command that passes on a mock/offline substitute which BYPASSES the new behavior does NOT prove the criterion, because the AC can be satisfied without the changed risky path ever executing (green offline tests plus a signed completion verdict are necessary but NOT sufficient). SEVERITY: a criterion no step reaches, or a claimed-but-unmeasured outcome, is MAJOR; a cutover/defaulted path with no criterion that exercises it end-to-end (live) is MAJOR; a hedge without a proving command is MINOR. ANTI-FP: universal lint/format/test commands do not by themselves prove a specific criterion; (f) is not-applicable when the new path has no live/external boundary, when the cutover stays behind a non-default opt-in flag, or when the end-to-end exercise is explicitly deferred to a named child with rationale. PASS if done-ness is verifiable and the end-state is reachable.
 
-VERIFY-COMMAND DEFECT TAXONOMY — nine ways a PRESENT, plausible-looking proving command silently lies (flag any): (1) substring false-positive — anchor the pattern with a word-boundary / quoted key (grep -E '"cycle_count"[[:space:]]*:' not grep cycle); (2) shell-expansion leakage — a $VAR / $? inside a grep pattern expands before grep runs; (3) wrong helper-script argv — cross-check flag names against --help (a --label vs --labels mismatch ships a silent runtime failure); (4) fixture invalidity — the fixture does not actually exercise the claim; (5) missing cardinality assertion when the criterion names a count (assert `jq '.events | length'` -eq N); (6) prose-vs-structured assertion target — assert on the structured artifact with `jq -e`, not on prose output; (7) missing prerequisite-state ordering — a command assumes state a prior step must establish; (8) conflicting ACs (tests-pass vs test-fails-RED) needing a sequencing AC; (9) references a sibling ticket's files with no dependency edge. Coach the corrected command with a concrete anchor. OPERATOR-ATTESTED RULE: when an acceptance criterion's checkbox text begins with the exact case-insensitive tag `[operator-attested]`, use a concrete attestation RECORDED ON THE TICKET (a change id / vote outcome / timestamp) as its proving evidence. CITED-PREREQUISITE EXCEPTION to taxonomy item 9 (`[rebar:<C>]`): a proving command or step that targets a symbol/file a PREREQUISITE ticket will create may cite it `<subject> [rebar:<C>]`. Item 9 (references a sibling ticket's files with no dependency edge) does NOT fire when the deterministic Layer-1 edge check verified the prerequisite edge (P `depends_on` C, or C `blocks` P) AND, on retrieving C via the `show_ticket(C)` tool, C's plan/file_impact affirmatively establishes the SPECIFIC targeted functionality; credit it ONLY on affirmative confirmation. This is an LLM judgment, not a string match. FAIL-CLOSED: an uncited cross-ticket reference, an edge-unbacked citation, or a citation whose coverage you cannot confirm is graded as normal (item 9 stands / still fails closed).
+VERIFY-COMMAND DEFECT TAXONOMY — nine ways a PRESENT, plausible-looking proving command silently lies (flag any): (1) substring false-positive — anchor the pattern with a word-boundary / quoted key (grep -E '"cycle_count"[[:space:]]*:' not grep cycle); (2) shell-expansion leakage — a $VAR / $? inside a grep pattern expands before grep runs; (3) wrong helper-script argv — cross-check flag names against --help (a --label vs --labels mismatch ships a silent runtime failure); (4) fixture invalidity — the fixture does not actually exercise the claim; (5) missing cardinality assertion when the criterion names a count (assert `jq '.events | length'` -eq N); (6) prose-vs-structured assertion target — assert on the structured artifact with `jq -e`, not on prose output; (7) missing prerequisite-state ordering — a command assumes state a prior step must establish; (8) conflicting ACs (tests-pass vs test-fails-RED) needing a sequencing AC; (9) references a sibling ticket's files with no dependency edge. Coach the corrected command with a concrete anchor. NON-CODEBASE RULE: when an acceptance criterion's checkbox text begins with the exact case-insensitive tag `[non-codebase]`, use a concrete attestation RECORDED ON THE TICKET (a change id / vote outcome / timestamp) as its proving evidence. CITED-PREREQUISITE EXCEPTION to taxonomy item 9 (`[rebar:<C>]`): a proving command or step that targets a symbol/file a PREREQUISITE ticket will create may cite it `<subject> [rebar:<C>]`. Item 9 (references a sibling ticket's files with no dependency edge) does NOT fire when the deterministic Layer-1 edge check verified the prerequisite edge (P `depends_on` C, or C `blocks` P) AND, on retrieving C via the `show_ticket(C)` tool, C's plan/file_impact affirmatively establishes the SPECIFIC targeted functionality; credit it ONLY on affirmative confirmation. This is an LLM judgment, not a string match. FAIL-CLOSED: an uncited cross-ticket reference, an edge-unbacked citation, or a citation whose coverage you cannot confirm is graded as normal (item 9 stands / still fails closed).
 
 Checklist:
 - Every completion-relevant claim has a concrete proving command/check that produces evidence on success.
@@ -109,7 +109,7 @@ Checklist:
 ## F1
 **Measurability & in-session completability** — exec:1-TURN, blocking, facet:ac-text-quality
 
-Examine each acceptance criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. OPERATOR-ATTESTED RULE: classify a criterion whose checkbox text begins with the exact case-insensitive tag `[operator-attested]` as in-session completable when its "done" evidence inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) and a concrete attestation is recorded on the ticket (a change id / vote outcome / timestamp).
+Examine each acceptance criterion for measurability and whether an agent can complete it within ONE working session. Apply these binary checks: (a) the criterion states a specific OBSERVABLE outcome (what changes for the user/system), not effort ('implement the service') or a subjective term ('improved/better/sufficient'); (b) it is evaluable IN-SESSION via repo artifacts, the closing PR's CI, or a deterministic command against a reachable target — NOT post-sprint-only (multi-day telemetry, adoption %, survey feedback score ≤2); (c) it is a durable end-state, not a one-time transition (litmus: could it be false before this work and true only because of it?); (d) the unit is right-sized (a coherent single-outcome deliverable, not an epic-of-epics, not a one-line triviality). SEVERITY: outcome-vague or effort-framed criteria are MAJOR; post-sprint-only validation is MAJOR; thin-but-present is MINOR. ANTI-FP: evaluate the spec AS WRITTEN, not the current codebase; observability tooling itself is valid in-session work; 'post-deployment' is fine if the check is deterministic. PASS if all criteria are measurable and in-session completable. NON-CODEBASE RULE: classify a criterion whose checkbox text begins with the exact case-insensitive tag `[non-codebase]` as in-session completable when its "done" evidence inherently lives OUTSIDE the codebase (a deploy, a live drill, a console setting) and a concrete attestation is recorded on the ticket (a change id / vote outcome / timestamp).
 
 Checklist:
 - Each criterion states a specific observable outcome (what changes for user/system), not effort or a subjective term.
@@ -795,9 +795,10 @@ tag. Apply this rubric to both leaf and container plans.
 repository state: a file, symbol, method, configuration declaration, removed configuration,
 test assertion, generated artifact, or other behavior encoded in the checked-out tree.
 
-`operator-attested` applies when completion is an event or live-state outcome outside the
-repository snapshot: a test run completed successfully, an AWS deployment occurred, a database
-was modified, a Gerrit vote landed, or an operator performed and observed a live procedure.
+`operator-attested` (the kind an author tags `[non-codebase]`) applies when completion is an
+event or live-state outcome outside the repository snapshot: a test run completed successfully,
+an AWS deployment occurred, a database was modified, a Gerrit vote landed, or an operator
+performed and observed a live procedure.
 Ticket evidence may attest those outcomes because the codebase cannot replay them.
 
 Classify the completion predicate, not nearby implementation nouns. The existence of test code
@@ -829,24 +830,27 @@ false positive.
 
 ## Exact tag contract
 
-ADR 0043 selects operator evidence only with the exact case-insensitive token
-`[operator-attested]` at the start of the checkbox text. Untagged criteria, `[codebase]`, and
-near-misses such as `[operator_attested]` remain codebase-verifiable.
+ADR 0043, as amended by ADR 0101, selects outside-the-codebase evidence only with an exact
+case-insensitive tag at the start of the checkbox text: the canonical `[non-codebase]`, or the
+still-accepted legacy `[operator-attested]`. Untagged criteria, `[codebase]`, and near-misses
+such as `[non_codebase]` or `[operator_attested]` remain codebase-verifiable.
 
 Emit a finding in these cases:
 
 - An outside-world criterion is untagged or malformed. The remediation must show the exact
-  syntax `- [ ] [operator-attested] …`.
-- A codebase-verifiable criterion carries `[operator-attested]` and the repository grounding
-  threshold above is met. Explain that ticket comments cannot substitute for repository proof,
-  and cite the exact file path plus symbol/declaration.
+  canonical syntax `- [ ] [non-codebase] …`.
+- A codebase-verifiable criterion carries `[non-codebase]` (or the legacy
+  `[operator-attested]`) and the repository grounding threshold above is met. Explain that
+  ticket comments cannot substitute for repository proof, and cite the exact file path plus
+  symbol/declaration.
 - One checkbox combines repository proof and outside-world proof. Label the finding
   `split-required`; quote both predicates and request two independently certifiable criteria.
 
-Accept an untagged codebase-verifiable criterion and an exactly tagged operator-attested
-criterion. Accept genuine test run, AWS, and database outcomes when exactly tagged even when the
-repository contains the tests, deployment definitions, or migrations that enabled them. Abstain
-on ambiguity or missing repository grounding.
+Accept an untagged codebase-verifiable criterion and a criterion carrying either exact tag
+(`[non-codebase]` or the legacy `[operator-attested]`). Accept genuine test run, AWS, and
+database outcomes when exactly tagged even when the repository contains the tests, deployment
+definitions, or migrations that enabled them. Abstain on ambiguity or missing repository
+grounding.
 
 ## Finding contract
 
@@ -856,8 +860,8 @@ citations in `evidence`; for missing/malformed external tags, cite the criterion
 predicate. Make the remediation an edit the author can apply directly.
 
 Checklist:
-- Visit every acceptance-criterion checkbox independently. Classify the completion evidence as codebase-verifiable, operator-attested, mixed, or insufficient. Repository classification requires affirmative evidence from an exact file path and symbol; ambiguous or unlocatable cases are insufficient and abstain.
-- For a single-kind criterion, the exact case-insensitive [operator-attested] tag appears only when completion proof is an outside-world event or live-state outcome. FIRE on an untagged/malformed external outcome, or on a tagged repository fact grounded by exact path/symbol evidence; explain that ticket comments cannot substitute for repository proof.
+- Visit every acceptance-criterion checkbox independently. Classify the completion evidence as codebase-verifiable, non-codebase (the kind tagged [non-codebase], or the still-accepted legacy [operator-attested]), mixed, or insufficient. Repository classification requires affirmative evidence from an exact file path and symbol; ambiguous or unlocatable cases are insufficient and abstain.
+- For a single-kind criterion, an exact case-insensitive tag — the canonical [non-codebase], or the still-accepted legacy [operator-attested] — appears only when completion proof is an outside-world event or live-state outcome. FIRE on an untagged/malformed external outcome (a near-miss such as [non_codebase] or [operator_attested] is malformed, not a tag), or on a tagged repository fact grounded by exact path/symbol evidence; explain that ticket comments cannot substitute for repository proof.
 - A criterion that combines repository proof with outside-world proof is split-required: FIRE with a request for independently certifiable criteria and assign neither evidence kind to the bundled item.
 
 ## hedge
