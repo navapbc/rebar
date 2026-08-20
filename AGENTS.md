@@ -278,7 +278,12 @@ handling — is in [CONTRIBUTING.md](CONTRIBUTING.md); the agent-actionable rule
   (bug 84aa).
 - **Push for review:** `git push gerrit HEAD:refs/for/main` (the magic ref creates a Gerrit
   change; it does not touch `main`). Iterate on findings with `git commit --amend --no-edit`
-  (keep the `Change-Id`) + re-push.
+  (keeps the `Change-Id`) + re-push. To REWRITE the message, use
+  **`make amend-msg FILE=<path>`**, never `git commit --amend -m/-F`: those REPLACE the whole
+  message and so DROP the `Change-Id`, the `commit-msg` hook then stamps a FRESH one, and the
+  next push opens a DUPLICATE Gerrit change instead of a new patchset (three in one session:
+  1921, 1926, 1931). `make amend-msg` carries HEAD's `Change-Id` forward, and refuses to amend
+  when HEAD has none — a missing trailer means the hook is not installed (`make hooks`).
 - **A change with known issues goes in WIP, not in a comment.** `…refs/for/main%wip` at push
   time, or `POST /a/changes/<n>/wip` on an existing change (`%ready` / `…/ready` to release);
   a hold recorded only on the ticket is advisory, and another session will submit past it →

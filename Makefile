@@ -35,7 +35,7 @@ LOCAL_BIN := .tools/bin
 # fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
 PYTHON_VERSION_FILE := .github/python-version.txt
 
-.PHONY: help install hooks venv worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -127,6 +127,23 @@ hooks:  ## (Re)install the pre-commit git hook and VERIFY it landed (the commit 
 		echo "         Do NOT curl over \$$(git rev-parse --git-path hooks/commit-msg):"; \
 		echo "         from a linked worktree that clobbers the SHARED pre-commit wrapper."; \
 	fi
+
+amend-msg:  ## Amend HEAD with FILE's commit message, CARRYING FORWARD its Change-Id. Usage: make amend-msg FILE=<path>
+	@# Ticket 5304. `git commit --amend -F/-m` REPLACES the whole message, dropping the
+	@# Change-Id; Gerrit's commit-msg hook then stamps a FRESH one and the next push opens a
+	@# DUPLICATE change instead of a patchset (Gerrit 1921, 1926, 1931 in one session). No
+	@# hook can catch it — an `-F` amend reaches prepare-commit-msg as source='message' with
+	@# an EMPTY sha, indistinguishable from a fresh `-F` commit — so, like Go's `git
+	@# codereview change` / OpenStack's `git-review` / `repo upload` / `git cl upload`, the
+	@# remedy is a wrapper that makes the failure unreachable. Use `git commit --amend
+	@# --no-edit` when the message is UNCHANGED; use this when you are REWRITING it.
+	@if [ -z "$(FILE)" ]; then \
+		echo "usage: make amend-msg FILE=<path>"; \
+		echo "  Amends HEAD with the commit message in <path>, carrying HEAD's existing"; \
+		echo "  Change-Id forward. Fails loudly if HEAD has no Change-Id (run 'make hooks')."; \
+		exit 2; \
+	fi
+	python scripts/amend_commit_message.py "$(FILE)"
 
 venv:  ## Create .venv on the CI-pinned interpreter ($(PYTHON_VERSION_FILE)). Fails loudly rather than using ambient python3.
 	@# Bug a5f5: this step used to be `python3 -m venv .venv`, inheriting whatever the host's
