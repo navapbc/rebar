@@ -304,9 +304,12 @@ def _check_file_impact_vs_diff(
             raise CommandError(
                 f"Error: cannot close: commit {sha} changes "
                 + ", ".join(undeclared)
-                + ", which the recorded file_impact does not declare. Declare them with "
-                "`rebar set-file-impact <ticket> ...` and retry "
-                '(or override with --force="<reason>").',
+                + ", which the recorded file_impact does not declare, so the work went "
+                "beyond the reviewed plan. Declare them with "
+                "`rebar set-file-impact <ticket> ...` — widening file_impact is a MATERIAL "
+                "plan change, so it invalidates the plan-review attestation "
+                "(stale-material) and `rebar review-plan <ticket>` must be re-run before "
+                'the close will succeed (or override with --force="<reason>").',
                 returncode=1,
             )
 
