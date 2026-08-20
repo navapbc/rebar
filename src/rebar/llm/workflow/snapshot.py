@@ -30,12 +30,15 @@ gitlink); **Git-LFS** files appear as their pointer text, not the smudged conten
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import threading
 from pathlib import Path
 
+from rebar._snapshot.git_fetch import stall_abort_args
 from rebar.llm.errors import WorkflowError
 
 # Total extracted-bytes ceiling — a snapshot is a source tree, not a data lake;
@@ -44,6 +47,37 @@ DEFAULT_MAX_SNAPSHOT_BYTES = 512 * 1024 * 1024  # 512 MiB
 # Member-count ceiling — bounds a tar of millions of tiny entries (inode exhaustion
 # / extraction-time blowup) that the byte cap alone would not catch.
 DEFAULT_MAX_SNAPSHOT_FILES = 200_000
+#: Wall-clock ceiling on the ``git archive`` child (bug 093a). The blocking read lives
+#: inside ``tarfile.__read``, where a ``communicate(timeout=…)`` cannot reach it, so the
+#: bound is enforced by a watchdog that KILLS the child — killing it closes the stdout
+#: pipe, which unblocks the extractor. 300s matches the ceiling 77e1/747f chose for the
+#: other git call sites and is deliberately NOT lower: it is a backstop, not the primary
+#: instrument. The primary instrument for a stalled transfer is the throughput-keyed
+#: abort below, because elapsed time is the wrong axis for dead air.
+_GIT_TIMEOUT = 300
+#: How long the cleanup path waits for a killed child before giving up on the reap.
+_REAP_TIMEOUT = 10
+#: Chunk size for discarding trailing stdout/stderr bytes (O(1) memory, not a read()).
+_DRAIN_CHUNK = 64 * 1024
+
+
+#: ``scheme://userinfo@host`` — the credential-bearing shape a ``TimeoutExpired.cmd`` can
+#: carry (bug 77e1). Masks the WHOLE userinfo, so neither the token nor the username
+#: survives into an error message or a log line.
+_CRED_URL_RE = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.\-]*://)[^/@\s]+@")
+
+
+def _redact_cmd(cmd: object) -> str:
+    """Render a subprocess ``cmd`` with any URL userinfo masked.
+
+    ``subprocess.TimeoutExpired`` is neither an ``OSError`` nor a ``CalledProcessError``,
+    so it escapes ordinary ``except`` tuples — and its ``cmd`` carries any
+    ``user:token@host`` URL verbatim. Bug 77e1 found that the hard way: converting a hang
+    into a credential disclosure is not a fix. Every timeout on this path is routed
+    through here before it reaches a :class:`SnapshotError` message.
+    """
+    text = " ".join(str(part) for part in cmd) if isinstance(cmd, (list, tuple)) else str(cmd)
+    return _CRED_URL_RE.sub(lambda m: f"{m.group('scheme')}***@", text)
 
 
 class SnapshotError(WorkflowError):
@@ -152,6 +186,137 @@ def _rmtree_writable(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
 
 
+def _reap(proc: subprocess.Popen) -> None:
+    """Kill (if running), wait for, and close the pipes of ``proc``.
+
+    Never leaves an orphan or a leaked pipe FD, and never lets a ``TimeoutExpired`` from
+    its own ``wait`` escape — during cleanup there is nothing actionable left to do, and
+    that exception's ``cmd`` is exactly the credential-bearing payload of bug 77e1.
+    """
+    if proc.poll() is None:
+        try:
+            proc.kill()
+        except OSError:  # pragma: no cover - the child raced us to exit
+            pass
+    try:
+        proc.wait(timeout=_REAP_TIMEOUT)
+    except Exception:  # noqa: BLE001 — best-effort child reap during cleanup
+        pass
+    for stream in (proc.stdout, proc.stderr):
+        try:
+            if stream is not None:
+                stream.close()
+        except Exception:  # noqa: BLE001 — best-effort pipe close during cleanup
+            pass
+
+
+def _drain(stream, sink: list[bytes] | None = None, *, cap: int = _DRAIN_CHUNK * 16) -> None:
+    """Read ``stream`` to EOF in bounded chunks, keeping at most ``cap`` bytes in ``sink``.
+
+    Run against stderr on its own thread: the pre-093a code left ``stderr=PIPE`` undrained
+    while it consumed stdout, so a child writing past the ~64 KiB pipe buffer blocked on
+    its stderr write, therefore stopped writing stdout, and the parent blocked forever in
+    ``tarfile.__read``. Draining concurrently is the only fix for that shape.
+    """
+    kept = 0
+    try:
+        while True:
+            chunk = stream.read(_DRAIN_CHUNK)
+            if not chunk:
+                return
+            if sink is not None and kept < cap:
+                sink.append(chunk[: cap - kept])
+                kept += len(chunk)
+    except (OSError, ValueError):  # pipe closed under us by the watchdog kill
+        return
+
+
+def _stream_archive(root: str, sha: str, tmp: Path, max_bytes: int) -> None:
+    """Stream ``git archive <sha>`` into ``tmp`` — bounded, drained, and prompt-free.
+
+    Three properties the naive ``Popen`` + ``tarfile`` pairing did not have (bug 093a):
+    stderr is drained on its own thread so it cannot deadlock the stdout reader; a
+    watchdog kills the child at :data:`_GIT_TIMEOUT` so the extractor cannot park forever
+    on dead air; and stdin is ``DEVNULL`` so no credential/host-key prompt can block here.
+    """
+    argv = ["git", "-C", root, *stall_abort_args(), "archive", "--format=tar", sha]
+    try:
+        proc = subprocess.Popen(  # raw-git-ok: read-only `git archive`; never mutates a repo
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        # A launch failure (git absent from PATH, exec denied) is raised BEFORE the
+        # try/finally below, so without this it escapes as a raw OSError and bypasses this
+        # module's documented "raises SnapshotError on any failure" contract.
+        raise SnapshotError(f"cannot run git archive {sha[:12]}: {_redact_cmd(str(exc))}") from exc
+    captured: list[bytes] = []
+    drainer = threading.Thread(target=_drain, args=(proc.stderr, captured), daemon=True)
+    drainer.start()
+    timed_out = threading.Event()
+
+    def _abort() -> None:
+        timed_out.set()
+        if proc.poll() is None:
+            try:
+                proc.kill()  # closes stdout, which unblocks the tarfile read
+            except OSError:  # pragma: no cover - the child raced us to exit
+                pass
+
+    watchdog = threading.Timer(_GIT_TIMEOUT, _abort)
+    watchdog.start()
+    try:
+        _extract_stream(proc, tmp, max_bytes, timed_out, argv, captured, sha)
+    finally:
+        watchdog.cancel()
+        _reap(proc)
+        drainer.join(timeout=_REAP_TIMEOUT)
+
+
+def _extract_stream(
+    proc: subprocess.Popen,
+    tmp: Path,
+    max_bytes: int,
+    timed_out: threading.Event,
+    argv: list[str],
+    captured: list[bytes],
+    sha: str,
+) -> None:
+    """Consume ``proc``'s tar on stdout into ``tmp``, converting every failure shape."""
+
+    def _fail(detail: str) -> SnapshotError:
+        if timed_out.is_set():
+            return SnapshotError(
+                f"git archive {sha[:12]} timed out after {_GIT_TIMEOUT} seconds and "
+                f"was terminated: {_redact_cmd(argv)}"
+            )
+        # The child's own stderr goes through the redactor too: a transport failure on the
+        # promisor lazy-fetch path echoes the promisor URL, which can carry credentials.
+        stderr = _redact_cmd(b"".join(captured).decode("utf-8", "replace").strip())
+        return SnapshotError(f"git archive {sha[:12]} failed: {stderr or detail}")
+
+    try:
+        # Stream the archive (mode "r|") so a large repo isn't buffered whole.
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
+            tar.extractall(path=str(tmp), filter=_hardened_filter(max_bytes))
+        _drain(proc.stdout)  # trailing padding, so the child is never blocked on write
+        rc = proc.wait(timeout=_GIT_TIMEOUT)
+    except SnapshotError:
+        raise  # the hardened filter's own caps — already this module's vocabulary
+    except subprocess.TimeoutExpired as exc:
+        # Neither an OSError nor a CalledProcessError, so it would otherwise escape every
+        # caller's except tuple carrying a `user:token@host` cmd (bug 77e1).
+        raise SnapshotError(
+            f"git archive {sha[:12]} timed out after {_GIT_TIMEOUT} seconds: {_redact_cmd(exc.cmd)}"
+        ) from exc
+    except (tarfile.TarError, OSError, EOFError) as exc:
+        raise _fail(f"{type(exc).__name__}: {_redact_cmd(str(exc))}") from exc
+    if rc != 0:
+        raise _fail(f"exit status {rc}")
+
+
 def snapshot_at_ref(
     ref: str,
     repo_root: str | None = None,
@@ -176,21 +341,8 @@ def snapshot_at_ref(
     _require_safe_extraction()
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(tempfile.mkdtemp(prefix=f".tmp-snap-{sha[:8]}-", dir=str(dest.parent)))
-    proc = None
     try:
-        proc = subprocess.Popen(
-            ["git", "-C", root, "archive", "--format=tar", sha],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        # Stream the archive (mode "r|") so a large repo isn't buffered whole.
-        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
-            tar.extractall(path=str(tmp), filter=_hardened_filter(max_bytes))
-        _, stderr = proc.communicate()
-        if proc.returncode != 0:
-            raise SnapshotError(
-                f"git archive {sha[:12]} failed: {stderr.decode('utf-8', 'replace').strip()}"
-            )
+        _stream_archive(root, sha, tmp, max_bytes)
         # Atomic publish FIRST, THEN make the published tree read-only. On macOS/BSD,
         # renaming a directory requires write permission on the directory itself (to
         # update its ``..`` entry), so chmod-readonly-before-rename raises EACCES there;
@@ -206,21 +358,8 @@ def snapshot_at_ref(
         _chmod_readonly(dest)
         return dest
     except BaseException:
-        # Reap the child rather than leaving a zombie / leaking its pipe FDs: kill
-        # if still running, then always wait() and close the stdio pipes.
-        if proc is not None:
-            if proc.poll() is None:
-                proc.kill()
-            try:
-                proc.wait(timeout=10)
-            except Exception:  # noqa: BLE001 — best-effort child reap during cleanup; nothing actionable if wait times out
-                pass
-            for stream in (proc.stdout, proc.stderr):
-                try:
-                    if stream is not None:
-                        stream.close()
-                except Exception:  # noqa: BLE001 — best-effort pipe close during cleanup
-                    pass
+        # ``_stream_archive`` owns the child and always reaps it; only the partial temp
+        # tree is this frame's to clean up.
         if tmp.exists():
             _rmtree_writable(tmp)
         raise
