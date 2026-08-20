@@ -173,15 +173,21 @@ def _cfg_tombstones() -> list[tuple[str, str, str]]:
 
 
 def _lifecycle_index() -> dict[str, str]:
-    """Map a canonical schema key to a LIFECYCLE note when it supersedes an old spelling."""
-    index: dict[str, str] = {}
+    """Map a canonical schema key to its LIFECYCLE note when it supersedes old spellings.
+
+    One canonical key can be the replacement target of MORE THAN ONE deprecated alias
+    and/or tombstone, so every note is ACCUMULATED and joined rather than first-wins:
+    a later note must never silently displace an earlier one. A key with exactly one
+    note renders byte-identically to a first-wins index.
+    """
+    notes: dict[str, list[str]] = {}
     for name, replacement, status in _cfg_deprecations():
         if replacement:
-            index.setdefault(replacement, f"active — supersedes alias `{name}` ({status})")
+            notes.setdefault(replacement, []).append(f"supersedes alias `{name}` ({status})")
     for name, replacement, _behavior in _cfg_tombstones():
         if replacement:
-            index.setdefault(replacement, f"active — replaces removed key `{name}`")
-    return index
+            notes.setdefault(replacement, []).append(f"replaces removed key `{name}`")
+    return {key: "active — " + "; ".join(parts) for key, parts in notes.items()}
 
 
 def _schema_rows() -> list[tuple[str, str, str, str]]:

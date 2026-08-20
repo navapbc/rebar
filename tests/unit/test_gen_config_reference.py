@@ -233,3 +233,44 @@ def test_check_is_crlf_safe(redirect_outputs):
     crlf = cfg.read_text(encoding="utf-8").replace("\n", "\r\n")
     cfg.write_bytes(crlf.encode("utf-8"))
     assert gen.main(["--check"]) == 0, "CRLF checkout must not be reported as drift"
+
+
+# ── multi-alias canonical-key collisions (ticket b0a5-f5c0) ───────────────────
+
+
+def _collision_key() -> str:
+    """A real schema key to stand in as the shared canonical replacement target."""
+    keys = sorted(_schema_keys())
+    assert keys, "fixture guard: the typed schema must expose at least one key"
+    return keys[0]
+
+
+def test_two_aliases_on_one_canonical_key_both_render(monkeypatch):
+    """Two deprecated aliases replaced by the SAME key both keep their lifecycle note."""
+    key = _collision_key()
+    monkeypatch.setattr(
+        gen,
+        "_cfg_deprecations",
+        lambda: [
+            ("legacy.first_alias", key, "permanent alias"),
+            ("legacy.second_alias", key, "deprecated (removal in 9.9.9)"),
+        ],
+    )
+    monkeypatch.setattr(gen, "_cfg_tombstones", list)
+    row = _row_for(gen.render_config_reference(), key)
+    assert row, f"schema key {key!r} missing from a reference table row"
+    assert "legacy.first_alias" in row, f"first alias note dropped from {key!r} row: {row}"
+    assert "legacy.second_alias" in row, f"second alias note dropped from {key!r} row: {row}"
+
+
+def test_alias_and_tombstone_on_one_canonical_key_both_render(monkeypatch):
+    """A deprecated alias and a tombstone sharing one replacement both keep their note."""
+    key = _collision_key()
+    monkeypatch.setattr(
+        gen, "_cfg_deprecations", lambda: [("legacy.alias", key, "permanent alias")]
+    )
+    monkeypatch.setattr(gen, "_cfg_tombstones", lambda: [("legacy.removed", key, "warns")])
+    row = _row_for(gen.render_config_reference(), key)
+    assert row, f"schema key {key!r} missing from a reference table row"
+    assert "legacy.alias" in row, f"alias note dropped from {key!r} row: {row}"
+    assert "legacy.removed" in row, f"tombstone note dropped from {key!r} row: {row}"
