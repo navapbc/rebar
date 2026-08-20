@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable
+from typing import ParamSpec
 
 # A fixed help width, deliberately independent of the terminal / COLUMNS so the
 # rendered help bytes are deterministic across environments.
 _FIXED_WIDTH = 80
+
+_P = ParamSpec("_P")
 
 
 class ParseError(Exception):
@@ -34,9 +37,14 @@ class ParseError(Exception):
     argparse message.
     """
 
-    def __init__(self, message: str, *, prog: str) -> None:
+    def __init__(self, message: str, *, prog: str, usage: str | None = None) -> None:
         super().__init__(message)
         self.prog = prog
+        # The failing parser's rendered usage block (``usage: ...\n``), captured at
+        # raise time so a caller can reproduce argparse's on-error stderr output
+        # (usage + ``prog: error: message``) even for a nested subparser it never
+        # holds a reference to. ``None`` only for hand-built ParseErrors.
+        self.usage = usage
 
 
 class RebarHelpFormatter(argparse.HelpFormatter):
@@ -73,7 +81,48 @@ class RebarArgumentParser(argparse.ArgumentParser):
     """
 
     def error(self, message: str) -> None:  # type: ignore[override]
-        raise ParseError(message, prog=self.prog)
+        raise ParseError(message, prog=self.prog, usage=self.format_usage())
+
+
+def render_parse_error(exc: ParseError) -> int:
+    """Reproduce argparse's on-error stderr output for a caught :class:`ParseError`.
+
+    A migrated handler holds a :class:`RebarArgumentParser` whose ``error()`` raises
+    instead of terminating; catching that at the handler boundary and calling this
+    reproduces the EXACT bytes argparse writes on a parse failure — the parser's
+    usage block followed by ``<prog>: error: <message>`` — and returns the argparse
+    convention exit code ``2``. No traceback escapes.
+    """
+    import sys
+
+    if exc.usage:
+        sys.stderr.write(exc.usage)
+    sys.stderr.write(f"{exc.prog}: error: {exc}\n")
+    return 2
+
+
+def guard_parse_errors(func: Callable[_P, int]) -> Callable[_P, int]:
+    """Wrap a CLI handler so a :class:`ParseError` reproduces argparse's exit contract.
+
+    A migrated handler builds a :class:`RebarArgumentParser`; both an argparse-internal
+    parse failure and an explicit ``parser.error(...)`` now RAISE :class:`ParseError`
+    instead of terminating. Handlers that previously relied on argparse's native
+    ``error()`` — which prints usage/message to stderr and then ``SystemExit(2)`` —
+    let that ``SystemExit`` propagate through ``main()`` to the process boundary. This
+    decorator restores that EXACT observable contract: it renders the usage/message to
+    stderr (no traceback) and re-raises ``SystemExit(2)``. A ``--help`` action already
+    raises :class:`SystemExit`, which propagates unchanged.
+    """
+    import functools
+
+    @functools.wraps(func)
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> int:
+        try:
+            return func(*args, **kwargs)
+        except ParseError as exc:
+            raise SystemExit(render_parse_error(exc)) from None
+
+    return wrapper
 
 
 def build_argument_parser(
@@ -81,18 +130,31 @@ def build_argument_parser(
     prog: str,
     description: str | None = None,
     epilog: str | None = None,
+    usage: str | None = None,
+    add_help: bool = True,
+    formatter_class: type[argparse.HelpFormatter] | None = None,
+    allow_abbrev: bool = True,
 ) -> argparse.ArgumentParser:
     """Build a :class:`RebarArgumentParser` bound to ``prog``.
 
     This is itself a conforming factory: ``prog`` is keyword-only, matching the
     ``build_parser(*, prog: str) -> ArgumentParser`` protocol shape.
+
+    The presentation passthroughs are additive (S2c). ``usage``/``add_help``/
+    ``allow_abbrev`` are forwarded to argparse unchanged; ``formatter_class`` defaults
+    to :class:`RebarHelpFormatter` when ``None`` and is otherwise passed through so a
+    family that carries a ``RawDescriptionHelpFormatter`` (or argparse's default
+    :class:`argparse.HelpFormatter`) keeps its exact help rendering.
     """
 
     return RebarArgumentParser(
         prog=prog,
         description=description,
         epilog=epilog,
-        formatter_class=RebarHelpFormatter,
+        usage=usage,
+        add_help=add_help,
+        allow_abbrev=allow_abbrev,
+        formatter_class=formatter_class or RebarHelpFormatter,
     )
 
 
@@ -100,16 +162,28 @@ def compose(
     define: Callable[[argparse.ArgumentParser], None],
     *,
     prog: str,
+    description: str | None = None,
     epilog: str | None = None,
+    usage: str | None = None,
+    add_help: bool = True,
+    formatter_class: type[argparse.HelpFormatter] | None = None,
 ) -> argparse.ArgumentParser:
     """Compose a parser from a shared argument-definition function.
 
     ``define`` receives a fresh parser and adds the shared arguments. Varying
-    ``prog``/``epilog`` while reusing ONE ``define`` lets a canonical spelling
-    and an alias/compat spelling share an identical option surface with no
-    option copying — the composed parsers parse argv identically.
+    ``prog``/``epilog`` (and the S2c presentation passthroughs) while reusing ONE
+    ``define`` lets a canonical spelling and an alias/compat spelling share an
+    identical option surface with no option copying — the composed parsers parse
+    argv identically.
     """
 
-    parser = build_argument_parser(prog=prog, epilog=epilog)
+    parser = build_argument_parser(
+        prog=prog,
+        description=description,
+        epilog=epilog,
+        usage=usage,
+        add_help=add_help,
+        formatter_class=formatter_class,
+    )
     define(parser)
     return parser

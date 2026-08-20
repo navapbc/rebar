@@ -12,11 +12,12 @@ and NO local op-cert sign/verify path ever depends on it.
 
 from __future__ import annotations
 
-import argparse
 import sys
 import time
 
 from rebar import config
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced.certs import build_remote_cert
 
 _USAGE = "rebar remote-cert <ticket-id> {completion-verifier|plan-review} [--root <path>]"
 _VALID_KINDS = ("completion-verifier", "plan-review")
@@ -25,11 +26,9 @@ _POLL_INTERVAL_SECONDS = 2.0
 _POLL_TIMEOUT_SECONDS = 1200.0
 
 
+@guard_parse_errors
 def cli(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(prog="rebar remote-cert", usage=_USAGE, description=__doc__)
-    p.add_argument("ticket_id", help="the ticket to certify")
-    p.add_argument("kind", choices=_VALID_KINDS, help="the gate kind to run")
-    p.add_argument("--root", help="repo root (default: cwd)")
+    p = build_remote_cert(prog="rebar remote-cert")
     args = p.parse_args(argv)
 
     try:

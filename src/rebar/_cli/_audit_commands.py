@@ -29,116 +29,56 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def audit_cli(rest: list[str]) -> int:
-    """Entry point for ``rebar audit …``. Returns the process exit code."""
+    """Entry point for ``rebar audit …``. Returns the process exit code.
+
+    The accepted-argv grammar (``show <ticket> [--output json|text]`` /
+    ``serve [--host …] [--port …]``) is owned by the shared parser factory
+    :func:`rebar._cli._parsers.advanced.audit.build`; this handler keeps only the
+    dispatcher-style ``--help`` behavior (the factory's built-in ``--help`` would
+    print a different block) and turns the factory's :class:`ParseError` into the
+    historical usage-to-stderr / exit-2 contract.
+    """
     if not rest or rest[0] in ("--help", "-h", "help"):
         # `rebar audit` / `rebar audit --help` → usage to stdout, exit 0.
         sys.stdout.write(_USAGE)
         return 0
 
-    sub, args = rest[0], rest[1:]
-    if sub == "serve":
-        return _audit_serve(args)
-    if sub != "show":
-        sys.stderr.write(f"Error: unknown audit subcommand '{sub}'\n")
-        sys.stderr.write(_USAGE)
-        return 2
+    sub = rest[0]
+    # Preserve the pre-factory per-subcommand `--help` (usage to stdout, exit 0).
+    if sub in ("show", "serve") and ("--help" in rest[1:] or "-h" in rest[1:]):
+        sys.stdout.write(_SERVE_USAGE if sub == "serve" else _USAGE)
+        return 0
 
-    ticket: str | None = None
-    output = "json"
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        if tok in ("--help", "-h"):
-            sys.stdout.write(_USAGE)
-            return 0
-        if tok == "--output":
-            if i + 1 >= len(args):
-                sys.stderr.write("Error: --output requires a value (json|text)\n")
-                return 2
-            output = args[i + 1]
-            i += 2
-            continue
-        if tok.startswith("--output="):
-            output = tok[len("--output=") :]
-            i += 1
-            continue
-        if tok.startswith("-"):
-            sys.stderr.write(f"Error: unknown option '{tok}'\n")
-            sys.stderr.write(_USAGE)
-            return 2
-        if ticket is None:
-            ticket = tok
-        else:
-            sys.stderr.write(f"Error: unexpected argument '{tok}'\n")
-            sys.stderr.write(_USAGE)
-            return 2
-        i += 1
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.advanced.audit import build
 
-    if ticket is None:
-        sys.stderr.write("Error: 'audit show' requires a <ticket> argument\n")
-        sys.stderr.write(_USAGE)
-        return 2
-    if output not in ("json", "text"):
-        sys.stderr.write(f"Error: --output must be json|text (got '{output}')\n")
-        return 2
+    try:
+        ns = build(prog="rebar audit").parse_args(rest)
+    except ParseError as exc:
+        return render_parse_error(exc)
 
+    if ns.subcommand == "serve":
+        return _audit_serve(ns.host, ns.port)
+    return _audit_show(ns.ticket, ns.output)
+
+
+def _audit_show(ticket: str, output: str) -> int:
+    """``rebar audit show`` — print a ticket's audit trail to stdout (JSON default)."""
     from rebar.audit.read import audit_trail
 
     trail = audit_trail(ticket)
-
     if output == "json":
         sys.stdout.write(json.dumps(trail, indent=2, default=str, ensure_ascii=False) + "\n")
         return 0
-
     _render_text(trail)
     return 0
 
 
-def _audit_serve(args: list[str]) -> int:
+def _audit_serve(host: str, port: int) -> int:
     """``rebar audit serve`` — start the optional, disabled-by-default read-only audit web
     UI. Gated by ``[ui] enabled`` (default false) and the ``nava-rebar[ui]`` extra; binds
-    loopback by default. Returns the process exit code."""
-    host = "127.0.0.1"
-    port = 8765
-    i = 0
-    while i < len(args):
-        tok = args[i]
-        if tok in ("--help", "-h"):
-            sys.stdout.write(_SERVE_USAGE)
-            return 0
-        if tok == "--host":
-            if i + 1 >= len(args):
-                sys.stderr.write("Error: --host requires a value\n")
-                return 2
-            host = args[i + 1]
-            i += 2
-            continue
-        if tok.startswith("--host="):
-            host = tok[len("--host=") :]
-            i += 1
-            continue
-        if tok == "--port":
-            if i + 1 >= len(args):
-                sys.stderr.write("Error: --port requires a value\n")
-                return 2
-            port_raw = args[i + 1]
-            i += 2
-            parsed = _parse_port(port_raw)
-            if parsed is None:
-                return 2
-            port = parsed
-            continue
-        if tok.startswith("--port="):
-            parsed = _parse_port(tok[len("--port=") :])
-            if parsed is None:
-                return 2
-            port = parsed
-            i += 1
-            continue
-        sys.stderr.write(f"Error: unknown option '{tok}'\n")
-        sys.stderr.write(_SERVE_USAGE)
-        return 2
-
+    loopback by default. ``host``/``port`` come already parsed from the factory. Returns
+    the process exit code."""
     # Resolve the gate flag from config (honors REBAR_ROOT / REBAR_UI_ENABLED / -c).
     from rebar import config
 
@@ -174,15 +114,6 @@ def _audit_serve(args: list[str]) -> int:
         )
         return 1
     return 0
-
-
-def _parse_port(raw: str) -> int | None:
-    """Parse a ``--port`` value; write an error to stderr and return ``None`` if invalid."""
-    try:
-        return int(raw)
-    except ValueError:
-        sys.stderr.write(f"Error: --port must be an integer (got '{raw}')\n")
-        return None
 
 
 def _render_text(trail: dict) -> None:

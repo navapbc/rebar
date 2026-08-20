@@ -26,9 +26,7 @@ from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from rebar import config
-from rebar._engine_support.output import OutputFormatError, parse_output
 
-_USAGE = "Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]\n"
 _DEFAULT_WINDOW_DAYS = 30
 
 
@@ -43,34 +41,6 @@ def _default_date_range(*, today: date | None = None) -> tuple[str, str]:
     until = today or datetime.now(timezone.utc).date()
     since = until - timedelta(days=_DEFAULT_WINDOW_DAYS)
     return since.isoformat(), until.isoformat()
-
-
-def _parse_dated_flag(argv: list[str], flag: str) -> tuple[str | None, list[str] | None]:
-    """Pull ``--flag <value>`` / ``--flag=<value>`` out of ``argv``.
-
-    Returns ``(value, remaining)``; ``(None, None)`` signals a malformed use
-    (missing value) after the caller has emitted the usage error.
-    """
-    rest: list[str] = []
-    value: str | None = None
-    i = 0
-    while i < len(argv):
-        tok = argv[i]
-        if tok == flag:
-            if i + 1 >= len(argv):
-                sys.stderr.write(f"Error: {flag} requires a value\n")
-                sys.stderr.write(_USAGE)
-                return None, None
-            value = argv[i + 1]
-            i += 2
-            continue
-        if tok.startswith(flag + "="):
-            value = tok[len(flag) + 1 :]
-            i += 1
-            continue
-        rest.append(tok)
-        i += 1
-    return value, rest
 
 
 def _entry_for(spec, ctx) -> dict:
@@ -113,23 +83,14 @@ def _render_text(_since: str, _until: str, entries: dict) -> str:
 
 def metrics_cli(argv: list[str], *, repo_root: str | None = None) -> int:
     """``rebar metrics [--since <d>] [--until <d>] [--output json|text]``."""
-    try:
-        fmt, rest = parse_output(argv, allowed=("json", "text"), default="json")
-    except OutputFormatError as exc:
-        sys.stderr.write(f"Error: {exc}\n")
-        sys.stderr.write(_USAGE)
-        return 2
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.advanced.metrics import build
 
-    since, rest2 = _parse_dated_flag(rest, "--since")
-    if rest2 is None:
-        return 2
-    until, rest3 = _parse_dated_flag(rest2, "--until")
-    if rest3 is None:
-        return 2
-    if rest3:
-        sys.stderr.write(f"Error: unexpected argument(s): {' '.join(rest3)}\n")
-        sys.stderr.write(_USAGE)
-        return 2
+    try:
+        ns = build(prog="rebar metrics").parse_args(argv)
+    except ParseError as exc:
+        return render_parse_error(exc)
+    fmt, since, until = ns.output, ns.since, ns.until
 
     default_since, default_until = _default_date_range()
     since = since if since and since.strip() else default_since
