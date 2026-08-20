@@ -309,3 +309,119 @@ def test_all_events_corrupt_reads_as_absent(repo: str) -> None:
     state = Q.reduce_ticket(tid, tracker, now_ns=_BASE_NS + 10)
     assert state["enqueued"] is False
     assert state["pending"] is False
+
+
+# ── O(1) drain-gate fast path (bug moist-short-lionfish 958e) ────────────────────
+# The write-path gate (`enrich_drain.maybe_drain`) probes the queue on EVERY store write
+# against a declared 20 ms budget. Reducing every ticket dir to answer it made the common
+# "nothing soaked" answer cost a full store walk — ~486 ms / ~24,000 metadata syscalls at
+# 4,831 tickets, and worse than linearly so when several agents' gates overlap. These pin
+# the ALGORITHMIC property (work does not scale with the store) rather than a wall clock,
+# which would be flaky under exactly the contention that motivated the fix.
+
+
+def _count_reductions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Instrument ``reduce_ticket`` and return the list it appends a ticket id to."""
+    seen: list[str] = []
+    real = Q.reduce_ticket
+
+    def counting(ticket_id: str, tracker: str, **kwargs: object) -> dict:
+        seen.append(ticket_id)
+        return real(ticket_id, tracker, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Q, "reduce_ticket", counting)
+    return seen
+
+
+@pytest.mark.parametrize("n_tickets", [4, 40])
+def test_gate_cost_does_not_scale_with_store_size(
+    repo: str, monkeypatch: pytest.MonkeyPatch, n_tickets: int
+) -> None:
+    """A repeat gate probe on a store with nothing soaked reduces NO tickets, at any store
+    size — so the gate's cost is independent of the ticket count.
+
+    Counted, not timed: the acceptance criterion is algorithmic, and a wall-clock bound is
+    precisely the flake class this bug's own measurements exhibited.
+    """
+    tracker = _tracker(repo)
+    now = 30_000_000_000_000
+    for i in range(n_tickets):
+        rebar.create_ticket("task", f"T{i}", repo_root=repo)
+    # First probe is allowed to be cold (it establishes the fast path).
+    assert Q.pending_enrichment(now, tracker) == []
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 1, tracker) == []
+    assert seen == [], f"repeat gate probe reduced {len(seen)} tickets at n={n_tickets}"
+
+
+def test_gate_fast_path_expires_at_the_soak_deadline(repo: str) -> None:
+    """The fast path must never HIDE a ticket: a probe taken during the soak may skip the
+    walk only until the soak deadline it recorded."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 31_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []  # soaking; records the deadline
+    assert Q.pending_enrichment(now + 59 * _MIN, tracker) == []  # still soaking
+    assert Q.pending_enrichment(now + 61 * _MIN, tracker) == [tid]  # deadline passed
+
+
+def test_lost_gate_marker_degrades_to_a_full_scan(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-healing: a marker that is deleted, empty or corrupt degrades to the full scan —
+    never to a missed drain."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 32_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []  # records a deadline at now+60m
+    marker = Q._gate_marker_path(tracker)
+    assert os.path.exists(marker)
+    # Simulate a crash between the queue append and the marker invalidation: the ticket
+    # becomes eligible immediately, but the recorded marker still says "not before now+60m".
+    monkeypatch.setattr(Q, "_clear_gate_marker", lambda _tracker: None)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now + 1)
+    monkeypatch.undo()
+    assert os.path.exists(marker)  # the stale marker survived the (simulated) crash
+    for corruption in (b"", b"{not json", b'{"next_eligible_ns": "nonsense"}'):
+        with open(marker, "wb") as fh:
+            fh.write(corruption)
+        assert Q.pending_enrichment(now + 2, tracker) == [tid]
+        with open(marker, "wb") as fh:  # rewrite the stale-but-valid marker for the next case
+            fh.write(json.dumps({"next_eligible_ns": now + 60 * _MIN, "written_ns": now}).encode())
+    os.unlink(marker)
+    assert Q.pending_enrichment(now + 2, tracker) == [tid]
+
+
+def test_stale_gate_marker_is_ttl_bounded(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A marker left stale by a crash suppresses the walk for at most the marker TTL, so a
+    drain is delayed but never permanently missed."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 33_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []
+    monkeypatch.setattr(Q, "_clear_gate_marker", lambda _tracker: None)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now + 1)
+    monkeypatch.undo()
+    ttl = Q._GATE_MARKER_TTL_NS
+    assert Q.pending_enrichment(now + 2, tracker) == []  # suppressed by the stale marker
+    assert Q.pending_enrichment(now + ttl + 1, tracker) == [tid]  # TTL expiry self-heals
+
+
+def test_queue_mutations_invalidate_the_gate_marker(repo: str) -> None:
+    """Every queue append clears the marker, so a state change is never hidden behind it."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 34_000_000_000_000
+    marker = Q._gate_marker_path(tracker)
+    for mutate in (
+        lambda: Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now),
+        lambda: Q.claim(tid, "A", lease_ttl_min=15, now_ns=now + 61 * _MIN, repo_root=repo),
+        lambda: Q.mark_done(tid, repo_root=repo),
+    ):
+        Q.pending_enrichment(now, tracker)
+        assert os.path.exists(marker) or Q.pending_enrichment(now, tracker) != []
+        mutate()
+        assert not os.path.exists(marker)
