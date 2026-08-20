@@ -13,13 +13,14 @@ Verb dispatch mirrors :func:`rebar._commands.identity.identity_cli`.
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 from pathlib import Path
 
 import yaml
 
+from rebar._cli._parser import ParseError, render_parse_error
+from rebar._cli._parsers.advanced.certs import build_trusted_env
 from rebar.attest.trusted_env import TRUSTED_ENV_FILENAME
 
 _USAGE = (
@@ -155,14 +156,11 @@ def cli(argv: list[str], *, repo_root=None) -> int:
     if not argv or argv[0] in ("--help", "-h", "help"):
         print(_USAGE)
         return 0 if argv else 1
-    p = argparse.ArgumentParser(prog="rebar trusted-env", usage=_USAGE, add_help=False)
-    p.add_argument("verb", choices=("add", "revoke"))
-    p.add_argument("env_id")
-    p.add_argument("target", help="<public_key> for add; <public_key-or-index> for revoke")
-    p.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    p = build_trusted_env(prog="rebar trusted-env")
     try:
         args = p.parse_args(argv)
-    except SystemExit:
+    except ParseError as exc:
+        render_parse_error(exc)
         print(_USAGE, file=sys.stderr)
         return 2
     root = args.root if args.root is not None else repo_root

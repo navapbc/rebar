@@ -132,40 +132,68 @@ def _intercepts() -> tuple[Route, ...]:
     # Pure-intercept subcommands routed above the set-based arms. ``metrics`` and
     # ``audit`` are also individually-routed arms; they carry a non-policy group
     # but keep intercept=True so ``_INTERCEPTS`` derives correctly.
-    names = (
-        "reconcile",
-        "review-code",
-        "scan-spec",
-        "verify-completion",
-        "review-plan",
-        "sign-review",
-        "enrich",
-        "explain",
-        "verify-commit-ticket",
-        "verify-identity",
-        "verify-authorship",
-        "verify-opcert",
-        "trusted-env",
-        "remote-cert",
-        "workflow",
-        "llm",
-        "jira-onboard",
-        "prompt",
-        "criteria",
-        "identity",
-        "config",
+    #
+    # Each advanced family carries a lazy ``parser_factory`` reference (RP-05 S2c):
+    # a ``"module:attr"`` string resolved only at build time, never at import.
+    _P = "rebar._cli._parsers.advanced"
+    factories: dict[str, str] = {
+        "reconcile": f"{_P}.reconcile:build",
+        "review-code": f"{_P}.llm:build_review_code",
+        "scan-spec": f"{_P}.llm:build_scan_spec",
+        "verify-completion": f"{_P}.llm:build_verify_completion",
+        "review-plan": f"{_P}.llm:build_review_plan",
+        "sign-review": f"{_P}.llm:build_sign_review",
+        "enrich": f"{_P}.enrich:build",
+        "explain": f"{_P}.llm:build_explain",
+        "verify-commit-ticket": f"{_P}.verify:build_commit_ticket",
+        "verify-identity": f"{_P}.verify:build_identity",
+        "verify-authorship": f"{_P}.verify:build_identity",
+        "verify-opcert": f"{_P}.verify:build_opcert",
+        "trusted-env": f"{_P}.certs:build_trusted_env",
+        "remote-cert": f"{_P}.certs:build_remote_cert",
+        "workflow": f"{_P}.workflow:build",
+        "llm": f"{_P}.llm_eval:build_llm",
+        "jira-onboard": f"{_P}.jira:build",
+        "prompt": f"{_P}.llm_eval:build_prompt",
+        "criteria": f"{_P}.llm_eval:build_criteria",
+        "identity": f"{_P}.identity:build",
+        "config": f"{_P}.config:build",
+    }
+    names = tuple(factories)
+    routes = [
+        Route(name, group="intercept", intercept=True, parser_factory=factories[name])
+        for name in names
+    ]
+    routes.append(
+        Route(
+            "metrics",
+            group="static_read",
+            intercept=True,
+            parser_factory=f"{_P}.metrics:build",
+        )
     )
-    routes = [Route(name, group="intercept", intercept=True) for name in names]
-    routes.append(Route("metrics", group="static_read", intercept=True))
-    routes.append(Route("audit", group="static_read", intercept=True))
+    routes.append(
+        Route(
+            "audit",
+            group="static_read",
+            intercept=True,
+            parser_factory=f"{_P}.audit:build",
+        )
+    )
     return tuple(routes)
 
 
 def _bridge_and_arms() -> tuple[Route, ...]:
+    _P = "rebar._cli._parsers.advanced"
     return (
-        Route("bridge", group="bridge"),
-        Route("bridge-status", group="bridge", hidden=True),
-        Route("bridge-fsck", group="bridge"),
+        Route("bridge", group="bridge", parser_factory=f"{_P}.bridge:build"),
+        Route(
+            "bridge-status",
+            group="bridge",
+            hidden=True,
+            parser_factory=f"{_P}.bridge:build",
+        ),
+        Route("bridge-fsck", group="bridge", parser_factory=f"{_P}.bridge_arms:build_fsck"),
         Route("init", group="bootstrap", no_auto_mount=True),
         Route("scratch", group="bootstrap", no_auto_mount=True),
         Route("delete", group="delete"),
@@ -173,7 +201,7 @@ def _bridge_and_arms() -> tuple[Route, ...]:
         Route("fsck-recover", group="repair"),
         Route("tracker-maintenance", group="repair"),
         Route("doctor", group="repair"),
-        Route("bridge-probe", group="repair"),
+        Route("bridge-probe", group="repair", parser_factory=f"{_P}.bridge_arms:build_probe"),
         Route("grounding-info", group="static_read"),
     )
 

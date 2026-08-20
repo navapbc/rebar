@@ -34,6 +34,8 @@ _COMPATIBILITY_FILES = {
     "docs/cli-reference.md",
     "src/rebar/_cli/__init__.py",
     "src/rebar/_cli/_jira_onboard.py",
+    "src/rebar/_cli/_parsers/advanced/bridge_arms.py",
+    "src/rebar/_cli/_parsers/advanced/jira.py",
     "src/rebar/_cli/_registry.py",
     "src/rebar/_cli/help/bridge-fsck.txt",
     "src/rebar/_cli/help/bridge-probe.txt",

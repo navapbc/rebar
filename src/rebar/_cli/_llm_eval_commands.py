@@ -12,7 +12,11 @@ from __future__ import annotations
 import argparse
 import sys
 
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced import llm_eval as _llm_eval_parsers
 
+
+@guard_parse_errors
 def _prompt(argv: list[str]) -> int:
     """``rebar prompt eval <id>`` → prompt evaluation (WS-G). Native intercept.
 
@@ -21,13 +25,7 @@ def _prompt(argv: list[str]) -> int:
     evaluated). The live model run needs the ``agents`` extra + credentials (the eval
     CI); committing the prompt is required to apply a passing edit (git-canonical)."""
 
-    parser = argparse.ArgumentParser(
-        prog="rebar prompt", description="Evaluate git-canonical prompts."
-    )
-    subparsers = parser.add_subparsers(dest="cmd")
-    p_eval = subparsers.add_parser("eval", help="validate + summarize a prompt's eval spec")
-    p_eval.add_argument("prompt_id", help="prompt/reviewer id (e.g. code-quality)")
-    p_eval.add_argument("--output", "-o", choices=["text", "json"], default="text")
+    parser = _llm_eval_parsers.build_prompt(prog="rebar prompt")
 
     args = parser.parse_args(argv)
     if args.cmd == "eval":
@@ -95,6 +93,7 @@ def _prompt_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+@guard_parse_errors
 def _criteria(argv: list[str]) -> int:
     """``rebar criteria eval <id>`` → run a criterion's calibration fixtures LIVE (story
     55b8). Unlike ``rebar prompt eval`` (validate-only), this executes the criterion's
@@ -102,19 +101,7 @@ def _criteria(argv: list[str]) -> int:
     view (recall / false-accept / Cohen's κ / agreement / N-run stability) so a maintainer
     can decide blocking/threshold informed. Needs the ``agents`` extra + credentials."""
 
-    parser = argparse.ArgumentParser(
-        prog="rebar criteria", description="Evaluate + calibrate review criteria."
-    )
-    subparsers = parser.add_subparsers(dest="cmd")
-    p_eval = subparsers.add_parser("eval", help="run a criterion's calibration fixtures live")
-    p_eval.add_argument(
-        "criterion_id",
-        help="criterion id (e.g. F1, project.no_print; code-review: project.foo)",
-    )
-    p_eval.add_argument(
-        "--runs", type=int, default=1, help="N-run stability: runs per fixture (default 1)"
-    )
-    p_eval.add_argument("--output", "-o", choices=["text", "json"], default="text")
+    parser = _llm_eval_parsers.build_criteria(prog="rebar criteria")
 
     args = parser.parse_args(argv)
     if args.cmd == "eval":
@@ -194,6 +181,7 @@ def _criteria_eval(args: argparse.Namespace) -> int:
     return 0
 
 
+@guard_parse_errors
 def _llm(argv: list[str]) -> int:
     """``rebar llm setup`` → the LLM-framework onboarding wizard (WS-J2).
 
@@ -201,24 +189,7 @@ def _llm(argv: list[str]) -> int:
     validates the engine with an offline FakeRunner dry-run (no tokens), and prints
     the recommended ``[tool.rebar.llm]`` config (optionally written to a file)."""
 
-    parser = argparse.ArgumentParser(
-        prog="rebar llm",
-        description="Configure and check the rebar LLM framework.",
-    )
-    subparsers = parser.add_subparsers(dest="cmd")
-    p_setup = subparsers.add_parser(
-        "setup", help="detect extras/keys, validate with a FakeRunner, print config"
-    )
-    p_setup.add_argument(
-        "--write", metavar="FILE", help="write the recommended [tool.rebar.llm] block to FILE"
-    )
-    p_setup.add_argument(
-        "--otlp-endpoint",
-        metavar="URL",
-        help="configure the [tracing] OTLP sink endpoint (write-only — OTel is never "
-        "read back into a rebar decision); defaults to $OTEL_EXPORTER_OTLP_ENDPOINT",
-    )
-    p_setup.add_argument("--output", "-o", choices=["text", "json"], default="text")
+    parser = _llm_eval_parsers.build_llm(prog="rebar llm")
 
     args = parser.parse_args(argv)
     if args.cmd == "setup":

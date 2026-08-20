@@ -385,10 +385,21 @@ def cmd_enrich(argv: list[str], tracker: str) -> int:
     """`rebar enrich` CLI: `--drain` (bounded drain), `--once` (one entry), `status` (JSON)."""
     import json
 
-    if argv and argv[0] == "status":
+    from rebar._cli._parser import ParseError
+    from rebar._cli._parsers.advanced.enrich import build
+
+    try:
+        ns, _unknown = build(prog="rebar enrich").parse_known_args(argv)
+        mode, once = ns.mode, ns.once
+    except ParseError:
+        # Preserve the historically lenient contract: a non-"status" positional is
+        # treated as a drain request (never a hard reject), mirroring the pre-factory
+        # `argv[0] == "status"` / `"--once" in argv` walk.
+        mode, once = None, "--once" in argv
+
+    if mode == "status":
         sys.stdout.write(json.dumps(status(tracker)) + "\n")
         return 0
-    once = "--once" in argv
     result = drain(tracker, once=once)
     sys.stdout.write(json.dumps(result) + "\n")
     return 0

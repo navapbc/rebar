@@ -20,6 +20,8 @@ import subprocess
 import sys
 
 from rebar import config
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced.verify import build_commit_ticket
 from rebar._engine_support.resolver import resolve_ticket_id
 
 # A single SAFE token: no path separators, no ``..``, no whitespace/control. This is a
@@ -121,7 +123,6 @@ def render_missing(tried: list[str]) -> str:
 
 
 # ── CLI (pure intercept — owns its own --help; no help/*.txt, no dispatch arm) ────
-_USAGE = "rebar verify-commit-ticket [--rev <ref> | --message-file <path> | --message <text>]"
 
 
 def _read_message(args: argparse.Namespace) -> tuple[str, bool]:
@@ -151,21 +152,9 @@ class _InfraError(Exception):
     """An I/O / environment failure (exit 2) — told apart from a missing ticket (exit 1)."""
 
 
+@guard_parse_errors
 def cli(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(
-        prog="rebar verify-commit-ticket",
-        usage=_USAGE,
-        description=(
-            "Verify a commit message references a rebar ticket that resolves in the store.\n\n"
-            + EXPECTED_FORMAT
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    src = p.add_mutually_exclusive_group()
-    src.add_argument("--rev", help="git revision to read the message from (default: HEAD)")
-    src.add_argument("--message-file", help="read the commit message from this file")
-    src.add_argument("--message", help="the commit message text (inline)")
-    p.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    p = build_commit_ticket(prog="rebar verify-commit-ticket")
     args = p.parse_args(argv)
 
     cfg = config.compose_config(root=args.root)

@@ -9,7 +9,6 @@ eval / config cluster (``prompt`` / ``criteria`` / ``llm setup``) lives in the s
 
 from __future__ import annotations
 
-import argparse
 import sys
 
 from rebar._cli._init import ensure_initialized
@@ -19,37 +18,8 @@ from rebar._cli._init import ensure_initialized
 # ``rebar._cli`` and existing importers (``from rebar._cli._llm_commands import _criteria``)
 # keep resolving unchanged.
 from rebar._cli._llm_eval_commands import _criteria, _llm, _prompt  # noqa: F401
-
-
-def _add_ref_source(
-    parser: argparse.ArgumentParser,
-    *,
-    ref_default: str = "origin/main",
-    ref_configurable: bool = True,
-) -> None:
-    """Add the shared ``--ref`` / ``--source`` controls (epic raze-vet-ditch S5) to a
-    code-reading CLI command, mirroring the MCP tools' ``ref``/``source`` args one-to-one.
-    Both default to ``None`` so the configured default resolves (``REBAR_GATE_SOURCE`` /
-    ``[snapshot]`` > built-in default). ``ref_configurable=False`` (review-code, whose ref
-    defaults to the reviewed ``head``, not the cross-gate ``origin/main``) drops the
-    config-override note so the help text matches the actual resolution."""
-    ref_help = f"branch | tag | SHA to verify against (default: {ref_default}"
-    ref_help += "; configurable via REBAR_GATE_REF / [snapshot].ref)" if ref_configurable else ")"
-    if ref_configurable:
-        ref_help += (
-            " — pass --ref HEAD when the review depends on code you have committed "
-            "locally but not yet landed on the default ref (a stacked change or feature "
-            "branch): the default ref reads a snapshot predating that code, so symbols it "
-            "adds read as 'does not exist' false findings"
-        )
-    parser.add_argument("--ref", default=None, help=ref_help)
-    parser.add_argument(
-        "--source",
-        choices=["attested", "local"],
-        default=None,
-        help="attested (default): verify a snapshot pinned at --ref (signs, records "
-        "verified_at_sha); local: read the in-place checkout (dirty allowed, never signs)",
-    )
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced import llm as _llm_parsers
 
 
 def _gate_source_error() -> type[Exception]:
@@ -130,6 +100,7 @@ def _disposition_exit_code(result: dict, *, indeterminate_code: int) -> int:
     return indeterminate_code if verdict == "INDETERMINATE" else 1
 
 
+@guard_parse_errors
 def _review_code(argv: list[str]) -> int:
     """``rebar review-code`` → rebar.llm.review_code (native, like reconcile).
 
@@ -137,22 +108,7 @@ def _review_code(argv: list[str]) -> int:
     more reviewers; JSON output conforms to the ``review_result`` schema."""
     import json as _json
 
-    parser = argparse.ArgumentParser(
-        prog="rebar review-code",
-        description="Run an LLM code review of a change (git range or diff file) and "
-        "emit aggregated structured findings. Needs the 'agents' extra + an API key.",
-    )
-    parser.add_argument("--base", default="HEAD~1", help="base git ref (default HEAD~1)")
-    parser.add_argument("--head", default="HEAD", help="head git ref (default HEAD)")
-    parser.add_argument("--diff-file", help="review this unified-diff file instead of a git range")
-    parser.add_argument(
-        "--reviewer",
-        action="append",
-        dest="reviewers",
-        help="reviewer id (repeatable; default: deterministic selection)",
-    )
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-    _add_ref_source(parser, ref_default="the reviewed --head", ref_configurable=False)
+    parser = _llm_parsers.build_review_code(prog="rebar review-code")
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -207,6 +163,7 @@ def _review_code(argv: list[str]) -> int:
     return _disposition_exit_code(result, indeterminate_code=2)
 
 
+@guard_parse_errors
 def _scan_spec(argv: list[str]) -> int:
     """``rebar scan-spec`` → rebar.llm.scan_epics_for_spec (native op).
 
@@ -214,21 +171,7 @@ def _scan_spec(argv: list[str]) -> int:
     conforms to the ``review_result`` schema."""
     import json as _json
 
-    parser = argparse.ArgumentParser(
-        prog="rebar scan-spec",
-        description="Batch-scan open epics against a specification and emit "
-        "structured findings (gaps/conflicts/overlaps). Needs the 'agents' extra.",
-    )
-    parser.add_argument("--spec-file", required=True, help="path to the specification text")
-    parser.add_argument("--batch-size", type=int, default=5, help="epics per batch (default 5)")
-    parser.add_argument(
-        "--epic",
-        action="append",
-        dest="epics",
-        help="restrict to these epic ids (repeatable; default: all open epics)",
-    )
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-    _add_ref_source(parser)
+    parser = _llm_parsers.build_scan_spec(prog="rebar scan-spec")
     args = parser.parse_args(argv)
 
     try:
@@ -262,6 +205,7 @@ def _scan_spec(argv: list[str]) -> int:
     return 0
 
 
+@guard_parse_errors
 def _verify_completion(argv: list[str]) -> int:
     """``rebar verify-completion`` → rebar.llm.verify_completion (native; like reconcile).
 
@@ -272,26 +216,7 @@ def _verify_completion(argv: list[str]) -> int:
     1 on FAIL or error (scriptable, like ``verify-signature``)."""
     import json as _json
 
-    parser = argparse.ArgumentParser(
-        prog="rebar verify-completion",
-        description="Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict "
-        "that its completion requirements (acceptance/success/close criteria, definitions of "
-        "done; for bugs, that the bug is resolved) are demonstrably met by the implementation. "
-        "Needs the 'agents' extra + a model API key; see `rebar verify-completion --check`.",
-    )
-    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
-    parser.add_argument(
-        "--graph",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="include the ticket's descendants; use --no-graph to force own-criteria "
-        "verification (default: auto — on for epics, off otherwise)",
-    )
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-    parser.add_argument(
-        "--check", action="store_true", help="print backend/credential availability and exit"
-    )
-    _add_ref_source(parser)
+    parser = _llm_parsers.build_verify_completion(prog="rebar verify-completion")
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -327,6 +252,7 @@ def _verify_completion(argv: list[str]) -> int:
     return 0 if result.get("verdict") == "PASS" else 1
 
 
+@guard_parse_errors
 def _explain(argv: list[str]) -> int:
     """``rebar explain <criterion-id|guide>`` → a plan-review criterion's authoring-guide section
     (WS10), OR an author-facing prose guide (``plan`` / ``review``). A pure registry/guide READ (no
@@ -337,16 +263,7 @@ def _explain(argv: list[str]) -> int:
     from rebar.llm.plan_review import registry
 
     guides = ", ".join(sorted(registry.AUTHOR_GUIDES))
-    parser = argparse.ArgumentParser(
-        prog="rebar explain",
-        description="Print a plan-review criterion's authoring-guide section (e.g. `rebar explain "
-        f"F1`), or an author-facing prose guide ({guides}) — e.g. `rebar explain plan` for how to "
-        "write a plan that passes the plan-review gate. One shared lookup with the MCP "
-        "explain_criterion tool.",
-    )
-    parser.add_argument(
-        "topic", nargs="?", help=f"a plan-review criterion id (e.g. F1, G3) or a guide ({guides})"
-    )
+    parser = _llm_parsers.build_explain(prog="rebar explain")
     args = parser.parse_args(argv)
     if not args.topic:
         parser.error(f"a criterion id (e.g. F1) or a guide ({guides}) is required")
@@ -361,6 +278,7 @@ def _explain(argv: list[str]) -> int:
         return 1
 
 
+@guard_parse_errors
 def _review_plan(argv: list[str]) -> int:
     """``rebar review-plan`` → rebar.llm.review_plan (native; like verify-completion).
 
@@ -373,52 +291,7 @@ def _review_plan(argv: list[str]) -> int:
     unless ``--force`` is passed. Exit 0 on PASS, 1 on BLOCK, 2 on INDETERMINATE."""
     import json as _json
 
-    from rebar import config
-
-    parser = argparse.ArgumentParser(
-        prog="rebar review-plan",
-        description="Run the plan-review gate on a ticket: a deterministic Layer-1 floor + a "
-        "four-pass (find → verify → decide → coach) review of the plan, then sign a "
-        "plan-review attestation on a non-blocking PASS. The inverse of verify-completion.",
-        epilog=(
-            "Coaching deep-links + `rebar explain <criterion-id>` reference the criteria "
-            f"authoring guide at {config.plan_review_docs_url()} "
-            "(anchor `#<criterion-id lower-cased>`; override the base with REBAR_DOCS_URL)."
-        ),
-    )
-    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
-    parser.add_argument(
-        "--no-sign",
-        action="store_true",
-        help="run the review but do NOT sign an attestation. By default a non-blocking PASS "
-        "SIGNS one — that attestation is the review's durable product, and it is what the "
-        "claim gate consumes — so this flag is the explicit opt-out, not the way to get a "
-        "signature. An unsigned PASS leaves the claim gate unsatisfied; recover a lost "
-        "signature cheaply (no LLM) with `rebar sign-review <id>`",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="re-run the review even if a current attestation exists "
-        "(bypass the idempotence short-circuit); also reviews a ticket that is not "
-        "yet claimable (closed/idea/blocked status, or blocked by an unclosed "
-        "dependency), which is otherwise fast-failed without running the LLM",
-    )
-    parser.add_argument(
-        "--check",
-        action="store_true",
-        help="print backend/credential availability and exit; does NOT inspect a ticket's "
-        "attestation status (for that, use --status)",
-    )
-    parser.add_argument(
-        "--status",
-        action="store_true",
-        help="read-only: report whether the ticket's plan-review attestation is CURRENT right "
-        "now (no model call, no network, no re-sign); prints the verdict + bound verified-at-sha. "
-        "Exit 0 when current, 12 when stale/absent",
-    )
-    _add_ref_source(parser)
+    parser = _llm_parsers.build_review_plan(prog="rebar review-plan")
     args = parser.parse_args(argv)
 
     from rebar import llm
@@ -469,6 +342,7 @@ def _review_plan(argv: list[str]) -> int:
     return _disposition_exit_code(result, indeterminate_code=2)
 
 
+@guard_parse_errors
 def _sign_review(argv: list[str]) -> int:
     """``rebar sign-review`` → rebar.llm.resign_plan_review (native; owns its --help).
 
@@ -479,16 +353,7 @@ def _sign_review(argv: list[str]) -> int:
     changed since the review (stale). Exit 0 on a successful re-sign."""
     import json as _json
 
-    parser = argparse.ArgumentParser(
-        prog="rebar sign-review",
-        description="Cheaply (re)persist the plan-review attestation for an already-computed, "
-        "still-valid PASS verdict from the latest REVIEW_RESULT sidecar — WITHOUT re-running the "
-        "multi-pass LLM review. Use it to recover a signature that a `rebar review-plan` computed "
-        "but failed to persist (e.g. a transient git index.lock). Refuses to sign a non-PASS or a "
-        "verdict that is stale because the plan changed since the review.",
-    )
-    parser.add_argument("ticket_id", nargs="?", help="ticket id, short id, or alias")
-    parser.add_argument("--output", "-o", choices=["json", "text"], default="json")
+    parser = _llm_parsers.build_sign_review(prog="rebar sign-review")
     args = parser.parse_args(argv)
 
     if not args.ticket_id:

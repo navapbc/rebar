@@ -24,18 +24,14 @@ The exit-code contract + walk are pinned by the RED oracle: 2 = infra error (no 
 
 from __future__ import annotations
 
-import argparse
 import os
 import sys
 
 from rebar import config
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced.verify import build_opcert
 
 KIND = "completion-verifier"
-
-_USAGE = (
-    "rebar verify-opcert [--require-environment <env_id>] [--since <ref>] "
-    "[--format {text,json}] [--root <path>]"
-)
 
 
 def _close_anchor_event(events, ticket_id):
@@ -111,40 +107,9 @@ def _commit_in_gated_history(commit: str, repo_root) -> bool:
         return False
 
 
+@guard_parse_errors
 def cli(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(
-        prog="rebar verify-opcert",
-        usage=_USAGE,
-        description=(
-            "Verify the required-environment operation certificate of the store's CLOSED tickets "
-            "(the op-cert merge-gate). Walks the merged log, groups by ticket, and for each "
-            "in-scope closed ticket verifies that verify.require_environment (or "
-            "--require-environment) "
-            "produced a valid completion-verifier op-cert against its OUT-OF-BAND-PINNED key "
-            "(.rebar/trusted_environments.yaml). Advisory unless a required environment is set, in "
-            "which case any ENFORCED closed ticket without a valid cert fails the gate (non-zero "
-            "exit). Tickets whose close commit predates --since / verify.opcert_enforce_since are "
-            "grandfathered: reported but never fail the gate."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    p.add_argument(
-        "--require-environment",
-        metavar="ENV_ID",
-        help="environment that must sign (default: verify.require_environment)",
-    )
-    p.add_argument(
-        "--since",
-        help="grandfather boundary: only enforce tickets closed at/descending this ref "
-        "(default: verify.opcert_enforce_since)",
-    )
-    p.add_argument(
-        "--format",
-        choices=("text", "json"),
-        default="text",
-        help="output format (default: text). json prints only a report array to stdout",
-    )
-    p.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    p = build_opcert(prog="rebar verify-opcert")
     args = p.parse_args(argv)
 
     try:
