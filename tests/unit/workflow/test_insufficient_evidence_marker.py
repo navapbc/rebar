@@ -332,14 +332,15 @@ def test_reconcile_derives_top_level_marker_and_remediation() -> None:
     assert result["remediation"] != COMPLETION_REMEDIATION_GUIDANCE
     # Operator-directed steering (field incidents): exhaustion is not refutation; the fix is
     # an UNTAGGED comment citing exact tests/paths/SHAs + re-verify — never misclassifying
-    # code-verifiable criteria as [operator-attested] to satisfy an exhausted search.
+    # code-verifiable criteria as [non-codebase] to satisfy an exhausted search.
     guidance = result["remediation"].casefold()
     assert "not refutation" in guidance
     assert "untagged comment" in guidance
     assert "test function" in guidance and "file paths" in guidance and "sha" in guidance
     assert "re-verify" in guidance
-    assert "do not tag code-verifiable" in guidance
+    assert "`[non-codebase]` tag is reserved" in guidance
     assert "reserved for evidence that inherently lives outside" in guidance
+    assert "so it is not non-codebase" in guidance
 
 
 def test_reconcile_no_marker_when_any_criterion_genuinely_unmet() -> None:
