@@ -18,9 +18,10 @@ tag. Apply this rubric to both leaf and container plans.
 repository state: a file, symbol, method, configuration declaration, removed configuration,
 test assertion, generated artifact, or other behavior encoded in the checked-out tree.
 
-`operator-attested` applies when completion is an event or live-state outcome outside the
-repository snapshot: a test run completed successfully, an AWS deployment occurred, a database
-was modified, a Gerrit vote landed, or an operator performed and observed a live procedure.
+`operator-attested` (the kind an author tags `[non-codebase]`) applies when completion is an
+event or live-state outcome outside the repository snapshot: a test run completed successfully,
+an AWS deployment occurred, a database was modified, a Gerrit vote landed, or an operator
+performed and observed a live procedure.
 Ticket evidence may attest those outcomes because the codebase cannot replay them.
 
 Classify the completion predicate, not nearby implementation nouns. The existence of test code
@@ -52,24 +53,27 @@ false positive.
 
 ## Exact tag contract
 
-ADR 0043 selects operator evidence only with the exact case-insensitive token
-`[operator-attested]` at the start of the checkbox text. Untagged criteria, `[codebase]`, and
-near-misses such as `[operator_attested]` remain codebase-verifiable.
+ADR 0043, as amended by ADR 0101, selects outside-the-codebase evidence only with an exact
+case-insensitive tag at the start of the checkbox text: the canonical `[non-codebase]`, or the
+still-accepted legacy `[operator-attested]`. Untagged criteria, `[codebase]`, and near-misses
+such as `[non_codebase]` or `[operator_attested]` remain codebase-verifiable.
 
 Emit a finding in these cases:
 
 - An outside-world criterion is untagged or malformed. The remediation must show the exact
-  syntax `- [ ] [operator-attested] …`.
-- A codebase-verifiable criterion carries `[operator-attested]` and the repository grounding
-  threshold above is met. Explain that ticket comments cannot substitute for repository proof,
-  and cite the exact file path plus symbol/declaration.
+  canonical syntax `- [ ] [non-codebase] …`.
+- A codebase-verifiable criterion carries `[non-codebase]` (or the legacy
+  `[operator-attested]`) and the repository grounding threshold above is met. Explain that
+  ticket comments cannot substitute for repository proof, and cite the exact file path plus
+  symbol/declaration.
 - One checkbox combines repository proof and outside-world proof. Label the finding
   `split-required`; quote both predicates and request two independently certifiable criteria.
 
-Accept an untagged codebase-verifiable criterion and an exactly tagged operator-attested
-criterion. Accept genuine test run, AWS, and database outcomes when exactly tagged even when the
-repository contains the tests, deployment definitions, or migrations that enabled them. Abstain
-on ambiguity or missing repository grounding.
+Accept an untagged codebase-verifiable criterion and a criterion carrying either exact tag
+(`[non-codebase]` or the legacy `[operator-attested]`). Accept genuine test run, AWS, and
+database outcomes when exactly tagged even when the repository contains the tests, deployment
+definitions, or migrations that enabled them. Abstain on ambiguity or missing repository
+grounding.
 
 ## Finding contract
 

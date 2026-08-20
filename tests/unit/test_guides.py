@@ -73,12 +73,22 @@ def test_section_names_top_five_in_frequency_order_with_examples() -> None:
         assert "Before" in entry and "After" in entry, f"move {name!r} lacks a before/after example"
 
 
-def test_operator_attested_tag_documented() -> None:
+def test_non_codebase_tag_documented() -> None:
     body = _section_text()
     start = body.index("### state attestation evidence")
     end = body.index("### propagate to children")
-    assert "[operator-attested]" in body[start:end], (
-        "the [operator-attested] AC tag is not documented in the state-attestation entry"
+    assert "[non-codebase]" in body[start:end], (
+        "the [non-codebase] AC tag is not documented in the state-attestation entry"
+    )
+
+
+def test_legacy_alias_stays_undocumented() -> None:
+    """ADR 0101 keeps `[operator-attested]` ACCEPTED but UNDOCUMENTED. That is only real if
+    something enforces it: without this test the legacy spelling drifts back into the guide
+    an author reads, and the rename quietly un-does itself."""
+    assert "operator-attested" not in _guide_text(), (
+        "the legacy alias reappeared in the packaged author guide; it is deliberately "
+        "undocumented (ADR 0101) even though the matcher still accepts it"
     )
 
 
