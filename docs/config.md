@@ -37,9 +37,14 @@
 6. **Loud, not silent.** Unknown keys **warn** (typo guard) — the bespoke parser
    dropped them silently — and flip to a hard error under
    `REBAR_CONFIG_UNKNOWN_KEYS=error` (the post-deprecation cutover). An invalid
-   *value* always raises `ConfigError` at load (fail-fast). The **verify gate stays
-   fail-closed**: a present-but-unreadable `verify.*` config requires a signature to
-   close; an absent config leaves the gate off.
+   *value* always raises `ConfigError` at load (fail-fast). The opt-in **`verify.*`
+   review gates fail OPEN**: a present-but-unreadable config skips the gate with a stderr
+   warning rather than blocking every claim and close on a broken file, and an absent
+   config leaves the gate off. Because those are two different things — a fault and a
+   policy choice — an unreadable config resolves to its own `GateState.UNREADABLE`
+   (`_commands/gates.py`) and is never reported as a deliberate disable. (This bullet
+   previously described a fail-closed signature-on-close gate; that gate was retired with
+   `verify.require_signature_for_close`.)
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 
