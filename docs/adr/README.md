@@ -135,3 +135,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0097 — Many-to-many tracker projects](0097-many-to-many-tracker-projects.md)
 - [0098 — Operation-scoped configuration and provider bindings](0098-operation-scoped-config-and-provider-composition.md)
 - [0100 — Lazy CLI command and capability registry with canonical help](0100-cli-command-and-capability-registry.md)
+- [0101 — `[non-codebase]` replaces `[operator-attested]` as the acceptance-criterion tag](0101-non-codebase-acceptance-criterion-tag.md)
