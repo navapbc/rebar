@@ -309,3 +309,199 @@ def test_all_events_corrupt_reads_as_absent(repo: str) -> None:
     state = Q.reduce_ticket(tid, tracker, now_ns=_BASE_NS + 10)
     assert state["enqueued"] is False
     assert state["pending"] is False
+
+
+# ── O(1) drain-gate fast path (bug moist-short-lionfish 958e) ────────────────────
+# The write-path gate (`enrich_drain.maybe_drain`) probes the queue on EVERY store write
+# against a declared 20 ms budget. Reducing every ticket dir to answer it made the common
+# "nothing soaked" answer cost a full store walk — ~486 ms / ~24,000 metadata syscalls at
+# 4,831 tickets, and worse than linearly so when several agents' gates overlap. These pin
+# the ALGORITHMIC property (work does not scale with the store) rather than a wall clock,
+# which would be flaky under exactly the contention that motivated the fix.
+
+
+def _count_reductions(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Instrument ``reduce_ticket`` and return the list it appends a ticket id to."""
+    seen: list[str] = []
+    real = Q.reduce_ticket
+
+    def counting(ticket_id: str, tracker: str, **kwargs: object) -> dict:
+        seen.append(ticket_id)
+        return real(ticket_id, tracker, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Q, "reduce_ticket", counting)
+    return seen
+
+
+@pytest.mark.parametrize("n_tickets", [4, 40])
+def test_gate_cost_does_not_scale_with_store_size(
+    repo: str, monkeypatch: pytest.MonkeyPatch, n_tickets: int
+) -> None:
+    """A repeat gate probe on a store with nothing soaked reduces NO tickets, at any store
+    size — so the gate's cost is independent of the ticket count.
+
+    Counted, not timed: the acceptance criterion is algorithmic, and a wall-clock bound is
+    precisely the flake class this bug's own measurements exhibited.
+    """
+    tracker = _tracker(repo)
+    now = 30_000_000_000_000
+    for i in range(n_tickets):
+        rebar.create_ticket("task", f"T{i}", repo_root=repo)
+    # First probe is allowed to be cold (it establishes the fast path).
+    assert Q.pending_enrichment(now, tracker) == []
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 1, tracker) == []
+    assert seen == [], f"repeat gate probe reduced {len(seen)} tickets at n={n_tickets}"
+
+
+def test_gate_fast_path_expires_at_the_soak_deadline(repo: str) -> None:
+    """The fast path must never HIDE a ticket: a probe taken during the soak may skip the
+    walk only until the soak deadline it recorded."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 31_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []  # soaking; records the deadline
+    assert Q.pending_enrichment(now + 59 * _MIN, tracker) == []  # still soaking
+    assert Q.pending_enrichment(now + 61 * _MIN, tracker) == [tid]  # deadline passed
+
+
+def test_lost_gate_marker_degrades_to_a_full_scan(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-healing: a marker that is deleted, empty or corrupt degrades to the full scan —
+    never to a missed drain."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 32_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []  # records a deadline at now+60m
+    marker = Q._gate_marker_path(tracker)
+    assert os.path.exists(marker)
+    # Simulate a crash between the queue append and the marker invalidation: the ticket
+    # becomes eligible immediately, but the recorded marker still says "not before now+60m".
+    monkeypatch.setattr(Q, "_clear_gate_marker", lambda _tracker: None)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now + 1)
+    monkeypatch.undo()
+    assert os.path.exists(marker)  # the stale marker survived the (simulated) crash
+    for corruption in (b"", b"{not json", b'{"next_eligible_ns": "nonsense"}'):
+        with open(marker, "wb") as fh:
+            fh.write(corruption)
+        assert Q.pending_enrichment(now + 2, tracker) == [tid]
+        with open(marker, "wb") as fh:  # rewrite the stale-but-valid marker for the next case
+            fh.write(json.dumps({"next_eligible_ns": now + 60 * _MIN, "written_ns": now}).encode())
+    os.unlink(marker)
+    assert Q.pending_enrichment(now + 2, tracker) == [tid]
+
+
+def test_stale_gate_marker_is_ttl_bounded(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A marker left stale by a crash suppresses the walk for at most the marker TTL, so a
+    drain is delayed but never permanently missed."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 33_000_000_000_000
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now, tracker) == []
+    monkeypatch.setattr(Q, "_clear_gate_marker", lambda _tracker: None)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now + 1)
+    monkeypatch.undo()
+    ttl = Q._GATE_MARKER_TTL_NS
+    assert Q.pending_enrichment(now + 2, tracker) == []  # suppressed by the stale marker
+    assert Q.pending_enrichment(now + ttl + 1, tracker) == [tid]  # TTL expiry self-heals
+
+
+def test_queue_mutations_invalidate_the_gate_marker(repo: str) -> None:
+    """Every queue append clears the marker, so a state change is never hidden behind it."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 34_000_000_000_000
+    marker = Q._gate_marker_path(tracker)
+    for mutate in (
+        lambda: Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now),
+        lambda: Q.claim(tid, "A", lease_ttl_min=15, now_ns=now + 61 * _MIN, repo_root=repo),
+        lambda: Q.mark_done(tid, repo_root=repo),
+    ):
+        Q.pending_enrichment(now, tracker)
+        assert os.path.exists(marker) or Q.pending_enrichment(now, tracker) != []
+        mutate()
+        assert not os.path.exists(marker)
+
+
+def test_marker_defers_a_claimed_entry_to_its_lease_expiry(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A claimed entry's next-eligible instant is its LEASE EXPIRY, not its soak deadline.
+
+    A claim holds a ticket back past its `not_before_ns` until the lease lapses, so recording
+    the soak deadline instead would make the marker expire the moment the claim was taken —
+    correct answers, but the fast path would never engage for a claimed store, which is
+    exactly the wedged-queue case this bug is worst in. Pinned by watching the fast path
+    engage mid-lease, then correctly stand down once the lease has lapsed.
+    """
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 35_000_000_000_000
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)  # eligible immediately...
+    assert Q.claim(tid, "A", lease_ttl_min=15, now_ns=now, repo_root=repo) is True  # ...but held
+    assert Q.pending_enrichment(now + 1, tracker) == []  # records the LEASE expiry, not now
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 10 * _MIN, tracker) == []  # mid-lease: fast path holds
+    assert seen == [], "marker expired at the soak deadline instead of the lease expiry"
+    monkeypatch.undo()
+    assert Q.pending_enrichment(now + 16 * _MIN, tracker) == [tid]  # lease lapsed → reclaimable
+
+
+def test_marker_written_in_the_future_is_not_trusted(repo: str) -> None:
+    """A marker whose ``written_ns`` is AHEAD of now is untrusted.
+
+    The TTL is a subtraction, so a clock that steps backwards (or a marker carried in from a
+    host whose clock ran fast) makes ``now - written`` negative — the TTL can then never
+    elapse, and the fast path would be trusted until real time caught up. That would turn the
+    bounded-delay guarantee into an unbounded one, so the window is treated as untrusted
+    rather than as infinitely fresh.
+    """
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 36_000_000_000_000
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)  # eligible right away
+    marker = Q._gate_marker_path(tracker)
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    with open(marker, "w", encoding="utf-8") as fh:
+        json.dump({"next_eligible_ns": None, "written_ns": now + 365 * 24 * 60 * _MIN}, fh)
+    assert Q.pending_enrichment(now + 1, tracker) == [tid]
+
+
+def test_gate_marker_lives_outside_the_tracker(repo: str) -> None:
+    """The marker is machine-local cache state, so it must live in the repo-local ``.rebar``
+    dir and NEVER inside the tracker — the tracker auto-commits and auto-pushes, so a marker
+    written there would travel to every clone and be reported as store drift.
+
+    Also pins the path against ``enrich_drain._rebar_dir``, the other implementation of the
+    tracker→``.rebar`` sibling convention: the two are deliberately separate (importing
+    ``enrich_drain`` from ``queue`` would invert the dependency, since ``enrich_drain``
+    imports ``queue``), so a test keeps them in lockstep instead.
+    """
+    from rebar.llm import enrich_drain as D
+
+    tracker = _tracker(repo)
+    marker = Q._gate_marker_path(tracker)
+    assert os.path.dirname(marker) == D._rebar_dir(tracker)
+    assert not os.path.abspath(marker).startswith(os.path.abspath(tracker) + os.sep)
+    Q.pending_enrichment(37_000_000_000_000, tracker)  # writes one
+    assert os.path.exists(marker)
+    assert Q._GATE_MARKER_NAME not in os.listdir(tracker)
+
+
+def test_bool_typed_marker_fields_are_rejected(repo: str) -> None:
+    """``bool`` is an ``int`` subclass in Python, so a marker carrying ``true`` where a
+    timestamp belongs would otherwise be arithmetic-compared and silently trusted."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 38_000_000_000_000
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)
+    marker = Q._gate_marker_path(tracker)
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    for payload in ({"next_eligible_ns": None, "written_ns": True}, {"next_eligible_ns": True}):
+        with open(marker, "w", encoding="utf-8") as fh:
+            json.dump({"written_ns": now, **payload}, fh)
+        assert Q.pending_enrichment(now + 1, tracker) == [tid]
