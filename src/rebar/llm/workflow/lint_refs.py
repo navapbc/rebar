@@ -438,7 +438,7 @@ def _output_fields_map(doc: dict[str, Any]) -> dict[str, _OutputContract | None]
         from rebar import schemas
 
         from . import steps  # noqa: F401  (side effect: register built-in contracts)
-        from .executor import contract_for
+        from .step_contracts import contract_for
     except Exception:  # noqa: BLE001 — fail-open: step library unimportable → all refs UNKNOWN ({})
         return {}
 
