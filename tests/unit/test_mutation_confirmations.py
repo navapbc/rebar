@@ -420,3 +420,155 @@ def test_confirmations_go_to_stdout_and_logs_to_stderr(repo: Path) -> None:
     assert proc.stdout.strip().startswith("created ")
     assert "Warning" not in proc.stdout, "advisory chatter stays on stderr"
     assert "no file_impact" in proc.stderr
+
+
+# ── the SHARED seam, structurally (ticket 0c00-0649-32da-41a5) ────────────────
+# The exact-line tests above are per-verb and observable-behaviour only: they stay
+# green if a verb stops using the shared confirmation channel and goes back to
+# printing its own line. These tests pin the STRUCTURE instead — every
+# confirmation is routed through `_confirm.emit`/`emit_text` exactly once, and
+# stdout carries nothing the shared seam was not asked to print.
+#
+# The seam is spied rather than the event reducer: `rebar.reducer.reduce_ticket`
+# is re-exported by binding the function object at import time
+# (`rebar.reducer.__init__`, `rebar._native`, `rebar.__init__`), so patching the
+# defining module's attribute is invisible to most callers and a call-count on it
+# would silently under-report. `test_confirmation_formatters_need_no_store` covers
+# the other half of the contract — the line is built from args plus the seam's
+# outcome, never a follow-up store read — by formatting with no store to read.
+@pytest.fixture
+def seam_spy(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record every line routed through the shared confirmation seam."""
+    from rebar._commands import _confirm
+
+    routed: list[str] = []
+    real_emit, real_emit_text = _confirm.emit, _confirm.emit_text
+
+    def emit(outcome, subject, detail, line, *, extra=None):
+        routed.append(line)
+        return real_emit(outcome, subject, detail, line, extra=extra)
+
+    def emit_text(line):
+        routed.append(line)
+        return real_emit_text(line)
+
+    monkeypatch.setattr(_confirm, "emit", emit)
+    monkeypatch.setattr(_confirm, "emit_text", emit_text)
+    return routed
+
+
+def _in_process(argv: list[str], repo: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> str:
+    """Run one CLI dispatch in-process (so the seam patch applies) and return stdout."""
+    from rebar._cli import main
+
+    monkeypatch.chdir(repo)
+    rc = main(argv)
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    return out
+
+
+@pytest.mark.parametrize("verb", ["create", "link", "transition"])
+def test_shared_seam_is_the_only_stdout_channel(
+    verb: str, repo: Path, monkeypatch: pytest.MonkeyPatch, capsys, seam_spy: list[str]
+) -> None:
+    """Each verb confirms via the shared seam exactly once — no per-verb printing."""
+    if verb == "create":
+        argv = ["create", "task", "seam subject"]
+    elif verb == "link":
+        argv = ["link", _create(repo, title="src"), _create(repo, title="dst"), "relates_to"]
+    else:
+        argv = ["transition", _create(repo), "open", "in_progress"]
+
+    seam_spy.clear()
+    out = _in_process(argv, repo, monkeypatch, capsys)
+
+    assert len(seam_spy) == 1, f"{verb} routed {len(seam_spy)} lines through the shared seam"
+    assert out == seam_spy[0] + "\n", f"{verb} printed stdout the shared seam never emitted"
+
+
+def test_shared_seam_also_carries_the_noop_confirmations(
+    repo: Path, monkeypatch: pytest.MonkeyPatch, capsys, seam_spy: list[str]
+) -> None:
+    """The idempotent no-op path is the same single shared channel, not a second one."""
+    a, b = _create(repo, title="noop-a"), _create(repo, title="noop-b")
+    _cli("link", a, b, "relates_to", repo=repo)
+
+    seam_spy.clear()
+    out = _in_process(["link", a, b, "relates_to"], repo, monkeypatch, capsys)
+    assert len(seam_spy) == 1 and out == seam_spy[0] + "\n"
+    assert seam_spy[0].startswith("no change: ")
+
+    tid = _create(repo, title="noop-transition")
+    _cli("transition", tid, "open", "in_progress", repo=repo)
+    seam_spy.clear()
+    out = _in_process(["transition", tid, "in_progress", "in_progress"], repo, monkeypatch, capsys)
+    assert len(seam_spy) == 1 and out == seam_spy[0] + "\n"
+    assert seam_spy[0].startswith("no change: ")
+
+
+def test_confirmation_formatters_need_no_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The line is built from args + outcome: formatting works with NO store to read."""
+    from rebar._commands import _confirm
+
+    monkeypatch.chdir(tmp_path)  # no git repo, no tracker, no REBAR_ROOT store
+    monkeypatch.delenv("REBAR_ROOT", raising=False)
+
+    with _confirm.confirmation_context(quiet=False, fmt=None):
+        _confirm.confirm_created("", {"alias": "an-alias", "id": "aaaa-bbbb", "title": "t"})
+        _confirm.leaf_confirm("comment", "aaaa-bbbb")
+        _confirm.leaf_confirm("tag", {"wrote": False, "id": "aaaa-bbbb", "tag": "x"})
+        _confirm.emit("transitioned", "aaaa-bbbb", "d", "transitioned aaaa-bbbb: open -> closed")
+
+    assert capsys.readouterr().out.splitlines() == [
+        "created an-alias (aaaa-bbbb): t",
+        "comment added to aaaa-bbbb",
+        "no change: tag x already on aaaa-bbbb",
+        "transitioned aaaa-bbbb: open -> closed",
+    ]
+
+
+# ── the verb inventory + confirmation-line migration record ───────────────────
+# Both tables are curated ONCE in the CLI-reference generator and rendered into
+# docs/cli-reference.md (a generated artifact behind a CI drift gate), the same
+# shape as its INTERCEPT_COMMANDS ladder parity check.
+def _gen():
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[2] / "scripts" / "gen_cli_reference.py"
+    spec = importlib.util.spec_from_file_location("gen_cli_reference", path)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_every_mutating_verb_is_classified_and_mapped() -> None:
+    """A verb added to the confirmation scope without classification fails here."""
+    from rebar._cli import _CONFIRM_SCOPE
+
+    verbs = _gen().MUTATION_VERBS
+    assert set(verbs) == set(_CONFIRM_SCOPE)
+    for name, row in verbs.items():
+        assert row["noop"] in (True, False), name
+        assert row["condition"] and row["old"] and row["new"], name
+
+
+def test_an_unclassified_verb_fails_the_generator(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The drift gate — not just this test file — refuses to emit a partial doc."""
+    gen = _gen()
+    monkeypatch.delitem(gen.MUTATION_VERBS, "archive")
+    with pytest.raises(ValueError, match="MUTATION_VERBS"):
+        gen.render()
+
+
+def test_generated_reference_carries_both_tables() -> None:
+    """The committed doc records the inventory and the old→new mapping."""
+    doc = (Path(__file__).resolve().parents[2] / "docs" / "cli-reference.md").read_text(
+        encoding="utf-8"
+    )
+    assert "no-op-capable" in doc and "always-writes" in doc
+    assert "`CLAIMED: <id> (assignee: <who>)`" in doc, "the pre-normalization claim line"
+    assert "`No transition needed`" in doc, "the pre-normalization transition no-op line"
