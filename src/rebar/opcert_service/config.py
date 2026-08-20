@@ -42,7 +42,9 @@ class OpcertServiceConfig:
     #: The startup op-cert key sources (story 6f14). Exactly one is used; ``key_path`` (a file
     #: path, ``REBAR_OPCERT_KEY_PATH``) is preferred, ``private_key`` (inline PEM,
     #: ``REBAR_OPCERT_PRIVATE_KEY``) is the compat fallback. ``private_key`` is ``repr=False``:
-    #: it is the raw secret and must never leak into repr/serialization/logs.
+    #: it is the raw secret and must never leak into repr/serialization/logs. :meth:`from_env`
+    #: CONSUMES the inline variable (see :func:`_private_key_env`), so after the first call
+    #: this field — not the environment — holds it.
     key_path: str | None = None
     private_key: str | None = field(default=None, repr=False)
     job_timeout_seconds: float = float(DEFAULT_JOB_TIMEOUT_SECONDS)
@@ -74,9 +76,34 @@ def _str_env(name: str) -> str | None:
 
 
 def _private_key_env() -> str | None:
-    """``REBAR_OPCERT_PRIVATE_KEY`` (inline PEM). Returned VERBATIM (not stripped) when it
-    carries content — an OpenSSH PEM's internal newlines are significant — else ``None``."""
+    """``REBAR_OPCERT_PRIVATE_KEY`` (inline PEM), CONSUMED: the variable is popped once its
+    value has been captured, so :meth:`OpcertServiceConfig.from_env` TRANSFERS the secret into
+    the config object rather than copying it. Returned VERBATIM (not stripped) when it carries
+    content — an OpenSSH PEM's internal newlines are significant — else ``None``.
+
+    Consume-once is the contract, not an accident: this is the only reader of the variable,
+    and ``from_env`` runs exactly once per process (module scope in :mod:`~.app`; the
+    container runs uvicorn with neither ``--workers`` nor ``--reload``). A second ``from_env``
+    therefore sees NO inline key — a future config-reload path must read the key from
+    :class:`OpcertServiceConfig` (or from ``REBAR_OPCERT_KEY_PATH``), never re-read this
+    variable.
+
+    What the pop buys: the raw PEM is gone from any in-process ``os.environ`` dump taken after
+    config load (a crash handler, an error reporter, a traceback rendering the environment)
+    and from the environment inherited by children spawned afterwards
+    (``keyprov``'s ``ssh-keygen``, ``workspace``'s ``git`` — neither passes an explicit
+    ``env=``). What it does NOT buy: the key stays in process memory (this return value, held
+    by ``app.state.config``, and ``compose_signer``'s 0600 copy on disk), so a core dump or
+    heap scrape is unaffected; it does not retract anything that already read the variable;
+    and on Linux it does not scrub ``/proc/<pid>/environ``, which reflects the exec-time
+    environment block that ``unsetenv`` does not rewrite. It narrows the exposure window; it
+    does not erase the secret.
+    """
     raw = os.environ.get("REBAR_OPCERT_PRIVATE_KEY")
+    # The read stays an ``os.environ.get`` with a literal key on purpose: it is the pattern
+    # ``scripts/gen_env_registry.py`` recognizes, and folding it into the ``pop`` would drop
+    # this variable from the generated ``docs/env-vars.md`` and trip its CI drift gate.
+    os.environ.pop("REBAR_OPCERT_PRIVATE_KEY", None)
     if raw and raw.strip():
         return raw
     return None
