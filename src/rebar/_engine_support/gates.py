@@ -84,10 +84,14 @@ def check_ac_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    from rebar._cli._parsers.core.gates import build_check_ac
+
+    ns, _extra = build_check_ac(prog="rebar check-ac").parse_known_args(rest)
     if len(rest) < 1:
         sys.stderr.write("Usage: check-acceptance-criteria.sh <id>\n")
         return 1
-    result, code = check_ac_compute(rest[0], tracker)
+    ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
+    result, code = check_ac_compute(ticket_id, tracker)
     if fmt == "json":
         sys.stdout.write(json.dumps(result) + "\n")
     elif result["verdict"] == "pass":
@@ -167,9 +171,12 @@ def clarity_check_compute(ticket_type: str, description: str, threshold: int) ->
 
 def clarity_check_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
     mode = ""
-    ticket_id = ""
-    config_file = ""
+    seen_id = False
     i = 0
+    # Bespoke guard: reject wording (``ERROR: unknown flag`` / ``unexpected
+    # argument``), --config arity, and the order-sensitive stdin-vs-id ``mode`` the
+    # flag-presence namespace can't encode. The factory then parses the accepted
+    # grammar (--stdin / --config <path> / <ticket_id>).
     while i < len(argv):
         a = argv[i]
         if a == "--stdin":
@@ -179,18 +186,22 @@ def clarity_check_cli(argv: list[str], tracker: str, repo_root: str | None) -> i
             if i + 1 >= len(argv):
                 sys.stderr.write("ERROR: --config requires a file path argument\n")
                 return 2
-            config_file = argv[i + 1]
             i += 2
         elif a.startswith("--"):
             sys.stderr.write(f"ERROR: unknown flag: {a}\n")
             return 2
         else:
-            if ticket_id:
+            if seen_id:
                 sys.stderr.write(f"ERROR: unexpected argument: {a}\n")
                 return 2
-            ticket_id = a
+            seen_id = True
             mode = "ticket_id"
             i += 1
+    from rebar._cli._parsers.core.gates import build_clarity_check
+
+    ns, _extra = build_clarity_check(prog="rebar clarity-check").parse_known_args(argv)
+    ticket_id = ns.ticket_id or ""
+    config_file = ns.config or ""
     if not mode:
         sys.stderr.write("ERROR: must supply a ticket ID or --stdin\n")
         return 2
@@ -341,10 +352,14 @@ def quality_check_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    from rebar._cli._parsers.core.gates import build_quality_check
+
+    ns, _extra = build_quality_check(prog="rebar quality-check").parse_known_args(rest)
     if len(rest) != 1:
         sys.stderr.write("Usage: issue-quality-check.sh <id>\n")
         return 1
-    result, code, warn = quality_check_compute(rest[0], tracker)
+    ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
+    result, code, warn = quality_check_compute(ticket_id, tracker)
     lc, kc, ac, fi = (
         result["line_count"],
         result["keyword_count"],
@@ -425,6 +440,11 @@ def summary_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    from rebar._cli._parsers.core.gates import build_summary
+
+    # ``summary`` is permissive about dash-leading ids (each raw token is an id), so
+    # the raw ``rest`` drives execution; the factory owns the accepted-grammar shape.
+    build_summary(prog="rebar summary").parse_known_args(rest)
     if len(rest) == 0:
         sys.stderr.write("Usage: issue-summary.sh <id> [<id> ...]\n")
         return 1

@@ -349,24 +349,28 @@ def run(argv: list[str], tracker: str) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     json_output = fmt == "json"
-    verbose = False
-    quick = False
-    terse = False
+    _val_known = {"--verbose", "-v", "--quick", "--full", "--terse"}
     for arg in rest:
-        if arg in ("--verbose", "-v"):
-            verbose = True
-        elif arg == "--quick":
+        if arg in _val_known:
+            continue
+        if arg in ("--help", "-h"):
+            print(_HELP)
+            return 0
+        print(f"Unknown option: {arg}")
+        return 1
+    from rebar._cli._parsers.core.reads import build_validate
+
+    ns = build_validate(prog="rebar validate").parse_args(rest)
+    verbose = ns.verbose
+    terse = ns.terse
+    # --quick / --full are last-wins (the loop assigned quick then reset it), a
+    # semantic resolution the flag-presence namespace cannot encode on its own.
+    quick = False
+    for arg in rest:
+        if arg == "--quick":
             quick = True
         elif arg == "--full":
             quick = False
-        elif arg == "--terse":
-            terse = True
-        elif arg in ("--help", "-h"):
-            print(_HELP)
-            return 0
-        else:
-            print(f"Unknown option: {arg}")
-            return 1
 
     # Header (text, full mode only — not terse, not json).
     if not json_output and not terse:

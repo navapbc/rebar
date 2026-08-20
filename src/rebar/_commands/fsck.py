@@ -267,6 +267,40 @@ def _missing_tracker_result(tracker: str, fmt: str) -> int | None:
     return 1
 
 
+def _fsck_govern(
+    *, repair_snapshots, include_archived, do_repair, dry_run, only, limit, fmt
+) -> int | None:
+    """Parser-of-record governance for :func:`fsck_cli`.
+
+    Reconstruct a canonical, always-argparse-valid argv from the values the bespoke
+    scan extracted and let the factory govern it. Returns a render exit code when a
+    (rejecting) factory refuses the argv, else ``None`` to continue.
+    """
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.repair import build_fsck
+
+    norm: list[str] = []
+    if repair_snapshots:
+        norm.append("--repair-snapshots")
+    if include_archived:
+        norm.append("--include-archived")
+    if do_repair:
+        norm.append("--repair")
+    if dry_run:
+        norm.append("--dry-run")
+    if only is not None:
+        norm.append(f"--only={only}")
+    if limit is not None:
+        norm.append(f"--limit={limit}")
+    if fmt in ("text", "json"):
+        norm.append(f"--output={fmt}")
+    try:
+        build_fsck(prog="rebar fsck").parse_args(norm)
+    except ParseError as exc:
+        return render_parse_error(exc)
+    return None
+
+
 def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int:
     # RC2b Option 1: --repair-snapshots opts into rebuilding a stale SNAPSHOT that has
     # a merged-in pre-snapshot orphan (drives the live store to fsck-zero — A3). Strip
@@ -312,6 +346,23 @@ def fsck_cli(argv: list[str], *, repo_root=None, no_mutate: bool = False) -> int
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+
+    # Parser of record. fsck's accepted grammar is order-independent membership tests
+    # (a flag may appear anywhere or repeat), equals-only ``--only=``/``--limit=`` with
+    # bespoke multi/require diagnostics, and ``--output`` handled by ``parse_output`` —
+    # none of which argparse matches byte-for-byte, so the handling above owns it. The
+    # factory still governs via ``_fsck_govern`` (a rejecting factory raises → fail).
+    _rc = _fsck_govern(
+        repair_snapshots=repair_snapshots,
+        include_archived=include_archived,
+        do_repair=do_repair,
+        dry_run=dry_run,
+        only=only,
+        limit=limit,
+        fmt=fmt,
+    )
+    if _rc is not None:
+        return _rc
 
     tracker = str(config.tracker_dir(repo_root))
     missing_result = _missing_tracker_result(tracker, fmt)

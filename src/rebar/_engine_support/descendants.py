@@ -77,8 +77,12 @@ def list_descendants_cli(argv: list[str], tracker: str) -> int:
     if not argv:
         sys.stderr.write("Usage: rebar list-descendants <ticket_id>\n")
         return 1
+    # Positional-only lookup: the permissive raw/dash-leading ticket_id is genuinely
+    # argparse-inexpressible, so the first token is read raw. The registry declares
+    # ``build`` for lazy census + canonical help (RP-05 S2d).
+    raw = argv[0]
     # Graceful: pass the raw input through when resolution misses (documented
     # empty-arrays contract).
-    root_id = resolve_ticket_id(argv[0], tracker) or argv[0]
+    root_id = resolve_ticket_id(raw, tracker) or raw
     sys.stdout.write(json.dumps(list_descendants(root_id, tracker), ensure_ascii=False) + "\n")
     return 0

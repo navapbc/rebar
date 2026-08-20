@@ -123,7 +123,6 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    include_scratch = False
     # ``managed_refs`` is the reducer's strictly-monotonic removal-sync projection
     # (see reducer._managed_refs): it retains every ref the ticket EVER managed, so
     # a link removed via ``unlink`` still appears there. Surfacing it in the default
@@ -132,17 +131,17 @@ def _cmd_show(argv: list[str], tracker: str) -> int:
     # internal, intentionally-undocumented flag the Jira reconciler always passes (it
     # reads this dict via ``rebar show`` stdout to drive removal-propagation). Keeping
     # the flag out of ``usage`` keeps it reconciler-only in practice.
-    include_provenance = False
-    ids: list[str] = []
+    # Bespoke unknown-option guard (byte-exact reject text) runs BEFORE the factory
+    # parses the accepted grammar (positionals + the two boolean flags).
     for arg in rest:
-        if arg == "--include-scratch":
-            include_scratch = True
-        elif arg == "--include-provenance":
-            include_provenance = True
-        elif arg.startswith("-"):
+        if arg.startswith("-") and arg not in ("--include-scratch", "--include-provenance"):
             return _reject_unknown_option(arg, usage)
-        else:
-            ids.append(arg)
+    from rebar._cli._parsers.core.reads import build_show
+
+    ns = build_show(prog="rebar show").parse_args(rest)
+    include_scratch = ns.include_scratch
+    include_provenance = ns.include_provenance
+    ids: list[str] = list(ns.ticket_id)
     if not ids:
         print(usage, file=sys.stderr)
         return 1
@@ -231,70 +230,69 @@ def _cmd_list(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    opts: dict[str, Any] = {
-        "include_archived": False,
-        "exclude_deleted": False,
-        "ticket_type": "",
-        "status": "",
-        "parent": "",
-        "has_tag": "",
-        "priority": "",
-        "without_tag": "",
-        "min_children": None,
-        "blocking_state": "",
-        "with_children_count": False,
-        "sort": "",
-        # Lean by default: drop the bulky description/comments bodies. `--full`
-        # opts back into the full ticket shape (matching show and search --full).
-        "include_body": False,
-    }
     rest = _coalesce_value_opts(rest, _LIST_VALUE_OPTS)
+    # Bespoke unknown-option guard (byte-exact reject text + hand-handled --help),
+    # left-to-right, BEFORE the factory parses the accepted grammar. ``list`` takes
+    # no positionals, so any unmatched token (dash or not) is a usage error.
+    _list_known_bare = {
+        "--include-archived",
+        "--exclude-deleted",
+        "--full",
+        "--unblocked",
+        "--blocked",
+        "--with-children-count",
+    }
+    _list_known_prefix = (
+        "--sort=",
+        "--type=",
+        "--status=",
+        "--parent=",
+        "--has-tag=",
+        "--priority=",
+        "--without-tag=",
+        "--min-children=",
+    )
     for arg in rest:
-        if arg == "--include-archived":
-            opts["include_archived"] = True
-        elif arg == "--full":
-            opts["include_body"] = True
-        elif arg.startswith("--sort="):
-            opts["sort"] = arg[len("--sort=") :]
-        elif arg == "--exclude-deleted":
-            opts["exclude_deleted"] = True
-        elif arg.startswith("--type="):
-            opts["ticket_type"] = arg[len("--type=") :]
-        elif arg.startswith("--status="):
-            opts["status"] = arg[len("--status=") :]
-        elif arg.startswith("--parent="):
-            opts["parent"] = arg[len("--parent=") :]
-        elif arg.startswith("--has-tag="):
-            opts["has_tag"] = arg[len("--has-tag=") :]
-        elif arg.startswith("--priority="):
-            opts["priority"] = arg[len("--priority=") :]
-        elif arg.startswith("--without-tag="):
-            opts["without_tag"] = arg[len("--without-tag=") :]
-        elif arg.startswith("--min-children="):
-            raw = arg[len("--min-children=") :]
-            if not raw.isdigit():
-                print(
-                    f"Error: --min-children expects a non-negative integer, got '{raw}'",
-                    file=sys.stderr,
-                )
-                return 2
-            opts["min_children"] = int(raw)
-        elif arg == "--unblocked":
-            opts["blocking_state"] = "unblocked"
-        elif arg == "--blocked":
-            opts["blocking_state"] = "blocked"
-        elif arg == "--with-children-count":
-            opts["with_children_count"] = True
-        elif arg in ("--help", "-h"):
+        if arg in _list_known_bare or arg.startswith(_list_known_prefix):
+            continue
+        if arg in ("--help", "-h"):
             print(usage, file=sys.stderr)
             return 0
-        else:
-            return _reject_unknown_option(
-                arg,
-                "Valid filters: --type --status --priority --parent --has-tag "
-                "--without-tag --min-children --unblocked --blocked --with-children-count "
-                "--full --sort --include-archived --exclude-deleted --output llm",
+        return _reject_unknown_option(
+            arg,
+            "Valid filters: --type --status --priority --parent --has-tag "
+            "--without-tag --min-children --unblocked --blocked --with-children-count "
+            "--full --sort --include-archived --exclude-deleted --output llm",
+        )
+    from rebar._cli._parsers.core.reads import build_list
+
+    ns = build_list(prog="rebar list").parse_args(rest)
+    blocking_state = "unblocked" if ns.unblocked else ("blocked" if ns.blocked else "")
+    opts: dict[str, Any] = {
+        "include_archived": ns.include_archived,
+        "exclude_deleted": ns.exclude_deleted,
+        "ticket_type": ns.type or "",
+        "status": ns.status or "",
+        "parent": ns.parent or "",
+        "has_tag": ns.has_tag or "",
+        "priority": ns.priority or "",
+        "without_tag": ns.without_tag or "",
+        "min_children": None,
+        "blocking_state": blocking_state,
+        "with_children_count": ns.with_children_count,
+        "sort": ns.sort or "",
+        # Lean by default: drop the bulky description/comments bodies. `--full`
+        # opts back into the full ticket shape (matching show and search --full).
+        "include_body": ns.full,
+    }
+    if ns.min_children is not None:
+        if not ns.min_children.isdigit():
+            print(
+                f"Error: --min-children expects a non-negative integer, got '{ns.min_children}'",
+                file=sys.stderr,
             )
+            return 2
+        opts["min_children"] = int(ns.min_children)
 
     if not sort_key_valid(opts["sort"]):
         print(
@@ -366,19 +364,22 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
     rest = _coalesce_value_opts(rest, _SESSION_LOGS_VALUE_OPTS)
     for arg in rest:
         if arg.startswith("--limit="):
-            raw = arg[len("--limit=") :]
-            if not raw.isdigit() or int(raw) <= 0:
-                print(
-                    f"Error: --limit expects a positive integer, got '{raw}'",
-                    file=sys.stderr,
-                )
-                return 2
-            limit = int(raw)
-        elif arg in ("--help", "-h"):
+            continue
+        if arg in ("--help", "-h"):
             print(usage, file=sys.stderr)
             return 0
-        else:
-            return _reject_unknown_option(arg, usage)
+        return _reject_unknown_option(arg, usage)
+    from rebar._cli._parsers.core.reads import build_session_logs
+
+    ns = build_session_logs(prog="rebar session-logs").parse_args(rest)
+    if ns.limit is not None:
+        if not ns.limit.isdigit() or int(ns.limit) <= 0:
+            print(
+                f"Error: --limit expects a positive integer, got '{ns.limit}'",
+                file=sys.stderr,
+            )
+            return 2
+        limit = int(ns.limit)
 
     if not os.path.isdir(tracker):
         print("Error: ticket system not initialized. Run 'ticket init' first.", file=sys.stderr)
@@ -394,23 +395,25 @@ def _cmd_session_logs(argv: list[str], tracker: str) -> int:
 
 
 def _cmd_deps(argv: list[str], tracker: str) -> int:
-    include_archived = "--include-archived" in argv
     for arg in argv:
         if arg.startswith("-") and arg != "--include-archived":
             return _reject_unknown_option(
                 arg, "Usage: ticket deps <ticket_id> [--include-archived]"
             )
-    pos = [a for a in argv if not a.startswith("-")]
-    if not pos:
+    from rebar._cli._parsers.core.reads import build_deps
+
+    ns, _extra = build_deps(prog="rebar deps").parse_known_args(argv)
+    include_archived = ns.include_archived
+    if not ns.ticket_id:
         print("Usage: ticket deps <ticket_id>", file=sys.stderr)
         return 1
     try:
-        result = deps_state(pos[0], tracker, include_archived=include_archived)
+        result = deps_state(ns.ticket_id, tracker, include_archived=include_archived)
     except ReadError as exc:
         # deps is a reader (always-JSON): emit a machine-readable error_envelope on
         # stdout (like show) so callers' json.load succeeds, plus prose on stderr.
         code = "ticket_not_found" if "not found" in exc.message else "deps_failed"
-        print(json.dumps(error_envelope(code, pos[0], exc.message, 1), ensure_ascii=False))
+        print(json.dumps(error_envelope(code, ns.ticket_id, exc.message, 1), ensure_ascii=False))
         print(f"Error: {exc.message}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False))
@@ -424,30 +427,39 @@ def _cmd_ready(argv: list[str], tracker: str) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     epic = None
-    sort = ""
     rest = _coalesce_value_opts(rest, _READY_VALUE_OPTS)
+    usage = (
+        "Usage: ticket ready [--output json|llm] [--epic <id>] "
+        "[--sort=<priority|created|updated|id|status>]"
+    )
+    # Guard the reject decisions (byte-exact) and normalize the bespoke bare-``--epic``
+    # value-consumption into the equals form the factory parses. ``ready`` takes no
+    # positionals, so non-option tokens are ignored (as the loop did).
+    normalized: list[str] = []
+    epic_is_none = False
     i = 0
     while i < len(rest):
         arg = rest[i]
         if arg == "--epic":
-            epic = rest[i + 1] if i + 1 < len(rest) else None
-            i += 2
+            if i + 1 < len(rest):
+                normalized.append(f"--epic={rest[i + 1]}")
+                i += 2
+            else:
+                epic_is_none = True
+                i += 1
             continue
-        if arg.startswith("--epic="):
-            epic = arg[len("--epic=") :]
-            i += 1
-            continue
-        if arg.startswith("--sort="):
-            sort = arg[len("--sort=") :]
+        if arg.startswith("--epic=") or arg.startswith("--sort="):
+            normalized.append(arg)
             i += 1
             continue
         if arg.startswith("-"):
-            return _reject_unknown_option(
-                arg,
-                "Usage: ticket ready [--output json|llm] [--epic <id>] "
-                "[--sort=<priority|created|updated|id|status>]",
-            )
+            return _reject_unknown_option(arg, usage)
         i += 1
+    from rebar._cli._parsers.core.reads import build_ready
+
+    ns, _extra = build_ready(prog="rebar ready").parse_known_args(normalized)
+    epic = None if epic_is_none else ns.epic
+    sort = ns.sort or ""
     if not sort_key_valid(sort):
         print(
             f"Error: --sort expects one of priority|created|updated|id|status "
@@ -490,29 +502,24 @@ def _cmd_search(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    query = None
-    status = ticket_type = has_tag = None
-    include_archived = False
-    full = False
-    sort = ""
     argv = _coalesce_value_opts(argv, _SEARCH_VALUE_OPTS)
+    _search_prefix = ("--status=", "--type=", "--has-tag=", "--sort=")
+    _search_bare = {"--include-archived", "--full"}
     for arg in argv:
-        if arg.startswith("--status="):
-            status = arg[len("--status=") :]
-        elif arg.startswith("--type="):
-            ticket_type = arg[len("--type=") :]
-        elif arg.startswith("--has-tag="):
-            has_tag = arg[len("--has-tag=") :]
-        elif arg.startswith("--sort="):
-            sort = arg[len("--sort=") :]
-        elif arg == "--include-archived":
-            include_archived = True
-        elif arg == "--full":
-            full = True
-        elif arg.startswith("-"):
+        if arg in _search_bare or arg.startswith(_search_prefix):
+            continue
+        if arg.startswith("-"):
             return _reject_unknown_option(arg, usage)
-        elif query is None:
-            query = arg
+    from rebar._cli._parsers.core.reads import build_search
+
+    ns, _extra = build_search(prog="rebar search").parse_known_args(argv)
+    query = ns.query
+    status = ns.status
+    ticket_type = ns.type
+    has_tag = ns.has_tag
+    include_archived = ns.include_archived
+    full = ns.full
+    sort = ns.sort or ""
     if query is None:
         print(
             usage,

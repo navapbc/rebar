@@ -19,7 +19,7 @@ import os
 import sys
 
 from rebar import config
-from rebar._commands._seam import CommandError, write_arg_parser
+from rebar._commands._seam import CommandError
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
@@ -157,11 +157,9 @@ def _parse_flags(args: list[str]) -> tuple[str, str | None, str, str, str]:
     token, silently skipped.)"""
     _reject_retired_force_close(args)
     force_reason, rest = _extract_force(args)
-    parser = write_arg_parser()
-    parser.add_argument("--reason", default="")
-    parser.add_argument("--class", dest="close_class", default="")
-    parser.add_argument("--caused-by", dest="caused_by", default="")
-    parser.add_argument("--ref", default="")
+    from rebar._cli._parsers.core.lifecycle import build_transition
+
+    parser = build_transition(prog="rebar transition")
     ns, _unknown = parser.parse_known_args(rest)
     return ns.reason, force_reason, ns.close_class, ns.caused_by, ns.ref
 
@@ -751,7 +749,12 @@ def reopen_cli(argv: list[str], *, repo_root=None) -> int:
         if text:
             sys.stderr.write(text)
         return 1
+    # ``reopen`` is a positional-only alias that delegates the real grammar to
+    # ``transition_cli``; its permissive raw/dash-leading ticket_id is genuinely
+    # argparse-inexpressible, so the first token is read raw. The registry still
+    # declares ``build_reopen`` for lazy census + canonical help (RP-05 S2d).
+    reopen_id = rest[0]
     out_flag = ["--output", fmt] if fmt != "text" else []
     return transition_cli(
-        [rest[0], "closed", "open", *out_flag], repo_root=repo_root, _confirm_verb="reopened"
+        [reopen_id, "closed", "open", *out_flag], repo_root=repo_root, _confirm_verb="reopened"
     )

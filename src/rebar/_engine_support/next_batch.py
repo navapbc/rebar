@@ -442,14 +442,13 @@ def next_batch_state(tracker: str, epic_id: str, *, limit: int = 0) -> dict[str,
 _USAGE = "rebar next-batch <epic-id> [--limit=N|unlimited] [--output json]"
 
 
-def run(argv: list[str], tracker: str) -> int:
-    """CLI handler for ``next-batch`` (text/json, exit codes 0/1/2)."""
-    epic_id = ""
-    limit = 0
-    limit_zero = False
-    json_output = False
+def _split_output_flag(argv: list[str]) -> tuple[bool, list[str], int | None]:
+    """Resolve ``--output``/``-o`` (report profile) out of ``argv``.
 
-    # --output/-o resolution (report profile).
+    Returns ``(json_output, rest, early_rc)`` where ``early_rc`` is a non-None exit
+    code the caller returns immediately (a missing or unknown ``--output`` value).
+    """
+    json_output = False
     rest: list[str] = []
     i = 0
     while i < len(argv):
@@ -457,7 +456,7 @@ def run(argv: list[str], tracker: str) -> int:
         if a in ("--output", "-o"):
             if i + 1 >= len(argv):
                 print(f"Usage: {_USAGE}", file=sys.stderr)
-                return 2
+                return json_output, rest, 2
             fmt = argv[i + 1]
             i += 2
             if fmt == "json":
@@ -466,7 +465,7 @@ def run(argv: list[str], tracker: str) -> int:
                 json_output = False
             else:
                 print(f"Error: unknown --output format '{fmt}'", file=sys.stderr)
-                return 2
+                return json_output, rest, 2
             continue
         if a.startswith("--output="):
             fmt = a.split("=", 1)[1]
@@ -476,43 +475,59 @@ def run(argv: list[str], tracker: str) -> int:
                 json_output = False
             else:
                 print(f"Error: unknown --output format '{fmt}'", file=sys.stderr)
-                return 2
+                return json_output, rest, 2
             i += 1
             continue
         rest.append(a)
         i += 1
+    return json_output, rest, None
+
+
+def run(argv: list[str], tracker: str) -> int:
+    """CLI handler for ``next-batch`` (text/json, exit codes 0/1/2)."""
+    epic_id = ""
+    limit = 0
+    limit_zero = False
+
+    json_output, rest, early_rc = _split_output_flag(argv)
+    if early_rc is not None:
+        return early_rc
 
     for arg in rest:
         if arg.startswith("--limit="):
-            val = arg[len("--limit=") :]
-            if val == "unlimited":
-                limit = 0
-            elif not val.isdigit():
-                print(
-                    "Error: --limit must be a non-negative integer or 'unlimited'",
-                    file=sys.stderr,
-                )
-                return 2
-            else:
-                limit = int(val)
-                if val == "0" or limit == 0:
-                    limit_zero = True
-        elif arg in ("--help", "-h"):
+            continue
+        if arg in ("--help", "-h"):
             print(f"Usage: {_USAGE}")
             return 0
-        elif arg.startswith("-"):
+        if arg.startswith("-"):
             print(f"Unknown flag: {arg}", file=sys.stderr)
             print(f"Usage: {_USAGE}", file=sys.stderr)
             return 2
+    from rebar._cli._parsers.core.reads import build_next_batch
+
+    ns, extras = build_next_batch(prog="rebar next-batch").parse_known_args(rest)
+    if extras:
+        # A second positional beyond the single epic id.
+        print(
+            "Error: Multiple epic IDs provided. Expected exactly one.",
+            file=sys.stderr,
+        )
+        return 2
+    epic_id = ns.epic or ""
+    if ns.limit is not None:
+        val = ns.limit
+        if val == "unlimited":
+            limit = 0
+        elif not val.isdigit():
+            print(
+                "Error: --limit must be a non-negative integer or 'unlimited'",
+                file=sys.stderr,
+            )
+            return 2
         else:
-            if not epic_id:
-                epic_id = arg
-            else:
-                print(
-                    "Error: Multiple epic IDs provided. Expected exactly one.",
-                    file=sys.stderr,
-                )
-                return 2
+            limit = int(val)
+            if val == "0" or limit == 0:
+                limit_zero = True
 
     if not epic_id:
         print(f"Usage: {_USAGE}", file=sys.stderr)

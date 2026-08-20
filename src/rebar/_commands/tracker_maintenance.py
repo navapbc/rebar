@@ -190,6 +190,20 @@ def tracker_maintenance_cli(argv: list[str], *, repo_root=None) -> int:
     if early_rc is not None:
         return early_rc
 
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.repair import build_tracker_maintenance
+
+    # Parser of record. ``clean`` is a LAST-WINS toggle over ``--clean``/``--status``
+    # (order-dependent, which argparse ``store_true`` cannot reproduce) and ``--force``
+    # is equals-only with a bespoke reject when the value is missing; both live in
+    # ``_parse`` above, which therefore owns this command's accepted grammar. The
+    # factory below still governs: a rejecting factory (or a genuinely malformed argv
+    # that survived ``_parse``) raises here and the run fails.
+    try:
+        build_tracker_maintenance(prog="rebar tracker-maintenance").parse_args(argv)
+    except ParseError as exc:
+        return render_parse_error(exc)
+
     tracker = str(config.tracker_dir(repo_root))
     if not os.path.isdir(tracker):
         sys.stderr.write(f"Error: tracker dir not found: {tracker}\n")

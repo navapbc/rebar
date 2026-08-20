@@ -601,6 +601,11 @@ def _init_via_symlink(repo: str, tracker: str, silent: bool) -> int:
 
 
 def init_cli(argv: list[str], *, repo_root=None) -> int:
+    from rebar._cli._parsers.core.bootstrap import build_init
+
+    # Parser of record for init's accepted grammar; the membership scan below is
+    # retained because it owns the bespoke ``unknown init option`` reject/exit code.
+    build_init(prog="rebar init").parse_known_args(argv)
     allowed = {"--silent", "--force-new-store"}
     unknown = [arg for arg in argv if arg not in allowed]
     if unknown:
