@@ -52,9 +52,62 @@ dataset:
       @@ -7 +7 @@
       -    alias = slugify(title)
       +    alias = to_slug(title)   # sole caller updated — a benign rename
+  # ── forbids_contract_allowed_state emission (ticket 7f9f) ────────────────────
+  - id: V-forbids-contract-allowed-state
+    corpus: dso
+    expect: finding
+    mode: verify-forbids-contract-allowed-state
+    note: >-
+      A contract-contradicting assertion the verifier should re-ground with the NEW
+      forbids_contract_allowed_state (serious) binary set — prod_impact re-scoped to the
+      guarded path's user-facing reach (medium, not none), not "test-only".
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -1,4 +1,5 @@
+       def claim(tid, assignee=None):
+      -    """Claim a ticket. assignee may be omitted — empty falls back to default_assignee."""
+      +    """Claim a ticket. assignee may be omitted — empty falls back to default_assignee."""
+           return _store.claim(tid, assignee)
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,6 @@
+      +def test_claim_rejects_empty_assignee(store):
+      +    # contract ALLOWS an omitted assignee; this forbids it — contract-contradicting
+      +    with pytest.raises(ValueError):
+      +        claim("t1", "")
+  - id: V-tightening-no-fire
+    corpus: dso
+    expect: pass
+    mode: verify-deliberate-tightening
+    note: >-
+      A stated deliberate tightening — the diff narrows the contract on purpose and the test
+      asserts the new behavior. forbids_contract_allowed_state must be FALSE; the verifier
+      still emits a graded set (presence contract).
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -1,4 +1,6 @@
+       def claim(tid, assignee):
+      -    """Claim a ticket. assignee may be omitted."""
+      +    """Claim a ticket. assignee is now REQUIRED — deliberately tightened."""
+      +    if not assignee:
+      +        raise ValueError("assignee is required")
+           return _store.claim(tid, assignee)
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,6 @@
+      +def test_claim_requires_assignee(store):
+      +    # asserts the deliberately tightened contract — a valid narrowing
+      +    with pytest.raises(ValueError):
+      +        claim("t1", "")
 
 gold_set:
   - input: "A verification set that flags the unupdated call site of a required-arg change."
     label: useful
   - input: "A verification set that confirms a benign rename with its caller updated."
+    label: useful
+  - input: "A verification emitting forbids_contract_allowed_state for a test forbidding an allowed state."
+    label: useful
+  - input: "A verification finding a stated deliberate tightening does not contradict the contract."
     label: useful

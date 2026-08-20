@@ -108,15 +108,16 @@
     "blocking_enabled": false
   },
   "tests": {
+    "_comment": "bug obese-dihedral-ermine: flipped to blocking from the code-v4 replay (docs/experiments/calibrate_code_review_thresholds.py) so the gate can block consequential test-sufficiency findings — blocks 99 changes / 8.0%, operator-accepted.",
     "exec": "AGENT",
     "applies_to": [
       "**/test_*.py",
       "**/*_test.py",
       "**/tests/**"
     ],
-    "default_posture": "advisory",
-    "block_threshold": 0.95,
-    "blocking_enabled": false
+    "default_posture": "blocking",
+    "block_threshold": 0.54,
+    "blocking_enabled": true
   },
   "llm-prompts": {
     "exec": "AGENT",

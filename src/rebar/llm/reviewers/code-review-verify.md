@@ -40,7 +40,10 @@ cause). Anchor each attribute to its levels; calibrate per finding — do NOT de
 middle or the top. Reserve the top level for findings that genuinely earn it.
 - prod_impact (none|low|medium|high) — runtime / user-facing harm if the change ships. none =
   no runtime effect (docs/test-only/comment); low = cosmetic or rare-path; medium = a real but
-  recoverable functional gap; high = data loss, security exposure, or a core flow broken.
+  recoverable functional gap; high = data loss, security exposure, or a core flow broken. For a
+  coverage/contract (maintainability) finding this is RE-SCOPED to the user-facing REACH of the
+  guarded path (this REPLACES the "none = no runtime effect / test-only" reading for such
+  findings).
 - debt_impact (none|low|medium|high) — maintainability/design harm carried forward.
 - blast_radius (local|module|system) — how far the change's effect reaches.
 - likelihood (low|medium|high) — chance the harm materialises given the change as written.
@@ -61,6 +64,7 @@ PRODUCTION lane (correctness / latent regression):
 MAINTAINABILITY lane (debt / contract / coupling):
 - unversioned_published_contract_break (serious) — a PUBLISHED contract breaks with no version bump.
 - safety_net_removal_without_replacement (serious) — a test/guard/assert is removed with no replacement.
+- forbids_contract_allowed_state (serious) — a test/assertion forbids a state that the SAME diff's contract declares allowed (a contract-contradicting assertion). Evidence must quote BOTH halves verbatim — the contract clause allowing the state AND the test forbidding it; a stated intent to tighten => FALSE.
 - contract_drift (moderate) — an interface drifts from its documented/implied contract.
 - hidden_invariant (moderate) — the change relies on or breaks an undocumented invariant.
 - reachable_path_without_automated_coverage (moderate) — the change introduces or unmasks a reachable code path with NO automated test coverage.
@@ -69,7 +73,9 @@ MAINTAINABILITY lane (debt / contract / coupling):
 TRIGGER LIKELIHOOD + DETECTION (drive the production-lane multiplier and the detection amplifier):
 - trigger_likelihood (common|sometimes|rare) — how often the PRODUCTION consequence actually
   triggers in practice. Leave "common" when unsure (the multiplier is common=1.0/sometimes=0.6/
-  rare=0.25; "common" so a serious correctness finding is never silently dampened).
+  rare=0.25; "common" so a serious correctness finding is never silently dampened). For a
+  coverage/contract (maintainability) finding this is RE-SCOPED to how often a legitimate user
+  action exercises the guarded path.
 - silent_failure (bool) — TRUE if the defect fails SILENTLY (no obvious error surfaces).
 - escapes_automation (bool) — TRUE if the defect escapes existing tests/CI/lint. (Either silent
   flag amplifies detection x1.0; neither ⇒ x0.8.)

@@ -505,19 +505,28 @@ _CODE_PROD_BINARIES = {
     "silent_wrong_feeding_a_decision": _CODE_TIER_SERIOUS,
     "capability_degraded": _CODE_TIER_MODERATE,
 }
-# consequence binary -> tier value, within the MAINTAINABILITY lane (debt / contract / coupling).
-_CODE_MAINT_BINARIES = {
+# code-v4 splits the old maintainability lane into three sub-lanes: SERIOUS (undamped, no churn),
+# MODERATE (prod_impact-keyed), and DEBT (churn is an amplifier only).
+_CODE_SERIOUS_MAINT_BINARIES = {
     "unversioned_published_contract_break": _CODE_TIER_SERIOUS,
     "safety_net_removal_without_replacement": _CODE_TIER_SERIOUS,
+    "forbids_contract_allowed_state": _CODE_TIER_SERIOUS,
+}
+_CODE_MODERATE_MAINT_BINARIES = {
     "contract_drift": _CODE_TIER_MODERATE,
     "hidden_invariant": _CODE_TIER_MODERATE,
     "reachable_path_without_automated_coverage": _CODE_TIER_MODERATE,
+}
+_CODE_DEBT_BINARIES = {
     "implicit_coupling": _CODE_TIER_MINOR,
     "dead_code": _CODE_TIER_MINOR,
 }
-# trigger-likelihood multiplier on the PRODUCTION lane. Absent ⇒ "common" (1.0) so a serious
-# correctness binary is never silently dampened by missing metadata.
-_CODE_TRIGGER_LIKELIHOOD_MULT = {"common": 1.0, "sometimes": 0.6, "rare": 0.25}
+# trigger-likelihood multiplier on the PRODUCTION lane. Absent ⇒ "common" (1.0).
+_CODE_PROD_TRIGGER_MULT = {"common": 1.0, "sometimes": 0.6, "rare": 0.25}
+# trigger-likelihood multiplier on the MODERATE-maint lane (a DIFFERENT map, same source field).
+_CODE_MODERATE_TRIGGER_MULT = {"rare": 0.75, "sometimes": 1.0, "common": 1.0}
+# prod_impact multiplier on the MODERATE-maint lane (reach of the guarded path). Absent ⇒ none.
+_CODE_PROD_IMPACT_MULT = {"high": 1.0, "medium": 1.0, "low": 0.6, "none": 0.5}
 _CODE_REVERSIBILITY_FLOOR = 0.6
 
 
@@ -539,40 +548,50 @@ def _code_lane_severity(attrs: dict[str, Any], binaries: dict[str, float]) -> fl
     return max(contribs) if contribs else 0.0
 
 
-def impact_code(attrs: dict[str, Any]) -> float:
-    """Code-review IMPACT ∈ [0,1]: two-lane, tier-tagged, severity-first MAX with a per-lane
-    likelihood/frequency multiplier, a detection amplifier, and a gated reversibility floor
-    (story albite-lazy-barb). Dispatched into :func:`pass3_decide` via ``impact_fn``.
-
-    - ``prod_lane`` = MAX(tier of TRUE production binaries) × trigger_likelihood_mult
-      (common=1.0 / sometimes=0.6 / rare=0.25; absent ⇒ common, so a serious correctness
-      finding is never silently dampened by missing metadata);
-    - ``maint_lane`` = MAX(tier of TRUE maintainability binaries) × freq_mult, where
-      ``freq_mult = 0.5 + 0.5·min(churn90, 30)/30`` (churn90 DET-enriched; absent ⇒ 0 ⇒ 0.5);
-    - ``impact_base`` = MAX(prod_lane, maint_lane); ``amp`` = 1.0 if the finding is silent
-      (``silent_failure`` OR ``escapes_automation``), else 0.8;
-    - ``impact`` = ``max(min(1.0, impact_base × amp), reversibility_floor)``, where the floor
-      is 0.6 ONLY when ``impact_base > 0`` AND the change touches a hard-to-reverse surface (a
-      one-way door: released packaging, a serialization/schema artifact, or a deletion). The
-      ``impact_base > 0`` gate lifts a GENUINE defect on a one-way-door surface to ≥0.6 but
-      never MANUFACTURES impact for a clean/no-consequence finding that merely touches that
-      file (fixes the "fires unconditionally, over-inflates nits" hole)."""
-    prod_sev = _code_lane_severity(attrs, _CODE_PROD_BINARIES)
-    maint_sev = _code_lane_severity(attrs, _CODE_MAINT_BINARIES)
-    trig_mult = _CODE_TRIGGER_LIKELIHOOD_MULT.get(attrs.get("trigger_likelihood", "common"), 1.0)
+def _code_churn_amp(attrs: dict[str, Any]) -> float:
+    """Debt-lane churn AMPLIFIER ∈ [1.0, 1.5]: ``1.0 + 0.5·min(churn90, 30)/30``. churn=0 ⇒ 1.0
+    (never halves impact); a non-int / negative value falls back to 0 defensively."""
     try:
         churn = max(0, int(attrs.get("churn90", 0)))
     except (TypeError, ValueError):
         churn = 0
-    freq_mult = 0.5 + 0.5 * min(churn, 30) / 30.0
-    impact_base = max(prod_sev * trig_mult, maint_sev * freq_mult)
+    return 1.0 + 0.5 * min(churn, 30) / 30.0
+
+
+def _code_prod_lane(attrs: dict[str, Any]) -> float:
+    mult = _CODE_PROD_TRIGGER_MULT.get(attrs.get("trigger_likelihood", "common"), 1.0)
+    return _code_lane_severity(attrs, _CODE_PROD_BINARIES) * mult
+
+
+def _code_moderate_maint_lane(attrs: dict[str, Any]) -> float:
+    sev = _code_lane_severity(attrs, _CODE_MODERATE_MAINT_BINARIES)
+    prod_mult = _CODE_PROD_IMPACT_MULT.get(attrs.get("prod_impact", "none"), 0.5)
+    trig_mult = _CODE_MODERATE_TRIGGER_MULT.get(attrs.get("trigger_likelihood", "common"), 1.0)
+    return sev * prod_mult * trig_mult
+
+
+def impact_code(attrs: dict[str, Any]) -> float:
+    """Code-review IMPACT ∈ [0,1]: code-v4 four-lane, tier-tagged, severity-first MAX with a
+    detection amplifier and a consequence-lane-gated reversibility floor (bug
+    obese-dihedral-ermine). Dispatched into :func:`pass3_decide` via ``impact_fn``. Lanes:
+    prod (trigger-keyed), serious-maint (undamped), moderate-maint (prod_impact × trigger keyed),
+    and debt (churn amplifier only). ``impact_base`` = MAX over all four; ``consequence_base`` =
+    MAX over all but debt. ``amp`` = 1.0 if silent (``silent_failure``/``escapes_automation``)
+    else 0.8. The 0.6 floor fires only when ``consequence_base > 0`` AND the change touches a
+    hard-to-reverse surface — debt alone NEVER floors."""
+    prod_lane = _code_prod_lane(attrs)
+    serious_maint_lane = _code_lane_severity(attrs, _CODE_SERIOUS_MAINT_BINARIES)
+    moderate_maint_lane = _code_moderate_maint_lane(attrs)
+    debt_lane = _code_lane_severity(attrs, _CODE_DEBT_BINARIES) * _code_churn_amp(attrs)
+    impact_base = max(prod_lane, serious_maint_lane, moderate_maint_lane, debt_lane)
+    consequence_base = max(prod_lane, serious_maint_lane, moderate_maint_lane)
     silent = _code_truthy(attrs.get("silent_failure")) or _code_truthy(
         attrs.get("escapes_automation")
     )
     amp = 1.0 if silent else 0.8
     rev_floor = (
         _CODE_REVERSIBILITY_FLOOR
-        if impact_base > 0.0 and _code_truthy(attrs.get("hard_to_reverse_surface"))
+        if consequence_base > 0.0 and _code_truthy(attrs.get("hard_to_reverse_surface"))
         else 0.0
     )
     result = max(min(1.0, impact_base * amp), rev_floor)

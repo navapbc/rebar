@@ -47,6 +47,12 @@ genuinely broken test — judge test quality on its own terms.
   contract is mid-operation rollback), so the recovery code never executes. Litmus: *does the
   injected failure occur at the operation the contract covers, forcing the recovery path to
   run?* Also flag a concurrency/race test whose PRIMARY synchronization is a timing sleep.
+- **contract-contradicting assertion**: a test that forbids a state the SAME diff's contract
+  declares allowed. Evidence must quote BOTH halves verbatim — the contract clause allowing the
+  state AND the test assertion forbidding it. GUARDS: a stated deliberate tightening (the diff
+  says it is intentionally narrowing the contract) is NOT flagged; a pure-function exact-value
+  assertion stays valid (already covered by the table-driven / exact-value guard below — do not
+  reclassify it as contradicting a contract).
 
 **False-positive GUARDS — do NOT flag these (they are VALID by the standard):**
 - **Four-Criterion Test.** Raise a test-coupling finding above a `minor` suggestion ONLY when at

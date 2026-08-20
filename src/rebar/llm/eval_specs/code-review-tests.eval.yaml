@@ -279,6 +279,57 @@ dataset:
       +    parent_exit()
       +    time.sleep(0.1)  # settle fs buffers after the barrier fired
       +    assert commit_reachable(remote, sha)
+  # ── recall + guard: contract-contradicting assertion (ticket 7f9f) ───────────
+  - id: R-contract-contradicting-assertion
+    corpus: dso
+    expect: finding
+    mode: contract-contradicting-assertion
+    note: >-
+      The SAME diff's docstring declares an empty assignee allowed ("assignee may be
+      omitted"), yet the added test asserts claim() REJECTS an empty assignee — the test
+      forbids a state the contract allows. Both halves are in the diff; the overlay must fire.
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -1,4 +1,6 @@
+       def claim(tid, assignee=None):
+      -    """Claim a ticket."""
+      +    """Claim a ticket. assignee may be omitted — an empty assignee is allowed and
+      +    falls back to ticket.default_assignee."""
+           return _store.claim(tid, assignee)
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,6 @@
+      +def test_claim_rejects_empty_assignee(store):
+      +    # contract ALLOWS an omitted assignee, but this forbids it — contradicts the contract
+      +    with pytest.raises(ValueError):
+      +        claim("t1", "")
+  - id: FP-deliberate-tightening
+    corpus: dso
+    expect: pass
+    mode: deliberate-tightening
+    note: >-
+      The diff STATES it is intentionally narrowing the contract (empty assignee is no longer
+      allowed), and the test asserts the new, tightened behavior. A stated deliberate tightening
+      is NOT a contract-contradicting assertion — the overlay must NOT fire.
+    diff: |
+      --- a/rebar/claim.py
+      +++ b/rebar/claim.py
+      @@ -1,4 +1,6 @@
+       def claim(tid, assignee):
+      -    """Claim a ticket. assignee may be omitted."""
+      +    """Claim a ticket. assignee is now REQUIRED — deliberately tightened: an empty
+      +    assignee is rejected (was previously allowed)."""
+      +    if not assignee:
+      +        raise ValueError("assignee is required")
+           return _store.claim(tid, assignee)
+      --- a/tests/test_claim.py
+      +++ b/tests/test_claim.py
+      @@ -1,3 +1,6 @@
+      +def test_claim_requires_assignee(store):
+      +    # asserts the deliberately tightened contract — a valid narrowing, not a contradiction
+      +    with pytest.raises(ValueError):
+      +        claim("t1", "")
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
@@ -288,4 +339,8 @@ gold_set:
   - input: "A test asserting a real observable postcondition (raises on conflict)."
     label: not_useful
   - input: "A test-file diff that only reorders imports and normalizes quotes (linter-owned)."
+    label: not_useful
+  - input: "A test forbidding an empty assignee while the same diff's docstring allows it."
+    label: useful
+  - input: "A test asserting a deliberately-tightened contract the same diff states it narrows."
     label: not_useful
