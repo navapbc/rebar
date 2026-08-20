@@ -66,6 +66,10 @@ def test_gate_strip_shows_all_three_states_counts_and_anchors(store: Path) -> No
                 "citation": "src/x.py:1",
             },
             {"criterion": "c2", "met": False, "kind": "codebase-verifiable", "citation": None},
+            # Both evidence-kind spellings render: the canonical one and the legacy alias
+            # still carried by historical verdicts (ADR 0101).
+            {"criterion": "c3", "met": False, "kind": "non-codebase", "citation": None},
+            {"criterion": "c4", "met": False, "kind": "operator-attested", "citation": None},
         ],
     )
     # no code review
