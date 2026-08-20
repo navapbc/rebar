@@ -291,7 +291,10 @@ jobs:
     runs-on: ubuntu-latest
     # Publish on an authorized dispatch-from-main run (the `authorize` job upstream of `build`
     # already enforced ref==main + version-lockstep + ancestry + env-preflight). The `pypi`
-    # environment's required reviewers below are the second human gate on every publish.
+    # environment's required reviewers below hold this job until an identity on that list
+    # approves the pending deployment. That is identity control over who can release the
+    # publish job -- not a second-party review of the release contents; see
+    # docs/releasing.md ("What the `pypi` environment gate does -- and does not -- guarantee").
     if: github.event_name == 'workflow_dispatch'
     environment:
       name: pypi

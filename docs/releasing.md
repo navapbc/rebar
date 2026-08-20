@@ -73,14 +73,41 @@ Before any artifact is built, the `authorize` job asserts four things (all in
    `{main}`). If either is missing the release **fails closed** — drift is caught when
    it matters, not silently.
 
-The `publish` job then runs in the `pypi` environment (required reviewers = the second
-human approval on every publish) and publishes **directly via OIDC Trusted Publishing**
-— no intermediate tag relay, no PAT. After a successful publish, `github_release`
-creates the `v*` tag at the released SHA and the GitHub Release (record only; the tag is
-an **output**, never a trigger). **To cut a release:** bump versions (step 1), land the
-bump on `main` through Gerrit, then run the workflow from `main` with the matching
-`version` input (`gh workflow run release.yml --ref main -f version=X.Y.Z`) and approve
-the `pypi` deployment when prompted.
+The `publish` job then runs in the `pypi` environment and publishes **directly via OIDC
+Trusted Publishing** — no intermediate tag relay, no PAT. After a successful publish,
+`github_release` creates the `v*` tag at the released SHA and the GitHub Release (record
+only; the tag is an **output**, never a trigger). **To cut a release:** bump versions
+(step 1), land the bump on `main` through Gerrit, then run the workflow from `main` with
+the matching `version` input (`gh workflow run release.yml --ref main -f version=X.Y.Z`)
+and approve the pending `pypi` deployment as the configured release identity (step 2).
+
+### What the `pypi` environment gate does — and does not — guarantee
+
+It is easy to read more assurance into this rule than it carries, so state it exactly.
+The required-reviewers rule holds the `publish` job — and with it the environment-scoped
+OIDC token Trusted Publishing mints — until an identity **on the environment's reviewer
+list** explicitly approves that specific run. That much is real, and it is load-bearing:
+a run dispatched from any other ref cannot reach the environment at all (the `main`-only
+branch policy plus the ref and ancestry guards above), and a run nobody on the list
+approves never publishes. The control it provides is precisely **"only a listed identity
+can release the publish job for this run"**.
+
+What it is **not** is a second pair of eyes, or an interactive human checkpoint:
+
+- The reviewer list holds a **single identity — this project's configured release
+  identity** — and that is the same identity that dispatches the release.
+- The environment sets `prevent_self_review: false`, so that identity approves its own
+  run. GitHub is not requiring a different approver.
+- The environment sets `can_admins_bypass: true`, so a repository admin can bypass it.
+- The approval is an ordinary REST call (step 2), routinely made non-interactively from
+  an automated session. Nothing in the mechanism causes a person to read anything at
+  approval time.
+
+The guarantee that **the published source was reviewed** comes from somewhere else
+entirely: the release runs only from `main`, and `main` is exactly the
+Gerrit-reviewed-and-landed history (top of this section). The environment rule adds
+identity and ref control over *who can release the publish job*; it does not add a review
+of what is being published.
 
 ## Supply-chain attestations (PyPI digital attestations)
 
@@ -321,12 +348,36 @@ gh run watch "$(gh run list --workflow=release.yml --event=workflow_dispatch -L1
 ```
 The `authorize` job first asserts ref==`main`, version-lockstep, ancestry, and the
 `pypi` env-preflight (required reviewers + `main`-only branch policy) — any failure
-**aborts before build**. It then builds once, tests the exact wheel/sdist, and
-publishes via OIDC after you **approve the `pypi` deployment** (the required-reviewers
-gate). After publish, `github_release` **creates the `v*` tag at the released SHA and
-the GitHub Release** (auto-generated notes, marked Latest, sdist + wheel attached) — the
-tag is a record output, not a trigger. There is **no tag-push publish path**: pushing a
-`vX.Y.Z` tag by hand does nothing.
+**aborts before build**. It then builds once, tests the exact wheel/sdist, and **pauses
+at the `pypi` environment** until a listed reviewer approves the pending deployment (the
+`gh run watch` above will sit there reporting the run as waiting).
+
+**Approve the pending deployment as the configured release identity.** There is no
+interactive prompt to wait for — the approval is an action you take. Either click it in
+the GitHub UI, or, the path an automated session uses, call the REST API: read the
+pending deployment to get the environment id, then approve it.
+
+```bash
+RUN=$(gh run list --workflow=release.yml --event=workflow_dispatch -L1 --json databaseId -q '.[0].databaseId')
+ENV_ID=$(gh api "repos/navapbc/rebar/actions/runs/$RUN/pending_deployments" --jq '.[0].environment.id')
+gh api --method POST "repos/navapbc/rebar/actions/runs/$RUN/pending_deployments" --input - <<JSON
+{"environment_ids": [$ENV_ID], "state": "approved", "comment": "release X.Y.Z"}
+JSON
+```
+
+Send the body as JSON with `--input`, not as `gh api` field flags: `environment_ids` must
+serialize as an **array of integers**, and neither `-f environment_ids=$ENV_ID` (which
+sends a string) nor `-F environment_ids="[$ENV_ID]"` (which sends the literal string
+`[…]`) satisfies that — the API rejects both. Posting the path with no body at all is a
+422.
+
+Approving is authorization by a listed identity, not a review of the release contents —
+see "What the `pypi` environment gate does — and does not — guarantee" above.
+
+After approval the run publishes via OIDC. After publish, `github_release` **creates the
+`v*` tag at the released SHA and the GitHub Release** (auto-generated notes, marked
+Latest, sdist + wheel attached) — the tag is a record output, not a trigger. There is
+**no tag-push publish path**: pushing a `vX.Y.Z` tag by hand does nothing.
 
 Verify the version is live on the channel:
 ```bash
