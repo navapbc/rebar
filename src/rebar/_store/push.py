@@ -199,6 +199,7 @@ def push_tickets_branch(
         # (JIRA_API_TOKEN / JIRA_PAT) while preserving all native git/ssh/proxy/CA config.
         # project_child_env returns a fresh dict and never mutates os.environ.
         from rebar import _child_env
+        from rebar._proc import detached_child_cwd
 
         child_env = _child_env.project_child_env(os.environ, relationship="unrelated")
         child_env["REBAR_SYNC_PUSH"] = "always"
@@ -215,6 +216,10 @@ def push_tickets_branch(
                     base_path,
                     src,
                 ],
+                # Pin the child to the canonical store root rather than inheriting this
+                # command's cwd — the push outlives us, and an ephemeral worktree cwd is
+                # routinely removed while it is still running (bug 3198-438c-72a5-470f).
+                cwd=detached_child_cwd(base_path),
                 env=child_env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
