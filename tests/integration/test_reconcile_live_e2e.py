@@ -57,10 +57,14 @@ from typing import Any
 import pytest
 
 # xdist_group pins every test in this module to a SINGLE pytest-xdist worker so the
-# live-Jira reconciler round-trips run serially even when the integration tier is
-# parallelized with `-n>0 --dist loadgroup` (story 8d36). These tests assert on Jira's
-# eventual consistency, which cross-worker interleaving would make flaky; they also
-# self-skip without live creds, so this only matters on a local live run.
+# live-Jira reconciler round-trips run serially under parallel collection (story 8d36).
+# These tests assert on Jira's eventual consistency, which cross-worker interleaving would
+# make flaky. IMPORTANT: pytest-xdist honours this mark ONLY under `--dist loadgroup` —
+# under `--dist load` (xdist's default) or `--dist worksteal` it is parsed and silently
+# DISCARDED, so the tests scatter across workers with no warning. CI's integration tier
+# passes `--dist loadgroup`; an ad-hoc local `-n auto` does not. The collection guard in
+# tests/_live_jira_confinement.py hard-fails any other parallel invocation when live Jira
+# credentials are actually present, so the gap cannot pass unnoticed.
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.live,
