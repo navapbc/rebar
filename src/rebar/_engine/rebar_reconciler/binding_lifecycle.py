@@ -39,7 +39,21 @@ from rebar_reconciler.timeutil import utc_now_iso
 if TYPE_CHECKING:
     from rebar_reconciler.binding_repository import BindingRepository
 
-__all__ = ["BindingLifecycle"]
+__all__ = ["UNKNOWN_COMMENT_ID", "BindingLifecycle"]
+
+# Bug aa7b — sentinel VALUE for the ``comment_ids`` map when the transport that
+# posted the comment cannot report a comment id.
+#
+# The map's job is to record that a local comment HAS been mirrored; the outbound
+# differ's only production reader is ``is_comment_mapped``, which asks about the KEY.
+# The Cloud/ACLI transport's ``add_comment`` returns ACLI's batch-mutation envelope
+# (``{"results": [{"status": "SUCCESS", "id": "<WORK ITEM KEY>"}], ...}``) — it
+# structurally cannot echo a created comment resource, so no comment id exists to
+# store. Recording this sentinel keeps the KEY present (so the PRIMARY id-identity
+# skip fires and the comment is never re-posted) while stating plainly that the VALUE
+# is not a Jira comment id. It is deliberately not id-shaped, and the work item key is
+# never stored in its place.
+UNKNOWN_COMMENT_ID = "__rebar_unknown_comment_id__"
 
 
 def _now_iso() -> str:
@@ -468,7 +482,12 @@ class BindingLifecycle:
     # -- comment-ID map (append-only comment sync; emersed-specific-mutt) ---
 
     def record_comment_id(self, local_comment_key: str, jira_comment_id: str) -> None:
-        """Persist a COMMENT-HLC-key -> Jira-comment-ID pairing and persist NOW.
+        """Persist a COMMENT-HLC-key -> comment-ID pairing and persist NOW.
+
+        ``jira_comment_id`` is the transport's comment ID when it reports one, or
+        :data:`UNKNOWN_COMMENT_ID` when it structurally cannot (bug aa7b — the
+        Cloud/ACLI transport). The KEY is what closes the duplicate class; the value is
+        only meaningful to callers that need a real id.
 
         The map identifies an already-mirrored comment by the COMMENT event's HLC
         ``timestamp`` (a stable, unique ``local_comment_key``), not by body — so
@@ -497,7 +516,14 @@ class BindingLifecycle:
         self._repo.save()
 
     def comment_id_for(self, local_comment_key: str) -> str | None:
-        """The recorded Jira comment ID for an HLC key, or ``None`` when unmapped."""
+        """The recorded value for an HLC key, or ``None`` when unmapped.
+
+        Usually the Jira comment ID, but it is :data:`UNKNOWN_COMMENT_ID` for a comment
+        posted through a transport that cannot report one (bug aa7b) — callers that need
+        a real id must compare against that sentinel. Use :meth:`is_comment_mapped` to
+        ask the question the outbound differ actually asks ("has this local comment been
+        mirrored?"), which is true for both value shapes.
+        """
         recorded: str | None = self._data.get("comment_ids", {}).get(str(local_comment_key))
         return recorded
 
