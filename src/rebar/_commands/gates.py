@@ -3,7 +3,11 @@
 The completion-verification *close* gate (``transition.py``) and the plan-review
 *start-work* gate (``claim.py`` + ``transition.py``) each resolve a single ``verify.*``
 config flag and, on an **unreadable** config, fail the gate **OPEN** (skip it) with a
-stderr warning rather than blocking every operation on a broken config. That resolution
+stderr warning rather than blocking every operation on a broken config. That skip is
+also **REPORTED as its own state** (:class:`GateState.UNREADABLE`, surfaced as the
+``unreadable`` verdict) rather than collapsed into "the operator turned this gate off":
+the posture is unchanged, but a fault is no longer indistinguishable from a policy
+choice. That resolution
 + fail-open posture is identical between them and is exactly the kind of copy-pasted,
 security-relevant logic that drifts between sessions — so it lives here, once.
 
@@ -22,9 +26,11 @@ import logging
 import os
 import sys
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any, cast
 
 __all__ = [
+    "GateState",
     "close_plan_review_gate_check",
     "description_cap_warning",
     "gate_enabled",
@@ -38,6 +44,33 @@ __all__ = [
 _PLAN_REVIEW_EXEMPT_TYPES = ("bug", "session_log", "code_review", "identity")
 
 logger = logging.getLogger(__name__)
+
+
+class GateState(Enum):
+    """The resolution of an opt-in ``verify.*`` gate flag — three states, not two.
+
+    ``DISABLED`` is a **POLICY CHOICE**: someone read the flag and deliberately turned the
+    gate off. ``UNREADABLE`` is a **FAULT**: the config could not be read or parsed at all,
+    so no one chose anything and the gate was *skipped*. Collapsing the two into a bare
+    ``False`` launders a fault into a policy choice — the audit trail then asserts an
+    operator decision that never happened, which is exactly the failure this enum exists to
+    prevent (the same "a distinct verdict, never a reused one" reasoning as the
+    ``disposition`` close verdict below).
+
+    :meth:`__bool__` is truthy for ``ENABLED`` **only**, so ``UNREADABLE`` remains falsey and
+    the historical **fail-OPEN** posture is byte-identical to the previous bare-``bool``
+    behaviour. Every existing ``if not gate_enabled(...)`` call site keeps its exact
+    semantics; the distinction this type adds is purely **additive information** for callers
+    (and audit payloads) that want to tell a fault from a choice.
+    """
+
+    ENABLED = "enabled"
+    DISABLED = "disabled"
+    UNREADABLE = "unreadable"
+
+    def __bool__(self) -> bool:
+        """Truthy only for :attr:`ENABLED` — preserves the fail-OPEN skip as falsey."""
+        return self is GateState.ENABLED
 
 
 def _claim_gate_reason(check: Mapping[str, object]) -> str:
@@ -62,31 +95,46 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
 
 def gate_enabled(
     cfg_root: str, attr: str, *, ticket_id: str, gate_label: str, extra: str = ""
-) -> bool:
+) -> GateState:
     """Resolve an opt-in ``verify.<attr>`` gate flag, failing OPEN on an unreadable config.
 
     ``attr`` is a ``VerifyConfig`` attribute name (e.g.
-    ``"require_completion_verification_for_close"``). Returns ``True`` when the gate is
-    enabled, ``False`` when it is off OR when the config can't be read — in the latter
-    case a single-line warning is printed to stderr (``gate_label`` + optional ``extra``
-    clause), so the skip is observable and never silent.
+    ``"require_completion_verification_for_close"``). Returns
+    :attr:`GateState.ENABLED` when the flag is on, :attr:`GateState.DISABLED` when a
+    readable config has it off, and :attr:`GateState.UNREADABLE` when the config can't be
+    read — in the latter case a single-line warning is printed to stderr (``gate_label`` +
+    optional ``extra`` clause), so the skip is observable and never silent.
 
-    Rationale for fail-OPEN: these are opt-in, default-off gates; an unreadable config
-    must not auto-enable a (possibly billable) gate across every repo and ticket. The
-    stronger signature gate fail-CLOSES independently, and a missing attestation is
-    itself the "not validated" signal CI checks.
+    The return value is **falsey for both** ``DISABLED`` and ``UNREADABLE``, so
+    ``if not gate_enabled(...)`` behaves exactly as it did when this returned a bare
+    ``bool``; the three-state result only lets a caller that cares distinguish an
+    operator's choice from a fault.
+
+    Rationale for fail-OPEN, in two legs that still hold:
+
+    1. These are opt-in, **default-off** gates. An unreadable config must not auto-enable
+       a (possibly billable) gate across every repo and every ticket.
+    2. A skipped gate mints **no attestation**, and that absence is itself the
+       "not validated" signal CI checks — so failing open here does not make unvalidated
+       work look validated.
+
+    A historical third leg ("the stronger signature gate fail-CLOSES independently") was
+    retired along with the signature gate itself (``verify.require_signature_for_close``
+    and its close-gate code were deleted), so it is no longer claimed here.
     """
     from rebar.config import ConfigError, compose_config
 
     try:
-        return bool(getattr(compose_config(cfg_root).verify, attr))
+        if getattr(compose_config(cfg_root).verify, attr):
+            return GateState.ENABLED
+        return GateState.DISABLED
     except ConfigError as exc:
         print(
             f"Warning: could not read rebar config ({exc}); {gate_label} is skipped "
             f"for {ticket_id}{extra}.",
             file=sys.stderr,
         )
-        return False
+        return GateState.UNREADABLE
 
 
 #: The administrative dispositions whose justification is a LIVE REPLACEMENT LINK — a
@@ -126,6 +174,32 @@ def _disposition_close_exempt(
         return False
 
 
+def _close_gate_skip_result(state: object) -> dict[str, object] | None:
+    """The close-gate payload for a NON-running gate, or ``None`` when it must run.
+
+    A DISTINCT verdict per skip reason, on the same reasoning as ``disposition`` below:
+    ``disabled`` asserts that an operator turned the gate off, which is simply false when
+    the config merely failed to parse. ``ok`` stays ``True`` for both — the fail-OPEN
+    posture is unchanged — only the audit trail gets more honest.
+
+    ``state`` is deliberately typed loosely: it is whatever :func:`gate_enabled` returned,
+    which tests substitute with a plain ``bool``. Anything falsey that is not
+    :attr:`GateState.UNREADABLE` is treated as the deliberate ``disabled`` case.
+    """
+    if state:
+        return None
+    if state is GateState.UNREADABLE:
+        return {
+            "ok": True,
+            "verdict": "unreadable",
+            "reason": (
+                "the plan-review close gate config could not be read, so the gate was "
+                "skipped — it was not deliberately disabled"
+            ),
+        }
+    return {"ok": True, "verdict": "disabled", "reason": "plan-review close gate is disabled"}
+
+
 def close_plan_review_gate_check(
     ticket_id: str,
     ticket_state: Mapping[str, Any],
@@ -146,14 +220,17 @@ def close_plan_review_gate_check(
     ``disposition`` verdict instead of demanding an attestation the ticket cannot earn (bug
     69b9) — see :func:`_disposition_close_exempt`.
     """
-    if not gate_enabled(
-        str(repo_root),
-        "require_plan_review_for_close",
-        ticket_id=ticket_id,
-        gate_label="the plan-review close gate",
-        extra=" (other close gates still apply)",
-    ):
-        return {"ok": True, "verdict": "disabled", "reason": "plan-review close gate is disabled"}
+    skipped = _close_gate_skip_result(
+        gate_enabled(
+            str(repo_root),
+            "require_plan_review_for_close",
+            ticket_id=ticket_id,
+            gate_label="the plan-review close gate",
+            extra=" (other close gates still apply)",
+        )
+    )
+    if skipped is not None:
+        return skipped
     if ticket_state.get("ticket_type") not in ("task", "story", "epic"):
         return {"ok": True, "verdict": "exempt", "reason": "ticket type is exempt"}
     ticket_type = str(ticket_state.get("ticket_type") or "")
