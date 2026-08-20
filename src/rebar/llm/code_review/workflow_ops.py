@@ -95,8 +95,8 @@ def overlay_union(ctx: StepContext) -> dict[str, Any]:
     cap = ctx.inputs.get("cap")
     scope_context = str(ctx.inputs.get("scope_context") or "")
 
-    glob_set = registry.glob_triggered_overlays(changed)
-    content_set = registry.content_triggered_overlays(diff_text)
+    glob_set = registry.glob_triggered_overlays(changed, repo_root=ctx.repo_root)
+    content_set = registry.content_triggered_overlays(diff_text, repo_root=ctx.repo_root)
     recommend_ids = registry.recommend_overlay_ids(recommend)
     selected = set(glob_set) | set(content_set) | set(recommend_ids)
     # scope-intent is TRAILER-driven, not glob/diff-content/recommend driven: it fires iff the
