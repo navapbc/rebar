@@ -217,3 +217,63 @@ def test_overlay_union_emits_include_concurrency():
         },
     )
     assert out2["include_concurrency"] is False
+
+
+# ── S5 dogfood: the PROJECT noisy-tier concurrency tokens fire only under this repo's
+# ── S5 dogfood: the PROJECT noisy-tier concurrency tokens fire only under a project's
+#    effective routing (config-effect contrast, shared test-design standard §6). A `.lock`-style
+#    substring is a project token DELIBERATELY absent from the committed high-precision list, so
+#    it fires the `concurrency` overlay when content_triggered_overlays reads a project overlay,
+#    and does NOT fire under committed-only routing. A test that only parsed the JSON would miss
+#    the read-but-miswired class; this asserts the observable trigger outcome differs across the
+#    two routing states — hermetically, on a fixture overlay.
+def test_project_concurrency_tokens_fire_only_under_repo_routing(tmp_path):
+    # HERMETIC mechanism test: a fixture overlay (not this checkout's live config) proves the
+    # config-effect contrast, so the mechanism is exercised even if the dogfood entry changes.
+    root = _make_repo(
+        tmp_path,
+        {"concurrency": {"trigger_tokens": [".lock"], "applies_to": ["**/_store/**"]}},
+    )
+    diff = (
+        "--- a/src/rebar/_store/writer.py\n"
+        "+++ b/src/rebar/_store/writer.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+    lock = self.path / 'index.lock'\n"
+    )
+    # committed-only routing (no repo_root): `.lock` is NOT a committed token.
+    assert "concurrency" not in reg.content_triggered_overlays(diff)
+    # the fixture overlay adds `.lock` (fires on the `index.lock` filename) → fires.
+    assert "concurrency" in reg.content_triggered_overlays(diff, root)
+    # and the additive `**/_store/**` glob fires the same overlay on a changed _store file.
+    assert "concurrency" in reg.glob_triggered_overlays(["src/rebar/_store/writer.py"], root)
+    assert "concurrency" not in reg.glob_triggered_overlays(["src/rebar/_store/writer.py"])
+
+
+def test_project_concurrency_entry_is_additive_only():
+    # The dogfood entry re-tunes a BUILT-IN overlay id, so it must carry ONLY the additive keys
+    # `project_trigger_extensions` consumes. A posture/threshold key would win the per-key
+    # `effective_routing` re-tune merge and silently re-tune the committed overlay.
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    routing = json.loads((repo_root / ".rebar" / "criteria_routing.json").read_text())
+    entry = routing["code_review"]["concurrency"]
+    # `.lock` is a noisy substring token absent from the committed high-precision list; it is
+    # what a filename like `index.lock` fires through (no redundant `index.lock` token needed).
+    assert ".lock" in entry["trigger_tokens"]
+    assert "**/_store/**" in entry["applies_to"]
+    assert set(entry) == {"trigger_tokens", "applies_to"}
+
+
+def test_project_concurrency_entry_does_not_retune_committed_block_threshold():
+    # Regression guard for the re-tune leak: the project entry must NOT lower the committed
+    # concurrency overlay's blocking calibration. effective_routing merges the project entry
+    # per-key over the committed built-in, so a stray `block_threshold` would win.
+    import pathlib
+
+    repo_root = str(pathlib.Path(__file__).resolve().parents[2])
+    committed = reg.routing_index()["concurrency"]
+    effective = reg.effective_routing(repo_root)["concurrency"]
+    assert effective["block_threshold"] == committed["block_threshold"] == 0.95
+    assert effective["blocking_enabled"] is False
+    assert effective["default_posture"] == "advisory"
