@@ -217,3 +217,40 @@ def test_overlay_union_emits_include_concurrency():
         },
     )
     assert out2["include_concurrency"] is False
+
+
+# ── S5 dogfood: the PROJECT noisy-tier concurrency tokens fire only under this repo's
+#    effective routing (config-effect contrast, shared test-design standard §6). The `.lock`
+#    substring is a project token DELIBERATELY absent from the committed high-precision list, so
+#    a filename like `index.lock` fires the `concurrency` overlay when content_triggered_overlays
+#    reads this checkout's `.rebar/criteria_routing.json`, and does NOT fire under committed-only
+#    routing. A test that only parsed the JSON would miss the read-but-miswired class; this
+#    asserts the observable trigger outcome differs across the two routing states.
+def test_project_concurrency_tokens_fire_only_under_repo_routing():
+    import pathlib
+
+    repo_root = str(pathlib.Path(__file__).resolve().parents[2])
+    diff = (
+        "--- a/src/rebar/store/writer.py\n"
+        "+++ b/src/rebar/store/writer.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+    lock = self.path / 'index.lock'\n"
+    )
+    # committed-only routing (no repo_root): `index.lock` is NOT a committed token.
+    assert "concurrency" not in reg.content_triggered_overlays(diff)
+    # this checkout's effective routing (the dogfood .rebar entry) adds it → fires.
+    assert "concurrency" in reg.content_triggered_overlays(diff, repo_root)
+
+
+def test_project_concurrency_entry_is_present_and_shaped():
+    # the dogfood entry is what the config-effect test above rides — assert it is wired
+    # (id ∈ OVERLAY_IDS with the additive keys the S1 read path consumes).
+    import pathlib
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    routing = json.loads((repo_root / ".rebar" / "criteria_routing.json").read_text())
+    entry = routing["code_review"]["concurrency"]
+    # `.lock` is a noisy substring token absent from the committed high-precision list; it is
+    # what a filename like `index.lock` fires through (no redundant `index.lock` token needed).
+    assert ".lock" in entry["trigger_tokens"]
+    assert "**/_store/**" in entry["applies_to"]
