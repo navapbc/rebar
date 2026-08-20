@@ -192,6 +192,8 @@ def _spawn_detached_sweep(tracker: str) -> None:
     python child can import rebar, the same stdio discipline (no stdin, output to a log), and
     the same never-raise posture — a detach failure must not fail the close that triggered it.
     """
+    from rebar._proc import detached_child_cwd
+
     src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     child_env = {**os.environ}
     child_env["PYTHONPATH"] = src + (
@@ -213,6 +215,9 @@ def _spawn_detached_sweep(tracker: str) -> None:
                 tracker,
                 src,
             ],
+            # Same durable-cwd anchor as the drain: never inherit an ephemeral worktree
+            # directory that can vanish mid-sweep (bug 3198-438c-72a5-470f).
+            cwd=detached_child_cwd(tracker),
             env=child_env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

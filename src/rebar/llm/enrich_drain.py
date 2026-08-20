@@ -304,6 +304,8 @@ def _detach_kwargs() -> dict:
 def _spawn_detached_drain(tracker: str) -> None:
     """Detach a `rebar enrich --drain` child that outlives the current command (POSIX). Mirrors
     push.py's PYTHONPATH bootstrap so the bare-python child can import rebar."""
+    from rebar._proc import detached_child_cwd
+
     src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     child_env = {**os.environ}
     child_env["PYTHONPATH"] = src + (
@@ -325,6 +327,9 @@ def _spawn_detached_drain(tracker: str) -> None:
                 tracker,
                 src,
             ],
+            # Anchor the child to the canonical store root, NOT this command's cwd — an
+            # inherited worktree cwd is deleted out from under it (bug 3198-438c-72a5-470f).
+            cwd=detached_child_cwd(tracker),
             env=child_env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

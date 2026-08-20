@@ -95,3 +95,43 @@ def reap_process_group(
             drain,
             proc.pid,
         )
+
+
+def detached_child_cwd(tracker: str) -> str:
+    """Pick a working directory a detached child can still resolve after its parent's is gone.
+
+    A detached child (the enrichment drain, the compaction sweep, the async
+    tickets-branch push) is spawned WITHOUT ``cwd=``, so it inherits the spawning
+    command's working directory. This project's own workflow runs ordinary writes from
+    short-lived ``make worktree`` worktrees that are removed once the change lands — and
+    when the worktree goes, the still-running child's inherited cwd no longer exists, so
+    its first ``os.getcwd()`` (reached via ``_config_sources.repo_root``'s ``Path.cwd()``
+    fallback) raises ``FileNotFoundError`` and the child dies before doing any work. That
+    silently breaks the "outlives the current command" contract each spawn site documents
+    (bug 3198-438c-72a5-470f). Passing the result of this helper as ``cwd=`` anchors the
+    child to a directory that has nothing to do with whoever spawned it.
+
+    The anchor is the CANONICAL store's repo root: the tracker resolved through symlinks,
+    then its PARENT. ``realpath`` is load-bearing rather than cosmetic — a provisioned
+    worktree's ``.tickets-tracker`` is a SYMLINK into the main checkout, so without it the
+    "root" would be the doomed worktree we are trying to escape. Taking the parent (never
+    the tracker itself) matters too: a child sitting inside ``.tickets-tracker`` would
+    resolve the repo root to the tracker and then hunt for a tracker inside the tracker.
+
+    Finally, the anchor must EXIST — pointing a child at a missing directory reproduces the
+    very failure — so we walk up to the nearest existing ancestor, ultimately the
+    filesystem root, which cannot be removed. Total by construction: never raises, because
+    every caller detaches under a never-raise posture where a background concern must not
+    fail the write or close that triggered it. Even a relative ``tracker`` resolved from an
+    already-dead cwd (``realpath`` -> ``getcwd`` -> ``OSError``) degrades to the root.
+    """
+    try:
+        root = os.path.dirname(os.path.realpath(tracker))
+    except OSError:
+        return os.sep
+    while root and not os.path.isdir(root):
+        parent = os.path.dirname(root)
+        if parent == root:
+            break
+        root = parent
+    return root if root and os.path.isdir(root) else os.sep
