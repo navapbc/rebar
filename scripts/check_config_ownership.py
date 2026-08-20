@@ -47,6 +47,11 @@ COMPOSITION_ROOT_BASENAMES: frozenset[str] = frozenset(
     {
         "config.py",
         "_config_sources.py",
+        # The below-seam RP-04 resolvers split out of _config_sources.py (story 1a33).
+        # Same composition root, two files: the raw-input half and the owned-resolver
+        # half. Classification is by BASENAME, so the split half must be listed here or
+        # every read it OWNS would fire as a below-seam violation.
+        "_config_resolvers.py",
         "_config_schema.py",
         "_child_env.py",
         "model_classes.py",

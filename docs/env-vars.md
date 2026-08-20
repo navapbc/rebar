@@ -21,33 +21,33 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `GITHUB_TOKEN` | `src/rebar/mirror_guard.py` |  |
 | `JIRA_API_TOKEN` | `src/rebar/_engine/rebar_reconciler/adapters/jira/acli_subprocess.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
 | `JIRA_PAT` | `src/rebar/_engine/rebar_reconciler/adapters/jira_datacenter/settings.py`, `src/rebar/_engine/rebar_reconciler/runtime.py` |  |
-| `JIRA_PROJECT` | `src/rebar/_config_sources.py` |  |
-| `JIRA_URL` | `src/rebar/_config_sources.py` |  |
-| `JIRA_USER` | `src/rebar/_config_sources.py` |  |
+| `JIRA_PROJECT` | `src/rebar/_config_resolvers.py` |  |
+| `JIRA_URL` | `src/rebar/_config_resolvers.py` |  |
+| `JIRA_USER` | `src/rebar/_config_resolvers.py` |  |
 | `LANGFUSE_HOST` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_PUBLIC_KEY` | `src/rebar/llm/config.py` |  |
 | `LANGFUSE_SECRET_KEY` | `src/rebar/llm/config.py` |  |
 | `LLM_REVIEW_BLOCK_VALUE` | `src/rebar/review_bot/config.py` |  |
 | `LLM_REVIEW_MAX_VALUE` | `src/rebar/review_bot/config.py` |  |
 | `OPENAI_API_KEY` | `src/rebar/llm/config.py` |  |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_config_sources.py` |  |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_ACLI_TIMEOUT` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_JIRA_CLI_TIMEOUT` |
-| `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_sources.py` |  |
+| `REBAR_ALLOW_ENV_REIDENTIFY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_AUTHOR` | `src/rebar/config.py` |  |
 | `REBAR_CONFIG` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_CONFIG_UNKNOWN_KEYS` | `src/rebar/_config_sources.py` |  |
 | `REBAR_CTAGS_BIN` | `src/rebar/grounding/resolve.py` |  |
-| `REBAR_DETECTED_BY` | `src/rebar/_config_sources.py` |  |
+| `REBAR_DETECTED_BY` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_DOCS_URL` | `src/rebar/config.py` |  |
 | `REBAR_ENV_ID` | `src/rebar/config.py` |  |
 | `REBAR_GATE_ALLOW_UNGATED` | `src/rebar/llm/gate_context.py` |  |
-| `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_FREE_WATERMARK_PCT` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_GRACE_SECONDS` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_MAX_AGE_SECONDS` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_sources.py` |  |
-| `REBAR_GATE_TMPDIR` | `src/rebar/_config_sources.py` |  |
+| `REBAR_GATE_FREE_WATERMARK_BYTES` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_FREE_WATERMARK_PCT` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_GRACE_SECONDS` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_MAX_AGE_SECONDS` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_REVERIFY_SECONDS` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_GATE_TMPDIR` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_HLC` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_HLC_NOW` | `src/rebar/_store/hlc.py` |  |
 | `REBAR_ID_GUARD_MODE` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_UNSAFE_ID_GUARD_BYPASS` |
@@ -88,7 +88,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_LLM_TRIVIAL_ENDPOINT` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_MODEL` | `src/rebar/llm/model_classes.py` |  |
 | `REBAR_LLM_TRIVIAL_PROVIDER` | `src/rebar/llm/model_classes.py` |  |
-| `REBAR_LOCK_RETRIES` | `src/rebar/_config_sources.py` |  |
+| `REBAR_LOCK_RETRIES` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_LOG_LEVEL` | `src/rebar/_logging.py` |  |
 | `REBAR_MCP_ALLOW_JIRA_SYNC` | `src/rebar/_config_schema.py (mcp config)` |  |
 | `REBAR_MCP_ALLOW_LLM` | `src/rebar/_config_schema.py (mcp config)` |  |
@@ -136,26 +136,26 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `REBAR_OPCERT_REVIEW_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_SHUTDOWN_CANCEL_SECONDS` | `src/rebar/opcert_service/config.py` |  |
 | `REBAR_OPCERT_TICKETS_REMOTE_URL` | `src/rebar/opcert_service/config.py` |  |
-| `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_sources.py` |  |
-| `REBAR_PREVIEW_TIMEOUT` | `src/rebar/_config_sources.py` |  |
+| `REBAR_PLAN_REVIEW_BUDGET` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_PREVIEW_TIMEOUT` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_RECONCILER_CONFLICT_PARENT_ID` | `src/rebar/_engine/rebar_reconciler/apply_inbound.py` |  |
 | `REBAR_RECONCILER_FAIL_SILENT_NOOP` | `src/rebar/_engine/rebar_reconciler/apply_handlers.py` |  |
 | `REBAR_RECONCILER_LOCK_STEAL` | `src/rebar/_engine/rebar_reconciler/_pass_lock_lifecycle.py` |  |
 | `REBAR_RECONCILER_VERBOSE` | `src/rebar/_engine/rebar_reconciler/adapters/jira/outbound_fields.py` |  |
 | `REBAR_RECONCILER_WRITE_FACADE` | `src/rebar/_engine/rebar_reconciler/reconcile_helpers.py` |  |
-| `REBAR_ROOT` | `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
+| `REBAR_ROOT` | `src/rebar/_config_resolvers.py`, `src/rebar/_config_sources.py`, `src/rebar/config.py` |  |
 | `REBAR_SIGNING_KEY` | `src/rebar/_signing_hmac.py` |  |
-| `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_sources.py` |  |
-| `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_sources.py` |  |
-| `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_sources.py` |  |
+| `REBAR_SNAPSHOT_STALL_ATTEMPTS` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_SNAPSHOT_STALL_FLOOR_BYTES_PER_SEC` | `src/rebar/_config_resolvers.py` |  |
+| `REBAR_SNAPSHOT_STALL_WINDOW_SECONDS` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_SYNC_PUSH` | `src/rebar/_io/import_ndjson.py` |  |
 | `REBAR_TEST_COMPACT_RENAME_BARRIER` | `src/rebar/_commands/compact_txn.py` |  |
 | `REBAR_TRACKER_DIR` | `src/rebar/_config_sources.py` |  |
-| `REBAR_USAGE_LOG` | `src/rebar/_config_sources.py` |  |
+| `REBAR_USAGE_LOG` | `src/rebar/_config_resolvers.py` |  |
 | `REBAR_VERIFY_OVERLAP_ENABLED` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS` |
 | `REBAR_VERIFY_PREFETCH` | `src/rebar/llm/workflow/gate_ops.py` |  |
 | `RECONCILER_ABSENT_GET_BUDGET` | `src/rebar/config.py (alias resolver)` | permanent alias of `REBAR_RECONCILER_DELETION_PROBE_LIMIT` |
-| `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_sources.py` |  |
+| `RECONCILER_ABSENT_RETIRE_GRACE` | `src/rebar/_config_resolvers.py` |  |
 | `RECONCILE_CURSOR_PATH` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_INTERVAL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `RECONCILE_MAX_HOLDBACK_SECONDS` | `src/rebar/review_bot/config.py` |  |
@@ -167,7 +167,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 | `SHUTDOWN_CANCEL_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `SHUTDOWN_DRAIN_SECONDS` | `src/rebar/review_bot/config.py` |  |
 | `TICKETS_REMOTE` | `src/rebar/review_bot/config.py` |  |
-| `USER` | `src/rebar/_config_sources.py` |  |
+| `USER` | `src/rebar/_config_resolvers.py` |  |
 | `WEBHOOK_TOKEN` | `src/rebar/review_bot/config.py` |  |
 | `XDG_CONFIG_HOME` | `src/rebar/_config_sources.py` |  |
 
@@ -178,7 +178,7 @@ _161 variables._
 These reads pass a non-literal name argument, so the concrete variable name is not statically resolvable:
 
 - `src/rebar/_commands/session_id.py:57` — `os.environ.get(<non-literal>)`
-- `src/rebar/_config_sources.py:612` — `os.environ.get(<non-literal>)`
+- `src/rebar/_config_resolvers.py:301` — `os.environ.get(<non-literal>)`
 - `src/rebar/_operation_config.py:54` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:303` — `os.environ.get(<non-literal>)`
 - `src/rebar/config.py:316` — `os.environ.get(<non-literal>)`

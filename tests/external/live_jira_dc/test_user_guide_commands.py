@@ -16,7 +16,7 @@ happily while the doc rotted, which is why the block is PARSED rather than resta
 
 TWO SURFACES, AND WHY THIS ONE. rebar reads bare ``[reconciler]`` from a standalone
 ``rebar.toml`` and ``[tool.rebar.reconciler]`` from a ``pyproject.toml``
-(``_config_sources.py:111-115``). The guide documents the ``[tool.rebar.…]`` form, so this
+(``_config_sources.py:153-159``). The guide documents the ``[tool.rebar.…]`` form, so this
 writes a **pyproject.toml** — the surface where that table name is the correct one.
 Testing the documented spelling against the file it actually applies to is the whole point;
 rewriting it into the other form would prove the guide works by not using it.
