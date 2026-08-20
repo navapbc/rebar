@@ -16,7 +16,8 @@ The parent reparent, scalar edit and label phases stay in ``dispatch_one``.
 
 This module is a strict LEAF: it imports nothing from ``dispatch_one`` (its only
 cross-module reach is the lazy in-function imports of ``rebar``,
-``rebar._commands.identity`` and ``rebar_reconciler._loader``), so ``dispatch_one`` can
+``rebar._commands.identity`` and ``rebar_reconciler._loader``, plus the constant-only
+import of ``binding_lifecycle.UNKNOWN_COMMENT_ID``, itself a leaf), so ``dispatch_one`` can
 re-import the three phase functions back without a cycle. ``dispatch_one`` re-exports
 ``_update_one_apply_reporter`` / ``_update_one_filter_fields`` /
 ``_update_one_dispatch_comments`` so ``update_one``'s bare-name calls and
@@ -50,6 +51,7 @@ from rebar_reconciler._errors import (
     RetryExhaustedError,
     parse_retry_after,
 )
+from rebar_reconciler.binding_lifecycle import UNKNOWN_COMMENT_ID
 from rebar_reconciler.pass_io import record_capability_gap
 
 logger = logging.getLogger(__name__)
@@ -307,18 +309,29 @@ def _update_one_filter_fields(fields, mutation) -> dict:
 
 
 def _record_comment_id(binding_store, entry, add_comment_result) -> None:
-    """Persist the returned Jira comment ID against ``entry``'s local_comment_key.
+    """Mark ``entry``'s local_comment_key as mirrored, with the comment ID when known.
 
-    emersed-specific-mutt (append-only comment sync). ``add_comment`` returns
-    ``{"id": ...}``; this captures that ID and records it via the binding_store's
-    write-ahead ``record_comment_id`` map, keyed on the COMMENT event's HLC
-    (``entry["local_comment_key"]``), so a re-sync never re-posts the comment.
+    emersed-specific-mutt (append-only comment sync). Records the COMMENT event's HLC
+    (``entry["local_comment_key"]``) in the binding_store's write-ahead
+    ``record_comment_id`` map, so a re-sync never re-posts the comment.
+
+    Bug aa7b — the recording is NOT conditional on the transport echoing a comment id.
+    Reaching this function already means the post landed: it is only ever called on an
+    ``add_comment`` that returned without raising. The DC/REST transport returns a real
+    top-level ``{"id": ...}`` and that exact value is what gets stored. The Cloud/ACLI
+    transport returns ACLI's batch-mutation envelope
+    (``{"results": [{"status": "SUCCESS", "id": "<WORK ITEM KEY>"}], ...}``) — no
+    top-level id, and ``results[].id`` is the WORK ITEM KEY, not a comment id — so there
+    is nothing truthful to store and :data:`UNKNOWN_COMMENT_ID` is recorded instead.
+    Requiring an id previously left the map EMPTY on Cloud, so the outbound differ's
+    PRIMARY id-identity skip never fired and richly-formatted comments (whose bodies
+    diverge through ADF/wiki round-tripping, defeating the SECONDARY body-equality skip)
+    were re-posted every pass.
 
     Every dependency is optional and guarded, so this is a no-op — never an error —
-    when the store is absent (legacy caller / stub), the entry carries no key, the
-    result carries no id, or the store predates ``record_comment_id``. Shared by
-    both enactment sites (``create_one`` and ``_update_one_dispatch_comments``) so
-    they cannot drift.
+    when the store is absent (legacy caller / stub), the entry is not a dict, it carries
+    no key, or the store predates ``record_comment_id``. Shared by both enactment sites
+    (``create_one`` and ``_update_one_dispatch_comments``) so they cannot drift.
     """
     if binding_store is None or not isinstance(entry, dict):
         return
@@ -326,11 +339,9 @@ def _record_comment_id(binding_store, entry, add_comment_result) -> None:
     if not key:
         return
     comment_id = add_comment_result.get("id") if isinstance(add_comment_result, dict) else None
-    if not comment_id:
-        return
     recorder = getattr(binding_store, "record_comment_id", None)
     if recorder is not None:
-        recorder(key, comment_id)
+        recorder(key, comment_id or UNKNOWN_COMMENT_ID)
 
 
 def _update_one_dispatch_comments(

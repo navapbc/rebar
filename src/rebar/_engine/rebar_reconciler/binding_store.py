@@ -357,11 +357,19 @@ class BindingStore:
     # closes are documented on ``BindingLifecycle.record_comment_id``.
 
     def record_comment_id(self, local_comment_key: str, jira_comment_id: str) -> None:
-        """Persist a COMMENT-HLC-key -> Jira-comment-ID pairing and save NOW."""
+        """Persist a COMMENT-HLC-key -> comment-ID pairing and save NOW.
+
+        The value is the transport's comment ID, or
+        ``binding_lifecycle.UNKNOWN_COMMENT_ID`` when it cannot report one (bug aa7b).
+        """
         self._lifecycle.record_comment_id(local_comment_key, jira_comment_id)
 
     def comment_id_for(self, local_comment_key: str) -> str | None:
-        """The recorded Jira comment ID for an HLC key, or ``None`` when unmapped."""
+        """The recorded value for an HLC key, or ``None`` when unmapped.
+
+        May be ``binding_lifecycle.UNKNOWN_COMMENT_ID`` rather than a Jira comment ID;
+        see ``BindingLifecycle.comment_id_for``.
+        """
         return self._lifecycle.comment_id_for(local_comment_key)
 
     def is_comment_mapped(self, local_comment_key: str) -> bool:
