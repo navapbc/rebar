@@ -31,7 +31,7 @@ def test_code_review_payload_stamps_version() -> None:
     from rebar.llm.code_review import sidecar
 
     payload = sidecar.build_payload({"verdict": "PASS"}, target_ticket="A1")
-    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v3"
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v4"
 
 
 def test_plan_and_code_versions_are_distinct() -> None:
@@ -89,10 +89,12 @@ def test_code_review_approved_blocking_criteria_set() -> None:
     blocking = {c for c, v in idx.items() if isinstance(v, dict) and v.get("blocking_enabled")}
     # The APPROVED hard-block set: the two pre-existing exec:DET security detectors; the
     # `security` AGENT criterion that b9c0 (2026-07-12) flipped on at the 9f25-derived threshold
-    # (the first LLM criterion permitted to block); PLUS the four criteria ticket
+    # (the first LLM criterion permitted to block); the four criteria ticket
     # cranial-goodly-seahog flipped on from the code-v3 sidecar calibration
     # (docs/experiments/calibrate_code_review_thresholds.py): api-compat@0.51,
-    # deletion-impact@0.60, and the two base dimensions regression@0.54 and error-handling@0.50.
+    # deletion-impact@0.60, and the two base dimensions regression@0.54 and error-handling@0.50;
+    # PLUS `tests`@0.54, flipped on by bug obese-dihedral-ermine from the code-v4 replay so the
+    # gate can block consequential test-sufficiency findings.
     # Any addition beyond this set must be a deliberate, re-approved change (this pin forces it).
     assert blocking == {
         "secret-detection",
@@ -102,6 +104,7 @@ def test_code_review_approved_blocking_criteria_set() -> None:
         "deletion-impact",
         "regression",
         "error-handling",
+        "tests",
     }
     for c in ("secret-detection", "high-critical-security"):
         assert idx[c].get("exec") == "DET"
@@ -189,8 +192,9 @@ def test_ab_gate_is_regression_detecting() -> None:
     assert passes_real is True
 
 
-def test_code_review_impact_model_version_is_v3() -> None:
-    # f32e: adding a maint-lane binary is a vocabulary change → IMPACT_MODEL_VERSION bump.
+def test_code_review_impact_model_version_is_v4() -> None:
+    # bug obese-dihedral-ermine: the maint-lane split + new binary is a vocabulary/shape change
+    # => IMPACT_MODEL_VERSION bump code-v3 -> code-v4.
     from rebar.llm.code_review import sidecar as code_sc
 
-    assert code_sc.IMPACT_MODEL_VERSION == "code-v3"
+    assert code_sc.IMPACT_MODEL_VERSION == "code-v4"

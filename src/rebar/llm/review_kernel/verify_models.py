@@ -345,7 +345,13 @@ def code_review_verification_model(*, strict: bool = False) -> type:
     class CodeSeverityAttrs(BaseModel):
         model_config = forbid
         # Base severity attributes (kept for sidecar continuity; impact_code reads binaries below).
-        prod_impact: str = Field(default="none", description="none|low|medium|high")
+        prod_impact: str = Field(
+            default="none",
+            description="none|low|medium|high — the PRODUCTION consequence's blast size. For a "
+            "coverage/contract (maintainability) finding this is RE-SCOPED to the user-facing "
+            "REACH of the guarded path (this REPLACES the 'none = no runtime effect / test-only' "
+            "reading for such findings).",
+        )
         debt_impact: str = Field(default="none", description="none|low|medium|high")
         blast_radius: str = Field(default="local", description="local|module|system")
         likelihood: str = Field(default="low", description="low|medium|high")
@@ -376,6 +382,12 @@ def code_review_verification_model(*, strict: bool = False) -> type:
             default=False,
             description="TRUE if a test/guard/assert is removed with no replacement (serious).",
         )
+        forbids_contract_allowed_state: bool = Field(
+            default=False,
+            description="TRUE if a test/assertion forbids a state that the SAME diff's contract "
+            "declares allowed (a contract-contradicting assertion, serious); a stated deliberate "
+            "tightening => FALSE.",
+        )
         contract_drift: bool = Field(
             default=False,
             description="TRUE if an interface drifts from its documented contract (moderate).",
@@ -401,7 +413,8 @@ def code_review_verification_model(*, strict: bool = False) -> type:
             default="common",
             description="common|sometimes|rare — how often the PRODUCTION consequence triggers "
             "(prod-lane multiplier common=1.0/sometimes=0.6/rare=0.25; distinct from base "
-            "likelihood; absent => common).",
+            "likelihood; absent => common). For a coverage/contract (maintainability) finding "
+            "this is RE-SCOPED to how often a legitimate user action exercises the guarded path.",
         )
         silent_failure: bool = Field(
             default=False,

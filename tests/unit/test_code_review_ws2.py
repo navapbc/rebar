@@ -65,8 +65,9 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
     # b9c0 (2026-07-12) added `security` as the first serious-tier AGENT blocking criterion, at
     # the 9f25-derived threshold. ticket cranial-goodly-seahog then flipped four more from the
     # code-v3 sidecar calibration (api-compat@0.51, deletion-impact@0.60, regression@0.54,
-    # error-handling@0.50); the approved blocking set is now exactly these seven, and adding an
-    # eighth must be a deliberate, re-approved change.
+    # error-handling@0.50); bug obese-dihedral-ermine flipped `tests`@0.54 from the code-v4
+    # replay. The approved blocking set is now exactly these eight, and adding a ninth must be
+    # a deliberate, re-approved change.
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
     assert set(blocking) == {
         "secret-detection",
@@ -76,6 +77,7 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
         "deletion-impact",
         "regression",
         "error-handling",
+        "tests",
     }
 
 
@@ -183,3 +185,87 @@ def test_coach_contract_registered_with_move_pick_shape():
         notes=[{"move_id": "extract-helper", "subject": "the parser", "finding_refs": ["0"]}]
     )
     assert inst.notes[0].move_id == "extract-helper"
+
+
+# ── bug obese-dihedral-ermine: fire case blocks end-to-end through the REAL packaged routing ──
+def test_tests_criterion_blocks_at_packaged_threshold():
+    # The `tests` criterion is flipped to blocking@0.54 in the packaged criteria_routing.json.
+    bt, blocking = reg.threshold_for(["tests"])
+    assert bt == 0.54
+    assert blocking is True
+
+
+def test_fire_case_forbids_contract_allowed_state_blocks_e2e():
+    """END-TO-END: a Pass-1 `tests` finding that the verifier grounded as a contract-contradicting
+    assertion (forbids_contract_allowed_state=True) on a load-bearing guarded path (prod_impact
+    medium) that is silent, decided through the REAL packaged routing (registry.threshold_for)
+    and the REAL impact_code, yields a BLOCK. This is the bug's fire case (ticket 7f9f).
+    """
+    from rebar.llm.review_kernel.decide import impact_code, pass3_over_findings
+
+    findings = [
+        {
+            "id": "0",
+            "finding": "test forbids a state the contract declares allowed",
+            "criteria": ["tests"],
+        }
+    ]
+    verifs = {
+        0: {
+            # a well-grounded finding: every graded binary answered yes => validity 1.0.
+            "binary": {
+                "is_verifiable": "yes",
+                "evidence_entails_finding": "yes",
+                "path_reachable": "yes",
+                "impact_follows_necessarily": "yes",
+                "no_viable_alternative_explanation": "yes",
+                "no_existing_mitigation": "yes",
+                "severity_claim_justified": "yes",
+            },
+            "severity_attributes": {
+                "forbids_contract_allowed_state": True,
+                "prod_impact": "medium",
+                "silent_failure": True,
+            },
+        }
+    }
+    out = pass3_over_findings(
+        findings, verifs, threshold_for=reg.threshold_for, impact_fn=impact_code
+    )
+    # forbids_contract_allowed_state is serious maint (0.9) * amp 1.0 (silent) = 0.9 impact;
+    # validity 1.0 => priority 0.9 >= packaged tests@0.54 => BLOCK.
+    assert out[0]["impact"] == 0.9
+    assert out[0]["priority"] == 0.9
+    assert out[0]["decision"] == "block"
+
+
+def test_tightening_pass_case_does_not_block_e2e():
+    """The pass case: a deliberate tightening (no forbids_contract_allowed_state) with an
+    already-detected, non-silent moderate gap tops out at 0.48 < 0.54 => advisory, not block.
+    """
+    from rebar.llm.review_kernel.decide import impact_code, pass3_over_findings
+
+    findings = [{"id": "0", "finding": "coverage gap", "criteria": ["tests"]}]
+    verifs = {
+        0: {
+            "binary": {
+                "is_verifiable": "yes",
+                "evidence_entails_finding": "yes",
+                "path_reachable": "yes",
+                "impact_follows_necessarily": "yes",
+                "no_viable_alternative_explanation": "yes",
+                "no_existing_mitigation": "yes",
+                "severity_claim_justified": "yes",
+            },
+            "severity_attributes": {
+                "reachable_path_without_automated_coverage": True,
+                "prod_impact": "medium",
+                # NOT silent => amp 0.8 => 0.48
+            },
+        }
+    }
+    out = pass3_over_findings(
+        findings, verifs, threshold_for=reg.threshold_for, impact_fn=impact_code
+    )
+    assert out[0]["impact"] == 0.48
+    assert out[0]["decision"] == "advisory"
