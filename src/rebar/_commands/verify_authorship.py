@@ -40,12 +40,13 @@ files are gone.
 
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import sys
 
 from rebar import config
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced.verify import build_identity
 from rebar.reducer import KNOWN_EVENT_TYPES
 
 # Classifications (also the human-facing labels; ``verified`` is the only pass).
@@ -462,47 +463,11 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
 
 
 # ── CLI (pure intercept — owns its own --help; no help/*.txt, no dispatch arm) ────
-_USAGE = (
-    "rebar verify-identity [--all | --base <ref>] [--require-authenticated] "
-    "[--since <ref>] [--format {text,json}] [--root <path>]"
-)
 
 
+@guard_parse_errors
 def cli(argv: list[str]) -> int:
-    p = argparse.ArgumentParser(
-        prog="rebar verify-identity",
-        usage=_USAGE,
-        description=(
-            "Verify authenticated authorship of the store's mutating events against each "
-            "author identity's epoch-scoped keyring (the authorship merge-gate; also available "
-            "under the back-compat alias `rebar verify-authorship`). Advisory unless "
-            "identity.require_authenticated (or --require-authenticated) is on, in which case "
-            "any ENFORCED event that is not `verified` fails the gate (non-zero exit). Events "
-            "whose introducing commit predates --since / identity.enforce_since are "
-            "grandfathered: reported but never fail the gate."
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    scope = p.add_mutually_exclusive_group()
-    scope.add_argument("--all", action="store_true", help="scan the whole store (default)")
-    scope.add_argument("--base", help="only events changed in <base>..HEAD on the tracker branch")
-    p.add_argument(
-        "--require-authenticated",
-        action="store_true",
-        help="force enforcement on regardless of identity.require_authenticated config",
-    )
-    p.add_argument(
-        "--since",
-        help="grandfather boundary: only enforce events at/descending this ref "
-        "(default: identity.enforce_since)",
-    )
-    p.add_argument(
-        "--format",
-        choices=("text", "json"),
-        default="text",
-        help="output format (default: text). json prints only a report array to stdout",
-    )
-    p.add_argument("--root", help="repo root (default: cwd); resolves the ticket store")
+    p = build_identity(prog="rebar verify-identity")
     args = p.parse_args(argv)
 
     try:

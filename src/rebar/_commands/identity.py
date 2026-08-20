@@ -583,139 +583,87 @@ def _load_signature(path: str | None):
         raise CommandError(f"Error: could not read signature file {path!r}: {exc}") from None
 
 
-def _parse_key(argv: list[str]) -> dict:
-    """Parse ``key <add|revoke> <id> <pubkey> [--signature-file <path>]``."""
-    if len(argv) < 3:
-        raise CommandError(f"Error: 'key' requires <add|revoke> <id> <pubkey>\n{_USAGE}")
-    action, identity_id, public_key = argv[0], argv[1], argv[2]
-    if action not in ("add", "revoke"):
-        raise CommandError(f"Error: unknown key action '{action}' (add|revoke)\n{_USAGE}")
-    sig_file: str | None = None
-    i, n = 3, len(argv)
-    while i < n:
-        a = argv[i]
-        if a == "--signature-file" or a.startswith("--signature-file="):
-            if a.startswith("--signature-file="):
-                sig_file, i = a[len("--signature-file=") :], i + 1
-            elif i + 1 >= n:
-                raise CommandError(f"Error: --signature-file requires a value\n{_USAGE}")
-            else:
-                sig_file, i = argv[i + 1], i + 2
-        else:
-            raise CommandError(f"Error: unknown option '{a}'\n{_USAGE}")
-    return {
-        "action": action,
-        "identity_id": identity_id,
-        "public_key": public_key,
-        "sig_file": sig_file,
-    }
+def _do_key(ns, *, repo_root) -> int:
+    """``rebar identity key add|revoke`` from a factory-parsed namespace."""
+    signature = _load_signature(ns.signature_file)
+    if ns.action == "add":
+        add_identity_key(ns.id, ns.public_key, signature=signature, repo_root=repo_root)
+        print(f"Added key to identity {ns.id}")
+        return 0
+    if signature is None:
+        raise CommandError(f"Error: key revoke requires --signature-file\n{_USAGE}")
+    revoke_identity_key(ns.id, ns.public_key, signature=signature, repo_root=repo_root)
+    print(f"Revoked key from identity {ns.id}")
+    return 0
 
 
-def _parse_create(argv: list[str]) -> dict:
-    name = email = None
-    mappings: list[dict] = []
-    keys: list[str] = []
-    use_self = False
-    i, n = 0, len(argv)
+def _do_create(ns, *, repo_root) -> int:
+    """``rebar identity create`` from a factory-parsed namespace.
 
-    def _val(flag: str, idx: int) -> tuple[str, int]:
-        if argv[idx].startswith(flag + "="):
-            return argv[idx][len(flag) + 1 :], idx + 1
-        if idx + 1 >= n:
-            raise CommandError(f"Error: {flag} requires a value\n{_USAGE}")
-        return argv[idx + 1], idx + 2
-
-    while i < n:
-        a = argv[i]
-        if a == "--name" or a.startswith("--name="):
-            name, i = _val("--name", i)
-        elif a == "--email" or a.startswith("--email="):
-            email, i = _val("--email", i)
-        elif a == "--mapping" or a.startswith("--mapping="):
-            raw, i = _val("--mapping", i)
-            if ":" not in raw:
-                raise CommandError(
-                    f"Error: --mapping must be <provider>:<external_id> (got '{raw}')\n{_USAGE}"
-                )
-            provider, external_id = raw.split(":", 1)
-            mappings.append({"provider": provider, "external_id": external_id})
-        elif a == "--key" or a.startswith("--key="):
-            raw, i = _val("--key", i)
-            keys.append(raw)
-        elif a == "--self":
-            use_self = True
-            i += 1
-        else:
-            raise CommandError(f"Error: unknown option '{a}'\n{_USAGE}")
-    if not name:
+    The factory owns the flag grammar; the required-field and ``--mapping`` format
+    checks stay here because they are value-semantics argparse does not express.
+    """
+    if not ns.name:
         raise CommandError(f"Error: --name is required\n{_USAGE}")
-    if not email:
+    if not ns.email:
         raise CommandError(f"Error: --email is required\n{_USAGE}")
-    return {
-        "name": name,
-        "email": email,
-        "mappings": mappings,
-        "keys": keys,
-        "use_self": use_self,
-    }
+    mappings: list[dict] = []
+    for raw in ns.mapping:
+        if ":" not in raw:
+            raise CommandError(
+                f"Error: --mapping must be <provider>:<external_id> (got '{raw}')\n{_USAGE}"
+            )
+        provider, external_id = raw.split(":", 1)
+        mappings.append({"provider": provider, "external_id": external_id})
+    res = create_identity_core(
+        ns.name,
+        ns.email,
+        mappings=mappings,
+        keys=ns.key,
+        repo_root=repo_root,
+        creation_channel="cli",
+    )
+    if ns.self:
+        use_identity(res["id"], repo_root=repo_root)
+    alias, tid = res.get("alias"), res["id"]
+    if alias and alias != tid:
+        print(f"Created identity {alias} ({tid}): {res['title']}")
+    else:
+        print(f"Created identity {tid}: {res['title']}")
+    print(tid)  # last whitespace-token = id (mirrors `create`)
+    return 0
 
 
 def identity_cli(argv: list[str], *, repo_root=None) -> int:
-    """``rebar identity create ...`` / ``rebar identity use <id>``."""
+    """``rebar identity create ...`` / ``rebar identity use <id>`` / ``rebar identity key ...``.
+
+    The accepted-argv grammar is owned by the shared parser factory
+    :func:`rebar._cli._parsers.advanced.identity.build`; this handler keeps the
+    dispatcher-style top-level ``--help`` (usage to stdout) and the value-semantics
+    validations, and maps the factory's :class:`ParseError` to identity's historical
+    exit-1 reject contract (argparse's own default would be exit 2).
+    """
     if not argv or argv[0] in ("--help", "-h", "help"):
         print(_USAGE)
         return 0 if argv else 1
-    verb, rest = argv[0], argv[1:]
+
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.advanced.identity import build
+
     try:
-        if verb == "create":
-            opts = _parse_create(rest)
-            res = create_identity_core(
-                opts["name"],
-                opts["email"],
-                mappings=opts["mappings"],
-                keys=opts["keys"],
-                repo_root=repo_root,
-                creation_channel="cli",
-            )
-            if opts["use_self"]:
-                use_identity(res["id"], repo_root=repo_root)
-            alias, tid = res.get("alias"), res["id"]
-            if alias and alias != tid:
-                print(f"Created identity {alias} ({tid}): {res['title']}")
-            else:
-                print(f"Created identity {tid}: {res['title']}")
-            print(tid)  # last whitespace-token = id (mirrors `create`)
-            return 0
-        if verb == "use":
-            if len(rest) != 1:
-                raise CommandError(f"Error: 'use' requires exactly one <id>\n{_USAGE}")
-            use_identity(rest[0], repo_root=repo_root)
-            print(f"Now using identity {rest[0]}")
-            return 0
-        if verb == "key":
-            opts = _parse_key(rest)
-            signature = _load_signature(opts["sig_file"])
-            if opts["action"] == "add":
-                add_identity_key(
-                    opts["identity_id"],
-                    opts["public_key"],
-                    signature=signature,
-                    repo_root=repo_root,
-                )
-                print(f"Added key to identity {opts['identity_id']}")
-            else:
-                if signature is None:
-                    raise CommandError(f"Error: key revoke requires --signature-file\n{_USAGE}")
-                revoke_identity_key(
-                    opts["identity_id"],
-                    opts["public_key"],
-                    signature=signature,
-                    repo_root=repo_root,
-                )
-                print(f"Revoked key from identity {opts['identity_id']}")
-            return 0
-        print(f"Error: unknown identity action '{verb}'\n{_USAGE}", file=sys.stderr)
+        ns = build(prog="rebar identity").parse_args(argv)
+    except ParseError as exc:
+        render_parse_error(exc)  # usage + message to stderr
         return 1
+
+    try:
+        if ns.verb == "create":
+            return _do_create(ns, repo_root=repo_root)
+        if ns.verb == "use":
+            use_identity(ns.id, repo_root=repo_root)
+            print(f"Now using identity {ns.id}")
+            return 0
+        return _do_key(ns, repo_root=repo_root)
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode

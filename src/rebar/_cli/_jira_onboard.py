@@ -21,8 +21,10 @@ precedent in :mod:`rebar._cli._llm_commands`.
 
 from __future__ import annotations
 
-import argparse
 import sys
+
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced import jira as _jira_parsers
 
 # The env var the secret token lives in — NEVER persisted to a config file.
 _TOKEN_ENV = "JIRA_API_TOKEN"
@@ -77,33 +79,10 @@ def _detected_line(name: str, value: str) -> str:
     return f"  {name:<8} {'= ' + value if value else '(missing)'}\n"
 
 
+@guard_parse_errors
 def jira_onboard(argv: list[str], *, prog: str = "rebar jira-onboard") -> int:
     """Run the Jira setup wizard under its entrypoint-specific program name."""
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description=(
-            "Interactively configure Jira: detect existing settings, prompt for "
-            "missing url/user/project, persist them to rebar.toml, and validate via "
-            "bridge check-access. The secret JIRA_API_TOKEN stays an environment variable "
-            "and is never written to a config file."
-        ),
-    )
-    parser.add_argument("--url", help="Jira base URL (non-interactive)")
-    parser.add_argument("--user", help="Jira account email (non-interactive)")
-    parser.add_argument("--project", help="default Jira project key (non-interactive)")
-    parser.add_argument(
-        "--no-validate",
-        action="store_true",
-        help="skip the post-setup bridge check-access check",
-    )
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="clear the persisted [jira] url/user/project and exit (no re-prompt)",
-    )
-    parser.add_argument(
-        "--yes", "-y", action="store_true", help="skip the --reset confirmation prompt"
-    )
+    parser = _jira_parsers.build(prog=prog)
     args = parser.parse_args(argv)
 
     from rebar import config as _config

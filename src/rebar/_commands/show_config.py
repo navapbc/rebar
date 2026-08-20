@@ -15,13 +15,14 @@ values themselves carry no host state.
 
 from __future__ import annotations
 
-import argparse
 import dataclasses
 import json
 import sys
 from typing import Any
 
 from rebar import config as _config
+from rebar._cli._parser import guard_parse_errors
+from rebar._cli._parsers.advanced import config as _config_parsers
 from rebar.config import _SECTIONS  # the canonical (section, key) inventory
 
 
@@ -194,32 +195,17 @@ def _validate(root: str | None) -> int:
     return 1 if has_error or typed_errors else 0
 
 
+@guard_parse_errors
 def config_cli(argv: list[str]) -> int:
     """``rebar config`` entrypoint. Subcommand ``validate`` scans for removed inputs;
     otherwise shows resolved config. ``--output text`` (default) or ``json``;
     ``--root`` overrides the repo root used for project-config discovery."""
     if argv and argv[0] == "validate":
-        vparser = argparse.ArgumentParser(
-            prog="rebar config validate",
-            description="Scan every config layer for invalid known typed values and "
-            "REMOVED (tombstoned) inputs. Exits non-zero on any typed failure or "
-            "load-bearing removed input.",
-        )
-        vparser.add_argument(
-            "--root", default=None, help="repo root for config discovery (default: auto)"
-        )
+        vparser = _config_parsers.build_validate(prog="rebar config validate")
         vargs = vparser.parse_args(argv[1:])
         return _validate(vargs.root)
 
-    parser = argparse.ArgumentParser(
-        prog="rebar config",
-        description="Show the resolved rebar configuration and the precedence layer "
-        "(cli > env > project > user > default) each value came from.",
-    )
-    parser.add_argument("--output", "-o", choices=["text", "json"], default="text")
-    parser.add_argument(
-        "--root", default=None, help="repo root for project-config discovery (default: auto)"
-    )
+    parser = _config_parsers.build(prog="rebar config")
     args = parser.parse_args(argv)
 
     try:
