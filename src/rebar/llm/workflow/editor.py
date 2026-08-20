@@ -165,7 +165,7 @@ def resolve_prompts(doc: dict[str, Any], path: str | Path) -> dict[str, str]:
 def _config_input_schema(kind: str, action: str | None, repo_root: Any) -> str | None:
     """The INPUT-contract schema NAME a node's ``with`` must satisfy — delegates to the
     shared resolver so edit-time validation matches the runtime net exactly (b642)."""
-    from .executor import input_schema_for
+    from .step_contracts import input_schema_for
 
     return input_schema_for(kind, action, repo_root)
 

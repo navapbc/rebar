@@ -3,7 +3,7 @@
 Two guards that did not exist at ANY layer before this file.
 
 WHY THE REGISTRY CHECKS RUN IN A SUBPROCESS — do not "simplify" this away.
-`@register_step` populates `STEP_REGISTRY` (a process-global dict, `workflow/executor.py:155`) as an
+`@register_step` populates `STEP_REGISTRY` (a process-global dict, `workflow/executor.py:166`) as an
 IMPORT SIDE EFFECT, so ANY module that imports a registering module populates it for the whole
 session. The masking path is a SIBLING TEST:
 `tests/unit/test_plan_review_prerequisites_heldout.py:11`
@@ -130,6 +130,6 @@ def test_every_uses_in_the_gate_yaml_resolves_to_a_registered_op() -> None:
     unresolvable = sorted(referenced - _registered_ops_from_a_clean_interpreter())
     assert unresolvable == [], (
         f"gates/plan-review.yaml references unregistered ops: {unresolvable}. The engine resolves "
-        "`uses` against STEP_REGISTRY at runtime (executor.py:673-676), so these would raise "
+        "`uses` against STEP_REGISTRY at runtime (executor.py:539-542), so these would raise "
         "WorkflowError mid-review."
     )

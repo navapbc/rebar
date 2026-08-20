@@ -75,7 +75,7 @@ def step_contract_view(uses: str | None) -> dict[str, Any]:
         # on import); without this the inspector would show every scripted op as
         # contract-less when nothing else has imported `steps` yet.
         from . import steps  # noqa: F401  (side effect: populate STEP_CONTRACTS)
-        from .executor import contract_for
+        from .step_contracts import contract_for
 
         contract = contract_for(uses)
     except Exception:  # noqa: BLE001 - registry trouble degrades to the empty state

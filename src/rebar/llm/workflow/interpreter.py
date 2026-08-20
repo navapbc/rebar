@@ -73,7 +73,7 @@ def _consumer_input_schema(kind: str, step: Mapping[str, Any], repo_root: str | 
     the editor's edit-time check can never diverge (story b642). Resolution trouble
     degrades to ``None`` — distinct from a validator that ERRORS while running, which
     the caller surfaces loudly."""
-    from .executor import input_schema_for
+    from .step_contracts import input_schema_for
 
     action = step.get("uses") if kind == "scripted" else step.get("prompt")
     return input_schema_for(kind, action, repo_root)
