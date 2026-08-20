@@ -20,6 +20,11 @@ def attach_commits_cli(args: list[str]) -> int:
     """Parse ``<ticket> <sha>...`` and route to the shared seam."""
     if len(args) < 2:
         raise CommandError(USAGE, returncode=2)
+    from rebar._cli._parsers.core.writes import build_attach_commits
+
+    # Parser of record; raw positional slicing is retained because the shas are
+    # permissive (``--`` and option-looking tokens are valid sha positions).
+    build_attach_commits(prog="rebar attach-commits").parse_known_args(args)
     import rebar
     from rebar._errors import RebarError
 

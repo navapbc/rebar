@@ -16,7 +16,7 @@ import sys
 
 from rebar import config
 from rebar._commands import gates, txn
-from rebar._commands._seam import CommandError, write_arg_parser
+from rebar._commands._seam import CommandError
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
 
@@ -60,9 +60,19 @@ def _parse_assignee(args: list[str]) -> str | None:
     default (``None``) supplies the absent sentinel, ``parse_known_args`` skips every other
     token, ``allow_abbrev=False`` keeps a truncation an unknown token, and a value-less
     ``--assignee`` raises :class:`CommandError` (exit 1) via the parser's ``error`` override."""
-    parser = write_arg_parser()
-    parser.add_argument("--assignee", default=None)
-    ns, _unknown = parser.parse_known_args(args)
+    import re
+
+    from rebar._cli._parser import ParseError
+    from rebar._cli._parsers.core.lifecycle import build_claim
+
+    parser = build_claim(prog="rebar claim")
+    try:
+        ns, _unknown = parser.parse_known_args(args)
+    except ParseError as exc:
+        m = re.match(r"argument (\S+): expected one argument", str(exc))
+        if m:
+            raise CommandError(f"Error: {m.group(1)} requires a value", returncode=1) from None
+        raise CommandError(f"Error: {exc}", returncode=1) from None
     return ns.assignee
 
 

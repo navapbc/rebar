@@ -79,6 +79,9 @@ def exists_cli(argv: list[str], tracker: str) -> int:
     if not argv or not argv[0]:
         sys.stderr.write("Usage: ticket exists <ticket_id>\n")
         return 1
+    # Positional-only lookup: ``exists`` is permissive about dash-leading ids, which
+    # is genuinely argparse-inexpressible, so the first token is read raw. The
+    # registry declares ``build_exists`` for lazy census + canonical help (RP-05 S2d).
     raw = argv[0]
     if _has_ticket_events(os.path.join(tracker, raw)):  # fast exact-dir path
         return 0
@@ -92,7 +95,11 @@ def resolve_cli(argv: list[str], tracker: str) -> int:
     if len(argv) < 1:
         sys.stderr.write("Usage: ticket resolve <id_or_alias_or_prefix>\n")
         return 1
-    resolved = resolve_ticket_id(argv[0], tracker)
+    # Positional-only lookup: the permissive raw/dash-leading input is genuinely
+    # argparse-inexpressible, so the first token is read raw. The registry declares
+    # ``build_resolve`` for lazy census + canonical help (RP-05 S2d).
+    raw = argv[0]
+    resolved = resolve_ticket_id(raw, tracker)
     if not resolved:  # None or "" (the resolver returns "" for an empty input)
         sys.stderr.write(f"Error: ticket '{argv[0]}' not found\n")
         return 1
@@ -104,6 +111,9 @@ def format_cli(argv: list[str], tracker: str, repo_root: str | None) -> int:
     if len(argv) < 1:
         sys.stderr.write("Usage: ticket format <ticket_id> [mode]\n")
         return 1
+    # Positional-only lookup (``<ticket_id> [mode]``): the permissive raw/dash-leading
+    # ticket_id is genuinely argparse-inexpressible, so positionals are read raw. The
+    # registry declares ``build_format`` for lazy census + canonical help (RP-05 S2d).
     ticket_id = argv[0]
     mode = argv[1] if len(argv) > 1 else ""
     if not mode:

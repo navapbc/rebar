@@ -67,40 +67,136 @@ class Finding:
     detail: str
 
 
+# Core-command parser-factory census (RP-05 S2b): each core spelling maps to a lazy
+# ``"module:attr"`` reference under ``rebar._cli._parsers.core`` resolved only at
+# build time, never at import (mirrors the advanced-family map in ``_intercepts``).
+_CORE_P = "rebar._cli._parsers.core"
+_CORE_FACTORIES: dict[str, str] = {
+    "show": f"{_CORE_P}.reads:build_show",
+    "list": f"{_CORE_P}.reads:build_list",
+    "next-batch": f"{_CORE_P}.reads:build_next_batch",
+    "deps": f"{_CORE_P}.reads:build_deps",
+    "ready": f"{_CORE_P}.reads:build_ready",
+    "search": f"{_CORE_P}.reads:build_search",
+    "session-logs": f"{_CORE_P}.reads:build_session_logs",
+    "validate": f"{_CORE_P}.reads:build_validate",
+    "get-file-impact": f"{_CORE_P}.field_reads:build_get_file_impact",
+    "get-verify-commands": f"{_CORE_P}.field_reads:build_get_verify_commands",
+    "exists": f"{_CORE_P}.lookups:build_exists",
+    "resolve": f"{_CORE_P}.lookups:build_resolve",
+    "format": f"{_CORE_P}.lookups:build_format",
+    "list-descendants": f"{_CORE_P}.descendants:build",
+    "clarity-check": f"{_CORE_P}.gates:build_clarity_check",
+    "check-ac": f"{_CORE_P}.gates:build_check_ac",
+    "quality-check": f"{_CORE_P}.gates:build_quality_check",
+    "summary": f"{_CORE_P}.gates:build_summary",
+    "sign": f"{_CORE_P}.signing:build_sign",
+    "verify-signature": f"{_CORE_P}.signing:build_verify_signature",
+    "compact": f"{_CORE_P}.compact:build_compact",
+    "compact-all": f"{_CORE_P}.compact:build_compact_all",
+    "export": f"{_CORE_P}.io:build_export",
+    "import": f"{_CORE_P}.io:build_import",
+    "transition": f"{_CORE_P}.lifecycle:build_transition",
+    "reopen": f"{_CORE_P}.lifecycle:build_reopen",
+    "claim": f"{_CORE_P}.lifecycle:build_claim",
+    "create": f"{_CORE_P}.writes:build_create",
+    "idea": f"{_CORE_P}.writes:build_idea",
+    "comment": f"{_CORE_P}.writes:build_comment",
+    "link": f"{_CORE_P}.writes:build_link",
+    "unlink": f"{_CORE_P}.writes:build_unlink",
+    "revert": f"{_CORE_P}.writes:build_revert",
+    "edit": f"{_CORE_P}.writes:build_edit",
+    "tag": f"{_CORE_P}.writes:build_tag",
+    "untag": f"{_CORE_P}.writes:build_untag",
+    "archive": f"{_CORE_P}.writes:build_archive",
+    "set-file-impact": f"{_CORE_P}.writes:build_set_file_impact",
+    "set-verify-commands": f"{_CORE_P}.writes:build_set_verify_commands",
+    "attach-commits": f"{_CORE_P}.writes:build_attach_commits",
+    "session-log": f"{_CORE_P}.writes:build_session_log",
+    "init": f"{_CORE_P}.bootstrap:build_init",
+    "scratch": f"{_CORE_P}.bootstrap:build_scratch",
+    "delete": f"{_CORE_P}.delete:build",
+    "fsck": f"{_CORE_P}.repair:build_fsck",
+    "fsck-recover": f"{_CORE_P}.repair:build_fsck_recover",
+    "tracker-maintenance": f"{_CORE_P}.repair:build_tracker_maintenance",
+    "doctor": f"{_CORE_P}.repair:build_doctor",
+    "grounding-info": f"{_CORE_P}.grounding:build",
+}
+
+
+def _core_factory(name: str) -> str:
+    """The core parser-factory reference for ``name`` (KeyError if unmapped)."""
+    return _CORE_FACTORIES[name]
+
+
 def _reads_init_only() -> tuple[Route, ...]:
     return tuple(
-        Route(name, group="reads_init_only")
+        Route(name, group="reads_init_only", parser_factory=_core_factory(name))
         for name in ("show", "list", "next-batch", "deps", "ready", "search", "session-logs")
     )
 
 
 def _simple_read_groups() -> tuple[Route, ...]:
     return (
-        Route("validate", group="reads_no_init"),
-        Route("get-file-impact", group="field_reads"),
-        Route("get-verify-commands", group="field_reads"),
-        Route("exists", group="lookups"),
-        Route("resolve", group="lookups"),
-        Route("format", group="lookups"),
-        Route("list-descendants", group="descendants"),
-        Route("clarity-check", group="gates"),
-        Route("check-ac", group="gates"),
-        Route("quality-check", group="gates"),
-        Route("summary", group="gates"),
-        Route("sign", group="signing"),
-        Route("verify-signature", group="signing"),
-        Route("compact", group="compact"),
-        Route("compact-all", group="compact"),
-        Route("export", group="io"),
-        Route("import", group="io"),
+        Route("validate", group="reads_no_init", parser_factory=_core_factory("validate")),
+        Route(
+            "get-file-impact",
+            group="field_reads",
+            parser_factory=_core_factory("get-file-impact"),
+        ),
+        Route(
+            "get-verify-commands",
+            group="field_reads",
+            parser_factory=_core_factory("get-verify-commands"),
+        ),
+        Route("exists", group="lookups", parser_factory=_core_factory("exists")),
+        Route("resolve", group="lookups", parser_factory=_core_factory("resolve")),
+        Route("format", group="lookups", parser_factory=_core_factory("format")),
+        Route(
+            "list-descendants",
+            group="descendants",
+            parser_factory=_core_factory("list-descendants"),
+        ),
+        Route("clarity-check", group="gates", parser_factory=_core_factory("clarity-check")),
+        Route("check-ac", group="gates", parser_factory=_core_factory("check-ac")),
+        Route("quality-check", group="gates", parser_factory=_core_factory("quality-check")),
+        Route("summary", group="gates", parser_factory=_core_factory("summary")),
+        Route("sign", group="signing", parser_factory=_core_factory("sign")),
+        Route(
+            "verify-signature",
+            group="signing",
+            parser_factory=_core_factory("verify-signature"),
+        ),
+        Route("compact", group="compact", parser_factory=_core_factory("compact")),
+        Route("compact-all", group="compact", parser_factory=_core_factory("compact-all")),
+        Route("export", group="io", parser_factory=_core_factory("export")),
+        Route("import", group="io", parser_factory=_core_factory("import")),
     )
 
 
 def _lifecycle() -> tuple[Route, ...]:
     return (
-        Route("transition", group="lifecycle", confirmable=True, legacy_output=True),
-        Route("reopen", group="lifecycle", confirmable=True, legacy_output=True),
-        Route("claim", group="lifecycle", confirmable=True, legacy_output=True),
+        Route(
+            "transition",
+            group="lifecycle",
+            confirmable=True,
+            legacy_output=True,
+            parser_factory=_core_factory("transition"),
+        ),
+        Route(
+            "reopen",
+            group="lifecycle",
+            confirmable=True,
+            legacy_output=True,
+            parser_factory=_core_factory("reopen"),
+        ),
+        Route(
+            "claim",
+            group="lifecycle",
+            confirmable=True,
+            legacy_output=True,
+            parser_factory=_core_factory("claim"),
+        ),
     )
 
 
@@ -123,7 +219,13 @@ def _writes_full() -> tuple[Route, ...]:
         "session-log",
     )
     return tuple(
-        Route(name, group="writes_full", confirmable=True, legacy_output=name in legacy)
+        Route(
+            name,
+            group="writes_full",
+            confirmable=True,
+            legacy_output=name in legacy,
+            parser_factory=_core_factory(name),
+        )
         for name in names
     )
 
@@ -194,15 +296,33 @@ def _bridge_and_arms() -> tuple[Route, ...]:
             parser_factory=f"{_P}.bridge:build",
         ),
         Route("bridge-fsck", group="bridge", parser_factory=f"{_P}.bridge_arms:build_fsck"),
-        Route("init", group="bootstrap", no_auto_mount=True),
-        Route("scratch", group="bootstrap", no_auto_mount=True),
-        Route("delete", group="delete"),
-        Route("fsck", group="repair"),
-        Route("fsck-recover", group="repair"),
-        Route("tracker-maintenance", group="repair"),
-        Route("doctor", group="repair"),
+        Route(
+            "init",
+            group="bootstrap",
+            no_auto_mount=True,
+            parser_factory=_core_factory("init"),
+        ),
+        Route(
+            "scratch",
+            group="bootstrap",
+            no_auto_mount=True,
+            parser_factory=_core_factory("scratch"),
+        ),
+        Route("delete", group="delete", parser_factory=_core_factory("delete")),
+        Route("fsck", group="repair", parser_factory=_core_factory("fsck")),
+        Route("fsck-recover", group="repair", parser_factory=_core_factory("fsck-recover")),
+        Route(
+            "tracker-maintenance",
+            group="repair",
+            parser_factory=_core_factory("tracker-maintenance"),
+        ),
+        Route("doctor", group="repair", parser_factory=_core_factory("doctor")),
         Route("bridge-probe", group="repair", parser_factory=f"{_P}.bridge_arms:build_probe"),
-        Route("grounding-info", group="static_read"),
+        Route(
+            "grounding-info",
+            group="static_read",
+            parser_factory=_core_factory("grounding-info"),
+        ),
     )
 
 

@@ -229,6 +229,11 @@ def scratch_cli(argv: list[str], *, _repo_root=None) -> int:
         )
         return 1
     verb, rest = argv[0], argv[1:]
+    from rebar._cli._parsers.core.bootstrap import build_scratch
+
+    # Parser of record for scratch's accepted grammar; the verb dispatch below is
+    # retained because it owns the bespoke ``unknown_verb`` JSON error and exit code.
+    build_scratch(prog="rebar scratch").parse_known_args(argv)
     if verb == "set":
         return _set(rest)
     if verb == "get":

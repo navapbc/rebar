@@ -73,6 +73,49 @@ def _detect_stale_rebase(git_dir: str) -> str:
     return ""
 
 
+def _fsck_recover_govern(
+    *, tracker_dir, detect_only, recover_dangling, continue_timeout
+) -> int | None:
+    """Parser-of-record governance for :func:`fsck_recover_cli`.
+
+    Reconstruct a canonical, always-argparse-valid argv from the values the tolerant
+    loop extracted and let the factory govern it. Returns a render exit code when a
+    (rejecting) factory refuses the argv, else ``None`` to continue.
+    """
+    from rebar._cli._parser import ParseError, render_parse_error
+    from rebar._cli._parsers.core.repair import build_fsck_recover
+
+    norm: list[str] = []
+    if tracker_dir:
+        norm.append(f"--tracker-dir={tracker_dir}")
+    if detect_only:
+        norm.append("--detect-only")
+    if recover_dangling:
+        norm.append("--recover-dangling")
+    norm.append(f"--timeout={continue_timeout}")
+    try:
+        build_fsck_recover(prog="rebar fsck-recover").parse_args(norm)
+    except ParseError as exc:
+        return render_parse_error(exc)
+    return None
+
+
+def _tolerant_value(argv: list[str], i: int, name: str, default):
+    """Match a tolerant value flag ``--name value`` or ``--name=value`` at ``argv[i]``.
+
+    Mirrors fsck-recover's byte-exact tolerance: a bare ``--name`` at the end of argv
+    (no following token) yields *default*, and an option-looking following token is
+    still consumed as the value. Returns ``(value, next_index)`` when it matches, else
+    ``None``.
+    """
+    a = argv[i]
+    if a == name:
+        return (argv[i + 1] if i + 1 < len(argv) else default), i + 2
+    if a.startswith(name + "="):
+        return a[len(name) + 1 :], i + 1
+    return None
+
+
 def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     tracker_dir = ""
     detect_only = False
@@ -82,23 +125,19 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
     i = 0
     while i < len(argv):
         a = argv[i]
-        if a == "--tracker-dir":
-            tracker_dir = argv[i + 1] if i + 1 < len(argv) else ""
-            i += 2
-        elif a.startswith("--tracker-dir="):
-            tracker_dir = a[len("--tracker-dir=") :]
-            i += 1
-        elif a == "--detect-only":
+        m = _tolerant_value(argv, i, "--tracker-dir", "")
+        if m is not None:
+            tracker_dir, i = m
+            continue
+        m = _tolerant_value(argv, i, "--timeout", 30)
+        if m is not None:
+            continue_timeout, i = int(m[0]), m[1]
+            continue
+        if a == "--detect-only":
             detect_only = True
             i += 1
         elif a == "--recover-dangling":
             recover_dangling = True
-            i += 1
-        elif a == "--timeout":
-            continue_timeout = int(argv[i + 1]) if i + 1 < len(argv) else 30
-            i += 2
-        elif a.startswith("--timeout="):
-            continue_timeout = int(a[len("--timeout=") :])
             i += 1
         elif a in ("--help", "-h"):
             sys.stdout.write(_USAGE)
@@ -107,6 +146,20 @@ def fsck_recover_cli(argv: list[str], *, repo_root=None) -> int:
             sys.stderr.write(f"Error: unknown argument '{a}'\n")
             sys.stderr.write(_USAGE)
             return 2
+
+    # Parser of record. The tolerant loop above owns fsck-recover's accepted grammar
+    # because argparse cannot reproduce it byte-for-byte: a value flag given with no
+    # value is tolerated (``--tracker-dir`` alone -> "", ``--timeout`` alone -> 30) and
+    # an option-looking following token is consumed as the value. The factory still
+    # governs via ``_fsck_recover_govern`` (a rejecting factory raises → fail).
+    _rc = _fsck_recover_govern(
+        tracker_dir=tracker_dir,
+        detect_only=detect_only,
+        recover_dangling=recover_dangling,
+        continue_timeout=continue_timeout,
+    )
+    if _rc is not None:
+        return _rc
 
     if not tracker_dir:
         # Default: config-resolved tracker (REBAR_TRACKER_DIR > repo_root >

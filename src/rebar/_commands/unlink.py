@@ -190,6 +190,11 @@ def unlink_core(id1_raw: str, id2_raw: str, relation: str | None = None, *, repo
 
 def unlink_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``unlink``."""
+    from rebar._cli._parsers.core.writes import build_unlink
+
+    # Parser of record; raw positional slicing is retained because unlink's ids are
+    # permissive (option-looking and ``--`` are valid id/relation values).
+    build_unlink(prog="rebar unlink").parse_known_args(argv)
     if len(argv) < 2:
         print(_USAGE, file=sys.stderr)
         return 1

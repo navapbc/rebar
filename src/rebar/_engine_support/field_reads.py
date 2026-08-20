@@ -53,10 +53,15 @@ def verify_commands(ticket_id: str, tracker: str) -> list:
 
 # ── CLI arms ──────────────────────────────────────────────────────────────
 def file_impact_cli(argv: list[str], tracker: str) -> int:
+    from rebar._cli._parsers.core.field_reads import build_get_file_impact
+
+    ns, _extra = build_get_file_impact(prog="rebar get-file-impact").parse_known_args(argv)
     if len(argv) < 1:
         sys.stderr.write("Usage: ticket get-file-impact <ticket_id>\n")
         return 1
-    ticket_id = argv[0]
+    # Permissive dash-leading id: argparse routes a lone ``--flag`` to extras, so
+    # fall back to the raw first token (the byte-exact historical contract).
+    ticket_id = ns.ticket_id if ns.ticket_id is not None else argv[0]
     if not ticket_id:
         sys.stderr.write("Error: ticket_id must be non-empty\n")
         return 1
@@ -70,10 +75,13 @@ def verify_commands_cli(argv: list[str], tracker: str) -> int:
     except OutputFormatError as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 2
+    from rebar._cli._parsers.core.field_reads import build_get_verify_commands
+
+    ns, _extra = build_get_verify_commands(prog="rebar get-verify-commands").parse_known_args(rest)
     if len(rest) < 1:
         sys.stderr.write("Usage: ticket get-verify-commands <ticket_id>\n")
         return 1
-    ticket_id = rest[0]
+    ticket_id = ns.ticket_id if ns.ticket_id is not None else rest[0]
     if not ticket_id:
         sys.stderr.write("Error: ticket_id must be non-empty\n")
         return 1

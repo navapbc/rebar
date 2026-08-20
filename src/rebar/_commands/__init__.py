@@ -34,20 +34,53 @@ class _Cmd(NamedTuple):
     # (a too-few-args guard only); archive is exactly-one, so a surplus positional
     # is a usage error. max_args pins that difference.
     max_args: int | None = None
+    # RP-05 S2b: the accepted-grammar factory for this leaf (an attribute of
+    # ``rebar._cli._parsers.core.writes``) plus its ordered positional dests. The
+    # bespoke reject/arity guards below stay for byte-exact diagnostics; the factory
+    # is the single source of the ACCEPTED positional grammar the command executes on.
+    factory: str = ""
+    dests: tuple[str, ...] = ()
 
 
 # Registry of leaf-write commands, keyed by subcommand name.
 # min_args / usage pin each command's arity guard.
 _REGISTRY: dict[str, _Cmd] = {
-    "comment": _Cmd(leaf.comment, 2, "Usage: rebar comment <ticket_id> <body>"),
+    "comment": _Cmd(
+        leaf.comment,
+        2,
+        "Usage: rebar comment <ticket_id> <body>",
+        factory="build_comment",
+        dests=("ticket_id", "body"),
+    ),
     "set-verify-commands": _Cmd(
         leaf.set_verify_commands,
         2,
         "Usage: rebar set-verify-commands <ticket_id> <json_array>",
+        factory="build_set_verify_commands",
+        dests=("ticket_id", "json_array"),
     ),
-    "tag": _Cmd(leaf.tag, 2, "Usage: rebar tag <ticket_id> <tag>"),
-    "untag": _Cmd(leaf.untag, 2, "Usage: rebar untag <ticket_id> <tag>"),
-    "archive": _Cmd(leaf.archive, 1, "Usage: rebar archive <ticket_id>", max_args=1),
+    "tag": _Cmd(
+        leaf.tag,
+        2,
+        "Usage: rebar tag <ticket_id> <tag>",
+        factory="build_tag",
+        dests=("ticket_id", "tag"),
+    ),
+    "untag": _Cmd(
+        leaf.untag,
+        2,
+        "Usage: rebar untag <ticket_id> <tag>",
+        factory="build_untag",
+        dests=("ticket_id", "tag"),
+    ),
+    "archive": _Cmd(
+        leaf.archive,
+        1,
+        "Usage: rebar archive <ticket_id>",
+        max_args=1,
+        factory="build_archive",
+        dests=("ticket_id",),
+    ),
 }
 
 # These commands take positionals ONLY. An option-looking token is therefore a
@@ -148,7 +181,13 @@ _SET_FILE_IMPACT_USAGE = (
 
 def _set_file_impact_cli(args: list[str]) -> int:
     """Parse the two mutually-exclusive file-impact write forms."""
+    from rebar._cli._parsers.core.writes import build_set_file_impact
     from rebar._commands import _confirm
+
+    # Parser of record for the accepted grammar; the explicit arity/``--none`` shape
+    # below is retained because the two mutually-exclusive forms and the exact usage
+    # exit code are not expressible as a single argparse spec.
+    build_set_file_impact(prog="rebar set-file-impact").parse_known_args(args)
 
     if len(args) == 2 and args[1] != "--none":
         out = leaf.set_file_impact(args[0], args[1])
@@ -185,6 +224,27 @@ _ARGV_REGISTRY: dict[str, Callable[[list[str]], int]] = {
     "revert": composer.revert_cli,
     "session-log": _session_log.session_log_cli,
 }
+
+
+def _parse_leaf_positionals(command: str, entry: _Cmd, positionals: list[str]) -> list[str]:
+    """Route the (already reject-guarded, arity-checked) positionals through the leaf's
+    accepted-grammar factory (RP-05 S2b) and return the ordered positional values that
+    drive ``entry.func``.
+
+    The bespoke ``_split_positionals`` reject guard and the ``min_args``/``max_args``
+    arity checks upstream own the byte-exact diagnostics; this only makes the factory the
+    parser of record for the ACCEPTED grammar. The import is function-local so the factory
+    can be spied at its defining module.
+    """
+    from rebar._cli._parsers.core import writes as _writes_parsers
+
+    factory = getattr(_writes_parsers, entry.factory)
+    # ``positionals`` are already end-of-options resolved by ``_split_positionals``
+    # (tokens after ``--`` are literal data, even when dash-leading). Prepend ``--``
+    # so the factory's argparse treats every one as a positional value rather than
+    # re-interpreting a dash-leading datum as an option.
+    ns, _extra = factory(prog=f"rebar {command}").parse_known_args(["--", *positionals])
+    return [getattr(ns, dest) for dest in entry.dests]
 
 
 def main(argv: list[str]) -> int:
@@ -244,7 +304,7 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         with forced_secret_write(allow_secret_pattern):
-            out = entry.func(*positionals)
+            out = entry.func(*_parse_leaf_positionals(command, entry, positionals))
     except CommandError as exc:
         print(exc.message, file=sys.stderr)
         return exc.returncode
