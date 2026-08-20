@@ -201,18 +201,18 @@ that check at the top of the sequencing.
 
 ### state attestation evidence
 
-*"State the concrete attestation evidence the [operator-attested] {subject} will require (a
+*"State the concrete attestation evidence the [non-codebase] {subject} will require (a
 change id / vote outcome / timestamp), recorded on the ticket."* When an AC's "done" evidence
 lives **outside the codebase** (a deploy, a live drill, an access review), tag the criterion
-`[operator-attested]` and name the concrete evidence — a change id, a vote outcome, a
+`[non-codebase]` and name the concrete evidence — a change id, a vote outcome, a
 timestamp — that will be recorded on the ticket. The completion verifier accepts that recorded
 attestation in place of an in-session proof.
-Classify the criterion before plan review by adding the [operator-attested] tag to its checkbox text.
+Classify the criterion before plan review by adding the [non-codebase] tag to its checkbox text.
 Record that evidence in a ticket comment; comments are non-material and do not invalidate the
 plan review.
 
 - **Before:** "- [ ] The new LaunchAgent is running in production."
-- **After:** "- [ ] [operator-attested] The new LaunchAgent is running: the operator records
+- **After:** "- [ ] [non-codebase] The new LaunchAgent is running: the operator records
   `launchctl print` output and its timestamp as a ticket comment."
 
 ### propagate to children
