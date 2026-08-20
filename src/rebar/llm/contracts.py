@@ -91,7 +91,7 @@ def completion_verdict_response_model() -> type:
         remediation: str | None = Field(
             default=None,
             description=(
-                "Optional per-finding next move. For an operator-attested criterion judged "
+                "Optional per-finding next move. For a non-codebase criterion judged "
                 "NOT MET, the concrete step that would make it pass: record proof as a "
                 "ticket comment/artifact naming the reference (change URL/id), the observed "
                 "outcome (votes/logs/console), and when. Distinct from the generic "
@@ -113,7 +113,7 @@ def completion_verdict_response_model() -> type:
             default=None, description="Evidence: file+line / url / freeform source (nullable)."
         )
         kind: str = Field(
-            description="codebase-verifiable | operator-attested (the criterion's evidence kind)."
+            description="codebase-verifiable | non-codebase (the criterion's evidence kind)."
         )
 
     class CompletionVerdict(BaseModel):
