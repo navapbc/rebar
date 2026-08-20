@@ -241,6 +241,44 @@ def applies_to_globs(criterion_id: str) -> list[str]:
     return [g for g in globs if isinstance(g, str)]
 
 
+def _str_list(value: object) -> list[str]:
+    """The ``str`` elements of ``value`` iff ``value`` is a list, else ``[]``. A plain STRING is
+    ignored WHOLESALE (never iterated into single-character tokens) — a malformed
+    ``trigger_tokens``/``applies_to`` must not silently trigger on stray characters."""
+    if not isinstance(value, list):
+        return []
+    return [v for v in value if isinstance(v, str)]
+
+
+def project_trigger_extensions(repo_root: str | None = None) -> dict[str, dict[str, list[str]]]:
+    """The ADDITIVE trigger extensions a project overlay declares for BUILT-IN overlays.
+
+    A project ``.rebar/criteria_routing.json`` ``code_review`` entry keyed by a member of
+    :data:`OVERLAY_IDS` may carry ``trigger_tokens`` (literal substrings for
+    :func:`content_triggered_overlays`) and ``applies_to`` (globs UNIONED into
+    :func:`glob_triggered_overlays`). Read from the RAW overlay, NOT :func:`effective_routing`:
+    the shared built-in merge is per-key overlay-wins (``{**merged[cid], **entry}``), so a
+    project ``applies_to`` read from the merged view would REPLACE the committed globs — the
+    opposite of the additive union this mechanism promises. Malformed values (non-list tokens,
+    non-string elements, entries under an id not in :data:`OVERLAY_IDS`) are ignored, never
+    raised. ``repo_root`` None / no overlay ⇒ ``{}``."""
+    from rebar.llm.criteria.overlay import _load_overlay
+
+    overlay = _load_overlay(repo_root)
+    gate = (overlay or {}).get(_GATE_KEY)
+    if not isinstance(gate, dict):
+        return {}
+    out: dict[str, dict[str, list[str]]] = {}
+    for cid, entry in gate.items():
+        if cid not in OVERLAY_IDS or not isinstance(entry, dict):
+            continue
+        tokens = _str_list(entry.get("trigger_tokens"))
+        globs = _str_list(entry.get("applies_to"))
+        if tokens or globs:
+            out[cid] = {"trigger_tokens": tokens, "applies_to": globs}
+    return out
+
+
 def _glob_match(path: str, pattern: str) -> bool:
     """Match a changed-file path against an ``applies_to`` glob.
 
@@ -253,13 +291,20 @@ def _glob_match(path: str, pattern: str) -> bool:
     return glob_match(path, pattern)
 
 
-def glob_triggered_overlays(changed_files: Sequence[str]) -> list[str]:
+def glob_triggered_overlays(
+    changed_files: Sequence[str], repo_root: str | None = None
+) -> list[str]:
     """The overlays whose ``applies_to`` globs match ANY changed file — the deterministic
     Round-A trigger set (the ``glob`` operand of ``overlay_union``'s formula). Ordered by
-    :data:`OVERLAY_IDS`. An escalation-only overlay (empty ``applies_to``) never glob-fires."""
+    :data:`OVERLAY_IDS`. An escalation-only overlay (empty ``applies_to``) never glob-fires.
+
+    Each overlay's committed globs are UNIONED with any project ``applies_to`` extension
+    (:func:`project_trigger_extensions`); ``repo_root`` None / no overlay ⇒ committed globs only
+    (byte-identical to before)."""
+    ext = project_trigger_extensions(repo_root)
     out: list[str] = []
     for oid in OVERLAY_IDS:
-        globs = applies_to_globs(oid)
+        globs = applies_to_globs(oid) + ext.get(oid, {}).get("applies_to", [])
         if globs and any(_glob_match(f, g) for f in changed_files for g in globs):
             out.append(oid)
     return out
@@ -318,22 +363,55 @@ _REMOVED_DECL_RE = re.compile(
 )
 
 
-def content_triggered_overlays(diff_text: str) -> list[str]:
+def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> list[str]:
     """The overlays triggered by the DIFF CONTENT (the ``content`` operand of ``overlay_union``,
-    unioned alongside the glob triggers). Scans ONLY the removed (``-``) lines of the unified
-    diff — skipping the ``---`` file header — for a removed def/class/function-signature, and
-    returns ``["deletion-impact"]`` when any matches (so the ``deletion-impact`` overlay can look
-    for now-dangling references to the removed symbol), else ``[]``. A pure add-only diff, a
-    body-only edit that keeps the signature (the ``def`` line stays a context line), and removed
-    comment/blank lines all yield ``[]``."""
+    unioned alongside the glob triggers), ordered by :data:`OVERLAY_IDS`.
+
+    Two scans, unioned: (1) the committed removed-declaration scan — a removed
+    def/class/function-signature on a ``-`` line fires ``deletion-impact`` (skipping the ``---``
+    file header); (2) any project ``trigger_tokens`` (:func:`project_trigger_extensions`) whose
+    literal substring appears on an ADDED (``+``) or REMOVED (``-``) line body (the ``+++``/``---``
+    headers excluded) fires that project-extended built-in overlay. ``repo_root`` None / no
+    overlay ⇒ the committed deletion-impact behavior only (byte-identical to before): a pure
+    add-only diff, a body-only edit that keeps the signature, and removed comment/blank lines
+    all yield ``[]``."""
     if not diff_text:
         return []
+    fired: set[str] = set()
+    if _has_removed_declaration(diff_text):
+        fired.add("deletion-impact")
+    _scan_project_tokens(diff_text, project_trigger_extensions(repo_root), fired)
+    return [oid for oid in OVERLAY_IDS if oid in fired]
+
+
+def _has_removed_declaration(diff_text: str) -> bool:
+    """Whether any removed (``-``) line — excluding the ``---`` file header — drops a
+    def/class/function signature (the committed deletion-impact trigger)."""
     for raw in diff_text.splitlines():
         if not raw.startswith("-") or raw.startswith("---"):
             continue
         if _REMOVED_DECL_RE.search(raw[1:]):  # strip the diff marker; keep the indentation
-            return ["deletion-impact"]
-    return []
+            return True
+    return False
+
+
+def _scan_project_tokens(
+    diff_text: str, ext: dict[str, dict[str, list[str]]], fired: set[str]
+) -> None:
+    """Add to ``fired`` every built-in overlay id whose project ``trigger_tokens`` literal
+    substring appears on an added/removed diff line body (``+++``/``---`` headers excluded)."""
+    token_map = {oid: e["trigger_tokens"] for oid, e in ext.items() if e.get("trigger_tokens")}
+    if not token_map:
+        return
+    for raw in diff_text.splitlines():
+        if raw.startswith("+++") or raw.startswith("---"):
+            continue
+        if not (raw.startswith("+") or raw.startswith("-")):
+            continue
+        body = raw[1:]
+        for oid, tokens in token_map.items():
+            if oid not in fired and any(tok in body for tok in tokens):
+                fired.add(oid)
 
 
 def overlay_flag_key(overlay_id: str) -> str:
