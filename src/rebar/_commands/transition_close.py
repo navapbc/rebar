@@ -172,6 +172,38 @@ def sign_completion_verdict(result: dict, ticket_id: str, repo_root=None, *, sig
     )
 
 
+def _active_caused_by_targets(state: dict) -> list[str]:
+    """The net-active ``caused_by`` targets already recorded on a reduced ticket state."""
+    return [
+        target
+        for dep in state.get("deps") or []
+        if dep.get("relation") == "caused_by" and (target := dep.get("target_id", ""))
+    ]
+
+
+def _resolve_caused_by_culprit(
+    caused_by: str, existing: list[str], ticket_id: str, tracker: str, repo_root_str: str
+) -> str | None:
+    """The culprit this close should attribute the bug to, or ``None`` for "leave it alone".
+
+    An explicit ``--caused-by`` is the operator's stated attribution and always resolves.
+    An EMPTY flag falls through to :func:`rebar.metrics.blame.derive_caused_by` ONLY when the
+    bug carries no ``caused_by`` edge yet (bug 10d0): blame is a guess, and a guess must never
+    be added beside a proven edge — that is the wrong-target failure the ``/rebar-debug``
+    guidance to always pass the flag exists to prevent. With no edge recorded, blame runs
+    exactly as before.
+    """
+    if caused_by.strip():
+        from rebar._engine_support.resolver import resolve_ticket_id
+
+        return resolve_ticket_id(caused_by.strip(), tracker) or caused_by.strip()
+    if existing:
+        return None
+    from rebar.metrics import blame
+
+    return blame.derive_caused_by(ticket_id, repo_root_str, tracker)
+
+
 def _apply_caused_by(
     ticket_id: str, caused_by: str, tracker: str, repo_root_str: str, repo_root
 ) -> None:
@@ -182,7 +214,19 @@ def _apply_caused_by(
     git blame. If a culprit is resolved, the edge is written via the lower-level
     :func:`rebar.graph._links._write_link_event` (which bypasses the closed-source + cycle
     guards ``add_dependency`` enforces — the source bug is already ``closed`` here). EVERYTHING
-    is wrapped so a resolve/write failure NEVER blocks or fails the close."""
+    is wrapped so a resolve/write failure NEVER blocks or fails the close.
+
+    Bypassing ``add_dependency`` also bypassed its ``_is_active_link`` idempotency check, so a
+    close that named an ALREADY-linked origin wrote a SECOND edge to the same target and
+    double-counted one escaped defect in ``rebar metrics`` (bug 10d0). The write is now
+    reconciled against the edges already recorded:
+
+    * culprit already linked -> no-op;
+    * a DIFFERENT explicit culprit -> REPLACES the recorded edge (unlink, then link). An
+      explicit flag is a deliberate, corrected attribution; dropping it silently would lock in
+      a known-wrong origin, and this path is best-effort by construction (every failure is
+      swallowed so the close stands), so there is no "fail loudly" that a caller could act on.
+    """
     try:
         from rebar.reducer import reduce_ticket as _reduce
 
@@ -190,21 +234,17 @@ def _apply_caused_by(
         if state.get("ticket_type") != "bug":
             return
 
-        culprit = caused_by.strip() if caused_by else None
-        if culprit:
-            from rebar._engine_support.resolver import resolve_ticket_id
-
-            culprit = resolve_ticket_id(culprit, tracker) or culprit
-        else:
-            from rebar.metrics import blame
-
-            culprit = blame.derive_caused_by(ticket_id, repo_root_str, tracker)
-        if not culprit or culprit == ticket_id:
+        existing = _active_caused_by_targets(state)
+        culprit = _resolve_caused_by_culprit(caused_by, existing, ticket_id, tracker, repo_root_str)
+        if not culprit or culprit == ticket_id or culprit in existing:
             return
 
-        from rebar.graph._links import _write_link_event
+        from rebar.graph._links import _write_link_event, remove_dependency
 
-        _write_link_event(ticket_id, culprit, "caused_by", str(config.tracker_dir(repo_root)))
+        tracker_dir = str(config.tracker_dir(repo_root))
+        for superseded in existing:
+            remove_dependency(ticket_id, superseded, tracker_dir, "caused_by")
+        _write_link_event(ticket_id, culprit, "caused_by", tracker_dir)
     except Exception:
         logger.warning(
             "best-effort caused_by link on close of %s failed; close stands",
