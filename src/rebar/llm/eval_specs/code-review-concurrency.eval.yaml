@@ -1,0 +1,175 @@
+# Standing eval spec for the code-review CONCURRENCY-RACE overlay (Pass-1) — story
+# ironfisted-humble-shrew, epic spoiled-theatrical-parrot.
+#
+# Recall (real races distilled from their introducing commits) + no-fire families
+# (concurrency-touching changes that are BENIGN). The overlay reviews the change along
+# the concurrency-race dimension and emits kernel-evidence findings; it is scored on
+# FINDINGS presence, not a FAIL/BLOCK verdict (the overlay ships ADVISORY — see the
+# criteria_routing entry `concurrency`).
+#
+# Validate offline: `rebar prompt eval code-review-concurrency` (validate-only — it
+# checks the spec is well-formed and the scorers/gate resolve). The LIVE behavioral
+# run (the `agents` extra + credentials) happens in eval CI, exactly as for every
+# sibling code-review overlay spec.
+#
+# GATE MECHANICS (grounded in rebar.llm.evals.eval.run_eval, NOT assumed):
+#   * A gating deterministic scorer passes an EPOCH iff every APPLICABLE case passes it
+#     (all-or-nothing per epoch); an epoch passes iff coverage_ok AND every gating
+#     scorer passes.
+#   * `coverage_threshold` is the fraction of cases that RAN (produced output without
+#     erroring) — it is a run-success floor, NOT a pass-rate carve-out, so it cannot
+#     make an individual case non-blocking.
+#   * `gate: at_least(2)` over `epochs: 3` is the ONLY per-run tolerance the framework
+#     provides: it lets a case miss in a MINORITY of epochs (a flaky WHOLE epoch)
+#     without failing the spec. It does NOT isolate a single persistently-failing case.
+#   * The known-hard R3 (fail-open guard) is therefore NOT a scored case — it is a
+#     documented NON-GATING stretch (a commented hunk block below), tracked but unable to
+#     fail the gate. Promote it to a scored recall case once the prompt reliably fires.
+prompt: code-review-concurrency
+model: anthropic:claude-opus-4-8
+epochs: 3
+gate: at_least(2)
+coverage_threshold: 0.8
+
+scorers:
+  - type: deterministic
+    name: code_review_emits_valid_findings
+    description: The overlay output is a dict carrying a `findings` list (native Pass-1 shape).
+  - type: deterministic
+    name: code_review_recall
+    description: A diff introducing a real data race / check-then-act TOCTOU / unlocked
+      twin produces a finding.
+  - type: deterministic
+    name: code_review_no_fire
+    description: A concurrency-touching diff that is BENIGN (lock added, atomic-write
+      seam, deliberate probe-then-skip that still locks) produces no finding.
+
+dataset:
+  # ── recall: real races distilled from their introducing commits (bad diff → finding) ──
+  - id: R1-unlocked-twin
+    corpus: concurrency-epic
+    expect: finding
+    mode: unlocked-twin
+    note: >-
+      Distilled from 9ad46965bd (`eclectic-spotted-barb`). A new writer commits to the
+      shared tracker via a raw `subprocess.run(["git", ..., "commit"])` that BYPASSES the
+      locked `event_append` seam every sibling writer routes through — so it races the
+      other writers' index/ref updates. The unlocked twin of an already-locked operation
+      is the archetypal introduced race.
+    diff: |
+      --- a/rebar/store/tracker.py
+      +++ b/rebar/store/tracker.py
+      @@ -40,6 +40,11 @@ def append_event(store, event):
+           with store.lock():                 # sibling writers serialize here
+               _event_append(store, event)
+      +
+      +def quick_note(store, text):
+      +    # BYPASSES store.lock()/_event_append — races concurrent appenders' ref update
+      +    subprocess.run(["git", "-C", store.path, "commit", "-m", text], check=True)
+  - id: R2-toctou-stale-lock
+    corpus: concurrency-epic
+    expect: finding
+    mode: check-then-act-toctou
+    note: >-
+      Distilled from 56e130ff71 (`fine-wisteria-solenodon`). Classic check-then-act
+      TOCTOU: read the lock's mtime, judge it stale, then `os.remove` it with NO identity
+      re-validation between the check and the act — a second process that renews or
+      reacquires the lock in that window has its lock deleted out from under it.
+    diff: |
+      --- a/rebar/store/locks.py
+      +++ b/rebar/store/locks.py
+      @@ -12,3 +12,9 @@ def acquire(lockfile):
+      +    if os.path.exists(lockfile):
+      +        age = time.time() - os.path.getmtime(lockfile)   # CHECK
+      +        if age > STALE_SECONDS:
+      +            os.remove(lockfile)      # ACT — no re-check that it is still the SAME stale lock
+      +    open(lockfile, "x").close()
+  # ── KNOWN-HARD STRETCH — R3 fail-open guard — DELIBERATELY NON-GATING ─────────────────
+  # R3 is NOT a scored `- id:` case: the harness has no per-case exemption for a scored
+  # entry (a failing gating recall case fails the whole epoch — see GATE MECHANICS above),
+  # so a persistently-hard case would make the gate flaky. It is documented HERE as a
+  # tracked stretch target so the corpus stays complete; promote it to a scored recall
+  # case once the prompt reliably fires on it.
+  #
+  # Distilled from 3938c7ed2d (`greisen-draconian-annelid`). Drift between two reads is
+  # DETECTED and a warning is logged, but the operation proceeds ANYWAY on the first (now
+  # stale) read instead of re-reading or aborting — a fail-open guard that races the
+  # concurrent writer whose change caused the drift. It is the hardest recall case for a
+  # less-capable reviewer because the warning reads as "handled".
+  #
+  #   --- a/rebar/store/reconcile.py
+  #   +++ b/rebar/store/reconcile.py
+  #   @@ -20,4 +20,8 @@ def reconcile(store):
+  #        head = store.read_head()
+  #   -    apply(store, head)
+  #   +    if store.read_head() != head:
+  #   +        log.warning("head drifted during reconcile")   # detected...
+  #   +    apply(store, head)   # ...but proceeds on the STALE head anyway (fail-open)
+  # ── no-fire: concurrency-TOUCHING diffs that are BENIGN (the overlay must NOT fire) ──
+  - id: F1-lock-added
+    corpus: concurrency-epic
+    expect: pass
+    mode: lock-added
+    note: >-
+      Distilled from 7853af7698. A write lock is ADDED around a previously-unlocked
+      merge — this REMOVES a race rather than introducing one. The overlay must not fire
+      on the mere presence of locking/concurrency vocabulary.
+    diff: |
+      --- a/rebar/store/merge.py
+      +++ b/rebar/store/merge.py
+      @@ -8,4 +8,5 @@ def merge_refs(store, a, b):
+      -    _merge(store, a, b)          # was unlocked — could race a concurrent merge
+      +    with store.lock():           # now serialized against concurrent merges
+      +        _merge(store, a, b)
+  - id: F2-atomic-write-seam
+    corpus: concurrency-epic
+    expect: pass
+    mode: atomic-write-seam
+    note: >-
+      Distilled from 95f97cbeb6. A write to PROCESS-LOCAL scratch state is converted to
+      an atomic write-then-rename. It touches write/rename vocabulary but the state is not
+      shared across processes, so there is no race — the overlay must not fire.
+    diff: |
+      --- a/rebar/util/cache.py
+      +++ b/rebar/util/cache.py
+      @@ -5,3 +5,6 @@ def save_scratch(self, data):
+      -    self._path.write_text(data)          # process-local scratch; not shared
+      +    tmp = self._path.with_suffix(".tmp")
+      +    tmp.write_text(data)
+      +    tmp.replace(self._path)              # atomic, but state was never shared anyway
+  - id: F3-probe-then-skip-still-locks
+    corpus: concurrency-epic
+    expect: pass
+    mode: deliberate-probe-then-skip
+    # HARD FALSE-POSITIVE CONTROL (per the story). A naive reviewer sees a check-then-act
+    # SHAPE (probe, then branch) and fires — but the skipped work is EXPLICITLY optional
+    # and the real operation still takes the lock, so no invariant rides the probe. The
+    # overlay must NOT fire; if it does, it is over-firing on shape rather than reasoning
+    # about reachability/handling.
+    note: >-
+      Distilled from abbc65adf4. A best-effort probe decides whether to do OPTIONAL warm
+      caching; whatever it decides, the subsequent real write takes the lock. The
+      check-then-act shape is benign because nothing correctness-critical depends on the
+      probe's result.
+    diff: |
+      --- a/rebar/store/writer.py
+      +++ b/rebar/store/writer.py
+      @@ -10,3 +10,9 @@ def write(store, event):
+      +    if not _cache_is_warm(store):        # best-effort probe — result is advisory only
+      +        _try_warm_cache(store)           # OPTIONAL; safe to skip or race, no invariant rides it
+      +    with store.lock():                   # the REAL write still serializes correctly
+      +        _event_append(store, event)
+
+gold_set:
+  - input: "A new writer commits to the shared store via raw git, bypassing the locked append seam."
+    label: useful
+  - input: "A stale-lock reaper that removes the lockfile after an mtime check with no re-validation."
+    label: useful
+  - input: "A guard that detects read drift, logs a warning, and proceeds on the stale value anyway."
+    label: useful
+  - input: "A write lock added around a previously-unlocked merge (removes a race)."
+    label: not_useful
+  - input: "An atomic write-then-rename over process-local scratch state that is never shared."
+    label: not_useful
+  - input: "A probe-then-skip of OPTIONAL cache warming where the real write still takes the lock."
+    label: not_useful
