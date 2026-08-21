@@ -254,7 +254,9 @@ def test_strict_module_cli_translates_delivery_error_without_writing_an_event(
     assert completed.stdout == ""
     assert "push-policy-declined" in completed.stderr
     assert "GH013" in completed.stderr or "pre-receive hook declined" in completed.stderr
-    assert "1 unpushed commits on origin/tickets..HEAD" in completed.stderr
+    assert (
+        "1 unpushed commits on the local tickets branch ahead of origin/tickets" in completed.stderr
+    )
     assert _git(tracker, "rev-parse", "HEAD").stdout.strip() == head_before
     assert _ahead(tracker) == 1
     events_after = {

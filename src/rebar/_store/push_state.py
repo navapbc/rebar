@@ -138,14 +138,45 @@ def unpushed_count(base: str, remote_ref: str) -> str:
 
 
 def unpushed_summary(base: str, remote_ref: str) -> str:
-    """A ``" (N unpushed commits …)"`` suffix for a terminal push-failure warning.
+    """A ``" (N unpushed commits …)"`` suffix for a terminal push-failure report.
 
     Bug 2a76: without it every failed write logged a byte-identical line, so a permanent
     outage looked like the same transient blip repeating. The count makes the backlog
     ESCALATE across successive failed writes, which is the signal an operator (or fsck's
     ``PUSH_PENDING``) acts on.
+
+    Bug 3ff9 (squeamish-halfawake-fantail): the wording names the tickets branch and
+    states the self-healing contract instead of the bare ``{remote_ref}..HEAD`` range —
+    the tracker's HEAD reads to an agent session as its code worktree's HEAD, and nothing
+    said the backlog publishes by itself, so sessions adopted the shared backlog as their
+    own emergency and burned tokens investigating a state that heals on the next write.
     """
-    return f" ({unpushed_count(base, remote_ref)} unpushed commits on {remote_ref}..HEAD)"
+    return (
+        f" ({unpushed_count(base, remote_ref)} unpushed commits on the local tickets branch"
+        f" ahead of {remote_ref}; committed locally, they publish on the next successful push)"
+    )
+
+
+def backlog_grew(tracker: str, remote_ref: str) -> bool:
+    """Whether the unpushed backlog GREW since the previously recorded failure.
+
+    Bug 3ff9 (squeamish-halfawake-fantail): the level of a terminal best-effort push
+    report keys on this — a lost contention race whose backlog is not growing is
+    expected and self-healing (INFO material), while growth across successive failures
+    is the persistent-outage signal bug 2a76 kept loud. Reads the PREVIOUS marker, so
+    it must run BEFORE :func:`record_failure` overwrites it. Ambiguity — no prior
+    marker, an ``unknown`` or corrupt count — resolves to ``False``: growth must be
+    PROVEN before a report escalates to operator-loud. Never raises (both reads are
+    best-effort by construction).
+    """
+    prior = read_status(tracker)
+    if prior.get("state") != "pending":
+        return False
+    prior_count = str(prior.get("unpushed", ""))
+    current = unpushed_count(tracker, remote_ref)
+    if not (prior_count.isdigit() and current.isdigit()):
+        return False
+    return int(current) > int(prior_count)
 
 
 def record_failure(tracker: str, reason: str, detail: str, remote_ref: str) -> None:

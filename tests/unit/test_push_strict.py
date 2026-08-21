@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import subprocess
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -139,7 +140,7 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
 
     monkeypatch.setattr(push, "_git", terminal_git)
     monkeypatch.setattr(push.sys, "exit", lambda *_a, **_k: pytest.fail("core called sys.exit"))
-    caplog.set_level("WARNING")
+    caplog.set_level("INFO")
 
     error = _delivery_error(
         lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
@@ -157,8 +158,13 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
     # delivery is degraded, so the strict path is deliberately no longer silent here.
     # Whether it reaches the captured streams or only the log handler depends on handler
     # config, so the count is asserted on caplog, which is deterministic either way.
+    # Bug 3ff9: the retry is automatic, so the announcement is INFO — never WARNING.
     retries = [r for r in caplog.records if "transient transport fault" in r.getMessage()]
     assert len(retries) == attempts - 1
+    assert all(r.levelno == logging.INFO for r in retries), (
+        "an automatic mid-retry transport notice must be INFO material: "
+        f"{[(r.levelname, r.getMessage()) for r in retries]}"
+    )
     assert witness.read_bytes() == before
     assert push_calls == attempts
 

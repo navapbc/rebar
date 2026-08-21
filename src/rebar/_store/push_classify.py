@@ -222,9 +222,11 @@ def _retry_transport_or_stop(
     violation (bug 2a76). A terminal outcome raises (strict) or logs, before returning.
     """
     if _is_transport_retriable(stderr) and transport_attempts < _MAX_TRANSPORT_ATTEMPTS:
-        logger.warning(
+        # Bug 3ff9: this retry is automatic — announcing it at WARNING primed agent
+        # sessions to investigate a fault the code was already riding out. INFO material.
+        logger.info(
             "tickets branch push hit a transient transport fault "
-            "(transport attempt %s/%s), retrying: %s",
+            "(transport attempt %s/%s); retrying automatically, no action needed: %s",
             transport_attempts,
             _MAX_TRANSPORT_ATTEMPTS,
             stderr.strip()[:200],
@@ -240,3 +242,27 @@ def _retry_transport_or_stop(
         _unpushed_summary(base_path, remote_ref),
     )
     return False
+
+
+def _terminal_severity(base_path: str, remote_ref: str, stderr: str) -> tuple[int, str]:
+    """The (log level, backlog suffix) for a terminal best-effort contention failure.
+
+    Bug 3ff9 (squeamish-halfawake-fantail): a lost contention race under concurrent
+    tickets writers is EXPECTED and self-healing — the write is committed locally, the
+    durable push-pending marker records the outcome, and the backlog publishes on the
+    next successful write — so reporting it at WARNING primed agent sessions to
+    investigate a non-issue (the operator ruling of 2026-08-21). It stays operator-loud
+    only when it is provably NOT self-healing: a policy decline in the terminal stderr
+    (permanent, bug 2a76), or a backlog that GREW since the previously recorded failure
+    (:func:`push_state.backlog_grew`). MUST be called BEFORE :func:`_raise_if_strict`
+    records the new failure, which overwrites the marker the growth check reads.
+    """
+    summary = _unpushed_summary(base_path, remote_ref)
+    if _is_policy_decline(stderr):
+        return logging.WARNING, summary
+    if push_state.backlog_grew(base_path, remote_ref):
+        return logging.WARNING, summary + "; the backlog GREW since the previous failure"
+    return (
+        logging.INFO,
+        summary + "; expected under concurrent tickets writers — no action needed",
+    )

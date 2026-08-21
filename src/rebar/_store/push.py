@@ -31,8 +31,8 @@ from rebar._store.push_classify import (
     _is_non_fast_forward,
     _raise_if_strict,
     _retry_transport_or_stop,
+    _terminal_severity,
 )
-from rebar._store.push_state import unpushed_summary as _unpushed_summary
 
 logger = logging.getLogger(__name__)
 
@@ -313,6 +313,9 @@ def push_tickets_branch(
             push_state.clear(base_path)
             return
         terminal_detail = terminal.stderr or "terminal push after recovery was rejected"
+        # Bug 3ff9: severity is computed BEFORE _raise_if_strict records the failure,
+        # which overwrites the previous marker the backlog-growth check reads.
+        level, backlog = _terminal_severity(base_path, remote_ref, terminal_detail)
         _raise_if_strict(
             strict,
             "final-push-rejected",
@@ -320,18 +323,22 @@ def push_tickets_branch(
             base_path,
             remote_ref,
         )
-        logger.warning(
+        logger.log(
+            level,
             "tickets branch terminal push failed after recovery (exit %s): %s%s",
             terminal.returncode,
             terminal_detail,
-            _unpushed_summary(base_path, remote_ref),
+            backlog,
         )
         return
 
     # Keep the literal "failed after N retries" wording — two negative assertions
     # (test_epoch_guard_matrix / test_epoch_guard_reconciliation) prove this line is
     # ABSENT in their scenarios, so it is appended to, never reworded. Bug 2a76 adds
-    # the last rejection reason and the escalating backlog size.
+    # the last rejection reason and the escalating backlog size. Bug 3ff9 keys the
+    # LEVEL on _terminal_severity: a lost contention race whose backlog is not growing
+    # is expected/self-healing and reports at INFO, not WARNING.
+    level, backlog = _terminal_severity(base_path, remote_ref, stderr)
     _raise_if_strict(
         strict,
         "final-push-rejected",
@@ -339,11 +346,12 @@ def push_tickets_branch(
         base_path,
         remote_ref,
     )
-    logger.warning(
+    logger.log(
+        level,
         "tickets branch push failed after %s retries: %s%s",
         _MAX_RETRIES,
         stderr,
-        _unpushed_summary(base_path, remote_ref),
+        backlog,
     )
 
 
