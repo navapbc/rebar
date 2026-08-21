@@ -12,6 +12,9 @@ local→Jira comment comparison and the create-path comment mapping:
     - ``_normalize_comment_body`` / ``_decorate_outbound_comment`` — the rich-text→text
       normalisation and the RECONCILER_MARKER loop-breaker decoration (bug 85a1 /
       Gap 1).
+    - ``fit_preserving_marker`` — the send-path fit that keeps that marker inside
+      the backend's size budget instead of letting the fitter shear it off the
+      tail (bug 5931).
     - ``_is_machine_marker_comment`` — the bridge-internal machine-comment
       exclusion (bug 6afc).
 
@@ -59,6 +62,7 @@ ticket, unwritten anywhere.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -203,6 +207,90 @@ def _decorate_outbound_comment(body: str) -> str:
     its own ADF node and back).
     """
     return f"{body}\n\n{RECONCILER_MARKER}"
+
+
+def fit_preserving_marker(text: str, fit: Callable[[str], str]) -> str:
+    """Fit a decorated outbound comment WITHOUT cutting off its marker.
+
+    Bug 5931-78a3-95d2-44cd. :func:`_decorate_outbound_comment` puts
+    ``RECONCILER_MARKER`` at the very END of the body, and every vendor fitter
+    truncates from the RIGHT (largest prefix + a visible truncation notice that
+    still serializes within the backend's limit). So on the send path the marker
+    — being the tail — was always the FIRST thing cut: an over-length comment
+    landed in Jira unmarked, the inbound loop-breaker (which tests
+    ``RECONCILER_MARKER in body_text``) did not recognise it as our own echo, and
+    the bridge re-mirrored it on every pass. 836 such unmarked duplicates
+    accumulated live. The defect is the ORDERING (decorate-then-fit), not the
+    fitter, so the repair belongs here beside the decoration rather than in any
+    vendor fitter.
+
+    The fix truncates the CONTENT and re-appends the decoration, so the marker is
+    inside the fitted budget instead of hanging off its end.
+
+    ``fit`` is the caller's vendor fitter (Cloud: ``AdfCodec.fit_outbound``),
+    injected as a plain ``Callable[[str], str]`` so this backend-neutral core
+    module keeps knowing nothing about any vendor or its numeric limit (pinned by
+    ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). Two properties of
+    every real fitter are relied on and hold by construction: it is idempotent,
+    and ``fit(x) == x`` exactly when ``x`` is already within the limit — which is
+    the only within-limit oracle available without naming a limit here.
+
+    Behaviour:
+
+    - text that does not end with the marker (descriptions, undecorated bodies)
+      is handed straight to ``fit`` — byte-identical to the pre-fix path;
+    - a decorated body already within the limit is returned UNCHANGED (no
+      truncation notice, no reordering, no added whitespace);
+    - an over-limit decorated body is rebuilt as
+      ``<content prefix><vendor truncation notice>`` re-decorated with the marker,
+      binary-searching the largest content prefix that still fits.
+
+    The vendor's own truncation notice is DERIVED from a single probe of ``fit``
+    (the part of the probe past its common prefix with the input) rather than
+    hard-coded: that literal is already triplicated across ``adapters/jira/adf.py``,
+    ``comment_limits.py`` and ``jira_family/rich_text.py``, and a fourth copy here
+    would silently drift. Likewise the marker separator comes from
+    :func:`_decorate_outbound_comment` itself, so the decoration has exactly one
+    source of truth.
+    """
+    if not text.endswith(RECONCILER_MARKER):
+        return fit(text)
+    probe = fit(text)
+    if probe == text:
+        # Already within the limit: send it completely unchanged.
+        return text
+    # The vendor notice is whatever the probe appended past the point it cut.
+    common = len(_common_prefix(text, probe))
+    notice = probe[common:]
+    # Strip the decoration to recover the user content: the separator's length is
+    # taken from the decorator so no separator literal is duplicated here.
+    separator_len = len(_decorate_outbound_comment("")) - len(RECONCILER_MARKER)
+    content = text[: len(text) - len(RECONCILER_MARKER) - separator_len]
+    lo, hi, best = 0, len(content), None
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        candidate = _decorate_outbound_comment(content[:mid] + notice)
+        if fit(candidate) == candidate:
+            best = candidate
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    # Pathological: not even the bare decoration fits. Fall back to the vendor
+    # fitter's own answer rather than emitting something over the limit.
+    return best if best is not None else probe
+
+
+def _common_prefix(left: str, right: str) -> str:
+    """The shared leading run of two strings (returned as the prefix itself).
+
+    Used by :func:`fit_preserving_marker` to isolate what a vendor fitter APPENDED
+    when it truncated, without importing or restating the vendor's notice literal.
+    """
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return left[:index]
 
 
 # Reconciler-internal machine-comment exclusion.
