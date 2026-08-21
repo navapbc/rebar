@@ -93,15 +93,15 @@ def test_known_env_helper_call_resolves_and_fires(gate, tmp_path):
     gen = importlib.util.module_from_spec(gen_spec)
     gen_spec.loader.exec_module(gen)
 
-    # Build the call from the row's DECLARED (pos, prefix), not from an assumption that the
+    # Build the call from the row's DECLARED position, not from an assumption that the
     # first row's env name sits at position 0: that assumption is dict-insertion-order
     # dependent, and it silently mis-built the call the moment the row order changed.
-    helper, (pos, prefix) = next(iter(gen.KNOWN_ENV_HELPERS.items()))
+    helper, pos = next(iter(gen.KNOWN_ENV_HELPERS.items()))
     args = ", ".join(["0"] * pos + ["'SOME_KNOB'", "0"])
     body = f"def f():\n    return {helper}({args})\n"
     errors = gate.check(_root(tmp_path, body))
     assert len(errors) == 1, errors
-    assert prefix + "SOME_KNOB" in errors[0]
+    assert "SOME_KNOB" in errors[0]
 
 
 def test_shim_shaped_absent_helper_fails_closed(gate, tmp_path):

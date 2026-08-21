@@ -423,13 +423,13 @@ class _Scanner:
         return self._shim_access(node, func)
 
     def _helper_access(self, node: ast.Call, helper: str) -> Access | None:
-        pos, prefix = KNOWN_ENV_HELPERS[helper]
+        pos = KNOWN_ENV_HELPERS[helper]
         if len(node.args) <= pos:
             return None
         lit = _str_literal(node.args[pos])
         if lit is None:
             return self._unresolved(node, helper)
-        return self._resolved_env(node, prefix + lit)
+        return self._resolved_env(node, lit)
 
     def _shim_access(self, node: ast.Call, func: ast.expr) -> Access | None:
         if not isinstance(func, ast.Name):

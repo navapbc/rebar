@@ -299,7 +299,7 @@ def test_stale_known_env_helper_row_aborts_the_scan():
     """
     ghost = "_rebar_ghost_helper_84c7"
     assert ghost not in _defined_function_names(gen.DEFAULT_SCAN_ROOT), "pick a freer name"
-    gen.KNOWN_ENV_HELPERS[ghost] = (0, "")
+    gen.KNOWN_ENV_HELPERS[ghost] = 0
     try:
         with pytest.raises(RuntimeError) as excinfo:
             gen.scan(gen.DEFAULT_SCAN_ROOT)
