@@ -15,7 +15,6 @@ An in-process Python CLI. Its structure:
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 
@@ -159,21 +158,6 @@ _WRITES_FULL = frozenset(
     }
 )
 
-# Keep the top-level router simple enough to be stable across the Python-version
-# specific ASTs Ruff scans in CI. Each partition follows an existing dispatch
-# seam and retains the established per-command initialization policy.
-_DISPATCH_PRIMARY = (
-    frozenset({"init", "scratch", "metrics", "delete"})
-    | _READS_INIT_ONLY
-    | _READS_NO_INIT
-    | _LIFECYCLE
-    | _COMPACT
-    | _BRIDGE
-)
-_DISPATCH_MIDDLE = (
-    _IO | frozenset({"doctor", "fsck", "fsck-recover", "tracker-maintenance"}) | _WRITES_FULL
-)
-
 
 def _reconcile(argv: list[str]) -> int:
     """Compatibility wrapper for the established ``rebar reconcile`` spelling."""
@@ -262,177 +246,6 @@ def _emit_subcommand_help(sub: str) -> int:
     return _help_route.emit_subcommand_help(sub)
 
 
-def _dispatch_bridge(sub: str, rest: list[str]) -> int:
-    """Dispatch bridge commands while preserving their distinct init policies."""
-    if sub in {"bridge", "bridge-status"}:
-        from rebar._cli._bridge_commands import bridge_cli
-
-        return bridge_cli(rest if sub == "bridge" else ["status", *rest])
-    from rebar._cli._bridge_commands import bridge_fsck_cli
-
-    return bridge_fsck_cli(rest)
-
-
-def _dispatch_primary(sub: str, rest: list[str]) -> int:
-    """Route bootstrap, read, lifecycle, compaction, and bridge commands."""
-    if sub == "init":
-        # Explicit bootstrap — NEVER triggers auto-init (it IS init).
-        from rebar._commands import init as _init_cmd
-
-        return _init_cmd.init_cli(rest)
-    if sub == "scratch":
-        # Filesystem-only per-ticket store — NO auto-init.
-        from rebar._commands import scratch
-
-        return scratch.scratch_cli(rest)
-    if sub == "metrics":
-        # Read command over the declarative metric registry. Init-only like the
-        # other reads: it resolves the store root but composes no writes.
-        ensure_initialized(init_only=True)
-        from rebar._commands import metrics as _metrics
-
-        return _metrics.metrics_cli(rest)
-    if sub in _READS_INIT_ONLY:
-        ensure_initialized(init_only=True)
-        from rebar._engine_support import reads
-
-        return reads.main([sub, *rest])
-    if sub in _READS_NO_INIT:
-        from rebar._engine_support import reads
-
-        return reads.main([sub, *rest])
-    if sub in _LIFECYCLE:
-        ensure_initialized(init_only=False)
-        from rebar._commands import transition as _transition
-
-        if sub == "reopen":
-            return _transition.reopen_cli(rest)
-        if sub == "claim":
-            return _transition.claim_cli(rest)
-        return _transition.transition_cli(rest)
-    if sub in _COMPACT:
-        ensure_initialized(init_only=False)
-        from rebar._commands import compact as _compact
-
-        if sub == "compact-all":
-            return _compact.compact_all_cli(rest)
-        return _compact.compact_cli(rest)
-    if sub == "delete":
-        ensure_initialized(init_only=False)
-        from rebar._commands import delete as _delete
-
-        return _delete.delete_cli(rest)
-    if sub in _BRIDGE:
-        return _dispatch_bridge(sub, rest)
-    raise RuntimeError(f"rebar: primary subcommand {sub!r} has no in-process handler")
-
-
-def _dispatch_middle(sub: str, rest: list[str]) -> int:
-    """Route import/export, repair, and ordinary write commands."""
-    if sub in _IO:
-        from rebar._io import _cli as _io_cli
-
-        if sub == "import":
-            ensure_initialized(init_only=False)
-            return _io_cli.import_cli(rest)
-        ensure_initialized(init_only=True)
-        return _io_cli.export_cli(rest)
-    if sub == "doctor":
-        # Read-only by default, so it must NOT join _WRITES_FULL — that arm
-        # reconverges the store on EVERY invocation. Only --repair writes, and only
-        # it needs the full init (same conditional shape as the import/export arm).
-        ensure_initialized(init_only="--repair" not in rest)
-        from rebar._commands import doctor as _doctor
-
-        return _doctor.doctor_cli(rest)
-    if sub == "fsck":
-        ensure_initialized(init_only=False)
-        from rebar._commands import fsck as _fsck
-
-        return _fsck.fsck_cli(rest)
-    if sub == "tracker-maintenance":
-        # The SUPPORTED door for raw git in the tracker (bug 2fa6). Needs a real store to
-        # inspect, and must never auto-init one — an operator reaching for maintenance is
-        # repairing an EXISTING store, and silently creating a fresh one would hide that.
-        ensure_initialized(init_only=False)
-        from rebar._commands import tracker_maintenance as _tracker_maintenance
-
-        return _tracker_maintenance.tracker_maintenance_cli(rest)
-    if sub == "fsck-recover":
-        # The recover path resolves its own tracker (honors REBAR_TRACKER_DIR /
-        # --tracker-dir); it only auto-inits when
-        # no tracker is injected.
-        from rebar import config
-
-        if not config.tracker_dir_override():
-            ensure_initialized(init_only=False)
-        from rebar._commands import fsck_recover as _fsck_recover
-
-        return _fsck_recover.fsck_recover_cli(rest)
-    if sub in _WRITES_FULL:
-        ensure_initialized(init_only=False)
-        from rebar._commands import main as commands_main
-
-        return commands_main([sub, *rest])
-    raise RuntimeError(f"rebar: middle subcommand {sub!r} has no in-process handler")
-
-
-def _dispatch_suffix(sub: str, rest: list[str]) -> int:
-    """Route field, graph, gate, signing, and static-read commands."""
-    if sub in _FIELD_READS:
-        ensure_initialized(init_only=False)
-        from rebar._engine_support import field_reads, reads
-
-        tracker = reads.tracker_dir()
-        if sub == "get-file-impact":
-            return field_reads.file_impact_cli(rest, tracker)
-        return field_reads.verify_commands_cli(rest, tracker)
-    if sub in _LOOKUPS:
-        ensure_initialized(init_only=False)
-        from rebar._engine_support import lookups, reads
-
-        tracker = reads.tracker_dir()
-        if sub == "exists":
-            return lookups.exists_cli(rest, tracker)
-        if sub == "resolve":
-            return lookups.resolve_cli(rest, tracker)
-        return lookups.format_cli(rest, tracker, os.path.dirname(tracker))
-    if sub in _DESCENDANTS:
-        ensure_initialized(init_only=False)
-        from rebar._engine_support import descendants, reads
-
-        return descendants.list_descendants_cli(rest, reads.tracker_dir())
-    if sub in _GATES:
-        from rebar._engine_support import gates, reads
-
-        tracker = reads.tracker_dir()
-        if sub == "check-ac":
-            return gates.check_ac_cli(rest, tracker)
-        if sub == "clarity-check":
-            return gates.clarity_check_cli(rest, tracker, os.path.dirname(tracker))
-        if sub == "quality-check":
-            return gates.quality_check_cli(rest, tracker)
-        return gates.summary_cli(rest, tracker)
-    if sub in _SIGNING:
-        ensure_initialized(init_only=False)
-        from rebar import signing
-
-        if sub == "sign":
-            return signing.sign_cli(rest)
-        return signing.verify_signature_cli(rest)
-    if sub == "bridge-probe":
-        return _bridge_probe(rest)
-    if sub == "grounding-info":
-        # Repo-INDEPENDENT static read (no store, no auto-init): the code-grounding
-        # oracle integration contract. Owns its own --output parsing (report profile).
-        return _grounding_info(rest)
-    # Every known subcommand is routed in-process above, and main() rejects
-    # unknown subcommands before reaching _dispatch. Arriving here means a
-    # subcommand was added to the known set without an in-process arm — a wiring
-    # bug, surfaced loudly rather than silently mis-dispatched.
-    raise RuntimeError(f"rebar: subcommand {sub!r} is known but has no in-process handler")
-
-
 # Mutating verbs that confirm their result on stdout (ticket 6bda-9d58-8546-4638).
 # The global --quiet / --output flags are pre-extracted here at the router — BEFORE
 # any partition dispatch — because the positional-only _REGISTRY leaves
@@ -478,12 +291,14 @@ def _dispatch(sub: str, rest: list[str]) -> int:
 
 
 def _dispatch_route(sub: str, rest: list[str]) -> int:
-    """The partition dispatch proper (post any global-flag extraction)."""
-    if sub in _DISPATCH_PRIMARY:
-        return _dispatch_primary(sub, rest)
-    if sub in _DISPATCH_MIDDLE:
-        return _dispatch_middle(sub, rest)
-    return _dispatch_suffix(sub, rest)
+    """The core dispatch proper (post any global-flag extraction).
+
+    The selected registry route is the single execution authority: it names the
+    lazy handler, its bounded adapter call shape, and its init policy (RP-05 S3).
+    """
+    from rebar._cli import _execute
+
+    return _execute.execute(sub, rest)
 
 
 def main(argv: list[str] | None = None) -> int:
