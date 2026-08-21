@@ -403,3 +403,62 @@ def test_wellformed_applies_to_accepted_at_overlay_load(tmp_path, ok_applies_to)
     root = _make_repo(tmp_path, overlay={"plan_review": {"project.x": good}, "activate": []})
 
     assert registry.effective_routing(root)["project.x"]["applies_to"] == ok_applies_to
+
+
+# ── RP-06 S1: the [] → ["**"] migration of project.review-phase-boundaries ──────────
+#
+# The committed repo overlay migrates the code-review project criterion
+# `project.review-phase-boundaries` from the ungated `applies_to: []` spelling to the
+# explicit repository-wide `["**"]`. These contract tests prove (a) the committed file
+# declares the explicit spelling and (b) the consumer selection is behavior-preserving —
+# including the diverging empty-`changed_files` edge, where the old `[]` short-circuit
+# selected but `any(glob_match … over [])` would not.
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
+
+
+def test_committed_review_phase_boundaries_is_repository_wide_glob():
+    """AC4: the committed `.rebar/criteria_routing.json` declares
+    `project.review-phase-boundaries.applies_to == ["**"]` (the explicit repository-wide
+    spelling), not the legacy empty list."""
+    overlay = json.loads(
+        (Path(_REPO_ROOT) / ".rebar" / "criteria_routing.json").read_text(encoding="utf-8")
+    )
+    entry = overlay["code_review"]["project.review-phase-boundaries"]
+    assert entry["applies_to"] == ["**"]
+
+
+def test_repository_wide_consumer_selects_regardless_of_changed_files(tmp_path):
+    """AC5 + the T8 edge: through the real code-review consumer, a `["**"]` project criterion
+    selects for a non-empty review AND for an empty-`changed_files` review — identical to the
+    membership the legacy `[]` spelling produced. A scoped, non-matching glob still records a
+    non-selection, proving the unconditional rule is `**`-specific, not blanket-true."""
+    from rebar.llm.code_review import registry as cr
+
+    overlay = {
+        "code_review": {
+            "project.rpb": {
+                "exec": "1-TURN",
+                "applies_to": ["**"],
+                "block_threshold": 0.9,
+                "default_posture": "advisory",
+            }
+        },
+        "activate": {"project.rpb": ["code_review"]},
+    }
+    root = _make_repo(tmp_path, overlay=overlay)
+    assert cr.project_criterion_applies("project.rpb", ["src/a.py"], root) is True
+    assert cr.project_criterion_applies("project.rpb", [], root) is True  # the diverging edge
+
+    scoped = {
+        "code_review": {
+            "project.rpb": {
+                "exec": "1-TURN",
+                "applies_to": ["src/auth/**"],
+                "block_threshold": 0.9,
+                "default_posture": "advisory",
+            }
+        },
+        "activate": {"project.rpb": ["code_review"]},
+    }
+    root2 = _make_repo(tmp_path / "scoped", overlay=scoped)
+    assert cr.project_criterion_applies("project.rpb", ["docs/x.md"], root2) is False

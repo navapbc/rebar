@@ -84,7 +84,7 @@
       "default_posture": "advisory",
       "block_threshold": 0.9,
       "blocking_enabled": false,
-      "applies_to": []
+      "applies_to": ["**"]
     },
     "concurrency": {
       "trigger_tokens": [

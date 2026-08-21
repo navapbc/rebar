@@ -230,10 +230,15 @@ def test_project_assets_are_explicitly_committed_and_documented() -> None:
 
 
 # ── this repo's own criterion stays UNGATED (bug d343-47c6 regression guard) ────────────
-def test_repo_criterion_declares_empty_applies_to() -> None:
+def test_repo_criterion_declares_repository_wide_applies_to() -> None:
+    """RP-06 S1 migrated this criterion's `applies_to` from the legacy ungated `[]` to the
+    explicit repository-wide `["**"]`. The two are behavior-equivalent for dispatch (proven by
+    `test_repo_criterion_is_dispatched_whatever_changed`, including the empty-changed-files
+    edge); `["**"]` states the always-on intent explicitly under the stricter non-empty-glob
+    rule for code-review project LLM criteria."""
     routing_doc = json.loads((_REBAR / "criteria_routing.json").read_text(encoding="utf-8"))
 
-    assert routing_doc["code_review"][CRITERION_ID]["applies_to"] == []
+    assert routing_doc["code_review"][CRITERION_ID]["applies_to"] == ["**"]
 
 
 @pytest.mark.parametrize(
@@ -247,8 +252,9 @@ def test_repo_criterion_declares_empty_applies_to() -> None:
     ids=["no-files", "python", "docs", "unrelated"],
 )
 def test_repo_criterion_is_dispatched_whatever_changed(changed_files) -> None:
-    """`applies_to: []` means UNGATED for a project criterion, so gating project criteria on
-    `applies_to` must leave this repo's only activated code-review criterion always-on."""
+    """`applies_to: ["**"]` means REPOSITORY-WIDE for a project criterion, so it selects
+    unconditionally — this repo's only activated code-review criterion stays always-on for any
+    changed-files set, including the empty set."""
     from rebar.llm.workflow import gate_dispatch
 
     activated = gate_dispatch._activated_code_review_project_criteria(REPO_ROOT, changed_files)

@@ -136,3 +136,4 @@ bijection. History of the 2026-08 renumbering is in [RENUMBERING.md](RENUMBERING
 - [0098 — Operation-scoped configuration and provider bindings](0098-operation-scoped-config-and-provider-composition.md)
 - [0100 — Lazy CLI command and capability registry with canonical help](0100-cli-command-and-capability-registry.md)
 - [0101 — `[non-codebase]` replaces `[operator-attested]` as the acceptance-criterion tag](0101-non-codebase-acceptance-criterion-tag.md)
+- [0102 — Review discovery reads ONE compiled effective-policy snapshot](0102-review-discovery-effective-policy.md)
