@@ -1,11 +1,11 @@
 """Happy-path contract for the RP-05 S2a route registry (``rebar._cli._registry``).
 
-These tests pin the *observable* foundation contract the registry must satisfy
-without cutting over any routing or help:
+These tests pin the *observable* foundation contract the registry must satisfy as the
+SOLE routing authority (RP-05 S6 completed the cutover — the router's duplicate literal
+policy frozensets were retired):
 
 * the immutable route table names every current spelling, and
-* the policy sets DERIVED from that table reproduce the router's live
-  ``_cli`` frozensets byte-for-byte (zero shadow-census delta), and
+* ``derive_policy_sets`` covers exactly the named policy-set census, and
 * the shipped route table validates clean.
 
 Adversarial validation, import-isolation, and parse-error shape live in the
@@ -19,12 +19,12 @@ import sys
 
 import pytest
 
-from rebar import _cli
 from rebar._cli import _registry
 from rebar._cli._registry import Route, validate
 
-# The named policy sets the router exposes today. ``derive_policy_sets`` must
-# reproduce each one exactly from the route table (AC2: zero shadow-census delta).
+# The named policy sets ``derive_policy_sets`` produces — its complete key census. (Before
+# RP-05 S6 the router also shipped these as literal ``_cli`` frozensets; that duplicate
+# authority was retired, so the registry's derived output is now the single source.)
 _CENSUS_SETS = (
     "_NO_AUTO_MOUNT",
     "_INTERCEPTS",
@@ -66,34 +66,17 @@ _INDIVIDUAL_ARMS = frozenset(
 
 
 def _all_current_spellings() -> frozenset[str]:
+    # RP-05 S6: the route registry is the SOLE authority — the router's literal policy
+    # frozensets were retired — so the spelling census is derived from the registry's own
+    # ``derive_policy_sets`` output, not from ``_cli`` module attributes.
+    derived = _registry.derive_policy_sets()
     grouped: frozenset[str] = frozenset()
     for name in _CENSUS_SETS:
         if name in ("_CONFIRM_SCOPE", "_LEGACY_OUTPUT", "_NO_AUTO_MOUNT"):
             # derived/overlay sets — their members already appear in a base set
             continue
-        grouped |= getattr(_cli, name)
+        grouped |= derived[name]
     return grouped | _INDIVIDUAL_ARMS
-
-
-def test_derived_policy_sets_have_zero_shadow_delta() -> None:
-    derived = _registry.derive_policy_sets()
-    for name in _CENSUS_SETS:
-        current = getattr(_cli, name)
-        got = derived[name]
-        missing = current - got
-        extra = got - current
-        assert got == current, f"{name}: missing={sorted(missing)} extra={sorted(extra)}"
-
-
-def test_shipped_derived_policy_sets_attribute_matches_live_frozensets() -> None:
-    # Pin the ACTUAL shadow-census artifact this story ships: the module-level
-    # ``_cli._DERIVED_POLICY_SETS`` computed in ``_cli/__init__`` at import. The
-    # recompute test above proves derive_policy_sets() is correct; this proves the
-    # shipped assignment wired it up with zero delta against the live frozensets, so
-    # a future edit to that line cannot silently drift from the router's authority.
-    shipped = _cli._DERIVED_POLICY_SETS
-    for name in _CENSUS_SETS:
-        assert shipped[name] == getattr(_cli, name), name
 
 
 def test_derive_covers_exactly_the_census_set_names() -> None:
@@ -247,13 +230,14 @@ def test_construction_imports_no_command_handlers() -> None:
     # ``pydantic_ai`` here would poison later tests sharing the xdist worker — mirror
     # of test_audit_serve's subprocess pattern).
     #
-    # NOTE: ``rebar._cli._llm_commands`` / ``_workflow_commands`` are intentionally
-    # NOT forbidden here: importing any ``rebar._cli`` submodule runs the package
-    # ``__init__`` — the pre-cutover eager router — which imports those two at top
-    # level. S2a is shadow-only (no route cutover), so that eager parent import is
-    # expected; the S6 cutover is what makes the router itself lazy. What S2a DOES
-    # guarantee, and what this pins, is that the heavy optional stacks stay out.
+    # NOTE: after the RP-05 S6 cutover the router imports NO command-handler module at
+    # package-``__init__`` time — the intercept ladder that eagerly imported
+    # ``rebar._cli._llm_commands`` / ``_workflow_commands`` was retired, so those advanced
+    # command modules must stay OUT of ``sys.modules`` when only the registry is imported.
+    # This pins the router's laziness alongside the heavy optional stacks staying out.
     forbidden = (
+        "rebar._cli._llm_commands",
+        "rebar._cli._workflow_commands",
         "rebar._commands.transition",
         "rebar._commands.delete",
         "rebar._cli._bridge_commands",

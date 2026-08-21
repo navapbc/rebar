@@ -23,7 +23,6 @@ from pathlib import Path
 
 import pytest
 
-from rebar import _cli
 from rebar._cli import _help
 
 # Arms intentionally NOT advertised in the overview. ``help`` is the top-level help
@@ -59,7 +58,9 @@ def _overview_listed() -> frozenset[str]:
 
 def test_routable_set_matches_pinned_help_set() -> None:
     """Every routable arm has pinned help text and vice-versa (no drift)."""
-    routable = _routable_subcommands() - _cli._HIDDEN_ALIASES
+    # ``_routable_subcommands`` already excludes hidden routes (RP-05 S6 retired the
+    # router's literal ``_HIDDEN_ALIASES`` frozenset — the registry is the sole authority).
+    routable = _routable_subcommands()
     known = _help.known_subcommands()
     assert routable - known == frozenset(), (
         f"routable but no pinned help text: {sorted(routable - known)}"

@@ -35,9 +35,10 @@ pytestmark = pytest.mark.unit
 
 
 # Every route the core dispatcher (``_dispatch`` → ``_execute.execute``) owns is
-# exactly a route that carries a lazy handler. Intercept-ladder commands
-# (reconcile, review-plan, config, audit, identity, ...) are a SEPARATE selection
-# authority and carry no handler in S3.
+# exactly a route that carries a lazy handler. After the RP-05 S6 cutover that includes
+# the former intercept-ladder commands (reconcile, review-plan, config, audit, identity,
+# ...): they now carry real execution metadata and route through the SAME executor — the
+# separate intercept selection authority was retired.
 def _dispatch_routes() -> tuple[_registry.Route, ...]:
     return tuple(r for r in _registry.ROUTES if r.handler is not None)
 
@@ -519,10 +520,13 @@ def test_execution_findings_are_excluded_from_retired_routes() -> None:
     assert not (_codes([retired]) & {"unknown_adapter", "unknown_init"})
 
 
-def test_derived_policy_sets_still_reproduce_the_live_frozensets() -> None:
-    """AC6: execution can fall back to the derived compatibility exports unchanged."""
+def test_router_uses_the_registry_derived_sets_as_its_sole_authority() -> None:
+    """RP-05 S6: the router's live policy sets ARE the registry-derived sets, and the
+    migration-only duplicate literal frozensets were retired (single-authority contract)."""
     from rebar import _cli
 
     derived = _registry.derive_policy_sets()
-    for name in ("_READS_INIT_ONLY", "_WRITES_FULL", "_LIFECYCLE", "_BRIDGE", "_CONFIRM_SCOPE"):
-        assert derived[name] == getattr(_cli, name), name
+    for name in ("_INTERCEPTS", "_NO_AUTO_MOUNT", "_LEGACY_OUTPUT", "_CONFIRM_SCOPE"):
+        assert getattr(_cli, name) == derived[name], name
+    for name in ("_READS_INIT_ONLY", "_WRITES_FULL", "_LIFECYCLE", "_BRIDGE"):
+        assert not hasattr(_cli, name), f"duplicate policy literal {name} still shipped"
