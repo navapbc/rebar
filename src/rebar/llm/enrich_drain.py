@@ -230,10 +230,98 @@ def _stale_digest_ids(tracker: str, repo_root) -> list[str]:
     return out
 
 
+def _is_permanent_input_rejection(exc: BaseException) -> bool:
+    """Is *exc* a per-ITEM, deterministic input rejection (``ResolutionClass.CHANGE_INPUT``)?
+
+    ``run_failure`` attaches the classifier's verdict to the raised provider error as
+    ``exc.outcome`` (an :class:`rebar.llm.failure.LLMOutcome`). Read it DEFENSIVELY: an
+    arbitrary exception may carry no ``outcome`` at all, or an ``outcome`` of any shape (a
+    string, a mock, an object whose attribute access raises). Classification runs inside the
+    drain's failure handler, and a drain concern must never fail a write — so anything
+    unexpected here degrades to "not permanent", i.e. the pre-existing transient posture.
+
+    WHY THIS CLASS AND NOT ``retryable=False``. ``retryable`` is false for six of the eight
+    classes, and the others are per-ENVIRONMENT, not per-item: ``CHANGE_SETTINGS`` is what a
+    401/403 bad credential maps to, ``CHANGE_PROVIDER_OR_MODEL`` is a provider outage,
+    ``INCREASE_PROVIDER_LIMITS`` is a quota ceiling, ``NEEDS_INVESTIGATION`` is unknown. Every
+    one of those fails identically for EVERY ticket in the batch, so tombstoning on
+    ``retryable=False`` would silently drain the entire backlog to DONE during one outage or one
+    expired key, and those digests would never be computed. ``CHANGE_INPUT`` is the only class
+    that is a property of THIS ticket's bytes: a body the provider rejects as too large or
+    malformed is rejected identically forever, so retrying it is pure waste.
+    """
+    from rebar.llm.failure import ResolutionClass
+
+    try:
+        outcome = getattr(exc, "outcome", None)
+        # `ResolutionClass` is a `str` Enum, so this also matches the persisted plain-string
+        # shape ("CHANGE_INPUT") a differently-constructed outcome may carry.
+        return getattr(outcome, "resolution_class", None) == ResolutionClass.CHANGE_INPUT
+    except Exception:  # noqa: BLE001 — a hostile __getattr__ must never fail the drain
+        return False
+
+
+def _record_item_failure(exc: BaseException, tid: str, *, repo_root) -> None:
+    """Dispose of ONE failed per-item ``enrich()``: tombstone it, or leave it transient.
+
+    Bug 569c-931f-69a2-4c1d (spongy-illjudged-terrier). The drain's blanket
+    ``except Exception`` used to log "will retry after lease" for EVERY failure and never append
+    ``DONE_ENRICH``. The queue reducer (``overlap/queue.py``) knows only ENQUEUE / CLAIM / DONE,
+    so an entry with no DONE returns to ``pending`` the moment its lease expires and the next
+    drain re-claims it — forever. For a permanently-rejected prompt that is an infinite loop:
+    the live store showed 435 / 430 / 424 ``CLAIM_ENRICH`` events against 7 / 11 / 12
+    ``DONE_ENRICH`` on the three affected tickets. A per-item permanent rejection must be
+    attempted EXACTLY ONCE, so it gets the DONE tombstone and leaves the pending set for good.
+
+    Note the tombstone's interaction with the self-heal: a ``CHANGE_INPUT`` tombstone leaves the
+    ticket's digest ``absent`` (no ``ds.emit`` ran), and ``_stale_digest_ids`` re-enqueues only
+    ``present-stale`` digests (``overlap.digest_sidecar.freshness``) — so the self-heal will NOT
+    resurrect it. That is intended: the entry is genuinely terminal until the ticket is
+    re-certified, which enqueues it naturally with fresh content. The companion fix in
+    ``rebar.llm.enrich._bound_source`` means the re-enqueued attempt then fits the window, so
+    this branch is the backstop for input the model rejects for some OTHER reason, not the
+    routine path.
+
+    Every other failure — a bare ``RuntimeError``, an error with no ``outcome``, and crucially
+    any other non-retryable class — keeps the EXISTING transient posture: no DONE, re-pickable
+    once the lease expires.
+    """
+    from rebar.llm.overlap import queue as _queue
+
+    if not _is_permanent_input_rejection(exc):
+        logger.warning(
+            "enrich drain: enrich(%s) failed; will retry after lease", tid, exc_info=True
+        )
+        return
+
+    from rebar.llm.failure import ResolutionClass, message_for
+
+    # Deliberately worded so it cannot be mistaken for the transient line above: it names the
+    # DISPOSITION ("permanently rejected", "will NOT retry") alongside the ticket, and reuses the
+    # shared `RESOLUTION_MESSAGES` remediation text via `message_for` so an operator sees the same
+    # advice the CLIs print for this class.
+    logger.warning(
+        "enrich drain: enrich(%s) permanently rejected (%s) — marking the queue entry done; "
+        "will NOT retry. %s",
+        tid,
+        ResolutionClass.CHANGE_INPUT.value,
+        message_for(ResolutionClass.CHANGE_INPUT.value) or "",
+        exc_info=True,
+    )
+    try:
+        _queue.mark_done(tid, repo_root=repo_root)
+    except Exception:
+        # The tombstone is best-effort like every other drain write: failing to append it just
+        # restores the old (looping) behaviour for this entry, and must never fail the drain.
+        logger.warning("enrich drain: could not tombstone %s; it stays pending", tid, exc_info=True)
+
+
 def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> dict:
     """Claim + process soaked queue entries (+ self-healing stale-digest tickets), up to the
-    batch cap. Best-effort per item: an enrich failure releases the claim (lease expiry) and
-    the batch continues; the failed ticket is re-picked later. Returns a summary dict."""
+    batch cap. Best-effort per item: a TRANSIENT enrich failure releases the claim (lease expiry)
+    and the batch continues, so the failed ticket is re-picked later; a per-item PERMANENT input
+    rejection is tombstoned instead so it is attempted exactly once (see
+    :func:`_record_item_failure`). Returns a summary dict."""
     from rebar.llm.config import LLMConfig
     from rebar.llm.enrich import enrich
     from rebar.llm.overlap import digest_sidecar as ds
@@ -281,10 +369,11 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
                 ds.emit(result["digest"], tid, model=cfg.model, repo_root=repo_root)
                 _queue.mark_done(tid, repo_root=repo_root)
                 processed += 1
-            except Exception:
-                logger.warning(
-                    "enrich drain: enrich(%s) failed; will retry after lease", tid, exc_info=True
-                )
+            except Exception as exc:  # noqa: BLE001 — logged+dispositioned by the helper below
+                # Extracted whole (behaviour-preserving for every pre-existing failure) so the
+                # new disposition branch lives OUTSIDE this already-long loop and adds no
+                # cyclomatic complexity to `drain` — see the module-size/complexity policy.
+                _record_item_failure(exc, tid, repo_root=repo_root)
         return {"processed": processed, "batch": batch}
     finally:
         _release_advisory_lock(tracker, lock_fd)
