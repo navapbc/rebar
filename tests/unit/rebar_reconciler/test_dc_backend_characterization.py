@@ -50,6 +50,7 @@ from rebar_reconciler.adapters.jira_datacenter.backend import (
     _map_local_to_dc_fields,
 )
 from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar_reconciler.outbound_comments import _decorate_outbound_comment
 
 from .backend_support import FakeTransport
 
@@ -372,11 +373,18 @@ def test_dc_sanitize_label_pins_the_shared_token_rules():
             sanitizer.sanitize_label(bad)
 
 
-def test_dc_fit_comment_is_the_wiki_codec_fit():
+def test_dc_fit_comment_is_the_send_path_fit():
     # ``_DCSanitizer.fit_comment`` is the differ-side comparison transform; it must
-    # be the IDENTICAL fit the send path applies, or the diff never converges.
+    # be exactly the marker-stripped body the SEND path lands (decorate →
+    # ``sanitize_comment`` fitting through ``fit_preserving_marker`` → strip the
+    # decoration; bug b9b4-f460-2d54-4872), or the diff never converges. The
+    # expectation is DERIVED from the send composition, not from any bare fitter.
     body = "c" * (WIKI_LIMIT + 1)
-    assert _backend().sanitizer.fit_comment(body) == WikiTextCodec().fit_outbound(body)
+    sanitizer = _backend().sanitizer
+    decoration = _decorate_outbound_comment("")
+    landed = sanitizer.sanitize_comment(_decorate_outbound_comment(body))
+    assert landed.endswith(decoration)
+    assert sanitizer.fit_comment(body) == landed[: len(landed) - len(decoration)]
 
 
 # ---------------------------------------------------------------------------

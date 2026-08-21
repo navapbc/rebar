@@ -146,9 +146,6 @@ class _JiraSanitizer:
     def sanitize_description(self, description: str) -> str:
         return jira_fields._sanitize_description(description)
 
-    def sanitize_comment(self, body: str) -> str:
-        return jira_fields._sanitize_comment(body)
-
     def fit_comment(self, body: str) -> str:
         """Pure fit-to-limit for comment-diff comparison (ticket 21ca; no warning).
 

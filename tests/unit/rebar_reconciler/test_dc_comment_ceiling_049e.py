@@ -37,6 +37,7 @@ import pytest
 from rebar import config as cfg
 from rebar_reconciler.adapters.jira_datacenter.backend import _DCSanitizer
 from rebar_reconciler.adapters.jira_family.rich_text import WikiTextCodec
+from rebar_reconciler.outbound_comments import _decorate_outbound_comment
 
 pytestmark = pytest.mark.unit
 
@@ -133,11 +134,22 @@ def test_sanitize_comment_does_not_call_the_description_fitter(
 
 
 def test_fit_comment_converges_with_sanitize_comment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The differ-side ``fit_comment`` must apply the IDENTICAL transform as the
-    send-side ``sanitize_comment`` under the SAME configured ceiling, or the
-    outbound comment loop re-emits forever (the convergence contract)."""
+    """The differ-side ``fit_comment`` must equal the marker-stripped body the
+    send path LANDS under the SAME configured ceiling, or the outbound comment
+    loop re-emits forever (the convergence contract).
+
+    Since bug b9b4-f460-2d54-4872 the send path is decorate →
+    ``sanitize_comment`` (which fits through ``fit_preserving_marker``), so the
+    expectation is DERIVED FROM THAT COMPOSITION rather than from a bare
+    truncation: ``fit_comment`` must reproduce the landed body with the
+    decoration taken back off (``fit_comment_as_sent``)."""
     _configure(monkeypatch, 4096)
     sanitizer = _DCSanitizer()
     body = "c" * _LONG_BODY_LEN
-    assert sanitizer.fit_comment(body) == sanitizer.sanitize_comment(body)
-    assert len(sanitizer.fit_comment(body)) == 4096
+    decoration = _decorate_outbound_comment("")
+    landed = sanitizer.sanitize_comment(_decorate_outbound_comment(body))
+    assert len(landed) == 4096
+    assert landed.endswith(decoration)
+    assert sanitizer.fit_comment(body) == landed[: len(landed) - len(decoration)]
+    # Idempotent — the fixed point the two-pass convergence depends on.
+    assert sanitizer.fit_comment(sanitizer.fit_comment(body)) == sanitizer.fit_comment(body)
