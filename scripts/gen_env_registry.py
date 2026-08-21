@@ -148,29 +148,29 @@ BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
 )
 
 
-# helper name -> (0-indexed position of the env-name argument, name prefix).
+# helper name -> 0-indexed position of the env-name argument.
 # Signatures verified against the current tree; extend by adding a row here. That claim is
 # ENFORCED by ``_raise_for_stale_rows`` below — a row whose helper has no definition under the
 # shipped scan root aborts the run (measured: the RP-04 config-ownership cutover drained
 # ``_rebar_env``, ``_env_int``, ``_str_pref`` and ``_int_pref`` out of the tree, and all four
 # rows survived here for free, publishing four names into docs/env-vars.md that named nothing
 # and exempting ``_int_pref(...)`` from the ownership gate entirely).
-KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
-    "_llm_str": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
-    "_llm_int": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
+KNOWN_ENV_HELPERS: dict[str, int] = {
+    "_llm_str": 2,  # llm/config.py: (table, cli, env_name, ...)
+    "_llm_int": 2,  # llm/config.py: (table, cli, env_name, ...)
     # Omitting this one cost four undocumented vars (bug b00f): a helper absent from this table
     # is not an error, it is INVISIBLE — the scan walks past every call and the drift gate stays
     # green, so a clean `--check` proves agreement with the generator, never completeness.
-    "_llm_float": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
-    "_int_env": (0, ""),  # review_bot/config.py
-    "_severities_env": (0, ""),  # review_bot/config.py
-    "_str_env": (0, ""),  # opcert_service/config.py: os.environ.get(name)
+    "_llm_float": 2,  # llm/config.py: (table, cli, env_name, ...)
+    "_int_env": 0,  # review_bot/config.py
+    "_severities_env": 0,  # review_bot/config.py
+    "_str_env": 0,  # opcert_service/config.py: os.environ.get(name)
     # Found by the fail-closed helper rule below rather than by hand. ``_gate_str_pref`` is the
     # MEASURED loss that motivated it: its two call-site literals REBAR_GATE_REF and
     # REBAR_GATE_SOURCE were absent from the committed registry while `--check` stayed green.
-    "_gate_str_pref": (0, ""),  # _config_resolvers.py: (env_name, file_key, default, root=None)
-    "read_secret_env": (0, ""),  # config.py: (env_name)
-    "_env_truthy": (0, ""),  # llm/config.py: (name)
+    "_gate_str_pref": 0,  # _config_resolvers.py: (env_name, file_key, default, root=None)
+    "read_secret_env": 0,  # config.py: (env_name)
+    "_env_truthy": 0,  # llm/config.py: (name)
 }
 
 
@@ -227,11 +227,11 @@ def _scan_call(node: ast.Call, rel: str, reads: Reads, dynamic: Dynamic) -> None
         return
     # project helper call: _rebar_env("X"), _llm_int(t, c, "X", ...), ...
     if isinstance(func, ast.Name) and func.id in KNOWN_ENV_HELPERS:
-        pos, prefix = KNOWN_ENV_HELPERS[func.id]
+        pos = KNOWN_ENV_HELPERS[func.id]
         if len(node.args) > pos:
             lit = _str_literal(node.args[pos])
             if lit is not None:
-                reads.setdefault(prefix + lit, set()).add(rel)
+                reads.setdefault(lit, set()).add(rel)
             else:
                 dynamic.append((rel, node.lineno, func.id))
 
@@ -311,7 +311,7 @@ def _call_key_expr(node: ast.Call) -> ast.expr | None:
     ):
         return node.args[0] if node.args else None
     if isinstance(func, ast.Name) and func.id in KNOWN_ENV_HELPERS:
-        pos = KNOWN_ENV_HELPERS[func.id][0]
+        pos = KNOWN_ENV_HELPERS[func.id]
         if len(node.args) > pos:
             return node.args[pos]
     return None
@@ -376,8 +376,8 @@ def _raise_for_helpers(helpers: HelperSites) -> None:
         "unregistered env-read helper(s) — each reads the environment under a key taken from "
         "its own parameter, so its variable names live at its CALL SITES and are invisible "
         "until it is registered. Add a row to KNOWN_ENV_HELPERS in "
-        f"{Path(__file__).name} giving the 0-indexed position of the env-name argument "
-        f"(and any name prefix):\n{sites}"
+        f"{Path(__file__).name} giving the 0-indexed position of the env-name argument"
+        f":\n{sites}"
     )
 
 
