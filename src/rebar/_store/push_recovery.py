@@ -289,7 +289,7 @@ def _merge_with_transport_retry(
             return merge
         if not _is_transport_retriable(merge.stderr or ""):
             return merge
-        core.logger.info(
+        core.logger.debug(
             "push-recovery merge hit a transient transport fault "
             "(transport attempt %s/%s); retrying automatically, no action needed: %s",
             transport_attempt,
@@ -374,7 +374,7 @@ def _fetch_for_recovery(
             return fetch
         if not _is_transport_retriable(fetch.stderr or ""):
             return fetch
-        core.logger.info(
+        core.logger.debug(
             "push-recovery fetch hit a transient transport fault "
             "(transport attempt %s/%s); retrying automatically, no action needed: %s",
             transport_attempt,
