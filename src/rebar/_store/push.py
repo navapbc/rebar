@@ -188,44 +188,27 @@ def push_tickets_branch(
         # Fail fast IN THE PARENT on a misconfigured S3 remote — the detached child's stderr
         # is discarded, so the actionable message would otherwise be lost.
         _require_s3_helper_for_configured_remote(base_path)
-        # Detach a synchronous push (REBAR_SYNC_PUSH=always) that survives parent exit.
-        # The dispatcher launches the CLI as a bare `python3` whose `rebar`
-        # importability comes from a parent sys.path bootstrap the child does NOT
-        # inherit — so put the rebar `src` dir on the child's PYTHONPATH and have the
-        # -c stub re-insert it (parents[2] of this file == .../src).
-        src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # Detach a synchronous push (REBAR_SYNC_PUSH=always) that survives parent exit,
+        # via the shared detached-rebar-child spawner (rebar._proc.spawn_detached), which
+        # owns the PYTHONPATH bootstrap, the -c re-entry stub, the detach flags and the
+        # durable-cwd anchor (bug 3198-438c-72a5-470f).
         # RP-04 S3 (AC4): a git-push child needs NO Jira send credential, so project the
         # parent env as an "unrelated" sibling — stripping every adapter-owned secret name
         # (JIRA_API_TOKEN / JIRA_PAT) while preserving all native git/ssh/proxy/CA config.
-        # project_child_env returns a fresh dict and never mutates os.environ.
+        # project_child_env returns a fresh dict and never mutates os.environ; env
+        # construction stays HERE so consolidation cannot drop the secret-stripping.
         from rebar import _child_env
-        from rebar._proc import detached_child_cwd
+        from rebar._proc import spawn_detached
 
         child_env = _child_env.project_child_env(os.environ, relationship="unrelated")
         child_env["REBAR_SYNC_PUSH"] = "always"
-        child_env["PYTHONPATH"] = src + (
-            os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
-        )
         try:
-            subprocess.Popen(
-                [
-                    sys.executable,
-                    "-c",
-                    "import sys; sys.path.insert(0, sys.argv[2]); "
-                    "from rebar._store import push; push.push_tickets_branch(sys.argv[1])",
-                    base_path,
-                    src,
-                ],
-                # Pin the child to the canonical store root rather than inheriting this
-                # command's cwd — the push outlives us, and an ephemeral worktree cwd is
-                # routinely removed while it is still running (bug 3198-438c-72a5-470f).
-                cwd=detached_child_cwd(base_path),
+            spawn_detached(
+                "rebar._store.push",
+                "push_tickets_branch",
+                base_path,
                 env=child_env,
-                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,  # orphan it (own session); survives parent exit
-                close_fds=True,
             )
         except OSError as exc:
             # Observability gap (audit 3.2): a failed detached spawn used to be swallowed

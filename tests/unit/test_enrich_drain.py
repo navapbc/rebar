@@ -199,15 +199,6 @@ def test_config_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert LLMConfig.from_env().overlap_drain == "async"
 
 
-def test_windows_detach_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(D.os, "name", "nt")
-    monkeypatch.setattr(D.subprocess, "DETACHED_PROCESS", 0x8, raising=False)
-    monkeypatch.setattr(D.subprocess, "CREATE_NO_WINDOW", 0x8000000, raising=False)
-    kw = D._detach_kwargs()
-    assert "creationflags" in kw
-    assert "start_new_session" not in kw
-
-
 def _mock_flags(monkeypatch, *, enabled=True, drain="always", agents=True):
     from rebar import config as rc
     from rebar.llm import config as lc
@@ -845,10 +836,13 @@ def test_detached_drain_child_is_handed_the_canonical_tracker(
         spawned.append((argv, kwargs))
         return object()
 
-    # Patch the module's OWN `subprocess` reference, never the real module: a global patch
-    # outlives this test's body and breaks `subprocess.run` in fixture teardown.
+    # Patch the spawn owner's OWN `subprocess` reference (`_proc` holds the one Popen since
+    # task 2dc4-9bcd-75b9-4544), never the real module: a global patch outlives this test's
+    # body and breaks `subprocess.run` in fixture teardown.
+    from rebar import _proc
+
     monkeypatch.setattr(
-        D,
+        _proc,
         "subprocess",
         types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
     )

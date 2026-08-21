@@ -407,27 +407,14 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
         _release_advisory_lock(tracker, lock_fd)
 
 
-def _detach_kwargs() -> dict:
-    """Platform detach kwargs. POSIX: a new session so the child outlives the parent. Windows
-    (authored, API-derisked; NOT reached in v1 — maybe_drain no-ops on nt): DETACHED_PROCESS |
-    CREATE_NO_WINDOW (constants exist only on Windows, referenced only inside this branch)."""
-    if os.name == "nt":
-        return {
-            "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
-        }
-    return {"start_new_session": True, "close_fds": True}
-
-
 def _spawn_detached_drain(tracker: str) -> None:
-    """Detach a `rebar enrich --drain` child that outlives the current command (POSIX). Mirrors
-    push.py's PYTHONPATH bootstrap so the bare-python child can import rebar."""
-    from rebar._proc import detached_child_cwd
+    """Detach a `rebar enrich --drain` child that outlives the current command (POSIX), via
+    the shared detached-rebar-child spawner (:func:`rebar._proc.spawn_detached`), which owns
+    the PYTHONPATH bootstrap, the ``-c`` re-entry stub, the detach flags and the durable-cwd
+    anchor. This site keeps its own stderr sink (the store-scoped drain log), its canonical
+    tracker argument, and its broad never-raise catch."""
+    from rebar._proc import spawn_detached
 
-    src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    child_env = {**os.environ}
-    child_env["PYTHONPATH"] = src + (
-        os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
-    )
     logdir = os.path.dirname(_drain_log_path(tracker))
     try:
         os.makedirs(logdir, exist_ok=True)
@@ -435,29 +422,18 @@ def _spawn_detached_drain(tracker: str) -> None:
     except OSError:
         log_fh = subprocess.DEVNULL  # type: ignore[assignment]
     try:
-        subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.path.insert(0, sys.argv[2]); "
-                "from rebar.llm import enrich_drain; enrich_drain.drain(sys.argv[1])",
-                # The canonical store tracker, for the same reason the cwd below is resolved:
-                # the child outlives the worktree that spawned it, and every path it touches —
-                # the store it lists, the queue events it appends, the digests it emits — is
-                # derived from this argument. Handing over a worktree's SYMLINK leaves the
-                # running child pointed at a path that dies with the worktree
-                # (bug da68-fc7c-068c-4c53: "Error: cannot list '<retired>/.tickets-tracker'").
-                _canonical_tracker(tracker),
-                src,
-            ],
-            # Anchor the child to the canonical store root, NOT this command's cwd — an
-            # inherited worktree cwd is deleted out from under it (bug 3198-438c-72a5-470f).
-            cwd=detached_child_cwd(tracker),
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+        spawn_detached(
+            "rebar.llm.enrich_drain",
+            "drain",
+            # The canonical store tracker, for the same reason spawn_detached resolves the
+            # child's cwd: the child outlives the worktree that spawned it, and every path it
+            # touches — the store it lists, the queue events it appends, the digests it emits
+            # — is derived from this argument. Handing over a worktree's SYMLINK leaves the
+            # running child pointed at a path that dies with the worktree
+            # (bug da68-fc7c-068c-4c53: "Error: cannot list '<retired>/.tickets-tracker'").
+            _canonical_tracker(tracker),
+            env={**os.environ},
             stderr=log_fh,
-            **_detach_kwargs(),
         )
     except Exception:
         logger.warning("enrich drain detach failed; continuing", exc_info=True)

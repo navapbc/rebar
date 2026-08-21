@@ -1,18 +1,27 @@
-"""Reap a timed-out child process and its whole process group (stdlib-only leaf).
+"""Process helpers shared between rebar's spawn sites (stdlib-only leaf).
 
-Shared by the grounding harness (:mod:`rebar.grounding.harness`) and the
-reconciler's ACLI transport (``rebar_reconciler.adapters.jira.acli_subprocess``): both spawn
-children with ``start_new_session=True`` and, on a wall-clock timeout, must reap
-the whole process GROUP — SIGTERM → grace → SIGKILL → bounded drain — so a
-pipe-holding grandchild is reaped rather than orphaned (bug d843). The logic was
-duplicated byte-for-byte in the two callers (differing only in the grace/drain
-CONSTANTS and the log identity); this is the single source of truth. To keep each
-caller's timing and log identity, :func:`reap_process_group` is parameterized by
-``grace``/``drain`` timeouts and a ``label``/``logger`` pair.
+Two families of logic live here because each was once duplicated per caller:
+
+* :func:`reap_process_group` — shared by the grounding harness
+  (:mod:`rebar.grounding.harness`) and the reconciler's ACLI transport
+  (``rebar_reconciler.adapters.jira.acli_subprocess``): both spawn children with
+  ``start_new_session=True`` and, on a wall-clock timeout, must reap the whole process
+  GROUP — SIGTERM → grace → SIGKILL → bounded drain — so a pipe-holding grandchild is
+  reaped rather than orphaned (bug d843). The logic was duplicated byte-for-byte in the
+  two callers (differing only in the grace/drain CONSTANTS and the log identity); this is
+  the single source of truth. To keep each caller's timing and log identity,
+  it is parameterized by ``grace``/``drain`` timeouts and a ``label``/``logger`` pair.
+
+* :func:`spawn_detached` (+ :func:`detached_child_cwd`) — the ONE implementation of
+  "spawn a detached rebar child", shared by the async tickets-branch push
+  (``_store.push``), the enrichment drain (``llm.enrich_drain``) and the compaction
+  sweep (``_commands.compact_trigger``). The pattern was previously copied per site,
+  and a defect (the missing durable ``cwd``, bug 3198-438c-72a5-470f) propagated to
+  all three by exactly that imitation (task 2dc4-9bcd-75b9-4544).
 
 This module is a **leaf**: stdlib-only (``os`` / ``signal`` / ``subprocess`` /
-``logging``), with NO ``rebar.*`` imports, so both the in-process library and the
-path-loaded reconciler subprocess can import it without forming an import cycle.
+``logging`` / ``sys``), with NO ``rebar.*`` imports, so both the in-process library and
+the path-loaded reconciler subprocess can import it without forming an import cycle.
 """
 
 from __future__ import annotations
@@ -21,6 +30,8 @@ import logging
 import os
 import signal
 import subprocess
+import sys
+from typing import IO
 
 
 def reap_process_group(
@@ -135,3 +146,73 @@ def detached_child_cwd(tracker: str) -> str:
             break
         root = parent
     return root if root and os.path.isdir(root) else os.sep
+
+
+def _detach_kwargs() -> dict:
+    """Platform detach kwargs. POSIX: a new session so the child outlives the parent. Windows
+    (authored, API-derisked; NOT reached in v1 — every caller no-ops on nt before spawning):
+    DETACHED_PROCESS | CREATE_NO_WINDOW (constants exist only on Windows, referenced only
+    inside this branch)."""
+    if os.name == "nt":  # pragma: no cover - POSIX CI
+        return {
+            "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
+        }
+    return {"start_new_session": True, "close_fds": True}
+
+
+def spawn_detached(
+    module: str,
+    func: str,
+    arg: str,
+    *,
+    env: dict[str, str],
+    stderr: int | IO[str],
+) -> None:
+    """Spawn ``<module>.<func>(arg)`` in a detached bare-python child that outlives this
+    process. The single implementation of "spawn a detached rebar child" (task
+    2dc4-9bcd-75b9-4544): the PYTHONPATH bootstrap, the ``-c`` re-entry stub, the platform
+    detach flags, the stdio discipline and the durable ``cwd`` anchor live HERE, once, so
+    the next property this pattern needs cannot silently miss a copy-pasted site the way
+    the missing ``cwd=`` did (bug 3198-438c-72a5-470f).
+
+    What stays PER-CALLER, deliberately:
+
+    * ``env`` — construction differs materially between sites (the async push passes a
+      secret-stripped ``project_child_env`` projection; the drain/sweep pass a plain
+      ``{**os.environ}``), so the caller supplies the finished dict and this helper only
+      layers the PYTHONPATH bootstrap onto a COPY of it (the caller's dict is not mutated).
+    * ``stderr`` — each caller picks its own sink (a store-scoped log file, or DEVNULL).
+    * the failure posture — this helper RE-RAISES whatever ``Popen`` raises, because the
+      sites do not catch identically (the push catches only ``OSError``; the drain and the
+      sweep catch broad ``Exception``) and folding the catch in here would silently change
+      an exposure. Each caller keeps its existing ``except`` clause and log line.
+
+    ``arg`` becomes the child's ``sys.argv[1]`` and should be a CANONICAL store path — the
+    child outlives ephemeral worktrees, so a worktree symlink would die with its worktree
+    (bugs 93a9-66cf-e681-4f49, da68-fc7c-068c-4c53). The child's ``cwd`` is anchored via
+    :func:`detached_child_cwd` on that same argument. The child is spawned as a bare
+    ``sys.executable`` whose ``rebar`` importability comes from putting this checkout's
+    ``src`` dir (``parents[1]`` of this file) on PYTHONPATH and having the ``-c`` stub
+    re-insert it.
+    """
+    src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    child_env = dict(env)
+    child_env["PYTHONPATH"] = src + (
+        os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
+    )
+    subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.path.insert(0, sys.argv[2]); "
+            f"import {module}; {module}.{func}(sys.argv[1])",
+            arg,
+            src,
+        ],
+        cwd=detached_child_cwd(arg),
+        env=child_env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=stderr,
+        **_detach_kwargs(),
+    )
