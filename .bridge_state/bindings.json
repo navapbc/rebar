@@ -829,6 +829,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:08Z"
     },
+    "0446-4278-b7df-438d": {
+      "created_at": "2026-08-21T11:35:46Z",
+      "jira_id": "4589695",
+      "jira_key": "REB-3375",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T11:35:49Z"
+    },
     "0447-9a5c-d74c-4b0a": {
       "baseline": {
         "assignee": null,
@@ -2300,7 +2307,7 @@
         },
         "description": "## The defect\n\n`tests/external/live_jira_dc/test_dc_mutations.py` asserts reconciler-pass health with, at 17+ sites (lines 412, 467, 477, 623, 671, 728, 737, 785, 805, 892, 980, 1001, 1052, 1108, 1122, and others):\n\n    assert \"Traceback\" not in cp.stderr, f\"inbound pass raised:\\n{cp.stderr[-2000:]}\"\n\n`cp.returncode` is never consulted. When the child is **killed by a signal** its stderr is EMPTY, so `\"Traceback\" not in \"\"` is `True` and the assertion **passes**. A reaped or OOM-killed reconciler pass reads as a healthy pass.\n\nThis is a **fail-OPEN** \u2014 the opposite direction from bug `f0fb-de7a-b315-4508`, where the same missing-returncode construct produced a false *blame*. Here it produces false *green*, which is worse: the live DC harness is the epic-exit evidence for reconciler correctness, so a silently killed pass would be recorded as proof the pass succeeded.\n\n## How it was found\n\nThe Step-7 construct sweep of bug `f0fb`. That bug proved (4/4 deterministic) that a `kill -9` child yields returncode `-9` with empty stderr, and fixed the two `tests/e2e` harness sites by routing them through a new shared helper, `tests/_child_diag.py::child_failure_detail`, which reports the returncode and signal name. These sites are the same construct in a tier `f0fb` did not touch.\n\n## Why it was not fixed in scope\n\nThe `external` tier is excluded from the default run and needs live Jira DC credentials plus `acli`, so a fix cannot be validated by the same RED->GREEN path `f0fb` used. It is also 17+ sites with a different assertion shape, and the correct remedy is a design question: assert `cp.returncode == 0` alongside the traceback check, or route these through a shared helper.\n\n## Acceptance Criteria\n\n- [x] A signal-killed reconciler child can no longer satisfy any pass-health assertion in\n      `tests/external/live_jira_dc/test_dc_mutations.py` \u2014 the returncode is checked, not only\n      the stderr text.\n- [x] A RED test proves it: with the child forced to die on a signal (empty stderr), the\n      assertion fails before the fix and after it names the signal.\n- [x] The whole file is swept \u2014 every `assert \"Traceback\" not in ...` site, not just the ones\n      enumerated above.\n- [x] Reuse `tests/_child_diag.py::child_failure_detail` rather than re-deriving the message,\n      so the two tiers stay consistent.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Live DC pass-health asserts fail OPEN on a signal-killed child"
       },
       "created_at": "2026-08-21T04:31:42Z",
@@ -3879,9 +3886,17 @@
       "updated_at": "2026-08-15T14:52:54Z"
     },
     "17c3-2f6e-a5e0-438c": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nDiscovered while proving `abusive-pebbly-sakimonkey` (e339-9709-15fe-419a). Independent of that ticket's FIT divergence: under `reconciler.rich_text_cutover = \"cloud\"` (this project's setting, `rebar.toml:87`) the outbound comment differ decodes the two sides of its body-equality key with DIFFERENT decoders, so a markdown comment WELL WITHIN the length limit never matches its own landed body.\n\n- **Local side** \u2014 `_diff_comments` computes `codec.normalize_outbound(...)`. In rich mode\n  `AdfCodec.normalize_outbound` is a markdown round trip, which ESCAPES markdown-active\n  characters and rewrites autolinks.\n- **Jira side** \u2014 `_normalize_comment_body` calls `inbound_mapper.normalize_rich_text`\n  (`inbound_fields.normalize_rich_text` -> `adf_to_text`), which does NOT escape.\n\n## Runtime evidence\n\nDriving the real `AdfCodec(rich=True)` and `_JiraInbound` on current main (worktree `fix-sakimonkey-dedupkey`), with an in-limit markdown body:\n\n```\nlocal key : '# Head\\n\\nSome *bold* text and a [link](<http://x>) plus `code`.\\n\\n- a\\n- b'\nlanded key: '# Head\\n\\nSome *bold* text and a [link](http://x) plus `code`.\\n\\n- a\\n- b'\nEQUAL?    : False\n```\n\nThe same asymmetry escapes the truncation notice: the local key carries `\\[truncated by reconciler\\]` where the landed body carries `[truncated by reconciler]`.\n\n## Why it matters\n\nBody equality is the SECONDARY dedup layer guarding a lost comment-id map write (the crash window between `add_comment` and `record_comment_id`). With the cutover ON it is inert for every markdown-formatted comment, not just over-length ones \u2014 a strictly wider blast radius than the fit divergence. `irongrey-chubby-oxpecker`'s commit message names this symptom (\"richly formatted comments never matched and were re-posted forever\") but repaired the PRIMARY id skip, not this decode asymmetry.\n\nThis is NOT fixed by `abusive-pebbly-sakimonkey`, which makes the two paths apply the identical FIT. Verified: after that fix the in-limit markdown case still diverges, for this reason.\n\n## Acceptance Criteria\n\n- [ ] The differ's two comparison keys are produced by the same decode under every\n      `rich_text_cutover` setting.\n- [ ] A test drives an in-limit markdown comment through the differ with the cutover ON and\n      asserts no duplicate mutation is emitted (RED on current code).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Cloud comment dedup key is markdown-escaped on one side only"
+      },
       "created_at": "2026-08-21T10:38:10Z",
       "jira_id": "4589670",
       "jira_key": "REB-3372",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T10:38:13Z"
     },
@@ -7645,6 +7660,13 @@
       "jira_key": "REB-1732",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:03Z"
+    },
+    "2c4b-3cd9-8bb0-4493": {
+      "created_at": "2026-08-21T11:35:49Z",
+      "jira_id": "4589696",
+      "jira_key": "REB-3376",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T11:35:52Z"
     },
     "2c58-e710-275e-4ff7": {
       "baseline": {
@@ -11954,6 +11976,13 @@
       "jira_key": "REB-1049",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:42Z"
+    },
+    "43d4-b8f5-4bb2-417b": {
+      "created_at": "2026-08-21T11:35:52Z",
+      "jira_id": "4589697",
+      "jira_key": "REB-3377",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T11:35:55Z"
     },
     "43ea-3d5a-078f-4fe3": {
       "baseline": {
@@ -23931,6 +23960,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:04:50Z"
     },
+    "8a0d-96ca-a60e-4da6": {
+      "created_at": "2026-08-21T11:35:56Z",
+      "jira_id": "4589698",
+      "jira_key": "REB-3378",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T11:35:58Z"
+    },
     "8a12-b8f7-5df7-479b": {
       "baseline": {
         "assignee": null,
@@ -25623,9 +25659,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Problem\n\n`pytest_sessionfinish`'s working-tree backstop in `tests/conftest.py` prints:\n\n    \"REPO ISOLATION FAILURE: the test run left new changes in the checkout \"\n    \"(a test wrote into the working tree instead of tmp_path). Offending entries ...\"\n\nIt is the third member of the shared-checkout guard family, and it makes the same causal claim its two siblings have now had corrected. Its only evidence is two `git status --porcelain` snapshots taken around the whole session, so \"a test wrote into the working tree\" is exactly the attribution a snapshot diff cannot supply \u2014 a concurrent commit, rebase, branch switch, or editor save by another process in the same checkout produces an identical diff. `docs/local-dev-env.md` (lines 425-450) already documents that these guards misfire that way.\n\nMilder than its siblings: it prescribes NO destructive remedy, so nothing here can destroy a developer's work. The defect is confined to the false causal claim and to the word \"Offending\".\n\n## Prior art\n\n- `tests/_isolation.py::leak_failure_message`, corrected under `746c-185a-0e48-4b83`.\n- `tests/_isolation.py::head_move_failure_message`, corrected under `a991-09dd-aa6a-4a27`\n  (which is where this was found; the HEAD-move guard's remedy was the dangerous case and was\n  fixed first, keeping that change tight).\n\nBoth extract the text into `tests/_isolation.py` so it can be pinned on observable content. The same treatment applies: name the concurrent-external possibility instead of asserting the one cause the backstop cannot know, and pin it alongside the existing assertions in `tests/unit/test_external_mutation_diagnostics.py`.\n\n## Scope\n\nWording only. The backstop must keep failing the run exactly as it does now (it still escalates `session.exitstatus` so CI catches a genuine leak) \u2014 this is not a weakening of detection.\n\n## Acceptance Criteria\n\n- [ ] The backstop message no longer asserts that a test made the change; it names the\n      concurrent-external cause, mirroring `leak_failure_message`.\n- [ ] The text lives in `tests/_isolation.py` so it is assertable on observable content.\n- [ ] A test pins the property alongside the existing ones in\n      `tests/unit/test_external_mutation_diagnostics.py`.\n- [ ] The backstop still sets `session.exitstatus` to a failure on a genuine leak (pinned by a\n      test), and `make lint` / `make typecheck` pass.",
+        "description": "## Problem\n\n`pytest_sessionfinish`'s working-tree backstop in `tests/conftest.py` prints:\n\n    \"REPO ISOLATION FAILURE: the test run left new changes in the checkout \"\n    \"(a test wrote into the working tree instead of tmp_path). Offending entries ...\"\n\nIt is the third member of the shared-checkout guard family, and it makes the same causal claim its two siblings have now had corrected. Its only evidence is two `git status --porcelain` snapshots taken around the whole session, so \"a test wrote into the working tree\" is exactly the attribution a snapshot diff cannot supply \u2014 a concurrent commit, rebase, branch switch, or editor save by another process in the same checkout produces an identical diff. `docs/local-dev-env.md` (lines 425-450) already documents that these guards misfire that way.\n\nMilder than its siblings: it prescribes NO destructive remedy, so nothing here can destroy a developer's work. The defect is confined to the false causal claim and to the word \"Offending\".\n\n## Prior art\n\n- `tests/_isolation.py::leak_failure_message`, corrected under `746c-185a-0e48-4b83`.\n- `tests/_isolation.py::head_move_failure_message`, corrected under `a991-09dd-aa6a-4a27`\n  (which is where this was found; the HEAD-move guard's remedy was the dangerous case and was\n  fixed first, keeping that change tight).\n\nBoth extract the text into `tests/_isolation.py` so it can be pinned on observable content. The same treatment applies: name the concurrent-external possibility instead of asserting the one cause the backstop cannot know, and pin it alongside the existing assertions in `tests/unit/test_external_mutation_diagnostics.py`.\n\n## Scope\n\nWording only. The backstop must keep failing the run exactly as it does now (it still escalates `session.exitstatus` so CI catches a genuine leak) \u2014 this is not a weakening of detection.\n\n## Acceptance Criteria\n\n- [x] The backstop message no longer asserts that a test made the change; it names the\n      concurrent-external cause, mirroring `leak_failure_message`.\n- [x] The text lives in `tests/_isolation.py` so it is assertable on observable content.\n- [x] A test pins the property alongside the existing ones in\n      `tests/unit/test_external_mutation_diagnostics.py`.\n- [x] The backstop still sets `session.exitstatus` to a failure on a genuine leak (pinned by a\n      test), and `make lint` / `make typecheck` pass.",
         "priority": "Low",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Session porcelain backstop asserts a test made the change"
       },
       "created_at": "2026-08-21T07:41:48Z",
@@ -25637,10 +25673,24 @@
     },
     "93a9-66cf-e681-4f49": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\n\n`_commands/compact_trigger._rebar_dir` (`src/rebar/_commands/compact_trigger.py:47-50`) carries the identical defect just proved and fixed for the enrichment drain in `nuclear-calm-heron` (`da68-fc7c-068c-4c53`):\n\n```python\ndef _rebar_dir(tracker: str) -> str:\n    \"\"\"The repo's ``.rebar/`` (sibling of the ``.tickets-tracker`` dir), as the drain uses.\"\"\"\n    return os.path.join(os.path.dirname(tracker), \".rebar\")\n```\n\nIt copied the drain's derivation verbatim (\"as the drain uses\", and the module header at `:24-26` says the machinery is \"REUSED from `rebar.llm.enrich_drain`\") \u2014 including the missing symlink resolution. A `make worktree` worktree's `.tickets-tracker` is a SYMLINK to the canonical store while its `.rebar` is a real directory, so every compaction sidecar is keyed on the worktree instead of the store:\n\n* `compact-worker.lock` (`:52-53`) \u2014 annotated \"Beside `enrich-drain.lock` in the repo's\n  `.rebar/` \u2014 one compactor at a time\" (`:40`). That intent is store-scoped and is not\n  achieved: two worktrees take two different lock files while compacting the ONE store.\n* `compact-sweep.stamp` (`:56-57`) \u2014 \"records when a sweep last ran, so the trigger can fire\n  on staleness alone\". A per-worktree stamp means a fresh worktree always looks maximally\n  stale, so it re-fires a sweep the store just had.\n* `logs/compact-worker.log` (`:60-61`) \u2014 scattered and deleted with the worktree.\n\n**Live evidence on this host: 33 worktree `.rebar/logs/compact-worker.log` files.** The sweep has demonstrably been running with worktree-local sidecars.\n\nThe caller does not save it: `_commands/transition_close.py:360` passes `tracker` through unresolved (contrast `_store/event_append.py:342` and `_store/push.py:484`, which both call `_lock.canonical_tracker` before their drain hook).\n\n## The contract being violated\n\n`_store/lock.py:150-153` \u2014 `canonical_tracker`: *\"Resolve to a canonical path \u2026 so symlinked and real-path callers contend on the SAME lock file.\"* The neighbouring `.rebar/hlc.lock` already resolves internally (`_store/hlc.py:80-83`), and `_commands/doctor_locks.py:328-329` already canonicalises before reporting lock legs \u2014 so `rebar doctor` describes the canonical `compact-worker.lock` while the sweep in a worktree takes a different one.\n\n## Scope\n\nSame shape as the drain fix: resolve inside the path derivation (`compact_trigger._rebar_dir`) via `_lock.canonical_tracker`, so the invariant cannot be defeated by a caller. Keep the lazy-import posture and the never-raise posture.\n\nFiled separately rather than folded into `nuclear-calm-heron`: different feature (compaction, not enrichment), different file lane (`_commands/` not `llm/`), and a distinct third artifact (the sweep stamp) whose worktree-locality has a behavioural consequence \u2014 a redundant sweep \u2014 that the drain's lock and log do not have.\n\n## Acceptance Criteria\n- [ ] Two worktree views of one store derive the SAME `compact-worker.lock` path, under the\n      canonical store's `.rebar`, and contend on it (second acquire refused).\n- [ ] `compact-sweep.stamp` written from one worktree is READ by another worktree of the\n      same store, so a fresh worktree does not re-fire a sweep the store just had.\n- [ ] `compact-worker.log` from a worktree-spawned sweep lands on the canonical store and\n      survives the worktree's removal.\n- [ ] `make lint`, `make typecheck`, the complexity ratchet and the full unit sweep are green.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "compaction trigger sidecars are worktree-local, not store-scoped"
       },
       "created_at": "2026-08-21T09:37:48Z",
@@ -26248,10 +26298,24 @@
     },
     "96db-365e-f2c3-4547": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Context / Problem\nBug cranial-sulfur-peafowl (a392-f630-7b25-4b14) added the `closed -> open` (reopen) edge to the parent-first cascade table `_CASCADING_EDGES` in `src/rebar/_commands/transition.py`, closing the reopen hole. A SECOND edge into the same invalid state is still open: `transition <id> closed in_progress`, the direct closed-then-reactivate edge. `transition_compute`'s own comment acknowledges that edge exists (\"reaching here with target in_progress means current is open/blocked/closed\"), and `_CASCADING_EDGES` has no `(\\\"closed\\\", \\\"in_progress\\\")` entry, so reactivating a closed child under a closed parent leaves the parent closed \u2014 the same invalid closed-parent-with-non-closed-child state.\n\nIt was deliberately left out of a392-f630-7b25-4b14: that plan was reviewed and signed with an explicit \"only the closed -> open edge is added\" scope statement, and cascading a parent from `closed` straight to `in_progress` additionally drags the parent through its own plan-review start-work gate, which is a behavior change worth reviewing on its own.\n\n## Approach\nAdd `(\\\"closed\\\", \\\"in_progress\\\"): \\\"closed\\\"` to `_CASCADING_EDGES` so the parent is reactivated on the same edge ahead of the child, and decide deliberately what the cascaded parent's gate interaction should be: the cascade runs the parent's FULL transition, so the parent's plan-review start-work gate fires and can block the child's reactivation, exactly as it already does on the `open -> in_progress` cascade (docs/concurrency.md I4a, \"Gate interaction\"). Document whichever behavior is chosen in that same section.\n\nWhy this approach: the edge table added by a392-f630-7b25-4b14 is already the single place both existing cascading edges are declared, so this is a one-entry extension plus its gate/doc decision, not new machinery.\n\n## Scope\n- `src/rebar/_commands/transition.py` \u2014 add the third entry to `_CASCADING_EDGES`.\n- `tests/interfaces/lifecycle/test_claim_transition_parent_cascade.py` \u2014 cases for the new edge.\n- `docs/concurrency.md` \u2014 extend the I4a cascading-edge table and its gate-interaction note.\n\n## Testing\n- Reactivate a closed child under a closed parent -> both end `in_progress`.\n- Reactivate under an already-`in_progress` parent -> parent untouched.\n- Multi-level closed chain -> every ancestor reactivated.\n- Parent's plan-review start-work gate blocking -> the child is NOT reactivated and the error names the parent.\n\n## Acceptance Criteria\n- [ ] `rebar transition <child> closed in_progress` under a closed parent leaves no closed parent with a non-closed child. Checked by the happy-path and multi-level tests asserting every ancestor is `in_progress`.\n- [ ] An already-`in_progress` or `open` parent is not disturbed by the new edge. Checked by the no-op tests.\n- [ ] The cascaded parent's plan-review start-work gate behavior is explicit and tested. Checked by the gate-blocking test asserting the child stays `closed` and the error names the parent.\n- [ ] docs/concurrency.md I4a lists all three cascading edges. Checked by reading the updated section.\n- [ ] `make lint` and `make typecheck` pass, complexity ratchet reports no new/increased entries.",
         "priority": "Low",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "closed -> in_progress reactivation lacks the parent-first cascade, still allowing a closed parent with an in_progress child"
       },
       "created_at": "2026-08-19T21:43:56Z",
@@ -33058,6 +33122,13 @@
       "jira_key": "REB-294",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:10:11Z"
+    },
+    "bb73-97de-eeea-4899": {
+      "created_at": "2026-08-21T11:35:58Z",
+      "jira_id": "4589699",
+      "jira_key": "REB-3379",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T11:36:01Z"
     },
     "bb80-80d0-5f6b-4d45": {
       "baseline": {
@@ -39870,7 +39941,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Summary\n\nDiscovered while proving bug `5931-78a3-95d2-44cd` (marker dropped by truncation). The Cloud outbound comment path fits the SAME body with TWO different rules, so the body-equality dedup can never match for an over-length comment.\n\n- **Differ / comparison key** \u2014 `outbound_comments._diff_comments` computes\n  `sanitizer.fit_comment(body)`. Cloud's `_JiraSanitizer.fit_comment`\n  (`adapters/jira/backend.py:152-154`) is `comment_limits.truncate_comment_body`, a\n  PLAIN-CHARACTER cap at `_JIRA_COMMENT_MAX_CHARS = 32767`.\n- **Send path** \u2014 `adapters/jira/acli_cli_ops.add_comment` fits with\n  `AdfCodec.fit_outbound` -> `adf.fit_text_to_adf_limit`, which measures the SERIALIZED\n  ADF against `_ADF_DESCRIPTION_LIMIT = 32000`.\n\n## Runtime evidence\n\nDriving both with a 40,000-char body (worktree `fix-illadopsis-marker`, repo venv):\n\n```\ncompare key len:      32767\nlanded jira key len:  31887\nBODY-EQUALITY SECONDARY SKIP HITS (today): False\n```\n\nThe two keys can never be equal for any over-length comment.\n\n## Why it matters\n\n`emersed-specific-mutt` made the ID-based skip (`binding_store.is_comment_mapped` / `jira_comment_id`) PRIMARY, so this is the belt-and-suspenders layer \u2014 but that layer is exactly the guard against a lost map write (a crash between `add_comment` and `record_comment_id`). For over-length comments it is structurally dead, so a lost map write re-posts every pass. `comment_limits.py`'s own docstring states the convergence requirement this violates: \"If the two paths used different truncation logic they could never agree on the landed body, and the loop would persist.\"\n\nNot fixed under 5931 \u2014 that bug's fix is confined to preserving the marker and does not change any comparison key. This divergence predates it and is unchanged by it.\n\n## Acceptance Criteria\n\n- [ ] The differ's comment comparison key and the Cloud send path apply the identical fit.\n- [ ] A test drives both and asserts the landed body equals the comparison key for an\n      over-length comment (RED on current code).",
+        "description": "## Summary\n\nDiscovered while proving bug `5931-78a3-95d2-44cd` (marker dropped by truncation). The Cloud outbound comment path fits the SAME body with TWO different rules, so the body-equality dedup can never match for an over-length comment.\n\n- **Differ / comparison key** \u2014 `outbound_comments._diff_comments` computes\n  `sanitizer.fit_comment(body)`. Cloud's `_JiraSanitizer.fit_comment`\n  (`adapters/jira/backend.py:152-154`) is `comment_limits.truncate_comment_body`, a\n  PLAIN-CHARACTER cap at `_JIRA_COMMENT_MAX_CHARS = 32767`.\n- **Send path** \u2014 `adapters/jira/acli_cli_ops.add_comment` fits with\n  `AdfCodec.fit_outbound` -> `adf.fit_text_to_adf_limit`, which measures the SERIALIZED\n  ADF against `_ADF_DESCRIPTION_LIMIT = 32000`.\n\n## Runtime evidence\n\nDriving both with a 40,000-char body (worktree `fix-illadopsis-marker`, repo venv):\n\n```\ncompare key len:      32767\nlanded jira key len:  31887\nBODY-EQUALITY SECONDARY SKIP HITS (today): False\n```\n\nThe two keys can never be equal for any over-length comment.\n\n## Why it matters\n\n`emersed-specific-mutt` made the ID-based skip (`binding_store.is_comment_mapped` / `jira_comment_id`) PRIMARY, so this is the belt-and-suspenders layer \u2014 but that layer is exactly the guard against a lost map write (a crash between `add_comment` and `record_comment_id`). For over-length comments it is structurally dead, so a lost map write re-posts every pass. `comment_limits.py`'s own docstring states the convergence requirement this violates: \"If the two paths used different truncation logic they could never agree on the landed body, and the loop would persist.\"\n\nNot fixed under 5931 \u2014 that bug's fix is confined to preserving the marker and does not change any comparison key. This divergence predates it and is unchanged by it.\n\n## Acceptance Criteria\n\n- [ ] The differ's comment comparison key and the Cloud send path apply the identical fit.\n- [ ] A test drives both and asserts the landed body equals the comparison key for an\n      over-length comment (RED on current code).\n\n## Fix plan (added after runtime confirmation on current main)\n\n**Restore the shared-fitter invariant on the CLOUD side only.** `_JiraSanitizer.fit_comment` becomes byte-identical to the text the Cloud send path actually lands \u2014 the same shape Data Center already has (`_DCSanitizer.fit_comment` is pinned byte-identical to `sanitize_comment`'s truncation).\n\n1. `outbound_comments.py` \u2014 add `fit_comment_as_sent(text, fit)` beside `fit_preserving_marker`:\n   the marker-free content the send path lands, i.e. `fit_preserving_marker(decorate(text), fit)`\n   with the decoration removed. Backend-neutral: `fit` arrives as an injected\n   `Callable[[str], str]`, exactly as `fit_preserving_marker` takes it, so the core module still\n   names no vendor and no numeric limit. The decoration's separator length comes from\n   `_decorate_outbound_comment` itself, so there is still one source of truth.\n2. `adapters/jira/backend.py` \u2014 `_JiraSanitizer.fit_comment` returns\n   `fit_comment_as_sent(body, AdfCodec(rich=\"cloud\" in cutover_clients()).fit_outbound)`\n   instead of `comment_limits.truncate_comment_body(body)`. Built exactly as `_fit_description`\n   builds its codec, so the flag governs both.\n\n**Deliberately NOT changed.** `_diff_comments` keeps calling `sanitizer.fit_comment` rather than `codec.fit_outbound`: bug 049e makes Data Center's comment fitter deliberately distinct from its description fitter, and coupling them in the shared layer would retarget DC's comment ceiling to its description fitter. Data Center's `fit_comment`, its send path, and `comment_limits.truncate_comment_body` are all untouched \u2014 so this does not absorb `community-sediment-snipe` (DC outbound comments never length-fitted), which remains open and separate.\n\n## Blast radius \u2014 no key migration, no re-post storm\n\nThe dedup key is computed in memory on every pass and is never persisted (`binding_store` stores `local_comment_key` -> Jira comment id, never a body or a body hash), so there is no stored key to migrate.\n\nVerified by driving the old key, the new key and the actual landed body over a corpus (short, multi-line 20k, markdown, unicode, empty, 32,200, 31,800, 43k single-line, 60k multi-line) in both rich modes: **every case where the old key matched the landed body, the new key matches it too.** The change can only ADD dedup skips, never remove one, so no already-landed comment can be re-posted as a result. Under the shipped default (`rich_text_cutover = off`) the new key converges on the whole corpus; under this project's `cloud` setting the over-length cases still diverge for an unrelated reason recorded on this ticket (the inbound decode asymmetry), which is filed separately.\n\n## Two existing tests must be RETARGETED (not weakened)\n\nBoth currently pin the model of the send path that commit `27b868ba55` invalidated, so both pin the defect. Neither can hold alongside the restored invariant; each is rebuilt to derive its expectation from the real send path so it cannot go stale the same way again, and each is mutation-checked to confirm it still returns RED when the fix is reverted.\n\n- `tests/unit/rebar_reconciler/state/test_richtext_port_heldout.py::test_fit_comment_truncates_over_limit_byte_identical`\n  asserts `sanitizer.fit_comment(huge) == comment_limits.truncate_comment_body(huge)` \u2014 a direct\n  pin of the plain 32,767 cap. Rebuilt against `fit_preserving_marker(decorate(huge),\n  AdfCodec.fit_outbound)`, keeping the \"actually truncated\" assertion and ADDING an assertion\n  that the result is no longer the old cap.\n- `tests/unit/rebar_reconciler/mutate/test_outbound_comment_length_convergence.py::test_oversize_comment_converges_over_two_passes`\n  simulates the landed Jira body as `comment_limits.truncate_comment_body(emitted_body)`. That\n  stale stub is why this \"convergence\" test stayed green while live convergence was broken.\n  Rebuilt to call exactly what `acli_cli_ops.add_comment` calls.",
         "priority": "Medium",
         "status": "In Progress",
         "summary": "Cloud comment dedup key is fitted at 32767 while the send path fits at the 32000 ADF limit"
@@ -45976,7 +46047,19 @@
     "1787307727655839001": "__rebar_unknown_comment_id__",
     "1787308305963745001": "__rebar_unknown_comment_id__",
     "1787308398195465001": "__rebar_unknown_comment_id__",
-    "1787308440184610001": "__rebar_unknown_comment_id__"
+    "1787308440184610001": "__rebar_unknown_comment_id__",
+    "1787308731901132001": "__rebar_unknown_comment_id__",
+    "1787308883549399001": "__rebar_unknown_comment_id__",
+    "1787310145999884001": "__rebar_unknown_comment_id__",
+    "1787310441221426001": "__rebar_unknown_comment_id__",
+    "1787310884761259001": "__rebar_unknown_comment_id__",
+    "1787311136071162001": "__rebar_unknown_comment_id__",
+    "1787311263058788001": "__rebar_unknown_comment_id__",
+    "1787311378389977001": "__rebar_unknown_comment_id__",
+    "1787311778312567001": "__rebar_unknown_comment_id__",
+    "1787311890394985001": "__rebar_unknown_comment_id__",
+    "1787312002625646001": "__rebar_unknown_comment_id__",
+    "1787312021627070001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -47831,6 +47914,11 @@
     "REB-337": "d8f5-82c1-373b-4cd4",
     "REB-3370": "93a9-66cf-e681-4f49",
     "REB-3372": "17c3-2f6e-a5e0-438c",
+    "REB-3375": "0446-4278-b7df-438d",
+    "REB-3376": "2c4b-3cd9-8bb0-4493",
+    "REB-3377": "43d4-b8f5-4bb2-417b",
+    "REB-3378": "8a0d-96ca-a60e-4da6",
+    "REB-3379": "bb73-97de-eeea-4899",
     "REB-338": "da27-c916-f04e-4885",
     "REB-339": "dab5-dbae-033d-49c5",
     "REB-34": "1532-0193-fd98-4933",
