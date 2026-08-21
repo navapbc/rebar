@@ -33,6 +33,7 @@ __all__ = [
     "close_plan_review_gate_check",
     "description_cap_warning",
     "gate_enabled",
+    "gate_ran",
     "log_description_cap_warning",
     "plan_review_precheck",
 ]
@@ -136,6 +137,22 @@ def gate_enabled(
         return GateState.UNREADABLE
 
 
+def gate_ran(check: Mapping[str, object]) -> bool:
+    """Whether a gate-check payload came from a gate that ACTUALLY RAN.
+
+    The single reader of the ``gate_ran`` stamp that
+    :func:`close_plan_review_gate_check` writes on every payload it returns. Callers ask
+    this instead of comparing ``verdict`` against a skip string: the verdict vocabulary
+    grows (``disabled`` and ``unreadable`` are both skips today), and a comparison that
+    silently misclassifies a new skip verdict as "ran" is the fragility this predicate
+    removes.
+
+    An UNSTAMPED payload (the key absent) answers ``False`` — fail-safe: absent evidence
+    that the gate ran must never authorise extra work.
+    """
+    return check.get("gate_ran") is True
+
+
 #: The administrative dispositions whose justification is a LIVE REPLACEMENT LINK — a
 #: verifiable, in-tracker fact the sibling completion gate already reads
 #: (:func:`close_precheck._has_live_replacement_link`). Deliberately a STRICT subset of
@@ -193,22 +210,40 @@ def close_plan_review_gate_check(
     ``disposition`` verdict instead of demanding an attestation the ticket cannot earn (bug
     69b9) — see :func:`_disposition_close_exempt`.
     """
-    if not gate_enabled(
+    state = gate_enabled(
         str(repo_root),
         "require_plan_review_for_close",
         ticket_id=ticket_id,
         gate_label="the plan-review close gate",
         extra=" (other close gates still apply)",
-    ):
-        # DELIBERATELY still one verdict for both gate-off and config-unreadable. The
-        # distinction now exists at the SOURCE (:class:`GateState`), but surfacing it HERE
-        # would change behaviour: `transition_close` uses `verdict != "disabled"` as its
-        # proxy for "the gate ran" when deciding whether to install the in-lock recheck, so
-        # a new verdict silently starts doing work inside the write lock. Splitting this
-        # verdict therefore has to land together with that consumer — tracked separately.
-        return {"ok": True, "verdict": "disabled", "reason": "plan-review close gate is disabled"}
+    )
+    if not state:
+        # Two categorically different skips, so two verdicts (the distinction
+        # :class:`GateState` exists to preserve): `disabled` is a POLICY CHOICE — someone
+        # read the flag and turned the gate off — while `unreadable` is a FAULT: the config
+        # could not be parsed, so nobody chose anything. Reporting a fault as `disabled`
+        # launders it into an operator decision that never happened. `ok` stays True in both
+        # cases: the fail-OPEN posture is unchanged, only the reporting is honest now.
+        # Consumers must not read these strings to learn whether the gate ran — that is
+        # what the `gate_ran` stamp below (and :func:`gate_ran`) is for.
+        unreadable = state is GateState.UNREADABLE
+        return {
+            "ok": True,
+            "gate_ran": False,
+            "verdict": "unreadable" if unreadable else "disabled",
+            "reason": (
+                "plan-review close gate was skipped: the rebar config could not be read"
+                if unreadable
+                else "plan-review close gate is disabled"
+            ),
+        }
     if ticket_state.get("ticket_type") not in ("task", "story", "epic"):
-        return {"ok": True, "verdict": "exempt", "reason": "ticket type is exempt"}
+        return {
+            "ok": True,
+            "gate_ran": True,
+            "verdict": "exempt",
+            "reason": "ticket type is exempt",
+        }
     ticket_type = str(ticket_state.get("ticket_type") or "")
     if _disposition_close_exempt(ticket_id, ticket_type, close_class, tracker, repo_root):
         # A DISTINCT verdict, never "exempt": the audit trail must separate an
@@ -216,6 +251,7 @@ def close_plan_review_gate_check(
         # --force bypass (which records no signature and never consults this gate).
         return {
             "ok": True,
+            "gate_ran": True,
             "verdict": "disposition",
             "reason": (
                 f"closed as {close_class} against a live replacement link; the plan-review "
@@ -240,6 +276,7 @@ def close_plan_review_gate_check(
             )
         result = {
             "ok": bool(validity.get("valid")),
+            "gate_ran": True,
             "verdict": str(validity.get("verdict", "unavailable")),
             "reason": str(validity.get("reason", "plan-review validity was unavailable")),
         }
@@ -253,6 +290,7 @@ def close_plan_review_gate_check(
         )
         return {
             "ok": False,
+            "gate_ran": True,
             "verdict": "unavailable",
             "reason": "could not verify the plan-review attestation locally",
         }

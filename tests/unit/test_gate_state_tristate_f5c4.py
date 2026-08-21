@@ -4,9 +4,12 @@ An unreadable/malformed config is a fault; a gate deliberately turned off is a p
 choice. Both used to resolve to a bare ``False``, so no caller could tell them apart and
 an unreadable config read as "the operator disabled this gate".
 
-These tests pin the DISTINCTION only. They deliberately also pin that the fail-OPEN
-posture is UNCHANGED (an unreadable config still lets the operation proceed) — that
-posture is a separate, contested policy decision and this bug is not the place it changes.
+These tests pin the DISTINCTION. They deliberately also pin that the fail-OPEN posture
+is UNCHANGED (an unreadable config still lets the operation proceed) — that posture is a
+separate, contested policy decision and neither bug is the place it changes.
+
+The close-gate payload guard at the end of this module was RE-ANCHORED by bug 2091, which
+discharged f5c4's deliberate deferral and split the verdict; see its docstring.
 """
 
 from __future__ import annotations
@@ -86,14 +89,21 @@ def test_truthiness_is_unchanged_so_the_fail_open_posture_is_preserved(cfg_root)
     assert bool(_resolve(cfg_root(_UNREADABLE))) is False
 
 
-def test_the_close_gate_caller_is_behaviourally_UNCHANGED_for_both_states(cfg_root) -> None:
-    """The source distinction must not leak into the close gate's payload YET.
+def test_the_close_gate_reports_a_config_fault_distinctly_from_a_deliberate_disable(
+    cfg_root,
+) -> None:
+    """RE-ANCHORED by bug 2091 — this test previously pinned the OPPOSITE.
 
-    `transition_close` uses `verdict != "disabled"` as its proxy for "the gate ran" when
-    deciding whether to install the in-lock recheck closure, so introducing a second
-    non-running verdict here would silently start doing work inside the write lock. This
-    pins the payload as identical for both states until that consumer is fixed alongside
-    it, so the tri-state lands as a genuinely zero-behaviour-change source fix.
+    It was written here as a deliberate DEFERRAL guard, asserting the close gate's payload
+    was IDENTICAL for both states while the source distinguished them, so that f5c4 landed
+    as a genuinely zero-behaviour-change source fix. The reason it could not be split then
+    was `transition_close`'s `verdict != "disabled"` proxy for "the gate ran": a second
+    non-running verdict would have silently installed the in-lock recheck.
+
+    Bug 2091 removed that proxy (the payload now carries an explicit `gate_ran` stamp), so
+    the deferral is discharged and this guard is re-pointed at the behaviour it was always
+    guarding the way TO. Its intent is unchanged: the close gate must not launder a config
+    FAULT into an operator's POLICY CHOICE.
     """
     state = {"ticket_id": "1111-2222-3333-4444", "ticket_type": "story", "status": "in_progress"}
 
@@ -102,7 +112,17 @@ def test_the_close_gate_caller_is_behaviourally_UNCHANGED_for_both_states(cfg_ro
         state["ticket_id"], state, repo_root=cfg_root(_UNREADABLE)
     )
 
-    assert off == unreadable
-    assert off["ok"] is True and off["verdict"] == "disabled"
-    # ...while the SOURCE still tells them apart, which is what this bug is about.
+    assert off["verdict"] == "disabled"
+    assert unreadable["verdict"] == "unreadable", (
+        "a config FAULT is still reported as a deliberate disable"
+    )
+    assert off != unreadable
+
+    # The fail-OPEN posture is UNCHANGED — still a contested policy this bug does not move.
+    assert off["ok"] is True and unreadable["ok"] is True
+
+    # Neither skip verdict ran the gate, so neither may install in-lock work.
+    assert off["gate_ran"] is False and unreadable["gate_ran"] is False
+
+    # ...and the SOURCE still tells them apart, which is what f5c4 was about.
     assert _resolve(cfg_root(_OFF)) is not _resolve(cfg_root(_UNREADABLE))
