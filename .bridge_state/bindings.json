@@ -3307,6 +3307,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:40Z"
     },
+    "14f4-d616-70df-466d": {
+      "created_at": "2026-08-21T05:38:12Z",
+      "jira_id": "4589634",
+      "jira_key": "REB-3340",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:16Z"
+    },
     "1503-a8eb-aac7-469f": {
       "baseline": {
         "assignee": {
@@ -3363,6 +3370,13 @@
       "peer_parent": "REB-536",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:52:40Z"
+    },
+    "1515-bebc-0d91-476b": {
+      "created_at": "2026-08-21T05:38:16Z",
+      "jira_id": "4589635",
+      "jira_key": "REB-3341",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:20Z"
     },
     "1532-0193-fd98-4933": {
       "baseline": {
@@ -4829,6 +4843,13 @@
       "jira_key": "REB-43",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:33Z"
+    },
+    "1e48-ff69-13f7-4a83": {
+      "created_at": "2026-08-21T05:38:20Z",
+      "jira_id": "4589636",
+      "jira_key": "REB-3342",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:23Z"
     },
     "1e80-5f27-9c7b-418c": {
       "baseline": {
@@ -7520,6 +7541,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:55:04Z"
+    },
+    "2c66-205d-92e1-4419": {
+      "created_at": "2026-08-21T05:38:25Z",
+      "jira_id": "4589637",
+      "jira_key": "REB-3343",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:28Z"
     },
     "2c7a-7157-db99-4659": {
       "created_at": "2026-08-15T14:55:05Z",
@@ -11754,6 +11782,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:57:40Z"
     },
+    "438a-e1d9-29d3-4081": {
+      "created_at": "2026-08-21T05:38:29Z",
+      "jira_id": "4589638",
+      "jira_key": "REB-3344",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:33Z"
+    },
     "43a0-9372-5c73-499d": {
       "created_at": "2026-08-15T14:57:41Z",
       "jira_key": "REB-109",
@@ -14544,6 +14579,13 @@
       "jira_key": "REB-772",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:59:29Z"
+    },
+    "52b0-6a6a-c66b-4c59": {
+      "created_at": "2026-08-21T05:38:33Z",
+      "jira_id": "4589639",
+      "jira_key": "REB-3345",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:37Z"
     },
     "52bf-bc40-3fcb-4729": {
       "baseline": {
@@ -20305,7 +20347,7 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Why\n\nThe outbound comment sync re-posted duplicate comments to Jira on every hourly pass (bug `irongrey-chubby-oxpecker` / `aa7b-5e47-6d3d-4615`: the PRIMARY comment-id dedup map `comment_ids` is inert/empty, leaving only the lossy body-membership fallback). The reconcile-bridge workflow is **paused** (`disabled_manually`, confirmed via the Actions API), so the duplicate set is FIXED and no longer growing. **REB-1861** is pinned at Jira's 5000-comment HARD cap, so new comments on it fail with `COMMENTS_PER_ISSUE_LIMIT_EXCEEDED`. This ticket purges the accumulated duplicates.\n\nSame failure class, different route, as bug `1f3d-cb66-d3fc-4356`; its cleanup task `bd80-0603-7d44-4d9f` is the established precedent, whose mechanism is reused here.\n\n## How the affected-issue set is enumerated (deterministic, not a guess)\n\nThe set is derived from the LAST reconcile pass before the pause \u2014 Actions run **32403944666** of `.github/workflows/reconcile-bridge.yml` (2026-08-20T18:34Z). Every touched issue emits `RECON: outbound_update key=<KEY> changed=[...] comments=<N>`; the affected set is exactly the keys with `comments>0`. Reproduce with:\n\n```\ngh run view 32403944666 --log \\\n  | grep -oE \"RECON: outbound_update key=[A-Z]+-[0-9]+ changed=\\[[^]]*\\] comments=[0-9]+\" \\\n  | sed -E 's/.*key=([A-Z]+-[0-9]+).*comments=([0-9]+)/\\1 \\2/' | awk '$2>0'\n```\n\nThat yields **30 issues** (the bug ticket's \"~28\" estimate). Keys with `comments=0` in that pass are converged and cannot be carrying duplicates from this bug: the body-membership fallback is deterministic, so an issue that matches today matched on every prior pass. The enumerated list is the completeness baseline for the run, is written to an artifact, and drives the script; the run is REFUSED if the key list and the artifact disagree.\n\nMeasured damage (read-only dry run over that list; all 30 passed the completeness check):\n\nThe full 30-row per-issue table is recorded as a comment on this ticket (artifact.\n\n**Totals: 31,683 Jira comments; 30,847 bot-marked; 836 unmarked; 836 distinct bodies kept; 30,011 duplicates to delete.**\n\n## Mechanism (reused from bd80 \u2014 see that ticket for the full rationale)\n\n- **Bot identification \u2014 the safety-critical filter. Marker detection runs on the PRE-STRIP\n  rendered text.** A comment is a deletion candidate IFF\n  `adf.adf_to_text(comment[\"body\"])` \u2014 the raw ADF\u2192text render, with NO marker strip \u2014 contains\n  `RECONCILER_MARKER = \"<!-- rebar:reconciler-echo -->\"` (`outbound_comments.py`, appended by\n  `_decorate_outbound_comment`). This is deliberately NOT `_normalize_comment_body`, which\n  STRIPS the marker before returning and therefore can never be used for detection. The two uses\n  are kept separate and explicit:\n  *detection* = `adf.adf_to_text(body)` (pre-strip);\n  *dedup grouping* = `_normalize_comment_body(body)` (post-strip).\n  A comment whose pre-strip rendered text lacks the marker is treated as foreign and is NEVER a\n  deletion candidate in phase 1.\n- **Secondary cross-check.** All candidates on an issue must resolve to a single bot `author.accountId`; divergence aborts that issue. Observed homogeneous: `712020:6471376f-4e5e-4ed2-8c05-330827bc387e` (the accountId bd80 recorded).\n- **Dedup key = the reconciler's OWN normalization.** Group candidates by\n  `outbound_comments._normalize_comment_body(body)`, imported and reused verbatim, so \"distinct\n  body\" means exactly what the reconciler means by it.\n- **Keep-one rule.** Per distinct normalized body: keep the OLDEST copy (min `created`), delete\n  the rest. A body with only ONE copy is NEVER deleted. This structurally guarantees the\n  invariant that every distinct body retains exactly one instance.\n- **Pagination + completeness gate.** All comments are fetched via\n  `GET /rest/api/3/issue/{key}/comment?startAt=..&maxResults=100&orderBy=created` and the count\n  is reconciled against the `total` from `?maxResults=0`. `len(fetched) != total` REFUSES that\n  issue (guards a silently truncated fetch producing a dangerous delete list).\n- **Rate limiting \u2014 429 IS retried, explicitly.** DELETE does NOT go through\n  `delete_comment`/`_direct_rest_delete`, which re-raise 4xx/5xx immediately and would hard-abort\n  on the first 429 across ~30k calls. Every request goes through the script's own wrapper, which\n  honours `Retry-After` on 429 and backs off exponentially on 5xx/transient faults, plus a\n  per-call throttle. A 404 on DELETE is idempotent success, so re-runs are safe.\n- **Append-only deletion log**: key, id, body hash, outcome, ts) flushed per deletion, so a stalled run is resumable.\n\n### Phase 2 \u2014 the 836 truncation-suffix comments (separate, evidence-gated)\n\nThree issues (REB-1567: 418, REB-1931: 278, REB-2605: 140) carry comments with NO marker. They are not human: same bot accountId, repeated ~139x identically, rendered text ending in `_TRUNCATION_SUFFIX = \" \u2026 [truncated by reconciler]\"` (`adapters/jira/comment_limits.py`) \u2014 the reconciler's own outbound truncation, which cut the 32767-char body short and removed the trailing marker paragraph. Because the phase-1 authoritative identifier is absent, these run as a SEPARATE phase behind `--include-truncated`, with its own dry run, under the rule: rendered text ends with `_TRUNCATION_SUFFIX` AND `author.accountId` == the resolved bot accountId. Keep-one still applies, so the one-surviving-copy invariant is unchanged. Phase 2 is not needed to clear the cap.\n\n## Safety plan (T4 \u2014 irreversible)\n\n- [x] **Pre-deletion backup** of the FULL comment payload (id, ADF body, author accountId +\n      display name, created) per issue, written and completeness-checked BEFORE any DELETE.\n- [x] **Dry-run default.** Deletion requires an explicit `--execute`. The dry run prints, per\n      issue: fetched/reported total, marked count, unmarked count, distinct-body count, the kept\n      id per body, and the delete count, and writes a per-issue machine-readable plan artifact.\n- [x] **Canary first.** Execute on ONE light issue, verify it fully, then proceed.\n      **REB-1861 runs LAST** (largest and riskiest).\n- [x] **Per-issue post-verification**: re-fetch and assert every distinct normalized body present\n      before the run still has exactly one surviving copy, that the unmarked count is unchanged,\n      and that the issue is below the cap.\n- [x] Ambiguous cases are SKIPPED and reported, never guessed.\n- [x] The reconcile-bridge workflow stays PAUSED for the whole operation and is NOT re-enabled\n      by this ticket.\n\n## Acceptance Criteria\n\n- [x] [non-codebase] Affected-issue list derived by the documented command from run 32403944666,\n      written as an artifact, and the run covered exactly it (30 issues) \u2014.\n- [x] [non-codebase] Per issue `len(fetched) == total` held and a backup existed BEFORE any DELETE\n      \u2014 `complete=True` everywhere; `backup/<KEY>.json` for all 27 issues with deletions (150MB).\n- [x] [non-codebase] Dry run produced and inspected before `--execute`\n      recorded in full as a ticket comment).\n- [x] [non-codebase] Marker detection ran PRE-STRIP \u2014 30,847 `marked` counted; detection on\n      stripped text would report 0.\n- [x] [non-codebase] Every DELETE honoured `Retry-After` on 429 \u2014 713+ throttles absorbed, 0 failed\n      deletions across 29,931 DELETEs.\n- [x] [non-codebase] Every issue below the cap; REB-1861 5000 -> 79.\n- [x] [non-codebase] Post-deletion re-fetch shows zero missing distinct bodies and unchanged\n      non-candidate counts, confirmed independently against the backups (MISSING=0 on all 27).\n- [x] [non-codebase] Deletion log has one object per deletion: 29,931 lines in matching the delete count.\n\nPhase 2 (the 836 truncation-suffix comments) was deliberately NOT executed; it is reported in the ticket comments as an operator decision, implemented behind `--include-truncated`.\n\n> provenance: all [non-codebase] criteria are proved by operator-local artifacts outside\n> this repo (Actions run 32403944666; paths recorded in this ticket's comments).",
+        "description": "## Problem\n\nThe Jira reconcile bridge re-posted the same comments every hourly pass because its PRIMARY id-identity dedup skip was inert (`comment_ids` empty). REB-1861 reached Jira's 5000-comment cap. This ticket is the CLEANUP of the duplicates that defect produced; the defect itself is fixed under `irongrey-chubby-oxpecker` (`aa7b-5e47-6d3d-4615`, change 1957, merged).\n\nThe full plan narrative, method, and safety rationale are preserved verbatim in this ticket's comments (moved there so the required `provenance:` lines fit under the 8,000-char cap).\n\n## Acceptance Criteria\n\n- [x] **Pre-deletion backup** of the FULL comment payload (id, ADF body, author accountId +\n      display name, created) per issue, written and completeness-checked BEFORE any DELETE.\n\n- [x] **Dry-run default.** Deletion requires an explicit `--execute`. The dry run prints, per\n      issue: fetched/reported total, marked count, unmarked count, distinct-body count, the kept\n      id per body, and the delete count, and writes a per-issue machine-readable plan artifact.\n\n- [x] **Canary first.** Execute on ONE light issue, verify it fully, then proceed.\n      **REB-1861 runs LAST** (largest and riskiest).\n\n- [x] **Per-issue post-verification**: re-fetch and assert every distinct normalized body present\n      before the run still has exactly one surviving copy, that the unmarked count is unchanged,\n      and that the issue is below the cap.\n\n- [x] Ambiguous cases are SKIPPED and reported, never guessed.\n\n- [x] The reconcile-bridge workflow stays PAUSED for the whole operation and is NOT re-enabled\n      by this ticket.\n\n- [x] [non-codebase] Affected-issue list derived by the documented command from run 32403944666,\n      written as an artifact, and the run covered exactly it (30 issues) \u2014.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 issue list derived from GitHub Actions run 32403944666, artifact retained outside the repo\n\n- [x] [non-codebase] Per issue `len(fetched) == total` held and a backup existed BEFORE any DELETE\n      \u2014 `complete=True` everywhere; `backup/<KEY>.json` for all 27 issues with deletions (150MB).\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 per-issue completeness gate and backups executed against live Jira before any DELETE\n\n- [x] [non-codebase] Dry run produced and inspected before `--execute`\n      recorded in full as a ticket comment).\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 dry-run output produced against live Jira and inspected before --execute\n\n- [x] [non-codebase] Marker detection ran PRE-STRIP \u2014 30,847 `marked` counted; detection on\n      stripped text would report 0.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 marker counted on live pre-strip ADF text returned by the Jira API\n\n- [x] [non-codebase] Every DELETE honoured `Retry-After` on 429 \u2014 713+ throttles absorbed, 0 failed\n      deletions across 29,931 DELETEs.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 throttle handling observed against live Jira rate limits during execution\n\n- [x] [non-codebase] Every issue below the cap; REB-1861 5000 -> 79.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 post-run comment counts read back from live Jira\n\n- [x] [non-codebase] Post-deletion re-fetch shows zero missing distinct bodies and unchanged\n      non-candidate counts, confirmed independently against the backups (MISSING=0 on all 27).\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 independent re-fetch from live Jira compared against pre-deletion backups\n\n- [x] [non-codebase] Deletion log has one object per deletion: 29,931 lines in matching the delete count.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 append-only operator-local log written during live execution",
         "priority": "High",
         "status": "To Do",
         "summary": "Jira data cleanup: purge duplicate comments from the ~30 issues inflated by the inert comment-id dedup (bd80 precedent)"
@@ -28979,6 +29021,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:11Z"
     },
+    "a881-2d9a-16bf-4acb": {
+      "created_at": "2026-08-21T05:38:37Z",
+      "jira_id": "4589640",
+      "jira_key": "REB-3346",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:41Z"
+    },
     "a88d-bc7e-728b-42b6": {
       "baseline": {
         "assignee": {
@@ -29098,6 +29147,13 @@
       "jira_key": "REB-1055",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:14Z"
+    },
+    "a8ea-be28-2394-4f0c": {
+      "created_at": "2026-08-21T05:38:42Z",
+      "jira_id": "4589641",
+      "jira_key": "REB-3347",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:45Z"
     },
     "a9bd-6641-e603-42bc": {
       "baseline": {
@@ -29909,6 +29965,13 @@
       "jira_key": "REB-1762",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:46Z"
+    },
+    "ad81-73ad-83bb-47c7": {
+      "created_at": "2026-08-21T05:38:45Z",
+      "jira_id": "4589642",
+      "jira_key": "REB-3348",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:49Z"
     },
     "ad85-e5e3-be8d-4be5": {
       "baseline": {
@@ -36744,6 +36807,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:23Z"
     },
+    "d458-bb1e-cc63-42a6": {
+      "created_at": "2026-08-21T05:38:50Z",
+      "jira_id": "4589643",
+      "jira_key": "REB-3349",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:53Z"
+    },
     "d48d-76bd-3d31-47ea": {
       "baseline": {
         "assignee": {
@@ -37890,6 +37960,13 @@
       "jira_key": "REB-448",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:59Z"
+    },
+    "db74-a0a5-2211-4c65": {
+      "created_at": "2026-08-21T05:38:54Z",
+      "jira_id": "4589644",
+      "jira_key": "REB-3350",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T05:38:57Z"
     },
     "db7b-c8fd-190f-4506": {
       "baseline": {
@@ -45205,7 +45282,10 @@
     "1787273764670789001": "__rebar_unknown_comment_id__",
     "1787286317899959001": "__rebar_unknown_comment_id__",
     "1787286351334756001": "__rebar_unknown_comment_id__",
-    "1787287325169440001": "__rebar_unknown_comment_id__"
+    "1787287325169440001": "__rebar_unknown_comment_id__",
+    "1787287545299116001": "__rebar_unknown_comment_id__",
+    "1787287931728003001": "__rebar_unknown_comment_id__",
+    "1787288726545035001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -47027,7 +47107,18 @@
     "REB-3338": "da68-fc7c-068c-4c53",
     "REB-3339": "bfe7-0900-c3d1-4141",
     "REB-334": "d751-4e52-9ee4-4a66",
+    "REB-3340": "14f4-d616-70df-466d",
+    "REB-3341": "1515-bebc-0d91-476b",
+    "REB-3342": "1e48-ff69-13f7-4a83",
+    "REB-3343": "2c66-205d-92e1-4419",
+    "REB-3344": "438a-e1d9-29d3-4081",
+    "REB-3345": "52b0-6a6a-c66b-4c59",
+    "REB-3346": "a881-2d9a-16bf-4acb",
+    "REB-3347": "a8ea-be28-2394-4f0c",
+    "REB-3348": "ad81-73ad-83bb-47c7",
+    "REB-3349": "d458-bb1e-cc63-42a6",
     "REB-335": "d7cf-9419-898a-45d1",
+    "REB-3350": "db74-a0a5-2211-4c65",
     "REB-336": "d843-1ed1-c7da-4d22",
     "REB-337": "d8f5-82c1-373b-4cd4",
     "REB-338": "da27-c916-f04e-4885",
