@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 
-from rebar._cli._parser import build_argument_parser
+from rebar._cli._parser import RebarHelpFormatter, build_argument_parser
 
 
 def build(*, prog: str) -> argparse.ArgumentParser:
@@ -20,7 +20,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
     parser = build_argument_parser(
         prog=prog,
         description="Render the full metric registry over a date range.",
-        formatter_class=argparse.HelpFormatter,
+        formatter_class=RebarHelpFormatter,
         allow_abbrev=False,
     )
     parser.add_argument("--since", metavar="DATE", help="inclusive start date (default: 30d ago)")

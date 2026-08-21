@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import argparse
 
-from rebar._cli._parser import build_argument_parser
+from rebar._cli._parser import RebarHelpFormatter, build_argument_parser
 
 
 def build_fsck(*, prog: str) -> argparse.ArgumentParser:
@@ -29,7 +29,7 @@ def build_fsck(*, prog: str) -> argparse.ArgumentParser:
     parser = build_argument_parser(
         prog=prog,
         description="Audit committed bridge events and binding-store integrity offline.",
-        formatter_class=argparse.HelpFormatter,
+        formatter_class=RebarHelpFormatter,
     )
     parser.add_argument(
         "--tickets-tracker",
@@ -77,7 +77,7 @@ def build_probe(*, prog: str) -> argparse.ArgumentParser:
             "Live Jira capability preflight (requires JIRA_URL, JIRA_USER, "
             "JIRA_API_TOKEN; optional JIRA_PROJECT). Creates and deletes a throwaway issue."
         ),
-        formatter_class=argparse.HelpFormatter,
+        formatter_class=RebarHelpFormatter,
     )
     parser.add_argument(
         "probe_args",
