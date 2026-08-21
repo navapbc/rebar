@@ -190,3 +190,91 @@ def test_an_in_limit_comment_key_is_unchanged_by_this_fix(plain_cutover: None) -
     """
     body = "a perfectly ordinary comment\nwith two lines"
     assert _JiraSanitizer().fit_comment(body) == body
+
+
+# ---------------------------------------------------------------------------
+# Bug 17c3-2f6e-a5e0-438c: under the rich cutover the LOCAL key was decoded by
+# a DIFFERENT decoder than the Jira side — `AdfCodec(rich=True).normalize_outbound`
+# is a markdown round trip that escapes markdown-active characters and rewrites
+# autolinks, while the Jira side decodes the fetched wire with
+# `_normalize_comment_body` -> `adf_to_text` (no escaping). So an IN-LIMIT
+# markdown comment never matched its own landed body and the secondary dedup
+# layer was inert for every markdown-formatted comment, not just over-length
+# ones. The landed side below is CAPTURED from the real ``add_comment`` (only
+# ``_run_acli`` stubbed), exactly as the fixtures above — never re-derived.
+# ---------------------------------------------------------------------------
+
+# Well within every limit; every markdown-active construct the escaping touches
+# (heading, emphasis, link target, code span, list) — the repro recorded on the
+# ticket.
+_IN_LIMIT_MARKDOWN_BODY = (
+    "# Head\n\nSome *bold* text and a [link](http://x) plus `code`.\n\n- a\n- b"
+)
+
+
+def test_an_already_landed_in_limit_markdown_comment_is_not_re_posted_under_rich_cutover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug 17c3 AC 2 — with the cutover ON, an in-limit markdown comment that
+    already landed must produce ZERO mutations on the next differ pass.
+
+    Send the markdown body through the real send path, hand the differ a snapshot
+    holding exactly the wire that landed, and ask it again. Driven with NO
+    ``binding_store`` so the PRIMARY id-identity skip cannot mask the SECONDARY
+    body-equality layer this ticket is about.
+    """
+    monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "cloud")
+    wire = json.loads(_send(_IN_LIMIT_MARKDOWN_BODY, monkeypatch))
+    # Fixture precondition: the in-limit body must land UNTRUNCATED (this bug is
+    # about decode asymmetry, not the fit — that is e339's cell above).
+    landed_text = oc._normalize_comment_body(wire, _JiraInbound())
+    assert "[truncated by reconciler]" not in landed_text
+
+    ticket = {"comments": [{"body": _IN_LIMIT_MARKDOWN_BODY, "timestamp": "3-c"}]}
+    out = oc._diff_comments(ticket, "REB-1", _snapshot("REB-1", [wire]), codec=AdfCodec(rich=True))
+
+    assert out == [], (
+        "re-posted an already-landed in-limit markdown comment under the rich "
+        f"cutover; emitted {len(out)} mutation(s) — the local dedup key must be "
+        "decoded by the SAME decoder as the Jira-side key"
+    )
+
+
+@pytest.mark.parametrize("cutover", ["off", "cloud"], ids=["plain", "rich"])
+def test_a_genuinely_new_markdown_comment_is_still_emitted(
+    cutover: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Counter-regression: a key made too LOOSE would swallow real new comments."""
+    monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", cutover)
+    wire = json.loads(_send(_IN_LIMIT_MARKDOWN_BODY, monkeypatch))
+    ticket = {"comments": [{"body": "a *different* [comment](http://y)", "timestamp": "4-d"}]}
+
+    out = oc._diff_comments(
+        ticket, "REB-1", _snapshot("REB-1", [wire]), codec=AdfCodec(rich=cutover == "cloud")
+    )
+
+    assert len(out) == 1
+    assert out[0]["action"] == "add"
+
+
+def test_an_already_landed_over_length_markdown_comment_is_not_re_posted_under_rich_cutover(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The truncation-notice facet: the old local key escaped the landed notice
+    (``\\[truncated by reconciler\\]``), so even a fit-converged over-length body
+    still diverged under the rich cutover. Same mechanism, boundary input.
+    """
+    monkeypatch.setenv("REBAR_RECONCILER_RICH_TEXT_CUTOVER", "cloud")
+    body = "Line of markdown *prose* about the [reconciler](http://r). " * 800
+    wire = json.loads(_send(body, monkeypatch))
+    landed_text = oc._normalize_comment_body(wire, _JiraInbound())
+    assert "[truncated by reconciler]" in landed_text, (
+        "fixture precondition: the send path must truncate this body"
+    )
+
+    ticket = {"comments": [{"body": body, "timestamp": "5-e"}]}
+    out = oc._diff_comments(ticket, "REB-1", _snapshot("REB-1", [wire]), codec=AdfCodec(rich=True))
+
+    assert out == [], (
+        f"re-posted an already-landed over-length markdown comment; emitted {len(out)}"
+    )

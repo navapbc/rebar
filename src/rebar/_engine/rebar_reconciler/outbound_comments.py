@@ -33,11 +33,14 @@ spec-loaded standalone in tests, where package-relative config resolution may no
 be available at import.
 
 Ticket a32a: ``_diff_comments`` additionally accepts an injected ``codec`` — any
-object exposing ``normalize_outbound(text) -> str`` (typically a real
+object exposing ``to_wire(text) -> Any`` (typically a real
 ``adapters/jira_family/rich_text.RichTextCodec``) — so the LOCAL comparison key
-is routed through the SAME outbound normalization the send path's landed form
-would embody, the way ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote``
-already composes ``normalize_outbound(fit_outbound(value))`` for descriptions.
+is derived from the SAME wire shape the send path's landed form would embody.
+Bug 17c3-2f6e-a5e0-438c sharpened the composition: the local key is the codec's
+``to_wire`` of the decorated, fitted body decoded back through the SAME
+``_normalize_comment_body`` decoder the Jira-side key uses — one decoder for
+both keys, where the previous ``normalize_outbound`` routing decoded the local
+side with a markdown round trip the Jira side never applies.
 ``codec`` defaults to ``None``, which resolves to an identity no-op
 (:class:`_IdentityCodec`) — today's actual behaviour for both deployments (Cloud
 sends comment bodies as plain text via ACLI with no ADF encoding computed; DC's
@@ -47,16 +50,14 @@ until a real, non-identity codec is wired in.
 **The invariant this depends on, and why there is no origin-aware gate for
 it:** this module does NOT distinguish "a body that originated in Jira and was
 pulled inbound" from "a body a human typed locally" before computing the
-outbound comparison key — both are normalized identically. That is safe ONLY
-because ``RichTextCodec.normalize_outbound(t) == RichTextCodec.decode_inbound(
-RichTextCodec.to_wire(t))`` for every real implementation (pinned in
-``test_rich_text_codec.py::test_normalize_outbound_equals_decode_of_to_wire``):
-degradation is symmetric. If that law ever stops holding — if encode-then-
-decode stops being the same fixed point as normalize-outbound — a body pulled
-FROM Jira starts being re-emitted on the next outbound pass, silently
-overwriting the human's Jira-native formatting with the reconciler's own
-(wrong) idea of it. This is currently load-bearing and was, before this
-ticket, unwritten anywhere.
+outbound comparison key — both are normalized identically. That is safe because
+the PRIMARY identity skip (``jira_comment_id`` / the comment-id map) removes
+inbound-origin comments before the body-equality layer, and because the local
+key is now, by construction, the one-decoder decode of the exact wire the send
+path would produce (``_normalize_comment_body(to_wire(decorated fitted body))``,
+bug 17c3-2f6e-a5e0-438c) — encode-then-decode symmetry is used directly instead
+of being assumed of a parallel ``normalize_outbound`` normalizer (the codec law,
+pinned in ``test_rich_text_codec.py::test_normalize_outbound_equals_decode_of_to_wire``).
 """
 
 from __future__ import annotations
@@ -123,16 +124,22 @@ class _IdentityCodec:
     def normalize_outbound(self, text: str) -> str:
         return text
 
+    def to_wire(self, text: str) -> Any:
+        """Identity wire shape (bug 17c3-2f6e: the key derivation predicts the
+        as-sent wire via ``to_wire``, so the fallback must expose it too)."""
+        return text
+
 
 def _resolve_codec(codec: Any | None) -> Any:
     """Resolve the injected outbound rich-text codec for the LOCAL comparison
     key (ticket a32a; default flipped to the real codec by emersed-specific-mutt).
 
-    A caller (or test) may pass any object exposing ``normalize_outbound(text)
-    -> str`` — typically a real ``adapters/jira_family/rich_text.RichTextCodec``
-    (``AdfCodec``/``WikiTextCodec``) — so the local comment key is routed through
-    it the same way ``OutboundFieldMapper.map_fields_to_remote`` composes
-    ``normalize_outbound(fit_outbound(value))`` for descriptions.
+    A caller (or test) may pass any object exposing ``to_wire(text) -> Any``
+    — typically a real ``adapters/jira_family/rich_text.RichTextCodec``
+    (``AdfCodec``/``WikiTextCodec``) — so the local comment key is derived from
+    the codec's own wire shape (bug 17c3-2f6e-a5e0-438c: the key is
+    ``_normalize_comment_body(to_wire(decorated fitted body))``, the same decode
+    the Jira-side key gets).
 
     ``None`` (the default) now resolves to the configured backend's REAL comment
     codec (Cloud ``AdfCodec``/DC ``WikiTextCodec``, each built with
@@ -388,16 +395,17 @@ def _diff_comments(
     Matching rule: emit a comment "add" only for local comment bodies NOT
     already present in Jira, after normalising both sides via
     :func:`_normalize_comment_body` (rich-text→text conversion + RECONCILER_MARKER
-    strip + whitespace strip), and — ticket a32a — routing the LOCAL side
-    additionally through the injected ``codec``'s ``normalize_outbound`` (after
-    ``sanitizer.fit_comment``, mirroring the fit-then-normalize order
-    ``outbound_mapper.OutboundFieldMapper.map_fields_to_remote`` composes for
-    descriptions: ``normalize_outbound(fit_outbound(value))``). Without this,
-    the Jira-side key is always a DECODED value while the local-side key
-    never accounts for what the send path would actually produce — the exact
-    asymmetry that already bit the description path before that composition
-    was added, and that bites the comment path's truncation guard below (bug
-    6afc) for the ONE transform it does know about. Body equality after
+    strip + whitespace strip). The LOCAL side's input to that shared decoder is
+    the PREDICTED wire (bug 17c3-2f6e-a5e0-438c, one decoder for both keys):
+    ``codec.to_wire(_decorate_outbound_comment(sanitizer.fit_comment(body)))`` —
+    decorate-fit-encode, the send path's own composition
+    (``acli_cli_ops.add_comment``: ``to_wire(fit_preserving_marker(decorated))``).
+    Without this, the Jira-side key is always a DECODED value while the
+    local-side key never accounts for what the send path would actually
+    produce — the exact asymmetry that already bit the description path, that
+    bit the comment path's truncation guard (bug 6afc), and that under the rich
+    cutover made the local key a markdown-ESCAPED round trip the Jira-side
+    ``adf_to_text`` decode never matches (bug 17c3). Body equality after
     normalisation → skip (already mirrored); otherwise emit with outbound
     decoration.
 
@@ -407,7 +415,7 @@ def _diff_comments(
     ``outbound_differ.compute_outbound_mutations`` (which already holds the backend).
 
     ``codec``: the injected outbound rich-text codec (ticket a32a) — any object
-    exposing ``normalize_outbound(text) -> str``, typically a real
+    exposing ``to_wire(text) -> Any``, typically a real
     ``adapters/jira_family/rich_text.RichTextCodec``. ``None`` resolves to
     :func:`_resolve_codec`'s identity default, so no existing caller's
     behaviour changes until one is wired in.
@@ -553,23 +561,33 @@ def _diff_comments(
         # Bug 6afc-20ee-84e5-4dd5 (convergence): the send path truncates an
         # over-length body to Jira's 32,767-char limit before it lands, so the
         # body in jira_bodies is the TRUNCATED form. Apply the SAME shared
-        # truncation to the expected local body before the membership test, then
-        # (ticket a32a) route the fitted body through the codec's
-        # ``normalize_outbound`` — fit-then-normalize, the order
-        # ``OutboundFieldMapper.map_fields_to_remote`` composes for descriptions.
+        # truncation to the expected local body before the membership test.
         # The local store is NOT mutated — this is an in-memory comparison key.
         #
         # emersed-specific-mutt: this body-equality test is now a SECONDARY
         # (belt-and-suspenders) skip behind the ID identity above — it guards a
         # lost map write (a crash between add_comment and record_comment_id's
-        # save) so a re-sync still does not re-post an already-landed body. When
-        # the codec renders RICH (story 3388 cutover on), ``normalize_outbound``
-        # can re-introduce trailing whitespace (e.g. ``adf_to_markdown`` appends a
-        # newline) that the Jira side has already stripped via
-        # ``_normalize_comment_body``; run the local key back through the SAME
-        # normalization so both sides are symmetric and the rich path converges.
+        # save) so a re-sync still does not re-post an already-landed body.
+        #
+        # Bug 17c3-2f6e-a5e0-438c: BOTH keys must be produced by ONE decoder.
+        # The Jira-side key above decodes the FETCHED wire with
+        # ``_normalize_comment_body``; the local key therefore predicts the wire
+        # the send path produces — decorate, fit, ``to_wire`` (the send path is
+        # ``to_wire(fit_preserving_marker(decorated))``, and ``fit_comment`` is
+        # that fit with the decoration taken back off, so re-decorating it
+        # reproduces the encoder's exact input) — and decodes it with the SAME
+        # ``_normalize_comment_body``. Routing the local key through
+        # ``normalize_outbound`` instead (the previous shape) decoded the two
+        # sides differently under the rich cutover: ``AdfCodec(rich=True)``'s
+        # markdown round trip escapes markdown-active characters and rewrites
+        # autolinks, while the Jira side's ``adf_to_text`` never does — and the
+        # real wire is the PLAIN encode anyway, because the decoration is an
+        # HTML comment and ``markdown_to_adf`` degrades a document that would
+        # drop one. So the secondary dedup was inert for every markdown-bearing
+        # comment and re-posted it each pass.
         compare_body = _normalize_comment_body(
-            codec.normalize_outbound(sanitizer.fit_comment(body)), inbound_mapper=inbound_mapper
+            codec.to_wire(_decorate_outbound_comment(sanitizer.fit_comment(body))),
+            inbound_mapper=inbound_mapper,
         )
         if compare_body and compare_body not in jira_bodies:
             # Decorate the outbound body with the reconciler marker so the
