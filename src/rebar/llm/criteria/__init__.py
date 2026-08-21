@@ -39,14 +39,22 @@ from .overlay import (
     effective_routing,
     register_gate,
 )
+from .snapshot import (
+    ApplicabilityDecision,
+    CriteriaSnapshot,
+    compile_snapshot,
+)
 
 __all__ = [
     "DEFAULT_BLOCK_THRESHOLD",
+    "ApplicabilityDecision",
     "CriteriaError",
+    "CriteriaSnapshot",
     "RepoRootMismatchError",
     "build_descriptor",
     "check_repo_root_agreement",
     "clear_caches",
+    "compile_snapshot",
     "disabled_builtins",
     "effective_criteria",
     "effective_routing",
