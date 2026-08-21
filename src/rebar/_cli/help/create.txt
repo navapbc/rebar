@@ -1,3 +1,29 @@
-Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--bridge-project <key>] [--repos <r1,r2>] [--output json]
-Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).
-Bridge project: --bridge-project sets the ticket's target bridge project key (tri-state) — omit for the unbound/legacy default, "" (empty) to mark never-sync, or a key (e.g. REB) to bind. --repos sets the associated repositories (CSV, mirroring --tags).
+Usage: rebar create [--output {text,json}] [--parent PARENT]
+                    [--priority PRIORITY] [--description DESCRIPTION]
+                    [--assignee ASSIGNEE] [--tags TAGS]
+                    [--bridge-project BRIDGE_PROJECT] [--repos REPOS]
+                    [--detected-by DETECTED_BY]
+                    [ticket_type] [title] [parent]
+
+Create a new ticket.
+
+positional arguments:
+  ticket_type           bug|epic|story|task
+  title                 ticket title
+  parent                optional parent id (positional)
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --parent PARENT       parent ticket id
+  --priority PRIORITY, -p PRIORITY
+                        priority 0-4
+  --description DESCRIPTION, -d DESCRIPTION
+                        ticket description
+  --assignee ASSIGNEE   assignee (Jira-resolvable)
+  --tags TAGS           comma-separated tags
+  --bridge-project BRIDGE_PROJECT
+                        bridge project key
+  --repos REPOS         comma-separated repos for the bridge project
+  --detected-by DETECTED_BY
+                        detected_by:<gate> tag (bugs)

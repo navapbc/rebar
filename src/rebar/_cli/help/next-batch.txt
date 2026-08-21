@@ -1,1 +1,11 @@
-Usage: rebar next-batch <epic_id> [--output json]
+Usage: rebar next-batch [--output {json,text,report}] [--limit N] [epic]
+
+Select next parallel agent batch for an epic.
+
+positional arguments:
+  epic                  the epic to select a batch for
+
+options:
+  --output {json,text,report}, -o {json,text,report}
+                        output format
+  --limit N             cap the batch size (or 'unlimited')

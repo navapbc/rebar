@@ -1,1 +1,6 @@
-Usage: rebar resolve <id_or_alias_or_prefix>
+Usage: rebar resolve [ticket_id]
+
+Resolve an id/alias/prefix to a canonical ticket id.
+
+positional arguments:
+  ticket_id  the id, alias, or prefix to resolve

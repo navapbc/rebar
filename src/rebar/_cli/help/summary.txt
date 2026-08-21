@@ -1,3 +1,10 @@
-Usage: rebar summary <ticket_id> [<ticket_id> ...] [--output json]
-  JSON items are {ticket_id, alias, status, title, blocking_summary}.
-  ticket_id preserves the caller token; alias is the exact resolved alias, or null when unresolved or ambiguous.
+Usage: rebar summary [--output {text,json}] [ticket_id ...]
+
+One-line ticket summary with blocking status for one or more IDs.
+
+positional arguments:
+  ticket_id             one or more tickets to summarize
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format

@@ -17,14 +17,26 @@ from rebar._cli._parser import build_argument_parser
 
 def build_get_file_impact(*, prog: str) -> argparse.ArgumentParser:
     """``rebar get-file-impact <ticket_id>``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("ticket_id", nargs="?")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Get the current file impact array for a ticket (JSON).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to read")
     return parser
 
 
 def build_get_verify_commands(*, prog: str) -> argparse.ArgumentParser:
     """``rebar get-verify-commands <ticket_id> [--output json]``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("--output", "-o", choices=("text", "json"), default="text")
-    parser.add_argument("ticket_id", nargs="?")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Get the current verify commands array for a ticket (JSON).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--output", "-o", choices=("text", "json"), default="text", help="output format"
+    )
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to read")
     return parser

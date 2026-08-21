@@ -1,4 +1,12 @@
-Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)
-  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from | caused_by
-  blocking deps (blocks/depends_on) link tickets that share a parent; across
-  sub-trees they escalate to the nearest common ancestor's children
+Usage: rebar link [--dry-run] [source] [target] [relation]
+
+Link two tickets (relation REQUIRED:
+blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by).
+
+positional arguments:
+  source     source ticket
+  target     target ticket
+  relation   the required relation
+
+options:
+  --dry-run  report without writing
