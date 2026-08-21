@@ -1,18 +1,20 @@
-"""EXPECTED, self-healing tickets-push outcomes must not be reported at WARNING
-(bug 3ff9-a8f0-ff5a-457f / squeamish-halfawake-fantail).
+"""EXPECTED, self-healing tickets-push outcomes must be suppressed from
+agent-visible output (bug 3ff9-a8f0-ff5a-457f / squeamish-halfawake-fantail).
 
 Bug 2a76 made the terminal push-failure report informative; the operator ruling of
 2026-08-21 draws the line the other way for outcomes that are expected and handled
 automatically: a lost contention race under concurrent writers, and a transient
 transport fault the code is already retrying, heal on the next successful write —
 surfacing them at WARNING primed agent sessions to assume the store was broken and
-burn tokens investigating ref topology.
+burn tokens investigating ref topology. The ruling update of the same day goes
+further: "We should suppress the message under normal load. This is noise, not an
+outage signal." — so the expected case emits NOTHING at INFO or above (DEBUG at most).
 
 The distinction these tests pin:
 
-* expected-and-self-healing (lost contention race; mid-retry transport blip) → INFO,
+* expected-and-self-healing (lost contention race; mid-retry transport blip) → DEBUG,
   wording that states the contract affirmatively ("expected under concurrent …
-  no action needed") — and NO record at WARNING or above;
+  no action needed") — and NO record at INFO or above;
 * operator-actionable stays loud — a policy decline, a strict raise, and a backlog
   that GREW across successive failures (the durable push-pending marker records the
   previous count, so growth is provable without new state);
@@ -91,27 +93,28 @@ def _arm(monkeypatch: pytest.MonkeyPatch, tracker: Path) -> None:
 
 
 def _push_best_effort(tracker: Path, caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO, logger="rebar._store.push"):
+    with caplog.at_level(logging.DEBUG, logger="rebar._store.push"):
         assert push.push_tickets_branch(str(tracker), sleep_fn=lambda _d: None) is None
 
 
-def test_lost_contention_race_emits_nothing_at_warning_and_states_the_contract(
+def test_lost_contention_race_emits_nothing_at_info_and_states_the_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC1 + AC3: a first lost contention race is INFO with self-healing wording."""
+    """AC1 + AC3: a first lost contention race is DEBUG at most, self-healing wording."""
     tracker = tmp_path / ".tickets-tracker"
     _arm(monkeypatch, tracker)
     monkeypatch.setattr(push, "_git", _contention_git("5"))
 
     _push_best_effort(tracker, caplog)
 
-    loud = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    loud = [r for r in caplog.records if r.levelno >= logging.INFO]
     assert loud == [], (
-        "a lost contention race is expected and self-healing; reporting it at WARNING "
-        f"primes agent sessions to investigate a non-issue. Got: {[r.getMessage() for r in loud]}"
+        "a lost contention race is expected and self-healing NOISE under normal load "
+        "(operator ruling: not an outage signal); anything at INFO or above primes agent "
+        f"sessions to investigate a non-issue. Got: {[r.getMessage() for r in loud]}"
     )
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert text.strip(), "the outcome must still be reported (at INFO), not silenced entirely"
+    assert text.strip(), "the outcome must still be traceable (at DEBUG), not silenced entirely"
     assert "..HEAD" not in text, (
         "bare ..HEAD reads as the session's code worktree HEAD; name the tickets branch:\n" + text
     )
@@ -152,7 +155,7 @@ def test_static_backlog_across_failures_stays_quiet(
 
     _push_best_effort(tracker, caplog)
 
-    loud = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    loud = [r for r in caplog.records if r.levelno >= logging.INFO]
     assert loud == [], (
         "an unchanged backlog is not growth; only a GROWING backlog is operator-actionable. "
         f"Got: {[r.getMessage() for r in loud]}"
@@ -197,10 +200,10 @@ def test_backlog_growth_check_reads_the_marker_before_it_is_overwritten(
     assert push_state.backlog_grew(str(tracker), "origin/tickets") is False
 
 
-def test_mid_retry_transport_notices_in_recovery_legs_are_info(
+def test_mid_retry_transport_notices_in_recovery_legs_are_debug(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """AC2: the fetch-leg and merge-leg retry announcements are INFO, not WARNING."""
+    """AC2: the fetch-leg and merge-leg retry announcements are DEBUG, below INFO."""
     tracker = tmp_path / ".tickets-tracker"
     _arm(monkeypatch, tracker)
     flaked: dict[str, int] = {"fetch": 0, "merge": 0}
@@ -214,7 +217,7 @@ def test_mid_retry_transport_notices_in_recovery_legs_are_info(
 
     monkeypatch.setattr(push, "_git", flaky)
 
-    with caplog.at_level(logging.INFO, logger="rebar._store.push"):
+    with caplog.at_level(logging.DEBUG, logger="rebar._store.push"):
         fetch = push_recovery._fetch_for_recovery(
             push, str(tracker), "origin", "tickets", lambda _d: None
         )
@@ -225,9 +228,9 @@ def test_mid_retry_transport_notices_in_recovery_legs_are_info(
     assert fetch.returncode == 0 and merge.returncode == 0, "the blip must still be ridden out"
     notices = [r for r in caplog.records if "transient transport fault" in r.getMessage()]
     assert len(notices) == 2, "each leg announces its automatic retry exactly once"
-    assert all(r.levelno == logging.INFO for r in notices), (
-        "an already-being-retried transport blip is INFO material, not worry-bait: "
-        f"{[(r.levelname, r.getMessage()) for r in notices]}"
+    assert all(r.levelno == logging.DEBUG for r in notices), (
+        "an already-being-retried transport blip is suppressed-under-normal-load noise, "
+        f"DEBUG at most: {[(r.levelname, r.getMessage()) for r in notices]}"
     )
     assert all("no action needed" in r.getMessage() for r in notices)
 

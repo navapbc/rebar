@@ -140,7 +140,10 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
 
     monkeypatch.setattr(push, "_git", terminal_git)
     monkeypatch.setattr(push.sys, "exit", lambda *_a, **_k: pytest.fail("core called sys.exit"))
-    caplog.set_level("INFO")
+    # Scoped to the emitting logger: raising the ROOT logger to DEBUG lets unrelated
+    # exc_info DEBUG records (push_state's best-effort marker) hit ambient handlers in
+    # full-suite order and pollute the capsys ("", "") assertion below.
+    caplog.set_level("DEBUG", logger="rebar._store.push_classify")
 
     error = _delivery_error(
         lambda: push.push_tickets_branch(str(tracker), strict=True, sleep_fn=lambda _d: None),
@@ -158,11 +161,11 @@ def test_strict_terminal_push_classes_have_distinct_reasons_and_preserve_state(
     # delivery is degraded, so the strict path is deliberately no longer silent here.
     # Whether it reaches the captured streams or only the log handler depends on handler
     # config, so the count is asserted on caplog, which is deterministic either way.
-    # Bug 3ff9: the retry is automatic, so the announcement is INFO — never WARNING.
+    # Bug 3ff9: the retry is automatic — suppressed under normal load, DEBUG at most.
     retries = [r for r in caplog.records if "transient transport fault" in r.getMessage()]
     assert len(retries) == attempts - 1
-    assert all(r.levelno == logging.INFO for r in retries), (
-        "an automatic mid-retry transport notice must be INFO material: "
+    assert all(r.levelno == logging.DEBUG for r in retries), (
+        "an automatic mid-retry transport notice is noise, not an outage signal — DEBUG: "
         f"{[(r.levelname, r.getMessage()) for r in retries]}"
     )
     assert witness.read_bytes() == before
