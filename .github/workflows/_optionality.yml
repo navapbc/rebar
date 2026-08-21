@@ -93,6 +93,25 @@ jobs:
       - name: a core CLI command runs on the clean wheel
         run: |
           /tmp/clean/bin/rebar --help >/dev/null
+      # RP-05 S5 (ticket 6755): the CLI reference + package help DERIVE from the route
+      # registry and the committed help bytes. Prove they are byte-current when rendered by
+      # the LEAN no-extras interpreter — a doc/help section that silently needed an optional
+      # import to render would fail here rather than only reddening main post-merge.
+      - name: parser-derived docs are byte-current on the lean wheel
+        run: |
+          /tmp/clean/bin/python scripts/gen_cli_help.py --check
+          /tmp/clean/bin/python scripts/gen_cli_reference.py --check
+      # The clean-wheel distribution contract (AC4/AC7): the SAME repository-local pytest that
+      # runs locally builds a no-extras wheel, renders every approved help form in a fresh
+      # directory with exact committed bytes, asserts no operation/config/store/handler/heavy
+      # import, and smoke-tests the `rebar-mcp` entry point (a concrete `--help` observable).
+      # 600s: it builds a wheel + a nested clean venv; --timeout-method=thread because that
+      # work blocks in C-level subprocess/venv calls the default `signal` method cannot fire in.
+      - name: clean-wheel distribution + every-help-form byte contract (portable pytest)
+        run: |
+          /tmp/clean/bin/pip install pytest pytest-timeout build 'mcp>=1.28.1,<2'
+          /tmp/clean/bin/python -m pytest --timeout=600 --timeout-method=thread \
+            tests/interfaces/contracts/test_cli_registry_distribution.py -rs
       # The LLM-optionality *degradation* tests (skipif the agents extra is
       # installed) verify every interface fails loudly+cleanly when the stack is
       # ABSENT. The main test.yml lane installs [dev] -> [agents], so they always
@@ -210,7 +229,7 @@ jobs:
                 "$v/bin/python" -m pip install --upgrade pip &&
                 "$v/bin/python" -m pip install ".[$target]" &&
                 "$v/bin/python" "$RUNNER_TEMP/check_extra.py" "$label" &&
-                if [ "$label" = mcp ]; then "$v/bin/rebar-mcp" --help >/dev/null; fi
+                if [ "$label" = mcp ]; then "$v/bin/rebar-mcp" --help | grep -q "rebar-mcp"; fi
             }; then
               rc=1
               echo "::error::optional extra '$label' failed"

@@ -18,17 +18,8 @@ from pathlib import Path
 import pytest
 
 import rebar
-from rebar._cli import (
-    _DESCENDANTS,
-    _FIELD_READS,
-    _GATES,
-    _LOOKUPS,
-    _READS_INIT_ONLY,
-    _READS_NO_INIT,
-    _WRITES_FULL,
-    _help,
-    main,
-)
+from rebar._cli import _help, main
+from rebar._cli._registry import ROUTES, derive_policy_sets
 
 
 def _all_subcommands() -> list[str]:
@@ -50,29 +41,24 @@ def test_sub_help_equals_help_sub(capsys: pytest.CaptureFixture[str]) -> None:
 def test_routing_tables_cover_every_known_subcommand() -> None:
     """No known subcommand falls through dispatch: each is in-process or passthrough.
 
-    The in-process sets are disjoint; everything else is the transitional
-    passthrough set. A command missing from BOTH would silently route to the bash
-    dispatcher, which is fine transitionally — but the explicit in-process sets must
-    never overlap (a command can't be both a read and a write arm).
+    RP-05 S5: the in-process read/write classes are enumerated from the route registry
+    via ``derive_policy_sets`` rather than importing the ``_cli`` policy frozensets by
+    hand — the registry IS the single source, so a class it derives cannot drift from
+    the class the test checks. The in-process sets must stay pairwise-disjoint (a command
+    can't be both a read and a write arm), and every in-process arm is a real subcommand.
     """
-    inproc = (
-        _READS_INIT_ONLY
-        | _READS_NO_INIT
-        | _WRITES_FULL
-        | _FIELD_READS
-        | _LOOKUPS
-        | _DESCENDANTS
-        | _GATES
+    derived = derive_policy_sets(ROUTES)
+    set_names = (
+        "_READS_INIT_ONLY",
+        "_READS_NO_INIT",
+        "_WRITES_FULL",
+        "_FIELD_READS",
+        "_LOOKUPS",
+        "_DESCENDANTS",
+        "_GATES",
     )
-    sets = [
-        _READS_INIT_ONLY,
-        _READS_NO_INIT,
-        _WRITES_FULL,
-        _FIELD_READS,
-        _LOOKUPS,
-        _DESCENDANTS,
-        _GATES,
-    ]
+    sets = [derived[name] for name in set_names]
+    inproc: frozenset[str] = frozenset().union(*sets)
     for i in range(len(sets)):
         for j in range(i + 1, len(sets)):
             assert sets[i].isdisjoint(sets[j]), "in-process routing sets overlap"
