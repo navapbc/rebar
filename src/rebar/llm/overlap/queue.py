@@ -356,18 +356,18 @@ def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
     marker for subsequent probes."""
     if _gate_marker_says_quiet(now_ns, tracker):
         return []
-    out: list[str] = []
+    out: list[tuple[int, str]] = []
     soonest: int | None = None
     try:
         entries = os.listdir(tracker)
     except OSError:
-        return out
+        return []
     for name in entries:
         if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
             continue
         state = reduce_ticket(name, tracker, now_ns=now_ns)
         if state["pending"]:
-            out.append(name)
+            out.append((int(state["not_before_ns"] or 0), name))
         eligible = _entry_eligible_ns(state)
         if eligible is not None and (soonest is None or eligible < soonest):
             soonest = eligible
@@ -375,7 +375,27 @@ def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
         _clear_gate_marker(tracker)
     else:
         _write_gate_marker(tracker, now_ns, soonest)
-    return sorted(out)
+    # Order by ``not_before_ns`` (soak deadline) first, ticket id only as a tiebreaker.
+    #
+    # ``drain`` consumes this list as a PREFIX — it stops at the batch cap — so whatever key
+    # orders it IS the service order. Sorting by ticket id alone (the prior behaviour) ordered
+    # a queue by content-derived hex quads: an arbitrary permutation with no relation to when
+    # an entry was enqueued or became eligible, and, worse, a STABLE one. Any entry that keeps
+    # re-entering the queue (a re-certification, or the drain's own stale-digest self-heal)
+    # sorted back to the same low position every run, spent the whole batch budget, and
+    # entries further along in id order were never reached at all — unbounded starvation, not
+    # slowness (bug f400-987f-45f6-419a; measured on the live store as 591 claims covering 100
+    # tickets, all inside the first two deciles of id order).
+    #
+    # ``not_before_ns`` is the field the queue ALREADY stores for exactly this question, and
+    # the module docstring's debounce rule makes it the right one: a re-enqueue bumps it
+    # FORWARD, so a churning entry moves to the BACK of the line and the long-waiting entries
+    # it was displacing advance. That restores the story's "backlog drains over successive
+    # runs" contract without touching the batch cap (raising it was tested and merely moves the
+    # starvation threshold), without any new stored state, and without randomness — the ticket
+    # id tiebreaker keeps the result fully deterministic for a given store state, so
+    # ``os.listdir`` order still cannot leak through.
+    return [name for _, name in sorted(out)]
 
 
 def claim(

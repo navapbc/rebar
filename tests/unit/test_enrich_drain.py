@@ -99,6 +99,45 @@ def test_batch_cap(repo: str) -> None:
     assert Q.pending_enrichment(Q._now_ns(), _tracker(repo)) == []
 
 
+def test_backlog_drains_despite_a_low_sorted_churn_set(repo: str) -> None:
+    """Every queued entry is eventually served, even when `DRAIN_BATCH` entries that sort
+    EARLIER keep re-entering the queue (bug f400-987f-45f6-419a).
+
+    Contract: story c1de-d6a0-6cef-4135's AC — "`rebar enrich --drain` processes up to
+    `DRAIN_BATCH` (default 5) soaked+unclaimed entries then exits; backlog drains over
+    successive runs."
+
+    The mechanism this pins is the interaction between the queue's candidate ORDER and the
+    drain's success-counted batch cap: an order keyed on the ticket-id directory name returns
+    a re-enqueued entry to the FRONT, so a churn set of `DRAIN_BATCH` low-sorted ids consumes
+    the whole per-run budget forever and later-sorted entries are never claimed at all.
+
+    The expected sets are built from ids this test created — never from `pending_enrichment`,
+    which would make the oracle tautological. The assertion is on SERVICE (which entries reach
+    a DONE tombstone), not on the order the queue happens to return, so any fair policy
+    satisfies it and no wall-clock timing is involved.
+    """
+    tids = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(14)]
+    by_id = sorted(tids)
+    churn, late = set(by_id[:5]), set(by_id[5:])  # 5 == DEFAULT_OVERLAP_DRAIN_BATCH
+
+    stamp = 1000
+    for tid in tids:
+        Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=stamp)
+
+    for _ in range(8):
+        stamp += 60 * 1_000_000_000  # each re-enqueue carries a fresh, later soak deadline
+        for tid in sorted(churn):
+            Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=stamp)
+        D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+
+    served = {t for t in tids if Q.reduce_ticket(t, _tracker(repo), now_ns=Q._now_ns())["done"]}
+    assert late - served == set(), (
+        f"{len(late - served)} of {len(late)} later-sorted entries were never served across "
+        f"8 drain runs while the churn set was served repeatedly"
+    )
+
+
 def test_lock_held_skip(repo: str) -> None:
     tid = rebar.create_ticket("task", "Locked", repo_root=repo)
     Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
