@@ -91,9 +91,15 @@ def leak_failure_message(leaked: Iterable[str]) -> str:
     The guard diffs REPO_ROOT around each test, so it cannot tell a leak from a
     write that landed from outside the suite — the message names both causes
     rather than asserting the one it cannot know.
+
+    For the same reason the guard does not delete what it reports, so the text
+    says so explicitly: whoever reads this is the only one who can tell the two
+    causes apart, and therefore the only one who can safely clean up.
     """
     return (
         f"New entries appeared in REPO_ROOT during this test: {sorted(leaked)}\n"
+        "They were left on disk untouched — the guard removes nothing, so clean "
+        "up yourself once you know which cause applies.\n"
         "If this test created them, sandbox it — write under tmp_path (or "
         "another disposable temp dir) instead of the checkout.\n"
         "If it did not, a concurrent write from outside the suite looks "

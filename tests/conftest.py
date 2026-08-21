@@ -2,8 +2,10 @@
 
 Provides an autouse fixture that prevents tests from creating new top-level
 entries in REPO_ROOT. Tests that write to disk must use ``tmp_path`` or
-another sandboxed location. If a test leaks, the leak is cleaned up and the
-test fails with a message naming the new entries.
+another sandboxed location. If new entries appear, the test fails with a message
+naming them. The guard reports only — it never removes what it names, because a
+snapshot diff cannot tell a test's own leak from a concurrent write by anything
+else sharing this checkout.
 
 This guard catches the most common leak shape — relative-path writes from
 mis-routed tracker_dir/cwd handling (the failure mode that put
@@ -20,7 +22,6 @@ these tiers) may opt out via ``@pytest.mark.allow_network``.
 from __future__ import annotations
 
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -303,10 +304,11 @@ def _is_coverage_artifact(name: str) -> bool:
     to the CWD (repo root) when it finishes, and pytest-cov combines them into a single
     ``.coverage`` at session end. Because workers finish at different times, a file
     written by a done worker would otherwise be observed as a "new entry" by the
-    per-test leak snapshot of a still-running worker and DELETED — corrupting the
-    combine (coverage collapses) and spuriously failing that test (story 8d36). These
-    names are all gitignored and produced by the coverage plugin, not the test body, so
-    the leak guard skips them (it never deletes and never fails on them).
+    per-test leak snapshot of a still-running worker and spuriously fail that test
+    (story 8d36; back when the guard also deleted what it reported, the same diff
+    additionally destroyed the data file and collapsed the combine). These names are
+    all gitignored and produced by the coverage plugin, not the test body, so the leak
+    guard skips them (it never fails on them).
     """
     return name == ".coverage" or name.startswith(".coverage.") or name == "coverage.xml"
 
@@ -322,20 +324,20 @@ def _no_repo_root_leaks() -> Iterator[None]:
         after = _repo_leak_snapshot(_REPO_ROOT)
         leaked = {name for name in (after - before) if not _is_coverage_artifact(name)}
         if leaked:
-            # Deepest-first so a leaked file under a watched dir is removed before
-            # we would touch the dir itself (top-level names sort shorter).
-            for name in sorted(leaked, key=len, reverse=True):
-                target = _REPO_ROOT / name
-                if target.is_dir():
-                    shutil.rmtree(target, ignore_errors=True)
-                else:
-                    try:
-                        target.unlink()
-                    except OSError:
-                        # Cleanup is best-effort — pytest.fail() below already
-                        # surfaces the leak. Suppressing keeps a permissions or
-                        # races race from masking the real failure.
-                        pass
+            # REPORT ONLY — never delete. Do not "restore cleanup" here.
+            #
+            # A before/after set difference proves only that an entry APPEARED
+            # under REPO_ROOT during a wall-clock window. Deleting it asserts the
+            # strictly stronger "this test created it", which the guard has no
+            # evidence for and cannot obtain: any other process writing into this
+            # same checkout (a concurrent git, an editor, another agent running
+            # rebar) produces an indistinguishable diff entry, and every proxy for
+            # ownership — mtime, birthtime, name shape — is satisfied equally by a
+            # legitimate external write. Reproduced 1/1: a bare `touch` from a
+            # separate shell mid-test was unlinked and blamed on an innocent test.
+            # Since no attribution signal exists, the deletion is removed outright
+            # rather than made conditional; the failure message tells the reader
+            # nothing was removed so they can clean up a genuine leak themselves.
             pytest.fail(_leak_failure_message(leaked))
 
 
