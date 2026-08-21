@@ -59,6 +59,7 @@ SEED_MESSAGE = "Seed the fixture commit\n"
 REWRITTEN_MESSAGE = "Rewrite the message entirely\n\nA fresh body with no trailer at all.\n"
 
 _CHANGE_ID = re.compile(r"^Change-Id:\s*(\S+)\s*$", re.MULTILINE)
+_SIGN_OFF = re.compile(r"^Signed-off-by:\s*(.+\S)\s*$", re.MULTILINE)
 
 
 def _load_script() -> Any:
@@ -101,7 +102,11 @@ def _head_change_id(repo: Path) -> str | None:
     return found[-1] if found else None
 
 
-def _make_repo(tmp_path: Path, *, with_gerrit_hook: bool) -> Path:
+def _head_sign_offs(repo: Path) -> list[str]:
+    return _SIGN_OFF.findall(_head_message(repo))
+
+
+def _make_repo(tmp_path: Path, *, with_gerrit_hook: bool, sign_offs: tuple[str, ...] = ()) -> Path:
     repo = tmp_path / ("stamped" if with_gerrit_hook else "unstamped")
     repo.mkdir()
     _git("init", "-q", "-b", "main", cwd=repo)
@@ -115,7 +120,14 @@ def _make_repo(tmp_path: Path, *, with_gerrit_hook: bool) -> Path:
         hook.chmod(hook.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     (repo / "seed.txt").write_text("seed\n", encoding="utf-8")
     _git("add", "seed.txt", cwd=repo)
-    _git("commit", "-q", "-m", SEED_MESSAGE.strip(), cwd=repo)
+    seed = SEED_MESSAGE.strip()
+    if sign_offs:
+        # `git commit -s` would stamp the committer identity; writing the trailer block
+        # directly lets the fixture pin ARBITRARY identities and MULTIPLE sign-offs, in
+        # a chosen order, exactly as a real multi-author commit carries them. The fake
+        # Gerrit hook then appends the Change-Id after them, as the real hook does.
+        seed += "\n\n" + "\n".join(f"Signed-off-by: {value}" for value in sign_offs)
+    _git("commit", "-q", "-m", seed, cwd=repo)
     return repo
 
 
@@ -193,6 +205,89 @@ def test_supplied_file_change_id_is_replaced_by_heads(stamped_repo: Path, tmp_pa
 
     amended = _head_message(stamped_repo)
     assert _CHANGE_ID.findall(amended) == [original]
+
+
+def test_wrapper_preserves_sign_offs_where_naive_amend_loses_them(tmp_path: Path) -> None:
+    """Ticket ebfa-3804: HEAD's ``Signed-off-by`` trailers survive the amend, in order.
+
+    Same contrast structure as the Change-Id test: the naive ``--amend -F`` from the
+    identical starting commit must LOSE the sign-offs, or the fixture cannot tell a
+    working wrapper from a no-op one.
+    """
+    sign_offs = ("Alice Dev <alice@example.com>", "Bob Dev <bob@example.com>")
+    repo = _make_repo(tmp_path, with_gerrit_hook=True, sign_offs=sign_offs)
+    assert _head_sign_offs(repo) == list(sign_offs), (
+        "fixture precondition: the seed commit must carry both sign-offs, in order"
+    )
+    original_change_id = _head_change_id(repo)
+    assert original_change_id is not None
+    seed_sha = _git("rev-parse", "HEAD", cwd=repo).strip()
+
+    message_file = tmp_path / "message.txt"
+    message_file.write_text(REWRITTEN_MESSAGE, encoding="utf-8")
+
+    # NEGATIVE CONTROL — the naive form loses every sign-off.
+    _git("commit", "--amend", "-q", "-F", str(message_file), cwd=repo)
+    assert _head_sign_offs(repo) == [], (
+        "negative control is inert: `git commit --amend -F` kept the sign-offs, so this "
+        "fixture cannot distinguish a working wrapper from a no-op one"
+    )
+
+    # Rewind to the very same starting commit and take the wrapper's path instead.
+    _git("reset", "--hard", "-q", seed_sha, cwd=repo)
+    assert _head_sign_offs(repo) == list(sign_offs)
+
+    result = _run_wrapper(repo, message_file)
+    assert result.returncode == 0, result.stderr
+
+    amended = _head_message(repo)
+    assert _head_sign_offs(repo) == list(sign_offs)
+    assert _head_change_id(repo) == original_change_id
+    assert amended.startswith(REWRITTEN_MESSAGE.splitlines()[0])
+    assert SEED_MESSAGE.strip() not in amended
+
+
+def test_supplied_file_sign_off_is_respected_and_not_duplicated(tmp_path: Path) -> None:
+    """A FILE that carries its own sign-off wins: nothing is carried, nothing doubled.
+
+    The carry-forward exists only for a file that OMITS the trailer. When the author
+    supplies one — even HEAD's very own — the file's trailer block is authoritative, so
+    HEAD's sign-offs must not be appended next to (or on top of) it.
+    """
+    repo = _make_repo(tmp_path, with_gerrit_hook=True, sign_offs=("Alice Dev <alice@example.com>",))
+
+    message_file = tmp_path / "message.txt"
+    message_file.write_text(
+        "Rewrite with its own sign-off\n\nBody.\n\nSigned-off-by: Alice Dev <alice@example.com>\n",
+        encoding="utf-8",
+    )
+
+    result = _run_wrapper(repo, message_file)
+    assert result.returncode == 0, result.stderr
+    assert _head_sign_offs(repo) == ["Alice Dev <alice@example.com>"]
+
+    # And a DIFFERENT identity in FILE is equally authoritative: HEAD's is not re-added.
+    message_file.write_text(
+        "Rewrite signed by someone else\n\nBody.\n\nSigned-off-by: Carol Dev <carol@example.com>\n",
+        encoding="utf-8",
+    )
+    result = _run_wrapper(repo, message_file)
+    assert result.returncode == 0, result.stderr
+    assert _head_sign_offs(repo) == ["Carol Dev <carol@example.com>"]
+
+
+def test_no_sign_off_on_head_invents_none(stamped_repo: Path, tmp_path: Path) -> None:
+    """A HEAD without a sign-off stays without one — the wrapper never fabricates a DCO."""
+    assert _head_sign_offs(stamped_repo) == [], (
+        "fixture precondition: the seed commit must carry no sign-off"
+    )
+    message_file = tmp_path / "message.txt"
+    message_file.write_text(REWRITTEN_MESSAGE, encoding="utf-8")
+
+    result = _run_wrapper(stamped_repo, message_file)
+    assert result.returncode == 0, result.stderr
+    assert _head_sign_offs(stamped_repo) == []
+    assert _head_change_id(stamped_repo) is not None
 
 
 def test_refuses_to_amend_when_head_carries_no_change_id(
