@@ -223,8 +223,10 @@ def _retry_transport_or_stop(
     """
     if _is_transport_retriable(stderr) and transport_attempts < _MAX_TRANSPORT_ATTEMPTS:
         # Bug 3ff9: this retry is automatic — announcing it at WARNING primed agent
-        # sessions to investigate a fault the code was already riding out. INFO material.
-        logger.info(
+        # sessions to investigate a fault the code was already riding out; the operator
+        # ruling update suppresses it under normal load ("noise, not an outage
+        # signal") — DEBUG at most.
+        logger.debug(
             "tickets branch push hit a transient transport fault "
             "(transport attempt %s/%s); retrying automatically, no action needed: %s",
             transport_attempts,
@@ -250,10 +252,12 @@ def _terminal_severity(base_path: str, remote_ref: str, stderr: str) -> tuple[in
     Bug 3ff9 (squeamish-halfawake-fantail): a lost contention race under concurrent
     tickets writers is EXPECTED and self-healing — the write is committed locally, the
     durable push-pending marker records the outcome, and the backlog publishes on the
-    next successful write — so reporting it at WARNING primed agent sessions to
-    investigate a non-issue (the operator ruling of 2026-08-21). It stays operator-loud
-    only when it is provably NOT self-healing: a policy decline in the terminal stderr
-    (permanent, bug 2a76), or a backlog that GREW since the previously recorded failure
+    next successful write — so surfacing it to agent-visible output primed agent
+    sessions to investigate a non-issue (operator ruling 2026-08-21, and its update:
+    "We should suppress the message under normal load. This is noise, not an outage
+    signal." — DEBUG at most). It stays operator-loud only when it is provably NOT
+    self-healing: a policy decline in the terminal stderr (permanent, bug 2a76), or a
+    backlog that GREW since the previously recorded failure
     (:func:`push_state.backlog_grew`). MUST be called BEFORE :func:`_raise_if_strict`
     records the new failure, which overwrites the marker the growth check reads.
     """
@@ -263,6 +267,6 @@ def _terminal_severity(base_path: str, remote_ref: str, stderr: str) -> tuple[in
     if push_state.backlog_grew(base_path, remote_ref):
         return logging.WARNING, summary + "; the backlog GREW since the previous failure"
     return (
-        logging.INFO,
+        logging.DEBUG,
         summary + "; expected under concurrent tickets writers — no action needed",
     )
