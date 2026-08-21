@@ -1,7 +1,22 @@
-Compatibility alias for `rebar bridge fsck`.
+Usage: rebar bridge-fsck [-h] [--tickets-tracker TICKETS_TRACKER] [--repair]
+                         [--live-visibility]
 
-Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]
+Audit committed bridge events and binding-store integrity offline.
 
-Audits committed event compatibility, binding drift, and forward/reverse
-binding-store integrity without Jira access. Produces the same result and exit
-semantics as `rebar bridge fsck`.
+options:
+  -h, --help            show this help message and exit
+  --tickets-tracker TICKETS_TRACKER
+                        Path to the .tickets-tracker directory. Defaults to
+                        the REBAR_TRACKER_DIR env var or <repo-root>/.tickets-
+                        tracker.
+  --repair              Prune reverse bindings that have no forward entry
+                        (store_integrity / reverse_missing_forward). Refuses
+                        if any other integrity kind is present. This is the
+                        only writing mode; the audit itself never writes.
+  --live-visibility     Opt-in: additionally run a READ-ONLY, ADVISORY live
+                        check that the mapped project keys + legacy_default
+                        are visible to the bridge bot, reusing the reconcile-
+                        pass visibility helper. Requires live Jira credentials
+                        (JIRA_URL / JIRA_USER / JIRA_API_TOKEN); when absent
+                        it skips cleanly. The advisory is written to stderr
+                        and never changes the exit code.

@@ -1,5 +1,10 @@
-Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit] [--include-archived]
+Usage: rebar compact-all [--dry-run] [--limit N] [--no-commit]
+                         [--include-archived]
 
-  --include-archived   Also select archived tickets (skipped by default; archive
-                       folds terminally, so this is the migration door for tickets
-                       archived before that fold existed).
+Compact all eligible tickets.
+
+options:
+  --dry-run           report what would compact without writing
+  --limit N           compact at most N tickets
+  --no-commit         stage the snapshots without committing
+  --include-archived  also compact archived tickets

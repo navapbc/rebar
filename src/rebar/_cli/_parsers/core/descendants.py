@@ -16,6 +16,11 @@ from rebar._cli._parser import build_argument_parser
 
 def build(*, prog: str) -> argparse.ArgumentParser:
     """``rebar list-descendants <ticket_id>``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("ticket_id", nargs="?")
+    parser = build_argument_parser(
+        prog=prog,
+        description="BFS walk from a root ticket, bucketed by type (JSON).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument("ticket_id", nargs="?", help="the root ticket to walk from")
     return parser

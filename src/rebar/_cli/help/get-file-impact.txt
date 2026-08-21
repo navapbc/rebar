@@ -1,1 +1,6 @@
-Usage: rebar get-file-impact <ticket_id>
+Usage: rebar get-file-impact [ticket_id]
+
+Get the current file impact array for a ticket (JSON).
+
+positional arguments:
+  ticket_id  the ticket to read

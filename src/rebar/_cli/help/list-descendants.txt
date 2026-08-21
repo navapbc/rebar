@@ -1,1 +1,6 @@
-Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)
+Usage: rebar list-descendants [ticket_id]
+
+BFS walk from a root ticket, bucketed by type (JSON).
+
+positional arguments:
+  ticket_id  the root ticket to walk from

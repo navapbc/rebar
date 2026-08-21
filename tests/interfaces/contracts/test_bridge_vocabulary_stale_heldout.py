@@ -41,6 +41,7 @@ _COMPATIBILITY_FILES = {
     "src/rebar/_cli/help/bridge-probe.txt",
     "src/rebar/_engine_support/bridge_fsck.py",
     "scripts/gen_cli_reference.py",
+    "scripts/gen_cli_help.py",
     "scripts/build_cloud_adf_corpus.py",
     "scripts/build_dc_wiki_corpus.py",
     "docs/exit-codes.md",

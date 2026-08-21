@@ -1,1 +1,12 @@
-Usage: rebar validate [--quick|--full] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)
+Usage: rebar validate [--output {text,json}] [--quick] [--full] [--verbose]
+                      [--terse]
+
+Repo-wide tracker health check (scores the whole store 1-5).
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --quick               run only the fast checks
+  --full                run the exhaustive checks
+  --verbose, -v         emit per-check detail
+  --terse               emit a single score line

@@ -1,1 +1,7 @@
-Usage: rebar format <ticket_id> [mode]
+Usage: rebar format [ticket_id] [mode]
+
+Render a ticket for display.
+
+positional arguments:
+  ticket_id  the ticket to render
+  mode       optional display mode

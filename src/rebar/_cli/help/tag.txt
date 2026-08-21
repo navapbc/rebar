@@ -1,1 +1,7 @@
-Usage: rebar tag <ticket_id> <tag>
+Usage: rebar tag [ticket_id] [tag]
+
+Add a tag to a ticket.
+
+positional arguments:
+  ticket_id  the ticket to tag
+  tag        the tag to add

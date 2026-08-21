@@ -1,1 +1,7 @@
-Usage: rebar scratch <set|get|clear> <ticket_id> [<key> [<value>]]
+Usage: rebar scratch [verb] [args ...]
+
+Manage per-ticket scratch values (set/get/clear).
+
+positional arguments:
+  verb  set|get|clear
+  args  verb arguments

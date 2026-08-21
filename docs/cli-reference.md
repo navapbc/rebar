@@ -67,325 +67,473 @@ The 54 subcommands with pinned help text (`rebar._cli._help.known_subcommands()`
 ### `archive`
 
 ```
-Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
+Usage: rebar archive [ticket_id]
+
+Archive an open ticket (excludes from default list; idempotent).
+
+positional arguments:
+  ticket_id  the ticket to archive
 ```
 
 ### `attach-commits`
 
 ```
-Usage: rebar attach-commits <ticket_id> <sha> [<sha>...]
+Usage: rebar attach-commits [ticket_id] [shas ...]
+
+Link commits to a ticket by SHA (repairs a missing rebar-ticket: trailer).
+
+positional arguments:
+  ticket_id  the ticket to attach commits to
+  shas       one or more commit SHAs
 ```
 
 ### `audit`
 
 ```
-Usage: rebar audit show <ticket_id> [--output json|text]   (full retained plan-review history + completion attestation/sidecar + associated code reviews; --output defaults to json)
-       rebar audit serve [--host 127.0.0.1] [--port 8765]   (start the optional, read-only audit web UI; disabled by default — enable with `[ui] enabled = true` and install the `nava-rebar[ui]` extra; binds loopback unless --host is overridden)
+Usage: rebar audit [-h] {show,serve} ...
+
+Show a ticket audit trail (plan-review history + completion + code reviews).
+
+positional arguments:
+  {show,serve}
+    show        print a ticket's audit trail
+    serve       start the optional read-only audit web UI
+
+options:
+  -h, --help    show this help message and exit
 ```
 
 ### `bridge`
 
 ```
-Usage: rebar bridge <command>
+Usage: rebar bridge [-h]
+                    {preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}
+                    ...
 
 Synchronize rebar tickets with Jira.
 
-Commands:
-  preview   Show proposed Jira changes without applying them
-  run       Run one scheduled profile and strictly deliver ticket events
-  sync      Apply the staged Jira synchronization
-  status    Show the reconciler's durable status snapshot
-  pause     Temporarily stop scheduled reconciliation
-  resume    Resume scheduled reconciliation
-  fsck      Audit committed events, binding drift, and binding-store integrity
-  check-access
-            Check Jira access with a create/label/search/delete round-trip
-  setup     Interactively configure and validate Jira access
-  projects  Manage the store's bridge-projects sync mapping (list/set/remove)
+options:
+  -h, --help            show this help message and exit
 
-Preview and sync options:
-  --only IDS       Examine only the named local IDs or bound Jira keys
-  --except IDS     Exclude the named local IDs or bound Jira keys
-
-Run option:
-  --profile PROFILE
-                   Scheduled compatibility profile; defaults to the provider configuration
-
-Sync option:
-  --max-changes N  Apply at most N proposed changes and retain the audit manifest
-
-Status options:
-  --target ID       Compare the witness with this environment id
-  --max-age AGE     Enable age-based staleness (for example 2h)
-  --json            Emit the snapshot as JSON
-
-Projects options:
-  set KEY --repos REPOS
-                   Replace KEY's repos with a comma-separated list ("" for none)
-  remove KEY        Remove KEY from the mapping (non-zero exit if absent)
-
-Run `rebar bridge <command> --help` for command-specific options.
+commands:
+  {preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}
+    preview             Show proposed Jira changes without applying them.
+    sync                Apply proposed Jira changes.
+    run                 Run one scheduled bridge profile and strictly deliver
+                        ticket events.
+    status              Show the reconciler's durable status snapshot.
+    pause               Temporarily stop scheduled reconciliation.
+    resume              Resume scheduled reconciliation.
+    fsck                Audit committed event compatibility and binding-store
+                        integrity.
+    check-access        Check live Jira access with a create/search/delete
+                        round-trip.
+    setup               Interactively configure and validate Jira access.
+    projects            Manage the store's bridge-projects sync mapping.
 ```
 
 ### `bridge-fsck`
 
 ```
-Compatibility alias for `rebar bridge fsck`.
+Usage: rebar bridge-fsck [-h] [--tickets-tracker TICKETS_TRACKER] [--repair]
+                         [--live-visibility]
 
-Usage: rebar bridge-fsck [--tickets-tracker=<path>] [--output json]
+Audit committed bridge events and binding-store integrity offline.
 
-Audits committed event compatibility, binding drift, and forward/reverse
-binding-store integrity without Jira access. Produces the same result and exit
-semantics as `rebar bridge fsck`.
+options:
+  -h, --help            show this help message and exit
+  --tickets-tracker TICKETS_TRACKER
+                        Path to the .tickets-tracker directory. Defaults to
+                        the REBAR_TRACKER_DIR env var or <repo-root>/.tickets-
+                        tracker.
+  --repair              Prune reverse bindings that have no forward entry
+                        (store_integrity / reverse_missing_forward). Refuses
+                        if any other integrity kind is present. This is the
+                        only writing mode; the audit itself never writes.
+  --live-visibility     Opt-in: additionally run a READ-ONLY, ADVISORY live
+                        check that the mapped project keys + legacy_default
+                        are visible to the bridge bot, reusing the reconcile-
+                        pass visibility helper. Requires live Jira credentials
+                        (JIRA_URL / JIRA_USER / JIRA_API_TOKEN); when absent
+                        it skips cleanly. The advisory is written to stderr
+                        and never changes the exit code.
 ```
 
 ### `bridge-probe`
 
 ```
-Compatibility alias for `rebar bridge check-access`.
+Usage: rebar bridge-probe [-h] ...
 
-Usage: rebar bridge-probe   (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN; optional JIRA_PROJECT)
+Live Jira capability preflight (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN;
+optional JIRA_PROJECT). Creates and deletes a throwaway issue.
+
+positional arguments:
+  probe_args  arguments forwarded verbatim to the capability probe
+
+options:
+  -h, --help  show this help message and exit
 ```
 
 ### `check-ac`
 
 ```
-Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)
+Usage: rebar check-ac [--output {text,json}] [ticket_id]
+
+Check one ticket has an Acceptance Criteria block.
+
+positional arguments:
+  ticket_id             the ticket to check
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `claim`
 
 ```
-Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses any enabled start-work gate, e.g. plan-review)
-Review: --review senses the plan-review gate first; when it applies and the attestation is stale/missing it runs the signed review (`review-plan`) BEFORE claiming — the claim proceeds only on PASS (BLOCK/INDETERMINATE/retryable exit 1/2/11 without claiming; gate disabled or exempt type prints a notice and claims). Not propagated to a cascaded parent claim. Review-then-claim is not atomic against concurrent store reconvergence — check currency cheaply with `rebar review-plan <id> --status`.
+Usage: rebar claim [--output {text,json}] [--assignee ASSIGNEE]
+                   [--force [FORCE]] [--review]
+                   [ticket_id]
+
+Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken).
+
+positional arguments:
+  ticket_id             the ticket to claim
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --assignee ASSIGNEE   override the default assignee (Jira-resolvable)
+  --force [FORCE]       bypass the start-work gate (--force=<reason>)
+  --review              emit the review payload
+
+--review: preview payload, not atomic; see review-plan --status.
 ```
 
 ### `clarity-check`
 
 ```
-Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdict/threshold)
+Usage: rebar clarity-check [--stdin] [--config CONFIG] [ticket_id]
+
+Score one ticket's clarity (exit 0=pass, 1=fail).
+
+positional arguments:
+  ticket_id        the ticket to score
+
+options:
+  --stdin          read the ticket text from stdin
+  --config CONFIG  path to a clarity config override
 ```
 
 ### `comment`
 
 ```
-Usage: rebar comment <ticket_id> <body>
+Usage: rebar comment [ticket_id] [body]
 
-Append a comment to a ticket. The body is a SINGLE positional argument — this
-command takes no options, so there is no --body / --body-file form; an
-option-looking argument is rejected rather than stored as the body.
+Add a comment to a ticket.
 
-For a long body, substitute a file's contents in the shell:
-  rebar comment <ticket_id> "$(cat /path/to/body.md)"
-
-If the body itself begins with "-", end option parsing with "--" first:
-  rebar comment <ticket_id> -- "-starts with a dash"
+positional arguments:
+  ticket_id  the ticket to comment on
+  body       the comment body
 ```
 
 ### `compact`
 
 ```
-Usage: rebar compact <ticket_id> [--threshold=<n>]
+Usage: rebar compact [--threshold N] [--horizon NS] [--skip-sync] [--no-commit]
+                     [ticket_id]
+
+Compact a ticket's event log.
+
+positional arguments:
+  ticket_id      the ticket to compact
+
+options:
+  --threshold N  compact only above N events
+  --horizon NS   retain events newer than NS nanoseconds
+  --skip-sync    skip the reconverge
+  --no-commit    stage the snapshot without committing
 ```
 
 ### `compact-all`
 
 ```
-Usage: rebar compact-all [--dry-run] [--limit=<n>] [--no-commit] [--include-archived]
+Usage: rebar compact-all [--dry-run] [--limit N] [--no-commit]
+                         [--include-archived]
 
-  --include-archived   Also select archived tickets (skipped by default; archive
-                       folds terminally, so this is the migration door for tickets
-                       archived before that fold existed).
+Compact all eligible tickets.
+
+options:
+  --dry-run           report what would compact without writing
+  --limit N           compact at most N tickets
+  --no-commit         stage the snapshots without committing
+  --include-archived  also compact archived tickets
 ```
 
 ### `create`
 
 ```
-Usage: rebar create <bug|epic|story|task> <title> [--parent <id>] [--priority <0-4>] [--assignee <name>] [--description <text>] [--tags <t1,t2>] [--bridge-project <key>] [--repos <r1,r2>] [--output json]
-Title: must be non-empty after trimming whitespace (a whitespace-only title is rejected) and at most 255 characters; surrounding whitespace around real content is kept verbatim (not trimmed).
-Bridge project: --bridge-project sets the ticket's target bridge project key (tri-state) — omit for the unbound/legacy default, "" (empty) to mark never-sync, or a key (e.g. REB) to bind. --repos sets the associated repositories (CSV, mirroring --tags).
+Usage: rebar create [--output {text,json}] [--parent PARENT]
+                    [--priority PRIORITY] [--description DESCRIPTION]
+                    [--assignee ASSIGNEE] [--tags TAGS]
+                    [--bridge-project BRIDGE_PROJECT] [--repos REPOS]
+                    [--detected-by DETECTED_BY]
+                    [ticket_type] [title] [parent]
+
+Create a new ticket.
+
+positional arguments:
+  ticket_type           bug|epic|story|task
+  title                 ticket title
+  parent                optional parent id (positional)
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --parent PARENT       parent ticket id
+  --priority PRIORITY, -p PRIORITY
+                        priority 0-4
+  --description DESCRIPTION, -d DESCRIPTION
+                        ticket description
+  --assignee ASSIGNEE   assignee (Jira-resolvable)
+  --tags TAGS           comma-separated tags
+  --bridge-project BRIDGE_PROJECT
+                        bridge project key
+  --repos REPOS         comma-separated repos for the bridge project
+  --detected-by DETECTED_BY
+                        detected_by:<gate> tag (bugs)
 ```
 
 ### `delete`
 
 ```
-Usage: rebar delete <ticket_id> --user-approved [--output json]   (destructive; requires explicit approval)
+Usage: rebar delete [--output {text,json}] [--user-approved] [ticket_id]
+
+Delete a ticket (destructive; requires --user-approved).
+
+positional arguments:
+  ticket_id             the ticket to delete
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --user-approved       required destructive-op guard
 ```
 
 ### `deps`
 
 ```
-Usage: rebar deps <ticket_id> [--include-archived] [--no-pull]
+Usage: rebar deps [--include-archived] [ticket_id]
+
+Show dependency graph for a ticket.
+
+positional arguments:
+  ticket_id           the ticket to graph
+
+options:
+  --include-archived  include archived tickets in the graph
 ```
 
 ### `doctor`
 
 ```
-Usage: rebar doctor [--repair] [--dry-run] [--output json]
-  Diagnose the store and, where it is unambiguous and reversible, heal it.
-  Read-only by default; exits 1 if any finding is outstanding, so it can gate CI.
+Usage: rebar doctor [--output {text,json}] [--repair] [--dry-run]
 
-  Checks currently implemented:
-    dependency-graph  blocking links (blocks/depends_on) that disagree with the
-                      structural rule — ancestor-blocking (a ticket blocking its
-                      own ancestor/descendant) and mis-escalated (recorded
-                      endpoints differ from what the resolver returns)
-    lock health       held/free for each of the store's lock legs (the tickets
-                      write lock's fcntl and mkdir legs, .rebar/hlc.lock and
-                      .rebar/enrich-drain.lock), plus — for the stamped legs,
-                      the mkdir leg and the drain lock — the holder's
-                      host/ns/pid/start, whether that pid is alive (same host
-                      only; "unprobeable" across hosts or pid namespaces), and
-                      how long it has been held. A held lock with a live holder
-                      is INFORMATION; a lock no live process claims is reported
-                      as stale-lock and counts toward the exit code. Read-only:
-                      doctor never reclaims or deletes a lock (the next writer's
-                      acquire does that), and --repair takes no lock action.
+Diagnose the store and heal what is safe to fix (--repair).
 
-  --repair    write the fixes (replacement link first, then the stale unlink);
-              tags the tracker's pre-run state as pre-doctor-repair
-  --dry-run   with --repair, preview without writing any event
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --repair              apply the safe fixes
+  --dry-run             report fixes without applying
 ```
 
 ### `edit`
 
 ```
-Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--bridge-project=VALUE] [--repos=VALUE] [--review]
-Title: --title must be non-empty after trimming whitespace (a whitespace-only value is rejected); surrounding whitespace around real content is kept verbatim (not trimmed).
-Bridge project: --bridge-project is promote-only — it may be set on an UNBOUND ticket but is rejected (non-zero, no event) once the ticket already holds a binding; "" marks never-sync. --repos replaces the associated repositories (CSV) and is freely editable.
-Tags: --add-tag/--remove-tag add/remove; --set-tags replaces (compiled to a convergent delta, add-wins). --set-tags="" clears only the tags THIS clone has observed (not an authoritative reset).
-Review: --review (valueless) re-runs the signed plan review (`review-plan`) AFTER the edit commits and exits with the review disposition (0 PASS / 1 BLOCK / 2 INDETERMINATE / 11 retryable). The edit stays committed whatever the verdict. Edit-then-review is not atomic against concurrent store reconvergence — check attestation currency cheaply with `rebar review-plan <id> --status`.
+Usage: rebar edit [--title TITLE] [--priority PRIORITY] [--assignee ASSIGNEE]
+                  [--ticket_type TICKET_TYPE] [--description DESCRIPTION]
+                  [--parent PARENT] [--bridge-project BRIDGE_PROJECT]
+                  [--add-tag ADD_TAG] [--remove-tag REMOVE_TAG]
+                  [--set-tags SET_TAGS] [--review]
+                  [ticket_id]
+
+Edit ticket fields (--title, --priority, --assignee, --ticket_type,
+--description, --parent; tags via --add-tag/--remove-tag/--set-tags).
+
+positional arguments:
+  ticket_id             the ticket to edit
+
+options:
+  --title TITLE         new title
+  --priority PRIORITY   new priority 0-4
+  --assignee ASSIGNEE   new assignee (Jira-resolvable)
+  --ticket_type TICKET_TYPE
+                        new ticket type
+  --description DESCRIPTION
+                        new description
+  --parent PARENT       new parent id
+  --bridge-project BRIDGE_PROJECT
+                        bridge project key
+  --add-tag ADD_TAG     add a tag
+  --remove-tag REMOVE_TAG
+                        remove a tag
+  --set-tags SET_TAGS   set the full tag set (add-wins)
+  --review              emit the review payload
+
+--review: preview payload, not atomic; see review-plan --status.
 ```
 
 ### `exists`
 
 ```
-Usage: rebar exists <ticket_id|alias>   (exit 0=exists, 1=not found)
+Usage: rebar exists [ticket_id]
+
+O(1) presence check (exit 0=exists, 1=not found).
+
+positional arguments:
+  ticket_id  the ticket to check
 ```
 
 ### `export`
 
 ```
-Usage: rebar export [-o FILE] [--status=<s>] [--type=<t>] [--parent=<id>] [--strip-external|--no-jira] [--include-session-logs] [--exclude-archived] [--include-deleted]
+Usage: rebar export [--out OUT] [--status STATUS] [--type TICKET_TYPE]
+                    [--parent PARENT] [--strip-external]
+                    [--include-session-logs] [--exclude-archived]
+                    [--include-deleted]
 
-Export the ticket store as NDJSON — one full ticket object per line — to stdout
-(default) or a file. A lossy interop projection for reporting/data-mining
-(DuckDB/jq/pandas/BigQuery) and clean rebar->rebar migration; NOT a backup (use
-`git bundle create tickets.bundle tickets` for a lossless, full-history backup).
-Each line carries `schema_version`; run metadata (counts, source_env) goes to
-stderr so every stdout line is a clean ticket object.
+Export the store as NDJSON (one ticket per line).
 
-  -o, --out=FILE          Write NDJSON to FILE (default: stdout)
-  --status=<s>            Only tickets with status in <s> (comma-separated for OR)
-  --type=<t>              Only tickets of type <t> (comma-separated for OR)
-  --parent=<id>           Only direct children of <id>
-  --strip-external        Strip ALL external-tracker linkage (provider-neutral:
-  --no-jira               jira_comment_id, bridge_alerts, any provider id). Alias.
-  --include-session-logs  Include session_log tickets (excluded by default)
-  --exclude-archived      Exclude archived tickets (included+marked by default)
-  --include-deleted       Include deleted tickets (excluded by default)
-
-Scope defaults: all work types and statuses (incl. closed); session_log excluded;
-archived included (carrying `archived: true`); deleted excluded.
+options:
+  --out OUT, -o OUT     write to FILE instead of stdout
+  --status STATUS       filter by status
+  --type TICKET_TYPE    filter by ticket type
+  --parent PARENT       filter to descendants of <id>
+  --strip-external, --no-jira
+                        strip external (Jira) bindings from the export
+  --include-session-logs
+                        include session_log tickets
+  --exclude-archived    exclude archived tickets
+  --include-deleted     include deleted tickets
 ```
 
 ### `format`
 
 ```
-Usage: rebar format <ticket_id> [mode]
+Usage: rebar format [ticket_id] [mode]
+
+Render a ticket for display.
+
+positional arguments:
+  ticket_id  the ticket to render
+  mode       optional display mode
 ```
 
 ### `fsck`
 
 ```
-Usage: rebar fsck [--output json] [--include-archived] [--repair [--only=stale-channel] [--dry-run] [--limit=N]]
+Usage: rebar fsck [--output {text,json}] [--repair] [--repair-snapshots]
+                  [--dry-run] [--include-archived] [--only ONLY] [--limit N]
 
-Store integrity validator. Checks JSON validity, CREATE presence, stale
-index.lock, and SNAPSHOT source_event_uuids consistency. Per-ticket checks
-walk ACTIVE tickets only by default; archived tickets are terminally folded
-at archive time, so re-scanning them is history cost, not activity cost.
+Check store integrity (JSON validity, CREATE presence, index.lock).
 
-  --include-archived   Scan archived ticket dirs too (the full historical walk).
-                       A stale .archived marker never hides a ticket: a dir is
-                       skipped only when its event log confirms net archival.
-  --repair             Drive the store to fsck-zero (A3 remediation): retire
-                       still-present folded sources (SNAPSHOT_INCONSISTENT) and
-                       rebuild snapshots that dropped an AUTO-RECOVER orphan.
-                       Pre-tags pre-a3-remediation, commits+pushes per batch, and
-                       aborts on a push failure. Order-sensitive orphans are
-                       surfaced for human triage, not auto-rebuilt.
-  --only=stale-channel With --repair: rebuild only stale creation-channel
-                       snapshots through the same batched commit-and-push path.
-                       Refuses tickets that also have SNAPSHOT_INCONSISTENT or
-                       ORPHAN_EVENT findings; it does not run the ensure sweep.
-  --dry-run            With --repair: print the per-ticket plan; write nothing.
-  --limit=N            With --repair: repair at most N tickets this run (resumable).
-  --repair-snapshots   Broad legacy rebuild of snapshots with a merged-in orphan
-                       or stale creation channel; it does not batch, push, or
-                       refuse mixed faults.
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --repair              repair what is safe to fix
+  --repair-snapshots    rebuild snapshot state
+  --dry-run             report without writing
+  --include-archived    also check archived tickets
+  --only ONLY           check only the named ticket(s)
+  --limit N             check at most N tickets
 ```
 
 ### `fsck-recover`
 
 ```
-Usage: rebar fsck-recover [--tracker-dir <path>]
+Usage: rebar fsck-recover [--tracker-dir TRACKER_DIR] [--detect-only]
+                          [--recover-dangling] [--timeout SECONDS]
+
+Recover the tracker worktree (dangling commits, interrupted rebases).
+
+options:
+  --tracker-dir TRACKER_DIR
+                        path to the tracker worktree
+  --detect-only         detect without recovering
+  --recover-dangling    recover dangling commits
+  --timeout SECONDS     git operation timeout
 ```
 
 ### `get-file-impact`
 
 ```
-Usage: rebar get-file-impact <ticket_id>
+Usage: rebar get-file-impact [ticket_id]
+
+Get the current file impact array for a ticket (JSON).
+
+positional arguments:
+  ticket_id  the ticket to read
 ```
 
 ### `get-verify-commands`
 
 ```
-Usage: rebar get-verify-commands <ticket_id>
+Usage: rebar get-verify-commands [--output {text,json}] [ticket_id]
+
+Get the current verify commands array for a ticket (JSON).
+
+positional arguments:
+  ticket_id             the ticket to read
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `grounding-info`
 
 ```
-Usage: rebar grounding-info [--output json]
+Usage: rebar grounding-info [--output {text,json}]
 
-Print the STATIC code-grounding oracle integration contract (epic 8f6c): the
-closed dimension-ID vocabulary + version, the reference kinds, the closed
-abstain-reason enum (+ outcome/job/tier vocabularies), and the available
-backends with their detected availability/version. Repo-independent and
-deterministic (no repo is scanned; only fail-open tool-version probes run).
-Default output is a human-readable summary; --output json emits the
-grounding_info schema.
+Print the code-grounding oracle contract (dimensions/kinds/reasons/backends).
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `idea`
 
 ```
-Usage: rebar idea "<title>" [--description <text>] [--output json]
-  Capture an undesigned idea: creates an epic in status 'idea' in a single CREATE event.
-  An idea is never momentarily 'open'/claimable, is excluded from ready/next-batch, and
-  'idea -> closed' (reject) skips the completion gates. Promote with 'transition <id> idea open'.
+Usage: rebar idea [--output {text,json}] [--description DESCRIPTION] [title]
+
+Capture an undesigned idea (creates an epic in status 'idea'; excluded from
+ready/next-batch).
+
+positional arguments:
+  title                 idea title
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --description DESCRIPTION, -d DESCRIPTION
+                        idea description
 ```
 
 ### `import`
 
 ```
-Usage: rebar import [FILE] [--dry-run]
+Usage: rebar import [--dry-run] [file]
 
-Import tickets from rebar export NDJSON (a FILE, or stdin if omitted) into this
-repo, composing ordinary events through the normal locked write path. A provenance
-import for clean rebar->rebar migration: every ticket gets a FRESH local id and
-fresh timestamps, with the source identity preserved as source_id / source_author /
-source_created_at / source_env. Two passes reproduce parents, links, tags,
-comments, file-impact, verify-commands, and non-open statuses (in_progress /
-closed). A dangling parent or link target (a source id not in the import set) is
-skipped with a warning, never a hard failure.
+Import tickets from export NDJSON (clean rebar->rebar migration).
 
-  FILE         NDJSON file to import (default: read stdin)
-  --dry-run    Report how many tickets would be created; write nothing
+positional arguments:
+  file       NDJSON file to import (stdin if omitted)
 
-Note: this importer always creates (re-running duplicates). Idempotent skip-by-
-source_id and deferred-push performance are added in a follow-up. Run summary
-(counts, warnings) is printed to stderr.
+options:
+  --dry-run  report without writing
 ```
 
 ### `init`
@@ -393,235 +541,436 @@ source_id and deferred-push performance are added in a follow-up. Run summary
 ```
 Usage: rebar init [--silent] [--force-new-store]
 
-Initialize (or mount) the ticket store. When a configured remote is reachable,
-rebar always mounts an advertised tickets branch and creates a new store only when
-that branch is absent. If the remote cannot be reached, initialization fails closed
-to avoid splitting ticket history.
+Initialize the ticket system.
 
-  --silent             Suppress successful initialization messages.
-  --force-new-store    Explicitly create a new store only when the configured remote
-                       cannot be reached. Has no effect for a reachable remote.
+options:
+  --silent           suppress successful init messages
+  --force-new-store  create a new store only when the configured remote is
+                     unreachable
 ```
 
 ### `link`
 
 ```
-Usage: rebar link <id1> <id2> <relation>   (relation REQUIRED)
-  relation: blocks | depends_on | relates_to | duplicates | supersedes | discovered_from | caused_by
-  blocking deps (blocks/depends_on) link tickets that share a parent; across
-  sub-trees they escalate to the nearest common ancestor's children
+Usage: rebar link [--dry-run] [source] [target] [relation]
+
+Link two tickets (relation REQUIRED:
+blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by).
+
+positional arguments:
+  source     source ticket
+  target     target ticket
+  relation   the required relation
+
+options:
+  --dry-run  report without writing
 ```
 
 ### `list`
 
 ```
-Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--sort=<key>] [--include-archived] [--exclude-deleted] [--no-pull] [--output llm]
-  --type=<type>      Filter by ticket type (bug, epic, story, task; comma-separated for OR)
-  --status=<status>  Filter by status: idea|open|in_progress|closed|blocked|archived|deleted
-                     (comma-separated for OR; error|fsck_needed also valid). An
-                     unrecognized status is a hard error, not an empty result.
-  --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)
-  --parent=<id>      Filter to direct children of <id>
-  --has-tag=<tag>    Filter to tickets having <tag> (comma-separated for OR);
-                     tags matching ^detected_by: auto-intersect with --type=bug
-  --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)
-  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
-                     unset values sort last). Default keeps store order.
-  --no-pull          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)
+Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
+                  [--full] [--with-children-count] [--unblocked] [--blocked]
+                  [--type TYPE] [--status STATUS] [--priority PRIORITY]
+                  [--parent PARENT] [--has-tag HAS_TAG]
+                  [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
+                  [--sort <priority|created|updated|id|status>]
+
+List all tickets as JSON.
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --include-archived    include archived tickets
+  --exclude-deleted     exclude deleted tickets
+  --full                emit full ticket records
+  --with-children-count
+                        annotate each ticket's child count
+  --unblocked           only tickets with no open blockers
+  --blocked             only tickets with open blockers
+  --type TYPE           filter by ticket type (comma-separated for OR)
+  --status STATUS       filter by status (comma-separated for OR)
+  --priority PRIORITY   filter by priority 0-4 (comma-separated for OR)
+  --parent PARENT       filter to direct children of <id>
+  --has-tag HAS_TAG     filter to tickets having <tag> (comma-separated for OR)
+  --without-tag WITHOUT_TAG
+                        exclude tickets having any of <tag> (comma-separated)
+  --min-children MIN_CHILDREN
+                        only tickets with at least N children
+  --sort <priority|created|updated|id|status>
+                        order by key ('-' prefix = descending)
 ```
 
 ### `list-descendants`
 
 ```
-Usage: rebar list-descendants <root_ticket_id>   (BFS walk bucketed by type, JSON)
+Usage: rebar list-descendants [ticket_id]
+
+BFS walk from a root ticket, bucketed by type (JSON).
+
+positional arguments:
+  ticket_id  the root ticket to walk from
 ```
 
 ### `metrics`
 
 ```
-Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]   (render the full metric registry over a date range)
-       --since <date>   lower bound of the reporting window (ISO-8601; default: 30 days ago)
-       --until <date>   upper bound of the reporting window (ISO-8601; default: today)
-       --output         json (default) emits {since,until,metrics{<id>:...}}; text emits one line per metric in registry order
+Usage: rebar metrics [-h] [--since DATE] [--until DATE] [--output {json,text}]
+
+Render the full metric registry over a date range.
+
+options:
+  -h, --help            show this help message and exit
+  --since DATE          inclusive start date (default: 30d ago)
+  --until DATE          inclusive end date (default: today)
+  --output {json,text}  output format (default: json)
 ```
 
 ### `next-batch`
 
 ```
-Usage: rebar next-batch <epic_id> [--output json]
+Usage: rebar next-batch [--output {json,text,report}] [--limit N] [epic]
+
+Select next parallel agent batch for an epic.
+
+positional arguments:
+  epic                  the epic to select a batch for
+
+options:
+  --output {json,text,report}, -o {json,text,report}
+                        output format
+  --limit N             cap the batch size (or 'unlimited')
 ```
 
 ### `quality-check`
 
 ```
-Usage: rebar quality-check <ticket_id> [--output json]   (exit 0=pass, 1=fail; QUALITY: pass|fail)
+Usage: rebar quality-check [--output {text,json}] [ticket_id]
+
+Check one ticket's dispatch readiness.
+
+positional arguments:
+  ticket_id             the ticket to check
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `ready`
 
 ```
-Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--sort=<key>] [--no-pull]   (lists tickets whose blockers are all closed)
-  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending; unset values sort last)
+Usage: rebar ready [--output {text,llm,json}] [--epic EPIC]
+                   [--sort <priority|created|updated|id|status>]
+
+List tickets ready to work (all blockers closed).
+
+options:
+  --output {text,llm,json}, -o {text,llm,json}
+                        output format
+  --epic EPIC           restrict to descendants of <id>
+  --sort <priority|created|updated|id|status>
+                        order by key ('-' prefix = descending)
 ```
 
 ### `reopen`
 
 ```
-Usage: rebar reopen <ticket_id> [--output json]   (closed -> open; exit 10 if not currently closed)
+Usage: rebar reopen [--output {text,json}] [ticket_id]
+
+Reopen a closed ticket (closed -> open; exit 10 if not currently closed).
+
+positional arguments:
+  ticket_id             the ticket to reopen
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `resolve`
 
 ```
-Usage: rebar resolve <id_or_alias_or_prefix>
+Usage: rebar resolve [ticket_id]
+
+Resolve an id/alias/prefix to a canonical ticket id.
+
+positional arguments:
+  ticket_id  the id, alias, or prefix to resolve
 ```
 
 ### `revert`
 
 ```
-Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]
+Usage: rebar revert [--reason REASON] [ticket_id] [target_uuid]
+
+Revert a ticket to a prior event UUID.
+
+positional arguments:
+  ticket_id        the ticket to revert
+  target_uuid      the event UUID to revert to
+
+options:
+  --reason REASON  reason recorded with the revert
 ```
 
 ### `scratch`
 
 ```
-Usage: rebar scratch <set|get|clear> <ticket_id> [<key> [<value>]]
+Usage: rebar scratch [verb] [args ...]
+
+Manage per-ticket scratch values (set/get/clear).
+
+positional arguments:
+  verb  set|get|clear
+  args  verb arguments
 ```
 
 ### `search`
 
 ```
-Usage: rebar search <query> [--output json|llm] [--full] [--status=<s>] [--type=<t>] [--has-tag=<tag>] [--include-archived] [--sort=<key>] [--no-pull]
-  <query>            AND of whitespace-separated, case-insensitive substring terms over
-                     titles/descriptions/comments/tags. Also accepts field predicates:
-                     status: type: priority: assignee: tag: parent: (exact; comma = OR
-                     within a field). priority: takes <, <=, >, >= and n..m ranges.
-                     Prefix a term with - (or not:) to negate; an unknown field: is a
-                     literal substring. The flags below AND-narrow on top of the query.
-  --output <format>  json (default) returns bounded discovery results; llm emits the same
-                     values as short-key NDJSON with null fields omitted.
-  --full             Return the legacy full ticket-state JSON array. Incompatible with
-                     --output llm; use show for a single full ticket.
-  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
-                     unset values sort last). Default keeps store order.
-  --no-pull          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)
+Usage: rebar search [--output {json,llm}] [--full] [--include-archived]
+                    [--status STATUS] [--type TYPE] [--has-tag HAS_TAG]
+                    [--sort <priority|created|updated|id|status>]
+                    [query]
+
+Full-text search over titles/descriptions/comments/tags.
+
+positional arguments:
+  query                 the search query
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --full                emit full ticket records
+  --include-archived    include archived tickets
+  --status STATUS       filter by status (comma-separated for OR)
+  --type TYPE           filter by ticket type (comma-separated for OR)
+  --has-tag HAS_TAG     filter to tickets having <tag> (comma-separated for OR)
+  --sort <priority|created|updated|id|status>
+                        order by key ('-' prefix = descending)
 ```
 
 ### `session-log`
 
 ```
-Usage: rebar session-log <append "<entry>" | start> [--summary=<text>] [--relates-to=<id>] [--discovered-from=<id>]   (capture helper: append to the current session_log, creating one on first use; start rotates to a fresh log)
+Usage: rebar session-log [--summary SUMMARY] [--relates-to RELATES_TO]
+                         [--discovered-from DISCOVERED_FROM]
+                         [verb] [entry]
+
+Capture helper: append "<entry>" to the current session_log (start rotates to a
+fresh log).
+
+positional arguments:
+  verb                  start|append
+  entry                 the log entry text
+
+options:
+  --summary SUMMARY     summary for a new (start) log
+  --relates-to RELATES_TO
+                        ticket this log relates to
+  --discovered-from DISCOVERED_FROM
+                        ticket this log was discovered from
 ```
 
 ### `session-logs`
 
 ```
-Usage: rebar session-logs [--output json|llm] [--limit=<n>] [--no-pull]   (lists the newest session_log tickets, newest first; default limit 5)
+Usage: rebar session-logs [--output {json,llm}] [--limit N]
+
+List the newest session_log tickets, newest first.
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --limit N             cap the number of logs returned
 ```
 
 ### `set-file-impact`
 
 ```
-Usage: rebar set-file-impact <ticket_id> <json_array>   (array of {path,reason} objects)
-   or: rebar set-file-impact <ticket_id> --none "<reason>"
+Usage: rebar set-file-impact [--none [NONE_REASON]] [ticket_id] [<json_array>]
+
+Record file impact for a ticket (JSON array of {path,reason} objects).
+
+positional arguments:
+  ticket_id             the ticket to annotate
+  <json_array>          JSON array of {path,reason} objects
+
+options:
+  --none [NONE_REASON]  record 'no file impact' with a reason
+
+No-impact form: rebar set-file-impact <ticket_id> --none "<reason>".
 ```
 
 ### `set-verify-commands`
 
 ```
-Usage: rebar set-verify-commands <ticket_id> <json_array>   (array of {dd_id,dd_text,command})
+Usage: rebar set-verify-commands [ticket_id] [json_array]
+
+Record DD-level verify commands (JSON array of {dd_id,dd_text,command}).
+
+positional arguments:
+  ticket_id   the ticket to annotate
+  json_array  JSON array of {dd_id,dd_text,command}
 ```
 
 ### `show`
 
 ```
-Usage: rebar show [--output llm] [--no-pull] <ticket_id> [<ticket_id> ...]
+Usage: rebar show [--output {json,llm}] [--include-scratch] [ticket_id ...]
+
+Show ticket details.
+
+positional arguments:
+  ticket_id             one or more ticket ids/aliases
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --include-scratch     include per-ticket scratch values
 ```
 
 ### `sign`
 
 ```
-Usage: rebar sign <ticket_id> <manifest_json>   (HMAC-sign a JSON array of verified-step strings with the environment key; [--output json])
+Usage: rebar sign [--output {text,json}] [ticket_id] [manifest_json]
+
+Sign a ticket's manifest of verified steps with the environment key.
+
+positional arguments:
+  ticket_id             the ticket to sign
+  manifest_json         JSON array of verified-step strings
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `summary`
 
 ```
-Usage: rebar summary <ticket_id> [<ticket_id> ...] [--output json]
-  JSON items are {ticket_id, alias, status, title, blocking_summary}.
-  ticket_id preserves the caller token; alias is the exact resolved alias, or null when unresolved or ambiguous.
+Usage: rebar summary [--output {text,json}] [ticket_id ...]
+
+One-line ticket summary with blocking status for one or more IDs.
+
+positional arguments:
+  ticket_id             one or more tickets to summarize
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
 ```
 
 ### `tag`
 
 ```
-Usage: rebar tag <ticket_id> <tag>
+Usage: rebar tag [ticket_id] [tag]
+
+Add a tag to a ticket.
+
+positional arguments:
+  ticket_id  the ticket to tag
+  tag        the tag to add
 ```
 
 ### `tracker-maintenance`
 
 ```
-Usage: rebar tracker-maintenance [--status] [--clean] [--force=<reason>]
+Usage: rebar tracker-maintenance [--status] [--clean] [--force FORCE]
 
-  --status          report what would change; makes NO writes (default)
-  --clean           perform the repair (backup ref first, then heal)
-  --force=<reason>  BREAK-GLASS: proceed even with unpushed ticket commits.
-                    Requires a written reason; recorded in the audit log.
+Supported door for raw git in the tracker; backup ref + refusal + audit.
 
-The supported alternative to ad-hoc `git` in the tickets tracker. Routine ticket
-writes must go through rebar; this is for a store rebar itself cannot write.
-
-Safety envelope:
-  * a backup ref (refs/rebar-maintenance/<utc>) is created at the current HEAD
-    BEFORE the first write, and printed with its rollback command;
-  * the run REFUSES when commits on HEAD are not yet on origin/tickets — the one
-    condition separating a recoverable local mess from real event loss. A refused
-    run makes no writes at all. It fails closed: a missing origin/tickets also
-    refuses, because local commits cannot then be proven safe;
-  * every run appends a durable audit line (actor, argv, backup ref, what changed,
-    whether the break-glass was used and why) to the tracker's git dir.
-
-Exit 0 = nothing to do / repaired; 1 = refused; 2 = fatal (no tracker / bad args).
+options:
+  --status       report tracker maintenance status
+  --clean        clean the tracker worktree
+  --force FORCE  break-glass override (--force=<reason>)
 ```
 
 ### `transition`
 
 ```
-Usage: rebar transition <ticket_id> <current_status> <target_status> [--class=<value>] [--reason=<text>] [--force] [--force=<reason>] [--output json]
-       rebar transition <ticket_id> <target_status>   (auto-detects current status)
-  status: idea | open | in_progress | closed | blocked
-  idea is a pre-work parking lot: undesigned, never in ready/next-batch; idea->closed skips the completion gates.
-  bug close requires --class <value>: regression | plan_defect | env_integration | flaky | preexisting | not_a_bug | duplicate | escalated | obsolete | superseded | wontfix | undetermined.
-  Any ticket type may close under an administrative disposition --class: duplicate | obsolete | superseded | wontfix. obsolete/wontfix REQUIRE --reason=<text> (recorded as close_reason and signed into the disposition attestation); duplicate/superseded require a live replacement link. Non-bug closes refuse any other class.
-  Bug-only dispositions not_a_bug/escalated REQUIRE --reason=<text> (why no defect exists / where the work was escalated to) unless a live replacement link stands in.
-  --reason=<text>: admitted only on a close whose --class is reason-required (obsolete, wontfix, not_a_bug, or escalated); it records the administrative close reason. Force audit text must ride on --force=<reason>.
-  With the completion gate enabled, an administrative disposition (or duplicate/not_a_bug/escalated on a bug) skips verification only when its evidence holds: a live duplicates/supersedes link, or the required close reason.
-  With the plan-review close gate enabled, only the LINK-BACKED dispositions duplicate/superseded skip the attestation, and only against a live duplicates/supersedes link; the close is recorded with the distinct 'disposition' verdict, not as a --force bypass. Reason-required obsolete/wontfix still need the attestation.
-  --ref=<ref>: Completion close gate: verify (and sign) against the committed tree at <ref> instead of HEAD. Use it to close a stacked story against its own commit while your worktree stays at the epic tip; default HEAD.
+Usage: rebar transition [--output {text,json}] [--reason REASON]
+                        [--class CLOSE_CLASS] [--caused-by CAUSED_BY]
+                        [--ref REF] [--force [FORCE]]
+                        [ticket_id] [statuses ...]
+
+Transition ticket status (optimistic concurrency).
+
+positional arguments:
+  ticket_id             the ticket to transition
+  statuses              [<current>] <target> status
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --reason REASON       close reason for a reason-required --class
+                        (obsolete/wontfix/not_a_bug/escalated); recorded as
+                        close_reason
+  --class CLOSE_CLASS   close disposition class
+  --caused-by CAUSED_BY
+                        ticket that caused this bug
+  --ref REF             verify/sign the completion gate against this ref
+  --force [FORCE]       bypass a start/close gate (--force=<reason>)
 ```
 
 ### `unlink`
 
 ```
-Usage: rebar unlink <source> <target> [relation]   (no relation: removes the most-recent link between the pair — call repeatedly for multiple; with relation: removes exactly that relation's link, leaving the pair's other relations)
+Usage: rebar unlink [source] [target] [relation]
+
+Remove a link: unlink <source> <target> [relation] (no relation: most-recent for
+pair; relation: exactly that relation).
+
+positional arguments:
+  source    source ticket
+  target    target ticket
+  relation  optional relation selector
 ```
 
 ### `untag`
 
 ```
-Usage: rebar untag <ticket_id> <tag>
+Usage: rebar untag [ticket_id] [tag]
+
+Remove a tag from a ticket.
+
+positional arguments:
+  ticket_id  the ticket to untag
+  tag        the tag to remove
 ```
 
 ### `validate`
 
 ```
-Usage: rebar validate [--quick|--full] [--verbose] [--output json] [--terse]   (repo-wide health check; takes NO ticket id)
+Usage: rebar validate [--output {text,json}] [--quick] [--full] [--verbose]
+                      [--terse]
+
+Repo-wide tracker health check (scores the whole store 1-5).
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --quick               run only the fast checks
+  --full                run the exhaustive checks
+  --verbose, -v         emit per-check detail
+  --terse               emit a single score line
 ```
 
 ### `verify-signature`
 
 ```
-Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match the signature; exit 0=certified, 1=mismatch/foreign/unsigned)
+Usage: rebar verify-signature [--output {text,json}] [--kind KIND] [ticket_id]
+
+Certify that a ticket's verified steps match its signature.
+
+positional arguments:
+  ticket_id             the ticket to verify
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --kind KIND           which signature kind to verify
 ```
 
 ## Intercept-arm commands

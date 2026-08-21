@@ -18,7 +18,10 @@ from rebar._cli._parser import build_argument_parser
 def build(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar metrics`` parser bound to ``prog``."""
     parser = build_argument_parser(
-        prog=prog, formatter_class=argparse.HelpFormatter, allow_abbrev=False
+        prog=prog,
+        description="Render the full metric registry over a date range.",
+        formatter_class=argparse.HelpFormatter,
+        allow_abbrev=False,
     )
     parser.add_argument("--since", metavar="DATE", help="inclusive start date (default: 30d ago)")
     parser.add_argument("--until", metavar="DATE", help="inclusive end date (default: today)")
