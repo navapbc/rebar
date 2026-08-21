@@ -420,9 +420,46 @@ def _intercepts() -> tuple[Route, ...]:
         "identity": f"{_P}.identity:build",
         "config": f"{_P}.config:build",
     }
+    # RP-05 S6 execution metadata: each intercept names a LAZY ``"module:attr"``
+    # handler (resolved only at dispatch, never at registry construction), invoked
+    # through the ``argv`` adapter (``handler(rest)``) with no auto-init — the two
+    # intercepts that need init or an extra argument (``identity``/``enrich``) do it
+    # inside their own ``rebar._cli`` wrapper.
+    _LLM = "rebar._cli._llm_commands"
+    handlers: dict[str, str] = {
+        "reconcile": "rebar._cli:_reconcile",
+        "review-code": f"{_LLM}:_review_code",
+        "scan-spec": f"{_LLM}:_scan_spec",
+        "verify-completion": f"{_LLM}:_verify_completion",
+        "review-plan": f"{_LLM}:_review_plan",
+        "sign-review": f"{_LLM}:_sign_review",
+        "enrich": "rebar._cli:_enrich",
+        "explain": f"{_LLM}:_explain",
+        "verify-commit-ticket": "rebar._commands.verify_commit:cli",
+        "verify-identity": "rebar._commands.verify_authorship:cli",
+        "verify-authorship": "rebar._commands.verify_authorship:cli",
+        "verify-opcert": "rebar._commands.verify_opcert:cli",
+        "trusted-env": "rebar._commands.trusted_env_cmd:cli",
+        "remote-cert": "rebar._commands.remote_cert:cli",
+        "workflow": "rebar._cli._workflow_commands:_workflow",
+        "llm": f"{_LLM}:_llm",
+        "jira-onboard": "rebar._cli._jira_onboard:jira_onboard",
+        "prompt": f"{_LLM}:_prompt",
+        "criteria": f"{_LLM}:_criteria",
+        "identity": "rebar._cli:_identity_intercept",
+        "config": "rebar._commands.show_config:config_cli",
+    }
     names = tuple(factories)
     routes = [
-        Route(name, group="intercept", intercept=True, parser_factory=factories[name])
+        Route(
+            name,
+            group="intercept",
+            intercept=True,
+            parser_factory=factories[name],
+            handler=handlers[name],
+            adapter="argv",
+            init="none",
+        )
         for name in names
     ]
     routes.append(
@@ -442,6 +479,9 @@ def _intercepts() -> tuple[Route, ...]:
             group="static_read",
             intercept=True,
             parser_factory=f"{_P}.audit:build",
+            handler="rebar._cli._audit_commands:audit_cli",
+            adapter="argv",
+            init="none",
         )
     )
     return tuple(routes)
