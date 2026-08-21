@@ -439,7 +439,7 @@ test happened to straddle it — an arbitrary, innocent one, different on each r
   It reports only; it no longer removes what it finds, because it cannot tell your write
   from a leaking test's (bug `746c-185a-0e48-4b83`). A genuine leak is therefore yours to
   clean up, and the failure message names each entry.
-* `_no_repo_commits` (`tests/conftest.py`) — "Test moved the repo HEAD (X -> Y)".
+* `_no_repo_commits` (`tests/conftest.py`) — "The repo HEAD moved during this test (X -> Y)".
 
 Both fire in **teardown**, so the run reports the test as *passed* AND raises an error: a
 tail reading `N passed, 1 error` is one run reporting both, not a contradiction. A killed

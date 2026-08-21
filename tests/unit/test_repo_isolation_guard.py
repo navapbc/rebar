@@ -386,6 +386,67 @@ def _drive_leak_guard(request: pytest.FixtureRequest, root: Path, during: Callab
     return str(failure.value)
 
 
+class _UnmarkedNode:
+    """Stands in for a test node carrying no ``allow_repo_writes`` opt-out."""
+
+    def get_closest_marker(self, name: str) -> None:
+        return None
+
+
+class _UnmarkedRequest:
+    node = _UnmarkedNode()
+
+
+def _drive_head_move_guard(request: pytest.FixtureRequest, root: Path, during: Callable[[], None]):
+    """Run the REAL ``_no_repo_commits`` against *root*, returning its failure text.
+
+    Same hand-driven shape as ``_drive_leak_guard``: the first ``next()`` samples
+    HEAD, *during* stands in for whatever moved it while the test body ran, and the
+    second ``next()`` runs the teardown under test.
+    """
+    conftest = _root_conftest(request)
+    guard = getattr(conftest._no_repo_commits, "__wrapped__", conftest._no_repo_commits)
+    with patch.object(conftest, "_REPO_ROOT", root):
+        generator = guard(_UnmarkedRequest())
+        next(generator)
+        during()
+        with pytest.raises(pytest.fail.Exception) as failure:
+            next(generator)
+    return str(failure.value)
+
+
+def test_head_move_guard_warns_before_it_offers_the_destructive_recovery(request, tmp_path):
+    """`git reset --hard` is correct for whoever owns the commit and destructive for
+    everyone else, and the guard cannot tell them apart — this checkout hosts many
+    worktrees and concurrent sessions. So the warning has to be readable *before* the
+    command, not after it."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    before = _isolation.head(repo)
+    assert before is not None
+
+    def another_process_commits() -> None:
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "--allow-empty", "-q", "-m", "not yours"],
+            check=True,
+        )
+
+    message = _drive_head_move_guard(request, repo, another_process_commits)
+
+    # The guard still fires, and still names the move.
+    assert before[:10] in message
+    # The recovery is still offered — it is right for whoever owns the commit.
+    recovery = f"git reset --hard {before[:10]}"
+    assert recovery in message
+    lowered = message.lower()
+    # ...but the reader is warned off it first, and told the external cause exists.
+    assert "do not" in lowered, message
+    assert lowered.index("do not") < lowered.index(recovery.lower()), message
+    assert "concurrent" in lowered, message
+    # And it never asserts the cause it cannot know.
+    assert "committed into the rebar checkout instead of" not in message
+
+
 def test_leak_guard_leaves_entries_it_cannot_attribute_on_disk(request, tmp_path):
     """A concurrent write from outside the suite must survive the guard's teardown.
 

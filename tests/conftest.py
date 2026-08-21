@@ -622,6 +622,7 @@ def block_extra() -> Iterator[Any]:
 # exercise the same code (tests/unit/test_repo_isolation_guard.py).
 
 from _isolation import head as _repo_head  # noqa: E402
+from _isolation import head_move_failure_message as _head_move_failure_message  # noqa: E402
 from _isolation import leak_failure_message as _leak_failure_message  # noqa: E402
 from _isolation import porcelain as _repo_porcelain  # noqa: E402
 
@@ -638,14 +639,7 @@ def _no_repo_commits(request: pytest.FixtureRequest) -> Iterator[None]:
         return
     after = _repo_head(_REPO_ROOT)
     if after is not None and after != before:
-        pytest.fail(
-            f"Test moved the repo HEAD ({before[:10]} -> {after[:10]}): it "
-            "committed into the rebar checkout instead of an isolated tmp "
-            "tracker. Isolate the git writes — pin GIT_CEILING_DIRECTORIES to the "
-            "tmp root (see tests/scripts/graph/conftest.py::"
-            "_isolate_git_from_enclosing_repo) or init the tracker as its own "
-            f"git repo. Undo the stray commit(s) with: git reset --hard {before[:10]}"
-        )
+        pytest.fail(_head_move_failure_message(before, after))
 
 
 # ── caplog coverage integrity (bug 9ac2) ─────────────────────────────────────
