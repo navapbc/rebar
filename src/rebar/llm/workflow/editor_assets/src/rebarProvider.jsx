@@ -1748,6 +1748,83 @@ function structuredEntries(element, kind) {
   return entries;
 }
 
+// ─── RP-06 S6: the READ-ONLY "Effective Policy" view — provenance ONLY. It fetches the
+// narrow /effective-policy projection (derived from the compiled S1 CriteriaSnapshot) and
+// renders it as a disabled, non-editable summary. It has NO control that writes/serializes
+// back to the workflow or the criteria overlay, and is kept DISTINCT from the editable
+// "Authored Workflow" (Step behavior / authoring) UI. An `available: false` payload shows an
+// unavailable banner carrying the compiler's located remedy, never a blank or crash.
+function formatEffectivePolicy(state) {
+  if (!state || state.loading) return "Loading effective policy…";
+  if (state.error) return "⚠ effective policy unavailable\n" + state.error;
+  const view = state.view || {};
+  if (view.available === false) {
+    return (
+      "⚠ effective policy unavailable\n" +
+      (view.unavailable_reason || "(no reason reported)")
+    );
+  }
+  const crits = Array.isArray(view.criteria) ? view.criteria : [];
+  const lines = ["digest: " + (view.digest || "(none)"), ""];
+  if (!crits.length) lines.push("(no criteria)");
+  for (const c of crits) {
+    lines.push(
+      `${c.id}  [${c.gate}]`,
+      `  tier=${c.tier}  posture=${c.posture}  enabled=${c.enabled}`,
+      `  applicability: ${c.applicability}`,
+      `  source: ${c.source}`,
+      `  (${c.reason})`,
+      "",
+    );
+  }
+  return lines.join("\n");
+}
+
+function EffectivePolicyEntry(props) {
+  const { element, id } = props;
+  const debounce = useService("debounceInput");
+  const [state, setState] = useState({ loading: true });
+  useEffect(() => {
+    let live = true;
+    fetch("/effective-policy", {
+      headers: { "X-Rebar-Token": window.REBAR_TOKEN },
+    })
+      .then((r) => r.json())
+      .then((view) => {
+        if (live) setState({ view });
+      })
+      .catch((e) => {
+        if (live) setState({ error: e.message });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <TextAreaEntry
+      id={id}
+      element={element}
+      label="Effective Policy (read-only)"
+      rows={14}
+      getValue={() => formatEffectivePolicy(state)}
+      setValue={() => {}}
+      debounce={debounce}
+      disabled
+    />
+  );
+}
+
+// The read-only Effective Policy group — provenance-only, distinct from the authored workflow.
+function effectivePolicyGroup() {
+  return {
+    id: "rebar-effective-policy",
+    label: "Effective Policy (read-only)",
+    entries: [
+      { id: "rebar-effective-policy-view", component: EffectivePolicyEntry },
+    ],
+  };
+}
+
 function rebarGroup(element) {
   const bo = element.businessObject;
   const kind = rebarKind(bo);
@@ -1785,6 +1862,10 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
+        // The READ-ONLY Effective Policy view (RP-06 S6): the compiled review-policy
+        // provenance, kept DISTINCT from the authored-workflow editing groups above and
+        // below. Provenance-only — it never writes back to the workflow or the overlay.
+        groups.push(effectivePolicyGroup());
         const k = rebarKind(bo);
         // A batch step gets two more groups: its editable, add/remove criteria LIST and the
         // model-ladder LIST (story B-UX item 18).
