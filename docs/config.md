@@ -384,6 +384,7 @@ model          = "claude-opus-4-8"   # top-level model (config/CLI only — the 
                                      # [tool.rebar.llm.model_classes] per-class slots
 model_provider = ""                  # env REBAR_LLM_MODEL_PROVIDER (inferred from the model name when empty)
 base_url       = ""                  # env REBAR_LLM_BASE_URL (OpenAI-compatible endpoint)
+bedrock_region_name = ""             # env REBAR_LLM_BEDROCK_REGION; AWS region for Bedrock (unset → boto3 resolution)
 parse_failure_artifact_dir = ""      # env REBAR_LLM_PARSE_FAILURE_ARTIFACT_DIR (opt-in raw-reply capture; unset = off)
 max_tokens     = 16000               # env REBAR_LLM_MAX_TOKENS
 max_steps      = 50                  # env REBAR_LLM_MAX_STEPS; ~2 steps per tool call
@@ -393,6 +394,17 @@ llm_retry_max_wait_s   = 60          # env REBAR_LLM_RETRY_MAX_WAIT_S; caps the 
 llm_tool_timeout_s     = 120         # env REBAR_LLM_TOOL_TIMEOUT_S; per-tool timeout (bounds async/MCP tools)
 mcp_servers    = {}                  # env REBAR_LLM_MCP_SERVERS (JSON); a TOML inline table in-file
 ```
+
+**Pin the region beside region-scoped Bedrock model pins.** A repo whose `[tool.rebar.llm]`
+table pins region-scoped Bedrock inference profiles (the `us.*` / `eu.*` prefixes) should set
+`bedrock_region_name` beside them. The model ids name *which* region family serves them, but
+boto3 resolves the concrete region from ambient env/profile config — and a fresh
+non-login shell (agent tool shells do not inherit login-shell exports) whose active
+`AWS_PROFILE` carries no `region` key resolves nothing, so every gated LLM op fails closed
+with a no-region `LLMConfigError` (bug adb6-4762-90f6-4e30). With the region pinned in config,
+any shell with working AWS credentials runs the gates; `REBAR_LLM_BEDROCK_REGION` (then
+`AWS_DEFAULT_REGION`, `AWS_REGION`) keeps precedence over the table value, so an operator
+pinning a different region regresses nothing.
 
 Transient-failure retry (`llm_retry_*`) is owned at the httpx transport layer for Anthropic
 calls (the SDK's own retries are disabled, `max_retries=0`): a `{429,529,5xx}` / timeout /
