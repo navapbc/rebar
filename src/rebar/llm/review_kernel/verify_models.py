@@ -376,7 +376,10 @@ def code_review_verification_model(*, strict: bool = False) -> type:
         # ── MAINTAINABILITY-lane consequence binaries. ──
         unversioned_published_contract_break: bool = Field(
             default=False,
-            description="TRUE if a PUBLISHED contract breaks with no version bump (serious).",
+            description="TRUE if a PUBLISHED contract breaks with NO version/deprecation "
+            "signal — no major version bump, no deprecation cycle, and no CHANGELOG "
+            "breaking-change entry (serious). A managed removal (any such signal present) "
+            "=> FALSE.",
         )
         safety_net_removal_without_replacement: bool = Field(
             default=False,
@@ -407,6 +410,22 @@ def code_review_verification_model(*, strict: bool = False) -> type:
         dead_code: bool = Field(
             default=False,
             description="TRUE if the change introduces dead/unreachable code (minor).",
+        )
+        # ── Removed-public-symbol sub-question (ticket 5452-3077-b34a-4157). Both abstain-safe
+        # (default False); decide.impact_code boosts removed_public_symbol AND NOT
+        # version_signal_present to the serious tier. ──
+        removed_public_symbol: bool = Field(
+            default=False,
+            description="TRUE if the finding cites a symbol this diff REMOVES whose name was "
+            "reachable from the public API — listed in __all__ or re-exported, a CLI command, "
+            "or an MCP tool. Key this on the EXPORT, never on a cited caller: the absence of "
+            "an internal caller does not prove an external API unused.",
+        )
+        version_signal_present: bool = Field(
+            default=False,
+            description="TRUE if the removal/break carries a version or deprecation signal — "
+            "a major version bump, a deprecation cycle, or a CHANGELOG breaking-change entry "
+            "— making it a MANAGED removal.",
         )
         # ── Per-lane likelihood + detection (drive impact_code multipliers/amplifier). ──
         trigger_likelihood: str = Field(

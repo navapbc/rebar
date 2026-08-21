@@ -415,6 +415,97 @@ def test_debt_lane_rescaled_amplifier_only() -> None:
     assert impact_code({"implicit_coupling": True}) == 0.24
 
 
+# ── code-v5: removed-public-symbol boost (ticket 5452-3077-b34a-4157) ──────────────────────
+def test_removed_public_symbol_unmanaged_boosts_to_serious() -> None:
+    # proposal-3: a removed PUBLIC export with NO version/deprecation signal is the same
+    # consequence as an unversioned published contract break — serious 0.9 × amp 0.8 = 0.72.
+    assert impact_code({"removed_public_symbol": True}) == 0.72
+    assert impact_code({"removed_public_symbol": True, "silent_failure": True}) == 0.9
+
+
+def test_removed_public_symbol_managed_removal_never_trips() -> None:
+    # a2: a MANAGED removal (version/deprecation signal present) does not trip the boost.
+    assert impact_code({"removed_public_symbol": True, "version_signal_present": True}) == 0.0
+
+
+def test_version_signal_alone_abstains() -> None:
+    # version_signal_present is a GATE input only — alone it contributes nothing, and it never
+    # suppresses a score another lane already earned.
+    assert impact_code({"version_signal_present": True}) == 0.0
+    base = {"capability_degraded": True}
+    assert impact_code({**base, "version_signal_present": True}) == impact_code(base)
+    managed_break = {
+        "unversioned_published_contract_break": True,
+        "version_signal_present": True,
+    }
+    assert impact_code(managed_break) == impact_code({"unversioned_published_contract_break": True})
+
+
+def test_citric_preregal_ladybird_replay_clears_flips() -> None:
+    # The escaped FN: [regression, deletion-impact, tests] finding naming the removed public
+    # API rebar.llm.review_ticket + a broken external test was labeled capability_degraded +
+    # reachable_path_without_automated_coverage with trigger rare — impact 0.30-shaped, below
+    # deletion-impact@0.60 / api-compat@0.51. With the export-keyed removed-public-symbol
+    # sub-answer set (and no version signal) it clears both flips.
+    citric = {
+        "capability_degraded": True,
+        "reachable_path_without_automated_coverage": True,
+        "trigger_likelihood": "rare",
+    }
+    assert impact_code(citric) < 0.51  # the pre-boost mislabeled shape stays low
+    assert impact_code({**citric, "removed_public_symbol": True}) >= 0.60
+
+
+def test_citric_replay_blocks_through_packaged_routing() -> None:
+    # END-TO-END through the REAL packaged routing: the citric-shaped finding tagged
+    # [regression, deletion-impact] with validity 1.0 now BLOCKS (priority 0.72 ≥ 0.54/0.60).
+    from rebar.llm.code_review import registry as reg
+
+    findings = [
+        {
+            "id": "0",
+            "finding": "removed public API rebar.llm.review_ticket breaks a named external test",
+            "criteria": ["regression", "deletion-impact"],
+        }
+    ]
+    verifs = {
+        0: {
+            "binary": {
+                "is_verifiable": "yes",
+                "evidence_entails_finding": "yes",
+                "path_reachable": "yes",
+                "impact_follows_necessarily": "yes",
+                "no_viable_alternative_explanation": "yes",
+                "no_existing_mitigation": "yes",
+                "severity_claim_justified": "yes",
+            },
+            "severity_attributes": {
+                "capability_degraded": True,
+                "reachable_path_without_automated_coverage": True,
+                "trigger_likelihood": "rare",
+                "removed_public_symbol": True,
+            },
+        }
+    }
+    out = pass3_over_findings(
+        findings, verifs, threshold_for=reg.threshold_for, impact_fn=impact_code
+    )
+    assert out[0]["impact"] == 0.72
+    assert out[0]["priority"] == 0.72
+    assert out[0]["decision"] == "block"
+
+
+def test_boost_is_amplify_only_never_lowers() -> None:
+    # The boost can only RAISE impact_base: a finding already at 0.9 stays 0.9 whether or not
+    # the removal sub-answers are present (managed or unmanaged).
+    base = {"data_loss_without_recovery": True, "silent_failure": True}
+    assert impact_code(base) == 0.9
+    assert impact_code({**base, "removed_public_symbol": True}) == 0.9
+    assert (
+        impact_code({**base, "removed_public_symbol": True, "version_signal_present": True}) == 0.9
+    )
+
+
 # ── labeled-fixture calibration: HIGH vs NIT separation under v4 ───────────────────────────
 def _load_fixture() -> list[dict]:
     return [json.loads(line) for line in _FIXTURE.read_text().splitlines() if line.strip()]

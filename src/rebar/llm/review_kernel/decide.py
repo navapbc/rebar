@@ -563,6 +563,24 @@ def _code_prod_lane(attrs: dict[str, Any]) -> float:
     return _code_lane_severity(attrs, _CODE_PROD_BINARIES) * mult
 
 
+def _code_serious_maint_lane(attrs: dict[str, Any]) -> float:
+    """SERIOUS-maint lane severity (undamped), PLUS the code-v5 removed-public-symbol boost
+    (ticket 5452-3077-b34a-4157): a removal of a PUBLICLY EXPORTED symbol
+    (``removed_public_symbol``, keyed on the EXPORT by the Pass-2 sub-question) that carries NO
+    version/deprecation signal (``version_signal_present`` false) is the same consequence as an
+    unversioned published contract break, so it earns the serious tier deterministically even
+    when the verifier did not also set that binary. Abstain-safe and AMPLIFY-ONLY: both
+    sub-answers default False (an older verifier never trips it), and a MANAGED removal
+    (signal present) never boosts — nor does either field ever lower a score another
+    binary already earned (this is a ``max``)."""
+    sev = _code_lane_severity(attrs, _CODE_SERIOUS_MAINT_BINARIES)
+    if _code_truthy(attrs.get("removed_public_symbol")) and not _code_truthy(
+        attrs.get("version_signal_present")
+    ):
+        sev = max(sev, _CODE_TIER_SERIOUS)
+    return sev
+
+
 def _code_moderate_maint_lane(attrs: dict[str, Any]) -> float:
     sev = _code_lane_severity(attrs, _CODE_MODERATE_MAINT_BINARIES)
     prod_mult = _CODE_PROD_IMPACT_MULT.get(attrs.get("prod_impact", "none"), 0.5)
@@ -571,16 +589,18 @@ def _code_moderate_maint_lane(attrs: dict[str, Any]) -> float:
 
 
 def impact_code(attrs: dict[str, Any]) -> float:
-    """Code-review IMPACT ∈ [0,1]: code-v4 four-lane, tier-tagged, severity-first MAX with a
+    """Code-review IMPACT ∈ [0,1]: code-v5 four-lane, tier-tagged, severity-first MAX with a
     detection amplifier and a consequence-lane-gated reversibility floor (bug
     obese-dihedral-ermine). Dispatched into :func:`pass3_decide` via ``impact_fn``. Lanes:
-    prod (trigger-keyed), serious-maint (undamped), moderate-maint (prod_impact × trigger keyed),
-    and debt (churn amplifier only). ``impact_base`` = MAX over all four; ``consequence_base`` =
-    MAX over all but debt. ``amp`` = 1.0 if silent (``silent_failure``/``escapes_automation``)
-    else 0.8. The 0.6 floor fires only when ``consequence_base > 0`` AND the change touches a
-    hard-to-reverse surface — debt alone NEVER floors."""
+    prod (trigger-keyed), serious-maint (undamped, plus the code-v5 removed-public-symbol
+    serious-tier boost — see :func:`_code_serious_maint_lane`, ticket 5452-3077-b34a-4157),
+    moderate-maint (prod_impact × trigger keyed), and debt (churn amplifier only).
+    ``impact_base`` = MAX over all four; ``consequence_base`` = MAX over all but debt.
+    ``amp`` = 1.0 if silent (``silent_failure``/``escapes_automation``) else 0.8. The 0.6 floor
+    fires only when ``consequence_base > 0`` AND the change touches a hard-to-reverse
+    surface — debt alone NEVER floors."""
     prod_lane = _code_prod_lane(attrs)
-    serious_maint_lane = _code_lane_severity(attrs, _CODE_SERIOUS_MAINT_BINARIES)
+    serious_maint_lane = _code_serious_maint_lane(attrs)
     moderate_maint_lane = _code_moderate_maint_lane(attrs)
     debt_lane = _code_lane_severity(attrs, _CODE_DEBT_BINARIES) * _code_churn_amp(attrs)
     impact_base = max(prod_lane, serious_maint_lane, moderate_maint_lane, debt_lane)

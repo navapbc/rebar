@@ -160,6 +160,45 @@ def test_verify_prompt_embeds_verifier_rules_scaffold_and_regrounds_on_diff():
     assert "outputs: code_review_verification" in body
 
 
+# ── ticket 5452-3077-b34a-4157: version-signal gating + removed-public-symbol sub-question ──
+def _code_severity_model():
+    from rebar.llm.review_kernel import verify_models
+
+    model = verify_models.code_review_verification_model()
+    verification = model.model_fields["verifications"].annotation.__args__[0]
+    return verification.model_fields["severity_attributes"].annotation
+
+
+def test_unversioned_break_is_version_signal_gated_on_both_surfaces():
+    """a2: `unversioned_published_contract_break` fires ONLY when the break lacks a
+    version/deprecation signal — the field description AND the prompt bullet must both name
+    the three signals and the managed-removal=>FALSE rule (the two pass-2 surfaces the
+    verifier reads)."""
+    desc = _code_severity_model().model_fields["unversioned_published_contract_break"].description
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text()
+    for surface in (desc, body):
+        for token in ("major version bump", "deprecation cycle", "CHANGELOG breaking-change"):
+            assert token in surface, f"missing version-signal token {token!r}"
+        assert "managed" in surface.lower()
+
+
+def test_verify_prompt_keys_removed_public_symbol_on_export():
+    """proposal-3: the removed-public-symbol sub-question keys detection on the EXPORT —
+    `__all__`/re-export, CLI command, MCP tool — explicitly NOT on a cited caller (the absence
+    of an internal caller does not prove an external API unused)."""
+    fields = _code_severity_model().model_fields
+    assert fields["removed_public_symbol"].default is False  # abstain-safe
+    assert fields["version_signal_present"].default is False
+    body = pathlib.Path("src/rebar/llm/reviewers/code-review-verify.md").read_text()
+    assert "removed_public_symbol" in body
+    assert "version_signal_present" in body
+    for token in ("__all__", "CLI command", "MCP tool"):
+        assert token in body, f"export-keyed detection token {token!r} missing"
+    assert "does not prove" in body  # the internal-caller non-proof rule
+    desc = fields["removed_public_symbol"].description
+    assert "__all__" in desc and "caller" in desc
+
+
 def test_all_code_review_prompts_are_canonical_front_matter_fixed_points():
     """Guard: every code-review-*.md must be a front-matter FIXED POINT (the CI gate
     test_prompt_front_matter asserts this for ALL packaged prompts; pin it here so a new/edited
