@@ -321,9 +321,12 @@ Today:
   written satisfy the two-arm selection (one directory read, independent of store size), or is
   the last-sweep stamp older than `compact.trigger_interval_s`? If either fires, a **detached
   worker** runs the same `compact-all` sweep out of band and the session returns immediately.
-  One worker at a time, arbitrated by a stamped advisory lock in `.rebar/` that reuses the
-  store lock's v2 ownership stamp and `lock_owner.stamped_file_is_stale`, so an orphaned lock
-  is reclaimed rather than disabling the trigger forever. `compact.trigger` selects
+  One worker at a time, arbitrated by a stamped advisory lock that reuses the store lock's v2
+  ownership stamp and `lock_owner.stamped_file_is_stale`, so an orphaned lock is reclaimed
+  rather than disabling the trigger forever. That lock, the last-sweep stamp and the worker log
+  all live in the CANONICAL store's `.rebar/` — the tracker resolved through symlinks, as
+  `_store.lock.canonical_tracker` requires — so every worktree view of one store shares one
+  worker lock and one sweep clock instead of each keying its own. `compact.trigger` selects
   `async` (detach, the default), `always` (inline — for tests/CI) or `off`. Windows is a v1
   no-op, as the enrichment drain is.
 

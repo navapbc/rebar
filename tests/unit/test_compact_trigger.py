@@ -28,6 +28,7 @@ from __future__ import annotations
 import os
 import subprocess
 import threading
+import types
 from pathlib import Path
 
 import pytest
@@ -407,3 +408,145 @@ def test_a_stand_aside_does_not_reset_the_sweep_clock(
     )
     # And the clock still being unset means the very next close retries, which is the point.
     assert compact_trigger._sweep_is_stale(tracker, 3600) is True
+
+
+# ── one store, one set of sidecars (bug intangible-ladyish-vicuna 93a9-66cf-e681-4f49) ───────
+#
+# `make worktree` provisions a worktree whose `.tickets-tracker` is a SYMLINK to the canonical
+# store while its `.rebar` is a real, per-worktree directory. The trigger derived all three of
+# its sidecars from `os.path.dirname(tracker)` without resolving that symlink, so each worktree
+# keyed its own worker lock, its own sweep stamp and its own log while triggering sweeps of the
+# ONE shared store. Observed on this host: 33 worktree-local stamps and logs, no shared lock.
+#
+# The store's own contract is explicit — `_store.lock.canonical_tracker` exists "so symlinked
+# and real-path callers contend on the SAME lock file", and the neighbouring `.rebar/hlc.lock`
+# already resolves internally. These tests pin the trigger to that contract, artifact by
+# artifact, because the three fail differently: the lock loses exclusion, the stamp makes every
+# fresh worktree re-fire a sweep the store just had, and the log is deleted with the worktree.
+
+
+def _canonical_store(tmp_path: Path) -> str:
+    """A canonical store: ``<root>/.tickets-tracker``. Returns the tracker path."""
+    tracker = Path(os.path.realpath(tmp_path)) / "canonical-repo" / ".tickets-tracker"
+    tracker.mkdir(parents=True)
+    return str(tracker)
+
+
+def _worktree_tracker(tmp_path: Path, tracker: str, name: str) -> str:
+    """A worktree view of *tracker*: a real ``.rebar`` beside a ``.tickets-tracker`` SYMLINK
+    into the canonical store, exactly as ``make worktree`` provisions one."""
+    wt = Path(os.path.realpath(tmp_path)) / name
+    (wt / ".rebar").mkdir(parents=True)
+    (wt / ".tickets-tracker").symlink_to(tracker)
+    return str(wt / ".tickets-tracker")
+
+
+def test_two_worktrees_of_one_store_derive_one_set_of_sidecar_paths(tmp_path: Path) -> None:
+    """Independence from the caller proved by INVARIANCE: two worktree views of one store must
+    derive the SAME sidecar paths, and they must be the canonical store's rather than either
+    worktree's. A sidecar keyed on the caller is as short-lived as the caller."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    for derive in (
+        compact_trigger._trigger_lock_path,
+        compact_trigger._sweep_stamp_path,
+        compact_trigger._trigger_log_path,
+    ):
+        assert derive(a) == derive(b), f"{derive.__name__} is keyed on the worktree"
+        assert derive(a) == derive(canonical), f"{derive.__name__} is not on the canonical store"
+
+
+def test_two_worktrees_of_one_store_contend_on_the_same_worker_lock(tmp_path: Path) -> None:
+    """The lock's stated intent — "one compactor at a time" — must hold ACROSS worktrees.
+
+    Path equality above is necessary but not sufficient: this drives the real acquire, so a fix
+    that renamed a path without restoring exclusion still fails here."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    held = compact_trigger._acquire_trigger_lock(a)
+    assert held is not None, "precondition: the first compactor must acquire"
+    try:
+        assert compact_trigger._acquire_trigger_lock(b) is None, (
+            "a second compactor on the SAME store acquired the worker lock concurrently"
+        )
+    finally:
+        compact_trigger.release_trigger_lock(a, held)
+
+
+def test_a_sweep_stamped_from_one_worktree_is_read_by_another(tmp_path: Path) -> None:
+    """The stamp's own behavioural consequence, which the lock does not share: it answers "does
+    this STORE need a sweep". Keyed on the worktree, every fresh worktree reads maximally stale
+    and re-fires a store-wide sweep the store just had."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    # Negative control: before any sweep, B must read stale — otherwise the assertion below
+    # could pass on a store that simply never reads the stamp at all.
+    assert compact_trigger._sweep_is_stale(b, 3600) is True, "precondition: never swept"
+
+    compact_trigger.record_sweep(a)
+
+    assert compact_trigger._sweep_is_stale(b, 3600) is False, (
+        "a worktree re-fired a store-wide sweep that another worktree had just run"
+    )
+
+
+def test_the_trigger_sidecars_are_never_written_inside_an_ephemeral_worktree(
+    tmp_path: Path,
+) -> None:
+    """The durability half: the artifacts must land on the store, so they survive the worktree.
+
+    Negative control for the two tests above — exclusion and stamp-sharing could in principle be
+    restored by keying every worktree on the FIRST one, which would still be deleted with that
+    worktree."""
+    canonical = _canonical_store(tmp_path)
+    wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    canonical_rebar = os.path.join(os.path.dirname(canonical), ".rebar")
+
+    fd = compact_trigger._acquire_trigger_lock(wt)
+    assert fd is not None
+    try:
+        compact_trigger.record_sweep(wt)
+        assert os.listdir(os.path.join(os.path.dirname(wt), ".rebar")) == [], (
+            "the trigger wrote sidecars into the worktree that spawned it"
+        )
+        assert sorted(os.listdir(canonical_rebar)) == [
+            "compact-sweep.stamp",
+            "compact-worker.lock",
+        ]
+    finally:
+        compact_trigger.release_trigger_lock(wt, fd)
+
+
+def test_a_detached_sweep_child_is_handed_the_canonical_store_tracker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child outlives the worktree that spawned it, so the tracker it is handed must outlive
+    that worktree too — otherwise it dies on a symlink into a directory that no longer exists.
+    Its ``cwd`` is already resolved (``_proc.detached_child_cwd``); its ARGUMENT was not."""
+    canonical = _canonical_store(tmp_path)
+    wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    seen: list[list[str]] = []
+
+    def _fake_popen(argv: list[str], **kwargs: object) -> object:
+        seen.append(argv)
+        return object()
+
+    # Patch the module's OWN `subprocess` reference, never the real module: a global patch
+    # outlives this test's body and breaks `subprocess.run` in fixture teardown.
+    monkeypatch.setattr(
+        compact_trigger,
+        "subprocess",
+        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+    )
+    compact_trigger._spawn_detached_sweep(wt)
+
+    assert seen, "precondition: a child was spawned"
+    assert canonical in seen[0], (
+        f"the detached sweep was handed the ephemeral worktree tracker: {seen[0]}"
+    )
