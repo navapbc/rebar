@@ -1,1 +1,11 @@
-Usage: rebar verify-signature <ticket_id> [--output json]   (certify steps match the signature; exit 0=certified, 1=mismatch/foreign/unsigned)
+Usage: rebar verify-signature [--output {text,json}] [--kind KIND] [ticket_id]
+
+Certify that a ticket's verified steps match its signature.
+
+positional arguments:
+  ticket_id             the ticket to verify
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --kind KIND           which signature kind to verify

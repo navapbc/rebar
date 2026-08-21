@@ -1,2 +1,11 @@
-Usage: rebar ready [--output text|llm|json] [--epic=<id>] [--sort=<key>] [--no-pull]   (lists tickets whose blockers are all closed)
-  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending; unset values sort last)
+Usage: rebar ready [--output {text,llm,json}] [--epic EPIC]
+                   [--sort <priority|created|updated|id|status>]
+
+List tickets ready to work (all blockers closed).
+
+options:
+  --output {text,llm,json}, -o {text,llm,json}
+                        output format
+  --epic EPIC           restrict to descendants of <id>
+  --sort <priority|created|updated|id|status>
+                        order by key ('-' prefix = descending)

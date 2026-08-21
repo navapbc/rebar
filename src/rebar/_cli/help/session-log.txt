@@ -1,1 +1,17 @@
-Usage: rebar session-log <append "<entry>" | start> [--summary=<text>] [--relates-to=<id>] [--discovered-from=<id>]   (capture helper: append to the current session_log, creating one on first use; start rotates to a fresh log)
+Usage: rebar session-log [--summary SUMMARY] [--relates-to RELATES_TO]
+                         [--discovered-from DISCOVERED_FROM]
+                         [verb] [entry]
+
+Capture helper: append "<entry>" to the current session_log (start rotates to a
+fresh log).
+
+positional arguments:
+  verb                  start|append
+  entry                 the log entry text
+
+options:
+  --summary SUMMARY     summary for a new (start) log
+  --relates-to RELATES_TO
+                        ticket this log relates to
+  --discovered-from DISCOVERED_FROM
+                        ticket this log was discovered from

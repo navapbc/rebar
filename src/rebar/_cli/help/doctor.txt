@@ -1,24 +1,9 @@
-Usage: rebar doctor [--repair] [--dry-run] [--output json]
-  Diagnose the store and, where it is unambiguous and reversible, heal it.
-  Read-only by default; exits 1 if any finding is outstanding, so it can gate CI.
+Usage: rebar doctor [--output {text,json}] [--repair] [--dry-run]
 
-  Checks currently implemented:
-    dependency-graph  blocking links (blocks/depends_on) that disagree with the
-                      structural rule — ancestor-blocking (a ticket blocking its
-                      own ancestor/descendant) and mis-escalated (recorded
-                      endpoints differ from what the resolver returns)
-    lock health       held/free for each of the store's lock legs (the tickets
-                      write lock's fcntl and mkdir legs, .rebar/hlc.lock and
-                      .rebar/enrich-drain.lock), plus — for the stamped legs,
-                      the mkdir leg and the drain lock — the holder's
-                      host/ns/pid/start, whether that pid is alive (same host
-                      only; "unprobeable" across hosts or pid namespaces), and
-                      how long it has been held. A held lock with a live holder
-                      is INFORMATION; a lock no live process claims is reported
-                      as stale-lock and counts toward the exit code. Read-only:
-                      doctor never reclaims or deletes a lock (the next writer's
-                      acquire does that), and --repair takes no lock action.
+Diagnose the store and heal what is safe to fix (--repair).
 
-  --repair    write the fixes (replacement link first, then the stale unlink);
-              tags the tracker's pre-run state as pre-doctor-repair
-  --dry-run   with --repair, preview without writing any event
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --repair              apply the safe fixes
+  --dry-run             report fixes without applying

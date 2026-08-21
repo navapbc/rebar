@@ -19,6 +19,7 @@ standard library so it stays cheap and free of optional-dependency coupling:
 from __future__ import annotations
 
 import argparse
+import re as _re
 from collections.abc import Callable
 from typing import ParamSpec
 
@@ -69,6 +70,54 @@ class RebarHelpFormatter(argparse.HelpFormatter):
             max_help_position=max_help_position,
             width=_FIXED_WIDTH,
         )
+
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        """Render an option invocation in the pre-3.13 style on EVERY Python version.
+
+        Python 3.13 changed argparse to print an optional that takes a value as
+        ``-o, --output METAVAR`` (metavar once) instead of the historical
+        ``-o METAVAR, --output METAVAR`` (metavar per option string). The generated
+        ``help/*.txt`` artifacts are committed bytes checked by
+        ``gen_cli_help.py --check`` across the whole CI version matrix, so a
+        version-dependent invocation makes ``--check`` report every option-bearing
+        command stale on 3.13 while passing on 3.11/3.12. Pin the historical form
+        (matching the pinned 3.12 toolchain and 3.11) so generation — and live help —
+        are byte-identical on all three. This is the verbatim pre-3.13 stdlib body.
+        """
+        if not action.option_strings:
+            default = self._get_default_metavar_for_positional(action)
+            (metavar,) = self._metavar_formatter(action, default)(1)
+            return metavar
+        if action.nargs == 0:
+            return ", ".join(action.option_strings)
+        default = self._get_default_metavar_for_optional(action)
+        args_string = self._format_args(action, default)
+        return ", ".join(
+            f"{option_string} {args_string}" for option_string in action.option_strings
+        )
+
+    def _get_actions_usage_parts(self, actions: list, groups: list) -> list:
+        """Re-split usage parts on the pre-3.13 whitespace boundaries.
+
+        Python 3.13 introduced this method and keeps a subparsers action's
+        ``{choices} ...`` as a SINGLE usage part; pre-3.13 code split the usage
+        string on whitespace outside brackets (via a regex), letting the trailing
+        ``...`` wrap onto its own line. That wrapping difference makes the committed
+        ``help/*.txt`` for subparser commands (e.g. ``bridge``) byte-differ on 3.13.
+        Re-split each part with the historical regex so usage wraps identically on
+        3.11/3.12/3.13. This method does not exist on <=3.12, so this override is
+        inert there and only takes effect on 3.13+.
+        """
+        parts = super()._get_actions_usage_parts(actions, groups)  # type: ignore[misc]
+        part_regexp = r"\(.*?\)+(?=\s|$)|\[.*?\]+(?=\s|$)|\S+"
+        resplit: list = []
+        for part in parts:
+            if not part:
+                resplit.append(part)
+                continue
+            tokens = _re.findall(part_regexp, part)
+            resplit.extend(tokens if " ".join(tokens) == part else [part])
+        return resplit
 
 
 class RebarArgumentParser(argparse.ArgumentParser):

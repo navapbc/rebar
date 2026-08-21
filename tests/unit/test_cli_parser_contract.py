@@ -14,6 +14,7 @@ held-out oracle.
 from __future__ import annotations
 
 import argparse
+import re
 
 import pytest
 
@@ -68,6 +69,49 @@ def test_help_is_deterministic_across_calls() -> None:
     parser = _parser.build_argument_parser(prog="rebar demo")
     _add_demo_options(parser)
     assert parser.format_help() == parser.format_help()
+
+
+def test_option_invocation_pins_pre_313_metavar_repetition() -> None:
+    """An optional with BOTH a short and long form renders the metavar once PER option string
+    (``-o X, --output X``) on every Python version.
+
+    Python 3.13 changed argparse to print ``-o, --output X`` (metavar once). The generated
+    ``help/*.txt`` artifacts are committed bytes checked by ``gen_cli_help.py --check`` across
+    the CI version matrix, so a version-dependent invocation makes ``--check`` report every
+    such command stale on 3.13. The formatter pins the historical repeated form (matching the
+    pinned 3.12 toolchain and 3.11) so generation and live help are byte-identical on all
+    three."""
+    parser = _parser.build_argument_parser(prog="rebar demo")
+    parser.add_argument("-o", "--output", choices=["json", "llm"], help="output format")
+
+    body = parser.format_help()
+
+    assert "-o {json,llm}, --output {json,llm}" in body, body
+
+
+def test_subparsers_usage_wraps_ellipsis_pre_313() -> None:
+    """A subparsers action whose ``{choices}`` metavar fills the usage line wraps the
+    trailing ``...`` onto its OWN line on every Python version.
+
+    Python 3.13 introduced ``_get_actions_usage_parts`` and keeps ``{choices} ...`` as a
+    single usage part, so the ``...`` no longer wraps separately; pre-3.13 split usage on
+    whitespace outside brackets and wrapped it. Committed ``help/*.txt`` for subparser
+    commands (e.g. ``bridge``) are byte-checked across the CI version matrix, so the
+    formatter pins the historical wrapping. Assert the ``...`` sits alone on the wrapped
+    line and is NOT joined to the choices metavar."""
+    parser = _parser.build_argument_parser(prog="rebar bridge")
+    commands = parser.add_subparsers(
+        dest="command",
+        required=True,
+        title="commands",
+        metavar="{preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}",
+    )
+    commands.add_parser("preview")
+
+    usage = parser.format_usage()
+
+    assert "} ..." not in usage, usage
+    assert re.search(r"\}\n\s+\.\.\.", usage), usage
 
 
 def test_factory_protocol_signature_is_keyword_prog() -> None:

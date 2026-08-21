@@ -1,5 +1,31 @@
-Usage: rebar edit <ticket_id> [--title=VALUE] [--priority=VALUE] [--assignee=VALUE] [--ticket_type=VALUE] [--description=VALUE] [--parent=VALUE] [--add-tag=t1,t2] [--remove-tag=t1,t2] [--set-tags=t1,t2] [--bridge-project=VALUE] [--repos=VALUE] [--review]
-Title: --title must be non-empty after trimming whitespace (a whitespace-only value is rejected); surrounding whitespace around real content is kept verbatim (not trimmed).
-Bridge project: --bridge-project is promote-only — it may be set on an UNBOUND ticket but is rejected (non-zero, no event) once the ticket already holds a binding; "" marks never-sync. --repos replaces the associated repositories (CSV) and is freely editable.
-Tags: --add-tag/--remove-tag add/remove; --set-tags replaces (compiled to a convergent delta, add-wins). --set-tags="" clears only the tags THIS clone has observed (not an authoritative reset).
-Review: --review (valueless) re-runs the signed plan review (`review-plan`) AFTER the edit commits and exits with the review disposition (0 PASS / 1 BLOCK / 2 INDETERMINATE / 11 retryable). The edit stays committed whatever the verdict. Edit-then-review is not atomic against concurrent store reconvergence — check attestation currency cheaply with `rebar review-plan <id> --status`.
+Usage: rebar edit [--title TITLE] [--priority PRIORITY] [--assignee ASSIGNEE]
+                  [--ticket_type TICKET_TYPE] [--description DESCRIPTION]
+                  [--parent PARENT] [--bridge-project BRIDGE_PROJECT]
+                  [--add-tag ADD_TAG] [--remove-tag REMOVE_TAG]
+                  [--set-tags SET_TAGS] [--review]
+                  [ticket_id]
+
+Edit ticket fields (--title, --priority, --assignee, --ticket_type,
+--description, --parent; tags via --add-tag/--remove-tag/--set-tags).
+
+positional arguments:
+  ticket_id             the ticket to edit
+
+options:
+  --title TITLE         new title
+  --priority PRIORITY   new priority 0-4
+  --assignee ASSIGNEE   new assignee (Jira-resolvable)
+  --ticket_type TICKET_TYPE
+                        new ticket type
+  --description DESCRIPTION
+                        new description
+  --parent PARENT       new parent id
+  --bridge-project BRIDGE_PROJECT
+                        bridge project key
+  --add-tag ADD_TAG     add a tag
+  --remove-tag REMOVE_TAG
+                        remove a tag
+  --set-tags SET_TAGS   set the full tag set (add-wins)
+  --review              emit the review payload
+
+--review: preview payload, not atomic; see review-plan --status.

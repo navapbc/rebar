@@ -1,1 +1,10 @@
-Usage: rebar reopen <ticket_id> [--output json]   (closed -> open; exit 10 if not currently closed)
+Usage: rebar reopen [--output {text,json}] [ticket_id]
+
+Reopen a closed ticket (closed -> open; exit 10 if not currently closed).
+
+positional arguments:
+  ticket_id             the ticket to reopen
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format

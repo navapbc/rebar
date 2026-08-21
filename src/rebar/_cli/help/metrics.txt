@@ -1,4 +1,9 @@
-Usage: rebar metrics [--since <date>] [--until <date>] [--output json|text]   (render the full metric registry over a date range)
-       --since <date>   lower bound of the reporting window (ISO-8601; default: 30 days ago)
-       --until <date>   upper bound of the reporting window (ISO-8601; default: today)
-       --output         json (default) emits {since,until,metrics{<id>:...}}; text emits one line per metric in registry order
+Usage: rebar metrics [-h] [--since DATE] [--until DATE] [--output {json,text}]
+
+Render the full metric registry over a date range.
+
+options:
+  -h, --help            show this help message and exit
+  --since DATE          inclusive start date (default: 30d ago)
+  --until DATE          inclusive end date (default: today)
+  --output {json,text}  output format (default: json)

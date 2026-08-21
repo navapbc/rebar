@@ -1,1 +1,9 @@
-Usage: rebar deps <ticket_id> [--include-archived] [--no-pull]
+Usage: rebar deps [--include-archived] [ticket_id]
+
+Show dependency graph for a ticket.
+
+positional arguments:
+  ticket_id           the ticket to graph
+
+options:
+  --include-archived  include archived tickets in the graph
