@@ -288,7 +288,7 @@ a reserved top-level `_generated_by` key for JSON (which has no comment syntax).
 
 | File | Derived from | Regenerate with | Enforcing CI gate |
 |---|---|---|---|
-| `docs/cli-reference.md` | the CLI's own help data (`rebar._cli._help`) + the curated intercept table in the generator | `python scripts/gen_cli_reference.py` | CLI-reference drift gate |
+| `docs/cli-reference.md` | the immutable CLI route registry (`rebar._cli._registry.ROUTES`) plus the committed package-help bytes (`rebar._cli._help`): help-backed subcommands embed their pinned help verbatim, intercept commands render live from their route `parser_factory` | `python scripts/gen_cli_reference.py` | CLI-reference drift gate |
 | `docs/config-reference.md` | the typed config schema (`rebar._config_schema._SECTION_CLASSES`) plus the `cfg`-kind deprecations/tombstones in `rebar._deprecations` | `python scripts/gen_config_reference.py` | Config-reference drift gate |
 | `docs/security.md` | the adapter send-credential name registry (`rebar._child_env._ADAPTER_SECRET_NAMES`) | `python scripts/gen_config_reference.py` | Config-reference drift gate |
 | `docs/env-vars.md` | an AST scan of `src/rebar/**/*.py` for env reads, plus `rebar._deprecations.REGISTRY` and `rebar.mcp_server.MCP_ENV_VARS` | `python scripts/gen_env_registry.py` | Env-var registry drift gate |

@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Generate ``docs/cli-reference.md`` — the canonical CLI command reference (ticket e866).
+"""Generate ``docs/cli-reference.md`` — the canonical CLI command reference (ticket 6755).
 
-The reference is DERIVED from the CLI's own help data (like ``gen_env_registry.py``): a CI
-drift gate regenerates it and fails the build on any diff, so a new command cannot ship
-undocumented.
+Every command syntax/options section is DERIVED from the immutable route registry
+(:mod:`rebar._cli._registry`) plus the committed package-help bytes (proven byte-current by
+``scripts/gen_cli_help.py --check``): a CI drift gate regenerates this file and fails the
+build on any diff, so a new command cannot ship undocumented.
 
-The CLI surface has two families, both emitted here:
+Each documented route (``not retired and not hidden``, in registry order) gets exactly one
+``### `<name>``` syntax section. Two families:
 
-  1. **Help-backed subcommands** — the dispatcher arms with pinned usage text under
-     ``rebar/_cli/help/*.txt``, enumerated by ``rebar._cli._help.known_subcommands()`` and
-     rendered verbatim via ``_help.subcommand_help(name)``.
-  2. **Intercept-arm commands** — advanced commands handled before the dispatcher (each owns
-     its own ``--help`` and has NO ``help/*.txt``). Their ``--help`` is not programmatically
-     capturable (e.g. ``rebar enrich --help`` prints JSON, not usage), so each carries a
-     curated one-liner in ``INTERCEPT_COMMANDS``. That key set is drift-gated against the
-     intercept ladder in ``rebar._cli.__init__`` (``ladder_intercepts()``): a missing or
-     stale curated entry makes ``render()`` raise loudly rather than emit a partial doc.
+  1. **Help-backed routes** (``route.group != "intercept"``) — the committed usage bytes
+     from ``rebar._cli._help.subcommand_help(name)`` are embedded verbatim.
+  2. **Intercept-group routes** (no pinned ``help/*.txt``) — rendered live from the route's
+     ``parser_factory`` (the same approach as ``scripts/gen_cli_help.py``).
+
+The verb-confirmation record (``MUTATION_VERBS``) is a behavioral output record — NOT a
+syntax census — and stays curated here, drift-gated against ``rebar._cli._CONFIRM_SCOPE``.
+
+Cross-command rationale lives in :data:`EDITORIAL_PREAMBLE`, kept structurally separate from
+the generated syntax sections and validated by :func:`lint_editorial` (an editorial block may
+never assert its own usage grammar or reference an unknown top-level command).
 
 Usage:
     python scripts/gen_cli_reference.py            # regenerate docs/cli-reference.md
@@ -25,109 +29,54 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib
 import re
 import sys
 from pathlib import Path
 
+from rebar._cli._registry import ROUTES
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOC_PATH = REPO_ROOT / "docs" / "cli-reference.md"
-CLI_INIT = REPO_ROOT / "src" / "rebar" / "_cli" / "__init__.py"
-
-# Curated one-line descriptions for intercept-arm commands. These commands own their
-# own ``--help`` and have no pinned ``help/*.txt``, and their ``--help`` output is not usable
-# programmatically (``rebar enrich --help`` prints JSON, others vary), so the descriptions are
-# hand-maintained here. The key set is drift-gated against ``ladder_intercepts()``.
-INTERCEPT_COMMANDS: dict[str, str] = {
-    "audit": (
-        "Show a ticket's audit trail: its full retained plan-review history, its completion "
-        "attestation + sidecar record, and the associated code reviews "
-        "(`audit show <ticket> [--output json|text]`)."
-    ),
-    "config": (
-        "Show the resolved rebar configuration from the working-tree config files "
-        "(a read-only config-transparency view; no store init)."
-    ),
-    "criteria": (
-        "Run per-criterion calibration evals against the shared review-criteria registry."
-    ),
-    "enrich": (
-        "Drain and report the cross-ticket overlap enrichment queue "
-        "(`rebar enrich [--drain|--once|status]`)."
-    ),
-    "explain": ("Explain a review criterion by id — a pure registry/guide read, no LLM call."),
-    "identity": (
-        "Manage authenticated identities: create an identity entity, set the current "
-        "self-identity, and add/revoke its signing keys (`identity key add|revoke`)."
-    ),
-    "jira-onboard": (
-        "Compatibility alias for `rebar bridge setup`; routes through the same interactive "
-        "Jira onboarding wizard."
-    ),
-    "llm": (
-        "LLM-framework setup wizard for configuring the optional agent surfaces "
-        "(API key, model, extras)."
-    ),
-    "prompt": "Run prompt-library evals over the packaged/overridden prompts.",
-    "reconcile": (
-        "Reconcile the rebar store with Jira (dry-run by default; `live` performs the sync)."
-    ),
-    "review-code": (
-        "Run the LLM code-review agent over a diff or commit range and emit structured findings."
-    ),
-    "review-plan": (
-        "Run the plan-review gate on a ticket; on a non-blocking PASS it signs the plan-review "
-        "attestation the claim gate consumes. Signing is the DEFAULT — `--no-sign` is the "
-        "explicit opt-out — and a BLOCK, an INDETERMINATE, or a degraded run is never signed. "
-        "Recover a PASS whose signature was lost with `sign-review` (no LLM call)."
-    ),
-    "scan-spec": "Scan prose/spec text for spec-implied work in batches, emitting findings.",
-    "sign-review": (
-        "Re-sign a plan-review attestation from the last REVIEW_RESULT sidecar (cheap; no LLM "
-        "call)."
-    ),
-    "verify-authorship": (
-        "Back-compat alias for `verify-identity` (the authenticated-authorship merge-gate); "
-        "dispatches identically."
-    ),
-    "verify-commit-ticket": (
-        "Verify a commit message references a rebar ticket that resolves in the store "
-        "(the commit-ticket gate)."
-    ),
-    "verify-completion": (
-        "Run the completion-verifier agent to check a ticket's completion criteria are "
-        "demonstrably met by the implementation."
-    ),
-    "verify-identity": (
-        "The authenticated-authorship merge-gate: verify each mutating event's in-toto "
-        "authorship signature against the author identity's commit-anchored keyring "
-        "(`--require-authenticated`, `--since` grandfathering, `--format json` report)."
-    ),
-    "verify-opcert": (
-        "The required-environment operation-certificate merge-gate: verify each in-scope closed "
-        "ticket carries a valid completion-verifier op-cert from the trusted environment pinned in "
-        "`.rebar/trusted_environments.yaml` (`--require-environment`, `--since` grandfathering)."
-    ),
-    "trusted-env": (
-        "Maintain `.rebar/trusted_environments.yaml` (Option B): `add <env_id> <public_key>` and "
-        "`revoke <env_id> <public_key-or-index>` stamp the current tickets-branch tip log position "
-        "as the key's `added_at_log_position` / `revoked_at_log_position`."
-    ),
-    "remote-cert": (
-        "Request an op-cert from the trusted gate service at `verify.opcert_remote_url` "
-        "(SigV4-signed): submit `<ticket-id> <kind>`, poll to a verdict, and on PASS persist the "
-        "returned signed envelope as a `SIGNATURE` event the merge gate certifies."
-    ),
-    "workflow": (
-        "Author, dry-render, and run `.rebar/workflows/*.yaml` workflows (the workflow-engine "
-        "DSL toolchain)."
-    ),
-}
 
 
-# The mutating-verb record (ticket 0c00-0649-32da-41a5), curated here for the same
-# reason as ``INTERCEPT_COMMANDS`` and drift-gated the same way: the key set MUST equal
-# ``rebar._cli._CONFIRM_SCOPE`` (``_WRITES_FULL | _LIFECYCLE``), so a verb cannot join the
-# confirmation channel without being classified. Each row carries
+# Cross-command rationale: the mutation-confirmation / ``--quiet`` / ``--output`` explanation
+# and the bridge nested-forms note. Prose only — NO ``Usage:`` line and NO ``| Option |``
+# table (parser artifacts are the only usage authority), and every ``rebar <cmd>`` reference
+# names a live route. :func:`render` runs :func:`lint_editorial` over this and fails loudly if
+# either rule is broken.
+EDITORIAL_PREAMBLE = """\
+The `rebar` CLI has two command families, both documented under **Command syntax** below.
+**Help-backed subcommands** are the dispatcher arms with pinned usage text, rendered verbatim
+from the committed package help. **Intercept-arm commands** are advanced commands handled
+before the dispatcher; each owns its own `--help`, rendered live from its parser here.
+
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`,
+`untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
+`transition`, `reopen`, `claim`) confirms its result on stdout with one kubectl-style line:
+`<past-tense-verb> <args-summary>` on a successful write, `no change: <reason>` on an
+idempotent no-op (exit 0 in both cases). Two global flags are extracted for these verbs at the
+top-level router (position-independent within the verb's arguments; tokens after `--` are
+never consumed):
+
+- `--quiet` / `-q` — suppress the text confirmation line only; errors, exit codes, JSON
+  output, and `link`'s machine-readable REDIRECT record are untouched.
+- `--output <text|json>` / `-o <mode>` — verbs that already accepted `--output` (`create`,
+  `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON shapes unchanged; the
+  newly-covered verbs emit one uniform mutation envelope
+  `{"outcome": "<verb-past>"|"noop", "subject": <id/edge>, "detail": <str>}` — **pre-1.0
+  UNSTABLE**: the envelope's field set may still change before 1.0. `--quiet` together with
+  `--output json` still prints the JSON.
+
+Bridge operations use the canonical nested forms `rebar bridge fsck`, `rebar bridge
+check-access`, and `rebar bridge setup`; the retained top-level `rebar bridge-fsck` spelling is
+kept for compatibility.
+"""
+
+
+# The mutating-verb record (ticket 0c00-0649-32da-41a5), curated here and drift-gated: the
+# key set MUST equal ``rebar._cli._CONFIRM_SCOPE`` (``_WRITES_FULL | _LIFECYCLE``), so a verb
+# cannot join the confirmation channel without being classified. Each row carries
 #
 # * ``noop``      — whether the verb has an idempotent no-op path (``no change: …``,
 #                   exit 0, zero events written) or always writes;
@@ -302,32 +251,147 @@ def _mutation_tables() -> list[str]:
     return lines
 
 
-def ladder_intercepts() -> set[str]:
-    """Return the intercept command names from the ``if argv[0] == "<name>"`` ladder in
-    ``src/rebar/_cli/__init__.py``, parsed from source (never hardcoded — a newly-added
-    intercept arm is detected automatically)."""
-    source = CLI_INIT.read_text(encoding="utf-8")
-    return set(re.findall(r'argv\[0\]\s*==\s*"([^"]+)"', source))
+def _live_route_names() -> set[str]:
+    """The top-level spellings a `rebar <cmd>` reference may name: every non-retired route."""
+    return {route.name for route in ROUTES if not route.retired}
+
+
+_REBAR_REF = re.compile(r"`rebar\s+([A-Za-z0-9][A-Za-z0-9-]*)")
+_OPTION_HEADER = re.compile(r"^\s*\|\s*option\b", re.IGNORECASE)
+
+
+def lint_editorial(text: str) -> list[str]:
+    """Return deterministic editorial findings (empty == clean) for an editorial prose block.
+
+    Flags, as separate findings: (a) a line asserting its own ``usage:`` grammar; (b) a
+    markdown option-table header; (c) a ``rebar <word>`` reference whose first word is not a
+    live (non-retired) route name."""
+    findings: list[str] = []
+    live = _live_route_names()
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        if line.strip().lower().startswith("usage:"):
+            findings.append(
+                f"line {lineno}: editorial prose asserts a `usage:` grammar — "
+                "parser artifacts are the only usage authority"
+            )
+        if _OPTION_HEADER.match(line):
+            findings.append(
+                f"line {lineno}: editorial prose renders an option table header — "
+                "parser artifacts are the only options authority"
+            )
+    for word in _REBAR_REF.findall(text):
+        if word not in live:
+            findings.append(
+                f"`rebar {word}` references an unknown top-level command "
+                "(not a live route in ROUTES)"
+            )
+    return findings
+
+
+def _resolve_factory(ref: str):
+    """Import and return the ``"module:attr"`` parser factory referenced by a route."""
+    module_name, _, attr = ref.partition(":")
+    module = importlib.import_module(module_name)
+    return getattr(module, attr)
+
+
+def _capitalize_usage(text: str) -> str:
+    """Capitalize argparse's lowercase ``usage:`` prefix (the byte-parity invariant)."""
+    if text.startswith("usage: "):
+        return "Usage: " + text[len("usage: ") :]
+    return text
+
+
+def _unwrap_usage(text: str) -> str:
+    """Join the wrapped usage block into a single line.
+
+    argparse's usage line-wrapping (notably of mutually-exclusive groups) changed in
+    Python 3.13, so a wrapped usage block renders different BYTES across the CI version
+    matrix (3.11/3.12/3.13). Collapsing the block to one logical line makes the rendered
+    intercept syntax byte-identical across versions — the CLI-reference drift gate runs in
+    every matrix cell, so version-stable output is a hard requirement."""
+    lines = text.split("\n")
+    end = 0
+    while end < len(lines) and lines[end].strip() != "":
+        end += 1
+    if end == 0:
+        return text
+    joined = " ".join([lines[0], *(line.strip() for line in lines[1:end])]).rstrip()
+    return "\n".join([joined, *lines[end:]])
+
+
+def _collapse_metavars(line: str) -> str:
+    """Collapse a repeated-metavar option invocation to the single-metavar form.
+
+    Python 3.12 renders ``--output {json,text}, -o {json,text}`` (the metavar repeated after
+    each option string); Python 3.13 renders ``--output, -o {json,text}`` (the metavar once).
+    Normalizing every version to the 3.13 form keeps the rendered intercept syntax
+    byte-identical across the CI version matrix. Only invocation lines (indented, starting
+    with an option string) are touched, so option help text is never rewritten."""
+    if not re.match(r"^\s+--?\S", line):
+        return line
+    prev = None
+    while prev != line:
+        prev = line
+        line = re.sub(r"(--?[\w-]+) (\S+), (--?[\w-]+) \2(?=[,\s]|$)", r"\1, \3 \2", line, count=1)
+    return line
+
+
+def _render_intercept(route) -> str:
+    """Render an intercept-group route's live ``--help`` from its parser factory.
+
+    The output is canonicalized (:func:`_unwrap_usage`, :func:`_collapse_metavars`) so it is
+    byte-identical across the 3.11/3.12/3.13 CI matrix that runs the drift gate."""
+    factory = _resolve_factory(route.parser_factory)
+    parser = factory(prog=f"rebar {route.name}")
+    text = _unwrap_usage(_capitalize_usage(parser.format_help()))
+    text = "\n".join(_collapse_metavars(line) for line in text.split("\n"))
+    return text.rstrip("\n")
+
+
+def _documented_routes() -> list:
+    """Live, non-hidden routes in registry order — one syntax section each."""
+    return [r for r in ROUTES if not r.retired and not r.hidden]
+
+
+def _syntax_body(route, help_mod) -> str:
+    """The fenced syntax body for one route: committed help bytes, or live parser help."""
+    if route.group != "intercept":
+        body = help_mod.subcommand_help(route.name)
+        if body is None:
+            raise ValueError(
+                f"help-backed route {route.name!r} has no committed help bytes — "
+                "regenerate with `python scripts/gen_cli_help.py` (byte-currency contract)."
+            )
+        return body.rstrip("\n")
+    return _render_intercept(route)
+
+
+def _syntax_sections(help_mod) -> list[str]:
+    """Emit exactly one ``### `<name>``` fenced syntax block per documented route."""
+    lines: list[str] = []
+    for route in _documented_routes():
+        lines.append(f"### `{route.name}`")
+        lines.append("")
+        lines.append("```")
+        lines.append(_syntax_body(route, help_mod))
+        lines.append("```")
+        lines.append("")
+    return lines
 
 
 def render() -> str:
-    """Build the full CLI-reference markdown.
+    """Build the full CLI-reference markdown from the registry + committed help bytes.
 
-    First runs a parity self-check: the curated ``INTERCEPT_COMMANDS`` key set MUST equal the
-    intercept ladder parsed from source, else raise ``ValueError`` (a drifted/missing curated
-    entry fails loudly rather than emitting a silently-incomplete doc). ``MUTATION_VERBS`` is
-    checked the same way against the CLI's confirmation scope."""
+    Runs the ``MUTATION_VERBS`` drift check and the editorial linter first (raising
+    ``ValueError`` on either), then assembles: banner → editorial preamble → mutation
+    confirmations → per-route syntax sections."""
     _check_mutation_verbs()
-    ladder = ladder_intercepts()
-    curated = set(INTERCEPT_COMMANDS)
-    if curated != ladder:
-        missing = ladder - curated
-        extra = curated - ladder
+    editorial_findings = lint_editorial(EDITORIAL_PREAMBLE)
+    if editorial_findings:
         raise ValueError(
-            "INTERCEPT_COMMANDS is out of sync with the intercept ladder in "
-            f"src/rebar/_cli/__init__.py: missing curated entries {sorted(missing)}, "
-            f"stale/extra curated entries {sorted(extra)}. "
-            "Update INTERCEPT_COMMANDS in scripts/gen_cli_reference.py."
+            "EDITORIAL_PREAMBLE failed the editorial lint in scripts/gen_cli_reference.py: "
+            + "; ".join(editorial_findings)
         )
 
     from rebar._cli import _help
@@ -341,80 +405,20 @@ def render() -> str:
         "build if this file is stale."
     )
     lines.append("")
-    lines.append(
-        "The `rebar` CLI has two command families. **Help-backed subcommands** are the "
-        "dispatcher arms with pinned usage text (rendered verbatim below). **Intercept-arm "
-        "commands** are advanced commands handled before the dispatcher; each owns its own "
-        "`--help` and is documented here by a curated one-liner — run `rebar <cmd> --help` "
-        "for full usage."
-    )
-    lines.append(
-        "Bridge operations use the canonical nested forms `rebar bridge fsck`, "
-        "`rebar bridge check-access`, and `rebar bridge setup`; retained top-level "
-        "spellings are identified below as compatibility aliases."
-    )
+    lines.extend(EDITORIAL_PREAMBLE.rstrip("\n").splitlines())
     lines.append("")
     lines.append("## Mutation confirmations and global output flags")
     lines.append("")
-    lines.append(
-        "Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, "
-        "`edit`, `tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, "
-        "`attach-commits`, `session-log`, `transition`, `reopen`, `claim`) confirms its "
-        "result on stdout with one kubectl-style line: `<past-tense-verb> <args-summary>` "
-        "on a successful write, `no change: <reason>` on an idempotent no-op (exit 0 in "
-        "both cases). Two global flags are extracted for these verbs at the top-level "
-        "router (position-independent within the verb's arguments; tokens after `--` are "
-        "never consumed):"
-    )
-    lines.append("")
-    lines.append(
-        "- `--quiet` / `-q` — suppress the text confirmation line only; errors, exit "
-        "codes, JSON output, and `link`'s machine-readable REDIRECT record are untouched."
-    )
-    lines.append(
-        "- `--output <text|json>` / `-o <mode>` — verbs that already accepted `--output` "
-        "(`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON "
-        "shapes unchanged; the newly-covered verbs emit one uniform mutation envelope "
-        '`{"outcome": "<verb-past>"|"noop", "subject": <id/edge>, "detail": <str>}` — '
-        "**pre-1.0 UNSTABLE**: the envelope's field set may still change before 1.0. "
-        "`--quiet` together with `--output json` still prints the JSON."
-    )
-    lines.append("")
     lines.extend(_mutation_tables())
-
-    # ── Help-backed subcommands ──────────────────────────────────────────────
-    subs = sorted(_help.known_subcommands())
-    lines.append("## Help-backed subcommands")
+    lines.append("## Command syntax")
     lines.append("")
     lines.append(
-        f"The {len(subs)} subcommands with pinned help text "
-        "(`rebar._cli._help.known_subcommands()`):"
+        f"One section per live command ({len(_documented_routes())} in total), in registry "
+        "order. Help-backed subcommands embed their committed package-help bytes verbatim; "
+        "intercept-arm commands render their live `--help` from the parser."
     )
     lines.append("")
-    for name in subs:
-        lines.append(f"### `{name}`")
-        lines.append("")
-        help_text = _help.subcommand_help(name)
-        body = (help_text or "").rstrip("\n")
-        lines.append("```")
-        lines.append(body)
-        lines.append("```")
-        lines.append("")
-
-    # ── Intercept-arm commands ───────────────────────────────────────────────
-    intercepts = sorted(INTERCEPT_COMMANDS)
-    lines.append("## Intercept-arm commands")
-    lines.append("")
-    lines.append(
-        f"The {len(intercepts)} advanced commands handled before the dispatcher. Each owns "
-        "its own `--help` (no pinned help text); run `rebar <cmd> --help` for full usage."
-    )
-    lines.append("")
-    lines.append("| Command | Description |")
-    lines.append("|---------|-------------|")
-    for name in intercepts:
-        lines.append(f"| `{name}` | {INTERCEPT_COMMANDS[name]} |")
-    lines.append("")
+    lines.extend(_syntax_sections(_help))
 
     return "\n".join(lines)
 
