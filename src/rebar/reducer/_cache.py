@@ -140,7 +140,20 @@ def read_cache(
 
 
 def write_cache(cache_path: str, dir_hash: str, state: dict, ticket_dir: str) -> None:
-    """Atomically publish one complete cache generation."""
+    """Atomically publish one complete cache generation.
+
+    No-op when ``ticket_dir`` lies inside a snapshot-store entry: those trees are
+    immutable and content-addressed (ADR 0005 D2), so a read must not add derived
+    files to them — it would break the janitor's reverify digest and, with entries
+    hardlink-sharing blobs, turn any in-place write into cross-entry corruption
+    (bug 5c27-7926). The cache is a rebuildable optimization; under a pinned
+    snapshot root the read simply stays uncached."""
+    # Deferred import: keep the reducer core decoupled from the snapshot subsystem
+    # except at this one write seam.
+    from rebar._snapshot.repo_snapshot import in_snapshot_entry
+
+    if in_snapshot_entry(ticket_dir):
+        return
     try:
         envelope = json.dumps({"dir_hash": dir_hash, "state": state}, ensure_ascii=False)
         atomic_write(cache_path, envelope)

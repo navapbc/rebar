@@ -86,6 +86,19 @@ a published entry is never mutated through a shared inode. The delta path is fai
 donor, unresolvable objects, a donor whose file set does not match `git ls-tree -r` for its own
 SHA, or an un-hardlinkable filesystem all fall back to the full materialization.
 
+**Immutability binds READERS too — nothing writes inside a published entry.** The premise
+above ("a published entry is never mutated") was violated in practice by the reducer, which
+published its derived `.cache.json` inside every ticket dir it read through a pinned root —
+measured at 4,844 post-materialization files in one live entry (bug `5c27-7926`). Post-read
+writes break the janitor's TOFU reverify digest (a clean entry looks corrupt and is evicted)
+and, once entries hardlink-share blobs, any in-place write through a shared inode corrupts
+every entry linking it. Two guards enforce the premise: writers of derived state consult
+`repo_snapshot.in_snapshot_entry` and skip the write under a store entry (the reducer cache
+is a rebuildable optimization, so a pinned-root read simply stays uncached), and
+`_store/fsutil.atomic_write`'s rename-over publication (`os.replace`, never in-place) is
+pinned by test so an accidental write through a shared inode still cannot corrupt the
+sibling entries.
+
 ### D3 — Reader safety via POSIX delete-on-last-close (and the REJECTED PID lease)
 
 Readers open files up front; eviction renames an entry to `trash/<uuid>` (atomic

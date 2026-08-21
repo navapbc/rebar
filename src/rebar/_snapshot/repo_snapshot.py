@@ -57,12 +57,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from itertools import pairwise
 from pathlib import Path
 
 from rebar._snapshot.delta_tree import materialize_via_donor
@@ -109,6 +111,30 @@ DEFAULT_REF = "origin/main"
 # Sibling modules add <root>/locks, <root>/trash, <root>/gc for the cache + janitor.
 
 _STORE_DIRNAME = "rebar-gate-snapshots"
+
+# An entry directory's name: a bare 40-hex code entry or a `tickets-<sha>` ticket-store
+# entry. Lexical twin of the janitor's ``_is_entry`` (which also stats the fs).
+_ENTRY_NAME_RE = re.compile(r"\A(tickets-)?[0-9a-f]{40}\Z")
+
+
+def in_snapshot_entry(path: str | os.PathLike[str]) -> bool:
+    """True when ``path`` lies inside a published snapshot-store entry.
+
+    Entries are immutable, content-addressed trees (ADR 0005 D2): after publication
+    nothing may write inside one — reads keep adding derived files otherwise (bug
+    5c27-7926), which breaks the janitor's TOFU reverify digest and, with hardlink
+    blob-sharing between adjacent entries (bug 8386), makes any in-place write a
+    cross-entry corruption hazard. Writers of derived state (e.g. the reducer cache)
+    consult this to skip the write when the tree they were pointed at is a snapshot.
+
+    The check is structural — the store layout (``…/rebar-gate-snapshots/<entry>/…``)
+    is recognized in the path itself — so it holds in any process regardless of which
+    env/config produced the root it was handed."""
+    parts = Path(os.path.abspath(os.fspath(path))).parts
+    return any(
+        parent == _STORE_DIRNAME and _ENTRY_NAME_RE.match(child) is not None
+        for parent, child in pairwise(parts)
+    )
 
 
 def store_root() -> Path:
