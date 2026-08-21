@@ -276,3 +276,49 @@ def test_the_real_tree_is_clean() -> None:
         cwd=REPO_ROOT,
     )
     assert result.returncode == 0, f"tree scan found rot-prone comments:\n{result.stdout}"
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the gate runs in `make lint`, not only in CI / the full suite
+# ---------------------------------------------------------------------------
+
+_MAKEFILE = REPO_ROOT / "Makefile"
+_GATE_INVOCATION = "scripts/check_comment_hygiene.py"
+
+
+def _lint_target_body(makefile_text: str) -> str:
+    """Recipe lines of the `lint` target only (the test_config_gate_wiring_heldout
+    idiom): everything between `lint:` and the next target header."""
+    import re
+
+    body: list[str] = []
+    in_target = False
+    for line in makefile_text.splitlines():
+        if re.match(r"^lint:", line):
+            in_target = True
+            continue
+        if in_target and re.match(r"^[A-Za-z0-9_.-]+:", line):
+            break
+        if in_target:
+            body.append(line)
+    return "\n".join(body)
+
+
+def test_make_lint_wires_the_hygiene_gate() -> None:
+    """Ticket 2d9a-78c5-5f87-4a22: the local fast gate must surface comment-hygiene
+    findings, not defer them to CI / the full suite."""
+    body = _lint_target_body(_MAKEFILE.read_text(encoding="utf-8"))
+    assert _GATE_INVOCATION in body, (
+        "`make lint` does not invoke scripts/check_comment_hygiene.py — the local fast "
+        "gate would return a clean verdict over a tree CI rejects (ticket 2d9a-78c5)."
+    )
+
+
+def test_wiring_check_detects_a_removed_invocation() -> None:
+    """Teeth: stripping the invocation from a synthetic Makefile copy must flip the
+    same assertion, and an invocation outside the lint target must not satisfy it."""
+    mk = _MAKEFILE.read_text(encoding="utf-8")
+    stripped = "\n".join(line for line in mk.splitlines() if _GATE_INVOCATION not in line)
+    assert _GATE_INVOCATION not in _lint_target_body(stripped)
+    relocated = stripped + f"\nother-target:\n\tpython {_GATE_INVOCATION}\n"
+    assert _GATE_INVOCATION not in _lint_target_body(relocated)

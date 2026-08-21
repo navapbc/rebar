@@ -219,6 +219,11 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# tests/interfaces/facades/test_mcp_http_transport.py; running it here makes the local
 	@# verdict agree with CI instead of surfacing staleness only in the full suite (~0.55s).
 	python scripts/gen_env_registry.py --check
+	@# Comment-hygiene gate (ticket 2d9a-78c5): CI runs this as the `comment-hygiene gate`
+	@# step of _build-and-test.yml and via tests/unit/test_comment_hygiene_guard.py; running
+	@# it here makes the local verdict agree with CI instead of surfacing findings only in
+	@# the full suite — same rationale as the env-var drift gate above (~4.9s on the full tree).
+	python scripts/check_comment_hygiene.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

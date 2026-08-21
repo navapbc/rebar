@@ -300,6 +300,7 @@ def test_make_lint_rejects_live_vocabulary_through_guard(tmp_path: Path) -> None
     (scripts / "check_config_ownership.py").write_text("", encoding="utf-8")
     (scripts / "check_config_reads.py").write_text("", encoding="utf-8")
     (scripts / "gen_env_registry.py").write_text("", encoding="utf-8")
+    (scripts / "check_comment_hygiene.py").write_text("", encoding="utf-8")
     _write(tmp_path, "src/rebar/live.py", _legacy_heading())
 
     stub_bin = tmp_path / "bin"
