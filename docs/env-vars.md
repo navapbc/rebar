@@ -6,7 +6,7 @@ This lists environment variables read under `src/rebar` via the following recogn
 
 - key-bearing stdlib reads (the literal key is registered): `os.environ["X"]`, `os.environ.__getitem__("X", …)`, `os.environ.get("X", …)`, `os.environ.pop("X", …)`, `os.environ.setdefault("X", …)`, `os.getenv("X", …)`
 - bulk/whole-mapping accesses (allowed, register nothing — they name no single variable): `os.environ.__contains__`, `os.environ.__delitem__`, `os.environ.__iter__`, `os.environ.__len__`, `os.environ.__setitem__`, `os.environ.clear`, `os.environ.copy`, `os.environ.items`, `os.environ.keys`, `os.environ.popitem`, `os.environ.update`, `os.environ.values`
-- project env-read helpers: `_env_int`, `_env_truthy`, `_gate_str_pref`, `_int_env`, `_int_pref`, `_llm_float`, `_llm_int`, `_llm_str`, `_rebar_env`, `_severities_env`, `_str_env`, `_str_pref`, `read_secret_env`
+- project env-read helpers: `_env_truthy`, `_gate_str_pref`, `_int_env`, `_llm_float`, `_llm_int`, `_llm_str`, `_severities_env`, `_str_env`, `read_secret_env`
 - NOT recognized: reads under `tests/` (outside the scan root), non-literal keys (reported as dynamic below instead of dropped), `os.environ` passed by reference into another callable (`dict(os.environ)`, `f(os.environ)`), `getattr(os.environ, …)` indirection, and keys built from a runtime source other than a parameter (a regex match group, say) — no call site carries those names, so they stay dynamic.
 
 | Variable | Read in | Alias/deprecation |
