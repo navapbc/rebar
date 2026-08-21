@@ -640,3 +640,172 @@ def test_max_bytes_resolved_from_env_and_snapshot_table(tmp_path, monkeypatch):
     proj = _init_repo(tmp_path / "proj")
     (proj / "rebar.toml").write_text("[snapshot]\nmax_bytes = 6789\n")
     assert janitor.JanitorConfig.from_env(repo_root=str(proj)).max_bytes == 6789
+
+
+# --------------------------------------------------------------------------------------
+# Bug 8386 (review finding) — hardlink sharing invalidates the janitor's size assumptions
+# --------------------------------------------------------------------------------------
+def _real_store_bytes(root: Path) -> int:
+    """Bytes the store's ENTRIES actually occupy, charging every distinct inode once.
+
+    Deliberately a SEPARATE implementation from ``cache.distinct_bytes`` rather than a call
+    to it: an accounting test whose expected value comes from the code under test measures
+    only that the code agrees with itself. This walk is written from the definition of "bytes
+    on disk", so the two sides of every assertion below can disagree.
+
+    Scoped to entries because that is what the byte total accounts for — the store also holds
+    ``bytes.total`` itself, ``locks/`` and the per-entry sidecars, which it deliberately does
+    not track."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for entry in janitor._entries(root):
+        for dirpath, _dirnames, filenames in os.walk(entry):
+            for name in filenames:
+                try:
+                    st = os.lstat(os.path.join(dirpath, name))
+                except OSError:  # pragma: no cover - racing eviction
+                    continue
+                key = (st.st_dev, st.st_ino)
+                if key in seen:
+                    continue
+                seen.add(key)
+                total += st.st_size
+    return total
+
+
+def _three_sharing_ticket_entries(repo: Path, store: Path) -> list[Path]:
+    """Three ``tickets-<sha>`` entries built from one another by hardlink delta."""
+    _commit(repo, "seed.txt", "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+    for i in range(8):
+        (repo / f"t{i}.json").write_text("T" * 20_000)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "--quiet", "-m", "tickets base")
+    entries = []
+    for i in range(3):
+        (repo / f"t{i}.json").write_text("T" * 19_999 + "X")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "--quiet", "-m", f"delta {i}")
+        entries.append(Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)))
+    _git(repo, "checkout", "--quiet", "-")
+    return entries
+
+
+def test_evicting_a_shared_entry_keeps_the_byte_total_honest(store, repo):
+    """The running byte total must keep describing real disk once entries share inodes.
+
+    Hardlink sharing (bug 8386) broke an assumption the janitor's accounting rested on. An
+    apportioned per-entry size (``st_size // st_nlink``) is a reasonable REPORTING figure, but
+    it is wrong as an incremental decrement: removing one of ``k`` links frees nothing until
+    the last link goes, so subtracting a 1/k share drives the running total away from the
+    bytes actually on disk. The ``max_bytes`` cap then evicts against bytes that do not
+    exist. Measured on this fixture pre-fix: evicting one entry credited 69,997 bytes while
+    freeing 20,000.
+    """
+    entries = _three_sharing_ticket_entries(repo, store)
+    assert len(entries) == 3
+
+    janitor.startup_sweep(store)  # authoritative walk -> the total starts exactly right
+    assert cache.byte_total(store) == _real_store_bytes(store), (
+        "the reconciling walk must agree exactly with the bytes on disk"
+    )
+
+    before = _real_store_bytes(store)
+    janitor._evict(store, entries[0])
+    after = _real_store_bytes(store)
+    assert after < before, "the victim held some blobs exclusively; those should be gone"
+    assert after > before // 2, "evicting one of three sharers must not free a whole tree"
+
+    assert cache.byte_total(store) == after, (
+        f"byte_total={cache.byte_total(store)} but the store really holds {after} bytes"
+    )
+
+
+def test_populating_shared_entries_tracks_real_disk_without_a_sweep(store, repo):
+    """The POPULATE side must be honest on its own, with no reconciling walk to rescue it.
+
+    The eviction tests below start with ``startup_sweep``, which resets the total from an
+    authoritative walk — and in doing so would launder an over-credit made at populate time.
+    This one never sweeps, so the only thing keeping ``byte_total`` in step with the disk is
+    what each materialization added. Charging a shared entry its full size here inflates the
+    total by every blob it reused, and the ``max_bytes`` cap then evicts against bytes that
+    were never consumed — defeating the sharing this ticket exists to introduce.
+    """
+    entries = _three_sharing_ticket_entries(repo, store)
+    assert len(entries) == 3
+
+    on_disk = _real_store_bytes(store)
+    assert cache.byte_total(store) == on_disk, (
+        f"after three sharing materializations byte_total={cache.byte_total(store)} "
+        f"but the entries really occupy {on_disk} bytes"
+    )
+    # Sharing is real here, so a per-entry full-size sum is strictly larger — i.e. the
+    # assertion above is discriminating, not satisfied by every possible accounting.
+    assert sum(cache.entry_size(e) for e in entries) > on_disk
+
+    # And the reconciling walk agrees, so the incremental and authoritative paths converge
+    # on the same number rather than each being self-consistently wrong.
+    janitor.startup_sweep(store)
+    assert cache.byte_total(store) == on_disk
+
+
+def test_reclaim_credits_only_bytes_actually_freed(store, repo):
+    """``_evict`` must report the disk it really freed, not an apportioned share.
+
+    The free-space loop credits ``free += reclaimed`` and stops once the watermark is met, so
+    an over-credit makes it believe it recovered space it did not and stop reclaiming while
+    the volume is still under the watermark.
+    """
+    entries = _three_sharing_ticket_entries(repo, store)
+
+    before = _real_store_bytes(store)
+    freed = janitor._evict(store, entries[0])
+    actually_freed = before - _real_store_bytes(store)
+    assert freed == actually_freed, (
+        f"_evict credited {freed} bytes but only {actually_freed} left the disk"
+    )
+
+    # The deferred bytes are not lost: the final holder of a shared blob does free it.
+    janitor._evict(store, entries[1])
+    mid = _real_store_bytes(store)
+    last = janitor._evict(store, entries[2])
+    assert last == mid - _real_store_bytes(store)
+    assert last > 0, "evicting the final holder must credit the bytes it really released"
+    assert _real_store_bytes(store) == 0
+
+
+def test_the_three_size_questions_on_a_known_inode_layout(tmp_path):
+    """Sharing splits "how big is this entry" into three questions with three answers.
+
+    Every expectation below is a LITERAL read off the layout this test builds by hand —
+    nothing is derived from the functions under test, so a change in any of them shows up
+    as a mismatch instead of moving both sides of the comparison together.
+    """
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    (left / "sub").mkdir(parents=True)
+    right.mkdir()
+    (left / "shared.bin").write_bytes(b"S" * 1000)
+    (left / "sub" / "only-left.bin").write_bytes(b"A" * 300)
+    (right / "only-right.bin").write_bytes(b"B" * 70)
+    os.link(left / "shared.bin", right / "shared.bin")  # ONE inode, TWO links
+
+    # REPORTING: full size, sharing ignored — and so it double-counts across entries.
+    assert cache.entry_size(left) == 1300
+    assert cache.entry_size(right) == 1070
+    assert cache.entry_size(left) + cache.entry_size(right) == 2370  # 1000 counted twice
+
+    # ACCOUNTING: the bytes this entry alone holds — what populating it added, and what
+    # evicting it would free. The 1000 shared bytes belong to neither exclusively.
+    assert cache.exclusive_size(left) == 300
+    assert cache.exclusive_size(right) == 70
+
+    # GROUND TRUTH: every inode once. 1000 + 300 + 70.
+    assert cache.distinct_bytes([left, right]) == 1370
+
+    # Dropping one of two links frees nothing and hands the bytes to the survivor, which
+    # is exactly why "subtract exclusive_size on evict" balances: the inode is subtracted
+    # once, when its LAST link goes.
+    (left / "shared.bin").unlink()
+    assert cache.exclusive_size(right) == 1070
+    assert cache.distinct_bytes([left, right]) == 1370  # unchanged: the bytes never left

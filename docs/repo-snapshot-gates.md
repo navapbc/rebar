@@ -86,6 +86,15 @@ consequences worth knowing:
   (`merge-base --is-ancestor`) before it is pinned, falling back to pinning `<remote>/tickets`
   directly if that cannot be confirmed — so the pinned store never holds less than the shared ref.
 
+- **Adjacent pins share storage, they are not re-copied.** Because the pin tracks a ref that
+  moves every ~26s while each commit touches a handful of files, the `tickets-<sha>` key
+  effectively never hits — so bounding the store cannot rely on key reuse the way the code
+  entries do. Instead a new ticket entry is built by hardlinking a neighbouring entry and
+  rewriting only the paths that differ between the two SHAs, so N gate resolutions across N
+  adjacent tips cost roughly one tree rather than N. Each entry still holds exactly the
+  committed tree at its own SHA; the delta path falls back to a full materialization whenever
+  a usable, verified donor is not available. See ADR 0005 D2.
+
 It is still a **snapshot**, taken once when the run starts. A comment or edit written *after* the
 run begins, or one not yet committed to the store, is not in it. That is why a verifier finding
 should be read as *"not visible in the ticket snapshot I read"* rather than "no such record
