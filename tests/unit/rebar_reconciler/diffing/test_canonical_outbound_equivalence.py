@@ -159,11 +159,12 @@ def test_snapshot_canonicalized_via_injected_inbound_mapper(od) -> None:
             emit_detach_clear=False,
             *,
             suppressed_out=None,
+            status_map=None,
         ):
             return {}
 
         def map_fields_to_remote(
-            self, changed, ticket=None, binding_store=None, local_ticket_types=None
+            self, changed, ticket=None, binding_store=None, local_ticket_types=None, status_map=None
         ):
             return dict(changed)
 

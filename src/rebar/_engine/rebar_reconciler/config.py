@@ -72,3 +72,29 @@ jira_to_local_status: dict[str, str] = {
     "Done": "closed",
     "Cancelled": "cancelled",
 }
+
+
+def effective_status_map(project_key: str, root: object = None) -> dict[str, str]:
+    """Resolve the EFFECTIVE outbound local->Jira status map for ``project_key``.
+
+    The forward map is ``local_to_jira_status`` (the built-in default) <-
+    ``[mapping.default.status_map]`` <- ``[mapping.projects.<KEY>.status_map]``,
+    resolved through the S1 per-key three-layer merge (``mapping_config.resolve_for
+    _project``). A ``SKIP`` value (``mapping_config.SKIP``) or an absent key means the
+    local status has NO Jira target — dropped here so callers see only mappable
+    statuses (map-or-drift: a caller that gets no target for a local status OMITS the
+    field rather than coercing it).
+
+    With NO ``[mapping]`` block the result equals ``local_to_jira_status`` verbatim —
+    the config seam is inert until configured.
+
+    ``mapping_config`` (and, through it, ``rebar.config``) is imported LAZILY so this
+    module stays stdlib-only at import time (it imports nothing but ``__future__`` at
+    the top level — the operator-overridable status literals above must never sit
+    behind an adapter/config import)."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(status_map=local_to_jira_status)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    return {k: v for k, v in resolved.status_map.items() if v != mc.SKIP}

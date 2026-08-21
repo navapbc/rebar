@@ -18,6 +18,7 @@ one-way dependency rule; see ``adapters/jira_family/__init__.py``).
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from rebar_reconciler.adapters.jira_family.rich_text import RichTextCodec
@@ -25,6 +26,49 @@ from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
     LOCAL_STATUS_TO_JIRA,
 )
+
+
+def reset_drift_warnings() -> None:
+    """Clear the per-process drift-warning dedupe set.
+
+    The drift alert in :func:`resolve_outbound_status` is emitted at most once per
+    distinct local status per process, so a persistently drifting status does not
+    re-flood stderr on every mapper call (every reconcile pass). Tests reset the set to
+    assert emission counts deterministically."""
+    _DRIFT_WARNED.clear()
+
+
+# Per-process set of local statuses already warned about (bug: unthrottled drift alert
+# re-printed on every reconcile pass). Deduped by status name so a stuck status warns
+# once, not once-per-call.
+_DRIFT_WARNED: set[str] = set()
+
+
+def resolve_outbound_status(value: Any, status_map: dict[str, str] | None) -> str | None:
+    """Resolve a local status to its Jira target under map-or-drift semantics.
+
+    ``status_map`` is the effective forward map (``config.effective_status_map``);
+    ``None`` falls back to the built-in ``LOCAL_STATUS_TO_JIRA``. When the local
+    ``value`` has NO target (absent / dropped as ``SKIP`` upstream) this returns
+    ``None`` — the caller OMITS the ``status`` field entirely (Jira left unchanged),
+    never coercing to ``"To Do"`` — and emits a non-fatal drift warning to stderr
+    naming the status. The warning is deduped per-status per-process (see
+    :func:`reset_drift_warnings`) so a persistently drifting status does not re-print
+    every pass. Shared by the UPDATE mapper and both CREATE paths so the map-or-drift
+    rule has ONE implementation."""
+    effective = LOCAL_STATUS_TO_JIRA if status_map is None else status_map
+    target = effective.get(value)
+    if target is None:
+        if value not in _DRIFT_WARNED:
+            _DRIFT_WARNED.add(value)
+            print(
+                f"rebar-reconciler: local status {value!r} has no Jira target in the "
+                "effective status map; leaving the Jira status field unchanged "
+                "(map-or-drift).",
+                file=sys.stderr,
+            )
+        return None
+    return target
 
 
 class OutboundFieldMapper:
@@ -53,6 +97,7 @@ class OutboundFieldMapper:
         ticket: dict[str, Any] | None = None,
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Map a CANONICAL changed-fields dict (local field names -> local values) to
         the vendor-shaped mutation fields, at the emission boundary (ticket 625b).
@@ -60,8 +105,12 @@ class OutboundFieldMapper:
         Field-name reconciliation (local ``title`` -> Jira ``summary``) and value
         mapping (``status``/``priority`` -> the Jira name; ``description`` fitted
         via the injected ``RichTextCodec``) reuse the shared local->Jira value
-        maps. ``assignee``/``parent``/``reporter`` values are already resolved by
-        the core diff and pass through unchanged, as does the
+        maps. ``status_map`` is the effective per-project forward map
+        (``config.effective_status_map``); ``None`` falls back to the built-in
+        ``LOCAL_STATUS_TO_JIRA``. A local status with NO target (map-or-drift) causes
+        the ``status`` field to be OMITTED entirely — never coerced — with a
+        non-fatal warning to stderr. ``assignee``/``parent``/``reporter`` values are
+        already resolved by the core diff and pass through unchanged, as does the
         ``_assignee_is_account_id`` dispatch sentinel."""
         out: dict[str, Any] = {}
         for name, value in changed.items():
@@ -88,7 +137,9 @@ class OutboundFieldMapper:
                     else value
                 )
             elif name == "status":
-                out["status"] = LOCAL_STATUS_TO_JIRA.get(value, "To Do")
+                target = resolve_outbound_status(value, status_map)
+                if target is not None:
+                    out["status"] = target
             elif name == "priority":
                 out["priority"] = LOCAL_PRIORITY_TO_JIRA.get(value, "Medium")
             else:

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from rebar_reconciler import config
+
 # ---------------------------------------------------------------------------
 # Label diff
 # ---------------------------------------------------------------------------
@@ -78,38 +80,60 @@ def _diff_labels(
 
 
 # ---------------------------------------------------------------------------
-# Status annotation label helpers (ticket 929a)
+# Status annotation label helpers (ticket 929a; generalised S2)
 # ---------------------------------------------------------------------------
 
-# Local statuses that need an annotation label to preserve lossless intent.
-# Maps local_status -> rebar-status:<label> emitted when that status is active.
-# (blocked/cancelled have no direct equivalent in the live DIG workflow, so the
-# nearest live state plus this annotation label is the lossless encoding.)
-_STATUS_ANNOTATION_LABEL: dict[str, str] = {
-    "blocked": "rebar-status:blocked",
-    "cancelled": "rebar-status:cancelled",
-}
+_REBAR_STATUS_LABEL_PREFIX = "rebar-status:"
+
+
+def _desired_status_annotation(local_status: str, status_map: dict[str, str] | None) -> str | None:
+    """The ``rebar-status:<local_status>`` label to stamp for ``local_status``, or None.
+
+    Built-in-reverse stamp rule (S2, generalising ticket 929a's blocked/cancelled
+    literal): a label is needed IFF the local status has a Jira target AND that target
+    does NOT reverse-map (via the built-in ``config.jira_to_local_status``) back to the
+    local status — i.e. the forward mapping is lossy and the raw workflow status alone
+    could not reconstruct the local status inbound.
+
+    ``status_map`` is the effective per-project forward map
+    (``config.effective_status_map``); ``None`` falls back to the built-in
+    ``config.local_to_jira_status``. A DRIFTED status (no target) stamps NOTHING (the
+    lookup is guarded — never blindly subscripted). On the built-in map the lossy set is
+    {blocked, cancelled} (``deleted`` is also lossy — "Done" reverses to ``closed`` — but
+    ``deleted`` tickets are excluded upstream by ``compute_outbound_mutations`` and never
+    reach this rule)."""
+    forward = config.local_to_jira_status if status_map is None else status_map
+    target = forward.get(local_status)
+    if target is None:
+        return None
+    if config.jira_to_local_status.get(target) == local_status:
+        return None
+    return f"{_REBAR_STATUS_LABEL_PREFIX}{local_status}"
 
 
 def _diff_status_annotation_labels(
     local_status: str,
     jira_labels: list[str],
+    status_map: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compute add/remove mutations for rebar-status: annotation labels.
 
-    These labels encode lossless status information for statuses that have no
-    direct equivalent in the live DIG Jira workflow (currently blocked and
-    cancelled, which map to In Progress and Done respectively).
+    These labels encode lossless status information for statuses whose forward mapping
+    is lossy (the target reverse-maps to a DIFFERENT local status). On the live DIG
+    workflow with the built-in map that is blocked (-> In Progress) and cancelled
+    (-> Done); a per-project ``status_map`` generalises the set.
 
     Rules:
-    - When local_status is in _STATUS_ANNOTATION_LABEL, emit ADD for the
-      corresponding rebar-status: label if Jira does not already carry it.
-    - When a rebar-status: annotation label is present on Jira but local_status
-      no longer matches it, emit REMOVE to clean up the stale label.
+    - Emit ADD for the desired ``rebar-status:<local>`` label (per the built-in-reverse
+      stamp rule) when Jira does not already carry it.
+    - When a rebar-status: annotation label is present on Jira but no longer matches the
+      desired one, emit REMOVE to clean up the stale label.
     """
     mutations: list[dict[str, Any]] = []
-    desired_annotation = _STATUS_ANNOTATION_LABEL.get(local_status)
-    jira_annotation_labels = {label for label in jira_labels if label.startswith("rebar-status:")}
+    desired_annotation = _desired_status_annotation(local_status, status_map)
+    jira_annotation_labels = {
+        label for label in jira_labels if label.startswith(_REBAR_STATUS_LABEL_PREFIX)
+    }
 
     # Add desired annotation if not already present
     if desired_annotation is not None and desired_annotation not in jira_annotation_labels:
