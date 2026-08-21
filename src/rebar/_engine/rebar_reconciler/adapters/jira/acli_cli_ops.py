@@ -508,12 +508,27 @@ def add_comment(
     Document Format (ADF)"). The codec is built exactly as
     ``adapters/jira/backend.py`` builds it, so ``reconciler.rich_text_cutover``
     (story 3388, ships ``off``) governs rendering.
+
+    Bug 5931-78a3-95d2-44cd: the fit goes through
+    ``outbound_comments.fit_preserving_marker`` rather than ``codec.fit_outbound``
+    directly. The body arriving here is ALREADY decorated with
+    ``RECONCILER_MARKER`` (the loop-breaker the inbound differ looks for), and that
+    marker is the body's LAST characters while every fitter truncates from the
+    RIGHT — so a bare ``fit_outbound`` cut the marker off first and the comment
+    landed unmarked, which made the next inbound pass treat our own echo as a NEW
+    Jira comment and re-mirror it (836 unmarked duplicates accumulated live). The
+    helper truncates the CONTENT and re-appends the decoration instead. It lives in
+    the backend-neutral core beside that decoration and takes the fitter as an
+    injected callable, so it stays vendor-agnostic; passing ``codec.fit_outbound``
+    keeps the size contract, the rich/plain cutover, and the undecorated-value path
+    exactly as they are today.
     """
     from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
     from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar_reconciler.outbound_comments import fit_preserving_marker
 
     codec = AdfCodec(rich="cloud" in cutover_clients())
-    body_arg = json.dumps(codec.to_wire(codec.fit_outbound(body)))
+    body_arg = json.dumps(codec.to_wire(fit_preserving_marker(body, codec.fit_outbound)))
     cmd = [
         "jira",
         "workitem",
