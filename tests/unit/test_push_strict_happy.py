@@ -46,6 +46,6 @@ def test_strict_policy_decline_raises_catchable_delivery_error(
     assert type(error).__name__ == "PushDeliveryError"
     assert getattr(error, "reason", None) == "push-policy-declined"
     assert "GH013" in str(error)
-    assert "3 unpushed commits on origin/tickets..HEAD" in str(error)
+    assert "3 unpushed commits on the local tickets branch ahead of origin/tickets" in str(error)
 
     assert push.push_tickets_branch(str(tracker)) is None
