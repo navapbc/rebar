@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 
-from rebar._cli._parser import build_argument_parser
+from rebar._cli._parser import RebarHelpFormatter, build_argument_parser
 
 
 def build(*, prog: str) -> argparse.ArgumentParser:
@@ -20,7 +20,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
     parser = build_argument_parser(
         prog=prog,
         description="Show a ticket audit trail (plan-review history + completion + code reviews).",
-        formatter_class=argparse.HelpFormatter,
+        formatter_class=RebarHelpFormatter,
         allow_abbrev=False,
     )
     subs = parser.add_subparsers(dest="subcommand", metavar="{show,serve}")
