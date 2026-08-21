@@ -11,8 +11,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
-from rebar_reconciler.adapters.jira.acli import AcliClient
-
 JQL_RETRY_COUNT = 6
 JQL_RETRY_SLEEP = 5
 
@@ -58,6 +56,31 @@ def _retry_sleep(seconds: float) -> None:
     time.sleep(seconds)
 
 
+def _default_client(**kwargs: Any) -> Any:
+    """The default probe-client factory: a patchable indirection over ``AcliClient``.
+
+    Deliberately a named factory rather than ``client_cls=AcliClient`` in the
+    signature. A default expression is evaluated ONCE at import, capturing whatever
+    ``AcliClient`` this module's globals named then — so a caller that rebinds
+    ``rebar_reconciler.adapters.jira.acli.AcliClient`` (the DEFINING module's
+    attribute) only reached the probe when it happened to win the import race, and
+    otherwise the probe silently constructed the REAL client and issued LIVE Jira
+    calls. Consumers reach this module through ``_lib_ops._engine_module``, which
+    returns the ``sys.modules`` cache, so that order is not under a caller's control.
+    This indirection resolves ``AcliClient`` at CALL time, so the seam is reliably
+    patchable while production behaviour is byte-identical (same class, same
+    constructor keywords). Mirrors :func:`_retry_sleep`, which exists for the
+    identical defect in ``sleep_fn=time.sleep`` (ticket 5ea3-76e5-480a-4464), and
+    the ``acli.AcliClient(...)`` call-time lookup used by ``runtime``/``backend``.
+
+    An explicitly passed ``client_cls=`` bypasses this factory entirely, so
+    injection still wins over the seam.
+    """
+    from rebar_reconciler.adapters.jira.acli import AcliClient
+
+    return AcliClient(**kwargs)
+
+
 def _resolve_probe_scope(
     env: dict[str, str] | None,
 ) -> tuple[dict[str, str] | None, tuple[dict[str, object], list[str], int] | None]:
@@ -96,7 +119,7 @@ def _resolve_probe_scope(
 def run_access_check(
     *,
     env: dict[str, str] | None = None,
-    client_cls=AcliClient,
+    client_cls=_default_client,
     sleep_fn=_retry_sleep,
 ) -> tuple[dict[str, object], list[str], int]:
     """Run the six-step probe and return its result, legacy lines, and exit code."""
@@ -393,7 +416,7 @@ def check_mapped_project_visibility(
     repo_root: str | os.PathLike[str],
     *,
     probe: Any | None = None,
-    client_cls=AcliClient,
+    client_cls=_default_client,
     env: dict[str, str] | None = None,
     query_project: str | None = None,
     projects_store_mod: Any | None = None,
