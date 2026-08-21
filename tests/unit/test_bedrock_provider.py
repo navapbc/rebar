@@ -917,3 +917,95 @@ def test_retry_attempts_below_one_clamp_to_a_single_attempt(monkeypatch) -> None
     build_bedrock_provider(cfg)
 
     assert session_seen["client_kwargs"]["config"].retries["max_attempts"] == 1
+
+
+# ── adb6: the repo-config rung — [llm] bedrock_region_name reaches region resolution ────────
+# The fresh-shell failure (bug adb6-4762-90f6-4e30): rebar.toml pins region-scoped `us.*`
+# inference profiles but not the region they are served from, so a shell exporting only
+# AWS_PROFILE (whose profile carries no region) fails every gated LLM op with the a574
+# LLMConfigError. The fix pins `bedrock_region_name` in the project [llm] table; these pin
+# (a) the table rung actually resolving, and (b) env keeping precedence over it.
+
+
+def _region_pinned_project(tmp_path):
+    """A repo root whose discovered rebar.toml pins the Bedrock region beside the model."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / ".git").mkdir()
+    (proj / "rebar.toml").write_text(
+        '[llm]\nmodel = "bedrock:us.anthropic.claude-sonnet-4-6"\n'
+        'bedrock_region_name = "us-east-1"\n',
+        encoding="utf-8",
+    )
+    return proj
+
+
+def _only_aws_profile_env(monkeypatch) -> None:
+    """The reproduction shell shape: AWS_PROFILE set, NO region source anywhere in env."""
+    for var in ("REBAR_LLM_BEDROCK_REGION", "AWS_DEFAULT_REGION", "AWS_REGION"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.delenv("REBAR_LLM_CONFIG_FILE", raising=False)
+    monkeypatch.setenv("AWS_PROFILE", "frontier")  # a profile carrying no region key
+
+
+def test_table_region_alone_builds_the_provider_in_a_profile_only_shell(
+    monkeypatch, tmp_path
+) -> None:
+    """adb6 AC2 shape. Only AWS_PROFILE-like env — no REBAR_LLM_BEDROCK_REGION,
+    AWS_DEFAULT_REGION, or AWS_REGION — and the rebar.toml table value must resolve the
+    region and reach the boto3 session explicitly, so gated ops stop failing closed."""
+    from rebar import config as _root_config
+    from rebar.llm.bedrock_model import build_bedrock_provider
+    from rebar.llm.config import LLMConfig
+
+    provider_seen = _stub_bedrock_provider(monkeypatch)
+    _only_aws_profile_env(monkeypatch)
+    session_seen = _spy_boto_session(monkeypatch)
+    _root_config.reset_config_cache()
+    try:
+        cfg = LLMConfig.from_env(repo_root=_region_pinned_project(tmp_path))
+    finally:
+        _root_config.reset_config_cache()
+
+    assert cfg.bedrock_region_name == "us-east-1"
+    build_bedrock_provider(cfg)
+    assert session_seen["session_kwargs"].get("region_name") == "us-east-1"
+    assert provider_seen.get("bedrock_client") is session_seen["sentinel"]
+
+
+def test_env_region_keeps_precedence_over_the_table_value(monkeypatch, tmp_path) -> None:
+    """adb6 AC3. REBAR_LLM_BEDROCK_REGION still overrides the rebar.toml pin, so an
+    operator pinning a different region regresses nothing."""
+    from rebar import config as _root_config
+    from rebar.llm.config import LLMConfig
+
+    _only_aws_profile_env(monkeypatch)
+    monkeypatch.setenv("REBAR_LLM_BEDROCK_REGION", "eu-central-1")
+    _root_config.reset_config_cache()
+    try:
+        cfg = LLMConfig.from_env(repo_root=_region_pinned_project(tmp_path))
+    finally:
+        _root_config.reset_config_cache()
+
+    assert cfg.bedrock_region_name == "eu-central-1"
+
+
+def test_this_checkout_pins_the_region_beside_its_region_scoped_model_pins() -> None:
+    """adb6 AC1 (the fix itself, held as a guard). This repo's rebar.toml pins region-scoped
+    `us.*` Bedrock inference profiles; the region they are measured in (us-east-1, account
+    896586841071 — .github/llm-providers/bedrock.toml, external-integration.yml defaults)
+    must be pinned beside them, or fresh shells rediscover the region via ambient env and
+    fail closed (operator ruling on adb6-4762-90f6-4e30: use the project's measured region)."""
+    from pathlib import Path
+
+    import tomllib
+
+    root = Path(__file__).resolve().parents[2]
+    table = tomllib.loads((root / "rebar.toml").read_text(encoding="utf-8"))["llm"]
+    assert str(table.get("model", "")).startswith("bedrock:us."), (
+        "precondition drifted: rebar.toml no longer pins a region-scoped bedrock model"
+    )
+    assert table.get("bedrock_region_name") == "us-east-1", (
+        "rebar.toml pins region-scoped us.* inference profiles but not the region they are "
+        "served from — fresh AWS_PROFILE-only shells fail closed on every gated LLM op"
+    )
