@@ -62,7 +62,10 @@ PRODUCTION lane (correctness / latent regression):
 - silent_wrong_feeding_a_decision (serious) — a silently-wrong value flows into a real decision.
 - capability_degraded (moderate) — a user-facing capability is degraded or partially broken.
 MAINTAINABILITY lane (debt / contract / coupling):
-- unversioned_published_contract_break (serious) — a PUBLISHED contract breaks with no version bump.
+- unversioned_published_contract_break (serious) — a PUBLISHED contract breaks with NO
+  version/deprecation signal: no major version bump, no deprecation cycle, and no CHANGELOG
+  breaking-change entry. A managed removal (any such signal present) => FALSE — client usage is
+  only unobservable when the break ships unannounced.
 - safety_net_removal_without_replacement (serious) — a test/guard/assert is removed with no replacement.
 - forbids_contract_allowed_state (serious) — a test/assertion forbids a state that the SAME diff's contract declares allowed (a contract-contradicting assertion). Evidence must quote BOTH halves verbatim — the contract clause allowing the state AND the test forbidding it; a stated intent to tighten => FALSE.
 - contract_drift (moderate) — an interface drifts from its documented/implied contract.
@@ -70,6 +73,16 @@ MAINTAINABILITY lane (debt / contract / coupling):
 - reachable_path_without_automated_coverage (moderate) — the change introduces or unmasks a reachable code path with NO automated test coverage.
 - implicit_coupling (minor) — the change adds implicit cross-module coupling.
 - dead_code (minor) — the change introduces dead/unreachable code.
+REMOVED-PUBLIC-SYMBOL SUB-QUESTION — for any finding about a symbol this diff REMOVES
+(deletion-impact / api-compat shapes), additionally answer:
+- removed_public_symbol (bool) — TRUE if the removed symbol's name was reachable from the
+  public API: listed in `__all__` or re-exported, exposed as a CLI command, or exposed as an
+  MCP tool. Key this on the EXPORT, never on a cited caller — the absence of an internal
+  caller does not prove an external API unused.
+- version_signal_present (bool) — TRUE if the removal carries a version or deprecation signal
+  (a major version bump, a deprecation cycle, or a CHANGELOG breaking-change entry) — a
+  MANAGED removal. An unmanaged removal of a public export (removed_public_symbol TRUE,
+  version_signal_present FALSE) scores at the serious tier deterministically.
 TRIGGER LIKELIHOOD + DETECTION (drive the production-lane multiplier and the detection amplifier):
 - trigger_likelihood (common|sometimes|rare) — how often the PRODUCTION consequence actually
   triggers in practice. Leave "common" when unsure (the multiplier is common=1.0/sometimes=0.6/

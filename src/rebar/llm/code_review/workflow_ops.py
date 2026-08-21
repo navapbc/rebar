@@ -280,8 +280,9 @@ def code_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
 # the file is) and `hard_to_reverse_surface` (a one-way-door file). We compute them here — from
 # each finding's `location` path + the diff — and inject them into the VERIFICATION dict's
 # `severity_attributes` (the exact dict pass3_decide passes to impact_code; NOT the finding
-# dict). Best-effort: any failure leaves the signal at its safe default (churn 0 ⇒ freq_mult 0.5;
-# surface False ⇒ no reversibility floor).
+# dict). Best-effort: any failure leaves the signal at its safe default (churn 0 ⇒ the debt-lane
+# churn amplifier stays 1.0 — amplify-only, it never discounts; surface False ⇒ no reversibility
+# floor).
 _PACKAGING_BASENAMES = {"pyproject.toml", "setup.py", "setup.cfg"}
 _SERIALIZATION_EXTS = {".proto", ".sql"}
 

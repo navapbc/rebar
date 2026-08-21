@@ -102,6 +102,62 @@ dataset:
       +    with pytest.raises(ValueError):
       +        claim("t1", "")
 
+  # ── removed-public-symbol sub-question (ticket 5452-3077-b34a-4157) ──────────
+  - id: V-unmanaged-public-removal
+    corpus: dso
+    expect: finding
+    mode: verify-unmanaged-public-removal
+    note: >-
+      An UNMANAGED removal of a publicly exported symbol — in __all__, no deprecation cycle,
+      no major bump, no CHANGELOG breaking-change entry. The verifier should answer the
+      removed-public-symbol sub-question keyed on the EXPORT (removed_public_symbol TRUE,
+      version_signal_present FALSE) even though no internal caller remains.
+    diff: |
+      --- a/rebar/llm/__init__.py
+      +++ b/rebar/llm/__init__.py
+      @@ -1,6 +1,4 @@
+      -__all__ = ["review_ticket", "run_gate"]
+      +__all__ = ["run_gate"]
+
+      -def review_ticket(tid):
+      -    """Public API: run the single-pass review for a ticket."""
+      -    return _review(tid)
+       def run_gate(tid):
+           return _gate(tid)
+  - id: V-managed-public-removal-no-fire
+    corpus: dso
+    expect: pass
+    mode: verify-managed-public-removal
+    note: >-
+      A MANAGED removal — the same public export removed WITH a version/deprecation signal
+      (CHANGELOG breaking-change entry + major version bump in the same diff).
+      version_signal_present must be TRUE, so neither unversioned_published_contract_break nor
+      the removed-public-symbol boost trips; the verifier still emits a graded set.
+    diff: |
+      --- a/CHANGELOG.md
+      +++ b/CHANGELOG.md
+      @@ -1,2 +1,5 @@
+      +## 2.0.0 — BREAKING CHANGES
+      +- `review_ticket` removed after its 1.x deprecation cycle; use `run_gate`.
+      +
+       ## 1.9.0
+      --- a/pyproject.toml
+      +++ b/pyproject.toml
+      @@ -3 +3 @@
+      -version = "1.9.0"
+      +version = "2.0.0"
+      --- a/rebar/llm/__init__.py
+      +++ b/rebar/llm/__init__.py
+      @@ -1,6 +1,4 @@
+      -__all__ = ["review_ticket", "run_gate"]
+      +__all__ = ["run_gate"]
+
+      -def review_ticket(tid):
+      -    """DEPRECATED since 1.7: use run_gate (removal scheduled for 2.0)."""
+      -    return _review(tid)
+       def run_gate(tid):
+           return _gate(tid)
+
 gold_set:
   - input: "A verification set that flags the unupdated call site of a required-arg change."
     label: useful
@@ -110,4 +166,8 @@ gold_set:
   - input: "A verification emitting forbids_contract_allowed_state for a test forbidding an allowed state."
     label: useful
   - input: "A verification finding a stated deliberate tightening does not contradict the contract."
+    label: useful
+  - input: "A verification keying removed_public_symbol on the export for an unmanaged public removal."
+    label: useful
+  - input: "A verification recognizing a managed removal (version signal present) as a no-fire."
     label: useful
