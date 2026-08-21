@@ -548,7 +548,10 @@ def resolve_jira_detection() -> tuple[str, str, str, bool]:
         url, user, project = jira.url, jira.user, jira.project
     except ConfigError:
         pass
-    token_present = bool(read_secret_env("JIRA_API_TOKEN"))
+    # bool() keeps this a PRESENCE check: the secret value is discarded here and never
+    # leaves this boundary (see the docstring above). The marker must sit on the READING
+    # line itself — the ownership gate looks only at that one line.
+    token_present = bool(read_secret_env("JIRA_API_TOKEN"))  # read-via: credential-presence
     return url, user, project, token_present
 
 

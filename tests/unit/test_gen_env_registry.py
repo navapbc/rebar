@@ -149,3 +149,71 @@ def test_dunder_getitem_call_registers_its_key(tmp_path: Path):
     # whole-mapping access would reopen the exact silent-skip hole this bug is about.
     reads, _dynamic = _scan_source(tmp_path, 'X = os.environ.__getitem__("REBAR_FAKE_DUNDER")\n')
     assert "REBAR_FAKE_DUNDER" in reads
+
+
+# --- bug ff2e: KNOWN_ENV_HELPERS was fail-OPEN --------------------------------------
+# The os.environ half fails closed (above), but helper recognition did not. A function
+# whose os.environ key comes from its own PARAMETER is an env-read helper by construction:
+# the literal key lives at its CALL SITES, one level up, and is only resolved when the
+# callee name is in KNOWN_ENV_HELPERS. A helper absent from that table was walked past
+# silently -- its internal read landed in the "dynamic" list, indistinguishable from a
+# registered helper's, so the artifact could not show that keys had been lost. MEASURED:
+# `_gate_str_pref` cost REBAR_GATE_REF and REBAR_GATE_SOURCE (scan 120 -> 122 on adding
+# the row, --check exit 0 throughout).
+
+
+def test_unregistered_parameterised_env_helper_aborts_the_scan(tmp_path: Path):
+    # THE oracle for this bug. The helper shape is chosen to escape BOTH pre-existing
+    # guards: it is not an `_llm_*`/`env_name` resolver in llm/config.py (the b00f guard in
+    # test_env_registry_helper_coverage.py), and `lookup_setting` does not match
+    # check_config_ownership.py's `_SHIM_RE` (^_.*(env|pref|getenv)). Against today's tree
+    # the scan returns silently and REBAR_FAKE_UNREGISTERED is simply absent.
+    source = (
+        "def lookup_setting(env_name, default=None):\n"
+        "    return os.environ.get(env_name, default)\n"
+        "\n"
+        "VALUE = lookup_setting('REBAR_FAKE_UNREGISTERED')\n"
+    )
+    with pytest.raises(RuntimeError) as excinfo:
+        _scan_source(tmp_path, source)
+    message = str(excinfo.value)
+    assert "lookup_setting" in message, "the error must name the unregistered helper"
+    assert "mod.py" in message, "the error must name the module"
+    assert ":2" in message, "the error must name the definition line"
+
+
+def test_inline_literal_reader_is_not_mistaken_for_a_helper(tmp_path: Path):
+    # THE false-positive control, and the reason the trigger is the PARAMETER dataflow
+    # rather than "a function body containing an env read" (which would fire on ~97
+    # functions in the real tree). This function reads a fixed literal inline, so the
+    # scanner already captures its key at the read site -- nothing is lost, nothing to fail.
+    reads, _dynamic = _scan_source(
+        tmp_path,
+        "def read_port():\n    return os.environ.get('REBAR_FAKE_INLINE', '0')\n",
+    )
+    assert "REBAR_FAKE_INLINE" in reads, "an inline literal read is registered as usual"
+
+
+def test_registered_helper_does_not_abort_the_scan(tmp_path: Path):
+    # The other half of fail-closed: once a helper IS in the table its keys are resolved at
+    # the call sites, so the parameterised read inside it is expected, not an offence.
+    helper = "_llm_float"
+    assert helper in gen.KNOWN_ENV_HELPERS, "re-target this control"
+    reads, _dynamic = _scan_source(
+        tmp_path,
+        f"def {helper}(table, cli, env_name, file_key=None, default=None):\n"
+        "    return os.environ.get(env_name, default)\n"
+        "\n"
+        f"VALUE = {helper}(None, None, 'REBAR_FAKE_REGISTERED')\n",
+    )
+    assert "REBAR_FAKE_REGISTERED" in reads, "a registered helper resolves its call-site key"
+
+
+def test_real_tree_scans_clean_and_documents_the_gate_vars():
+    # The measured instance. `_gate_str_pref` in src/rebar/_config_resolvers.py reads
+    # os.environ.get(env_name); its two literals were invisible. The seam comment directly
+    # above it (_config_resolvers.py:288-289) asserts these literals "stay visible to
+    # gen_env_registry here" -- this is that claim, enforced.
+    reads, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
+    missing = [v for v in ("REBAR_GATE_REF", "REBAR_GATE_SOURCE") if v not in reads]
+    assert missing == [], f"read under src/rebar but invisible to the generator: {missing}"

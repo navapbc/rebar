@@ -123,3 +123,31 @@ def test_a_non_env_llm_helper_is_not_registered() -> None:
     assert drain, "_llm_drain_mode has moved or been renamed — re-target this control"
     assert "env_name" not in [a.arg for a in drain[0].args.args]
     assert "_llm_drain_mode" not in gen.KNOWN_ENV_HELPERS
+
+
+def test_dropping_a_used_helpers_row_fails_loudly_instead_of_shrinking(tmp_path) -> None:
+    """THE b00f REPLAY (bug ff2e). The guard above pins that today's `_llm_*` resolvers ARE
+    registered, but it is a static table check: it cannot show what the GENERATOR does when a
+    row for a live helper goes missing. That is the behaviour b00f actually cost us, and until
+    ff2e it was silence -- the scan walked past every call and the registry simply shrank while
+    `--check` stayed green.
+
+    Re-enacts it at runtime on the real tree: drop `_llm_float`'s row and scan. The registry
+    must not quietly lose its four variables; the generator must refuse to emit a registry it
+    knows to be incomplete, naming the helper.
+    """
+    gen = _gen_env_registry()
+    baseline, _dynamic = gen.scan(gen.DEFAULT_SCAN_ROOT)
+    assert all(v in baseline for v in _FLOAT_VARS), "precondition: the row resolves them today"
+
+    del gen.KNOWN_ENV_HELPERS["_llm_float"]
+    try:
+        reads, _dyn = gen.scan(gen.DEFAULT_SCAN_ROOT)
+    except RuntimeError as exc:
+        assert "_llm_float" in str(exc), "the refusal must name the helper whose row is missing"
+        return
+    lost = sorted(set(baseline) - set(reads))
+    raise AssertionError(
+        f"the scan returned silently after losing {len(lost)} variable(s): {lost} -- "
+        "a missing row for a live helper must fail loudly, not shrink the registry"
+    )

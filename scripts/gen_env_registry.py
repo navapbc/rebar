@@ -20,7 +20,16 @@ stayed green, because the generator and the committed doc were blind in the same
      ``.items()``, ``.keys()``, ``.values()``, … name no single variable, so they are
      ALLOWED and register nothing.
   3. Project env-read helpers (``KNOWN_ENV_HELPERS``): the string-literal env-name
-     argument is resolved at each call site (one level through the shim).
+     argument is resolved at each call site (one level through the shim). This half is
+     now FAIL-CLOSED too: a function whose own body reads the environment under a key
+     DERIVED FROM ONE OF ITS OWN PARAMETERS is an env-read helper — its effective variable
+     names live at its CALL SITES — so if its name is missing from ``KNOWN_ENV_HELPERS``
+     the scan raises ``UnregisteredEnvReadHelper`` instead of walking silently past every
+     call site (bug: ``_gate_str_pref`` was unregistered, so ``REBAR_GATE_REF`` and
+     ``REBAR_GATE_SOURCE`` were absent from the registry while ``--check`` stayed green —
+     its own internal ``os.environ.get(env_name)`` landed in the ``dynamic`` list, which is
+     indistinguishable from a REGISTERED helper's internal read). Remediate by adding a row
+     to ``KNOWN_ENV_HELPERS`` giving the position of the helper's env-name argument.
 
 Deliberately NOT recognised (and why):
   * reads under ``tests/`` — outside the scan root by design; the registry documents the
@@ -33,6 +42,11 @@ Deliberately NOT recognised (and why):
   * ``getattr(os.environ, "get")(…)`` and similar string-indirection — not statically
     resolvable at all; a fail-closed AST scan cannot see it, so it is out of scope rather
     than pretended-covered.
+  * a key derived from a runtime source that is NOT a parameter — ``os.environ.get(m.group(1))``
+    for a regex match ``m``, a name computed from file contents, and so on. This is the
+    boundary the helper rule deliberately does NOT cross: no table row could ever name such a
+    variable, because no call site carries it, so the read stays genuinely dynamic and is
+    REPORTED in the ``dynamic`` list rather than demanded to be registered.
 
 Alias/deprecation status is read from ``rebar._deprecations.REGISTRY`` (``kind == "env"``).
 
@@ -60,6 +74,21 @@ class UnrecognisedEnvironAccess(RuntimeError):
     would then be silently missing from the registry while ``--check`` stayed green), so the
     generator refuses to emit a registry it knows to be incomplete. Fix by classifying the
     attribute into ``KEY_BEARING_ENVIRON_ATTRS`` or ``BULK_ENVIRON_ATTRS`` below.
+    """
+
+
+class UnregisteredEnvReadHelper(RuntimeError):
+    """Raised when a function reads the environment under a key derived from its OWN parameter
+    but is missing from ``KNOWN_ENV_HELPERS``.
+
+    Fail-closed by design, and kept DISTINCT from ``UnrecognisedEnvironAccess`` so the two
+    seams stay separately diagnosable. Such a function's effective variable names exist only
+    at its CALL SITES, so an unregistered helper is not an error the old scan could see — it
+    was INVISIBLE: every call site was walked past and the helper's own internal read landed
+    in the ``dynamic`` list, looking exactly like a registered helper's, so the drift gate
+    stayed green over a registry it knew nothing was missing from (measured: ``_gate_str_pref``
+    cost ``REBAR_GATE_REF`` and ``REBAR_GATE_SOURCE``). Fix by adding a row to
+    ``KNOWN_ENV_HELPERS`` giving the 0-indexed position of the env-name argument.
     """
 
 
@@ -118,6 +147,12 @@ KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
     "_int_env": (0, ""),  # review_bot/config.py
     "_severities_env": (0, ""),  # review_bot/config.py
     "_str_env": (0, ""),  # opcert_service/config.py: os.environ.get(name)
+    # Found by the fail-closed helper rule below rather than by hand. ``_gate_str_pref`` is the
+    # MEASURED loss that motivated it: its two call-site literals REBAR_GATE_REF and
+    # REBAR_GATE_SOURCE were absent from the committed registry while `--check` stayed green.
+    "_gate_str_pref": (0, ""),  # _config_resolvers.py: (env_name, file_key, default, root=None)
+    "read_secret_env": (0, ""),  # config.py: (env_name)
+    "_env_truthy": (0, ""),  # llm/config.py: (name)
 }
 
 
@@ -204,18 +239,145 @@ def _scan_module(tree: ast.Module, rel: str, reads: Reads, dynamic: Dynamic) -> 
     return offenders
 
 
+# --------------------------------------------------------------------------- #
+# The fail-closed HELPER seam. Mirrors the ``os.environ``-attribute seam above: there, an
+# accessor the scan cannot classify aborts the run; here, a function that reads the
+# environment under a key supplied by its CALLERS must be registered or the run aborts.
+# --------------------------------------------------------------------------- #
+
+FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
+# (helper name, module path relative to the repo root, line of its ``def``).
+HelperSites = list[tuple[str, str, int]]
+
+
+def _param_names(fn: FuncDef) -> set[str]:
+    """Every name bound as a parameter of ``fn`` — positional-only, positional-or-keyword,
+    keyword-only, plus ``*args``/``**kwargs``. A key expression touching ANY of these is
+    caller-supplied, which is exactly what makes the function a helper."""
+    a = fn.args
+    names = {arg.arg for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
+    names.update(extra.arg for extra in (a.vararg, a.kwarg) if extra is not None)
+    return names
+
+
+def _own_body_nodes(fn: FuncDef) -> list[ast.AST]:
+    """Nodes in ``fn``'s OWN body, NOT descending into a nested ``def``/``lambda``. A nested
+    function is judged separately against its own parameters (``ast.walk`` over the module
+    reaches it independently), so this both attributes each read to the right function and
+    keeps a single site from being reported twice."""
+    out: list[ast.AST] = []
+    stack: list[ast.AST] = list(fn.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
+            continue
+        out.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _call_key_expr(node: ast.Call) -> ast.expr | None:
+    """The env-name argument of a key-bearing CALL, or ``None`` when the call names no single
+    variable. Same shapes ``_scan_call`` registers, expressed as the raw expression so the
+    caller can ask what it is BUILT FROM rather than only whether it is a literal."""
+    func = node.func
+    if isinstance(func, ast.Attribute) and _is_os_environ(func.value):
+        if func.attr in KEY_BEARING_ENVIRON_ATTRS and node.args:
+            return node.args[0]
+        return None
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "getenv"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    ):
+        return node.args[0] if node.args else None
+    if isinstance(func, ast.Name) and func.id in KNOWN_ENV_HELPERS:
+        pos = KNOWN_ENV_HELPERS[func.id][0]
+        if len(node.args) > pos:
+            return node.args[pos]
+    return None
+
+
+def _key_expr(node: ast.AST) -> ast.expr | None:
+    """The key expression of any key-bearing read shape — the ``os.environ[...]`` subscript
+    included — or ``None`` for everything else."""
+    if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+        return node.slice
+    if isinstance(node, ast.Call):
+        return _call_key_expr(node)
+    return None
+
+
+def _is_env_read_helper(fn: FuncDef) -> bool:
+    """True when a key-bearing read in ``fn``'s own body keys off one of ``fn``'s parameters.
+    An f-string built from a parameter counts (any ``ast.Name`` inside the key expression is
+    enough); an inline string literal does NOT — that key is already captured at the read
+    site — and neither does a key from some other runtime source (a regex match group), which
+    stays genuinely dynamic."""
+    params = _param_names(fn)
+    if not params:
+        return False
+    for node in _own_body_nodes(fn):
+        key = _key_expr(node)
+        if key is None:
+            continue
+        if any(isinstance(sub, ast.Name) and sub.id in params for sub in ast.walk(key)):
+            return True
+    return False
+
+
+def _unregistered_helpers(tree: ast.Module, rel: str) -> HelperSites:
+    """Every env-read helper defined in this module that is missing from ``KNOWN_ENV_HELPERS``.
+    Collected rather than raised on the spot so ``scan`` can report the whole tree at once."""
+    return [
+        (node.name, rel, node.lineno)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name not in KNOWN_ENV_HELPERS
+        and _is_env_read_helper(node)
+    ]
+
+
+def _raise_for_environ(offenders: Dynamic) -> None:
+    if not offenders:
+        return
+    sites = "\n".join(f"  - os.environ.{attr} at {mod}:{lineno}" for mod, lineno, attr in offenders)
+    raise UnrecognisedEnvironAccess(
+        "unrecognised os.environ access(es) — classify each attribute into "
+        "KEY_BEARING_ENVIRON_ATTRS (registers its literal key) or BULK_ENVIRON_ATTRS "
+        f"(names no single variable) in {Path(__file__).name}:\n{sites}"
+    )
+
+
+def _raise_for_helpers(helpers: HelperSites) -> None:
+    if not helpers:
+        return
+    sites = "\n".join(f"  - {name} defined at {mod}:{lineno}" for name, mod, lineno in helpers)
+    raise UnregisteredEnvReadHelper(
+        "unregistered env-read helper(s) — each reads the environment under a key taken from "
+        "its own parameter, so its variable names live at its CALL SITES and are invisible "
+        "until it is registered. Add a row to KNOWN_ENV_HELPERS in "
+        f"{Path(__file__).name} giving the 0-indexed position of the env-name argument "
+        f"(and any name prefix):\n{sites}"
+    )
+
+
 def scan(root: Path) -> tuple[Reads, Dynamic]:
     """Return (reads, dynamic) where ``reads`` maps each resolved env-var name to the set
     of module paths (relative to the repo root) that read it, and ``dynamic`` lists
     (module, lineno, callee) for reads whose name argument is not a string literal.
 
     Raises ``UnrecognisedEnvironAccess`` if any ``os.environ`` attribute access under
-    ``root`` is neither key-bearing nor bulk. The arity of this return value is
+    ``root`` is neither key-bearing nor bulk, and ``UnregisteredEnvReadHelper`` if any
+    function under ``root`` reads the environment under a key derived from its own
+    parameter without a ``KNOWN_ENV_HELPERS`` row. The arity of this return value is
     load-bearing (``scripts/check_config_ownership.py`` unpacks a 2-tuple): the
     fail-closed signal is the exception, never a third element."""
     reads: Reads = {}
     dynamic: Dynamic = []
     offenders: Dynamic = []
+    helpers: HelperSites = []
     for py in sorted(root.rglob("*.py")):
         try:
             rel = py.relative_to(REPO_ROOT).as_posix()
@@ -226,15 +388,9 @@ def scan(root: Path) -> tuple[Reads, Dynamic]:
         except SyntaxError:
             continue
         offenders.extend(_scan_module(tree, rel, reads, dynamic))
-    if offenders:
-        sites = "\n".join(
-            f"  - os.environ.{attr} at {mod}:{lineno}" for mod, lineno, attr in offenders
-        )
-        raise UnrecognisedEnvironAccess(
-            "unrecognised os.environ access(es) — classify each attribute into "
-            "KEY_BEARING_ENVIRON_ATTRS (registers its literal key) or BULK_ENVIRON_ATTRS "
-            f"(names no single variable) in {Path(__file__).name}:\n{sites}"
-        )
+        helpers.extend(_unregistered_helpers(tree, rel))
+    _raise_for_environ(offenders)
+    _raise_for_helpers(helpers)
     return reads, dynamic
 
 
@@ -282,10 +438,12 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     lines.append("")
     lines.append(
         "This lists environment variables read under `src/rebar` via the following "
-        "recognized read patterns. Within `os.environ` the scan is fail-closed — an "
-        "attribute access the generator cannot classify aborts the run instead of "
-        "silently dropping a variable — but reads through other indirections are still "
-        "not captured (extend `KNOWN_ENV_HELPERS` in the generator to cover a new helper):"
+        "recognized read patterns. The scan is fail-closed on both halves: an `os.environ` "
+        "attribute access the generator cannot classify aborts the run instead of silently "
+        "dropping a variable, and so does an unregistered project env-read helper — a "
+        "function that reads the environment under a key taken from its own parameter must "
+        "have a `KNOWN_ENV_HELPERS` row, because its variable names live at its call sites. "
+        "Neither kind of read can therefore go missing here while the drift gate stays green:"
     )
     lines.append("")
     lines.append(
@@ -304,8 +462,9 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     lines.append(
         "- NOT recognized: reads under `tests/` (outside the scan root), non-literal keys "
         "(reported as dynamic below instead of dropped), `os.environ` passed by reference "
-        "into another callable (`dict(os.environ)`, `f(os.environ)`), and "
-        "`getattr(os.environ, …)` indirection."
+        "into another callable (`dict(os.environ)`, `f(os.environ)`), `getattr(os.environ, …)` "
+        "indirection, and keys built from a runtime source other than a parameter (a regex "
+        "match group, say) — no call site carries those names, so they stay dynamic."
     )
     lines.append("")
     lines.append("| Variable | Read in | Alias/deprecation |")
