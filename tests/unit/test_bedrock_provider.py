@@ -781,6 +781,107 @@ def test_empty_string_env_regions_are_treated_as_unset(monkeypatch) -> None:
     assert resolve_bedrock_region("") == (None, None)
 
 
+# ── cda8: truthful region_source — the configured knob's ORIGIN labels the record ───────────
+# The knob arm used to label EVERY configured value "REBAR_LLM_BEDROCK_REGION", so a
+# rebar.toml pin was mislabeled as the env var in signed provenance. The label now rides the
+# SAME resolution pass that produced the value (LLMConfig.from_env -> bedrock_region_source),
+# threaded here as `configured_source` — never re-derived, so record and runtime agree.
+
+
+@contextlib.contextmanager
+def _bedrock_region_via_cli(region: str):
+    """Set the Bedrock region through the CLI rung (`rebar -c llm.bedrock_region_name=…`)."""
+    from rebar import config as _root_config
+
+    previous = _root_config.cli_overrides_for("llm")
+    _root_config.set_cli_overrides(
+        _root_config.parse_cli_overrides([f"llm.bedrock_region_name={region}"])
+    )
+    try:
+        yield
+    finally:
+        _root_config.set_cli_overrides({"llm": previous} if previous else {})
+
+
+def test_configured_source_labels_the_knob_arm_verbatim(monkeypatch) -> None:
+    """cda8 AC1/AC3 at the resolver seam: the threaded origin is returned VERBATIM as the
+    source — a repo-config pin is labeled repo-config, a CLI value cli — while the resolved
+    VALUE is byte-identical to the unlabeled call."""
+    from rebar.llm.bedrock_model import resolve_bedrock_region
+
+    _strip_region_sources(monkeypatch)
+    assert resolve_bedrock_region("us-east-1", configured_source="repo-config") == (
+        "us-east-1",
+        "repo-config",
+    )
+    assert resolve_bedrock_region("us-east-1", configured_source="cli") == ("us-east-1", "cli")
+
+
+def test_sourceless_configured_region_keeps_the_env_var_label(monkeypatch) -> None:
+    """Compatibility: a caller that constructs LLMConfig directly has no origin to thread, so
+    the knob arm keeps its historical `REBAR_LLM_BEDROCK_REGION` label rather than guessing."""
+    from rebar.llm.bedrock_model import resolve_bedrock_region
+
+    _strip_region_sources(monkeypatch)
+    assert resolve_bedrock_region("us-east-1") == ("us-east-1", "REBAR_LLM_BEDROCK_REGION")
+
+
+def test_configured_source_never_leaks_into_env_chain_arms(monkeypatch) -> None:
+    """When the knob is UNSET the threaded origin is meaningless and must not relabel (or
+    reorder) the AWS_DEFAULT_REGION > AWS_REGION > nothing tail of the chain."""
+    from rebar.llm.bedrock_model import resolve_bedrock_region
+
+    _strip_region_sources(monkeypatch)
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-west-1")
+    assert resolve_bedrock_region(None, configured_source="repo-config") == (
+        "eu-west-1",
+        "AWS_DEFAULT_REGION",
+    )
+    monkeypatch.delenv("AWS_DEFAULT_REGION")
+    assert resolve_bedrock_region("", configured_source="repo-config") == (None, None)
+
+
+def test_from_env_precedence_and_label_pairs_for_every_source_combination(monkeypatch) -> None:
+    """cda8 AC4: the precedence+label pair for every source combination, stripped
+    front-to-back. Precedence is UNCHANGED (CLI > REBAR_LLM_BEDROCK_REGION > config file) and
+    the label always names the layer that actually won."""
+    from rebar.llm import config as llm_config
+
+    _strip_region_sources(monkeypatch)
+    monkeypatch.delenv("REBAR_LLM_BEDROCK_REGION", raising=False)
+    monkeypatch.setattr(
+        llm_config,
+        "_read_llm_file_table",
+        lambda repo_root=None: {"bedrock_region_name": "eu-central-1"},
+    )
+
+    monkeypatch.setenv("REBAR_LLM_BEDROCK_REGION", "us-east-1")
+    with _bedrock_region_via_cli("ap-southeast-2"):
+        cfg = llm_config.LLMConfig.from_env(repo_root=".")
+    assert (cfg.bedrock_region_name, cfg.bedrock_region_source) == ("ap-southeast-2", "cli")
+
+    cfg = llm_config.LLMConfig.from_env(repo_root=".")
+    assert (cfg.bedrock_region_name, cfg.bedrock_region_source) == (
+        "us-east-1",
+        "REBAR_LLM_BEDROCK_REGION",
+    )
+
+    monkeypatch.delenv("REBAR_LLM_BEDROCK_REGION")
+    cfg = llm_config.LLMConfig.from_env(repo_root=".")
+    assert (cfg.bedrock_region_name, cfg.bedrock_region_source) == ("eu-central-1", "repo-config")
+
+
+def test_from_env_unconfigured_region_carries_no_source_label(monkeypatch) -> None:
+    """No layer set the knob -> value None AND source None: nothing to label, nothing guessed."""
+    from rebar.llm import config as llm_config
+
+    _strip_region_sources(monkeypatch)
+    monkeypatch.delenv("REBAR_LLM_BEDROCK_REGION", raising=False)
+    monkeypatch.setattr(llm_config, "_read_llm_file_table", lambda repo_root=None: {})
+    cfg = llm_config.LLMConfig.from_env(repo_root=".")
+    assert (cfg.bedrock_region_name, cfg.bedrock_region_source) == (None, None)
+
+
 def test_aws_region_alone_builds_and_reaches_the_session_explicitly(monkeypatch) -> None:
     """8274 AC1 (the symptom itself). Only AWS_REGION is set — the shell shape operators
     actually have — and the build must succeed with THAT region passed explicitly to the

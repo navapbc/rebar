@@ -366,20 +366,31 @@ def _read_llm_file_table(repo_root=None) -> dict:
     return _root_config.layer_llm_config_file(discovered)
 
 
+def _llm_str_source(table: dict, cli: dict, env_name: str | None, file_key: str, default):
+    """Resolve a string setting to ``(value, source)``: CLI > env > file > default (blank →
+    fall through). The ``source`` labels the layer that actually won — ``"cli"``, the env
+    var's own name, ``"repo-config"`` for the config-file table, or ``None`` for the default —
+    from the SAME pass that produced the value, so a provenance label derived from it can
+    never diverge from the resolution (cda8). ``env_name=None`` means the setting has NO env
+    channel (CLI + config file only) — used by ``model``, whose bare ``REBAR_LLM_MODEL`` env
+    was removed and tombstoned."""
+    if file_key in cli and str(cli[file_key]).strip():
+        return str(cli[file_key]).strip(), "cli"
+    raw = os.environ.get(env_name) if env_name is not None else None
+    if raw is not None and raw.strip():
+        return raw.strip(), env_name
+    fv = table.get(file_key)
+    if fv is not None and str(fv).strip():
+        return str(fv).strip(), "repo-config"
+    return default, None
+
+
 def _llm_str(table: dict, cli: dict, env_name: str | None, file_key: str, default):
     """Resolve a string setting: CLI > env > file > default (blank → fall through).
 
-    ``env_name=None`` means the setting has NO env channel (CLI + config file only) —
-    used by ``model``, whose bare ``REBAR_LLM_MODEL`` env was removed and tombstoned."""
-    if file_key in cli and str(cli[file_key]).strip():
-        return str(cli[file_key]).strip()
-    raw = os.environ.get(env_name) if env_name is not None else None
-    if raw is not None and raw.strip():
-        return raw.strip()
-    fv = table.get(file_key)
-    if fv is not None and str(fv).strip():
-        return str(fv).strip()
-    return default
+    Delegates to :func:`_llm_str_source` (the ONE resolution pass) and drops the source —
+    identical value semantics for every existing key."""
+    return _llm_str_source(table, cli, env_name, file_key, default)[0]
 
 
 def _llm_int(table: dict, cli: dict, env_name: str, file_key: str, default: int):
@@ -474,6 +485,12 @@ class LLMConfig:
     # AMBIENT AWS credential chain (instance role / AWS_PROFILE / boto3's own default chain),
     # so unlike `api_key` above there is no Bedrock credential field here at all.
     bedrock_region_name: str | None = None  # None -> boto3's own region resolution
+    # WHICH layer supplied bedrock_region_name — "cli", "REBAR_LLM_BEDROCK_REGION", or
+    # "repo-config"; None when the knob is unset (cda8). Set by `from_env` from the SAME
+    # resolution pass that produced the value (never re-derived), and recorded verbatim as
+    # `region_source` in the verdict's provider provenance when the knob wins the region
+    # chain. Label-only metadata: it never influences which region value is used.
+    bedrock_region_source: str | None = None
     max_tokens: int = DEFAULT_MAX_TOKENS
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     timeout_s: int = DEFAULT_TIMEOUT_S
@@ -582,6 +599,12 @@ class LLMConfig:
         # The agent's rebar ticket tools read the PINNED ticket-store snapshot when a gate
         # set it (None when unset -> the live checkout's store; preserves prior behavior).
         tickets_path = current_tickets_root()
+        # Bedrock region: value + origin from the ONE resolution pass (cda8) — the source
+        # label can never disagree with which layer actually won. Precedence unchanged:
+        # CLI > REBAR_LLM_BEDROCK_REGION > config file > None.
+        bedrock_region_name, bedrock_region_source = _llm_str_source(
+            table, cli, "REBAR_LLM_BEDROCK_REGION", "bedrock_region_name", None
+        )
         return cls(
             runner=runner,
             # No env channel: the bare REBAR_LLM_MODEL was removed (tombstoned above);
@@ -596,9 +619,8 @@ class LLMConfig:
                 "parse_failure_artifact_dir",
                 None,
             ),
-            bedrock_region_name=_llm_str(
-                table, cli, "REBAR_LLM_BEDROCK_REGION", "bedrock_region_name", None
-            ),
+            bedrock_region_name=bedrock_region_name,
+            bedrock_region_source=bedrock_region_source,
             api_key=os.environ.get("REBAR_LLM_API_KEY") or None,
             max_tokens=_llm_int(
                 table, cli, "REBAR_LLM_MAX_TOKENS", "max_tokens", DEFAULT_MAX_TOKENS
