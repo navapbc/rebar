@@ -1,0 +1,76 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "106adb29_ae4d10e5",
+        "filename": "src/rebar/llm/review_kernel/discovery.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 276,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-21T22:34:39Z",
+      "side": 1,
+      "message": "Fixed: DiscoveryStagePlan.__post_init__ now validates topology via _validate_topology(), catching graphlib.CycleError and re-raising a clear ValueError. Covered by test_plan_rejects_a_dependency_cycle (RED-first).",
+      "parentUuid": "476712fd_5376f09b",
+      "revId": "d34c83ee66ef042807ddc1a42568a9ae0ad71e42",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "4957f3f9_dd1040a6",
+        "filename": "src/rebar/llm/review_kernel/discovery.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 395,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-21T22:34:39Z",
+      "side": 1,
+      "message": "Fixed: _validate_topology() rejects duplicate unit_ids with a ValueError naming the dupes, so a malformed plan cannot be constructed. Covered by test_plan_rejects_duplicate_unit_ids (RED-first).",
+      "parentUuid": "bf014ee0_ba4a01c7",
+      "revId": "d34c83ee66ef042807ddc1a42568a9ae0ad71e42",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "3ed8322e_23d5ebe9",
+        "filename": "tests/unit/test_review_discovery_executor.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 287,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-21T22:34:39Z",
+      "side": 1,
+      "message": "Fixed: the corrupt and legacy sub-cases now store under the real sha256 identity digest the loader queries (not key \u0027x\u0027), and the legacy case builds a genuine namespace-0 envelope via json round-trip (the old \"1\"-\u003e\"0\" string replace was a no-op since namespace_version serializes unquoted). Both now exercise the from_json-\u003eNone rejection path.",
+      "parentUuid": "099d5d49_3820917c",
+      "revId": "d34c83ee66ef042807ddc1a42568a9ae0ad71e42",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "473077e0_99a23bb4",
+        "filename": "tests/unit/test_review_discovery_trace.py",
+        "patchSetId": 2
+      },
+      "lineNbr": 120,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-21T22:34:39Z",
+      "side": 1,
+      "message": "Fixed: added test_trace_downgrades_an_unknown_reason_code_to_the_bare_kind, which drives a dependency-skip (compound reason \u0027dependency_unsatisfied:\u003cdep\u003e\u0027) and asserts the trace reason is downgraded to the bare kind; the failure test now asserts the known code is preserved (reason \u003d\u003d \u0027local_operation_exhausted\u0027).",
+      "parentUuid": "d55a8939_6180027d",
+      "revId": "d34c83ee66ef042807ddc1a42568a9ae0ad71e42",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    }
+  ]
+}
