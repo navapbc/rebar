@@ -52,8 +52,13 @@ def test_locked_recheck_detects_change_after_precheck(rebar_repo: Path, monkeypa
         nonlocal checks
         checks += 1
         if checks == 1:
-            return {"ok": True, "verdict": "certified", "reason": "current"}
-        return {"ok": False, "verdict": "stale-material", "reason": "plan changed"}
+            return {"ok": True, "gate_ran": True, "verdict": "certified", "reason": "current"}
+        return {
+            "ok": False,
+            "gate_ran": True,
+            "verdict": "stale-material",
+            "reason": "plan changed",
+        }
 
     monkeypatch.setattr(gates, "close_plan_review_gate_check", changes_between_checks)
     monkeypatch.setattr(transition_close, "_completion_precheck", lambda *a, **k: None)

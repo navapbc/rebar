@@ -50,7 +50,7 @@ def test_close_gate_preserves_validity_failure_vocabulary(
         {"ticket_id": "1111-2222-3333-4444", "ticket_type": "task"},
         repo_root="/repo",
     )
-    assert result == {"ok": False, "verdict": verdict, "reason": reason}
+    assert result == {"ok": False, "gate_ran": True, "verdict": verdict, "reason": reason}
 
 
 def test_close_gate_unexpected_error_fails_closed_without_raising(monkeypatch, caplog) -> None:

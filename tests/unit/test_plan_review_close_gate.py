@@ -39,7 +39,7 @@ def test_close_gate_uses_certified_plan_review_with_close_profile(monkeypatch) -
         ticket_state["ticket_id"], ticket_state, repo_root="/repo"
     )
 
-    assert result == {"ok": True, "verdict": "certified", "reason": "current"}
+    assert result == {"ok": True, "gate_ran": True, "verdict": "certified", "reason": "current"}
     assert calls == [
         ("verify", ticket_state["ticket_id"], "plan-review", "/repo"),
         (

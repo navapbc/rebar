@@ -489,7 +489,14 @@ def close_ticket(
             )
             if not check.get("ok"):
                 _raise_plan_review_close_gate_error(ticket_id, check)
-            if check.get("verdict") != "disabled":
+            # Install the under-lock recheck ONLY when the gate actually ran. The closure
+            # below is invoked by `txn.transition_core` INSIDE the write lock, so it re-reads
+            # the config there; installing it after a SKIP (gate off, or config unreadable)
+            # would add a config read — and, on an unreadable config, a re-parse that can only
+            # fail again — to the critical section for a gate that never applied. Ask the
+            # producer's stamp, never a verdict string: the skip vocabulary grows, and a
+            # string comparison that misses a new skip verdict starts doing exactly that work.
+            if gates.gate_ran(check):
 
                 def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
                     locked_check = gates.close_plan_review_gate_check(
