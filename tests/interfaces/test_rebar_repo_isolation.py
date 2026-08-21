@@ -17,13 +17,13 @@ RED/GREEN check during development, so the protection survives every later edit.
 
 from __future__ import annotations
 
-import json
 import shutil
 import subprocess
 import uuid
 from pathlib import Path
 
 import pytest
+from _git_upkeep import assert_no_detached_upkeep, init_bare_remote
 from _store_template import (
     _IDENTITY_FILES,
     _WORKTREE_POINTERS,
@@ -39,77 +39,6 @@ from rebar import signing
 
 def _rewrite(path: Path, old: str, new: str) -> None:
     path.write_text(path.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
-
-
-# The upkeep posture a fixture bare remote is pinned to BEFORE anything is pushed into it.
-# Keys are git config keys.
-#
-# At git's DEFAULTS a bare repository's ``receive-pack`` runs ``run_auto_maintenance()`` after
-# every push, spawning ``git maintenance run --auto --quiet --detach`` — a background process
-# that OUTLIVES the push. ``subprocess.run([... "push" ...])`` returning is therefore NOT a
-# happens-before edge for that repository's object database, and the copy below reads exactly
-# that database. Measured on this module with ``GIT_TRACE2_EVENT``: at defaults the run spawns
-# 3 detached maintenance children (bug dca1-f641-caeb-4df4).
-#
-# The copy then races a concurrent repack. The CI signature was a vanished
-# ``objects/maintenance.lock``, but that is only the entry the walk happened to reach first: a
-# standalone reproduction shows whole loose-object FANOUT DIRECTORIES (``objects/2c``,
-# ``objects/2d``, ...) being pruned mid-walk as maintenance packs them. Filtering ``*.lock``
-# out of the copy would therefore NOT fix this — the same second limb was measured on bug
-# chewed-illicit-blacklemur, where ignoring ``*.lock`` was likewise shown insufficient.
-#
-# rebar pins the two ``autoDetach`` keys on every store it OWNS (``_commands/init.py``'s
-# gc-config ensure unit; bug 88eb, ADR 0051), which is why this module's maintenance children
-# against rebar-owned trackers already run ``--no-detach``. A bare remote built by a test
-# fixture is owned by no rebar code, so it must be pinned here.
-#
-# ``receive.autogc=false`` is the direct fix — a throwaway fixture remote has no reason to run
-# upkeep at all, and it drops the push's maintenance children to ZERO. The two ``autoDetach``
-# pins are defence in depth for any other trigger: they do not suppress maintenance, they force
-# it into the FOREGROUND, so the git command that triggered it cannot return while it is still
-# running. Either way no mutator survives the push.
-#
-# This REMOVES the concurrent mutator rather than tolerating it: no retry, no sleep, no timing
-# bound, no ignore predicate, and no assertion weakened. ``tests/integration/
-# test_concurrency_regression.py`` pins the same three keys on its own fixture remote for the
-# same reason (bug 5b74-5d8f-a6b4-4674).
-_BARE_REMOTE_UPKEEP_PINS = {
-    "gc.autoDetach": "false",
-    "maintenance.autoDetach": "false",
-    "receive.autogc": "false",
-}
-
-
-def _init_bare_remote(path: Path) -> Path:
-    """Create a bare remote at *path* that leaves no background upkeep behind a push."""
-    subprocess.run(
-        ["git", "init", "-q", "--bare", str(path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    for key, value in _BARE_REMOTE_UPKEEP_PINS.items():
-        subprocess.run(
-            ["git", "-C", str(path), "config", key, value],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    return path
-
-
-def _maintenance_children(trace: Path) -> list[list[str]]:
-    """Every ``git maintenance run`` child recorded in a ``GIT_TRACE2_EVENT`` log."""
-    children = []
-    for line in trace.read_text(encoding="utf-8").splitlines():
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:  # pragma: no cover - trace2 writes well-formed JSON
-            continue
-        argv = event.get("argv") or []
-        if event.get("event") == "child_start" and argv[:3] == ["git", "maintenance", "run"]:
-            children.append(argv)
-    return children
 
 
 def _tickets_ref(repo: Path) -> str:
@@ -343,13 +272,13 @@ def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
 
     * git defaults                   -> 1 child, ``--detach``     (a background mutator: RED)
     * ``autoDetach`` pins only       -> 1 child, ``--no-detach``  (foreground, push waits)
-    * all of ``_BARE_REMOTE_UPKEEP_PINS`` -> 0 children           (no upkeep at all)
+    * all of ``BARE_REMOTE_UPKEEP_PINS`` -> 0 children            (no upkeep at all)
 
     The assertion is a content fact about an argv list. It has no timing bound, polls nothing,
     and does not care how long maintenance takes — only that none of it is left running.
     """
     trace = tmp_path / "trace2.json"
-    remote = _init_bare_remote(tmp_path / "origin.git")
+    remote = init_bare_remote(tmp_path / "origin.git")
     work = _clone_template(_rebar_repo_template, tmp_path / "work")
     subprocess.run(
         ["git", "-C", str(work), "remote", "add", "origin", str(remote)],
@@ -365,17 +294,7 @@ def test_fixture_bare_remote_leaves_no_detached_upkeep_behind_a_push(
         env=subprocess_env(GIT_TRACE2_EVENT=str(trace)),
     )
 
-    # Positive control: the trace must actually cover the push's process tree, which is where
-    # a detached maintenance child would be recorded. Without this the assertion below would
-    # pass just as happily against an empty or unwritten trace file.
-    assert "receive-pack" in trace.read_text(encoding="utf-8"), (
-        "trace2 did not record the push's receive-pack child, so it cannot witness upkeep"
-    )
-
-    detached = [argv for argv in _maintenance_children(trace) if "--detach" in argv]
-    assert not detached, (
-        f"the push left detached background upkeep running against {remote}: {detached}"
-    )
+    assert_no_detached_upkeep(trace, remote)
 
 
 def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
@@ -386,7 +305,7 @@ def test_copy_repoints_sibling_origin_and_keeps_refs_isolated(
     """A copied store must push only to the matching copied sibling origin."""
     source = tmp_path / "source"
     source.mkdir()
-    source_origin = _init_bare_remote(source / "origin.git")
+    source_origin = init_bare_remote(source / "origin.git")
     source_work = _clone_template(_rebar_repo_template, source / "work")
     subprocess.run(
         ["git", "-C", str(source_work), "remote", "add", "origin", str(source_origin)],

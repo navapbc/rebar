@@ -29,6 +29,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _git_upkeep import BARE_REMOTE_UPKEEP_PINS, init_bare_remote
 from _topology_template import clone_topology_template
 
 from rebar import _engine
@@ -236,42 +237,6 @@ def _extract_created_id(stdout: str) -> str:
     return match.group(0)
 
 
-# The upkeep posture the fixture's bare remote is pinned to. Keys are git config keys.
-#
-# rebar pins the FIRST TWO on every tracker it owns (``_commands/init.py`` gc-config ensure
-# unit): auto-gc stays enabled, but is forced FOREGROUND, because a DETACHED background
-# ``git gc`` / ``git maintenance run --auto`` repacks an object database outside the write
-# lock and corrupts the store (bug 88eb, ADR 0051; ``rebar._store.sync`` module docstring).
-#
-# That pinning reaches the tracker and its enclosing clone. It does NOT reach a bare remote,
-# which no rebar code owns — so the harness's own ``remote.git`` was the one repository here
-# whose ``receive-pack`` ran ``git gc --auto`` at git's defaults, i.e. DETACHED, after every
-# push. Background upkeep then repacked and pruned it concurrently with the next incoming
-# push, which is how a push came back ``unresolved deltas left after unpacking`` /
-# ``refs/heads/tickets does not point to a valid object!`` (bug 5b74-5d8f-a6b4-4674).
-#
-# ``receive.autogc=false`` is the direct fix: a throwaway fixture remote has no reason to run
-# upkeep at all, and a push must never trigger a concurrent rewrite of the object store the
-# NEXT push depends on. The two ``autoDetach`` pins are defence in depth for any other
-# trigger, and keep this remote's posture identical to the one rebar guarantees elsewhere.
-#
-# None of this weakens an oracle: it removes a concurrent mutator, and adds no retry, no
-# swallowed error, and no timing bound. A push that genuinely cannot succeed still fails.
-_REMOTE_UPKEEP_PINS = {
-    "gc.autoDetach": "false",
-    "maintenance.autoDetach": "false",
-    "receive.autogc": "false",
-}
-
-
-def _init_bare_remote(remote: Path, cwd: Path) -> Path:
-    """Create the harness's bare remote with no detached background upkeep."""
-    _git("init", "-q", "--bare", str(remote), cwd=cwd)
-    for key, value in _REMOTE_UPKEEP_PINS.items():
-        _bare_git(remote, "config", key, value)
-    return remote
-
-
 # ─────────────────────────── fixtures ───────────────────────────────────────
 def _build_two_clones(root: Path) -> tuple[Path, Path, Path, str]:
     """A bare remote + two initialized clones (A, B) sharing one tickets branch.
@@ -279,7 +244,7 @@ def _build_two_clones(root: Path) -> tuple[Path, Path, Path, str]:
     A creates a seed ticket and pushes it; B mounts the same tickets branch.
     Returns (remote, repo_a, repo_b, seed_ticket_id).
     """
-    remote = _init_bare_remote(root / "remote.git", root)
+    remote = init_bare_remote(root / "remote.git")
 
     repo_a = _make_repo(remote, root / "a")
     _git("commit", "-q", "--allow-empty", "-m", "init", cwd=repo_a)
@@ -363,7 +328,7 @@ def test_fixture_remote_runs_no_detached_upkeep_and_shares_no_objects(two_clones
     """
     remote, repo_a, repo_b, _seed = two_clones
 
-    for key, expected in _REMOTE_UPKEEP_PINS.items():
+    for key, expected in BARE_REMOTE_UPKEEP_PINS.items():
         got = _bare_git(remote, "config", "--get", key, check=False).stdout.strip()
         assert got == expected, (
             f"the fixture's bare remote must pin {key}={expected} so no DETACHED background "

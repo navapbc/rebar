@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import TypeAlias
 
+from _git_upkeep import unpinned_bare_repositories
+
 _IDENTITY_FILES = ((".env-id", 0o644), (".signing-key", 0o600))
 _PathRewrite: TypeAlias = tuple[bytes, bytes]
 
@@ -206,6 +208,33 @@ def _assert_source_paths_absent(topology: Path, rewrites: list[_PathRewrite]) ->
         )
 
 
+def _assert_bare_repositories_pinned(template: Path) -> None:
+    """Refuse to copy a template holding a bare repository still running upkeep.
+
+    At git's defaults a bare repository's ``receive-pack`` spawns
+    ``git maintenance run --auto --quiet --detach`` after every push — a child that
+    OUTLIVES the push. A fixture that pushes into such a remote and then reaches this
+    function races a concurrent repack: ``shutil.copytree`` below and the two full-tree
+    ``rglob("*")`` passes after it walk an object database another process is rewriting,
+    and entries vanish mid-walk (bug b394-6198-6010-42f7).
+
+    This is the only mechanism in ``tests/`` that copies a whole topology, which makes it
+    the one place the whole class can be closed. Refusing here converts a future
+    fixture's latent, load-dependent flake into a deterministic setup failure naming the
+    repository and the keys it is missing — so the exposed set closes by construction,
+    rather than by an enumeration of today's fixtures that decays on the next one added.
+    """
+    unpinned = unpinned_bare_repositories(template)
+    if unpinned:
+        detail = "; ".join(f"{path} is missing {missing}" for path, missing in unpinned)
+        raise AssertionError(
+            f"template at {template.resolve()} holds a bare repository running "
+            f"unpinned background git upkeep: {detail}. A push into it leaves a detached "
+            "`git maintenance run` rewriting the object database this copy walks. Build "
+            "it with _git_upkeep.init_bare_remote() instead of a raw `git init --bare`."
+        )
+
+
 def clone_topology_template(template: Path, destination: Path) -> Path:
     """Copy and isolate an arbitrary local git/rebar fixture topology.
 
@@ -215,6 +244,7 @@ def clone_topology_template(template: Path, destination: Path) -> Path:
     rebar identity is reminted, and both source and copy are checked through
     git's own worktree registry.
     """
+    _assert_bare_repositories_pinned(template)
     _assert_no_object_alternates(template)
     for repo in _store_repos(template):
         assert_store_self_contained(repo)
