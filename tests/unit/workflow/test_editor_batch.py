@@ -14,9 +14,12 @@ from rebar.llm.workflow import bpmn
 from rebar.llm.workflow import lint as _lint
 from rebar.llm.workflow import migrate as _migrate
 from rebar.llm.workflow import schema as _schema
-from rebar.llm.workflow.editor_contracts import resolve_contracts
+from rebar.llm.workflow.editor_contracts import resolve_contracts, validate_criterion_authoring
 
 pytestmark = pytest.mark.unit
+
+_PLAN = "plan_review"
+_CODE = "code_review"
 
 
 def _doc(criteria: list[dict]) -> dict:
@@ -119,3 +122,86 @@ def test_prompt_step_if_overlay_round_trips():
     back = bpmn.bpmn_to_ir(bpmn.ir_to_bpmn(doc))
     review = next(s for s in back["steps"] if s["id"] == "review")
     assert review["if"] == "${{ steps.t.outputs.security }}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════
+# RP-06 S6 — project-LLM glob authoring validation + built-in/DET/plan-review controls.
+#
+# The editor's criterion-authoring seam enforces RP-06's project-applicability contract: a
+# ``project.*`` code-review LLM criterion MUST declare a non-empty list of non-empty
+# repository-relative ``applies_to`` globs, and an empty/missing/blank/non-list selector is
+# refused with the located ``use ["**"] for a repository-wide criterion`` remedy. Plan-review
+# project criteria, code-review DET criteria, and built-ins are negative controls — they keep
+# their own authoring semantics and are NOT forced through the glob rule.
+# ══════════════════════════════════════════════════════════════════════════════════
+def test_authoring_a_valid_repository_wide_code_review_criterion_succeeds():
+    """A ``project.*`` code-review LLM criterion whose ``applies_to`` is a non-empty list of
+    non-empty globs authors cleanly (no fail-loud refusal)."""
+    routing = {
+        "gate": _CODE,
+        "exec": "1-TURN",
+        "facet": "project-invariants",
+        "applies_to": ["**"],
+        "block_threshold": 0.8,
+        "default_posture": "advisory",
+    }
+    assert validate_criterion_authoring("project.house-style", routing) == []
+
+
+@pytest.mark.parametrize(
+    "bad_globs",
+    [
+        pytest.param(None, id="missing"),
+        pytest.param([], id="empty-list"),
+        pytest.param("**", id="non-list-string"),
+        pytest.param(["", "  "], id="blank-strings"),
+        pytest.param([""], id="single-blank"),
+    ],
+)
+def test_authoring_a_bad_glob_code_review_criterion_is_refused_with_the_remedy(bad_globs):
+    """A project code-review LLM criterion with missing/empty/non-list/blank globs is refused,
+    and the refusal names the criterion AND carries the exact repository-wide remedy."""
+    routing = {"gate": _CODE, "exec": "1-TURN", "default_posture": "advisory"}
+    if bad_globs is not None:
+        routing["applies_to"] = bad_globs
+    errors = validate_criterion_authoring("project.house-style", routing)
+    assert errors, f"expected a fail-loud refusal for applies_to={bad_globs!r}"
+    joined = " ".join(errors)
+    assert "project.house-style" in joined  # LOCATED at the criterion
+    assert 'use ["**"] for a repository-wide criterion' in joined  # the exact remedy
+
+
+def test_plan_review_project_criterion_is_not_subjected_to_the_glob_rule():
+    """Negative control: a plan-review project criterion needs NO ``applies_to`` globs — it
+    authors cleanly with only its ``applies_at`` scope."""
+    routing = {
+        "gate": _PLAN,
+        "exec": "1-TURN",
+        "applies_at": {"scope": ["leaf"]},
+        "default_posture": "advisory",
+    }
+    assert validate_criterion_authoring("project.no-print", routing) == []
+
+
+def test_code_review_det_criterion_is_not_subjected_to_the_glob_rule():
+    """Negative control: a code-review DET (non-LLM) project criterion is exempt from the LLM
+    glob rule — the rule targets exec != DET only."""
+    routing = {
+        "gate": _CODE,
+        "exec": "DET",
+        "detector": {"id_prefix": "project.secret."},
+        "default_posture": "advisory",
+    }
+    assert validate_criterion_authoring("project.secret-shape", routing) == []
+
+
+def test_scoped_globs_that_do_not_match_still_author():
+    """A code-review project LLM criterion with a real scoped glob is VALID at authoring time
+    (applicability against changed files is a runtime concern, not an authoring refusal)."""
+    routing = {
+        "gate": _CODE,
+        "exec": "1-TURN",
+        "applies_to": ["src/**/*.py"],
+        "default_posture": "advisory",
+    }
+    assert validate_criterion_authoring("project.house-style", routing) == []

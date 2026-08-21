@@ -450,3 +450,57 @@ def test_sequential_saves_each_back_up_the_prior_ir(tmp_path):
     # A second save (re-serialize the now-saved IR) backs up `first_saved`.
     assert editor.save_bpmn_to_ir(editor._load_bpmn_for(path), path) == []
     assert bak.read_text(encoding="utf-8") == first_saved
+
+
+@pytest.mark.allow_network  # loopback only
+def test_library_create_refuses_bad_glob_code_review_project_criterion(_repo_server):
+    # RP-06 S6 AC3 (server seam): saving a project.* code-review LLM criterion whose applies_to
+    # globs are missing/empty is refused fail-loud with the located repository-wide remedy, and
+    # NOTHING is written — neither the rubric prompt nor the routing overlay (fail BEFORE write).
+    repo, base, token = _repo_server
+    routing = {
+        "gate": "code_review",
+        "exec": "1-TURN",
+        "applies_to": [],
+        "block_threshold": 0.8,
+        "default_posture": "advisory",
+    }
+    status, body = _post_library_create(
+        base,
+        token,
+        {"id": "project.house-style", "kind": "criterion", "body": "x", "routing": routing},
+    )
+    assert status == 400 and body["ok"] is False, body
+    joined = "; ".join(body["errors"])
+    assert "project.house-style" in joined
+    assert 'use ["**"] for a repository-wide criterion' in joined
+    # fail-loud BEFORE any write: no overlay, no rubric on disk
+    assert not (repo / ".rebar" / "criteria_routing.json").exists()
+    assert not list((repo / ".rebar" / "prompts").glob("*house-style*"))
+
+
+@pytest.mark.allow_network  # loopback only
+def test_library_create_authors_code_review_criterion_under_the_code_review_gate(_repo_server):
+    # RP-06 S6: a VALID project.* code-review LLM criterion authored via the editor lands under
+    # the CODE_REVIEW gate (routing section + activate membership), not silently under plan_review
+    # — the save path honors the routing's declared gate.
+    repo, base, token = _repo_server
+    routing = {
+        "gate": "code_review",
+        "exec": "1-TURN",
+        "applies_to": ["**"],
+        "block_threshold": 0.8,
+        "default_posture": "advisory",
+    }
+    status, body = _post_library_create(
+        base,
+        token,
+        {"id": "project.house-style", "kind": "criterion", "body": "x", "routing": routing},
+    )
+    assert status == 200 and body["ok"] is True, body
+    overlay = json.loads((repo / ".rebar" / "criteria_routing.json").read_text(encoding="utf-8"))
+    assert "project.house-style" in overlay.get("code_review", {}), overlay
+    assert "project.house-style" not in overlay.get("plan_review", {}), overlay
+    assert overlay["activate"]["project.house-style"] == ["code_review"], overlay
+    # the transport-only gate hint is NOT persisted inside the stored routing entry
+    assert "gate" not in overlay["code_review"]["project.house-style"], overlay

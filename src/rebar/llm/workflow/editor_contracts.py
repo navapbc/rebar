@@ -157,3 +157,114 @@ def _contracts_in(step: Any, *, repo_root: Any = None) -> dict[str, dict[str, An
             if isinstance(pid, str) and pid and pid not in out:
                 out[pid] = prompt_contract_view(pid, repo_root=repo_root)
     return out
+
+
+# ─── RP-06 S6: the read-only "Effective Policy" projection (distinct from the authored
+# workflow) + the fail-loud code-review authoring rule. Both are BEST-EFFORT: like the
+# contract views above, the projection never raises to the caller — a compile failure
+# degrades to an ``available: False`` payload carrying the located remedy string.
+
+_CODE_GATE = "code_review"
+_POLICY_GATES: tuple[str, ...] = ("code_review", "plan_review")
+
+
+def _policy_applicability(record: Any) -> str:
+    """A concise applicability SUMMARY for one criterion (never a discovery trace).
+
+    A code-review project LLM criterion is summarized from its ``applies_to`` globs via the
+    SAME shared rule the gate uses: ``["**"]`` ⇒ ``"repository-wide"``, empty/absent ⇒
+    ``"ungated"``, a scoped list ⇒ the joined globs (``"globs: <g>, <g>"``). Everything else
+    (plan-review, DET, built-ins) gets a benign ``"repository-wide"`` summary."""
+    from rebar.llm.criteria.snapshot import select_project_applicability
+
+    if record.gate == _CODE_GATE and record.kind == "project" and record.exec != "DET":
+        globs = [g for g in (record.routing.get("applies_to") or []) if isinstance(g, str) and g]
+        decision = select_project_applicability(globs, [])
+        if decision.reason == "repository-wide":
+            return "repository-wide"
+        if decision.reason == "ungated":
+            return "ungated"
+        return "globs: " + ", ".join(globs)
+    return "repository-wide"
+
+
+def _policy_reason(record: Any, *, enabled: bool) -> str:
+    """A short human derivation label — provenance only, never a body/prompt/trace."""
+    if not enabled:
+        return "disabled by overlay"
+    return "packaged built-in" if record.kind == "builtin" else "project overlay"
+
+
+def _policy_projection(snap: Any, gate: str, cid: str, *, enabled: bool) -> dict[str, Any]:
+    """The NARROW per-criterion projection — EXACTLY the provenance keys the editor shows
+    (id/gate/tier/posture/applicability/enabled/source/reason); no criterion body leaks."""
+    record = snap.record(gate, cid)
+    posture = record.routing.get("default_posture")
+    return {
+        "id": record.id,
+        "gate": record.gate,
+        "tier": record.exec,
+        "posture": str(posture) if posture else "advisory",
+        "applicability": _policy_applicability(record),
+        "enabled": enabled,
+        "source": record.source,
+        "reason": _policy_reason(record, enabled=enabled),
+    }
+
+
+def effective_policy_view(*, repo_root: Any = None) -> dict[str, Any]:
+    """The editor's READ-ONLY "Effective Policy" view — a narrow provenance projection of the
+    S1 :class:`~rebar.llm.criteria.snapshot.CriteriaSnapshot`, kept DISTINCT from the editable
+    authored workflow. On success it carries the snapshot ``digest`` and a per-criterion
+    projection for BOTH gates (active criteria as ``enabled: True`` plus disabled built-ins as
+    ``enabled: False``); no bodies/prompts/traces are exposed (AC7).
+
+    Best-effort: a bad overlay (``CriteriaError`` — e.g. a code-review criterion authored
+    without proper ``applies_to`` globs) degrades to ``available: False`` carrying the located
+    remedy string as ``unavailable_reason``, never a crash."""
+    try:
+        from rebar.llm.criteria import compile_snapshot
+
+        snap = compile_snapshot(repo_root=repo_root)
+        criteria: list[dict[str, Any]] = []
+        for gate in _POLICY_GATES:
+            for cid in snap.criteria(gate):
+                criteria.append(_policy_projection(snap, gate, cid, enabled=True))
+            for cid in snap.disabled_builtins(gate):
+                criteria.append(_policy_projection(snap, gate, cid, enabled=False))
+    except Exception as exc:  # noqa: BLE001 - any compile failure surfaces as unavailable
+        return {
+            "available": False,
+            "digest": None,
+            "unavailable_reason": str(exc),
+            "criteria": [],
+        }
+    return {
+        "available": True,
+        "digest": snap.digest,
+        "unavailable_reason": None,
+        "criteria": criteria,
+    }
+
+
+def validate_criterion_authoring(criterion_id: str, routing: dict[str, Any]) -> list[str]:
+    """Fail-loud authoring check for a NEW criterion (RP-06's project-applicability contract),
+    returning a list of human-readable errors (``[]`` == valid). A ``project.``-prefixed
+    ``code_review`` LLM criterion (``exec`` != ``DET``) MUST declare ``applies_to`` as a
+    non-empty list of non-empty globs; the shared S1 validator raises the located
+    ``use ["**"] for a repository-wide criterion`` remedy, which is surfaced verbatim. Plan-
+    review criteria, code-review DET criteria, and non-``project.`` ids are NOT subject to the
+    rule (negative controls) and return ``[]``."""
+    if not (isinstance(criterion_id, str) and criterion_id.startswith("project.")):
+        return []
+    if routing.get("gate") != _CODE_GATE:
+        return []
+    if str(routing.get("exec", "1-TURN")).upper() == "DET":
+        return []
+    try:
+        from rebar.llm.criteria.snapshot import _validate_code_review_applies_to
+
+        _validate_code_review_applies_to(criterion_id, routing, "criterion authoring")
+    except Exception as exc:  # noqa: BLE001 - the located remedy becomes a user-facing error
+        return [str(exc)]
+    return []

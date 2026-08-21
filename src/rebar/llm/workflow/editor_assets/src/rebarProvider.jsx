@@ -701,7 +701,9 @@ const authoring = {
   // the .rebar/criteria_routing.json overlay + activation (author_criterion_overlay). Defaults
   // mirror the packaged routing floor so a minimal form still produces a valid entry.
   routingExec: "1-TURN", // 1-TURN | 2-STEP | AGENT | DET
-  routingScope: "container,leaf", // applies_at.scope (comma-separated)
+  routingGate: "plan_review", // which review the criterion belongs to: plan_review | code_review
+  routingScope: "container,leaf", // applies_at.scope (comma-separated) — plan_review only
+  routingAppliesTo: "", // applies_to globs (comma-separated) — code_review only
   routingBlockThreshold: "0.95", // block_threshold, number in [0,1]
   routingPosture: "advisory", // default_posture: advisory | blocking
   routingFailMode: "open", // DET only: open | closed
@@ -736,7 +738,9 @@ function resetAuthoring() {
   authoring.id = "";
   authoring.body = "";
   authoring.routingExec = "1-TURN";
+  authoring.routingGate = "plan_review";
   authoring.routingScope = "container,leaf";
+  authoring.routingAppliesTo = "";
   authoring.routingBlockThreshold = "0.95";
   authoring.routingPosture = "advisory";
   authoring.routingFailMode = "open";
@@ -1162,17 +1166,28 @@ function isCriterionAuthoring(a) {
 // return null for that reference flow; the genuine overlay-activation flow keeps its routing.
 function buildRouting(a) {
   if (a.kind !== "criterion" || a.targetKind === "criterion") return null;
-  const scope = (a.routingScope || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const gate = a.routingGate || "plan_review";
   const n = parseFloat(a.routingBlockThreshold);
   const routing = {
+    gate,
     exec: a.routingExec || "1-TURN",
-    applies_at: scope.length ? { scope } : {},
     block_threshold: Number.isFinite(n) ? n : 0.95,
     default_posture: a.routingPosture || "advisory",
   };
+  if (gate === "code_review") {
+    // A code-review project LLM criterion targets changed files via applies_to globs; an
+    // empty list is left in place so the backend refuses it fail-loud (RP-06 S6 AC3).
+    routing.applies_to = (a.routingAppliesTo || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  } else {
+    const scope = (a.routingScope || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    routing.applies_at = scope.length ? { scope } : {};
+  }
   if ((a.routingExec || "") === "DET") {
     routing.fail_mode = a.routingFailMode || "open";
     const det = (a.routingDetector || "").trim();
@@ -1209,7 +1224,9 @@ function AuthoringRoutingScopeEntry(props) {
   const { element, id } = props;
   const a = useAuthoring();
   const debounce = useService("debounceInput");
-  if (!isCriterionAuthoring(a)) return null;
+  // applies_at.scope is a PLAN-REVIEW concept; hide it when authoring a code-review criterion
+  // (which targets changed files via applies_to globs instead).
+  if (!isCriterionAuthoring(a) || a.routingGate === "code_review") return null;
   return (
     <TextFieldEntry
       id={id}
@@ -1218,6 +1235,49 @@ function AuthoringRoutingScopeEntry(props) {
       getValue={() => a.routingScope}
       setValue={(v) => {
         a.routingScope = v || "";
+      }}
+      debounce={debounce}
+    />
+  );
+}
+
+function AuthoringRoutingGateEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  if (!isCriterionAuthoring(a)) return null;
+  return (
+    <SelectEntry
+      id={id}
+      element={element}
+      label="gate (which review this criterion runs in)"
+      getValue={() => a.routingGate}
+      setValue={(v) => {
+        a.routingGate = v || "plan_review";
+        notifyAuthoring();
+      }}
+      getOptions={() => [
+        { value: "plan_review", label: "plan_review (ticket plans)" },
+        { value: "code_review", label: "code_review (changed files)" },
+      ]}
+    />
+  );
+}
+
+function AuthoringRoutingAppliesToEntry(props) {
+  const { element, id } = props;
+  const a = useAuthoring();
+  const debounce = useService("debounceInput");
+  // applies_to globs are REQUIRED for a code-review project LLM criterion; use ["**"] for a
+  // repository-wide one. Only shown (and only sent) for the code_review gate.
+  if (!isCriterionAuthoring(a) || a.routingGate !== "code_review") return null;
+  return (
+    <TextFieldEntry
+      id={id}
+      element={element}
+      label='applies_to globs (comma-separated; use ** for repository-wide)'
+      getValue={() => a.routingAppliesTo}
+      setValue={(v) => {
+        a.routingAppliesTo = v || "";
       }}
       debounce={debounce}
     />
@@ -1556,8 +1616,18 @@ function authoringGroup(element) {
         isEdited: isSelectEntryEdited,
       },
       {
+        id: "rebar-author-routing-gate",
+        component: AuthoringRoutingGateEntry,
+        isEdited: isSelectEntryEdited,
+      },
+      {
         id: "rebar-author-routing-scope",
         component: AuthoringRoutingScopeEntry,
+        isEdited: isTextFieldEntryEdited,
+      },
+      {
+        id: "rebar-author-routing-applies-to",
+        component: AuthoringRoutingAppliesToEntry,
         isEdited: isTextFieldEntryEdited,
       },
       {
@@ -1748,6 +1818,96 @@ function structuredEntries(element, kind) {
   return entries;
 }
 
+// ─── RP-06 S6: the READ-ONLY "Effective Policy" view — provenance ONLY. It fetches the
+// narrow /effective-policy projection (derived from the compiled S1 CriteriaSnapshot) and
+// renders it as a disabled, non-editable summary. It has NO control that writes/serializes
+// back to the workflow or the criteria overlay, and is kept DISTINCT from the editable
+// "Authored Workflow" (Step behavior / authoring) UI. An `available: false` payload shows an
+// unavailable banner carrying the compiler's located remedy, never a blank or crash.
+function formatEffectivePolicy(state) {
+  if (!state || state.loading) return "Loading effective policy…";
+  if (state.error) return "⚠ effective policy unavailable\n" + state.error;
+  const view = state.view || {};
+  if (view.available === false) {
+    return (
+      "⚠ effective policy unavailable\n" +
+      (view.unavailable_reason || "(no reason reported)")
+    );
+  }
+  const crits = Array.isArray(view.criteria) ? view.criteria : [];
+  const lines = ["digest: " + (view.digest || "(none)"), ""];
+  if (!crits.length) lines.push("(no criteria)");
+  for (const c of crits) {
+    lines.push(
+      `${c.id}  [${c.gate}]`,
+      `  tier=${c.tier}  posture=${c.posture}  enabled=${c.enabled}`,
+      `  applicability: ${c.applicability}`,
+      `  source: ${c.source}`,
+      `  (${c.reason})`,
+      "",
+    );
+  }
+  return lines.join("\n");
+}
+
+function EffectivePolicyEntry(props) {
+  const { element, id } = props;
+  const debounce = useService("debounceInput");
+  const [state, setState] = useState({ loading: true });
+  useEffect(() => {
+    let live = true;
+    fetch("/effective-policy", {
+      headers: { "X-Rebar-Token": window.REBAR_TOKEN },
+    })
+      .then((r) => {
+        // fetch does NOT reject on an HTTP error status, so an auth/other failure returns a
+        // {"errors":[...]} body that must NOT be shown as if it were effective policy — surface
+        // it as an explicit error instead.
+        if (!r.ok) {
+          return r
+            .json()
+            .catch(() => ({}))
+            .then((b) => {
+              throw new Error((b.errors || ["HTTP " + r.status]).join("; "));
+            });
+        }
+        return r.json();
+      })
+      .then((view) => {
+        if (live) setState({ view });
+      })
+      .catch((e) => {
+        if (live) setState({ error: e.message });
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+  return (
+    <TextAreaEntry
+      id={id}
+      element={element}
+      label="Effective Policy (read-only)"
+      rows={14}
+      getValue={() => formatEffectivePolicy(state)}
+      setValue={() => {}}
+      debounce={debounce}
+      disabled
+    />
+  );
+}
+
+// The read-only Effective Policy group — provenance-only, distinct from the authored workflow.
+function effectivePolicyGroup() {
+  return {
+    id: "rebar-effective-policy",
+    label: "Effective Policy (read-only)",
+    entries: [
+      { id: "rebar-effective-policy-view", component: EffectivePolicyEntry },
+    ],
+  };
+}
+
 function rebarGroup(element) {
   const bo = element.businessObject;
   const kind = rebarKind(bo);
@@ -1785,6 +1945,10 @@ class RebarPropertiesProvider {
       const bo = element.businessObject;
       if (bo && REBAR_KINDS.includes(bo.$type)) {
         groups.push(rebarGroup(element));
+        // The READ-ONLY Effective Policy view (RP-06 S6): the compiled review-policy
+        // provenance, kept DISTINCT from the authored-workflow editing groups above and
+        // below. Provenance-only — it never writes back to the workflow or the overlay.
+        groups.push(effectivePolicyGroup());
         const k = rebarKind(bo);
         // A batch step gets two more groups: its editable, add/remove criteria LIST and the
         // model-ladder LIST (story B-UX item 18).
