@@ -558,6 +558,7 @@ def provenance_for(
     caps: ModelCapabilities,
     web: bool = False,
     bedrock_region_name: str | None = None,
+    bedrock_region_source: str | None = None,
 ) -> dict:
     """The ``provider_provenance`` record for a signed gate verdict (story S5/343b).
 
@@ -601,7 +602,10 @@ def provenance_for(
     seam never imports boto3, so that value is unobservable here, and synthesising it would put
     an unverified fact into a signed record — the exact rule ``endpoint_host`` follows above.
     ``bedrock_region_name`` is threaded unconditionally by the runner; the provider check gates
-    the record, so a non-bedrock verdict never carries region keys.
+    the record, so a non-bedrock verdict never carries region keys. ``bedrock_region_source``
+    (cda8) is the configured knob's TRUE origin — ``LLMConfig.bedrock_region_source``, resolved
+    by the SAME ``from_env`` pass that produced the value — so a ``[tool.rebar.llm]`` pin is
+    labeled ``repo-config`` (and a CLI override ``cli``), never blanket-labeled as the env var.
 
     Security: the host is read via ``urlparse(base_url).hostname``, never ``.netloc`` — the
     latter retains embedded credentials (``user:secret@host``), and no credential material may
@@ -629,7 +633,9 @@ def provenance_for(
     if provider == "bedrock":
         from rebar.llm.bedrock_model import resolve_bedrock_region
 
-        region, region_source = resolve_bedrock_region(bedrock_region_name)
+        region, region_source = resolve_bedrock_region(
+            bedrock_region_name, configured_source=bedrock_region_source
+        )
         if region is not None:
             record["region"] = region
             record["region_source"] = region_source

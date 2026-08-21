@@ -157,6 +157,7 @@ BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
 # and exempting ``_int_pref(...)`` from the ownership gate entirely).
 KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
     "_llm_str": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
+    "_llm_str_source": (2, ""),  # llm/config.py: (table, cli, env_name, ...) -> (value, source)
     "_llm_int": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     # Omitting this one cost four undocumented vars (bug b00f): a helper absent from this table
     # is not an error, it is INVISIBLE — the scan walks past every call and the drift gate stays

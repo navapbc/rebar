@@ -39,14 +39,23 @@ logger = logging.getLogger(__name__)
 DEFAULT_BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 
-def resolve_bedrock_region(bedrock_region_name: str | None) -> tuple[str | None, str | None]:
+def resolve_bedrock_region(
+    bedrock_region_name: str | None, *, configured_source: str | None = None
+) -> tuple[str | None, str | None]:
     """rebar's OWN Bedrock region chain: ``(region, source)``, or ``(None, None)``.
 
     Order, with the EXACT ``source`` label returned for each arm (bug 8274; the label is
     recorded verbatim as ``region_source`` in the verdict's provider provenance):
 
-    1. ``bedrock_region_name`` — the configured knob (``REBAR_LLM_BEDROCK_REGION`` env or
-       ``[tool.rebar.llm].bedrock_region_name``) → ``"REBAR_LLM_BEDROCK_REGION"``.
+    1. ``bedrock_region_name`` — the configured knob (``rebar -c llm.bedrock_region_name``,
+       ``REBAR_LLM_BEDROCK_REGION`` env, or ``[tool.rebar.llm].bedrock_region_name``) →
+       ``configured_source``, the knob's TRUE origin (``"cli"`` /
+       ``"REBAR_LLM_BEDROCK_REGION"`` / ``"repo-config"``) as resolved by the SAME
+       ``LLMConfig.from_env`` pass that produced the value (``bedrock_region_source``,
+       cda8) — never re-derived here, so record and resolution cannot diverge. A caller
+       with no origin to thread (a hand-built config) falls back to the historical
+       ``"REBAR_LLM_BEDROCK_REGION"`` label. ``configured_source`` labels ONLY this arm;
+       it never reorders the chain or relabels the env arms below.
     2. ``AWS_DEFAULT_REGION`` env → ``"AWS_DEFAULT_REGION"``.
     3. ``AWS_REGION`` env → ``"AWS_REGION"``.
     4. Nothing set → ``(None, None)``: boto3's own resolution (the active profile) applies.
@@ -64,7 +73,7 @@ def resolve_bedrock_region(bedrock_region_name: str | None) -> tuple[str | None,
     (``capabilities.provenance_for``) can call it without pulling boto3 into a signed-record
     path, and both call sites deterministically agree."""
     if bedrock_region_name:
-        return bedrock_region_name, "REBAR_LLM_BEDROCK_REGION"
+        return bedrock_region_name, configured_source or "REBAR_LLM_BEDROCK_REGION"
     for var in ("AWS_DEFAULT_REGION", "AWS_REGION"):
         value = os.environ.get(var)
         if value:
@@ -131,7 +140,9 @@ def build_bedrock_provider(cfg: LLMConfig, *, session=None):
     import boto3
     from botocore.config import Config as BotoConfig
 
-    region, _region_source = resolve_bedrock_region(cfg.bedrock_region_name)
+    region, _region_source = resolve_bedrock_region(
+        cfg.bedrock_region_name, configured_source=cfg.bedrock_region_source
+    )
     # RP-04 S4: an injected caller-owned boto3 Session is used INSTEAD of constructing an
     # ambient one — `boto3.session.Session(...)` is never called on this path. The caller owns
     # the injected session's region resolution, so rebar's own region pre-check (which guards

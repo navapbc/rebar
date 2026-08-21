@@ -470,6 +470,7 @@ class PydanticAIRunner:
                 caps=caps,
                 web=web_requested,
                 bedrock_region_name=cfg.bedrock_region_name,
+                bedrock_region_source=cfg.bedrock_region_source,
             )
             if fallback_targets:
                 # A verdict produced by a fallback must not attest the primary. The ordered
