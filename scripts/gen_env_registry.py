@@ -439,7 +439,7 @@ def scan(root: Path) -> tuple[Reads, Dynamic]:
     ``KNOWN_ENV_HELPERS`` row names a helper with no definition under ``DEFAULT_SCAN_ROOT`` —
     that third check validates the table against the SHIPPED surface it describes, never
     against ``root``. The arity of this return value is load-bearing
-    (``scripts/check_config_ownership.py`` unpacks a 2-tuple): the fail-closed signal is the
+    (``render`` below and the tests unpack a 2-tuple): the fail-closed signal is the
     exception, never a third element."""
     _raise_for_stale_rows()
     reads: Reads = {}
