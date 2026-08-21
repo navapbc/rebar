@@ -90,7 +90,11 @@ Clustering the (b) + zero-score (a-weak) + not-joinable regressions by nature:
 - `surface-parity` (content-triggered when a CLI command's args/guards change) — require the MCP
   tool + NDJSON/import path be updated in lockstep.
 - `ci-gate-compat` for `.github/workflows/**` + gate scripts — a new hard-fail gate must guard /
-  grandfather in-flight and pre-gate branches.
+  grandfather in-flight and pre-gate branches. **REJECTED — do not re-propose** (operator
+  decision 2026-08-19, reaffirmed 2026-08-21; ticket 6f2e-58a5, Gerrit change 1919 abandoned):
+  when a new hard-fail gate breaks an in-flight branch, the remedy is to rebase on origin/main
+  and fix the actual gate failure; a grandfathering criterion institutionalises working around
+  gate failures instead of fixing them.
 
 **Out of scope for code review:** live/external-integration signature breaks (class 4) are a CI
 concern, not a static-diff-review concern.
