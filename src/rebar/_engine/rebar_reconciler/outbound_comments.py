@@ -280,6 +280,49 @@ def fit_preserving_marker(text: str, fit: Callable[[str], str]) -> str:
     return best if best is not None else probe
 
 
+def fit_comment_as_sent(text: str, fit: Callable[[str], str]) -> str:
+    """Return the MARKER-FREE body an undecorated comment would actually land as.
+
+    The comment-diff's dedup key and the send path must agree on the landed body
+    or an over-length comment can never match and is re-posted every pass — the
+    convergence requirement stated in ``adapters/jira/comment_limits.py``'s module
+    docstring ("the two paths MUST share one truncation function"). The send path
+    is decorate-then-:func:`fit_preserving_marker`, so the only way to reproduce
+    its result exactly is to run that same composition and then take the marker
+    back off: the differ compares USER CONTENT (``_normalize_comment_body`` strips
+    ``RECONCILER_MARKER`` from both sides), while the fit budget is consumed by the
+    DECORATED body. A fitter applied to the bare text cannot see that reserved
+    budget and so lands on a different cut — the drift that reopened the loop when
+    the send path moved onto ``fit_preserving_marker`` and the differ's fitter was
+    left behind.
+
+    ``fit`` is the caller's vendor fitter, injected as a plain
+    ``Callable[[str], str]`` exactly as :func:`fit_preserving_marker` takes it, so
+    this backend-neutral core module still names no vendor and no numeric limit
+    (pinned by ``tests/unit/rebar_reconciler/test_backend_neutrality.py``). The
+    decoration's length is likewise derived from
+    :func:`_decorate_outbound_comment`, never restated.
+
+    A body already within the limit is returned BYTE-IDENTICAL: the decorated form
+    is then within the limit too, :func:`fit_preserving_marker` returns it
+    unchanged, and removing the decoration recovers the input. That is
+    load-bearing — a shifted in-limit key would make every already-mirrored
+    comment look new and re-post it.
+
+    Only Jira Cloud composes this. Data Center deliberately keeps its comment
+    ceiling distinct from its description fitter (bug 049e), so its sanitizer is
+    left alone and the shared :func:`_diff_comments` keeps calling
+    ``sanitizer.fit_comment`` rather than any codec directly.
+    """
+    decoration = _decorate_outbound_comment("")
+    landed = fit_preserving_marker(_decorate_outbound_comment(text), fit)
+    if landed.endswith(decoration):
+        return landed[: len(landed) - len(decoration)]
+    # Pathological: not even the bare decoration fit, so fit_preserving_marker fell
+    # back to the vendor fitter's own (undecorated) answer. Pass it through as-is.
+    return landed
+
+
 def _common_prefix(left: str, right: str) -> str:
     """The shared leading run of two strings (returned as the prefix itself).
 

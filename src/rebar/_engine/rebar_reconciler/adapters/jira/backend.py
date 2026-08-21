@@ -23,7 +23,7 @@ from typing import Any
 from rebar_reconciler import inbound_fields
 from rebar_reconciler._backend import RemoteRef
 from rebar_reconciler._backend_registry import register
-from rebar_reconciler.adapters.jira import comment_limits, jira_fields, outbound_fields
+from rebar_reconciler.adapters.jira import jira_fields, outbound_fields
 from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
 from rebar_reconciler.adapters.jira_family import (
     RELATION_TO_JIRA_LINK,
@@ -150,8 +150,30 @@ class _JiraSanitizer:
         return jira_fields._sanitize_comment(body)
 
     def fit_comment(self, body: str) -> str:
-        """Pure fit-to-limit for comment-diff comparison (ticket 21ca; no warning)."""
-        return comment_limits.truncate_comment_body(body)
+        """Pure fit-to-limit for comment-diff comparison (ticket 21ca; no warning).
+
+        Must return exactly the marker-free text Cloud's send path LANDS, because
+        ``outbound_comments._diff_comments`` builds its dedup key from this and
+        compares it against the (marker-stripped) body read back from Jira. That is
+        the convergence requirement ``comment_limits`` states: if the comparison and
+        the send apply different fits, an over-length comment can never match and is
+        re-posted on every pass.
+
+        So this composes what ``acli_cli_ops.add_comment`` composes —
+        ``fit_preserving_marker`` over the DECORATED body, measured by
+        ``AdfCodec.fit_outbound`` (which sizes the SERIALIZED ADF, not the raw text,
+        and additionally reserves budget for ``RECONCILER_MARKER``) — and strips the
+        decoration back off. A plain character cap could not agree with it. The codec
+        is built with the same flag-governed constructor :func:`_fit_description`
+        uses, so ``reconciler.rich_text_cutover`` governs both alike.
+
+        Deliberately NOT hoisted into the shared differ: Data Center keeps its comment
+        ceiling distinct from its description fitter (bug 049e), so the convergence is
+        restored per-backend here rather than by coupling the core to a codec.
+        """
+        from rebar_reconciler.outbound_comments import fit_comment_as_sent
+
+        return fit_comment_as_sent(body, AdfCodec(rich="cloud" in cutover_clients()).fit_outbound)
 
 
 class JiraBackend:
