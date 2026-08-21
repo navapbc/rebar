@@ -214,6 +214,11 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# no if-present guard — `make lint` runs the patchset's own Makefile.
 	python scripts/check_config_ownership.py
 	python scripts/check_config_reads.py
+	@# Env-var registry drift (bug: fail-closed os.environ scan). CI runs this in the
+	@# `Env-var registry drift gate` step of .github/actions/docs-gates/action.yml and via
+	@# tests/interfaces/facades/test_mcp_http_transport.py; running it here makes the local
+	@# verdict agree with CI instead of surfacing staleness only in the full suite (~0.55s).
+	python scripts/gen_env_registry.py --check
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

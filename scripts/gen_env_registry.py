@@ -6,13 +6,33 @@ The registry is DERIVED (like ``reviewers/index.json``): a CI drift gate regener
 and fails the build on any diff, so a new env-var read cannot ship undocumented.
 
 Scope is defined RELATIVE to an explicit, enumerated set of read patterns (documented in
-the generated file's header) — the generator does not claim to catch every conceivable
-indirection:
+the generated file's header). Within ``os.environ`` the scan is now FAIL-CLOSED: every
+attribute access on ``os.environ`` must be classified, and an unclassified one raises
+``UnrecognisedEnvironAccess`` rather than being silently walked past (bug: a
+``os.environ.pop("K")`` read used to drop ``K`` from the registry while the drift gate
+stayed green, because the generator and the committed doc were blind in the same way).
 
-  1. Direct stdlib literals: ``os.environ["X"]``, ``os.environ.get("X", …)``,
-     ``os.getenv("X", …)`` with a string-literal key.
-  2. Project env-read helpers (``KNOWN_ENV_HELPERS``): the string-literal env-name
+  1. Key-bearing stdlib reads — the accessor returns the current value of ONE named
+     variable, so its string-literal key is registered: the ``os.environ["X"]``
+     subscript, ``os.environ.get/pop/setdefault("X", …)``
+     (``KEY_BEARING_ENVIRON_ATTRS``), and ``os.getenv("X", …)``.
+  2. Bulk/whole-mapping accesses (``BULK_ENVIRON_ATTRS``) — ``os.environ.copy()``,
+     ``.items()``, ``.keys()``, ``.values()``, … name no single variable, so they are
+     ALLOWED and register nothing.
+  3. Project env-read helpers (``KNOWN_ENV_HELPERS``): the string-literal env-name
      argument is resolved at each call site (one level through the shim).
+
+Deliberately NOT recognised (and why):
+  * reads under ``tests/`` — outside the scan root by design; the registry documents the
+    shipped ``src/rebar`` surface, not test fixtures.
+  * non-literal keys (``os.environ.get(name)``) — the concrete name only exists at
+    runtime, so these are REPORTED in the ``dynamic`` list instead of dropped.
+  * ``os.environ`` passed by reference into another callable (``dict(os.environ)``,
+    ``f(os.environ)``) — a bulk handoff with no literal key, indistinguishable from the
+    allowed whole-mapping accesses; nothing to register.
+  * ``getattr(os.environ, "get")(…)`` and similar string-indirection — not statically
+    resolvable at all; a fail-closed AST scan cannot see it, so it is out of scope rather
+    than pretended-covered.
 
 Alias/deprecation status is read from ``rebar._deprecations.REGISTRY`` (``kind == "env"``).
 
@@ -31,6 +51,56 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SCAN_ROOT = REPO_ROOT / "src" / "rebar"
 DOC_PATH = REPO_ROOT / "docs" / "env-vars.md"
+
+
+class UnrecognisedEnvironAccess(RuntimeError):
+    """Raised when ``os.environ`` is touched through an attribute the scan cannot classify.
+
+    Fail-closed by design: an unknown accessor might be a key-bearing read (whose variable
+    would then be silently missing from the registry while ``--check`` stayed green), so the
+    generator refuses to emit a registry it knows to be incomplete. Fix by classifying the
+    attribute into ``KEY_BEARING_ENVIRON_ATTRS`` or ``BULK_ENVIRON_ATTRS`` below.
+    """
+
+
+# ``os.environ.<attr>(...)`` accessors that RETURN the current value of ONE named variable.
+# Their first positional argument is the variable name, so it is registered exactly like the
+# ``os.environ["X"]`` subscript. ``pop``/``setdefault`` also mutate, but the read is what the
+# registry cares about.
+# ``__getitem__`` is here, not in the bulk set below: an explicit ``os.environ.__getitem__("X")``
+# call is an ast.Call, NOT an ast.Subscript, so the subscript branch never sees it — treating it
+# as a whole-mapping access would silently drop X, which is the very hole this scan closes.
+KEY_BEARING_ENVIRON_ATTRS: frozenset[str] = frozenset({"get", "pop", "setdefault", "__getitem__"})
+
+# Whole-mapping ``MutableMapping`` members: they name no single variable, so they are allowed
+# and register nothing. Each is here for a concrete reason:
+#   copy/items/keys/values — bulk reads of the whole mapping (``copy`` occurs under src/rebar
+#     today, for building a child-process environment).
+#   update/clear/popitem  — bulk WRITES/removals; nothing readable is named by a literal
+#     (``popitem`` returns an arbitrary pair, not a requested variable).
+#   __contains__/__iter__/__len__ — dunder forms reached only through explicit attribute
+#     access; membership/iteration/length name no single variable.
+#   __setitem__/__delitem__ — key-bearing but WRITE-only: they set or remove rather than
+#     return a value, and the registry documents readable surface. (The ``os.environ["X"] = v``
+#     Store subscript is registered by the Subscript branch; that predates this bug and is
+#     left as-is deliberately.) The READ dunder ``__getitem__`` is key-bearing — see above.
+BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
+    {
+        "copy",
+        "items",
+        "keys",
+        "values",
+        "update",
+        "clear",
+        "popitem",
+        "__contains__",
+        "__iter__",
+        "__len__",
+        "__setitem__",
+        "__delitem__",
+    }
+)
+
 
 # helper name -> (0-indexed position of the env-name argument, name prefix).
 # Signatures verified against the current tree; extend by adding a row here.
@@ -67,12 +137,85 @@ def _is_os_environ(node: ast.expr) -> bool:
     )
 
 
-def scan(root: Path) -> tuple[dict[str, set[str]], list[tuple[str, int, str]]]:
+Reads = dict[str, set[str]]
+Dynamic = list[tuple[str, int, str]]
+
+
+def _record(reads: Reads, dynamic: Dynamic, rel: str, node: ast.Call, callee: str) -> None:
+    """Register ``node``'s first positional argument as an env-var name, or report it as
+    dynamic when it is not a string literal. Shared by every key-bearing read shape."""
+    name = _str_literal(node.args[0]) if node.args else None
+    if name:
+        reads.setdefault(name, set()).add(rel)
+    elif node.args:
+        dynamic.append((rel, node.lineno, callee))
+
+
+def _scan_call(node: ast.Call, rel: str, reads: Reads, dynamic: Dynamic) -> None:
+    """Handle the call-shaped read patterns: ``os.environ.<key-bearing>(…)``,
+    ``os.getenv(…)`` and the ``KNOWN_ENV_HELPERS`` shims. Bulk ``os.environ`` accessors
+    fall through here without recording anything; CLASSIFICATION of every ``os.environ``
+    attribute — including rejecting an unrecognised one — happens in ``_scan_module``,
+    which sees the ``ast.Attribute`` node whether or not it is called."""
+    func = node.func
+    # os.environ.get/pop/setdefault("X", ...)
+    if isinstance(func, ast.Attribute) and _is_os_environ(func.value):
+        if func.attr in KEY_BEARING_ENVIRON_ATTRS:
+            _record(reads, dynamic, rel, node, f"os.environ.{func.attr}")
+        return
+    # os.getenv("X", ...)
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr == "getenv"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "os"
+    ):
+        _record(reads, dynamic, rel, node, "os.getenv")
+        return
+    # project helper call: _rebar_env("X"), _llm_int(t, c, "X", ...), ...
+    if isinstance(func, ast.Name) and func.id in KNOWN_ENV_HELPERS:
+        pos, prefix = KNOWN_ENV_HELPERS[func.id]
+        if len(node.args) > pos:
+            lit = _str_literal(node.args[pos])
+            if lit is not None:
+                reads.setdefault(prefix + lit, set()).add(rel)
+            else:
+                dynamic.append((rel, node.lineno, func.id))
+
+
+def _scan_module(tree: ast.Module, rel: str, reads: Reads, dynamic: Dynamic) -> Dynamic:
+    """Walk one parsed module, filling ``reads``/``dynamic`` and RETURNING the list of
+    unrecognised ``os.environ`` attribute sites as ``(rel, lineno, attr)``. Offending sites
+    are collected rather than raised on the spot so ``scan`` can report every one at once."""
+    offenders: Dynamic = []
+    for node in ast.walk(tree):
+        # os.environ["X"] (also the Store-context ``os.environ["X"] = v`` form)
+        if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
+            name = _str_literal(node.slice)
+            if name:
+                reads.setdefault(name, set()).add(rel)
+        elif isinstance(node, ast.Attribute) and _is_os_environ(node.value):
+            # Classify EVERY os.environ attribute access, called or not — this is the
+            # fail-closed seam that stops a new accessor from silently dropping a variable.
+            if node.attr not in KEY_BEARING_ENVIRON_ATTRS and node.attr not in BULK_ENVIRON_ATTRS:
+                offenders.append((rel, node.lineno, node.attr))
+        elif isinstance(node, ast.Call):
+            _scan_call(node, rel, reads, dynamic)
+    return offenders
+
+
+def scan(root: Path) -> tuple[Reads, Dynamic]:
     """Return (reads, dynamic) where ``reads`` maps each resolved env-var name to the set
     of module paths (relative to the repo root) that read it, and ``dynamic`` lists
-    (module, lineno, callee) for reads whose name argument is not a string literal."""
-    reads: dict[str, set[str]] = {}
-    dynamic: list[tuple[str, int, str]] = []
+    (module, lineno, callee) for reads whose name argument is not a string literal.
+
+    Raises ``UnrecognisedEnvironAccess`` if any ``os.environ`` attribute access under
+    ``root`` is neither key-bearing nor bulk. The arity of this return value is
+    load-bearing (``scripts/check_config_ownership.py`` unpacks a 2-tuple): the
+    fail-closed signal is the exception, never a third element."""
+    reads: Reads = {}
+    dynamic: Dynamic = []
+    offenders: Dynamic = []
     for py in sorted(root.rglob("*.py")):
         try:
             rel = py.relative_to(REPO_ROOT).as_posix()
@@ -82,50 +225,16 @@ def scan(root: Path) -> tuple[dict[str, set[str]], list[tuple[str, int, str]]]:
             tree = ast.parse(py.read_text(encoding="utf-8"))
         except SyntaxError:
             continue
-        for node in ast.walk(tree):
-            # os.environ["X"]
-            if isinstance(node, ast.Subscript) and _is_os_environ(node.value):
-                name = _str_literal(node.slice)
-                if name:
-                    reads.setdefault(name, set()).add(rel)
-                continue
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            # os.environ.get("X", ...)
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "get"
-                and _is_os_environ(func.value)
-            ):
-                name = _str_literal(node.args[0]) if node.args else None
-                if name:
-                    reads.setdefault(name, set()).add(rel)
-                elif node.args:
-                    dynamic.append((rel, node.lineno, "os.environ.get"))
-                continue
-            # os.getenv("X", ...)
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr == "getenv"
-                and isinstance(func.value, ast.Name)
-                and func.value.id == "os"
-            ):
-                name = _str_literal(node.args[0]) if node.args else None
-                if name:
-                    reads.setdefault(name, set()).add(rel)
-                elif node.args:
-                    dynamic.append((rel, node.lineno, "os.getenv"))
-                continue
-            # project helper call: _rebar_env("X"), _llm_int(t, c, "X", ...), ...
-            if isinstance(func, ast.Name) and func.id in KNOWN_ENV_HELPERS:
-                pos, prefix = KNOWN_ENV_HELPERS[func.id]
-                if len(node.args) > pos:
-                    lit = _str_literal(node.args[pos])
-                    if lit is not None:
-                        reads.setdefault(prefix + lit, set()).add(rel)
-                    else:
-                        dynamic.append((rel, node.lineno, func.id))
+        offenders.extend(_scan_module(tree, rel, reads, dynamic))
+    if offenders:
+        sites = "\n".join(
+            f"  - os.environ.{attr} at {mod}:{lineno}" for mod, lineno, attr in offenders
+        )
+        raise UnrecognisedEnvironAccess(
+            "unrecognised os.environ access(es) — classify each attribute into "
+            "KEY_BEARING_ENVIRON_ATTRS (registers its literal key) or BULK_ENVIRON_ATTRS "
+            f"(names no single variable) in {Path(__file__).name}:\n{sites}"
+        )
     return reads, dynamic
 
 
@@ -173,13 +282,30 @@ def render(root: Path = DEFAULT_SCAN_ROOT) -> str:
     lines.append("")
     lines.append(
         "This lists environment variables read under `src/rebar` via the following "
-        "recognized read patterns (reads through other indirections are not captured — "
-        "extend `KNOWN_ENV_HELPERS` in the generator to cover a new helper):"
+        "recognized read patterns. Within `os.environ` the scan is fail-closed — an "
+        "attribute access the generator cannot classify aborts the run instead of "
+        "silently dropping a variable — but reads through other indirections are still "
+        "not captured (extend `KNOWN_ENV_HELPERS` in the generator to cover a new helper):"
     )
     lines.append("")
-    lines.append('- direct `os.environ["X"]` / `os.environ.get("X", …)` / `os.getenv("X", …)`')
+    lines.append(
+        "- key-bearing stdlib reads (the literal key is registered): "
+        '`os.environ["X"]`, '
+        + ", ".join(f'`os.environ.{a}("X", …)`' for a in sorted(KEY_BEARING_ENVIRON_ATTRS))
+        + ', `os.getenv("X", …)`'
+    )
+    lines.append(
+        "- bulk/whole-mapping accesses (allowed, register nothing — they name no single "
+        "variable): " + ", ".join(f"`os.environ.{a}`" for a in sorted(BULK_ENVIRON_ATTRS))
+    )
     lines.append(
         "- project env-read helpers: " + ", ".join(f"`{h}`" for h in sorted(KNOWN_ENV_HELPERS))
+    )
+    lines.append(
+        "- NOT recognized: reads under `tests/` (outside the scan root), non-literal keys "
+        "(reported as dynamic below instead of dropped), `os.environ` passed by reference "
+        "into another callable (`dict(os.environ)`, `f(os.environ)`), and "
+        "`getattr(os.environ, …)` indirection."
     )
     lines.append("")
     lines.append("| Variable | Read in | Alias/deprecation |")
