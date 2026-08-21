@@ -180,7 +180,7 @@ tools never reach it. Tunables (env > `[snapshot]` config > documented default):
 | max age (cold-trim) | `REBAR_GATE_MAX_AGE_SECONDS` | 7 days | evict genuinely cold entries regardless of free space |
 | store-size cap | `REBAR_GATE_MAX_BYTES` | 0 (off) | cap the store's OWN size in bytes (checked against the running byte total, not free disk); evict LRU down to 5% below the cap |
 | integrity reverify period | `REBAR_GATE_REVERIFY_SECONDS` | 0 (off) | re-check entries for corruption every N seconds |
-| janitor interval | `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | 300 | background reclamation cadence |
+| janitor interval | `REBAR_GATE_JANITOR_INTERVAL_SECONDS` | 300 | reclamation cadence: the review-bot's background pass AND the per-host operation-linked GC trigger; `0` disables the trigger |
 
 **Disk-cap behavior.** A single background janitor (off the hot path) reclaims under the
 free-space watermark using LRU by touch-on-read `mtime`, skipping the grace window, backstopped
@@ -189,6 +189,34 @@ by the `max_bytes` byte-total cap and a secondary max-age cold-trim. Eviction is
 holding an open file keeps reading via POSIX
 delete-on-last-close; a new lookup that misses simply re-materializes. The cache is
 regenerable — losing it costs only re-materialization.
+
+**When a reclamation pass runs.** Two drivers funnel into the same `run_gc` policy, so they
+cannot reclaim by different rules:
+
+1. **The review-bot's resident janitor** — a daemon thread in the FastAPI lifespan runs a pass
+   every `interval_seconds` (review-bot hosts only).
+2. **The operation-linked trigger** (`rebar._snapshot.gc_trigger`, bug
+   `undamaged-epidermic-kakarikis`) — every **attested gate resolution** (`review-plan`,
+   `verify-completion`, `review-code`, `scan-spec`, gated workflows) ends with a near-free
+   check: one `stat` of `<store>/gc/last-pass.stamp` against the same `interval_seconds`
+   cadence. When the stamp is missing or stale, a **detached child** runs one `run_gc` pass and
+   stamps it; the gate itself never waits on GC, never enumerates the store, and never touches
+   the ticket-store lock. This is the portability floor: a laptop, a CI runner, or a library
+   embedding that resolves attested gates reclaims its own store with no CI provider, cron, or
+   daemon involved. Single-flight is enforced by a stamped `<store>/gc/worker.lock` sidecar
+   plus `run_gc`'s own non-blocking `flock` — overlap with the resident janitor (or another
+   worktree/process) harmlessly degrades to `skipped="locked"`, and a skipped pass does **not**
+   reset the stamp. Setting `REBAR_GATE_JANITOR_INTERVAL_SECONDS=0` disables the trigger. The
+   detached child logs to `<store>/gc/worker.log`.
+
+**Forcing a pass.** An operator can run one synchronously at any time:
+
+```sh
+python -c "from rebar._snapshot import gc_trigger, repo_snapshot; \
+gc_trigger.run_detached(repo_snapshot.store_root())"
+```
+
+or delete `<store>/gc/last-pass.stamp` so the next attested gate op re-triggers immediately.
 
 **Sizing the watermark: use the percentage on a small volume.** The two watermark terms are
 combined by taking the LARGER, so the absolute floor is a hard minimum and the percentage adds

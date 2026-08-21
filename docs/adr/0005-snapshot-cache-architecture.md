@@ -118,6 +118,23 @@ is detected by a content-digest reverify and discarded so the next acquire re-ma
 All thresholds (watermark, grace, max-age, reverify period, interval) are configurable with
 documented defaults (`REBAR_GATE_*` env > `[snapshot]` config > default).
 
+**Amendment (bug `undamaged-epidermic-kakarikis`, 58a3-0756-e470-4b40): the pass needs a
+per-host driver, not only the review-bot's.** As accepted, the "single background pass" had
+exactly one production driver — the review-bot FastAPI lifespan — so every OTHER host that
+resolves attested gates populated its store append-only (measured: 64,021 entries / 47.24 GiB
+on one developer host). The cadence floor is now an **operation-linked trigger**
+(`rebar._snapshot.gc_trigger`, mirroring the compaction trigger that fixed bug `0d15-59a4`):
+the tail of an attested gate resolution performs one O(1) `stat` of a
+`<root>/gc/last-pass.stamp` sidecar against the janitor `interval_seconds`, and when due
+spawns a **detached child** that runs the same `run_gc` pass. "Never invoked from
+populate/read" holds in substance: the reclamation work itself still never runs in the gate's
+process or on any hot path — the in-line cost is one marker `stat` once per gate operation,
+no store enumeration, and no ticket-store lock. Single-flight adds a stamped
+`<root>/gc/worker.lock` sidecar (the shared v2 owner-stamp staleness table) in front of the
+existing gc `flock`; a pass that stood aside (`skipped="locked"`) does not reset the stamp.
+The review-bot's resident thread remains as a supplementary cadence; overlap degrades to
+`skipped="locked"` by D5's own interlock.
+
 ### D6 — Attested signing binds the SHA via the EXISTING manifest channel
 
 (Implemented in sibling story S4; recorded here for the cross-cutting picture.) The signed

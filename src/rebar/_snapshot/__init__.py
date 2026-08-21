@@ -35,6 +35,7 @@ from rebar._snapshot.cache import (
     open_in_snapshot,
     touch_entry,
 )
+from rebar._snapshot.gc_trigger import maybe_gc
 from rebar._snapshot.janitor import (
     JanitorConfig,
     drain_trash,
@@ -78,6 +79,7 @@ __all__ = [
     "is_lfs_pointer",
     "materialize",
     "materialize_tickets",
+    "maybe_gc",
     "open_in_snapshot",
     "resolve_ref",
     "reverify_entry",
