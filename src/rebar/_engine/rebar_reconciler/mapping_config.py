@@ -290,6 +290,20 @@ def resolve_for_project(
 # ---------------------------------------------------------------------------
 
 
+def declared_status_names(config: MappingConfig) -> set[str]:
+    """Every target status NAME the config DECLARES: the non-:data:`SKIP`
+    ``status_map`` values plus any declared ``statuses`` vocabulary, taken across the
+    ``default`` block AND every ``projects.<KEY>`` overlay. Provider-neutral (no vendor
+    literal): the caller unions this with the target's built-in status names. Reused by
+    ``fetcher._known_jira_statuses`` so a per-project remap onto a custom status name is
+    recognised rather than flagged as unmapped."""
+    names: set[str] = set()
+    for layer in (config.default, *config.projects.values()):
+        names.update(v for v in layer.status_map.values() if v != SKIP)
+        names.update(layer.statuses or ())
+    return names
+
+
 def _check_vocab(axis: Mapping[str, str], vocab: Any, *, name: str) -> None:
     """Every non-:data:`SKIP` value of ``axis`` must fall inside ``vocab`` when a
     vocabulary is declared (not ``None``). ``SKIP`` is always allowed."""

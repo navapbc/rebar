@@ -144,8 +144,9 @@ def test_map_fields_to_remote_maps_every_status_plus_unmapped_default():
         "cancelled": "Done",
     }.items():
         assert b.outbound.map_fields_to_remote({"status": local_status}) == {"status": jira_state}
-    # The default branch an extraction is most likely to drop.
-    assert b.outbound.map_fields_to_remote({"status": "no_such_status"}) == {"status": "To Do"}
+    # Map-or-drift (S2): an unmapped local status is OMITTED entirely (Jira left
+    # unchanged), never coerced to "To Do".
+    assert b.outbound.map_fields_to_remote({"status": "no_such_status"}) == {}
 
 
 def test_map_fields_to_remote_maps_every_priority_plus_unmapped_default():

@@ -130,12 +130,43 @@ _JIRA_TO_LOCAL_STATUS: dict[str, str] = {
     "Cancelled": "cancelled",
 }
 
-# rebar-status: annotation labels that override the Jira workflow status on inbound.
-# Maps rebar-status:<label> -> local status. Takes precedence over _JIRA_TO_LOCAL_STATUS.
-_REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
-    "rebar-status:blocked": "blocked",
-    "rebar-status:cancelled": "cancelled",
-}
+# rebar-status: annotation labels override the Jira workflow status on inbound. A
+# ``rebar-status:<local>`` label (emitted outbound by the built-in-reverse stamp rule)
+# recovers the local status DIRECTLY — project-key-free and reverse-map-free — for any
+# status whose forward mapping was lossy. This generalises the retired 2-entry
+# blocked/cancelled literal (``_REBAR_STATUS_LABEL_TO_LOCAL``): it recovers ANY valid
+# local status (e.g. ``rebar-status:open``), which that literal could not.
+_REBAR_STATUS_LABEL_PREFIX = "rebar-status:"
+
+# The local-status vocabulary a ``rebar-status:<local>`` label may name. A label whose
+# suffix is NOT in this set is ignored (fall back to the raw workflow status), so a
+# malformed / unknown label never fabricates a bogus local status. DERIVED (not a
+# hand-maintained parallel literal) from the parity-tested reverse map plus the one
+# terminal local with no Jira reverse (``deleted`` -> "Done", which reverses to
+# ``closed``): the recovery domain is exactly the local statuses the outbound stamp rule
+# can emit. ``inbound_translate._LOCAL_STATUS_VALUES`` re-uses this so the two cannot
+# drift.
+_LOCAL_STATUS_VOCAB: frozenset[str] = frozenset(_JIRA_TO_LOCAL_STATUS.values()) | {"deleted"}
+
+
+def recover_status_label(labels: Any) -> str | None:
+    """Recover a local status from a ``rebar-status:<local>`` annotation label.
+
+    Scans ``labels`` for the first ``rebar-status:`` label whose suffix is a valid local
+    status (in :data:`_LOCAL_STATUS_VOCAB`) and returns that ``<local>``; an
+    unknown/malformed suffix is ignored so the caller falls back to the raw workflow
+    status. ``None`` when no valid label is present.
+
+    The SINGLE shared implementation of the inbound status-label recovery — imported by
+    ``inbound_translate`` / ``apply_inbound_events`` / ``inbound_differ`` (and re-exported
+    from ``applier``) in place of the retired per-module ``_REBAR_STATUS_LABEL_TO_LOCAL``
+    literals, which only recognised blocked/cancelled."""
+    for label in labels or []:
+        if isinstance(label, str) and label.startswith(_REBAR_STATUS_LABEL_PREFIX):
+            candidate = label[len(_REBAR_STATUS_LABEL_PREFIX) :]
+            if candidate in _LOCAL_STATUS_VOCAB:
+                return candidate
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -293,12 +324,8 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
         out["remote_parent_id"] = parent_raw.get("key") if isinstance(parent_raw, dict) else None
 
     # Prefer rebar-status: annotation label over raw Jira workflow status.
-    # Check labels list for any rebar-status: entry and map to local status.
-    local_status: str | None = None
-    for label in jira_fields.get("labels") or []:
-        if label in _REBAR_STATUS_LABEL_TO_LOCAL:
-            local_status = _REBAR_STATUS_LABEL_TO_LOCAL[label]
-            break
+    # The label recovers ANY valid local status directly (reverse-map-free).
+    local_status: str | None = recover_status_label(jira_fields.get("labels"))
     if local_status is None and "status" in jira_fields:
         # Bug 5886: an unmapped Jira status must NOT default to "open" (that silently
         # reopened closed tickets). Leave it None so the dict omits status → no diff.

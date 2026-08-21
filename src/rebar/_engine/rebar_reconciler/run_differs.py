@@ -488,6 +488,7 @@ def _run_differs_outbound(ctx: Any, mutations, backend) -> tuple[list, dict, Any
             conflict_sink=conflict_sink,
             dropped_field_sink=dropped_field_sink,
             projects_mapping=_projects_mapping,
+            repo_root=repo_root,
         ),
         outbound_mapper=backend.outbound,
         inbound_mapper=backend.inbound,

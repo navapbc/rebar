@@ -41,7 +41,6 @@ from rebar_reconciler.batch_dispatch import _call_with_retry
 from rebar_reconciler.inbound_translate import (
     _BRIDGE_INTERNAL_TAG_PREFIXES,
     _JIRA_TYPE_MAP,
-    _REBAR_STATUS_LABEL_TO_LOCAL,
     _extract_name,
     _jira_key_to_local_id,
     _jira_status_to_local,
@@ -51,6 +50,7 @@ from rebar_reconciler.inbound_translate import (
     _resolve_priority,
     _resolve_tracker_dir,
     _write_event_file,
+    recover_status_label,
 )
 
 # Loop-breaker marker (mirrors inbound_differ.RECONCILER_MARKER). Comments whose
@@ -153,11 +153,7 @@ def _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id
     # annotation label takes precedence over the raw workflow status —
     # same precedence as inbound_differ._map_jira_to_local_fields, so the
     # import lands at the status the bound-ticket differ would compute.
-    local_status: str | None = None
-    for _lbl in raw_labels:
-        if isinstance(_lbl, str) and _lbl in _REBAR_STATUS_LABEL_TO_LOCAL:
-            local_status = _REBAR_STATUS_LABEL_TO_LOCAL[_lbl]
-            break
+    local_status: str | None = recover_status_label(raw_labels)
     if local_status is None:
         jira_status = _extract_name(fields.get("status"))
         if jira_status:

@@ -147,7 +147,6 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _JIRA_PRIORITY_MAP,
     _JIRA_TYPE_MAP,
     _LOCAL_STATUS_VALUES,
-    _REBAR_STATUS_LABEL_TO_LOCAL,
     _TICKET_REDUCER_MODULE,
     _VALID_PRIORITY_RANGE,
     _event_meta,
@@ -159,6 +158,7 @@ from rebar_reconciler.inbound_translate import (  # noqa: E402
     _resolve_priority,
     _resolve_tracker_dir,
     _write_event_file,
+    recover_status_label,
 )
 
 # Pass-write persistence + the reschedule contract live in pass_io.py.
@@ -304,7 +304,6 @@ __all__ = [
     "_LEAVES",
     "_LOCAL_STATUS_VALUES",
     "_MUTATION_KEY",
-    "_REBAR_STATUS_LABEL_TO_LOCAL",
     "_TICKET_REDUCER_MODULE",
     "_VALID_PRIORITY_RANGE",
     "ApplyResult",
@@ -352,6 +351,7 @@ __all__ = [
     "create_one",
     "delete_one",
     "inbound_repair_property",
+    "recover_status_label",
     "update_one",
 ]
 

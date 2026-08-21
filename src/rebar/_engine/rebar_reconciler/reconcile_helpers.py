@@ -68,9 +68,30 @@ class StatusMappingError(Exception):
     class stays defined for references (e.g. tests) that still name it."""
 
 
-def preflight_status_mapping(mutations) -> None:
-    """Scan update mutations for statuses absent from
-    ``config.local_to_jira_status`` and WARN (non-fatally) on each.
+def _status_preflight_tolerated(mapping: Mapping[str, str], repo_root: Path | None) -> set[str]:
+    """The status names the preflight tolerates: the built-in ``local_to_jira_status``
+    keys (local names) UNION its values (built-in Jira names) UNION every Jira status
+    NAME the mapping config for ``repo_root`` declares.
+
+    The config-declared widening (ticket 438a) is what keeps a per-project REMAP from
+    tripping a spurious warning: the mapper emits a config-only Jira name that is absent
+    from the built-in keys AND values, so without this union the post-mapper preflight
+    would false-alarm on exactly the config it is meant to support. Best-effort: a
+    config-load failure falls back to the built-in set and never breaks the pass."""
+    tolerated = set(mapping) | set(mapping.values())
+    try:
+        from rebar_reconciler import mapping_config as _mc
+
+        tolerated |= _mc.declared_status_names(_mc.load_mapping_config(repo_root))
+    except Exception:  # noqa: BLE001 — fail-open: config-declared widening is best-effort, never break the pass
+        pass
+    return tolerated
+
+
+def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
+    """Scan update mutations for statuses absent from the EFFECTIVE status vocabulary
+    (built-in ``config.local_to_jira_status`` keys/values UNION the config-declared Jira
+    names for ``repo_root``) and WARN (non-fatally) on each.
 
     Facet 3 (reconciler-abort-isolation): this scan used to RAISE
     :class:`StatusMappingError` on the first unmapped status, aborting the whole
@@ -80,14 +101,16 @@ def preflight_status_mapping(mutations) -> None:
     of taking down the entire pass. :class:`StatusMappingError` remains defined
     for other references.
 
-    An empty mapping disables the scan (kill-switch). Non-update mutations,
+    An empty built-in mapping disables the scan (kill-switch). Non-update mutations,
     inbound mutations, and mutations whose ``fields`` payload does not include a
-    ``status`` key are ignored.
+    ``status`` key are ignored. ``repo_root`` scopes the config-declared widening so a
+    per-project status remap is tolerated rather than flagged (ticket 438a).
     """
     cfg = _load("reconcile_config", "config.py")
     mapping = getattr(cfg, "local_to_jira_status", {}) or {}
     if not mapping:
         return  # kill-switch — empty mapping disables preflight
+    tolerated = _status_preflight_tolerated(mapping, repo_root)
     for m in mutations:
         # Mutations may be plain dicts (current schema) or objects with an
         # ``.action`` attribute (forward-compat). Normalise to a string action
@@ -140,11 +163,12 @@ def preflight_status_mapping(mutations) -> None:
         #   - or a JIRA status string ("To Do", "In Progress") — when the
         #     differ already mapped local→jira via _LOCAL_TO_JIRA_STATUS
         #     (outbound_differ._map_local_to_jira_fields:107).
-        # Accept either by checking presence in mapping KEYS (local names)
-        # OR VALUES (jira names). The preflight purpose is to catch
-        # *unmapped* statuses before the applier dispatch; both shapes are
-        # legitimately-mapped values.
-        if status and status not in mapping and status not in set(mapping.values()):
+        # Accept either by checking presence in the effective tolerated set
+        # (built-in local keys ∪ built-in Jira values ∪ config-declared Jira
+        # names). The preflight purpose is to catch *unmapped* statuses before
+        # the applier dispatch; a per-project remap onto a config-declared name
+        # is legitimately-mapped (ticket 438a).
+        if status and status not in tolerated:
             # Facet 3 (reconciler-abort-isolation): this preflight used to RAISE
             # StatusMappingError here, which aborted the ENTIRE pass on the FIRST
             # unmapped status — before ANY mutation was applied. That turned one
