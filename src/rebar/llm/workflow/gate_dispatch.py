@@ -34,7 +34,7 @@ from typing import Any, NamedTuple
 # ``gate_dispatch._attach_code_review_metrics`` at 7 sites. The code-review finalization cluster
 # moved to the code_review/finalize.py strict leaf; this keeps the attribute resolving here.
 from rebar.llm.code_review.finalize import _attach_code_review_metrics  # noqa: F401
-from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.gate_error_sidecar import emit_gate_error
 
 # Back-compat re-export (load-bearing): the plan-review recovery cluster lives in the
@@ -186,7 +186,10 @@ def produce_plan_review_verdict(
                 batch_runner=ProductionBatchRunner(runner=runner_sel),
                 recorder=rec,
             )
-    except LLMUnavailableError as exc:
+    except (LLMUnavailableError, LLMInputRejectedError) as exc:
+        # LLMInputRejectedError (bug 43d4) joins this arm: this try block has NO broad
+        # `except Exception`/`except LLMError`, so the new type would ESCAPE and take the
+        # gate_error_v1 sidecar plus the degraded-verdict contract with it.
         # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
         # infra outage, before preserving the soft-degrade.
         # Consumed counters (df94, Part 2): the `rec` recorder IS in scope here and may hold
@@ -519,7 +522,10 @@ def _run_code_review_gate(request: CodeReviewRequest, prep: _CodeReviewPrep) -> 
                 ),
                 recorder=prep.rec,
             )
-    except LLMUnavailableError as exc:
+    except (LLMUnavailableError, LLMInputRejectedError) as exc:
+        # LLMInputRejectedError (bug 43d4) joins this arm: this try block has NO broad
+        # `except Exception`/`except LLMError`, so the new type would ESCAPE and take the
+        # gate_error_v1 sidecar plus the degraded-verdict contract with it.
         # Write-then-degrade (ticket 8bc5): same additive gate_error capture on the mid-run
         # infra outage, before preserving the soft-degrade.
         # Consumed counters (df94, Part 2): `prep.rec` IS in scope and may hold batch/agent

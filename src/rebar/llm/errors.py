@@ -48,6 +48,25 @@ class ContextWindowExceededError(LLMRunnerError):
     ``except LLMRunnerError`` / ``except LLMError`` handler still catches it."""
 
 
+class LLMInputRejectedError(LLMRunnerError):
+    """The provider ANSWERED and rejected the request's INPUT as unusable — an oversized
+    prompt (a context-length 400, a 413), or a content-policy refusal. Deterministic and
+    caller-fixable: the same input will be rejected identically every time, so waiting or
+    retrying cannot help and the remedy is to SHRINK or CHANGE the input.
+
+    Deliberately NOT an :class:`LLMUnavailableError`, for the same reason
+    :class:`RunawayToolLoopError` is not: nothing is wrong with the provider, so this must
+    never surface as "the LLM provider call failed" and must never be mistaken for an outage
+    a caller could wait out. A strict :class:`LLMRunnerError` subclass, so every existing
+    ``except LLMRunnerError`` / ``except LLMError`` handler still catches it.
+
+    Raised only where the runner's failure seam has ALREADY classified the failure
+    ``ResolutionClass.CHANGE_INPUT``; the classification is not widened here. The wrapped
+    provider message rides through verbatim so the size ladder in
+    ``plan_review.sizing`` can still recognise a context limit by its text.
+    """
+
+
 class RunawayToolLoopError(LLMRunnerError):
     """A detected repeating tool-call cycle (one signature or a k-cycle dominating the
     trailing window), aborted MID-RUN so bounded recovery can still land a verdict —

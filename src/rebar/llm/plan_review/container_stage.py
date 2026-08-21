@@ -20,7 +20,7 @@ from typing import Any
 from rebar._plan_clarity import evaluate_plan_clarity
 from rebar.llm import capabilities
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.runner import Runner
 
 from . import det_floor, passes, sizing
@@ -206,11 +206,16 @@ def _run_container(
     if warm:
         bin_children = pairings[0]
         findings, record, exc = _timed_pairing(runner, cfg, ctx, roster, container, bin_children)
-        if isinstance(exc, LLMUnavailableError):
+        if isinstance(exc, (LLMUnavailableError, LLMInputRejectedError)):
             # SYSTEMIC failure (auth / key / connection / rate-limit) on the warming
             # call: the whole tier is down — abort rather than fan out N-1 doomed calls
             # (mirrors the Pass-1 tier). run_review turns this into an INDETERMINATE,
             # unsigned verdict.
+            # LLMInputRejectedError (bug 43d4) aborts for the SAME cost reason rather than
+            # the availability one: a container prompt the provider rejected as too large or
+            # refused is rejected identically for every remaining pairing, so fanning out
+            # would buy N-1 guaranteed failures. Behaviour-preserving — this arm caught a
+            # rejected input before the type existed.
             logger.warning(
                 "container warm bin %s SYSTEMIC failure (%s); aborting fan-out",
                 record["children"],

@@ -668,12 +668,12 @@ class _PermanentInputRejectionRunner(Runner):
         self.calls = 0
 
     def run(self, req: RunRequest) -> dict:
-        from rebar.llm.errors import LLMUnavailableError
+        from rebar.llm.errors import LLMInputRejectedError
         from rebar.llm.failure import LLMOutcome, ResolutionClass
 
         self.calls += 1
-        err = LLMUnavailableError(
-            "the LLM provider call failed: status_code: 400, "
+        err = LLMInputRejectedError(
+            "the LLM provider rejected the request input: status_code: 400, "
             "model_name: us.anthropic.claude-haiku-4-5-20251001-v1:0, "
             "'Message': 'prompt is too long: 206826 tokens > 200000 maximum'"
         )
