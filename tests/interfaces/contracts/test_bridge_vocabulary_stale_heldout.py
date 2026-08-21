@@ -49,6 +49,7 @@ _COMPATIBILITY_FILES = {
     "tests/interfaces/contracts/test_help_overview_coverage.py",
     "tests/interfaces/contracts/test_schema_coverage.py",
     "tests/unit/test_cli_registry.py",
+    "tests/unit/test_cli_registry_dispatch.py",
     "tests/unit/test_gen_cli_reference.py",
     "tests/unit/test_jira_onboard.py",
 }
