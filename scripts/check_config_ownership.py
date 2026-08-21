@@ -7,7 +7,7 @@ access (env read, ``load_config`` call, credential read, backend reload, configu
 default) BELOW an approved seam is an error unless it is a recorded legacy exception or
 carries a ``# read-via:`` marker.
 
-Env-read detection REUSES ``scripts/gen_env_registry.py`` (``scan`` / ``KNOWN_ENV_HELPERS``
+Env-read detection REUSES ``scripts/gen_env_registry.py`` (``KNOWN_ENV_HELPERS``
 / ``_is_os_environ`` / ``_str_literal``) by direct import — there is NO parallel env-read
 parser here. On top of those primitives this gate layers seam/ownership classification,
 the getattr/backend/configurable-default categories, and receiver-object aliasing.
@@ -34,7 +34,6 @@ from gen_env_registry import (  # noqa: E402
     KNOWN_ENV_HELPERS,
     _is_os_environ,
     _str_literal,
-    scan,
 )
 
 # --------------------------------------------------------------------------- #
@@ -156,19 +155,6 @@ def _register_key(dec: ast.expr) -> str | None:
     if name != "register":
         return None
     return _str_literal(dec.args[0])
-
-
-def derive_env_baseline() -> set[str]:
-    """Return the union of scanned env-var names and env-channel deprecation aliases."""
-    _ensure_src_on_path()
-    reads, _dynamic = scan(REPO_ROOT / "src" / "rebar")
-    names: set[str] = set(reads)
-    from rebar._deprecations import REGISTRY
-
-    for dep in REGISTRY.values():
-        if dep.kind == "env":
-            names.add(dep.name)
-    return names
 
 
 # --------------------------------------------------------------------------- #
