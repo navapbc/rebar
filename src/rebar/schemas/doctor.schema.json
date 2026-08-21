@@ -40,7 +40,13 @@
         "properties": {
           "name": {
             "type": "string",
-            "enum": ["tickets-write-fcntl", "tickets-write-mkdir", "hlc", "enrich-drain"]
+            "enum": [
+              "tickets-write-fcntl",
+              "tickets-write-mkdir",
+              "hlc",
+              "enrich-drain",
+              "compact-worker"
+            ]
           },
           "path": { "type": "string" },
           "mechanism": { "type": "string", "enum": ["fcntl", "mkdir", "existence", "unknown"] },

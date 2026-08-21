@@ -67,7 +67,7 @@ def _dead_pid() -> int:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
-    """All four legs are reported even when nothing is held — "the lock is free" is the
+    """All five legs are reported even when nothing is held — "the lock is free" is the
     answer an operator most often needs, and a missing row is indistinguishable from a
     check that never ran."""
     tracker = _tracker(tmp_path)
@@ -79,8 +79,12 @@ def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
         doctor_locks.LEG_TICKETS_MKDIR,
         doctor_locks.LEG_HLC,
         doctor_locks.LEG_ENRICH_DRAIN,
+        doctor_locks.LEG_COMPACT_WORKER,
     }
     assert _by_name(reports, doctor_locks.LEG_TICKETS_MKDIR)["state"] == "free"
+    compact = _by_name(reports, doctor_locks.LEG_COMPACT_WORKER)
+    assert compact["state"] == "free"
+    assert compact["holder"] is None, "a free store must not report a spurious holder"
     # The fcntl files are created lazily by the first acquirer, so a never-written store
     # reports them absent rather than inventing them: probing must not create a lock file.
     assert _by_name(reports, doctor_locks.LEG_TICKETS_FCNTL)["state"] == "absent"
@@ -354,6 +358,56 @@ def test_an_incomplete_drain_stamp_is_stated_not_guessed(tmp_path: Path) -> None
     assert drain["holder"] is None
     assert drain["pid_state"] is None
     assert drain["staleness"] == doctor_locks.STALENESS_NOT_STALE
+
+
+# ---------------------------------------------------------------------------
+# the compact-worker lock (existence + v2 stamp, exactly the drain lock's shape)
+# ---------------------------------------------------------------------------
+
+
+def _plant_compact_lock(tracker: Path, stamp: str, *, age_s: float = 0.0) -> Path:
+    rebar_dir = tracker.parent / ".rebar"
+    rebar_dir.mkdir(exist_ok=True)
+    path = rebar_dir / "compact-worker.lock"
+    path.write_text(stamp, encoding="utf-8")
+    if age_s:
+        when = time.time() - age_s
+        os.utime(path, (when, when))
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_the_compact_lock_names_a_live_holder_and_is_not_a_finding(tmp_path: Path) -> None:
+    """The compaction trigger's worker lock (``compact_trigger``, which reuses the drain's
+    stamped-lock machinery) joins the census: a live detached compactor is information —
+    named, aged, called live — never a finding."""
+    tracker = _tracker(tmp_path)
+    _plant_compact_lock(tracker, _drain_stamp())  # this live process
+
+    report = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
+
+    assert report["state"] == "held"
+    assert report["held_seconds"] is not None
+    assert report["holder"]["pid"] == str(os.getpid())
+    assert report["pid_state"] == "live"
+    assert report["staleness"] == doctor_locks.STALENESS_NOT_STALE
+    assert doctor_locks.lock_findings([report]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_a_dead_holder_compact_lock_is_a_stale_finding(tmp_path: Path) -> None:
+    """The gap this leg exists for: a detached compaction worker that died between
+    acquire and release leaves a stamped lock doctor could not previously see."""
+    tracker = _tracker(tmp_path)
+    _plant_compact_lock(tracker, _drain_stamp(pid=str(_dead_pid())))
+
+    report = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
+
+    assert report["staleness"] == doctor_locks.STALENESS_STALE
+    findings = doctor_locks.lock_findings([report])
+    assert [f["kind"] for f in findings] == [doctor_locks.KIND_STALE_LOCK]
 
 
 # ---------------------------------------------------------------------------

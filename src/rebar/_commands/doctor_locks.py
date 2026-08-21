@@ -40,7 +40,7 @@ under contention, not a fault. A lock the shared staleness function calls stale 
 FINDING, because no live process claims it. Findings feed doctor's existing exit rule
 (exit 1 while anything is outstanding).
 
-Four legs are reported. The two tickets-store legs are the dual-window contract
+Five legs are reported. The two tickets-store legs are the dual-window contract
 (:mod:`rebar._store.lock`): ``.ticket-write.lock`` (fcntl) and ``.ticket-write.lock.d``
 (mkdir, the leg that carries the ownership stamp). ``.rebar/hlc.lock`` is the clock's
 short RMW lock (:mod:`rebar._store.hlc`) and ``.rebar/enrich-drain.lock`` is the drain
@@ -49,7 +49,11 @@ so the kernel drops them when their holder dies and "stale" is not a state they 
 reach; the drain lock is an ``O_EXCL`` file whose CONTENTS are its owner stamp, so it
 carries a holder and a real staleness verdict from the same shared function (bug
 knavish-stimulated-bluebottle; before it the drain lock was unstamped and this row
-could only report ``not-assessable``).
+could only report ``not-assessable``). ``.rebar/compact-worker.lock`` is the compaction
+trigger's worker lock (:mod:`rebar._commands.compact_trigger`, which reuses the drain's
+stamped-lock machinery), the same existence-plus-stamp shape — and the lock most likely
+to be held by a DETACHED background process, which is exactly the holder an operator
+cannot find with ``ps``.
 """
 
 from __future__ import annotations
@@ -91,9 +95,11 @@ LEG_TICKETS_FCNTL = "tickets-write-fcntl"
 LEG_TICKETS_MKDIR = "tickets-write-mkdir"
 LEG_HLC = "hlc"
 LEG_ENRICH_DRAIN = "enrich-drain"
+LEG_COMPACT_WORKER = "compact-worker"
 
 _HLC_LOCK_NAME = "hlc.lock"
 _DRAIN_LOCK_NAME = "enrich-drain.lock"
+_COMPACT_WORKER_LOCK_NAME = "compact-worker.lock"
 
 _STALE_ADVICE = (
     "no live process claims this lock; the next writer's acquire reclaims it "
@@ -359,6 +365,14 @@ def scan_locks(tracker: str) -> list[dict[str, Any]]:
                 LEG_ENRICH_DRAIN,
                 os.path.join(rebar_dir, _DRAIN_LOCK_NAME),
                 note="no drain process holds the enrichment drain lock",
+            ),
+        ),
+        (
+            LEG_COMPACT_WORKER,
+            lambda: _existence_report(
+                LEG_COMPACT_WORKER,
+                os.path.join(rebar_dir, _COMPACT_WORKER_LOCK_NAME),
+                note="no detached compaction worker holds the compact-worker lock",
             ),
         ),
     ]
