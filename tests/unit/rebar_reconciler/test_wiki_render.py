@@ -12,6 +12,8 @@ missing simulate only the renderer's own probe, not the binary.
 from __future__ import annotations
 
 import logging
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +23,18 @@ from rebar_reconciler.adapters.jira_family.wiki_render import (
     render_markdown_to_wiki,
     substitute_arrows,
 )
+
+# `_child_diag` lives in `tests/`, which the ROOT `tests/conftest.py` normally puts on
+# `sys.path`. That is not enough for every caller: a module importing it can be loaded as a
+# `pytest_plugins` entry by a NESTED pytest run rooted OUTSIDE `tests/`
+# (tests/unit/test_fixture_env_repr_security.py), where the root conftest never loads and a
+# bare import raises ImportError at collection. Same explicit bootstrap the sibling oracle
+# uses (tests/unit/test_live_dc_pass_health.py).
+_TESTS_DIR = Path(__file__).resolve().parents[2]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
 
 _MIXED = """# Heading
 
@@ -99,6 +113,9 @@ def test_pandoc_emits_no_color_form() -> None:
             capture_output=True,
             text=True,
         )
+        # Absent-string verdict => fail-OPEN without this: a signal-killed pandoc is torn
+        # down before it writes, so `"{color:" not in ""` is trivially True.
+        assert_child_was_not_signal_killed(completed, what="pandoc")
         assert "{color:" not in completed.stdout
 
 

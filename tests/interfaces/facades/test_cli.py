@@ -19,6 +19,17 @@ import pytest
 
 import rebar
 
+# `_child_diag` lives in `tests/`, which the ROOT `tests/conftest.py` normally puts on
+# `sys.path`. That is not enough here: this module is loaded as a `pytest_plugins` entry by a
+# NESTED pytest run rooted OUTSIDE `tests/` (tests/unit/test_fixture_env_repr_security.py),
+# where the root conftest never loads and a bare import raises ImportError at collection.
+# Same explicit bootstrap the sibling oracle uses (tests/unit/test_live_dc_pass_health.py).
+_TESTS_DIR = Path(__file__).resolve().parents[2]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
+
 
 def _cli(
     *args: str, cwd: str | None = None, env: dict[str, str] | None = None
@@ -148,6 +159,11 @@ def test_reconcile_intercepted_dry_run_default(
     test below, so this routing check never touches the network."""
     offline_acli_env["REBAR_ROOT"] = str(rebar_repo)
     cp = _cli("reconcile", cwd=str(rebar_repo), env=offline_acli_env)
+    # The routing verdict rests on a string being ABSENT, so it fails OPEN without this: a
+    # signal-killed CLI writes nothing, and the unknown-subcommand text is trivially absent.
+    # Only a signal death is rejected — the healthy offline pass legitimately exits non-zero,
+    # and this test deliberately checks ROUTING ONLY, so no exit code is pinned.
+    assert_child_was_not_signal_killed(cp, what="the reconcile routing pass")
     assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
 
 

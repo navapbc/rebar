@@ -26,11 +26,23 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 from _subprocess_env import subprocess_env
+
+# `_child_diag` lives in `tests/`, which the ROOT `tests/conftest.py` normally puts on
+# `sys.path`. That is not enough here: this module is loaded as a `pytest_plugins` entry by a
+# NESTED pytest run rooted OUTSIDE `tests/` (tests/unit/test_fixture_env_repr_security.py),
+# where the root conftest never loads and a bare import raises ImportError at collection.
+# Same explicit bootstrap the sibling oracle uses (tests/unit/test_live_dc_pass_health.py).
+_TESTS_DIR = Path(__file__).resolve().parents[1]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "_build-and-test.yml"
@@ -124,6 +136,9 @@ def test_absent_floor_file_explains_why_it_skipped(tree_without_floor_file: Path
 def test_absent_floor_file_emits_no_workflow_error(tree_without_floor_file: Path) -> None:
     """A skip must not annotate the run as an error — that is what misled change 1416."""
     result = _run_gate(tree_without_floor_file)
+    # The verdict below rests on a string being ABSENT, so it fails OPEN without this:
+    # a signal-killed gate writes nothing at all, and `"::error::" not in ""` is True.
+    assert_child_was_not_signal_killed(result, what="the Git-floor gate")
     assert "::error::" not in (result.stdout + result.stderr), (
         "the gate still emits a GitHub `::error::` annotation for an absent floor file; "
         f"stdout: {result.stdout}\nstderr: {result.stderr}"

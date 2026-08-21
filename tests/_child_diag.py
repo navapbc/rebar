@@ -87,3 +87,34 @@ def assert_child_ran_clean(
     stderr = proc.stderr or ""
     if "Traceback" in stderr:
         raise AssertionError(f"{what} raised:\n{stderr[-PASS_STDERR_TAIL_CHARS:]}")
+
+
+def assert_child_was_not_signal_killed(
+    proc: subprocess.CompletedProcess[str],
+    *,
+    what: str,
+) -> None:
+    """Assert *proc* ran to completion on its own rather than being killed by a signal.
+
+    The NARROW sibling of :func:`assert_child_ran_clean`, for oracles whose verdict rests on
+    a string being ABSENT from a child's output. Such a test fails OPEN: a child killed by a
+    signal is torn down by the kernel before it writes anything, so ``stdout == stderr == ""``,
+    the bad string is trivially absent, and a run that NEVER EXECUTED is reported GREEN
+    (deterministically reproduced: a child running ``kill -9 $$`` yields ``returncode == -9``
+    with empty output). Same construct class as bugs ``0e1d-c698-c38d-4c3e`` and
+    ``f0fb-de7a-b315-4508``.
+
+    Only a NEGATIVE ``returncode`` is rejected — CPython's encoding of "terminated by signal
+    N". This RESTORES the oracle without WIDENING it: callers keep whatever exit-code
+    expectation they already had (``!= 0``, ``== 0``, or none at all), and nothing new is
+    claimed about the product. In particular a POSITIVE ``128+N`` (e.g. ``137``) is ACCEPTED:
+    a shell that survives and reports its own killed child exits normally with that code,
+    which is indistinguishable from a script deliberately choosing to exit ``137``.
+
+    :func:`assert_child_ran_clean` is the wrong tool for these sites — it demands a specific
+    exit code (default ``0``) and also scans stderr for a traceback, both of which would be
+    new assertions about the child. The message is delegated to :func:`child_failure_detail`
+    so the signal name and returncode are worded identically everywhere.
+    """
+    if proc.returncode < 0:
+        raise AssertionError(f"{what} did not complete: {child_failure_detail(proc)}")
