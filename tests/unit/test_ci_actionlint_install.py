@@ -17,9 +17,21 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+# `_child_diag` lives in `tests/`, which the ROOT `tests/conftest.py` normally puts on
+# `sys.path`. That is not enough here: this module is loaded as a `pytest_plugins` entry by a
+# NESTED pytest run rooted OUTSIDE `tests/` (tests/unit/test_fixture_env_repr_security.py),
+# where the root conftest never loads and a bare import raises ImportError at collection.
+# Same explicit bootstrap the sibling oracle uses (tests/unit/test_live_dc_pass_health.py).
+_TESTS_DIR = Path(__file__).resolve().parents[2]
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
+
+from _child_diag import assert_child_was_not_signal_killed  # noqa: E402
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,6 +69,11 @@ def test_actionlint_install_fails_fast_on_download_failure(tmp_path: Path) -> No
         text=True,
         timeout=180,
     )
+    # Every assertion below is satisfied by a child that never ran: `returncode != 0` is
+    # true of a SIGNAL death (CPython reports -9), no binary gets installed, and the
+    # false-success line is trivially absent from an empty stdout. Guard first, so the
+    # oracle cannot fail OPEN. The non-zero requirement below is kept, not loosened.
+    assert_child_was_not_signal_killed(proc, what="the actionlint-bin recipe")
     assert proc.returncode != 0, (
         "actionlint-bin masked a failed download as success (exit 0) — it must fail-fast.\n"
         f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
