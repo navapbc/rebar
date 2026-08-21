@@ -167,19 +167,19 @@ def _load_alert_store():
     return mod
 
 
-def _known_jira_statuses() -> frozenset[str]:
-    """Jira workflow status names the reconciler has an inbound mapping for
-    (``config.jira_to_local_status`` keys).
-
-    A Jira status OUTSIDE this set has no reconciler mapping: if it reaches an
-    outbound mutation it trips ``reconcile.preflight_status_mapping``. The fetcher
-    flags such a status at snapshot-build time (see ``_flag_unmapped_statuses``) so
-    a newly-added Jira-side status is surfaced for a mapping proactively — rather
-    than being discovered only via a downstream per-mutation failure. An empty
-    mapping disables the check (mirrors the preflight kill-switch)."""
+def _known_jira_statuses(repo_root: Path) -> frozenset[str]:
+    """Jira workflow status NAMES the reconciler can round-trip: the built-in
+    reverse-map keys (``config.jira_to_local_status``) UNION every Jira status NAME the
+    mapping config for ``repo_root`` declares (``mapping_config.declared_status_names``).
+    An empty BUILT-IN mapping disables the check (the preflight kill-switch)."""
     from rebar_reconciler import config as _cfg
+    from rebar_reconciler import mapping_config as _mc
 
-    return frozenset(getattr(_cfg, "jira_to_local_status", {}) or {})
+    builtin = getattr(_cfg, "jira_to_local_status", {}) or {}
+    if not builtin:
+        return frozenset()  # kill-switch: empty built-in mapping disables the check
+    declared = _mc.declared_status_names(_mc.load_mapping_config(repo_root))
+    return frozenset(set(builtin) | declared)
 
 
 def _flag_unmapped_statuses(
@@ -198,7 +198,7 @@ def _flag_unmapped_statuses(
     (24h window) so a persistent unmapped status does not re-file every ~20-minute
     pass. Fully fail-open: any error is logged and swallowed — proactive detection
     must never break the fetch/reconcile pass."""
-    known = _known_jira_statuses()
+    known = _known_jira_statuses(repo_root)
     if not known:
         return  # kill-switch: an empty mapping disables the check
     seen: set[str] = set()

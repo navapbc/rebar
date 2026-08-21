@@ -482,7 +482,7 @@ def _apply_mutations(ctx: _PassContext) -> None:
     # before any applier dispatch. It no longer aborts the pass (Facet 3): an
     # unmapped status flows to the applier and is recorded there as a
     # per-mutation failure rather than taking down every later mutation.
-    preflight_status_mapping(mutations)
+    preflight_status_mapping(mutations, repo_root)
 
     # Direction-aware dispatch lives inside applier.apply (PR #371 / defect
     # #8): the applier partitions typed Mutations by direction internally and

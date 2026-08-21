@@ -204,6 +204,7 @@ def test_dc_create_path_defaults_on_a_bare_ticket():
 def test_dc_create_path_defaults_on_unmapped_values():
     # Present-but-unmapped is a DIFFERENT branch from missing: it exercises the
     # ``.get(key, default)`` fallback of each value map rather than the ticket's.
+    # Map-or-drift (S2): an unmapped status is OMITTED entirely, never coerced.
     assert _map_local_to_dc_fields(
         {"title": "t", "ticket_type": "no_such_type", "priority": 99, "status": "no_such_status"}
     ) == {
@@ -211,7 +212,6 @@ def test_dc_create_path_defaults_on_unmapped_values():
         "description": "",
         "issuetype": "Task",
         "priority": "Medium",
-        "status": "To Do",
         "assignee": "",
     }
 
@@ -478,7 +478,8 @@ def test_dc_map_fields_to_remote_maps_every_status_plus_unmapped_default():
         "cancelled": "Done",
     }.items():
         assert outbound.map_fields_to_remote({"status": local_status}) == {"status": dc_state}
-    assert outbound.map_fields_to_remote({"status": "no_such_status"}) == {"status": "To Do"}
+    # Map-or-drift (S2): an unmapped status is OMITTED, never coerced to "To Do".
+    assert outbound.map_fields_to_remote({"status": "no_such_status"}) == {}
 
 
 def test_dc_map_fields_to_remote_maps_every_priority_plus_unmapped_default():

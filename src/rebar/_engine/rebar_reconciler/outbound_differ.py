@@ -71,9 +71,8 @@ from rebar_reconciler.outbound_comments import (  # noqa: F401
 # seam-extraction the comment/link/assignee clusters above already went through). It is
 # self-contained — nothing else in this module feeds it. All four names are re-exported
 # so outbound_differ.<name> keeps resolving for existing callers and tests.
-from rebar_reconciler.outbound_labels import (  # noqa: F401
+from rebar_reconciler.outbound_labels import (
     _EXCLUDED_PREFIXES,
-    _STATUS_ANNOTATION_LABEL,
     _diff_labels,
     _diff_status_annotation_labels,
 )
@@ -251,6 +250,12 @@ class OutboundDiffConfig:
     # create (creates are guard-exempt, so this is the only place that gap closes).
     # None / an empty mapping preserves the legacy single-project behaviour.
     projects_mapping: Any = None
+    # Story S2. The store root the reconcile pass runs against. Threaded into
+    # ``_effective_status_map_for`` so the per-project ``[mapping]`` status overlay is
+    # discovered from the store root (like the fetcher/preflight), never the process CWD.
+    # None → ``effective_status_map`` falls back to CWD discovery (the built-in map when
+    # no config is found), preserving legacy behaviour.
+    repo_root: Any = None
 
 
 # The reserved create-payload key carrying the resolved target project from the
@@ -259,6 +264,27 @@ class OutboundDiffConfig:
 # transport DROPS it in ``_translate_create_fields`` before splatting the field
 # dict, so it never reaches the tracker.
 _BRIDGE_TARGET_PROJECT_KEY = "_bridge_target_project"
+
+
+def _effective_status_map_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+) -> dict[str, str] | None:
+    """The effective per-project local->Jira status map for ``ticket``, or ``None``.
+
+    Story S2: resolve the ticket's project (``projects_store.resolve_project``) and return
+    ``config.effective_status_map(project_key, root=repo_root)`` so both create and update
+    map status through the project's overlay (map-or-drift). ``repo_root`` is the store root
+    the pass runs against; ``[mapping]`` MUST be read from it, never the CWD, consistent with
+    the fetcher and preflight. ``None`` (the built-in fallback the mappers already apply) when
+    no project key is obtainable or there is no ``[mapping]`` block."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return None
+    from rebar_reconciler import config, projects_store
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return None
+    return config.effective_status_map(project_key, root=repo_root)
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +441,7 @@ def compute_outbound_mutations(
                 outbound_mapper,
                 dropped_field_sink=dropped_field_sink,
                 mapping=config.projects_mapping,
+                repo_root=config.repo_root,
             )
         else:
             _compute_outbound_update_mutation(
@@ -438,6 +465,8 @@ def compute_outbound_mutations(
                 links,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
+                mapping=config.projects_mapping,
+                repo_root=config.repo_root,
             )
 
     return mutations, absent_alive_fields
@@ -504,6 +533,7 @@ def _compute_outbound_create_mutation(
     *,
     dropped_field_sink: list[tuple[str, str]] | None = None,
     mapping: Any = None,
+    repo_root: Any = None,
 ) -> None:
     """Phase: append the outbound CREATE mutation for an unbound local ticket.
 
@@ -535,9 +565,11 @@ def _compute_outbound_create_mutation(
     # Unbound -> outbound create
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).
+    status_map = _effective_status_map_for(ticket, mapping, repo_root)
     annotation_mutations = _diff_status_annotation_labels(
         local_status=status,
         jira_labels=[],
+        status_map=status_map,
     )
     suppressed_parents: list[str] = []
     create_fields = outbound_mapper.map_local_to_remote(
@@ -545,6 +577,7 @@ def _compute_outbound_create_mutation(
         binding_store=binding_store,
         local_ticket_types=local_ticket_types,
         suppressed_out=suppressed_parents,
+        status_map=status_map,
     )
     if suppressed_parents and dropped_field_sink is not None:
         dropped_field_sink.append((local_id, "parent"))
@@ -619,6 +652,8 @@ def _compute_outbound_update_mutation(
     *,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
+    mapping: Any = None,
+    repo_root: Any = None,
 ) -> None:
     """Phase: for a bound ticket, resolve jira_fields (including the bounded
     bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
@@ -685,6 +720,7 @@ def _compute_outbound_update_mutation(
 
     # Ticket 625b: the whole vendor-neutral field path (canonicalize snapshot +
     # baseline, diff in local shape, map back to vendor shape) lives in the core helper.
+    _status_map = _effective_status_map_for(ticket, mapping, repo_root)
     fields = compute_update_fields(
         ticket,
         jira_fields,
@@ -698,6 +734,7 @@ def _compute_outbound_update_mutation(
         prev_snapshot=prev_snapshot,
         conflict_sink=conflict_sink,
         dropped_field_sink=dropped_field_sink,
+        status_map=_status_map,
     )
     # Comments use the resolved snapshot (the bounded-GET overlay) — NO second call (C3).
     # emersed-specific-mutt: thread the binding_store so _diff_comments' PRIMARY skip can
@@ -727,6 +764,7 @@ def _compute_outbound_update_mutation(
     annotation_mutations = _diff_status_annotation_labels(
         local_status=status,
         jira_labels=list(jira_fields.get("labels") or []),
+        status_map=_status_map,
     )
     label_mutations = label_mutations + annotation_mutations
     # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,

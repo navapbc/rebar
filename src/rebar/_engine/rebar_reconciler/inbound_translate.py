@@ -30,6 +30,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler.inbound_fields import _LOCAL_STATUS_VOCAB, recover_status_label  # noqa: F401
+
 # Map Jira issuetype -> local ticket_type. Anything else falls through to 'task'.
 _JIRA_TYPE_MAP: dict[str, str] = {
     "Bug": "bug",
@@ -40,15 +42,12 @@ _JIRA_TYPE_MAP: dict[str, str] = {
 }
 
 # rebar-status: annotation labels override the Jira workflow status on inbound
-# (blocked/cancelled have no live DIG workflow equivalent; the label is the
-# lossless encoding). Mirrors inbound_differ._REBAR_STATUS_LABEL_TO_LOCAL —
-# _apply_inbound_create applies the same precedence so a freshly imported
-# issue lands at the SAME local status the bound-ticket inbound differ would
-# compute on the next pass (ticket robe-creek-zealot).
-_REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
-    "rebar-status:blocked": "blocked",
-    "rebar-status:cancelled": "cancelled",
-}
+# (a lossy forward mapping's local status is recovered directly from the label). The
+# shared, generalised recovery helper (``recover_status_label``, imported above and
+# re-exported for the leaf appliers) replaces the retired 2-entry
+# ``_REBAR_STATUS_LABEL_TO_LOCAL`` literal — _apply_inbound_create applies the same
+# precedence so a freshly imported issue lands at the SAME local status the
+# bound-ticket inbound differ would compute on the next pass (ticket robe-creek-zealot).
 
 # Bridge-internal label prefixes that must never leak into local ticket tags
 # at import time. Matches inbound_differ._EXCLUDED_PREFIXES minus "imported:"
@@ -69,20 +68,13 @@ _JIRA_PRIORITY_MAP: dict[str, int] = {
 
 _VALID_PRIORITY_RANGE = range(0, 5)  # 0-4 inclusive
 
-# Local status vocabulary (source of truth: ticket_reducer/_processors.py:process_status).
-# Listed here for documentation / debug purposes only — the typed-mutation
-# inbound path no longer uses value-membership to decide whether to invoke
-# the Jira→local mapper (see _apply_inbound_update). Kept as a module
-# constant so any future check is consistent with the reducer.
-_LOCAL_STATUS_VALUES: tuple[str, ...] = (
-    "idea",
-    "open",
-    "in_progress",
-    "blocked",
-    "closed",
-    "cancelled",
-    "done",
-)
+# Local status vocabulary. Single-sourced from ``inbound_fields._LOCAL_STATUS_VOCAB``
+# (the inbound recovery domain) so this documentation constant cannot drift from the
+# set the recovery helper actually honours — the prior hand-maintained literal listed a
+# stale ``done`` and omitted ``deleted``. Listed here for documentation / debug purposes
+# only — the typed-mutation inbound path no longer uses value-membership to decide
+# whether to invoke the Jira->local mapper (see ``_apply_inbound_update``).
+_LOCAL_STATUS_VALUES: tuple[str, ...] = tuple(sorted(_LOCAL_STATUS_VOCAB))
 
 
 def _resolve_priority(raw_pri: Any) -> int:
