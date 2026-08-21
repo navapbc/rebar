@@ -537,10 +537,13 @@ def test_a_detached_sweep_child_is_handed_the_canonical_store_tracker(
         seen.append(argv)
         return object()
 
-    # Patch the module's OWN `subprocess` reference, never the real module: a global patch
-    # outlives this test's body and breaks `subprocess.run` in fixture teardown.
+    # Patch the spawn owner's OWN `subprocess` reference (`_proc` holds the one Popen since
+    # task 2dc4-9bcd-75b9-4544), never the real module: a global patch outlives this test's
+    # body and breaks `subprocess.run` in fixture teardown.
+    from rebar import _proc
+
     monkeypatch.setattr(
-        compact_trigger,
+        _proc,
         "subprocess",
         types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
     )

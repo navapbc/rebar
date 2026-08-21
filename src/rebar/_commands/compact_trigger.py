@@ -204,58 +204,32 @@ def release_trigger_lock(tracker: str, fd: int) -> None:
         pass
 
 
-def _detach_kwargs() -> dict:
-    """Platform detach flags, mirroring :func:`rebar.llm.enrich_drain._detach_kwargs`."""
-    if sys.platform == "win32":  # pragma: no cover - POSIX CI
-        return {
-            "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
-        }
-    return {"start_new_session": True, "close_fds": True}
-
-
 def _spawn_detached_sweep(tracker: str) -> None:
-    """Detach a sweep child that outlives this command (POSIX).
+    """Detach a sweep child that outlives this command (POSIX), via the shared
+    detached-rebar-child spawner (:func:`rebar._proc.spawn_detached`), which owns the
+    PYTHONPATH bootstrap, the ``-c`` re-entry stub, the detach flags and the durable-cwd
+    anchor. This site keeps its own stderr sink (the store-scoped worker log), its canonical
+    tracker argument, and its broad never-raise catch — a detach failure must not fail the
+    close that triggered it."""
+    from rebar._proc import spawn_detached
 
-    Mirrors ``enrich_drain._spawn_detached_drain``: the same PYTHONPATH bootstrap so a bare
-    python child can import rebar, the same stdio discipline (no stdin, output to a log), and
-    the same never-raise posture — a detach failure must not fail the close that triggered it.
-    """
-    from rebar._proc import detached_child_cwd
-
-    src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    child_env = {**os.environ}
-    child_env["PYTHONPATH"] = src + (
-        os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
-    )
     try:
         os.makedirs(os.path.dirname(_trigger_log_path(tracker)), exist_ok=True)
         log_fh = open(_trigger_log_path(tracker), "a")  # noqa: SIM115 — handed to the child
     except OSError:
         log_fh = subprocess.DEVNULL  # type: ignore[assignment]
     try:
-        subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.path.insert(0, sys.argv[2]); "
-                "from rebar._commands import compact_trigger; "
-                "compact_trigger.run_sweep(sys.argv[1])",
-                # The canonical store tracker, for the same reason the cwd below is resolved:
-                # the child outlives the worktree that spawned it, and inside `run_sweep` this
-                # argument also becomes `repo_root = dirname(tracker)`. Handing over a
-                # worktree's SYMLINK would leave the running child pointed at a path that dies
-                # with the worktree (bug 93a9-66cf-e681-4f49).
-                _canonical_tracker(tracker),
-                src,
-            ],
-            # Same durable-cwd anchor as the drain: never inherit an ephemeral worktree
-            # directory that can vanish mid-sweep (bug 3198-438c-72a5-470f).
-            cwd=detached_child_cwd(tracker),
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+        spawn_detached(
+            "rebar._commands.compact_trigger",
+            "run_sweep",
+            # The canonical store tracker, for the same reason spawn_detached resolves the
+            # child's cwd: the child outlives the worktree that spawned it, and inside
+            # `run_sweep` this argument also becomes `repo_root = dirname(tracker)`. Handing
+            # over a worktree's SYMLINK would leave the running child pointed at a path that
+            # dies with the worktree (bug 93a9-66cf-e681-4f49).
+            _canonical_tracker(tracker),
+            env={**os.environ},
             stderr=log_fh,
-            **_detach_kwargs(),
         )
     except Exception:
         logger.warning("compaction sweep detach failed; continuing", exc_info=True)

@@ -74,6 +74,15 @@ def repo_root(explicit: str | os.PathLike[str] | None = None) -> Path:
     """Resolve the repository root.
 
     Order: explicit arg > REBAR_ROOT > git toplevel of cwd.
+
+    The final ``Path.cwd()`` fallback RAISES (``FileNotFoundError`` via ``os.getcwd()``)
+    when the process's working directory has been deleted. That posture is a recorded
+    DECISION, not an accident (task 2dc4-9bcd-75b9-4544, revisited from bug
+    3198-438c-72a5-470f): a silently-wrong repo root is worse than a loud failure.
+    Detached children no longer reach it — :func:`rebar._proc.spawn_detached` anchors
+    every detached rebar child to a durable cwd — and long-lived IN-PROCESS work (daemon
+    threads, a reconciler run "as a daemon from anywhere") must either pass ``explicit``
+    / set ``REBAR_ROOT`` or accept the loud failure.
     """
     if explicit is not None:
         return Path(explicit).resolve()
