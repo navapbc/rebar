@@ -20,6 +20,7 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -481,3 +482,71 @@ def test_leak_guard_still_fails_and_names_every_entry(request, tmp_path):
     assert "depends_on" in message
     assert "stray_report.json" in message
     assert "tmp_path" in message  # still tells an actually-leaking test how to fix itself
+
+
+def _drive_working_tree_backstop(
+    request: pytest.FixtureRequest, root: Path, during: Callable[[], None]
+) -> tuple[str, SimpleNamespace]:
+    """Run the REAL session backstop against *root*, returning its text and session.
+
+    Same hand-driven shape as the two guard drivers above: ``pytest_sessionstart``
+    takes the porcelain snapshot, *during* stands in for whatever dirtied the tree
+    while the session ran, and ``pytest_sessionfinish`` is the hook under test. The
+    module-level snapshot is patched so restoring it cannot disturb the real run's
+    own backstop.
+    """
+    conftest = _root_conftest(request)
+    written: list[str] = []
+    reporter = SimpleNamespace(write_line=lambda line, **kwargs: written.append(line))
+    session = SimpleNamespace(
+        config=SimpleNamespace(
+            pluginmanager=SimpleNamespace(get_plugin=lambda name: reporter),
+        ),
+        exitstatus=0,
+    )
+    with (
+        patch.object(conftest, "_REPO_ROOT", root),
+        patch.object(conftest, "_PORCELAIN_AT_START", None),
+    ):
+        conftest.pytest_sessionstart(session)
+        during()
+        conftest.pytest_sessionfinish(session, 0)
+    return "\n".join(written), session
+
+
+def test_session_backstop_still_fails_the_run_and_names_every_entry(request, tmp_path):
+    """Rewording must not become a silent weakening: the backstop still escalates the
+    run to a failure so CI catches a genuine leak, and still names each entry."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+
+    def a_write_lands_in_the_tree() -> None:
+        (repo / "stray_report.json").write_text("{}")
+
+    message, session = _drive_working_tree_backstop(request, repo, a_write_lands_in_the_tree)
+
+    assert "REPO ISOLATION FAILURE" in message
+    assert "stray_report.json" in message
+    assert session.exitstatus == pytest.ExitCode.TESTS_FAILED
+
+
+def test_session_backstop_does_not_assert_a_test_made_the_change(request, tmp_path):
+    """Two porcelain snapshots taken around the whole session carry no writer
+    identity, so "a test wrote into the working tree" is a claim the backstop cannot
+    make — a concurrent write from another process in this checkout is the same diff
+    entry. Sibling finding of bugs `746c-185a` and `hot-guessable-ungulate`."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+
+    def another_process_writes() -> None:
+        (repo / "EXTERNAL_MUTATION_PROBE").write_text("written by another process")
+
+    message, _ = _drive_working_tree_backstop(request, repo, another_process_writes)
+
+    # It still tells an actually-leaking test how to fix itself.
+    assert "tmp_path" in message, message
+    assert "a test wrote into the working tree instead of tmp_path" not in message, message
+    assert "offending" not in message.lower(), message
+    lowered = message.lower()
+    assert "concurrent" in lowered, message
+    assert "outside" in lowered or "external" in lowered, message
