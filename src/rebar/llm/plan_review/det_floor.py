@@ -293,6 +293,31 @@ def _clarity_score(description: str, ticket_type: str) -> int:
 P4_AC_SOFT_CAP = 25  # checklist items
 P4_FILE_IMPACT_SOFT_CAP = 30  # file-impact entries
 
+# The two P4 branches have DIFFERENT causes and therefore DIFFERENT remedies (ticket 1e48).
+# An over-limit description is usually over-NARRATED, not over-SCOPED: the fix is concision
+# plus relocating the narration, and coaching decomposition here would have an author split a
+# coherent unit of work for a formatting reason. Genuine over-scope is what the advisory
+# signal branch below flags, and that is where decomposition advice belongs. Both messages
+# POINT AT the packaged authoring guide rather than restating it, so they cannot drift from it.
+P4_OVER_LIMIT_FIX = (
+    "Shorten the description to at most {desc_limit} characters by writing more concisely and "
+    "moving narration out — not by splitting coherent work. KEEP the context a reader who has "
+    "never seen this ticket needs in order to evaluate the plan: the problem, the constraints "
+    "the work must respect, and each acceptance criterion with how it will be evidenced. MOVE "
+    "the narration into ticket comments or a session log, where it stays discoverable without "
+    "consuming the reviewer's and completion-verifier's context: investigation history, method "
+    "discussion, rationale for choices already settled, and the conversational progression that "
+    "led to the plan. Run `rebar explain plan` for the authoring guidance. Split into child "
+    "tickets only when the WORK is genuinely more than one unit — the advisory oversize signals "
+    "flag that case separately."
+)
+P4_TOO_LARGE_FIX = (
+    "If this really is more than one unit of work, split it into coherent child tickets (G5 "
+    "decomposition) so each is one session's work. If instead the plan is merely long-winded, "
+    "tighten the prose and move narration into ticket comments or a session log rather than "
+    "fragmenting coherent work. Run `rebar explain plan` for the authoring guidance."
+)
+
 
 def _description_limit(repo_root: str | None) -> int:
     """Resolve the shared typed gate limit (including its packaged default)."""
@@ -324,31 +349,29 @@ def p4_oversize(ctx: PlanContext) -> DetResult:
     }
     if not signals:
         return DetResult("P4", "oversize", "pass", coverage=cov)
+    if description_over_limit:
+        finding = {
+            "finding": "Ticket description exceeds the review admission limit.",
+            "evidence": signals,
+            "impact": ("Oversized tickets exhaust plan-review and completion-verifier resources."),
+            "suggested_fix": P4_OVER_LIMIT_FIX.format(desc_limit=desc_limit),
+        }
+    else:
+        finding = {
+            "finding": "Oversize signals suggest this unit may be too large for one session.",
+            "evidence": signals,
+            "impact": (
+                "Large units compound early errors and are hard to one-shot; "
+                "consider G5 decomposition."
+            ),
+            "suggested_fix": P4_TOO_LARGE_FIX,
+        }
     return DetResult(
         "P4",
         "oversize",
         "fail",
         blocking=description_over_limit,
-        finding={
-            "finding": (
-                "Ticket description exceeds the review admission limit."
-                if description_over_limit
-                else "Oversize signals suggest this unit may be too large for one session."
-            ),
-            "evidence": signals,
-            "impact": (
-                "Oversized tickets exhaust plan-review and completion-verifier resources."
-                if description_over_limit
-                else (
-                    "Large units compound early errors and are hard to one-shot; "
-                    "consider G5 decomposition."
-                )
-            ),
-            "suggested_fix": (
-                f"Reduce the description to at most {desc_limit} characters, usually by splitting "
-                "independent work into coherent child tickets."
-            ),
-        },
+        finding=finding,
         coverage=cov,
     )
 
