@@ -106,3 +106,34 @@ def leak_failure_message(leaked: Iterable[str]) -> str:
         "identical here: a detached run shares this checkout with whatever "
         "else is touching it (an external commit, build, or editor)."
     )
+
+
+def head_move_failure_message(before: str, after: str) -> str:
+    """The HEAD-move guard's failure text for a move from *before* to *after*.
+
+    The guard's only evidence is two ``git rev-parse HEAD`` samples taken around
+    the test, and a sha inequality across that window carries no attribution: a
+    commit made by the test and one made by another process sharing this checkout
+    are the same kind of object, by the same user, in the same repo. So the text
+    names both causes instead of asserting the one it cannot know.
+
+    That is also why the recovery command is fenced by a warning placed *before*
+    it: ``git reset --hard`` is right for whoever owns the commit and destructive
+    for everyone else, and a caveat read after the command is read too late.
+    """
+    return (
+        f"The repo HEAD moved during this test ({before[:10]} -> {after[:10]}). "
+        "The guard only samples HEAD around each test, so it cannot tell which "
+        "process committed.\n"
+        "If this test committed, isolate its git writes — pin "
+        "GIT_CEILING_DIRECTORIES to the tmp root (see tests/scripts/graph/"
+        "conftest.py::_isolate_git_from_enclosing_repo) or init the tracker as "
+        "its own git repo.\n"
+        "If it did not, a concurrent commit from outside the suite looks "
+        "identical here: a detached run shares this checkout with whatever else "
+        "is committing, rebasing, or switching branches in it.\n"
+        "So do not run the recovery below until you know the moved HEAD is "
+        "yours — it discards another process's commit and every "
+        "uncommitted change in this worktree.\n"
+        f"Once you own the commit(s), undo them with: git reset --hard {before[:10]}"
+    )

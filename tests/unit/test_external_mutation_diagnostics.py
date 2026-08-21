@@ -24,7 +24,7 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import child_failure_detail  # noqa: E402
-from _isolation import leak_failure_message  # noqa: E402
+from _isolation import head_move_failure_message, leak_failure_message  # noqa: E402
 
 
 def test_leak_message_does_not_assert_the_test_created_the_entry():
@@ -42,6 +42,49 @@ def test_leak_message_does_not_assert_the_test_created_the_entry():
     assert "tmp_path" in message
     # But it must NOT assert the test did it, and it MUST offer the other cause.
     assert "Test leaked new entries into REPO_ROOT" not in message
+    lowered = message.lower()
+    assert "concurrent" in lowered
+    assert "outside" in lowered or "external" in lowered
+
+
+_BEFORE = "cc3fba5cfb2222222222222222222222222222222"
+_AFTER = "018dbb14621111111111111111111111111111111"
+
+
+def test_head_move_message_does_not_prescribe_an_unconditional_reset():
+    """The remedy must not be a bare instruction to destroy uncommitted work.
+
+    Observed firing against a disposable worktree under bug `hot-guessable-ungulate`:
+    the guard ended
+    with `Undo the stray commit(s) with: git reset --hard <sha>` with no condition
+    attached. This checkout hosts ~100 worktrees and several concurrent sessions,
+    so a reader whose HEAD moved because ANOTHER process committed follows that
+    literally and discards a commit that was never theirs, plus every uncommitted
+    change in the worktree.
+    """
+    message = head_move_failure_message(_BEFORE, _AFTER)
+
+    reset = f"git reset --hard {_BEFORE[:10]}"
+    assert reset in message, "the remedy is still worth offering to whoever owns the commit"
+    # ...but only after the message has told the reader not to run it blind.
+    lowered = message.lower()
+    warning_at = lowered.find("do not")
+    assert warning_at != -1, "no explicit do-not-reset warning"
+    assert warning_at < lowered.find(reset.lower()), (
+        "the reset is prescribed before the reader is warned off it"
+    )
+
+
+def test_head_move_message_does_not_assert_the_test_committed():
+    """A sha inequality across a wall-clock window carries no attribution signal,
+    so `it committed into the rebar checkout` is a claim the guard cannot make.
+    `docs/local-dev-env.md` already documents this guard firing on a concurrent
+    commit, rebase or branch switch by another writer."""
+    message = head_move_failure_message(_BEFORE, _AFTER)
+
+    # It must still tell an actually-leaking test how to isolate itself.
+    assert "GIT_CEILING_DIRECTORIES" in message
+    assert "committed into the rebar checkout instead of" not in message
     lowered = message.lower()
     assert "concurrent" in lowered
     assert "outside" in lowered or "external" in lowered
