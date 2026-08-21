@@ -37,9 +37,37 @@ def _drainer_id() -> str:
     return f"drainer-{os.getpid()}-{_DRAINER_SEQ}"
 
 
+def _canonical_tracker(tracker: str) -> str:
+    """*tracker* resolved through symlinks, degrading to the raw value.
+
+    Delegates to :func:`rebar._store.lock.canonical_tracker` — the same resolution the store
+    write lock uses — rather than re-deriving one, so a caller reaching the store through a
+    symlink lands on the same paths as a caller holding its real path. Lazily imported and
+    never-raising, matching this module's posture: the drain rides the tail of ordinary
+    writes, where a background concern must not fail the operation that triggered it (the
+    same reasoning as :func:`rebar._proc.detached_child_cwd`)."""
+    try:
+        from rebar._store import lock as _lock
+
+        return _lock.canonical_tracker(tracker)
+    except OSError:
+        return tracker
+
+
 def _rebar_dir(tracker: str) -> str:
-    # The tracker is .../.tickets-tracker; the repo's .rebar dir is its sibling under the repo.
-    return os.path.join(os.path.dirname(tracker), ".rebar")
+    """The repo's ``.rebar/`` — the sibling of the CANONICAL ``.tickets-tracker`` dir.
+
+    Resolving *tracker* first is load-bearing, not cosmetic (bug ``da68-fc7c-068c-4c53`` /
+    ``nuclear-calm-heron``). A ``make worktree`` worktree's ``.tickets-tracker`` is a SYMLINK
+    to the canonical store while its ``.rebar`` is a real per-worktree directory, so a bare
+    ``dirname`` stops at the CALLER and keys the drain lock and the drain log on the view
+    instead of the store. That defeated both: two agents in two worktrees held two DIFFERENT
+    lock files while draining the SAME queue, and the log was written into — and deleted with
+    — an ephemeral worktree. Doing the resolution HERE, inside the derivation, is what makes
+    the invariant hold for every path helper at once and keeps a caller from defeating it
+    (the shape ``_commands.compact_trigger._rebar_dir`` landed for the same class, bug
+    ``93a9-66cf-e681-4f49``)."""
+    return os.path.join(os.path.dirname(_canonical_tracker(tracker)), ".rebar")
 
 
 def _drain_lock_path(tracker: str) -> str:
@@ -413,7 +441,13 @@ def _spawn_detached_drain(tracker: str) -> None:
                 "-c",
                 "import sys; sys.path.insert(0, sys.argv[2]); "
                 "from rebar.llm import enrich_drain; enrich_drain.drain(sys.argv[1])",
-                tracker,
+                # The canonical store tracker, for the same reason the cwd below is resolved:
+                # the child outlives the worktree that spawned it, and every path it touches —
+                # the store it lists, the queue events it appends, the digests it emits — is
+                # derived from this argument. Handing over a worktree's SYMLINK leaves the
+                # running child pointed at a path that dies with the worktree
+                # (bug da68-fc7c-068c-4c53: "Error: cannot list '<retired>/.tickets-tracker'").
+                _canonical_tracker(tracker),
                 src,
             ],
             # Anchor the child to the canonical store root, NOT this command's cwd — an

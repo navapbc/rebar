@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import types
 from pathlib import Path
 
 import pytest
@@ -744,3 +745,117 @@ def test_transient_failure_keeps_the_retry_posture(repo: str) -> None:
 
     assert Q.reduce_ticket(tid, _tracker(repo), now_ns=end)["done"] is False
     assert tid in Q.pending_enrichment(end, _tracker(repo))
+
+
+# ── one store, one drain lock (bug nuclear-calm-heron da68-fc7c-068c-4c53) ───────────────────
+#
+# `make worktree` provisions a worktree whose `.tickets-tracker` is a SYMLINK to the canonical
+# store while its `.rebar` is a real, per-worktree directory. The drain derived its lock and
+# its log from `os.path.dirname(tracker)` without resolving that symlink, so two agents in two
+# worktrees held two DIFFERENT lock files while draining the SAME queue — the lock's whole
+# purpose defeated exactly when it matters — and the drain log was written into, and deleted
+# with, the ephemeral worktree. The store's own contract is explicit:
+# `_store.lock.canonical_tracker` exists "so symlinked and real-path callers contend on the
+# SAME lock file". These tests pin the drain to that contract, the same way
+# tests/unit/test_compact_trigger.py pins the compaction trigger (the landed half of this
+# class fix, bug intangible-ladyish-vicuna 93a9-66cf-e681-4f49).
+
+
+def _canonical_store(tmp_path: Path) -> str:
+    """A canonical store: ``<root>/.tickets-tracker``. Returns the tracker path."""
+    tracker = Path(os.path.realpath(tmp_path)) / "canonical-repo" / ".tickets-tracker"
+    tracker.mkdir(parents=True)
+    return str(tracker)
+
+
+def _worktree_tracker(tmp_path: Path, tracker: str, name: str) -> str:
+    """A worktree view of *tracker*: a real ``.rebar`` beside a ``.tickets-tracker`` SYMLINK
+    into the canonical store, exactly as ``make worktree`` provisions one."""
+    wt = Path(os.path.realpath(tmp_path)) / name
+    (wt / ".rebar").mkdir(parents=True)
+    (wt / ".tickets-tracker").symlink_to(tracker)
+    return str(wt / ".tickets-tracker")
+
+
+def test_two_worktrees_of_one_store_derive_one_set_of_drain_paths(tmp_path: Path) -> None:
+    """Independence from the caller proved by INVARIANCE: two worktree views of one store must
+    derive the SAME lock and log paths, and they must be the canonical store's rather than
+    either worktree's. A sidecar keyed on the caller is as short-lived as the caller."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    for derive in (D._drain_lock_path, D._drain_log_path):
+        assert derive(a) == derive(b), f"{derive.__name__} is keyed on the worktree"
+        assert derive(a) == derive(canonical), f"{derive.__name__} is not on the canonical store"
+
+
+def test_two_worktrees_of_one_store_contend_on_the_same_drain_lock(tmp_path: Path) -> None:
+    """The lock's stated intent — two drain PROCESSES must not overlap on one store — must
+    hold ACROSS worktrees. Path equality above is necessary but not sufficient: this drives
+    the real acquire, so a fix that renamed a path without restoring exclusion still fails."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    held = D._acquire_advisory_lock(a)
+    assert held is not None, "precondition: the first drainer must acquire"
+    try:
+        assert D._acquire_advisory_lock(b) is None, (
+            "a second drainer on the SAME store acquired the drain lock concurrently"
+        )
+    finally:
+        D._release_advisory_lock(a, held)
+
+
+def test_the_drain_lock_is_never_written_inside_an_ephemeral_worktree(tmp_path: Path) -> None:
+    """The durability half: the lock must land on the store, so it survives the worktree.
+
+    Negative control for the two tests above — exclusion could in principle be restored by
+    keying every worktree on the FIRST one, which would still be deleted with that worktree."""
+    canonical = _canonical_store(tmp_path)
+    wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    canonical_rebar = os.path.join(os.path.dirname(canonical), ".rebar")
+
+    fd = D._acquire_advisory_lock(wt)
+    assert fd is not None
+    try:
+        assert os.listdir(os.path.join(os.path.dirname(wt), ".rebar")) == [], (
+            "the drain wrote its lock into the worktree that spawned it"
+        )
+        assert os.listdir(canonical_rebar) == ["enrich-drain.lock"], (
+            "the drain lock did not land in the canonical store's .rebar"
+        )
+    finally:
+        D._release_advisory_lock(wt, fd)
+
+
+def test_detached_drain_child_is_handed_the_canonical_tracker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child outlives the worktree that spawned it, and its ``argv[1]`` tracker is every
+    path it will ever touch — a worktree SYMLINK there dies with the worktree
+    (`Error: cannot list '<retired worktree>/.tickets-tracker'`). Its ``cwd`` was already
+    resolved for exactly this reason (bug 3198-438c-72a5-470f); this pins the argv too."""
+    canonical = _canonical_store(tmp_path)
+    wt = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    spawned: list[tuple[list[str], dict]] = []
+
+    def _fake_popen(argv: list[str], **kwargs: object) -> object:
+        spawned.append((argv, kwargs))
+        return object()
+
+    # Patch the module's OWN `subprocess` reference, never the real module: a global patch
+    # outlives this test's body and breaks `subprocess.run` in fixture teardown.
+    monkeypatch.setattr(
+        D,
+        "subprocess",
+        types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
+    )
+
+    D._spawn_detached_drain(wt)
+
+    assert len(spawned) == 1
+    argv, kwargs = spawned[0]
+    assert argv[3] == canonical, "the detached child was handed an ephemeral worktree tracker"
+    assert kwargs["cwd"] == os.path.dirname(canonical)

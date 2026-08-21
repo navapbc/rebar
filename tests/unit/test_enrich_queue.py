@@ -505,3 +505,64 @@ def test_bool_typed_marker_fields_are_rejected(repo: str) -> None:
         with open(marker, "w", encoding="utf-8") as fh:
             json.dump({"written_ns": now, **payload}, fh)
         assert Q.pending_enrichment(now + 1, tracker) == [tid]
+
+
+# ── one store, one gate marker (bug nuclear-calm-heron da68-fc7c-068c-4c53) ──────────────────
+#
+# Same class as the drain lock and the compaction sidecars (bug 93a9-66cf-e681-4f49): the
+# marker was derived from `os.path.dirname(tracker)` without resolving the `.tickets-tracker`
+# SYMLINK a `make worktree` worktree holds, so each worktree kept its own marker for the ONE
+# shared queue. The marker only ever says "nothing is pending", so a worktree-local one can
+# assert quiet for a store another worktree just made noisy — and a mutation's invalidation
+# (`_clear_gate_marker`) unlinked the WRONG file, leaving the stale claim standing.
+
+
+def _canonical_store(tmp_path: Path) -> str:
+    """A canonical store: ``<root>/.tickets-tracker``. Returns the tracker path."""
+    tracker = Path(os.path.realpath(tmp_path)) / "canonical-repo" / ".tickets-tracker"
+    tracker.mkdir(parents=True)
+    return str(tracker)
+
+
+def _worktree_tracker(tmp_path: Path, tracker: str, name: str) -> str:
+    """A worktree view of *tracker*: a real ``.rebar`` beside a ``.tickets-tracker`` SYMLINK
+    into the canonical store, exactly as ``make worktree`` provisions one."""
+    wt = Path(os.path.realpath(tmp_path)) / name
+    (wt / ".rebar").mkdir(parents=True)
+    (wt / ".tickets-tracker").symlink_to(tracker)
+    return str(wt / ".tickets-tracker")
+
+
+def test_two_worktrees_of_one_store_share_one_gate_marker(tmp_path: Path) -> None:
+    """Path invariance: two worktree views of one store derive the SAME marker path, and it is
+    the canonical store's — so the marker describes the store, not the caller's view."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    assert Q._gate_marker_path(a) == Q._gate_marker_path(b), (
+        "the gate marker is keyed on the worktree"
+    )
+    assert Q._gate_marker_path(a) == Q._gate_marker_path(canonical), (
+        "the gate marker is not on the canonical store"
+    )
+
+
+def test_a_mutation_in_one_worktree_invalidates_the_marker_another_wrote(
+    tmp_path: Path,
+) -> None:
+    """The behavioural consequence the path test cannot see: a queue mutation's invalidation
+    must hit the marker regardless of which worktree wrote it, or a stale "nothing pending"
+    claim outlives the write that falsified it."""
+    canonical = _canonical_store(tmp_path)
+    a = _worktree_tracker(tmp_path, canonical, "worktree-a")
+    b = _worktree_tracker(tmp_path, canonical, "worktree-b")
+
+    Q._write_gate_marker(a, 1_000, None)
+    assert Q._read_gate_marker(b) is not None, "precondition: one marker, visible to both"
+
+    Q._clear_gate_marker(b)
+
+    assert Q._read_gate_marker(a) is None, (
+        "a mutation from one worktree left another worktree's stale marker standing"
+    )
