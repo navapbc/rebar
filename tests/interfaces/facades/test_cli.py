@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _child_diag import assert_child_was_not_signal_killed
 
 import rebar
 
@@ -148,6 +149,11 @@ def test_reconcile_intercepted_dry_run_default(
     test below, so this routing check never touches the network."""
     offline_acli_env["REBAR_ROOT"] = str(rebar_repo)
     cp = _cli("reconcile", cwd=str(rebar_repo), env=offline_acli_env)
+    # The routing verdict rests on a string being ABSENT, so it fails OPEN without this: a
+    # signal-killed CLI writes nothing, and the unknown-subcommand text is trivially absent.
+    # Only a signal death is rejected — the healthy offline pass legitimately exits non-zero,
+    # and this test deliberately checks ROUTING ONLY, so no exit code is pinned.
+    assert_child_was_not_signal_killed(cp, what="the reconcile routing pass")
     assert "unknown subcommand 'reconcile'" not in (cp.stdout + cp.stderr).lower()
 
 

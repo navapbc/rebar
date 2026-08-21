@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _child_diag import assert_child_was_not_signal_killed
 from jsonschema import Draft7Validator
 
 pytestmark = pytest.mark.unit
@@ -225,6 +226,10 @@ def test_redispatch_keeps_every_other_failure_fatal(tmp_path: Path) -> None:
         tmp_path, 'echo "HTTP 403: Resource not accessible by integration" >&2\nexit 1'
     )
 
+    # No completion guard here, deliberately: unlike its sibling below, this oracle also
+    # asserts a string is PRESENT (`"::error::" in combined`). A signal-killed child writes
+    # nothing, so that assertion cannot pass on an empty capture — the fail-open gap is
+    # already closed. The asymmetry is intentional, not an oversight.
     assert completed.returncode != 0
     combined = completed.stdout + completed.stderr
     assert "::error::" in combined
@@ -240,6 +245,10 @@ def test_redispatch_requires_both_the_422_and_the_disabled_workflow_signal(
     )
 
     assert completed.returncode != 0
+    # `returncode != 0` alone is satisfied by a SIGNAL death (CPython reports -9), and a
+    # killed child writes nothing, so the absent-`::warning::` verdict below fails OPEN.
+    # This guard restores it without loosening the non-zero requirement above.
+    assert_child_was_not_signal_killed(completed, what="the re-dispatch step")
     assert "::warning::" not in completed.stdout + completed.stderr
 
 

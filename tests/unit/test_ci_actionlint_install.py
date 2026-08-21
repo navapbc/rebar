@@ -20,6 +20,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from _child_diag import assert_child_was_not_signal_killed
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -57,6 +58,11 @@ def test_actionlint_install_fails_fast_on_download_failure(tmp_path: Path) -> No
         text=True,
         timeout=180,
     )
+    # Every assertion below is satisfied by a child that never ran: `returncode != 0` is
+    # true of a SIGNAL death (CPython reports -9), no binary gets installed, and the
+    # false-success line is trivially absent from an empty stdout. Guard first, so the
+    # oracle cannot fail OPEN. The non-zero requirement below is kept, not loosened.
+    assert_child_was_not_signal_killed(proc, what="the actionlint-bin recipe")
     assert proc.returncode != 0, (
         "actionlint-bin masked a failed download as success (exit 0) — it must fail-fast.\n"
         f"--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"

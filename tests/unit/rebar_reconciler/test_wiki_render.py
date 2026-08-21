@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from _child_diag import assert_child_was_not_signal_killed
 
 from rebar_reconciler.adapters.jira_family import wiki_render
 from rebar_reconciler.adapters.jira_family.wiki_render import (
@@ -99,6 +100,9 @@ def test_pandoc_emits_no_color_form() -> None:
             capture_output=True,
             text=True,
         )
+        # Absent-string verdict => fail-OPEN without this: a signal-killed pandoc is torn
+        # down before it writes, so `"{color:" not in ""` is trivially True.
+        assert_child_was_not_signal_killed(completed, what="pandoc")
         assert "{color:" not in completed.stdout
 
 

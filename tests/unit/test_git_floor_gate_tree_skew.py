@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _child_diag import assert_child_was_not_signal_killed
 from _subprocess_env import subprocess_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -124,6 +125,9 @@ def test_absent_floor_file_explains_why_it_skipped(tree_without_floor_file: Path
 def test_absent_floor_file_emits_no_workflow_error(tree_without_floor_file: Path) -> None:
     """A skip must not annotate the run as an error — that is what misled change 1416."""
     result = _run_gate(tree_without_floor_file)
+    # The verdict below rests on a string being ABSENT, so it fails OPEN without this:
+    # a signal-killed gate writes nothing at all, and `"::error::" not in ""` is True.
+    assert_child_was_not_signal_killed(result, what="the Git-floor gate")
     assert "::error::" not in (result.stdout + result.stderr), (
         "the gate still emits a GitHub `::error::` annotation for an absent floor file; "
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
