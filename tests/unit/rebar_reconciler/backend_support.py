@@ -187,9 +187,6 @@ class _FakeSanitizer:
     def sanitize_description(self, description: str) -> str:
         return description[: self._MAX]
 
-    def sanitize_comment(self, body: str) -> str:
-        return body[: self._MAX]
-
 
 class _FakeIdentity:
     _PREFIX = "fake-id:"

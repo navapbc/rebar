@@ -316,10 +316,13 @@ def fit_comment_as_sent(text: str, fit: Callable[[str], str]) -> str:
     load-bearing — a shifted in-limit key would make every already-mirrored
     comment look new and re-post it.
 
-    Only Jira Cloud composes this. Data Center deliberately keeps its comment
-    ceiling distinct from its description fitter (bug 049e), so its sanitizer is
-    left alone and the shared :func:`_diff_comments` keeps calling
-    ``sanitizer.fit_comment`` rather than any codec directly.
+    Both Jira deployments compose this. Cloud measures with
+    ``AdfCodec.fit_outbound`` (serialized-ADF budget); Data Center measures with
+    its own plain-character comment fit at the deployment-resolved ceiling, kept
+    deliberately distinct from its description fitter (bug 049e). Each backend's
+    ``fit_comment`` passes its OWN vendor fitter here, so the shared
+    :func:`_diff_comments` keeps calling ``sanitizer.fit_comment`` rather than any
+    codec directly.
     """
     decoration = _decorate_outbound_comment("")
     landed = fit_preserving_marker(_decorate_outbound_comment(text), fit)

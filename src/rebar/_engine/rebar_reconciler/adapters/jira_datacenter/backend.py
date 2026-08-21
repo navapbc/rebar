@@ -255,28 +255,50 @@ class _DCSanitizer:
             self._comment_max_chars = resolve_comment_max_chars()
         return self._comment_max_chars
 
+    def _fit_raw(self, text: str) -> str:
+        """The comment path's OWN vendor fit — a plain right-truncation at the
+        deployment-resolved ceiling. DELIBERATELY NOT ``self._codec.fit_outbound``
+        (bug 049e): that is the DESCRIPTION fitter. The two agreed today only
+        because DC's description fit happens to be a plain character truncation —
+        Cloud shows why the coupling is a trap, since its description fitter
+        measures ADF-SERIALIZED size and would be catastrophically wrong for a
+        comment. ``_truncate_dc_comment_body`` is the comment path's own rule, so a
+        future format-aware change to description fitting cannot silently retarget
+        comments. Convergence over this ceiling is pinned by ``tests/unit/
+        rebar_reconciler/mutate/test_dc_outbound_comment_length_convergence.py``."""
+        return _truncate_dc_comment_body(text, self.comment_max_chars())
+
     def sanitize_comment(self, body: str) -> str:
-        # DELIBERATELY NOT ``self._codec.fit_outbound`` (bug 049e): that is the
-        # DESCRIPTION fitter. The two agreed today only because DC's description fit
-        # happens to be a plain character truncation — Cloud shows why the coupling
-        # is a trap, since its description fitter measures ADF-SERIALIZED size and
-        # would be catastrophically wrong for a comment. ``_truncate_dc_comment_body``
-        # is the comment path's own rule, so a future format-aware change to
-        # description fitting cannot silently retarget comments. Convergence over this
-        # ceiling is pinned by ``tests/unit/rebar_reconciler/mutate/
-        # test_dc_outbound_comment_length_convergence.py``.
-        max_chars = self.comment_max_chars()
+        # The SEND-path sanitizer (bug b9b4-f460-2d54-4872: now actually wired, via
+        # ``JiraDataCenterBackend.add_comment``). The fit runs through the shared
+        # ``fit_preserving_marker`` — the same marker-preserving composition Cloud's
+        # send path uses (bug 5931) — so an over-length decorated body is truncated
+        # in its CONTENT and re-decorated, never cutting RECONCILER_MARKER off the
+        # tail. A marker-less body goes straight to ``_fit_raw``, byte-identical to
+        # the pre-wiring behaviour. The operator truncation warning stays in the
+        # shared ``jira_family.sanitize_comment``.
+        from rebar_reconciler.outbound_comments import fit_preserving_marker
+
         return _shared_sanitize_comment(
             body,
-            truncate=lambda text: _truncate_dc_comment_body(text, max_chars),
-            max_chars=max_chars,
+            truncate=lambda text: fit_preserving_marker(text, self._fit_raw),
+            max_chars=self.comment_max_chars(),
         )
 
     def fit_comment(self, body: str) -> str:
-        # The differ-side comparison transform. MUST stay byte-identical to
-        # ``sanitize_comment``'s truncation (same ceiling, same rule) or the outbound
-        # comment loop never converges — hence the shared ``_truncate_dc_comment_body``.
-        return _truncate_dc_comment_body(body, self.comment_max_chars())
+        """The differ-side comparison transform: exactly the marker-free body the
+        send path LANDS (bug b9b4-f460-2d54-4872, the e339 convergence class).
+
+        ``_diff_comments`` builds its dedup key from this and compares it against
+        the marker-stripped body read back from Jira, so it must reproduce the
+        send composition — decorate, :func:`fit_preserving_marker` over
+        :meth:`_fit_raw`, strip the decoration — or an over-length comment never
+        matches and re-posts every pass. ``fit_comment_as_sent`` runs precisely
+        that composition; a body already within the limit returns byte-identical.
+        """
+        from rebar_reconciler.outbound_comments import fit_comment_as_sent
+
+        return fit_comment_as_sent(body, self._fit_raw)
 
 
 def _search_users_by_username(client: Any, username: str) -> tuple[str | None, bool, bool]:
@@ -491,7 +513,13 @@ class JiraDataCenterBackend:
 
     # --- capability: SupportsComments (delegates to transport) ---
     def add_comment(self, remote_id: str, body: str) -> dict[str, Any]:
-        return self.transport.add_comment(remote_id, body)
+        # Bug b9b4-f460-2d54-4872: fit the body to the deployment-resolved ceiling
+        # BEFORE the transport — the DC transport hands it straight to the jira
+        # client, and an over-length body is rejected without landing, re-emitting
+        # every pass (bug 6afc's loop). ``sanitize_comment`` fits through
+        # ``fit_preserving_marker`` so the RECONCILER_MARKER survives the cut, and
+        # ``fit_comment`` (the differ's dedup key) reproduces this exact result.
+        return self.transport.add_comment(remote_id, self.sanitizer.sanitize_comment(body))
 
     def get_comment_map(self, project_key: str) -> dict[str, Any]:
         return self.transport.get_comment_map(project_key)

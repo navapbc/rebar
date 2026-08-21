@@ -174,7 +174,12 @@ def test_dc_comment_fit_targets_the_documented_instance_ceiling(
     assert sanitizer.fit_comment("hello") == "hello"  # under-limit: unchanged
 
     fitted = sanitizer.fit_comment(_OVERSIZE_BODY)
-    assert len(fitted) == _JIRA_TEXT_FIELD_CHARACTER_LIMIT
+    # The dedup key is the MARKER-STRIPPED body the SEND path lands (bug
+    # b9b4-f460-2d54-4872): the send fits the DECORATED body to the ceiling
+    # through ``fit_preserving_marker``, so the key is under the ceiling by
+    # exactly the decoration the send re-appends.
+    decoration = outbound_comments._decorate_outbound_comment("")
+    assert len(fitted) + len(decoration) == _JIRA_TEXT_FIELD_CHARACTER_LIMIT
     assert fitted.endswith(_WIKI_TRUNCATION_SUFFIX)
     # Idempotent — the fixed point convergence depends on.
     assert sanitizer.fit_comment(fitted) == fitted

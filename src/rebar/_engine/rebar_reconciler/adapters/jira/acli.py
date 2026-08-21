@@ -65,7 +65,6 @@ from rebar_reconciler.adapters.jira.adf import text_to_adf as _text_to_adf  # ca
 # so ``acli.<name>`` keeps resolving for callers and the characterization suites
 # (point-of-use read access).
 from rebar_reconciler.adapters.jira.jira_fields import (
-    _sanitize_comment,
     _sanitize_description,
 )
 from rebar_reconciler.adapters.jira_family import JIRA_LABEL_MAX_CHARS as _JIRA_LABEL_MAX_CHARS
@@ -105,7 +104,6 @@ __all__ = [
     "_create_issue_from_json",
     "_create_issue_no_json",
     "_run_acli",
-    "_sanitize_comment",
     "_sanitize_label",
     "_verify_created_issue",
 ]

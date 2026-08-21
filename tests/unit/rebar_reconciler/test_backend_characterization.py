@@ -96,12 +96,6 @@ def test_sanitize_summary_truncates_to_254_with_suffix():
     assert out.startswith("x" * 100)
 
 
-def test_sanitize_comment_truncates_to_32767_with_marker():
-    out = _backend().sanitizer.sanitize_comment("c" * 40000)
-    assert len(out) == 32767
-    assert out.endswith(" … [truncated by reconciler]")
-
-
 def test_sanitize_label_strips_and_returns_clean_token():
     assert _backend().sanitizer.sanitize_label("  rebar-id:foo  ") == "rebar-id:foo"
 
@@ -109,7 +103,6 @@ def test_sanitize_label_strips_and_returns_clean_token():
 def test_sanitize_short_values_pass_through_unchanged():
     b = _backend()
     assert b.sanitizer.sanitize_summary("Fine") == "Fine"
-    assert b.sanitizer.sanitize_comment("hello") == "hello"
 
 
 # ---------------------------------------------------------------------------
@@ -233,16 +226,11 @@ def test_sanitize_label_raises_on_every_rejection_reason():
             b.sanitizer.sanitize_label(bad)
 
 
-def test_sanitize_comment_at_inclusive_limit_is_untruncated():
-    body = "c" * 32767
-    out = _backend().sanitizer.sanitize_comment(body)
-    assert out == body
-
-
-def test_sanitize_comment_one_over_limit_truncates_with_marker():
-    out = _backend().sanitizer.sanitize_comment("c" * 32768)
-    assert len(out) == 32767
-    assert out.endswith(" … [truncated by reconciler]")
+# (The ``sanitize_comment`` golden pins that sat here were removed with the dead
+# code they characterized: Cloud's caller-less ``_JiraSanitizer.sanitize_comment``
+# was deleted by bug b9b4-f460-2d54-4872 — the REAL Cloud send fit lives in
+# ``acli_cli_ops.add_comment`` and is pinned by
+# ``diffing/test_comment_dedup_key_matches_send_fit.py``.)
 
 
 def test_sanitize_description_short_value_passes_through():

@@ -500,8 +500,8 @@ def add_comment(
     same way the description path does, routed through the ``RichTextCodec``
     contract. Order is load-bearing and mirrors ``AdfCodec.fit_outbound``:
     FIT THE TEXT FIRST (``fit_outbound`` measures the serialized ADF against
-    Jira's limit), THEN ``json.dumps(to_wire(fitted))``. The plaintext
-    ``_sanitize_comment`` guard is NOT run on the serialized ADF — its byte
+    Jira's limit), THEN ``json.dumps(to_wire(fitted))``. No plaintext
+    character-cap guard is run on the serialized ADF — its byte
     length is far longer than the text it measures, so it would slice the JSON
     mid-structure into a payload ACLI rejects. ``--body`` accepts ADF (confirmed
     by ``acli jira workitem comment create --help``: "plain text or Atlassian

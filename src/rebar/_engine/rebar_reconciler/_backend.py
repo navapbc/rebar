@@ -468,15 +468,17 @@ class FieldSanitizer(Protocol):
 
     def sanitize_description(self, description: str) -> str: ...
 
-    def sanitize_comment(self, body: str) -> str: ...
-
     def fit_comment(self, body: str) -> str:
-        """Fit a comment body to the backend's hard length limit, WITHOUT the
-        send-side warning ``sanitize_comment`` logs (ticket 21ca).
+        """Fit a comment body to the backend's hard length limit, silently.
 
-        A pure fit-to-limit used by the comment-diff comparison (Jira:
-        ``comment_limits.truncate_comment_body``) — distinct from
-        ``sanitize_comment``, which is the send-path sanitizer.
+        A pure fit-to-limit used by the comment-diff comparison: it must return
+        exactly the marker-free body the backend's SEND path lands (see
+        ``outbound_comments.fit_comment_as_sent``), or an over-length comment can
+        never match on the next pass and re-posts forever. The port deliberately
+        carries no ``sanitize_comment`` member: the warning-bearing send-side
+        sanitizer is a backend-internal concern (DC wires its own inside
+        ``add_comment``; Cloud fits inside ``acli_cli_ops.add_comment``), and a
+        port member nothing calls is a false assurance (bug b9b4-f460-2d54-4872).
         """
         ...
 

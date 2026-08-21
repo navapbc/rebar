@@ -19,7 +19,7 @@ comment re-posts on every pass. That is the shape of failure that put 836
 unmarked duplicates into live Jira.
 
 Data Center already has the shape this file demands of Cloud:
-``test_dc_backend_characterization.py::test_dc_fit_comment_is_the_wiki_codec_fit``
+``test_dc_backend_characterization.py::test_dc_fit_comment_is_the_send_path_fit``
 and ``test_dc_comment_ceiling_049e.py::test_fit_comment_converges_with_sanitize_comment``
 both pin ``fit_comment`` byte-identical to what DC's send path lands. Cloud has no
 such pin — this file is it.
