@@ -65,23 +65,19 @@ def _cfg(repo: Path, model: str):
 
 
 @_skip
-def test_pydantic_review_code_opus(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pydantic_review_code_opus(rebar_repo: Path) -> None:
     """The primary review op via pydantic_ai on OPUS — validates opus parameter handling
     (no `temperature` sent, which would 400) on the new runner.
 
     Retargeted from the removed public ``rebar.llm.review_ticket`` (bug 751a): that
     findings-mode reviewer no longer exists, so the opus param-handling intent is preserved
     through the surviving findings-returning op, ``review_code``, forced onto the frontier
-    (opus) model. ``review_code`` is the OFF-BY-DEFAULT four-pass gate (epic b744): enabling it
-    makes this exercise the REAL pydantic_ai path (not the inert ``code-review-disabled``
-    result), so a live opus ``temperature`` 400 would surface here. The finalized verdict
+    (opus) model. ``review_code`` always runs the four-pass gate (epic b744 + bug
+    5b32-37c4-f99a-4315) on the REAL pydantic_ai path, so a live opus ``temperature`` 400
+    would surface here. The finalized verdict
     stamps the CONFIGURED model/runner (``cfg.model``/runner name), so the frontier-model and
     ``pydantic_ai`` provenance assertions still hold."""
     import rebar.llm as llm
-
-    # review_code is an OFF-BY-DEFAULT four-pass gate (epic b744): enable it so this LIVE test
-    # exercises the real gated pydantic_ai path rather than the inert empty result.
-    monkeypatch.setenv("REBAR_VERIFY_ENABLE_CODE_REVIEW", "1")
 
     diff = "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+API_KEY = 'hardcoded-secret'\n"
     (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
@@ -99,14 +95,11 @@ def test_pydantic_review_code_opus(rebar_repo: Path, monkeypatch: pytest.MonkeyP
 
 
 @_skip
-def test_pydantic_review_code(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_pydantic_review_code(rebar_repo: Path) -> None:
     import rebar.llm as llm
 
-    # review_code is an OFF-BY-DEFAULT four-pass gate (epic b744): disabled it returns an
-    # inert empty result (runner="code-review-disabled"). Enable the capability so this
-    # LIVE test exercises the real gated path on the supplied diff.
-    monkeypatch.setenv("REBAR_VERIFY_ENABLE_CODE_REVIEW", "1")
-
+    # review_code always runs the four-pass gate (epic b744 + bug 5b32-37c4-f99a-4315), so
+    # this LIVE test exercises the real gated path on the supplied diff with no config key.
     diff = (
         "--- a/auth.py\n+++ b/auth.py\n@@ -0,0 +1,2 @@\n+def check(t):\n+    return True  # TODO\n"
     )
@@ -120,9 +113,8 @@ def test_pydantic_review_code(rebar_repo: Path, monkeypatch: pytest.MonkeyPatch)
         config=_cfg(rebar_repo, _class_model("standard")),
     )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
-    # The enabled four-pass gate runs via the pydantic_ai runner and reports it as the
-    # provenance (NOT the inert "code-review-disabled" of the default-off path) — this is
-    # the live pydantic_ai-runner validation this cutover test exists for.
+    # The four-pass gate runs via the pydantic_ai runner and reports it as the provenance —
+    # this is the live pydantic_ai-runner validation this cutover test exists for.
     assert result["runner"] == "pydantic_ai"
     assert isinstance(result["findings"], list)
 

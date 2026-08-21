@@ -119,11 +119,11 @@ rebar review-code --diff-file change.diff -o text          # or review a saved u
 Two setup notes, mirroring `review-plan`'s requirements:
 
 - **It needs the `[agents]` extra + a model API key** (`pip install 'nava-rebar[agents]'`,
-  `export ANTHROPIC_API_KEY=…`). Without them there's nothing to run the LLM passes with.
-- **The capability is off by default** — enable it for the run with
-  `REBAR_VERIFY_ENABLE_CODE_REVIEW=1` (or `verify.enable_code_review = true` in config).
-  Left off, `review-code` returns an inert empty result (zero findings, zero LLM calls) and
-  you'll see nothing — that's the disabled state, not a clean pass.
+  `export ANTHROPIC_API_KEY=…`). Without them there's nothing to run the LLM passes with —
+  the run degrades to an INDETERMINATE result (exit 2), never a silent empty pass.
+- **No config key gates it** — an explicit `rebar review-code` always runs the review, just
+  like `rebar review-plan`. (`verify.enable_code_review` only controls whether AUTOMATED
+  dispatch paths run the gate; it never blocks an explicit invocation.)
 
 The local run is a **preview, not a vote**: it never touches Gerrit and its findings are keyed
 to your session, so a local review never seeds the change's first bot review — the bot still

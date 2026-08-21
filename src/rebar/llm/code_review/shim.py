@@ -3,12 +3,15 @@
 This REPLACES the retired single-pass route: ``review_code`` keeps its name/signature and its
 ``review_result`` return shape, but its IMPLEMENTATION is now the four-pass gate.
 
-- **Disabled** (the default — ``verify.enable_code_review`` off): returns a valid EMPTY
-  ``review_result`` (zero findings + a 'capability disabled' note), ZERO LLM calls — INERT.
-- **Enabled:** assembles the diff context, runs ``produce_code_review_verdict`` (the gate), and
-  TRANSLATES the ``code_review_verdict`` → ``review_result`` (reusing ``finalize_findings`` so the
-  result is schema-valid). The raw verdict is attached under a ``verdict`` key for callers that
-  want the typed gate output (blocking/advisory/coaching/coverage).
+An explicit ``review_code`` call — the CLI ``rebar review-code``, the library function, the MCP
+tool — IS the caller's statement of intent, so it ALWAYS runs the gate (bug 5b32-37c4-f99a-4315):
+it assembles the diff context, runs ``produce_code_review_verdict`` with ``enabled=True``, and
+TRANSLATES the ``code_review_verdict`` → ``review_result`` (reusing ``finalize_findings`` so the
+result is schema-valid). The raw verdict is attached under a ``verdict`` key for callers that
+want the typed gate output (blocking/advisory/coaching/coverage). This mirrors review-plan's
+shape: a config key may control whether a gate is REQUIRED, never whether the operation is
+AVAILABLE — ``verify.enable_code_review`` keeps its enablement meaning only for dispatch-level
+callers of ``produce_code_review_verdict`` that leave ``enabled=None``.
 
 The CLI (``rebar review-code``) and MCP (``review_code``) call this unchanged.
 """
@@ -111,23 +114,6 @@ def _verdict_to_review_result(
     return result
 
 
-def _disabled_review_result() -> dict[str, Any]:
-    from rebar.llm import findings as _findings
-    from rebar.llm import gate_source as _gate_source
-
-    result = _findings.finalize_findings(
-        [],
-        runner="code-review-disabled",
-        model=None,
-        target={"kind": "code"},
-        reviewers=[],  # present (empty) so the review_result contract keys are stable
-        summary="code-review capability disabled (verify.enable_code_review is off).",
-    )
-    # INERT: no snapshot is resolved (zero work, zero LLM), so the provenance keys are present
-    # but UNPINNED — an inert result must never look signable.
-    return _gate_source.copy_provenance(None, result)
-
-
 def review_code(
     *,
     base: str = "HEAD~1",
@@ -144,10 +130,10 @@ def review_code(
     config: LLMConfig | None = None,
     runner: Any = None,
 ) -> dict[str, Any]:
-    """Review a code change and return a ``review_result``. Gate-backed (epic b744): when the
-    capability is disabled (default) returns an inert empty result; when enabled, runs the
-    four-pass gate and translates its verdict. (``reviewers`` is accepted for surface
-    compatibility but the gate selects its own overlays.)
+    """Review a code change and return a ``review_result``. Gate-backed (epic b744): always
+    runs the four-pass gate and translates its verdict — an explicit call is the caller's
+    intent, so no config key gates availability (bug 5b32-37c4-f99a-4315). (``reviewers`` is
+    accepted for surface compatibility but the gate selects its own overlays.)
 
     ``ref``/``source`` select the read-root like every other code-reading gate. The gate pins
     ONE ref (there is no base+head snapshot pair) and it is the REVIEWED commit, so an explicit
@@ -165,9 +151,6 @@ def review_code(
     gains cross-run memory — both are forwarded to the gate request."""
     from rebar.llm.workflow import gate_dispatch
 
-    if not gate_dispatch.code_review_enabled(repo_root):
-        return _disabled_review_result()
-
     cfg = config or LLMConfig.from_env(repo_root=repo_root)
     # An explicit `ref` selects the reviewed commit (see the docstring): the gate resolves its
     # ONE snapshot ref from `request.head`, so `ref` must land there or it is silently dropped.
@@ -175,6 +158,9 @@ def review_code(
     verdict = gate_dispatch.produce_code_review_verdict(
         gate_dispatch.CodeReviewRequest(
             cfg,
+            # An explicit invocation always runs: never defer to `verify.enable_code_review`
+            # (which keeps its enablement meaning for dispatch callers that leave enabled=None).
+            enabled=True,
             base=base,
             head=reviewed_head,
             source=source,

@@ -159,14 +159,24 @@ def test_review_code_result_carries_provenance_for_each_source(
         assert result["signable"] is False, "a local (dirty-checkout) read is never signable"
 
 
-def test_disabled_review_result_is_unpinned_and_never_signable(monkeypatch):
-    """The INERT disabled result resolves no snapshot, so it carries the provenance keys in
-    their UNPINNED form — present, but never advertising a signable attested run."""
+def test_config_off_explicit_call_still_dispatches_enabled_and_stays_unpinned(monkeypatch):
+    """`verify.enable_code_review` no longer gates the explicit surface (bug
+    5b32-37c4-f99a-4315): with the key off, the shim dispatches the gate with
+    ``enabled=True``. A stub verdict that pinned nothing must still yield honestly
+    UNPINNED provenance — never advertising a signable attested run."""
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
+    seen: dict[str, Any] = {}
+
+    def _capture(request):
+        seen["enabled"] = request.enabled
+        return {"verdict": "PASS", "blocking": [], "advisory": [], "coverage": {}}
+
+    monkeypatch.setattr(gate_dispatch, "produce_code_review_verdict", _capture)
     from rebar.llm.code_review import review_code
 
     result = review_code(diff_text=_DIFF, changed_files=["x.py"])
 
+    assert seen["enabled"] is True  # the explicit call never defers to the config key
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
     assert result["source"] is None
     assert result["verified_at_sha"] is None

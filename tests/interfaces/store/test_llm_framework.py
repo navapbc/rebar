@@ -512,17 +512,32 @@ def test_changed_from_diff_covers_deletes_and_renames() -> None:
     assert "/dev/null" not in files
 
 
-def test_review_code_disabled_by_default_returns_empty_review_result() -> None:
-    # epic b744 / WS4: the single-pass route is retired; review_code is the gate-backed shim,
-    # OFF by default → a valid EMPTY review_result + a 'disabled' note, never an error/stub.
-    # (The ENABLED gate path is covered in tests/unit/test_code_review_ws4.py.)
+def test_review_code_runs_gate_without_config_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Bug 5b32-37c4-f99a-4315: an explicit review_code() call always runs the four-pass gate —
+    # no config key gates its AVAILABILITY (mirroring review-plan, where config controls
+    # requiredness). With verify.enable_code_review unset (the default), the gate still runs.
     import rebar.llm as llm
+    from rebar.llm.code_review import detectors as _det
 
+    # Repo-less diff review → pin the in-place (local) gate read (see the rationale on the
+    # _local_gate_source fixture in tests/unit/test_code_review_ws4.py).
+    monkeypatch.setenv("REBAR_GATE_SOURCE", "local")
+    monkeypatch.delenv("REBAR_GATE_REF", raising=False)
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    structured = {
+        "findings": [],
+        "recommend_overlays": [],
+        "verifications": [],
+        "notes": [],
+        "summary": "x",
+    }
     diff = "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n+print('hi')\n"
-    result = llm.review_code(diff_text=diff, changed_files=["x.py"])
+    result = llm.review_code(
+        diff_text=diff, changed_files=["x.py"], runner=llm.FakeRunner(structured=structured)
+    )
     schemas.validator(schemas.REVIEW_RESULT).validate(result)
-    assert result["findings"] == []
-    assert "disabled" in result["summary"].lower()
+    assert result.get("runner") != "code-review-disabled"
+    assert "verdict" in result  # the typed gate verdict — the real gate ran
 
 
 # ── batch spec scan ───────────────────────────────────────────────────────────

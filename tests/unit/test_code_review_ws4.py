@@ -75,13 +75,24 @@ def test_produce_verdict_disabled_is_inert_and_makes_zero_llm_calls(monkeypatch)
     assert runner.calls == 0  # INERT: never ran the workflow / a model call
 
 
-def test_review_code_disabled_returns_empty_review_result(monkeypatch):
+def test_review_code_runs_gate_even_when_config_key_is_off(monkeypatch):
+    # Bug 5b32-37c4-f99a-4315: an explicit `review_code()` call (CLI `rebar review-code`,
+    # library, MCP) IS the operator's statement of intent — `verify.enable_code_review` must
+    # not gate its AVAILABILITY (mirroring review-plan, where config controls whether the
+    # gate is REQUIRED, never whether the operation is invocable). The config key keeps its
+    # enablement meaning only for dispatch-level callers that leave `enabled=None`
+    # (test_produce_verdict_disabled_is_inert_and_makes_zero_llm_calls above).
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: False)
+    from rebar.llm.code_review import detectors as _det
     from rebar.llm.code_review import review_code
 
-    r = review_code(diff_text=_DIFF, changed_files=["x.py"])
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+    runner = _CountingRunner(structured=_STRUCTURED)
+    r = review_code(diff_text=_DIFF, changed_files=["x.py"], runner=runner)
     schemas.validator(schemas.REVIEW_RESULT).validate(r)
-    assert r["findings"] == [] and "disabled" in r["summary"].lower()
+    assert r.get("runner") != "code-review-disabled"  # NOT the inert disabled result
+    assert runner.calls > 0  # the real four-pass gate ran
+    assert r["verdict"]["coverage"].get("llm_ran") is True
 
 
 # ── enabled → runs the gate, schema-valid verdict ───────────────────────────────────────────

@@ -71,12 +71,12 @@ def _gate_source_local(monkeypatch: pytest.MonkeyPatch) -> None:
 # cannot ship without an optionality entry here.
 OPERATIONS = ("review_code", "scan_epics_for_spec", "verify_completion")
 
-# review_code is the ONE FAIL-SAFE op (epic b744 / WS4): the code-review gate is OFF by default
-# (verify.enable_code_review) and, being a gated capability, its public `review_code` shim returns
-# a VALID review_result rather than raising — inert-empty when disabled, degraded (INDETERMINATE +
-# coverage.llm_unavailable) when enabled without the extra. So it degrades WITHOUT the extra by
-# returning cleanly, NOT by raising/exit-1. The raise-degradation invariant below therefore EXEMPTS
-# it; its real contract is pinned by test_review_code_is_fail_safe_without_extra (here) and by
+# review_code is the ONE FAIL-SAFE op (epic b744 / WS4 + bug 5b32-37c4-f99a-4315): the public
+# `review_code` shim always runs the gate and returns a VALID review_result rather than raising —
+# without the extra, the runner preflight failure degrades to INDETERMINATE +
+# coverage.llm_unavailable. So it degrades WITHOUT the extra by returning cleanly, NOT by
+# raising/exit-1. The raise-degradation invariant below therefore EXEMPTS it; its real contract is
+# pinned by test_review_code_is_fail_safe_without_extra (here) and by
 # tests/unit/test_code_review_ws4.py. It stays in OPERATIONS so the exhaustiveness check holds.
 _FAIL_SAFE = frozenset({"review_code"})
 
@@ -138,10 +138,10 @@ def test_library_operation_degrades_without_extra(op: str, rebar_repo: Path) -> 
 
 @pytest.mark.skipif(_AGENTS, reason="the fail-safe path is the point WITHOUT the extra installed")
 def test_review_code_is_fail_safe_without_extra(rebar_repo: Path) -> None:
-    """review_code is the off-by-default gated capability (WS4): without the agents extra AND
-    disabled (the default), it returns a VALID empty review_result — no raise, no billable call —
-    so a lean install never crashes on it. (Enabled-without-extra degrades to an INDETERMINATE
-    result, also without raising; covered by tests/unit/test_code_review_ws4.py.)"""
+    """review_code always runs the gate (bug 5b32-37c4-f99a-4315), and stays FAIL-SAFE without
+    the agents extra: the runner preflight failure degrades to a valid INDETERMINATE
+    review_result — no raise, no billable call, and never a PASS-looking empty result — so a
+    lean install never crashes on it and never mistakes 'could not review' for 'reviewed clean'."""
     import rebar.llm
 
     result = rebar.llm.review_code(
@@ -149,7 +149,8 @@ def test_review_code_is_fail_safe_without_extra(rebar_repo: Path) -> None:
     )
     assert isinstance(result, dict)
     assert result.get("findings") == []
-    assert "disabled" in str(result.get("summary", "")).lower()
+    assert result["verdict"]["verdict"] == "INDETERMINATE"
+    assert result["coverage"].get("llm_unavailable") is True
 
 
 # ── CLI surface: each command degrades with Error: + exit 1 without the extra ──
@@ -177,8 +178,8 @@ def test_cli_operation_degrades_without_extra(
     rc = main(argv)
     captured = capsys.readouterr()
     err = captured.err
-    if op in _FAIL_SAFE:  # review_code: off by default → inert clean exit, no traceback (WS4)
-        assert rc == 0, f"{op} is fail-safe (off by default) → exit 0, not a degradation error"
+    if op in _FAIL_SAFE:  # review_code: degrades to INDETERMINATE (exit 2), never a traceback
+        assert rc == 2, f"{op} without the extra is an INDETERMINATE degrade → exit 2, got {rc}"
         assert "Traceback" not in err, "fail-safe path must not surface a raw traceback"
         return
     assert rc == 1, f"{op} should exit 1 when the extra is absent"

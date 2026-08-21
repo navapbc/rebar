@@ -13,10 +13,12 @@ deterministic Pass-3 blocker decides PASS vs BLOCK (via ``criteria_routing.json`
 the adapter no longer applies a severity heuristic — ``ReceiverConfig.blocking_severities`` is now
 vestigial for this path.
 
-FORCE-ENABLE. The code-review gate is OFF by default (``verify.enable_code_review``), but voter
-activation is itself the authoritative gate (a project is only reviewed once its receiver is
-deployed + configured), so the adapter passes ``enabled=True`` — else every change would get the
-inert disabled verdict. See ADR 0015.
+FORCE-ENABLE. The code-review DISPATCH is OFF by default for callers that leave ``enabled=None``
+(``verify.enable_code_review``), but voter activation is itself the authoritative gate (a project
+is only reviewed once its receiver is deployed + configured), so the adapter passes
+``enabled=True`` — else every change would get the inert disabled verdict. See ADR 0015. (The
+explicit ``review_code`` surface passes ``enabled=True`` for the same intent-is-authoritative
+reason — bug 5b32-37c4-f99a-4315.)
 
 DECISION RULE (fail-closed). PASS only for a genuine ``verdict == PASS`` with full coverage. A
 real BLOCK (blocking findings), an INDETERMINATE (LLM outage), a fail-closed security-scanner

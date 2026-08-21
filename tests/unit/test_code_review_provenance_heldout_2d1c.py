@@ -96,21 +96,30 @@ def test_result_carries_all_three_provenance_keys(monkeypatch: pytest.MonkeyPatc
         assert key in result, f"the documented MCP promise requires {key!r}"
 
 
-def test_disabled_gate_result_carries_the_keys_and_is_never_signable(
+def test_config_off_explicit_call_reaches_the_gate_enabled_and_stays_unpinned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The inert path pins nothing, so it must be honestly unpinned — NOT signable.
-    A disabled gate returning `signable: True` would let an unreviewed change be
-    certified, which is the worst reachable outcome of this bug's shape."""
+    """The config key no longer gates the explicit surface (bug 5b32-37c4-f99a-4315): with
+    `verify.enable_code_review` off, the shim still dispatches `enabled=True`. A verdict
+    that pinned nothing must be honestly unpinned — NOT signable: `signable: True` here
+    would let an unreviewed change be certified, the worst reachable outcome."""
     from rebar.llm.workflow import gate_dispatch
 
     monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda _r: False)
+    cap: dict[str, Any] = {}
+
+    def _produce(request: Any) -> dict:
+        cap["request"] = request
+        return _verdict()
+
+    monkeypatch.setattr(gate_dispatch, "produce_code_review_verdict", _produce)
 
     result = shim.review_code(source="attested", ref="cafebabe1234", diff_text="d")
 
+    assert cap["request"].enabled is True  # explicit intent, never the config key
     for key in PROVENANCE:
         assert key in result
-    assert result["signable"] is False, "an inert result must never be signable"
+    assert result["signable"] is False, "an unpinned result must never be signable"
     assert result["verified_at_sha"] is None
 
 
