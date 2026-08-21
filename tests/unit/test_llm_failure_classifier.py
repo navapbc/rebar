@@ -182,17 +182,33 @@ def test_classifier_is_total_and_never_raises(exc):
     assert isinstance(out.resolution_class, ResolutionClass)
 
 
-# ── Preservation: this story raises NO new type at the existing seams ──────────
+# ── Preservation: the CHANGE_INPUT type swap keeps the ladder predicate working ─
 def test_context_length_error_still_detected_by_the_ladder_predicate():
-    """The classifier maps a context-length 400 to CHANGE_INPUT, but changes NO raised
-    type — sizing.is_context_limit_error still recognises it, so the escalation ladder is
-    intact."""
-    from rebar.llm.errors import LLMUnavailableError
+    """A context-length 400 now raises LLMInputRejectedError (bug 43d4), and
+    sizing.is_context_limit_error must STILL recognise it — the whole point of the swap is
+    that the escalation ladder finally sees this failure instead of it being re-raised as an
+    LLMUnavailableError one clause earlier.
+
+    The predicate matches the WHOLE message, so this also guards the prefix hazard: rebar's
+    own prefix must contribute NONE of the eight substrings, or a content-filter refusal
+    (also CHANGE_INPUT, but NOT a size problem) would masquerade as a context limit and burn
+    the full model-escalation ladder before emitting a bogus "too big to review" finding.
+    """
+    from rebar.llm.errors import LLMInputRejectedError
     from rebar.llm.plan_review.sizing import is_context_limit_error
 
     # The runner wraps the provider error, preserving the message the ladder keys on.
-    wrapped = LLMUnavailableError("the LLM provider call failed: prompt is too long: ...")
+    wrapped = LLMInputRejectedError(
+        "the LLM provider rejected the request input: prompt is too long: ..."
+    )
     assert is_context_limit_error(wrapped) is True
+
+    # The prefix alone carries no size signal — a non-size CHANGE_INPUT rejection (a
+    # content-policy refusal) must NOT be mistaken for a context limit.
+    refusal = LLMInputRejectedError(
+        "the LLM provider rejected the request input: the model refused"
+    )
+    assert is_context_limit_error(refusal) is False
 
 
 def test_runner_attaches_llm_outcome_at_the_generic_seam():

@@ -64,6 +64,7 @@ from pydantic_ai.models.function import FunctionModel
 from rebar.llm import structured as _structured
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import (
+    LLMInputRejectedError,
     LLMRunnerError,
     LLMUnavailableError,
     StructuredOutputError,
@@ -130,10 +131,14 @@ class Case:
     marker: str  # CURRENT(<file>:<line>): <one-line behavior it pins>
 
 
-# CURRENT behavior, discovered empirically: EVERY provider HTTP error / network timeout /
-# raised model exception collapses into the single opaque LLMUnavailableError at the
-# runner's generic ``except Exception`` seam (runner.py:353-365). 429 is indistinguishable
-# from 401 from a connect-timeout — the exact opacity this epic replaces. The canned
+# CURRENT behavior, discovered empirically: nearly every provider HTTP error / network
+# timeout / raised model exception collapses into the single opaque LLMUnavailableError at
+# the runner's generic ``except Exception`` seam (run_failure.py:interpret_failure). 429 is
+# indistinguishable from 401 from a connect-timeout — the exact opacity this epic replaces.
+# The ONE split (bug 43d4): a failure the classifier maps to ResolutionClass.CHANGE_INPUT —
+# a context-length 400, a 413, a raised ContentFilterError — raises LLMInputRejectedError
+# instead, because the provider ANSWERED and rejected the INPUT; calling that an outage
+# hid a caller-fixable problem AND shadowed the plan-review size ladder. The canned
 # finish_reason cases (content_filter / length) instead reach the structured stack's
 # check_stop_reason and raise UnretryableOutputError; a canned non-JSON body fails output
 # validation as StructuredOutputError; a model-raised UsageLimitExceeded maps to
@@ -202,14 +207,14 @@ MATRIX: list[Case] = [
     Case(
         "400-context-length",
         lambda: _raise(ModelHTTPError(400, "m", body={"error": {"message": "prompt is too long"}})),
-        LLMUnavailableError,
-        "CURRENT(structured_run.py:131): 400 context-length -> LLMUnavailableError",
+        LLMInputRejectedError,
+        "CURRENT(run_failure.py:201): 400 context-length -> LLMInputRejectedError",
     ),
     Case(
         "413-too-large",
         lambda: _raise(ModelHTTPError(413, "m", body={"error": {"type": "request_too_large"}})),
-        LLMUnavailableError,
-        "CURRENT(structured_run.py:131): 413 request-too-large -> LLMUnavailableError",
+        LLMInputRejectedError,
+        "CURRENT(run_failure.py:201): 413 request-too-large -> LLMInputRejectedError",
     ),
     Case(
         "content_filter-finish_reason",
@@ -220,8 +225,8 @@ MATRIX: list[Case] = [
     Case(
         "structured-refusal-exception",
         lambda: _raise(ContentFilterError("the model refused")),
-        LLMUnavailableError,
-        "CURRENT(structured_run.py:131): raised ContentFilterError -> LLMUnavailableError",
+        LLMInputRejectedError,
+        "CURRENT(run_failure.py:201): raised ContentFilterError -> LLMInputRejectedError",
     ),
     Case(
         "length-truncation-finish_reason",

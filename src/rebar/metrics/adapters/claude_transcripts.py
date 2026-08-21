@@ -62,6 +62,7 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
             r"|timed out"
             r"|ReadTimeout"
             r"|LLMUnavailableError"
+            r"|LLMInputRejectedError"  # bug 43d4: a rejected input must not classify as `none`
             r"|\b429\b"
             r"|\b5\d{2}\b",
             re.IGNORECASE,

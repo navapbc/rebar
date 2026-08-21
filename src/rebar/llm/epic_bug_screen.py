@@ -49,7 +49,7 @@ from dataclasses import replace
 from typing import Any
 
 from rebar.llm.config import LLMConfig
-from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.errors import LLMInputRejectedError, LLMUnavailableError
 from rebar.llm.model_classes import TRIVIAL_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
@@ -341,7 +341,10 @@ def screen_candidates(
     def _row(bug: dict) -> dict:
         try:
             verdict = _normalized(screen_fn(bug, system_prompt))
-        except LLMUnavailableError:
+        except (LLMUnavailableError, LLMInputRejectedError):
+            # LLMInputRejectedError (bug 43d4) joins this arm: a prompt-too-long / refused
+            # screen call produced NO judgement, so degrading it to C would be a BLIND screen
+            # laundered into a clean verdict — exactly what 1019 forbids.
             # Bug 1019 (operator-ratified FAIL CLOSED): a systemic provider error — the
             # provider rejected/unreachable, or the extra/key absent (LLMConfigError is a
             # subclass by design) — must NOT be laundered into C. Re-raise (warm call and
@@ -445,8 +448,11 @@ def run_screen(
             "tally": tally,
             "overflow": overflow,
         }
-    except LLMUnavailableError:
-        raise  # bug 1019: a systemic provider error fails the close CLOSED, never degrades
+    except (LLMUnavailableError, LLMInputRejectedError):
+        # bug 1019: a systemic provider error fails the close CLOSED, never degrades. Bug
+        # 43d4: a rejected INPUT (prompt too long / content-filter) is equally blind — an
+        # empty block would let an unscreened epic close.
+        raise
     except Exception:
         logger.warning("epic bug screen failed for %s; degrading open (skipped)", epic_id)
         logger.debug("epic bug screen failure detail", exc_info=True)

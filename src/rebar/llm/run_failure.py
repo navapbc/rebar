@@ -18,15 +18,19 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from rebar.llm import usage_log
 from rebar.llm.errors import (
     LLMBudgetExhaustedError,
     LLMError,
+    LLMInputRejectedError,
     LLMUnavailableError,
     RunawayToolLoopError,
 )
+
+if TYPE_CHECKING:  # import-only: `failure` stays a function-local import at runtime
+    from rebar.llm.failure import ResolutionClass
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +65,10 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
     4. anything else — try the sampling-parameter-rejection translation FIRST (a provider
        rejecting e.g. ``temperature`` must fail loudly/actionably, not be swept into the
        broad provider-outage bucket below); only if that returns ``None`` does the generic
-       ``LLMUnavailableError`` path run.
+       path run. That generic path raises :class:`LLMInputRejectedError` when — and only
+       when — the classifier's ``resolution_class`` is ``CHANGE_INPUT`` (the provider
+       ANSWERED and rejected the input: a context-length 400, a 413, a content-policy
+       refusal), and :class:`LLMUnavailableError` for every other disposition.
     """
     from pydantic_ai.exceptions import UsageLimitExceeded
 
@@ -125,7 +132,8 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
     # A SYSTEMIC provider failure (auth / missing key / connection / rate-limit). Unify
     # into the provider-agnostic LLMUnavailableError so every prompt-using client gets ONE
     # recognizable "LLM couldn't run" signal — never a swallowed empty result
-    # (fuel-posse-ball).
+    # (fuel-posse-ball). The ONE exception is a provider that ANSWERED and rejected the
+    # INPUT: see `_generic_failure_error` (bug 43d4).
     # Tried FIRST (story S3/2932): a provider rejecting a sampling parameter (e.g. Bedrock's
     # "temperature is deprecated for this model" on a model NOT in the capabilities.py
     # denylist) must fail LOUDLY and ACTIONABLY, not be misclassified as an opaque outage by
@@ -149,22 +157,49 @@ def interpret_failure(exc: BaseException, run_messages: list, ctx: FailureContex
         time.monotonic() - ctx.started_at,
         exc,
     )
-    provider_err = LLMUnavailableError(f"the LLM provider call failed: {exc}")
+    # The classified disposition is computed FIRST because it now SELECTS the raised type
+    # (bug 43d4), not just decorates it. Kept total (classify_llm_failure never raises), so
+    # enriching the error can't mask it.
+    from rebar.llm.failure import ClassifyContext, classify_llm_failure
+
+    outcome = classify_llm_failure(exc, ClassifyContext(model=ctx.ran_model))
+    provider_err = _generic_failure_error(exc, outcome.resolution_class)
     provider_err.diagnostic = usage_log.failure_usage(  # type: ignore[attr-defined]
         run_messages,
         request_limit=ctx.req_limit,
         tool_calls_limit=tool_calls_limit,
     )
-    # Attach the classified disposition as METADATA (story civilized-immediate-mamba). This
-    # does NOT change the raised type — every existing `except LLMUnavailableError` still
-    # catches, and the per-seam wiring + exit-code use is story blackbear's. Kept total
-    # (classify_llm_failure never raises), so enriching the error can't mask it.
-    from rebar.llm.failure import ClassifyContext, classify_llm_failure
-
-    provider_err.outcome = classify_llm_failure(  # type: ignore[attr-defined]
-        exc, ClassifyContext(model=ctx.ran_model)
-    )
+    # `.outcome` is attached to BOTH types (story civilized-immediate-mamba): 25+ sites read
+    # the disposition off the raised OBJECT rather than off its type.
+    provider_err.outcome = outcome  # type: ignore[attr-defined]
     raise provider_err from exc
+
+
+def _generic_failure_error(exc: BaseException, resolution: ResolutionClass) -> LLMError:
+    """Pick the exception TYPE for the broad arm of :func:`interpret_failure` from the
+    disposition the classifier already computed (bug 43d4).
+
+    ``CHANGE_INPUT`` means the provider ANSWERED and rejected the INPUT (an oversized
+    prompt — a context-length 400 or a 413 — or a content-policy refusal): deterministic and
+    caller-fixable, so it must NOT masquerade as an outage. EVERY other disposition (5xx,
+    529, 429, auth/``CHANGE_SETTINGS``, ``NEEDS_INVESTIGATION``) keeps raising
+    :class:`LLMUnavailableError` verbatim — the key is the resolution CLASS, never "4xx" or
+    "not retryable".
+
+    The CHANGE_INPUT prefix deliberately contains NONE of the substrings
+    ``plan_review.sizing.is_context_limit_error`` matches ("context", "token limit",
+    "input length", "exceeds the maximum", …): that predicate tests the WHOLE message, so a
+    prefix carrying one would make every rejected input — a content-filter refusal
+    included — read as a context limit and burn the model-escalation ladder before emitting a
+    bogus "too big to review" finding. ``{exc}`` rides through VERBATIM, so a real
+    context-limit 400 still matches the predicate through the PROVIDER's own words and the
+    size ladder finally engages where it was designed to.
+    """
+    from rebar.llm.failure import ResolutionClass
+
+    if resolution is ResolutionClass.CHANGE_INPUT:
+        return LLMInputRejectedError(f"the LLM provider rejected the request input: {exc}")
+    return LLMUnavailableError(f"the LLM provider call failed: {exc}")
 
 
 def _write_parse_failure_artifact(
