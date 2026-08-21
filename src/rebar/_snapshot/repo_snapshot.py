@@ -62,8 +62,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from itertools import pairwise
 from pathlib import Path
 
@@ -215,6 +214,10 @@ class SnapshotHandle:
     materialized, pinned copy of the ticket store (the ``tickets`` branch lives on an
     orphan ref, so it is absent from the code snapshot ``path``). ``None`` = read the
     in-place checkout's store (local mode); attested sets it via :func:`materialize_tickets`.
+
+    The handle owns NO resource lifetime: snapshot-store entries are a shared cache whose
+    cleanup is the janitor's (snapshot GC's) responsibility, never the handle's — a
+    per-handle release would defeat the caching (bug 8386).
     """
 
     path: Path
@@ -223,21 +226,11 @@ class SnapshotHandle:
     lfs_pointers: tuple[str, ...] = ()
     submodules: tuple[str, ...] = ()
     tickets_path: str | None = None
-    _cleanup: Callable[[], None] | None = field(default=None, repr=False)
 
     @property
     def signable(self) -> bool:
         """Only an attested snapshot pinned to an immutable SHA may back a signature."""
         return self.source == SOURCE_ATTESTED and self.sha is not None
-
-    def __enter__(self) -> SnapshotHandle:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        # Returns None (falsy) — never swallows the in-flight exception. (mypy rejects a
-        # `-> bool` that only ever returns False as a context-manager footgun.)
-        if self._cleanup is not None:
-            self._cleanup()
 
 
 def resolve_ref(
