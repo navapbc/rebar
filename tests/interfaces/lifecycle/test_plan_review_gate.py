@@ -341,6 +341,35 @@ def test_transition_cascade_parent_gate_blocks_and_names_parent(rebar_repo: Path
     assert _status(parent, rebar_repo) == "open"
 
 
+def test_reactivation_cascade_parent_gate_blocks_and_names_parent(rebar_repo: Path) -> None:
+    # The cascaded parent's start-work gate fires on the `closed -> in_progress`
+    # reactivation edge too (paragonite-fruited-minnow): the cascade runs the parent's FULL
+    # transition, so a reviewed child under an un-reviewed CLOSED parent is blocked by the
+    # PARENT's gate, the error names the parent, and NEITHER ticket moves — identical to the
+    # `open -> in_progress` edge above.
+    _commit(rebar_repo)
+    parent = rebar.create_ticket(
+        "epic", "parent epic", description=_DESC, repo_root=str(rebar_repo)
+    )
+    # A `bug` child is gate-EXEMPT, so its own gate passes trivially and the block can only
+    # come from the cascaded parent (`review-plan` cannot mint an attestation for a CLOSED
+    # child — it fast-fails on a non-claimable ticket — so exemption is the way to isolate
+    # the parent's gate on this edge).
+    child = rebar.create_ticket(
+        "bug", "child bug", description=_DESC, parent=parent, repo_root=str(rebar_repo)
+    )
+    rebar.transition(child, "open", "closed", close_class="preexisting", repo_root=str(rebar_repo))
+    rebar.transition(parent, "open", "closed", repo_root=str(rebar_repo))
+    _enable(rebar_repo)
+
+    with pytest.raises(rebar.RebarError) as ei:
+        rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    assert parent in ei.value.stderr  # the cascade hit the parent's gate, named the parent
+    assert _status(child, rebar_repo) == "closed"  # child not reactivated under a blocked parent
+    assert _status(parent, rebar_repo) == "closed"
+
+
 def test_transition_cascade_force_propagates_up_the_chain(rebar_repo: Path) -> None:
     # The cascade is preserved AND the --force bypass propagates up it: force-starting a
     # child whose parent is also un-reviewed moves BOTH to in_progress (claim/transition

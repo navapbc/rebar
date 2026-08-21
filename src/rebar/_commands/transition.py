@@ -45,9 +45,11 @@ _USAGE = (
     "close event and signed into the disposition attestation. It does NOT double as the "
     "force-bypass audit note (that is the --force=<reason> value). Refused on any other plain "
     "transition. To record rationale on a ticket, use `rebar comment <id>`.\n"
-    "  Parent-first (open -> in_progress only): if the ticket has an OPEN parent, the\n"
-    "  parent is transitioned first (recursively); a parent failure aborts the child\n"
-    "  and the error names the parent. close/reopen/blocked never cascade.\n"
+    "  Parent-first (open -> in_progress, closed -> open, closed -> in_progress): if the\n"
+    "  ticket has a parent in the status eligible for that edge (OPEN, CLOSED, CLOSED\n"
+    "  respectively), the parent is transitioned along the SAME edge first (recursively);\n"
+    "  a parent failure aborts the child and the error names the parent. close/blocked\n"
+    "  never cascade.\n"
     "  --class=<value>          Required when closing bug tickets. One of: regression, "
     "plan_defect, env_integration, flaky, preexisting, not_a_bug, duplicate, escalated, "
     "obsolete, superseded, wontfix, undetermined. On non-bug tickets, optional and limited to "
@@ -96,9 +98,9 @@ def _resolve_parent_in_status(tracker: str, ticket_id: str, status: str) -> str 
 
     This is the lookup behind the parent-first cascade: the caller names the parent
     status that is ELIGIBLE to be cascaded on the edge being taken (``"open"`` for
-    ``open -> in_progress``, ``"closed"`` for the ``closed -> open`` reopen). A parent
-    in any other status (or absent / unreadable) yields ``None`` — no cascade, the
-    child op proceeds alone."""
+    ``open -> in_progress``, ``"closed"`` for both the ``closed -> open`` reopen and
+    the ``closed -> in_progress`` reactivation). A parent in any other status (or absent
+    / unreadable) yields ``None`` — no cascade, the child op proceeds alone."""
     state = reduce_ticket(os.path.join(tracker, ticket_id))
     if state is None:
         return None
@@ -245,9 +247,10 @@ def transition_compute(
     :class:`ConcurrencyMismatch` (exit 10) / :class:`CommandError`. Does NOT parse
     ``--output`` or autodetect current — that is the CLI wrapper's job.
 
-    Parent-first cascade: on a CASCADING EDGE — ``open -> in_progress``, or the
-    ``closed -> open`` reopen (see :data:`_CASCADING_EDGES`) — if the ticket's parent
-    sits in the status eligible for that edge (``open`` and ``closed`` respectively),
+    Parent-first cascade: on a CASCADING EDGE — ``open -> in_progress``, the
+    ``closed -> open`` reopen, or the ``closed -> in_progress`` reactivation (see
+    :data:`_CASCADING_EDGES`) — if the ticket's parent sits in the status eligible for
+    that edge (``open`` for the first, ``closed`` for the other two),
     the parent is transitioned along the SAME edge first (recursively up the chain)
     before the child; a parent failure aborts the child with an error naming the
     parent. Pass ``cascade=False`` to suppress this for callers that replay an exact
@@ -343,10 +346,10 @@ def transition_compute(
         note = _force_note(force_reason)
         gates.plan_review_precheck(ticket_id, repo_root_str, repo_root, force_reason=note)
 
-    # Parent-first cascade: on a cascading edge (open -> in_progress, and the
-    # closed -> open reopen), if this ticket has a parent in the eligible status,
-    # transition it first (recursively up the chain) so a child is never left ahead
-    # of its parent in the lifecycle. See _cascade_parent_first.
+    # Parent-first cascade: on a cascading edge (open -> in_progress, the closed -> open
+    # reopen, and the closed -> in_progress reactivation), if this ticket has a parent in
+    # the eligible status, transition it first (recursively up the chain) so a child is
+    # never left ahead of its parent in the lifecycle. See _cascade_parent_first.
     _cascade_parent_first(
         ticket_id,
         current_status,
@@ -395,19 +398,23 @@ def _force_note(force_reason: str | None) -> str:
 
 # The cascading edges of the parent-first cascade, mapping the ``(current, target)``
 # status edge the CHILD is taking to the parent status that is ELIGIBLE to cascade on
-# it. Both entries move the parent along the SAME edge, ahead of the child:
+# it. Every entry moves the parent along the SAME edge, ahead of the child:
 #
-#   open -> in_progress : an ``open`` parent is pulled into progress, so a descendant is
-#                         never in progress while an ancestor is merely open;
-#   closed -> open      : a ``closed`` parent is reopened, so a reopened descendant is
-#                         never left under a still-closed ancestor (bug
-#                         cranial-sulfur-peafowl).
+#   open -> in_progress   : an ``open`` parent is pulled into progress, so a descendant
+#                           is never in progress while an ancestor is merely open;
+#   closed -> open        : a ``closed`` parent is reopened, so a reopened descendant is
+#                           never left under a still-closed ancestor (bug
+#                           cranial-sulfur-peafowl);
+#   closed -> in_progress : the direct reactivation edge — a ``closed`` parent is
+#                           reactivated too, so reactivating a descendant straight into
+#                           progress never leaves it under a still-closed ancestor.
 #
 # Every other edge — notably ``* -> closed`` (which has its own open-children guard) and
 # ``* -> blocked`` — is absent and therefore never cascades.
 _CASCADING_EDGES: dict[tuple[str, str], str] = {
     ("open", "in_progress"): "open",
     ("closed", "open"): "closed",
+    ("closed", "in_progress"): "closed",
 }
 
 
@@ -427,8 +434,8 @@ def _cascade_parent_first(
     ``ticket_id``'s parent sits in the status eligible for this edge, transition the
     parent along the SAME edge first (recursively up the chain, via
     :func:`transition_compute`) so a child never runs ahead of its parent — not into
-    ``in_progress`` while the parent is still ``open``, and not back to ``open`` while
-    the parent is still ``closed``.
+    ``in_progress`` while the parent is still ``open``, and not back to ``open`` or
+    ``in_progress`` while the parent is still ``closed``.
 
     If the parent transition fails, the child is NOT transitioned and the raised error
     names the parent as the cause (preserving the parent's exit code / concurrency

@@ -381,6 +381,124 @@ def test_reopen_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
     assert _status(parent, rebar_repo) == "closed"  # NOT cascaded
 
 
+# --------------------------------------------------- reactivation (closed -> in_progress)
+
+
+def test_reactivate_child_reactivates_closed_parent(rebar_repo: Path) -> None:
+    """The bug (paragonite-fruited-minnow): reactivating a closed child straight to
+    ``in_progress`` left its CLOSED parent closed, so the store held a closed parent with
+    an ``in_progress`` child — the invalid state I4a forbids, reached through the one edge
+    into it that the cascade table did not cover."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "in_progress"  # cascaded
+
+
+def test_reactivate_cascades_through_multiple_closed_levels(rebar_repo: Path) -> None:
+    grand, parent, child = _closed_chain(rebar_repo, 3)
+
+    rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    for t in (grand, parent, child):
+        assert _status(t, rebar_repo) == "in_progress", f"{t} not cascaded"
+
+
+def test_reactivate_does_not_disturb_in_progress_parent(rebar_repo: Path) -> None:
+    """An already-``in_progress`` parent is not eligible on this edge — only the requested
+    ticket moves."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.claim(parent, assignee="owner", repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+
+    rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "in_progress"
+    assert _assignee(parent, rebar_repo) == "owner"  # untouched
+
+
+def test_reactivate_does_not_disturb_open_parent(rebar_repo: Path) -> None:
+    """Only a ``closed`` parent is eligible on the ``closed -> in_progress`` edge, so an
+    ``open`` parent is left alone (see the residual noted on the ticket)."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
+
+    rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "open"  # not eligible on this edge
+
+
+def test_reactivate_parent_failure_aborts_child_with_attributed_error(
+    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fail-fast, no partial cascade: a raced parent keeps its concurrency identity
+    (exit 10) at the leaf and the child is NOT reactivated."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    orig = txn.transition_core
+
+    def fake_transition_core(tracker, ticket_id, current, target, **kw):  # type: ignore[no-untyped-def]
+        if ticket_id == parent:
+            raise ConcurrencyMismatch("simulated parent reactivation failure")
+        return orig(tracker, ticket_id, current, target, **kw)
+
+    monkeypatch.setattr(txn, "transition_core", fake_transition_core)
+
+    with pytest.raises(rebar.ConcurrencyError) as ei:
+        rebar.transition(child, "closed", "in_progress", repo_root=str(rebar_repo))
+
+    assert ei.value.returncode == 10
+    msg = str(ei.value)
+    assert parent in msg, f"error must name the parent: {msg}"
+    assert child in msg
+    assert "parent" in msg.lower()
+    assert _status(child, rebar_repo) == "closed"  # child NOT reactivated
+
+
+def test_reactivate_wrong_current_status_still_rejected(rebar_repo: Path) -> None:
+    """The new edge does not loosen optimistic concurrency: naming a current status the
+    ticket is not in is still exit 10, and nothing (child or parent) moves."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    with pytest.raises(rebar.ConcurrencyError) as ei:
+        rebar.transition(child, "open", "in_progress", repo_root=str(rebar_repo))
+
+    assert ei.value.returncode == 10
+    assert _status(child, rebar_repo) == "closed"
+    assert _status(parent, rebar_repo) == "closed"
+
+
+def test_cli_reactivate_cascade_smoke(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """CLI parity: `rebar transition <child> closed in_progress` cascades too."""
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    rc = _cli.main(["transition", child, "closed", "in_progress"])
+    capsys.readouterr()
+
+    assert rc == 0
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "in_progress"
+
+
+def test_reactivate_cascade_false_suppresses_cascade(rebar_repo: Path) -> None:
+    """``cascade=False`` (per-ticket state replay, e.g. NDJSON import) opts out of the
+    reactivation cascade exactly as it does for the other two edges."""
+    from rebar._commands.transition import transition_compute
+
+    parent, child = _closed_chain(rebar_repo, 2)
+
+    transition_compute(child, "closed", "in_progress", cascade=False, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "closed"  # NOT cascaded
+
+
 # ------------------------------------------------- cascade TOCTOU benign-race parity
 
 
