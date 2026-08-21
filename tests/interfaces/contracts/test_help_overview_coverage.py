@@ -35,41 +35,17 @@ _RETIRED_BRIDGE_COMMANDS = ("purge-bridge",)
 
 
 def _routable_subcommands() -> frozenset[str]:
-    """The subcommands ``_cli._dispatch`` routes (won't hit the unknown error)."""
-    grouped: frozenset[str] = (
-        _cli._READS_INIT_ONLY
-        | _cli._READS_NO_INIT
-        | _cli._FIELD_READS
-        | _cli._LOOKUPS
-        | _cli._DESCENDANTS
-        | _cli._GATES
-        | _cli._SIGNING
-        | _cli._LIFECYCLE
-        | _cli._COMPACT
-        | _cli._BRIDGE
-        | _cli._WRITES_FULL
-        | _cli._IO
+    """The canonical subcommands the registry routes (won't hit the unknown error).
+
+    RP-05 S5: enumerated from the route registry via ``derive_policy_sets`` + route
+    attributes rather than reconstructing the ``_cli`` policy frozensets by hand. The
+    routable-with-pinned-help class is exactly the live, non-hidden, non-intercept
+    routes (the intercept class owns its own ``--help`` and carries no ``help/*.txt``)."""
+    from rebar._cli._registry import ROUTES
+
+    return frozenset(
+        r.name for r in ROUTES if not r.retired and not r.hidden and r.group != "intercept"
     )
-    # Arms ``_dispatch`` routes by explicit ``if sub == …`` rather than a frozenset, plus
-    # ``audit`` which is routed by a ``main()`` intercept (owns its own subcommand parsing,
-    # like reconcile) yet carries pinned help text (help/audit.txt) so it is a known
-    # subcommand — hence it must be counted routable here (story 46f0).
-    individual = frozenset(
-        {
-            "init",
-            "scratch",
-            "metrics",
-            "delete",
-            "fsck",
-            "fsck-recover",
-            "tracker-maintenance",
-            "doctor",
-            "bridge-probe",
-            "grounding-info",
-            "audit",
-        }
-    )
-    return grouped | individual
 
 
 def _overview_listed() -> frozenset[str]:

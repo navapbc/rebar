@@ -1,9 +1,18 @@
-"""Tests for the CLI-reference generator (ticket e866).
+"""Oracle for the registry-derived CLI-reference generator (RP-05 S5, ticket 6755).
 
-The generator (scripts/gen_cli_reference.py) emits docs/cli-reference.md from the CLI's
-own help data: the help-backed subcommands (rebar._cli._help) with full usage text,
-plus intercept-arm commands with curated one-liners whose key set is drift-gated
-against the intercept ladder in rebar._cli.__init__.
+S5 rebuilds ``scripts/gen_cli_reference.py`` so that EVERY command syntax/options section
+in ``docs/cli-reference.md`` is DERIVED from the immutable route registry
+(:mod:`rebar._cli._registry`) plus the committed package-help bytes (proven byte-current by
+``scripts/gen_cli_help.py --check``). The hand-maintained intercept command census is gone:
+no ``INTERCEPT_COMMANDS`` curated one-liner table and no ``ladder_intercepts()`` source-regex.
+Editorial rationale is kept structurally separate and is registry-linted; parser artifacts
+remain the only usage/option authority.
+
+Assertions here are OBSERVABLE: the generator's rendered bytes, ``--check`` exit codes, the
+registry-vs-doc parity, and the editorial lint's findings — never private helper names.
+(The verb confirmation-line record ``MUTATION_VERBS`` is a distinct behavioral record, drift-
+gated against the registry's ``_CONFIRM_SCOPE``, and is exercised by
+``tests/unit/test_mutation_confirmations.py`` — out of scope here.)
 """
 
 from __future__ import annotations
@@ -29,49 +38,44 @@ def _load():
 
 gen = _load()
 
-_LADDER = {
-    "audit",  # story 46f0: audit read-layer aggregator (`audit show <ticket>`)
-    "config",
-    "criteria",
-    "enrich",
-    "explain",
-    "identity",  # epic gnu-whale-ichor: identity entity + self-identity + key add/revoke
-    "jira-onboard",
-    "llm",
-    "prompt",
-    "reconcile",
-    "review-code",
-    "review-plan",
-    "scan-spec",
-    "sign-review",
-    "verify-authorship",  # epic gnu-whale-ichor / AC7: back-compat alias for verify-identity
-    "verify-commit-ticket",
-    "verify-completion",
-    "verify-identity",  # epic gnu-whale-ichor / AC7: authenticated-authorship merge-gate
-    "verify-opcert",  # epic sonic-columned-sturgeon / 4214: required-environment op-cert merge-gate
-    "trusted-env",  # story 4214: maintain .rebar/trusted_environments.yaml (add/revoke keys)
-    "remote-cert",  # story ee0b: trusted op-cert gate service client
-    "workflow",
-}
+
+def _routes():
+    from rebar._cli._registry import ROUTES
+
+    return ROUTES
 
 
-# ─────────────────────────── HAPPY PATH (shown to implementer) ────────────────
+def _documented_routes():
+    """Live (non-retired), non-hidden routes — every one must get a syntax section."""
+    return [r for r in _routes() if not r.retired and not r.hidden]
 
 
-def test_render_lists_every_help_backed_command():
-    """Every known_subcommands() entry appears, backtick-wrapped, in the output."""
+# ─────────────────────────── HAPPY PATH ───────────────────────────────────────
+
+
+def test_render_documents_every_live_route():
+    """Every live, non-hidden route in the registry gets a backtick-headed syntax section."""
+    doc = gen.render()
+    for route in _documented_routes():
+        assert f"### `{route.name}`" in doc, f"route {route.name!r} missing a syntax section"
+
+
+def test_render_embeds_help_backed_committed_bytes():
+    """A help-backed command's exact committed help bytes are embedded verbatim."""
     from rebar._cli import _help
 
     doc = gen.render()
-    for cmd in _help.known_subcommands():
-        assert f"`{cmd}`" in doc, f"help-backed command {cmd!r} missing from reference"
+    create_help = _help.subcommand_help("create")
+    assert create_help is not None
+    assert create_help.rstrip("\n") in doc
+    assert "Usage: rebar create" in doc
 
 
-def test_render_lists_every_intercept_command():
-    """Every intercept-arm command appears, backtick-wrapped, in the output."""
+def test_render_renders_intercept_syntax_from_parser():
+    """An intercept command (no pinned help/*.txt) is rendered live from its parser factory."""
     doc = gen.render()
-    for cmd in _LADDER:
-        assert f"`{cmd}`" in doc, f"intercept command {cmd!r} missing from reference"
+    assert "### `reconcile`" in doc
+    assert "Usage: rebar reconcile" in doc
 
 
 def test_check_mode_clean_against_committed_tree():
@@ -79,49 +83,92 @@ def test_check_mode_clean_against_committed_tree():
     assert gen.main(["--check"]) == 0
 
 
-# ─────────────────────────── EDGE CASES (HELD OUT) ────────────────────────────
+# ─────────────────────────── EDGE CASES ───────────────────────────────────────
 
 
-def test_intercept_dict_matches_ladder():
-    """The curated INTERCEPT_COMMANDS key set equals the ladder parsed from _cli."""
-    assert set(gen.INTERCEPT_COMMANDS) == _LADDER
-    assert set(gen.INTERCEPT_COMMANDS) == set(gen.ladder_intercepts())
+def test_no_curated_census_symbols_remain():
+    """The intercept command-description census is deleted: no INTERCEPT_COMMANDS /
+    ladder_intercepts survive as module attributes (AC2)."""
+    assert not hasattr(gen, "INTERCEPT_COMMANDS")
+    assert not hasattr(gen, "ladder_intercepts")
 
 
-def test_substring_commands_are_distinct(tmp_path: Path):
-    """`review-plan` and `review-code` are BOTH present as distinct backtick tokens —
-    the reference must not let one mask the other (backtick-wrapping makes them exact).
-    The bare `review` verb was removed in the pre-1.0 breaking pass."""
+def test_generator_source_has_no_intercept_regex():
+    """The generator no longer regex-parses CLI source for the intercept ladder (AC2)."""
+    source = GEN_PATH.read_text(encoding="utf-8")
+    assert "INTERCEPT_COMMANDS" not in source
+    assert "ladder_intercepts" not in source
+    assert "argv[0]" not in source
+
+
+def test_retired_routes_are_not_documented():
+    """Retired (unrouted) spellings get no syntax section."""
     doc = gen.render()
-    assert "`review-plan`" in doc
-    assert "`review-code`" in doc
-    assert "`review`" not in doc
+    for route in (r for r in _routes() if r.retired):
+        assert f"### `{route.name}`" not in doc, f"retired {route.name!r} leaked into the doc"
 
 
-def test_help_backed_usage_text_included():
-    """A help-backed command's actual usage text (not just its name) is emitted."""
+def test_hidden_aliases_are_not_documented():
+    """Hidden alias spellings (e.g. bridge-status) are not advertised as syntax sections."""
     doc = gen.render()
-    # `create`'s pinned help begins with "Usage: rebar create"
-    assert "Usage: rebar create" in doc
+    hidden = [r for r in _routes() if r.hidden]
+    assert hidden, "fixture guard: expected at least one hidden route"
+    for route in hidden:
+        assert f"### `{route.name}`" not in doc
 
 
-def test_parity_selfcheck_fails_on_intercept_drift(monkeypatch):
-    """If INTERCEPT_COMMANDS drifts from the ladder, generation fails loudly (no silent
-    incomplete doc). Removing a curated entry must raise."""
-    broken = dict(gen.INTERCEPT_COMMANDS)
-    broken.pop("workflow")
-    monkeypatch.setattr(gen, "INTERCEPT_COMMANDS", broken)
-    with pytest.raises((ValueError, AssertionError, RuntimeError)):
+def test_section_count_equals_documented_route_count():
+    """Completeness census: exactly one syntax section per documented route — no extras,
+    none missing. A route added to the registry forces a new section (derivation teeth)."""
+    doc = gen.render()
+    headings = {
+        line[len("### ") :].strip()
+        for line in doc.splitlines()
+        if line.startswith("### `") and line.rstrip().endswith("`")
+    }
+    expected = {f"`{r.name}`" for r in _documented_routes()}
+    assert headings == expected
+
+
+def test_render_is_deterministic():
+    """Two renders produce identical bytes (no dict-ordering / set nondeterminism)."""
+    assert gen.render() == gen.render()
+
+
+def test_editorial_preamble_passes_its_own_lint():
+    """The shipped editorial preamble is clean under the deterministic editorial lint."""
+    assert gen.lint_editorial(gen.EDITORIAL_PREAMBLE) == []
+
+
+def test_editorial_lint_rejects_usage_authority():
+    """An editorial block asserting its own `Usage:` grammar is rejected (parser artifacts
+    are the only usage authority)."""
+    bad = "Some prose.\nUsage: rebar create [options]\nMore prose.\n"
+    assert gen.lint_editorial(bad), "editorial Usage: authority must be flagged"
+
+
+def test_editorial_lint_rejects_option_table_authority():
+    """An editorial option table (a competing option authority) is rejected."""
+    bad = "Prose.\n\n| Option | Meaning |\n|--------|---------|\n| `--x` | y |\n"
+    assert gen.lint_editorial(bad), "editorial option-table authority must be flagged"
+
+
+def test_editorial_lint_rejects_unknown_top_level_spelling():
+    """A `rebar <cmd>` reference to a non-registry spelling is rejected; a real one passes."""
+    assert gen.lint_editorial("See `rebar frobnicate` for details.\n"), (
+        "unknown top-level spelling must be flagged"
+    )
+    assert gen.lint_editorial("See `rebar create` for details.\n") == []
+
+
+def test_render_raises_when_editorial_preamble_is_dirty(monkeypatch):
+    """render() fails loudly rather than emit a doc with an editorial usage authority."""
+    monkeypatch.setattr(gen, "EDITORIAL_PREAMBLE", "Usage: rebar create\n`rebar frobnicate`\n")
+    with pytest.raises(ValueError):
         gen.render()
 
 
-def test_ladder_intercepts_parses_source():
-    """ladder_intercepts() derives the 17 names from _cli/__init__.py source, not a
-    hardcoded copy — so a new intercept arm is detected."""
-    assert gen.ladder_intercepts() == _LADDER
-
-
-# ─────────────────────────── E2E via main() / drift (HELD OUT) ────────────────
+# ─────────────────────────── E2E via main() / drift ───────────────────────────
 
 
 def test_check_mode_detects_stale_committed_doc(tmp_path: Path, monkeypatch):
@@ -132,31 +179,32 @@ def test_check_mode_detects_stale_committed_doc(tmp_path: Path, monkeypatch):
     assert gen.main(["--check"]) != 0
 
 
-def test_generate_writes_full_doc(tmp_path: Path, monkeypatch):
-    """Running the generator (no --check) writes a doc containing all commands."""
+def test_generate_writes_full_doc_for_every_route(tmp_path: Path, monkeypatch):
+    """Running the generator (no --check) writes a doc with a section for every documented
+    route, and the freshly written doc is --check-clean against itself."""
     out = tmp_path / "cli-reference.md"
     monkeypatch.setattr(gen, "DOC_PATH", out, raising=False)
     assert gen.main([]) == 0
-    written = out.read_text()
-    from rebar._cli import _help
-
-    for cmd in list(_help.known_subcommands())[:5]:
-        assert f"`{cmd}`" in written
-    for cmd in _LADDER:
-        assert f"`{cmd}`" in written
+    written = out.read_text(encoding="utf-8")
+    for route in _documented_routes():
+        assert f"### `{route.name}`" in written
+    assert gen.main(["--check"]) == 0
 
 
-def test_render_expands_the_staged_bridge_group():
-    """The generated reference documents every canonical bridge operation."""
-    text = gen.render()
-    assert "### `bridge`" in text
-    assert "Usage: rebar bridge [-h]" in text
-    assert "preview             Show proposed Jira changes without applying them." in text
-    assert "sync                Apply proposed Jira changes." in text
-    assert "\n    pause" in text
-    assert "\n    resume" in text
-    assert "\n    fsck" in text
-    assert "\n    check-access" in text
-    assert "\n    setup" in text
-    for future_verb in ("resolve", "probe", "bind", "unbind"):
-        assert f"rebar bridge {future_verb}" not in text
+def test_check_mode_reflects_registry_change(monkeypatch):
+    """Derivation teeth via main(): drop a route from the registry and the committed doc
+    (rendered from the full registry) is detected as stale."""
+    dropped = tuple(r for r in _routes() if r.name != "reconcile")
+    import rebar._cli._registry as reg
+
+    monkeypatch.setattr(reg, "ROUTES", dropped, raising=True)
+    monkeypatch.setattr(gen, "ROUTES", dropped, raising=False)
+    assert gen.main(["--check"]) != 0
+
+
+def test_render_omits_reference_to_reconcile_when_route_removed(monkeypatch):
+    """render() is derived from the registry: removing a route removes its section."""
+    dropped = tuple(r for r in _routes() if r.name != "reconcile")
+    monkeypatch.setattr(gen, "ROUTES", dropped, raising=False)
+    doc = gen.render()
+    assert "### `reconcile`" not in doc

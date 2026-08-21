@@ -20,12 +20,18 @@ _ROW_RE = re.compile(r"^\| `([a-z][a-z0-9-]+)`", re.MULTILINE)
 
 
 def dispatcher_arms() -> set[str]:
-    """The authoritative set of public dispatcher arms: the union of the pinned
-    help-text subcommands and the intercepted subcommands."""
-    import rebar._cli as cli
-    from rebar._cli import _help
+    """The authoritative set of public dispatcher arms, enumerated from the route
+    registry itself (RP-05 S5): the union of the intercept class and every live,
+    non-hidden canonical spelling. Derived via ``derive_policy_sets`` + route
+    attributes rather than reconstructing the ``_cli`` policy frozensets by hand, so a
+    new route class cannot silently escape the exit-code doc-conformance guard."""
+    from rebar._cli._registry import ROUTES, derive_policy_sets
 
-    return set(cli._INTERCEPTS) | set(_help.known_subcommands())
+    derived = derive_policy_sets(ROUTES)
+    intercepts = set(derived["_INTERCEPTS"])
+    hidden = set(derived["_HIDDEN_ALIASES"])
+    canonical = {r.name for r in ROUTES if not r.retired and r.name not in hidden}
+    return (canonical | intercepts) - hidden
 
 
 def documented_arms(text: str | None = None) -> set[str]:
