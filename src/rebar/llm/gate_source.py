@@ -29,6 +29,7 @@ from rebar._snapshot import (
     SOURCE_LOCAL,
     SnapshotHandle,
     acquire,
+    gc_trigger,
 )
 from rebar._snapshot.repo_snapshot import DEFAULT_REF, materialize_tickets
 from rebar.llm import build_drift
@@ -98,6 +99,11 @@ def resolve_gate_handle(
         # in the code snapshot). Fail-closed errors propagate, like the code snapshot.
         tickets_root = materialize_tickets(repo_root=repo_root, fetch=fetch)
         handle = dataclasses.replace(handle, tickets_path=tickets_root)
+        # The attested resolution above is what POPULATES the snapshot store, so its tail is
+        # where the operation-linked GC trigger lives (bug undamaged-epidermic-kakarikis):
+        # one stamp `stat`, no ticket-store lock, the pass itself in a detached child.
+        # Never raises — housekeeping must not fail the gate that triggered it.
+        gc_trigger.maybe_gc(repo_root)
     return handle
 
 
