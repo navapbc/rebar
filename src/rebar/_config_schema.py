@@ -630,7 +630,9 @@ _ALIASES: dict[str, dict[str, str]] = {"verify": {"overlap_enabled": "suggest_du
 # coerced into :class:`Config` — and read raw via :func:`read_reserved_section`.
 # ``snapshot`` is the repo-snapshot-isolation gate cache/janitor tunables layer
 # (``rebar._snapshot``), resolved env-first by :class:`rebar._snapshot.JanitorConfig`.
-_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot"})
+# ``mapping`` is the provider-neutral reconciler mapping-vocabulary layer
+# (``rebar_reconciler.mapping_config``), resolved by :func:`load_mapping_config`.
+_RESERVED_SECTIONS: frozenset[str] = frozenset({"llm", "snapshot", "mapping"})
 
 
 def coerce_sparse(raw: dict | None, *, source: str = "", strict: bool = False) -> dict:
