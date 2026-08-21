@@ -41,6 +41,7 @@ from typing import Any
 
 import pytest
 from _bridge_output import converged_pass_problem, wrote_nothing_problem
+from _child_diag import assert_child_ran_clean
 from _dc_support import live_jira_ready
 from _dc_support import run_bridge as _run_bridge
 from _dc_support import skip_no_extra as _skip_no_extra
@@ -153,7 +154,7 @@ def _push_and_converge(
 
     rebar.edit_ticket(local_id, repo_root=repo, description=description)
     cp = _run_bridge(repo, "sync", only=f"{local_id},{key}", max_changes=10)
-    assert "Traceback" not in cp.stderr, f"{what} pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what=f"{what} pass")
     problem = converged_pass_problem(cp.stdout, cp.stderr)
     assert problem is None, f"{what}: {problem}\n{cp.stdout}\n--stderr--\n{cp.stderr}"
     _wait_until_search_reflects(
@@ -231,7 +232,7 @@ def test_live_rich_text_renders_and_echo_is_safe(
 
     # ECHO-SAFETY — the immediately-following pass must write nothing.
     second = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
-    assert "Traceback" not in second.stderr, f"echo pass raised:\n{second.stderr[-2000:]}"
+    assert_child_ran_clean(second, what="echo pass")
     problem = wrote_nothing_problem(second.stdout, second.stderr)
     assert problem is None, (
         "the second pass re-pushed the rich body — echo-safety does not hold against the real "
@@ -283,9 +284,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
         visible_token=heading,
     )
     settle = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
-    assert "Traceback" not in settle.stderr, (
-        f"baseline settle pass raised:\n{settle.stderr[-2000:]}"
-    )
+    assert_child_ran_clean(settle, what="baseline settle pass")
     assert wrote_nothing_problem(settle.stdout, settle.stderr) is None, (
         "the baseline did not settle before the conflict was staged — a non-quiet pre-state "
         f"would confound the both-sides precondition:\n{settle.stdout}\n--stderr--\n{settle.stderr}"
@@ -312,7 +311,7 @@ def test_live_rich_text_both_sides_conflict_keeps_local(
 
     # (3) THE PASS — local-wins emit + recorded conflict.
     cp = _run_bridge(dc_store_copy_repo, "sync", only=f"{local_id},{key}", max_changes=10)
-    assert "Traceback" not in cp.stderr, f"conflict pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="conflict pass")
     assert converged_pass_problem(cp.stdout, cp.stderr) is None, (
         f"the conflict pass did not settle:\n{cp.stdout}\n--stderr--\n{cp.stderr}"
     )
