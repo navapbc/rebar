@@ -171,3 +171,36 @@ def require_s3_helper() -> None:
             f"git-remote-s3 version {version_str!r} does not meet the minimum "
             f"version {MIN_GIT_REMOTE_S3}; {_install_hint('s3')}"
         )
+
+
+# ── Semantic-capability delegation (RP-05 S4) ────────────────────────────────────────────
+# ``require_extra`` / ``guard_import`` / ``EXTRAS`` above remain the historical
+# optional-dependency compatibility surface. The descriptive *semantic capability* registry
+# (``rebar._capabilities``, ADR 0100 §7) is the newer seam: it maps a semantic capability
+# (``agent_runtime``, ``audit_ui``, …) to its extra and a typed missing posture, so a boundary
+# can enforce AFTER the selected mode/backend is known instead of extra-by-extra. The thin
+# delegators below let callers reach that seam through this module. Imported lazily because
+# ``rebar._capabilities`` imports :class:`OptionalDependencyError` from here (avoids an
+# import cycle); this module never imports the optional packages themselves.
+
+
+def capability_installed(key: str) -> bool:
+    """True if the semantic capability ``key``'s probe module is importable (no import).
+
+    Delegates to :func:`rebar._capabilities.is_available` — pure detection via
+    ``importlib.util.find_spec``, never executing the optional package."""
+    from rebar import _capabilities
+
+    return _capabilities.is_available(key)
+
+
+def require_capability(key: str) -> None:
+    """Enforce an ``error``-posture semantic capability at a selected execution boundary.
+
+    Delegates to :func:`rebar._capabilities.require_capability`: raises
+    :class:`OptionalDependencyError` (naming the exact ``pip install``) when the capability's
+    extra is absent, and :class:`ValueError` for a non-``error`` posture (whose degraded /
+    abstain / fallback result the domain component owns, not this guard)."""
+    from rebar import _capabilities
+
+    _capabilities.require_capability(key)
