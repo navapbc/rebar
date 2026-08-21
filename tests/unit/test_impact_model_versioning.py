@@ -31,7 +31,7 @@ def test_code_review_payload_stamps_version() -> None:
     from rebar.llm.code_review import sidecar
 
     payload = sidecar.build_payload({"verdict": "PASS"}, target_ticket="A1")
-    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v4"
+    assert payload["impact_model_version"] == sidecar.IMPACT_MODEL_VERSION == "code-v5"
 
 
 def test_plan_and_code_versions_are_distinct() -> None:
@@ -192,9 +192,10 @@ def test_ab_gate_is_regression_detecting() -> None:
     assert passes_real is True
 
 
-def test_code_review_impact_model_version_is_v4() -> None:
+def test_code_review_impact_model_version_is_v5() -> None:
     # bug obese-dihedral-ermine: the maint-lane split + new binary is a vocabulary/shape change
-    # => IMPACT_MODEL_VERSION bump code-v3 -> code-v4.
+    # => IMPACT_MODEL_VERSION bump code-v3 -> code-v4. Ticket 5452-3077-b34a-4157: the
+    # removed-public-symbol serious boost changes impact semantics again => code-v5.
     from rebar.llm.code_review import sidecar as code_sc
 
-    assert code_sc.IMPACT_MODEL_VERSION == "code-v4"
+    assert code_sc.IMPACT_MODEL_VERSION == "code-v5"
