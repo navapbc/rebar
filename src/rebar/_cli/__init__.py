@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 
-from rebar._cli import _help
+from rebar._cli import _help, _help_route
 from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
 from rebar._cli._llm_commands import (
     _criteria,
@@ -127,43 +127,13 @@ _HIDDEN_ALIASES = frozenset({"bridge-status"})
 
 
 def _wants_help(rest: list[str]) -> bool:
-    """True if a bare ``--help``/``-h`` appears before any ``--`` terminator.
-
-    The dispatcher must honour a help flag in ANY position, not only ``rest[0]``:
-    ``rebar create task --help`` used to fall through to the create handler, which
-    consumed ``--help`` as the positional title and created a placeholder ticket
-    (bug b8de).
-
-    Scanning stops at the first ``--`` so a caller can suppress the help intercept
-    at the dispatcher. This is a dispatcher-level convention only: downstream write
-    handlers parse their own positionals and do not themselves treat ``--`` as an
-    argument terminator, so ``--`` is an escape from help interception, not a
-    general "everything after is literal data" contract. A ``--help``/``-h`` meant
-    as the *value* of a value-taking option (e.g. ``-d --help``) is likewise read
-    as a help request here; passing such a literal is an unsupported edge, matching
-    argparse's own precedence of the help flag.
-    """
-    for tok in rest:
-        if tok == "--":
-            return False
-        if tok in ("--help", "-h"):
-            return True
-    return False
+    """Deprecated shim — see :func:`rebar._cli._help_route.wants_help`."""
+    return _help_route.wants_help(rest)
 
 
 def _help_requested(sub: str, rest: list[str]) -> bool:
-    """Whether ``rebar <sub> …`` is a help request the DISPATCHER should serve itself.
-
-    Nested-dispatch families (the ``bridge`` group) own their children's help, so
-    for them only a LEADING ``--help``/``-h`` asks for the family's own usage — a
-    later flag belongs to a child (``bridge preview --help`` → preview usage, served
-    by ``bridge_cli``, not the dispatcher). This keeps ``bridge --help`` identical to
-    ``help bridge``. Every other command has no nested help, so a ``--help``/``-h`` in
-    any position before a ``--`` is a usage request for it (bug b8de).
-    """
-    if sub in _BRIDGE:
-        return bool(rest) and rest[0] in ("--help", "-h")
-    return _wants_help(rest)
+    """Deprecated shim — see :func:`rebar._cli._help_route.help_requested`."""
+    return _help_route.help_requested(sub, rest)
 
 
 # Import/export arms (P1.2): NDJSON interop projection. `export` is a read
@@ -288,18 +258,8 @@ def _grounding_info(argv: list[str]) -> int:
 
 
 def _emit_subcommand_help(sub: str) -> int:
-    """Print ``sub``'s usage.
-
-    Known subcommand → stdout, exit 0. Unknown → error + blank + overview all to
-    stderr, exit 1.
-    """
-    text = _help.subcommand_help(sub)
-    if text is not None:
-        sys.stdout.write(text)
-        return 0
-    sys.stderr.write(f"Error: unknown subcommand '{sub}'\n\n")
-    sys.stderr.write(_help.overview())
-    return 1
+    """Deprecated shim — see :func:`rebar._cli._help_route.emit_subcommand_help`."""
+    return _help_route.emit_subcommand_help(sub)
 
 
 def _dispatch_bridge(sub: str, rest: list[str]) -> int:
@@ -567,6 +527,15 @@ def _main_dispatch(argv: list[str]) -> int:
     """The full CLI dispatch body: the ``-c`` override parse, every in-process
     intercept (reconcile/review/…/identity/config/audit), and ``return _dispatch(...)``.
     Wrapped by :func:`main` in a ``RemovedInputError`` handler (see there)."""
+    # Canonical help / overview / unknown pre-scan (RP-05 S2d): answer a help, bare-overview,
+    # or unknown-subcommand request from the committed help artifacts BEFORE any operation
+    # snapshot, config materialization, store mount, handler/factory resolution, or optional
+    # import. Returns an exit code when it served the request; None means fall through to the
+    # real dispatch below (a genuine command, or an intercept command that owns its --help).
+    _served = _help_route.pre_scan(argv)
+    if _served is not None:
+        return _served
+
     # Global config overrides (git -c style): `rebar -c section.key=value [...] <cmd>`,
     # repeatable, BEFORE the subcommand. They install the highest-precedence `cli`
     # layer (CLI > env > project > user > defaults) for every config consumer this
@@ -728,36 +697,11 @@ def _main_dispatch(argv: list[str]) -> int:
 
         return show_config.config_cli(argv[1:])
 
-    # No subcommand: overview to stdout, exit 1.
-    if not argv:
-        sys.stdout.write(_help.overview())
-        return 1
-
-    first = argv[0]
-
-    # Top-level help: `rebar help [<sub>]`, `rebar --help`, `rebar -h`.
-    if first in ("help", "--help", "-h"):
-        if len(argv) >= 2:
-            return _emit_subcommand_help(argv[1])
-        sys.stdout.write(_help.overview())
-        return 0
-
-    sub, rest = first, argv[1:]
-
-    # `rebar <sub> --help|-h` → usage, no exec. For most commands a help flag in ANY
-    # position before a `--` counts (else `create task --help` reaches the handler and is
-    # stored as the ticket title — bug b8de); nested-dispatch families (bridge*) honour only
-    # a leading flag so a child keeps its own help. Commands intercepted earlier never reach
-    # here.
-    if sub not in _HIDDEN_ALIASES and _help_requested(sub, rest):
-        return _emit_subcommand_help(sub)
-
-    # Unknown subcommand: error to stderr + overview to stdout, exit 1.
-    if sub not in _help.known_subcommands() and sub not in _HIDDEN_ALIASES:
-        sys.stderr.write(f"Error: unknown subcommand '{sub}'\n")
-        sys.stdout.write(_help.overview())
-        return 1
-
+    # Help, overview, and unknown-subcommand forms were already served by
+    # ``_help_route.pre_scan`` at the top of this function (before any snapshot/config/mount).
+    # Reaching here means a real, help-backed command invocation (intercept commands and
+    # their own ``--help`` were handled by the ladder above); route it to the dispatcher.
+    sub, rest = argv[0], argv[1:]
     return _dispatch(sub, rest)
 
 

@@ -1,1 +1,11 @@
-Usage: rebar delete <ticket_id> --user-approved [--output json]   (destructive; requires explicit approval)
+Usage: rebar delete [--output {text,json}] [--user-approved] [ticket_id]
+
+Delete a ticket (destructive; requires --user-approved).
+
+positional arguments:
+  ticket_id             the ticket to delete
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --user-approved       required destructive-op guard

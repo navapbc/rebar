@@ -1,39 +1,24 @@
-Usage: rebar bridge <command>
+Usage: rebar bridge [-h]
+                    {preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}
+                    ...
 
 Synchronize rebar tickets with Jira.
 
-Commands:
-  preview   Show proposed Jira changes without applying them
-  run       Run one scheduled profile and strictly deliver ticket events
-  sync      Apply the staged Jira synchronization
-  status    Show the reconciler's durable status snapshot
-  pause     Temporarily stop scheduled reconciliation
-  resume    Resume scheduled reconciliation
-  fsck      Audit committed events, binding drift, and binding-store integrity
-  check-access
-            Check Jira access with a create/label/search/delete round-trip
-  setup     Interactively configure and validate Jira access
-  projects  Manage the store's bridge-projects sync mapping (list/set/remove)
+options:
+  -h, --help            show this help message and exit
 
-Preview and sync options:
-  --only IDS       Examine only the named local IDs or bound Jira keys
-  --except IDS     Exclude the named local IDs or bound Jira keys
-
-Run option:
-  --profile PROFILE
-                   Scheduled compatibility profile; defaults to the provider configuration
-
-Sync option:
-  --max-changes N  Apply at most N proposed changes and retain the audit manifest
-
-Status options:
-  --target ID       Compare the witness with this environment id
-  --max-age AGE     Enable age-based staleness (for example 2h)
-  --json            Emit the snapshot as JSON
-
-Projects options:
-  set KEY --repos REPOS
-                   Replace KEY's repos with a comma-separated list ("" for none)
-  remove KEY        Remove KEY from the mapping (non-zero exit if absent)
-
-Run `rebar bridge <command> --help` for command-specific options.
+commands:
+  {preview,run,sync,status,pause,resume,fsck,check-access,setup,projects}
+    preview             Show proposed Jira changes without applying them.
+    sync                Apply proposed Jira changes.
+    run                 Run one scheduled bridge profile and strictly deliver
+                        ticket events.
+    status              Show the reconciler's durable status snapshot.
+    pause               Temporarily stop scheduled reconciliation.
+    resume              Resume scheduled reconciliation.
+    fsck                Audit committed event compatibility and binding-store
+                        integrity.
+    check-access        Check live Jira access with a create/search/delete
+                        round-trip.
+    setup               Interactively configure and validate Jira access.
+    projects            Manage the store's bridge-projects sync mapping.

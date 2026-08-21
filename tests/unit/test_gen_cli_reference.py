@@ -150,13 +150,13 @@ def test_render_expands_the_staged_bridge_group():
     """The generated reference documents every canonical bridge operation."""
     text = gen.render()
     assert "### `bridge`" in text
-    assert "Usage: rebar bridge <command>" in text
-    assert "preview   Show proposed Jira changes" in text
-    assert "sync      Apply the staged Jira synchronization" in text
-    assert "\n  pause" in text
-    assert "\n  resume" in text
-    assert "\n  fsck" in text
-    assert "\n  check-access" in text
-    assert "\n  setup" in text
+    assert "Usage: rebar bridge [-h]" in text
+    assert "preview             Show proposed Jira changes without applying them." in text
+    assert "sync                Apply proposed Jira changes." in text
+    assert "\n    pause" in text
+    assert "\n    resume" in text
+    assert "\n    fsck" in text
+    assert "\n    check-access" in text
+    assert "\n    setup" in text
     for future_verb in ("resolve", "probe", "bind", "unbind"):
         assert f"rebar bridge {future_verb}" not in text

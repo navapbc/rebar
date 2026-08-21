@@ -1,1 +1,10 @@
-Usage: rebar clarity-check <ticket_id>   (exit 0=pass, 1=fail; JSON: score/verdict/threshold)
+Usage: rebar clarity-check [--stdin] [--config CONFIG] [ticket_id]
+
+Score one ticket's clarity (exit 0=pass, 1=fail).
+
+positional arguments:
+  ticket_id        the ticket to score
+
+options:
+  --stdin          read the ticket text from stdin
+  --config CONFIG  path to a clarity config override

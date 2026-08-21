@@ -1,1 +1,11 @@
-Usage: rebar show [--output llm] [--no-pull] <ticket_id> [<ticket_id> ...]
+Usage: rebar show [--output {json,llm}] [--include-scratch] [ticket_id ...]
+
+Show ticket details.
+
+positional arguments:
+  ticket_id             one or more ticket ids/aliases
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --include-scratch     include per-ticket scratch values

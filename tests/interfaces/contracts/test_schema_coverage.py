@@ -104,6 +104,7 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "doctor": lambda s: ["doctor"],
     "bridge-fsck": lambda s: ["bridge", "fsck"],
     "grounding-info": lambda s: ["grounding-info"],
+    "get-verify-commands": lambda s: ["get-verify-commands", s["task"]],
     "create": lambda s: ["create", "task", "Made by guard"],
     "idea": lambda s: ["idea", "Made by guard"],
     "claim": lambda s: ["claim", s["claimable"], "--assignee=agent"],
@@ -121,6 +122,19 @@ def _output_advertisers() -> set[str]:
     return {cmd for cmd, help_text in _help_arms().items() if "--output" in help_text}
 
 
+# Advertisers whose ``--output`` does NOT appear in their top-level ``--help`` text, so the
+# mechanical help-text scan in ``_output_advertisers`` cannot detect them — yet they genuinely
+# accept ``--output json`` and MUST keep real-output coverage (driven below). RP-05 S2d
+# regenerated the package help from the argparse parser factories, so:
+#   * ``audit`` is a subparser group; its ``--output`` lives on ``audit show``, never in the
+#     top-level ``audit`` help; and
+#   * ``bridge-fsck`` (like the rest of the bridge family) has ``--output``/``-o`` consumed by
+#     ``parse_output`` BEFORE argparse, so it is absent from the parser-derived artifact.
+# These stay in CLI_OUTPUT_DRIVERS (their real-output tests still validate the flag); they are
+# exempt only from the "stale advertiser" guard.
+_OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit", "bridge-fsck"}
+
+
 def test_every_cli_output_advertiser_is_classified() -> None:
     """Mechanical completeness: every CLI --output advertiser has a real driver."""
     advertised = _output_advertisers()
@@ -130,7 +144,7 @@ def test_every_cli_output_advertiser_is_classified() -> None:
         f"CLI commands advertise --output but are not classified for real-output "
         f"validation: {sorted(unclassified)} — add a driver to CLI_OUTPUT_DRIVERS."
     )
-    stale = classified - advertised
+    stale = classified - advertised - _OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP
     assert not stale, (
         f"CLI_OUTPUT_DRIVERS lists commands that no longer advertise --output: {sorted(stale)}"
     )
