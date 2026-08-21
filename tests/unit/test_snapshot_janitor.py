@@ -809,3 +809,60 @@ def test_the_three_size_questions_on_a_known_inode_layout(tmp_path):
     (left / "shared.bin").unlink()
     assert cache.exclusive_size(right) == 1070
     assert cache.distinct_bytes([left, right]) == 1370  # unchanged: the bytes never left
+
+
+# --------------------------------------------------------------------------------------
+# Bug 797c-a4ea — a materialize_tickets cache hit must bump the entry's recency (mtime)
+# --------------------------------------------------------------------------------------
+def _tickets_branch(repo: Path, body: str) -> None:
+    _commit(repo, "seed.txt", "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+    _commit(repo, "t.json", body)
+    _git(repo, "checkout", "--quiet", "-")
+
+
+def test_materialize_tickets_bumps_mtime_on_cache_hit(store, repo):
+    """ADR 0005 D4: the janitor evicts LRU by ``mtime``, which the cache bumps explicitly on
+    EVERY hit. ``materialize_tickets`` is a second read path into the same store, so its
+    cache-hit branch owes the same ``touch_entry`` that ``cache.acquire`` pays — without it a
+    hot ``tickets-<sha>`` entry's recency is frozen at creation time."""
+    _tickets_branch(repo, "T")
+    dest = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+
+    stale = time.time() - 10_000
+    os.utime(dest, (stale, stale))
+    rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)  # cache hit
+
+    assert cache.entry_mtime(dest) > stale + 1, (
+        "a materialize_tickets cache hit must bump the entry mtime (ADR 0005 D4)"
+    )
+
+
+def test_hot_tickets_entry_is_not_first_lru_victim(store, repo):
+    """The consequence pinned: a repeatedly-read ``tickets-`` entry must NOT be the first LRU
+    victim ahead of a genuinely older-unread entry. With the hit un-recorded, the oldest-created
+    (but hottest) entry sorts FIRST in the janitor's LRU order and is evicted preferentially."""
+    now = time.time()
+    _tickets_branch(repo, "T" * 200_000)
+
+    # The tickets entry is created FIRST (oldest creation time = frozen mtime pre-fix) ...
+    hot = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+    os.utime(hot, (now - 50_000, now - 50_000))
+    # ... a code entry is created later but never read again after this.
+    _sha, cold = _populate(repo, store, "cold.txt", "C" * 100_000, mtime=now - 20_000)
+    # The tickets entry keeps being read (cache hits).
+    rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)
+
+    total = cache.byte_total(store)
+    assert total > 0
+    cfg = janitor.JanitorConfig(
+        free_watermark_bytes=1,
+        grace_seconds=120,
+        max_age_seconds=10**9,
+        max_bytes=total - 1,  # must reclaim at least one entry; the LRU-first one goes
+    )
+    res = janitor.run_gc(store, config=cfg, now=now, free_bytes=10**15)
+
+    assert res.evicted >= 1
+    assert hot.exists(), "the hot tickets- entry must not be the first LRU victim"
+    assert not cold.exists(), "the genuinely cold entry is the correct victim"
