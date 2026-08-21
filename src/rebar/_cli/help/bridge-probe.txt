@@ -1,3 +1,10 @@
-Compatibility alias for `rebar bridge check-access`.
+Usage: rebar bridge-probe [-h] ...
 
-Usage: rebar bridge-probe   (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN; optional JIRA_PROJECT)
+Live Jira capability preflight (requires JIRA_URL, JIRA_USER, JIRA_API_TOKEN;
+optional JIRA_PROJECT). Creates and deletes a throwaway issue.
+
+positional arguments:
+  probe_args  arguments forwarded verbatim to the capability probe
+
+options:
+  -h, --help  show this help message and exit

@@ -17,21 +17,39 @@ from rebar._cli._parser import build_argument_parser
 
 def build_export(*, prog: str) -> argparse.ArgumentParser:
     """``rebar export [-o FILE] [--status S] [--type T] [--parent ID] [toggles]``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("--out", "-o", dest="out")
-    parser.add_argument("--status")
-    parser.add_argument("--type", dest="ticket_type")
-    parser.add_argument("--parent")
-    parser.add_argument("--strip-external", "--no-jira", dest="strip_external", action="store_true")
-    parser.add_argument("--include-session-logs", action="store_true")
-    parser.add_argument("--exclude-archived", action="store_true")
-    parser.add_argument("--include-deleted", action="store_true")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Export the store as NDJSON (one ticket per line).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument("--out", "-o", dest="out", help="write to FILE instead of stdout")
+    parser.add_argument("--status", help="filter by status")
+    parser.add_argument("--type", dest="ticket_type", help="filter by ticket type")
+    parser.add_argument("--parent", help="filter to descendants of <id>")
+    parser.add_argument(
+        "--strip-external",
+        "--no-jira",
+        dest="strip_external",
+        action="store_true",
+        help="strip external (Jira) bindings from the export",
+    )
+    parser.add_argument(
+        "--include-session-logs", action="store_true", help="include session_log tickets"
+    )
+    parser.add_argument("--exclude-archived", action="store_true", help="exclude archived tickets")
+    parser.add_argument("--include-deleted", action="store_true", help="include deleted tickets")
     return parser
 
 
 def build_import(*, prog: str) -> argparse.ArgumentParser:
     """``rebar import [FILE] [--dry-run]``   (reads stdin if FILE omitted)."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("file", nargs="?")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Import tickets from export NDJSON (clean rebar->rebar migration).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument("--dry-run", action="store_true", help="report without writing")
+    parser.add_argument("file", nargs="?", help="NDJSON file to import (stdin if omitted)")
     return parser

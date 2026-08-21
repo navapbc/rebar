@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 
-from rebar._cli._parser import build_argument_parser
+from rebar._cli._parser import RebarHelpFormatter, build_argument_parser
 
 
 def _positive_int(value: str) -> int:
@@ -44,7 +44,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
     parser = build_argument_parser(
         prog=prog,
         description="Synchronize rebar tickets with Jira.",
-        formatter_class=argparse.HelpFormatter,
+        formatter_class=RebarHelpFormatter,
     )
     commands = parser.add_subparsers(
         dest="command",

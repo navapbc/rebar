@@ -80,6 +80,92 @@ def test_help_anywhere_before_terminator_shows_usage_no_write(
     assert _ticket_count(rebar_repo) == before, "help must not mutate the store"
 
 
+def test_flat_bridge_family_serves_pinned_help_for_nonleading_flag(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A FLAT compatibility command in the ``bridge`` group owns no nested children, so a
+    non-leading ``--help`` is ITS OWN usage request and must be served from the pinned,
+    capitalized artifact — not fall through to argparse's live lowercase ``usage: rebar`` with
+    the wrong prog. Regression for the ``_NESTED_FAMILY`` over-inclusion (deriving the set from
+    ``group == "bridge"`` wrongly swept in the flat, non-nested arm)."""
+    from rebar._cli._registry import ROUTES
+
+    flat = next(
+        r.name for r in ROUTES if r.group == "bridge" and not r.hidden and r.name != "bridge"
+    )
+    rc = _cli.main([flat, "somearg", "--help"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith(f"Usage: rebar {flat}"), out[:80]
+
+
+def _help_backed_nested_families() -> list[tuple[str, str]]:
+    """Every ``(command, first_child)`` for a HELP-BACKED route whose parser owns SUBCOMMANDS.
+
+    Resolved from the registry by building the parser (allowed in a test, forbidden in the
+    pre-scan, which must not resolve a factory) so the test never hardcodes a command and
+    can't rot if one is renamed. "Help-backed" (``group != "intercept"``, not hidden/retired)
+    is the exact predicate the pre-scan uses to decide it serves a route's pinned help, so
+    this is precisely the class whose nested children the pre-scan can wrongly intercept
+    (``bridge`` and the ``audit`` main()-intercept today)."""
+    import argparse
+    import importlib
+
+    from rebar._cli._registry import ROUTES
+
+    out: list[tuple[str, str]] = []
+    for r in ROUTES:
+        help_backed = r.group != "intercept" and not r.hidden and not r.retired
+        if not (help_backed and r.parser_factory):
+            continue
+        module_name, attr = r.parser_factory.split(":")
+        parser = getattr(importlib.import_module(module_name), attr)(prog=f"rebar {r.name}")
+        subs = next((a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None)
+        if subs is not None and subs.choices:
+            out.append((r.name, sorted(subs.choices)[0]))
+    return out
+
+
+def test_nested_family_child_help_falls_through_to_argparse(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A HELP-BACKED nested family owns its own subcommand parsing, so a NON-leading ``--help``
+    (``audit serve --help``, ``bridge preview --help``) is the CHILD's usage request and must
+    fall through to the real parser — NOT be intercepted to the family's pinned top-level
+    artifact (which would show e.g. ``rebar audit [-h] {show,serve}`` instead of the child's
+    own options). Iterates the whole class so a future nested family omitted from
+    ``_NESTED_FAMILY`` also trips this. Regression: ``_NESTED_FAMILY`` was derived only from the
+    ``bridge`` parser factory, so ``audit``'s children were wrongly swept into the pre-scan."""
+    families = _help_backed_nested_families()
+    assert families, "expected at least the bridge and audit nested families"
+
+    for cmd, child in families:
+        capsys.readouterr()
+        try:
+            rc: object = _cli.main([cmd, child, "--help"])
+        except SystemExit as exc:  # a fall-through argparse --help may exit rather than return
+            rc = exc.code
+        out = capsys.readouterr().out
+        assert rc == 0, (cmd, child, rc)
+        assert f"{cmd} {child}" in out.splitlines()[0], (cmd, child, out[:120])
+
+
+def test_help_behind_a_config_prefix_is_served_without_write(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A leading ``-c SECTION.KEY=VALUE`` config prefix is stripped by the pre-scan, so the
+    help request behind it is still served (exit 0, usage on stdout) and mutates nothing."""
+    before = _ticket_count(rebar_repo)
+
+    rc = _cli.main(["-c", "ticket.default_assignee=x@y", "create", "--help"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith("Usage: rebar create"), out[:80]
+    assert _ticket_count(rebar_repo) == before, "help behind a config prefix must not write"
+
+
 def test_ordinary_create_still_writes(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A real title with no help flag creates exactly one ticket (no over-eager intercept)."""
     rc = _cli.main(["create", "task", "a real title"])

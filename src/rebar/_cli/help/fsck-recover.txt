@@ -1,1 +1,11 @@
-Usage: rebar fsck-recover [--tracker-dir <path>]
+Usage: rebar fsck-recover [--tracker-dir TRACKER_DIR] [--detect-only]
+                          [--recover-dangling] [--timeout SECONDS]
+
+Recover the tracker worktree (dangling commits, interrupted rebases).
+
+options:
+  --tracker-dir TRACKER_DIR
+                        path to the tracker worktree
+  --detect-only         detect without recovering
+  --recover-dangling    recover dangling commits
+  --timeout SECONDS     git operation timeout

@@ -18,7 +18,10 @@ from rebar._cli._parser import build_argument_parser
 def build(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar audit`` nested parser bound to ``prog``."""
     parser = build_argument_parser(
-        prog=prog, formatter_class=argparse.HelpFormatter, allow_abbrev=False
+        prog=prog,
+        description="Show a ticket audit trail (plan-review history + completion + code reviews).",
+        formatter_class=argparse.HelpFormatter,
+        allow_abbrev=False,
     )
     subs = parser.add_subparsers(dest="subcommand", metavar="{show,serve}")
 

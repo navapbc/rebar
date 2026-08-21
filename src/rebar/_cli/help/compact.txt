@@ -1,1 +1,13 @@
-Usage: rebar compact <ticket_id> [--threshold=<n>]
+Usage: rebar compact [--threshold N] [--horizon NS] [--skip-sync] [--no-commit]
+                     [ticket_id]
+
+Compact a ticket's event log.
+
+positional arguments:
+  ticket_id      the ticket to compact
+
+options:
+  --threshold N  compact only above N events
+  --horizon NS   retain events newer than NS nanoseconds
+  --skip-sync    skip the reconverge
+  --no-commit    stage the snapshot without committing

@@ -1,1 +1,10 @@
-Usage: rebar revert <ticket_id> <target_uuid> [--reason=<text>]
+Usage: rebar revert [--reason REASON] [ticket_id] [target_uuid]
+
+Revert a ticket to a prior event UUID.
+
+positional arguments:
+  ticket_id        the ticket to revert
+  target_uuid      the event UUID to revert to
+
+options:
+  --reason REASON  reason recorded with the revert

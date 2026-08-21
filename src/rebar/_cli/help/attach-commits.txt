@@ -1,1 +1,7 @@
-Usage: rebar attach-commits <ticket_id> <sha> [<sha>...]
+Usage: rebar attach-commits [ticket_id] [shas ...]
+
+Link commits to a ticket by SHA (repairs a missing rebar-ticket: trailer).
+
+positional arguments:
+  ticket_id  the ticket to attach commits to
+  shas       one or more commit SHAs

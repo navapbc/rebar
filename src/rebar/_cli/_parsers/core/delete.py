@@ -17,8 +17,17 @@ from rebar._cli._parser import build_argument_parser
 
 def build(*, prog: str) -> argparse.ArgumentParser:
     """``rebar delete <ticket_id> --user-approved [--output json]``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("--output", "-o", choices=("text", "json"), default="text")
-    parser.add_argument("--user-approved", action="store_true")
-    parser.add_argument("ticket_id", nargs="?")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Delete a ticket (destructive; requires --user-approved).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--output", "-o", choices=("text", "json"), default="text", help="output format"
+    )
+    parser.add_argument(
+        "--user-approved", action="store_true", help="required destructive-op guard"
+    )
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to delete")
     return parser

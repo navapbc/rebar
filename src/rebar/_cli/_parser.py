@@ -70,6 +70,57 @@ class RebarHelpFormatter(argparse.HelpFormatter):
             width=_FIXED_WIDTH,
         )
 
+    def _format_action_invocation(self, action: argparse.Action) -> str:
+        """Render an option invocation in the pre-3.13 style on EVERY Python version.
+
+        Python 3.13 changed argparse to print an optional that takes a value as
+        ``-o, --output METAVAR`` (metavar once) instead of the historical
+        ``-o METAVAR, --output METAVAR`` (metavar per option string). The generated
+        ``help/*.txt`` artifacts are committed bytes checked by
+        ``gen_cli_help.py --check`` across the whole CI version matrix, so a
+        version-dependent invocation makes ``--check`` report every option-bearing
+        command stale on 3.13 while passing on 3.11/3.12. Pin the historical form
+        (matching the pinned 3.12 toolchain and 3.11) so generation — and live help —
+        are byte-identical on all three. This is the verbatim pre-3.13 stdlib body.
+        """
+        if not action.option_strings:
+            default = self._get_default_metavar_for_positional(action)
+            (metavar,) = self._metavar_formatter(action, default)(1)
+            return metavar
+        if action.nargs == 0:
+            return ", ".join(action.option_strings)
+        default = self._get_default_metavar_for_optional(action)
+        args_string = self._format_args(action, default)
+        return ", ".join(
+            f"{option_string} {args_string}" for option_string in action.option_strings
+        )
+
+    def _format_usage(self, usage, actions, groups, prefix=None):  # type: ignore[no-untyped-def]
+        """Wrap a subparsers ``...`` remainder onto its own line on EVERY Python version.
+
+        argparse's usage-line wrapping of a subparsers action's ``{choices} ...`` changed
+        repeatedly across CPython 3.x (pre-3.13 split it on whitespace so ``...`` wrapped to
+        its own line; 3.13 kept ``{choices} ...`` together; 3.13's private helper was then
+        renamed again in a 3.13 patch release — gh-75949). The committed ``help/*.txt`` for
+        subparser commands (e.g. ``bridge``) are byte-checked across the whole CI version
+        matrix, so chasing those private-method changes is fragile. Instead, post-process the
+        RENDERED usage string — a stable seam: split any over-width line ending in a ``...``
+        remainder so the ``...`` sits on its own line at the same indent (the historical
+        form). This depends only on the output text and the fixed width, not argparse
+        internals, so it is stable regardless of which private helper a given CPython uses.
+        """
+        rendered = super()._format_usage(usage, actions, groups, prefix)
+        out_lines: list[str] = []
+        for line in rendered.split("\n"):
+            if line.endswith(" ...") and len(line) > self._width:
+                head = line[:-4]
+                indent = head[: len(head) - len(head.lstrip(" "))]
+                out_lines.append(head)
+                out_lines.append(f"{indent}...")
+            else:
+                out_lines.append(line)
+        return "\n".join(out_lines)
+
 
 class RebarArgumentParser(argparse.ArgumentParser):
     """An :class:`argparse.ArgumentParser` that raises instead of exiting.
