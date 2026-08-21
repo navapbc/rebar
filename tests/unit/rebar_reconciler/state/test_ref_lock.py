@@ -57,6 +57,20 @@ def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _bare_git(args: list[str], bare: Path) -> subprocess.CompletedProcess:
+    """Run git against a BARE repo via explicit --git-dir naming.
+
+    ``git -C <bare.git>`` relies on implicit repository discovery, which git
+    refuses under the ``safe.bareRepository=explicit`` policy (exit 128:
+    "cannot use bare repository"). Explicit ``--git-dir`` naming is always
+    permitted, so bare fixture repos stay portable to hosts that inject that
+    policy (same pattern as tests/_git_upkeep.py; bug 02e8-96bd).
+    """
+    return subprocess.run(
+        ["git", "--git-dir", str(bare), *args], capture_output=True, text=True, check=True
+    )
+
+
 @pytest.fixture()
 def tmp_git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
@@ -212,9 +226,9 @@ def test_ac0_blob_ref_roundtrips_through_remote(
     oid = ref_lock.acquire(work, ref_lock.LOCK_REF, holder="p1", lease_secs=120, remote="origin")
 
     # The bare remote holds a BLOB-pointing refs/reconciler/lock.
-    obj_type = _git(["cat-file", "-t", oid], bare).stdout.strip()
+    obj_type = _bare_git(["cat-file", "-t", oid], bare).stdout.strip()
     assert obj_type == "blob"
-    ref_oid = _git(["rev-parse", ref_lock.LOCK_REF], bare).stdout.strip()
+    ref_oid = _bare_git(["rev-parse", ref_lock.LOCK_REF], bare).stdout.strip()
     assert ref_oid == oid
 
     # A fresh clone reads the same state via read(remote=...).
