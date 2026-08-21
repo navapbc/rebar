@@ -14,10 +14,11 @@ Two families of logic live here because each was once duplicated per caller:
 
 * :func:`spawn_detached` (+ :func:`detached_child_cwd`) — the ONE implementation of
   "spawn a detached rebar child", shared by the async tickets-branch push
-  (``_store.push``), the enrichment drain (``llm.enrich_drain``) and the compaction
-  sweep (``_commands.compact_trigger``). The pattern was previously copied per site,
-  and a defect (the missing durable ``cwd``, bug 3198-438c-72a5-470f) propagated to
-  all three by exactly that imitation (task 2dc4-9bcd-75b9-4544).
+  (``_store.push``), the enrichment drain (``llm.enrich_drain``), the compaction
+  sweep (``_commands.compact_trigger``) and the snapshot-GC trigger
+  (``_snapshot.gc_trigger``). The pattern was previously copied per site,
+  and a defect (the missing durable ``cwd``, bug 3198-438c-72a5-470f) propagated
+  by exactly that imitation (task 2dc4-9bcd-75b9-4544).
 
 This module is a **leaf**: stdlib-only (``os`` / ``signal`` / ``subprocess`` /
 ``logging`` / ``sys``), with NO ``rebar.*`` imports, so both the in-process library and
@@ -163,12 +164,11 @@ def _detach_kwargs() -> dict:
 def spawn_detached(
     module: str,
     func: str,
-    arg: str,
-    *,
+    *args: str,
     env: dict[str, str],
     stderr: int | IO[str],
 ) -> None:
-    """Spawn ``<module>.<func>(arg)`` in a detached bare-python child that outlives this
+    """Spawn ``<module>.<func>(*args)`` in a detached bare-python child that outlives this
     process. The single implementation of "spawn a detached rebar child" (task
     2dc4-9bcd-75b9-4544): the PYTHONPATH bootstrap, the ``-c`` re-entry stub, the platform
     detach flags, the stdio discipline and the durable ``cwd`` anchor live HERE, once, so
@@ -187,29 +187,34 @@ def spawn_detached(
       sweep catch broad ``Exception``) and folding the catch in here would silently change
       an exposure. Each caller keeps its existing ``except`` clause and log line.
 
-    ``arg`` becomes the child's ``sys.argv[1]`` and should be a CANONICAL store path — the
-    child outlives ephemeral worktrees, so a worktree symlink would die with its worktree
-    (bugs 93a9-66cf-e681-4f49, da68-fc7c-068c-4c53). The child's ``cwd`` is anchored via
-    :func:`detached_child_cwd` on that same argument. The child is spawned as a bare
-    ``sys.executable`` whose ``rebar`` importability comes from putting this checkout's
-    ``src`` dir (``parents[1]`` of this file) on PYTHONPATH and having the ``-c`` stub
-    re-insert it.
+    ``args`` (at least one) become the child's ``sys.argv[1:]``, and the FIRST should be a
+    CANONICAL store path — the child outlives ephemeral worktrees, so a worktree symlink
+    would die with its worktree (bugs 93a9-66cf-e681-4f49, da68-fc7c-068c-4c53). The child's
+    ``cwd`` is anchored via :func:`detached_child_cwd` on that first argument. Arguments are
+    plain STRINGS on the child's argv; a caller whose entry point wants an optional value
+    passes a sentinel (e.g. ``""``) and coerces it back inside the entry point — the stub
+    stays generic. The child is spawned as a bare ``sys.executable`` whose ``rebar``
+    importability comes from putting this checkout's ``src`` dir (``parents[1]`` of this
+    file) on PYTHONPATH and having the ``-c`` stub re-insert it.
     """
+    if not args:
+        raise ValueError("spawn_detached needs at least one argument for the child")
     src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     child_env = dict(env)
     child_env["PYTHONPATH"] = src + (
         os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
     )
+    n = len(args)
     subprocess.Popen(
         [
             sys.executable,
             "-c",
-            "import sys; sys.path.insert(0, sys.argv[2]); "
-            f"import {module}; {module}.{func}(sys.argv[1])",
-            arg,
+            f"import sys; sys.path.insert(0, sys.argv[{n + 1}]); "
+            f"import {module}; {module}.{func}(*sys.argv[1:{n + 1}])",
+            *args,
             src,
         ],
-        cwd=detached_child_cwd(arg),
+        cwd=detached_child_cwd(args[0]),
         env=child_env,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,

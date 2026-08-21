@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from rebar import _proc
 from rebar._snapshot import cache, gc_trigger, janitor
 from rebar._snapshot import repo_snapshot as rs
 
@@ -350,17 +351,19 @@ def test_run_detached_survives_a_dead_repo_root(store: Path, tmp_path: Path) -> 
 def test_the_detached_child_is_anchored_to_the_durable_store_root(
     store: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The child is handed the resolved store root in argv, its cwd is the store root itself
-    (per-host, outside any ephemeral worktree), and its stdio is detached."""
+    """The child is handed the resolved store root in argv, its cwd is the durable anchor the
+    shared spawner derives from that same store root (per-host, outside any ephemeral
+    worktree), and its stdio is detached."""
     seen: list[tuple[list[str], dict]] = []
 
     def _fake_popen(argv: list[str], **kwargs: object) -> object:
         seen.append((argv, kwargs))
         return object()
 
-    # Patch the module's OWN `subprocess` reference, never the real module.
+    # The one Popen lives in the shared spawner (rebar._proc.spawn_detached); patch that
+    # module's OWN `subprocess` reference, never the real module.
     monkeypatch.setattr(
-        gc_trigger,
+        _proc,
         "subprocess",
         types.SimpleNamespace(Popen=_fake_popen, DEVNULL=subprocess.DEVNULL),
     )
@@ -369,6 +372,9 @@ def test_the_detached_child_is_anchored_to_the_durable_store_root(
     assert seen, "precondition: a child was spawned"
     argv, kwargs = seen[0]
     assert str(store) in argv, f"the child was not handed the store root: {argv}"
-    assert kwargs.get("cwd") == str(store), "the child's cwd must be the durable store root"
+    assert str(repo) in argv, f"the child was not handed the repo root: {argv}"
+    assert kwargs.get("cwd") == _proc.detached_child_cwd(str(store)), (
+        "the child's cwd must be the durable anchor derived from the store root"
+    )
     assert kwargs.get("stdin") is subprocess.DEVNULL
     assert kwargs.get("start_new_session") is True

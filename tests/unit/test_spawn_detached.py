@@ -1,14 +1,15 @@
 """One implementation of "spawn a detached rebar child" (task 2dc4-9bcd-75b9-4544).
 
-rebar detaches three children that outlive the command that started them — the async
-tickets-branch push, the enrichment drain, and the compaction sweep — and each site used to
+rebar detaches children that outlive the command that started them — the async
+tickets-branch push, the enrichment drain, the compaction sweep, and the snapshot-GC
+trigger — and each site used to
 carry its own copy of the PYTHONPATH bootstrap, the ``-c`` re-entry stub, the platform detach
 flags and the stdio discipline. A defect (the missing durable ``cwd``, bug
 3198-438c-72a5-470f) propagated to all three by exactly that imitation. These tests pin the
 consolidation: the pattern's signature exists only in ``rebar._proc.spawn_detached``, its
 construction is correct, and its boundaries (per-caller env, per-caller catch) hold.
 
-The end-to-end cwd contract across the three call sites stays pinned by
+The end-to-end cwd contract across the original three call sites stays pinned by
 ``tests/unit/test_detached_child_cwd.py``, which drives the real sites with real processes.
 """
 
@@ -114,7 +115,7 @@ def test_spawn_detached_builds_the_bare_python_reentry(
     assert captured.argv[1] == "-c"
     assert "sys.path.insert(0, sys.argv[2])" in captured.argv[2]
     assert (
-        "import rebar.llm.enrich_drain; rebar.llm.enrich_drain.drain(sys.argv[1])"
+        "import rebar.llm.enrich_drain; rebar.llm.enrich_drain.drain(*sys.argv[1:2])"
         in (captured.argv[2])
     )
     assert captured.argv[3] == str(tracker)
@@ -126,6 +127,40 @@ def test_spawn_detached_builds_the_bare_python_reentry(
     assert captured.kwargs["stderr"] == subprocess.DEVNULL
     assert captured.kwargs["start_new_session"] is True  # POSIX CI
     assert captured.kwargs["close_fds"] is True
+
+
+def test_spawn_detached_hands_every_argument_to_the_entry_point(
+    tmp_path: Path, captured: _CapturedSpawn
+) -> None:
+    """A multi-argument entry point (the snapshot-GC trigger passes the store root AND a
+    repo-root sentinel): every argument rides argv in order, the bootstrap src slot follows
+    them, and the cwd anchor derives from the FIRST argument."""
+    store = tmp_path / "gate-snapshots"
+    store.mkdir()
+
+    _proc.spawn_detached(
+        "rebar._snapshot.gc_trigger",
+        "run_detached",
+        str(store),
+        "",
+        env={},
+        stderr=subprocess.DEVNULL,
+    )
+
+    assert captured.argv is not None and captured.kwargs is not None
+    assert "sys.path.insert(0, sys.argv[3])" in captured.argv[2]
+    assert "gc_trigger.run_detached(*sys.argv[1:3])" in captured.argv[2]
+    assert captured.argv[3] == str(store)
+    assert captured.argv[4] == ""
+    assert captured.argv[5] == str(_SRC)
+    assert captured.kwargs["cwd"] == _proc.detached_child_cwd(str(store))
+
+
+def test_spawn_detached_requires_at_least_one_argument() -> None:
+    """The cwd anchor and the re-entry stub both key on the first argument, so a zero-arg
+    spawn is a caller bug surfaced loudly, not a child that dies quietly later."""
+    with pytest.raises(ValueError, match="at least one argument"):
+        _proc.spawn_detached("rebar.x", "f", env={}, stderr=subprocess.DEVNULL)
 
 
 def test_spawn_detached_layers_pythonpath_without_mutating_the_callers_env(

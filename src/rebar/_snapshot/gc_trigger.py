@@ -169,51 +169,29 @@ def _janitor_config(repo_root: str | None) -> JanitorConfig:
         return _janitor.JanitorConfig()
 
 
-def _detach_kwargs() -> dict:
-    """Platform detach flags, mirroring :func:`compact_trigger._detach_kwargs`."""
-    if sys.platform == "win32":  # pragma: no cover - POSIX CI
-        return {
-            "creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined]
-        }
-    return {"start_new_session": True, "close_fds": True}
-
-
 def _spawn_detached_gc(root: Path, repo_root: str | None) -> None:
-    """Detach a GC child that outlives this gate op (POSIX).
+    """Detach a GC child that outlives this gate op (POSIX), via the shared detached-rebar-
+    child spawner (:func:`rebar._proc.spawn_detached`), which owns the PYTHONPATH bootstrap,
+    the ``-c`` re-entry stub, the platform detach flags, the stdio discipline (no stdin,
+    stderr to the log sink chosen here) and the durable ``cwd`` (bug ``3198-438c-72a5-470f``)
+    anchored on the store root — per-host, outside any repo, and never an ephemeral worktree
+    that can vanish mid-pass. The never-raise posture stays HERE: a detach failure must not
+    fail the gate that triggered it. ``repo_root`` rides argv as ``""`` for ``None``;
+    :func:`run_detached` coerces it back."""
+    from rebar._proc import spawn_detached
 
-    Mirrors ``compact_trigger._spawn_detached_sweep``: the same PYTHONPATH bootstrap so a bare
-    python child can import rebar, the same stdio discipline (no stdin, stderr to a log), and
-    the same never-raise posture — a detach failure must not fail the gate that triggered it.
-    The child's ``cwd`` is the STORE ROOT itself: per-host, outside any repo, and never an
-    ephemeral worktree that can vanish mid-pass (the bug ``3198-438c-72a5-470f`` concern
-    :func:`rebar._proc.detached_child_cwd` exists for, satisfied here by construction)."""
-    src = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    child_env = {**os.environ}
-    child_env["PYTHONPATH"] = src + (
-        os.pathsep + child_env["PYTHONPATH"] if child_env.get("PYTHONPATH") else ""
-    )
     try:
         log_fh = open(_log_path(root), "a")  # noqa: SIM115 — handed to the child
     except OSError:
         log_fh = subprocess.DEVNULL  # type: ignore[assignment]
     try:
-        subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.path.insert(0, sys.argv[3]); "
-                "from rebar._snapshot import gc_trigger; "
-                "gc_trigger.run_detached(sys.argv[1], sys.argv[2] or None)",
-                str(root),
-                repo_root or "",
-                src,
-            ],
-            cwd=str(root),
-            env=child_env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
+        spawn_detached(
+            "rebar._snapshot.gc_trigger",
+            "run_detached",
+            str(root),
+            repo_root or "",
+            env={**os.environ},
             stderr=log_fh,
-            **_detach_kwargs(),
         )
     except Exception:
         logger.warning("snapshot-GC detach failed; continuing", exc_info=True)
@@ -230,6 +208,9 @@ def run_detached(root: str | os.PathLike[str], repo_root: str | None = None) -> 
     Stamps ONLY a pass that actually ran: a stand-aside must leave the clock alone so the next
     gate op tries again — stamping it would suppress the trigger for a full interval while the
     store reclaimed nothing (the ``compact_trigger.run_sweep`` lesson, verbatim)."""
+    # The shared spawner's argv carries plain strings; the detached stub hands "" through
+    # for an absent repo root, so coerce it back to None here (the child's entry point).
+    repo_root = repo_root or None
     rootp = Path(root)
     fd = _acquire_worker_lock(rootp)
     if fd is None:
