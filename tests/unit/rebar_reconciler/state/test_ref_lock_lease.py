@@ -21,6 +21,7 @@ import importlib.util
 import logging
 import subprocess
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -146,6 +147,46 @@ def test_steal_waits_holders_lease(rl: ModuleType, repo: Path) -> None:
     new_oid = rl.steal(repo, rl.LOCK_REF, holder="thief", sleep_fn=waited.append)
     assert waited == [7]  # waited exactly one holder-lease, on our own clock
     assert new_oid is not None and rl.read(repo, rl.LOCK_REF).holder == "thief"
+
+
+def test_steal_default_sleep_resolves_time_sleep_at_call_time(
+    rl: ModuleType, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ``time.sleep`` patch applied AFTER the module is imported must reach steal().
+
+    The hostile order (bug 9118, same class as 2c4b/5ea3): the module is already
+    resident (the module-scoped ``rl`` fixture loaded it), THEN the test patches
+    ``time.sleep`` on its defining module. A frozen ``sleep_fn=time.sleep`` default
+    captured the original function at import and silently escapes the patch.
+
+    Membership (not equality) assertions: the global ``time.sleep`` patch also
+    captures stdlib ``subprocess``'s timeout-poll backoff (doubling, capped at
+    0.05s) on slow hosts, so only the distinctive lease value is asserted.
+    """
+    rl.acquire(repo, rl.LOCK_REF, holder="holder", lease_secs=7.5)
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+
+    new_oid = rl.steal(repo, rl.LOCK_REF, holder="thief")  # default sleep_fn
+
+    assert 7.5 in slept, "the time.sleep patch did not reach steal()'s default sleep"
+    assert new_oid is not None and rl.read(repo, rl.LOCK_REF).holder == "thief"
+
+
+def test_steal_explicit_sleep_fn_wins_over_the_seam(
+    rl: ModuleType, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Call-time resolution must not override an explicit injection."""
+    rl.acquire(repo, rl.LOCK_REF, holder="holder", lease_secs=7.5)
+    via_time: list[float] = []
+    monkeypatch.setattr(time, "sleep", via_time.append)
+    injected: list[float] = []
+
+    new_oid = rl.steal(repo, rl.LOCK_REF, holder="thief", sleep_fn=injected.append)
+
+    assert injected == [7.5]
+    assert 7.5 not in via_time  # only stdlib poll sleeps (< 0.05s) may appear here
+    assert new_oid is not None
 
 
 def test_steal_of_live_holder_returns_none(rl: ModuleType, repo: Path) -> None:

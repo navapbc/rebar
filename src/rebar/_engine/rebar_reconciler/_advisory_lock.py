@@ -158,7 +158,20 @@ def acquire_pass_lock(pass_id: str, repo_root: Path) -> str | None:
         ) from exc
 
 
-def steal_pass_lock(pass_id: str, repo_root: Path, *, sleep_fn=time.sleep) -> str | None:
+def _default_sleep(seconds: float) -> None:
+    """The default steal wait: a patchable indirection over ``time.sleep``.
+
+    Deliberately a named function rather than ``sleep_fn=time.sleep`` in the
+    signature — a default expression is evaluated ONCE at import, so a frozen
+    default silently escapes a test's ``time.sleep`` patch on its defining module
+    (bug 9118, same class as 2c4b/5ea3). Resolves ``time.sleep`` at CALL time;
+    production behaviour is byte-identical, and an explicitly passed ``sleep_fn=``
+    bypasses it. Mirrors ``access_check._retry_sleep``.
+    """
+    time.sleep(seconds)
+
+
+def steal_pass_lock(pass_id: str, repo_root: Path, *, sleep_fn=_default_sleep) -> str | None:
     """Attempt to steal an EXPIRED pass lock, returning the new oid on success.
 
     Delegates to :func:`_ref_lock.steal` — the sanctioned skew-proof expiry
