@@ -1378,6 +1378,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:51:30Z"
     },
+    "0740-8c81-cf58-4edc": {
+      "created_at": "2026-08-21T07:41:45Z",
+      "jira_id": "4589652",
+      "jira_key": "REB-3358",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T07:41:47Z"
+    },
     "0743-39a1-9689-409d": {
       "baseline": {
         "assignee": {
@@ -4862,10 +4869,24 @@
     },
     "1e48-ff69-13f7-4a83": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n\nWhen a ticket description exceeds the 8,000-character plan-review admission limit, the only remediation offered is **decomposition**. `src/rebar/llm/plan_review/det_floor.py:347-350`:\n\n```python\n\"suggested_fix\": (\n    f\"Reduce the description to at most {desc_limit} characters, usually by splitting \"\n    \"independent work into coherent child tickets.\"\n),\n```\n\nThat is the right advice when the **work** is too large. It is the wrong first advice when the **prose** is too large, which is the more common cause \u2014 and an author who follows it fragments a coherent unit of work for a reason that has nothing to do with its scope.\n\n## Evidence\n\nMeasured on `darkish-enormous-raptors` (`76b2-4b5f-5682-45e5`), which hit the limit:\n\n```\ndescription at rejection : 7989 chars \u2014 14 acceptance criteria, 105 lines of narrative prose\nafter rewriting prose out: 4440 chars \u2014 ALL 14 criteria retained, plus 9 required provenance lines\nheadroom under the limit : 3560 chars (44% spare)\n```\n\n**Nothing needed splitting.** The unit of work was one coherent cleanup with fourteen criteria. What exceeded the limit was method discussion, rationale, and conversational progression that belonged in ticket comments. Removing none of the commitments and none of the evidence \u2014 only relocating the narration \u2014 left 44% headroom.\n\nHad the author followed the suggested fix literally, they would have split a single cleanup into child tickets to solve a formatting problem.\n\nAt least **two independent sessions hit this limit on 2026-08-20**, and both independently arrived at the same unsuggested remedy: move the narrative into a comment. Two sessions rediscovering the same fix that the message does not mention is the signal.\n\n## Why this is a coaching defect and NOT a limit defect\n\nStated plainly, because this ticket replaces an earlier one of mine (`piecemeal-batiste-greatargus`, closed `not_a_bug`) that got this wrong:\n\n**8,000 characters is ample for one ticket's worth of work** \u2014 roughly 1,200 words. A plan that cannot state its problem and its acceptance criteria in that space is either describing more than one unit of work or is padded. The limit is correct and should not move. The formatting requirements that share the budget (`provenance:` continuation lines) are also correct and fit comfortably.\n\nThe gap is that the message names one cause of over-length and one remedy, when there are two distinct causes with different remedies, and the more common one is unaddressed.\n\n## Direction (not a prescription)\n\nDistinguish the two cases and coach accordingly. The signal is already available: this same function computes `oversize signals` separately from `description_over_limit`, and its OTHER branch already suggests G5 decomposition for genuinely large units. So decomposition advice already has a home; the over-limit branch could instead coach on authoring:\n\n- prefer concise language over narration;\n- move conversational progression, method discussion, and rationale into ticket **comments** or a\n  **session log** \u2014 the description carries the plan and its acceptance criteria;\n- follow the packaged authoring guidance (`rebar explain plan`,\n  `src/rebar/_guides/writing-a-passing-plan.md`);\n- and only split when the WORK is genuinely more than one unit \u2014 pointing at the oversize-signal\n  branch rather than conflating the two.\n\nWhether to keep any mention of splitting in this branch is a judgement call for the implementer; the defensible minimum is that it stops being the *only* suggestion.\n\n## Relationship to other tickets\n\nSame class as `bediasite-bilineate-stoat` (`fb8b-189d-97ab-4546`, closed): a gate message whose stated remedy under-serves the situation the author is actually in. That one was fixed by making the message name the consequence the author would otherwise discover the hard way. This is the same fix shape applied to a different message.\n\n## Acceptance Criteria\n\n- [ ] The over-limit finding's `suggested_fix` names concision and relocating narration to comments\n      or a session log as remedies, not only decomposition \u2014 verified by a test asserting the\n      message content.\n- [ ] The message distinguishes CONTEXT that must stay (problem, constraints, acceptance\n      criteria and their evidence \u2014 enough that a reader who has never seen the ticket can\n      evaluate the plan) from NARRATION that should move to comments or a session log\n      (investigation history, method discussion, conversational progression). Coaching that\n      only says \"be shorter\" fails the completion verifier from the opposite direction and\n      does not satisfy this criterion \u2014 verified by a test asserting both halves are named.\n- [ ] The message points at the packaged authoring guidance rather than restating it, so the advice\n      cannot drift from the guide.\n- [ ] Decomposition advice remains available for the case it genuinely fits (a unit of work too\n      large for one session) and is distinguishable from the over-length-prose case \u2014 verified by a\n      test covering both branches.\n- [ ] The 8,000-character limit itself is UNCHANGED. This ticket does not raise it, and a change\n      that raises it does not satisfy these criteria.\n- [ ] `make lint`, `make typecheck`, and `python scripts/check_complexity_baseline.py --check`\n      (`new=0 increased=0 stale=0`) pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Over-limit plan message suggests only decomposition, coaching authors to split coherent work when the real fix is concision"
       },
       "created_at": "2026-08-21T05:38:20Z",
@@ -15736,10 +15757,24 @@
     },
     "5931-78a3-95d2-44cd": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Summary\n\n`_decorate_outbound_comment` (`outbound_comments.py`) appends `RECONCILER_MARKER` AFTER the comment body. The outbound comment-limit truncation (`adapters/jira/comment_limits.py`, `_TRUNCATION_SUFFIX = \\\" \u2026 [truncated by reconciler]\\\"`) then cuts the composed text at the 32767-char limit, which removes the trailing marker paragraph.\n\n## Impact\n\nA comment whose body exceeds the limit lands in Jira with NO marker. That comment is then:\n- unrecognisable as the reconciler's own echo on the inbound side (the loop-breaker at `inbound_collection_diffs.py` tests for the marker in the body text), and\n- unrecognisable to any tooling that identifies bot-authored comments by the marker.\n\n## Evidence (live)\n\nFound during the duplicate-comment cleanup (`darkish-enormous-raptors` / `76b2-4b5f-5682-45e5`). 836 Jira comments across REB-1567 (418), REB-1931 (278) and REB-2605 (140) are marker-less. Each is authored by the bridge bot accountId `712020:6471376f-4e5e-4ed2-8c05-330827bc387e`, is exactly 32767 rendered chars, ends in `_TRUNCATION_SUFFIX`, and repeats ~139 times identically. They had to be excluded from the marker-based cleanup as non-candidates.\n\n## Expected vs Actual\n\n- Expected: every outbound comment carries the marker regardless of body length.\n- Actual: any comment over the limit loses it.\n\n## Acceptance Criteria\n\n- [ ] Outbound truncation reserves room for the marker \u2014 truncate the BODY to (limit - len(marker) - len(suffix)) and append the marker after truncating, so the composed text is <= the limit AND ends with the marker.\n- [ ] Unit test: a body longer than the limit produces an outbound payload that is <= the limit and whose rendered text contains RECONCILER_MARKER. RED on current code.\n- [ ] Unit test: the truncation suffix is still present on a truncated body (the existing truncation contract is not broken).",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Outbound comment truncation drops the RECONCILER_MARKER, defeating the loop-breaker for >32767-char comments"
       },
       "created_at": "2026-08-21T04:32:55Z",
@@ -16116,9 +16151,17 @@
       "updated_at": "2026-08-15T15:00:14Z"
     },
     "5b25-a463-5038-4c65": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Discovered from\n\nStep 7 sibling sweep during rebar-debug on bug `smart-disloyal-naga` (8386-a512-4815-4e6b). Same construct, different entry kind. Confirmed semantically (by reading the code path, not a string match) and then observed at runtime.\n\n## Problem\n\nBug 8386 fixed the write amplification on `tickets-<sha>` entries by hardlinking unchanged blobs against a verified neighbouring entry. The **code** entry path has exactly the same construct and was deliberately left out of that fix's scope.\n\n`materialize` (`src/rebar/_snapshot/repo_snapshot.py`, the `cache.acquire` populate branch) builds `<store>/<sha>` with the same `_materialize_tree` \u2014 `git read-tree` + `git checkout-index --all --force` \u2014 so every blob is written fresh, with no hardlink and no delta against an adjacent entry.\n\n**Observed at runtime** (scratch store, 40-file tree, 4 successive `cache.acquire` calls each after a commit touching ONE file):\n\n    code entries: 4 resolutions -> files=170 distinct_bytes=385118 one_tree~96240 (4.00x)\n\nCharging each `(st_dev, st_ino)` exactly once, four adjacent-SHA resolutions cost **4.00x one tree** \u2014 identical to the pre-fix tickets number, i.e. zero sharing.\n\n## Why it was scoped out of 8386, and why it is still worth doing\n\nWeaker in the field than the tickets case, on two counts: the code tree is ~41.6 MiB / 3,131 files against the ticket store's ~620 MiB / 69,984 blobs (15x smaller), and the default code ref `origin/main` genuinely does have key reuse \u2014 it moves per merge, and concurrent gates collapse onto one SHA, which is the case ADR 0005 D2 was written for. That is why the tickets key was the acute problem and this one is not.\n\nIt is still real: this host holds **29,450 code entries**, and `--ref HEAD` (the documented way to review committed-but-unlanded code) makes the key move per commit, which is the fast-moving regime the ADR's reuse assumption does not cover.\n\nHeld out of 8386 on blast radius, not on doubt: code snapshots are the **attestation basis for signed verdicts**, so changing how they are built deserves its own review rather than riding along with a ticket-store performance fix.\n\n## What makes this cheap now\n\n8386 landed `src/rebar/_snapshot/delta_tree.py` as a **generic** donor-selection + hardlink-clone\n+ delta-apply helper that takes the source repo, the target sha, and a destination. It was\nwritten not to depend on anything ticket-specific. Wiring the code path through it should be small; the work is in the review and the test, not the algorithm.\n\n## Acceptance criteria\n\n- [ ] `materialize`'s populate branch reuses unchanged blobs from a verified neighbouring code\n      entry, or the decision not to is recorded with its reasoning.\n- [ ] A test observes the amplification RED (N adjacent-SHA code resolutions consume ~N trees)\n      and GREEN after (~1 tree), asserting distinct-inode bytes rather than wall-clock.\n- [ ] Each entry still byte-matches the committed tree at its own SHA, and the LFS-pointer and\n      submodule caveat sidecars are still computed correctly for a delta-built entry.\n- [ ] The attestation argument is stated explicitly: sharing storage must not weaken the claim\n      that `<store>/<sha>` is the tree at `<sha>`.",
+        "priority": "Low",
+        "status": "To Do",
+        "summary": "Code snapshot entries have the same no-sharing write amplification as the ticket entries"
+      },
       "created_at": "2026-08-21T06:38:39Z",
       "jira_id": "4589645",
       "jira_key": "REB-3351",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:41Z"
     },
@@ -16340,9 +16383,17 @@
       "updated_at": "2026-08-15T15:00:19Z"
     },
     "5c27-7926-835f-4563": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Discovered from\n\nrebar-debug on bug `smart-disloyal-naga` (8386-a512-4815-4e6b), via an independent write-safety audit of the materialized ticket-store entry. Not a root cause of 8386; a separate defect found while proving that one.\n\n## Problem\n\n`<store>/tickets-<sha>/` is documented and treated as an **immutable, content-addressed** entry (ADR 0005 D2). It is not. Every `show_ticket` read through the pinned root writes a derived reducer cache **inside the entry**:\n\n`reducer/_api.py:221` -> `write_cache(cache_path, ...)` with `cache_path = os.path.join(ticket_dir, \".cache.json\")` (`reducer/_cache.py:196`, published at `:146` via `atomic_write`). A second site, `reducer/_processors.py:58`, writes the same file on the corrupt-CREATE replay path.\n\n**Measured on this host:** one live entry (`tickets-00b00a6ee3e2b6c0ebb667c044eb303ccf2ba3e3`) holds **4,844 `.cache.json` files**, every one with an mtime newer than the entry directory itself \u2014 i.e. created by reads after materialization, not by `checkout-index`. They are gitignored on the tickets branch, so they are absent from the committed tree and are purely post-build artifacts.\n\n## Why it matters\n\n1. **The immutability premise is false**, and other code is entitled to rely on it. Bug 8386's\n   fix now hardlinks unchanged blobs between adjacent entries; it is safe only because\n   `atomic_write` publishes by `os.replace` (`_store/fsutil.py:96`) rather than writing in\n   place. That is an incidental property of one line, not an enforced invariant. If that line\n   ever becomes a plain `open(path, \"w\")`, every entry sharing the inode is silently corrupted.\n2. **It already breaks the reverify pass.** `janitor.reverify_entry` (`janitor.py:249-277`)\n   records a TOFU digest over the entry's contents at first sight. Reads keep adding\n   `.cache.json` files afterwards, so a baseline taken before the first read makes the entry\n   look **corrupt** on the next pass and evicts it. Opt-in today (`reverify_seconds > 0`), which\n   is the only reason this has not bitten.\n3. It inflates the store, which is the parent bug's whole subject: ~4.8k extra files per entry.\n\n## Acceptance criteria\n\n- [ ] Reading a ticket through a pinned snapshot root does not write into the snapshot entry\n      (e.g. the reducer cache is disabled, or redirected outside the entry, when the tracker\n      root is a snapshot).\n- [ ] A test observes the write RED (a materialized entry's file set changes after a read) and\n      GREEN after the fix.\n- [ ] The rename-over contract in `_store/fsutil.py` is pinned by a test, or the entry is made\n      genuinely read-only, so a future in-place write cannot silently corrupt shared inodes.\n- [ ] ADR 0005's immutability claim is either enforced or amended to describe reality.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Snapshot entries are not immutable: every ticket read writes .cache.json inside them"
+      },
       "created_at": "2026-08-21T06:38:41Z",
       "jira_id": "4589646",
       "jira_key": "REB-3352",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:44Z"
     },
@@ -19864,10 +19915,24 @@
     },
     "739f-9531-11b8-4a33": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n`scripts/gen_env_registry.py` recognises only a closed set of environment-read forms when it scans `src/rebar` to build `docs/env-vars.md`. At `scripts/gen_env_registry.py:98` it matches `func.attr == \"get\"` (plus the `os.environ[...]` subscript and `os.getenv` forms). Any OTHER expression that reads an environment variable is invisible to it.\n\nThe consequence is silent documentation loss on a refactor that looks entirely harmless. Changing\n\n```python\nvalue = os.environ.get(\"REBAR_SOMETHING\")\n```\n\nto\n\n```python\nvalue = os.environ.pop(\"REBAR_SOMETHING\", None)\n```\n\nstill reads the variable, but the generator no longer sees it, so the key DISAPPEARS from `docs/env-vars.md`. Nothing about the edit signals that documentation was dropped.\n\n## Evidence\nObserved 2026-08-20 while implementing `illusory-patronal-giraffe` (op-cert credential hardening). The natural implementation of that ticket was exactly the `get` -> `pop` swap. It silently reduced the generated registry from **161 keys to 160**, dropping `REBAR_OPCERT_PRIVATE_KEY` \u2014 the very variable the change was about.\n\nThe implementer worked around it rather than absorbing a generator fix: the read stays an `os.environ.get` with a literal key, and the pop is a SEPARATE statement. That is the correct scope call for that ticket and it is not in question here \u2014 but it leaves the generator blind spot in place, and the next person to write a `pop`-based read will hit it without the same luck.\n\n## Why the current gate does not protect you\n`make lint` does NOT catch this. The staleness check only fires in the full suite, via `tests/interfaces/facades/test_mcp_http_transport.py::test_generators_not_stale_and_include_new_keys`.\n\nSo the feedback loop is: make a reasonable one-token edit, see `make lint` pass locally, and learn about the dropped documentation from CI \u2014 or not at all, if the same change happens to regenerate the file. This is the same shape as the complexity-ratchet divergence recorded on `dystopian-bardlike-basil`: a local gate that is weaker than CI, teaching contributors to trust a signal that does not hold.\n\n## Investigation before choosing a remedy\nEstablish first which env-read forms actually occur, or plausibly could, in `src/rebar` \u2014 `pop`, `setdefault`, an `os.environ` alias bound to a local name, a `dict(os.environ)` copy, indirect reads through a helper. The remedy should be sized to what the codebase realistically uses, not to every expression Python permits.\n\nCandidate approaches, to be decided on evidence:\n- Widen the recogniser to the read-bearing method set (`get`, `pop`, `setdefault`, \u2026) rather than\n  the single `get`.\n- Make an UNRECOGNISED `os.environ` attribute access a loud generator error rather than a silent\n  skip, so a novel form fails the build instead of quietly dropping a key. This is the fail-closed\n  option and is likely stronger than enumerating methods, since it catches forms nobody predicted.\n- Have `make lint` run the generator's `--check` so the local and CI verdicts agree.\n\nThe second and third are complementary: fail-closed recognition plus a local gate that actually reports it.\n\n## Acceptance Criteria\n- [ ] A `pop`-based environment read in `src/rebar` is REGISTERED in `docs/env-vars.md` \u2014 proven by\n      a test that performs the read one way, regenerates, and asserts the key is present; and that\n      FAILS against today's generator.\n- [ ] An `os.environ` access the recogniser does not understand causes a LOUD failure (generator\n      error or a failing check), not a silent omission. Proven with a deliberately novel form.\n- [ ] The local and CI verdicts agree: a tree whose generated registry is stale fails\n      `make lint`, not only the full suite. If that is judged too slow for the lint path, record\n      why and name where the earlier signal comes from instead.\n- [ ] `REBAR_OPCERT_PRIVATE_KEY` remains present in `docs/env-vars.md` (key count does not regress\n      from 161), guarding the specific instance that exposed this.\n- [ ] `make lint`, `make typecheck` pass, and `python scripts/check_complexity_baseline.py --check`\n      reports `new=0 increased=0 stale=0`.\n\n## Provenance\nDiscovered 2026-08-20 during `illusory-patronal-giraffe`; the generator behaviour at `scripts/gen_env_registry.py:98` and the 161\u2192160 key drop were both observed directly, not inferred.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "gen_env_registry recognises only os.environ.get, so a pop-based read silently drops its key from docs/env-vars.md"
       },
       "created_at": "2026-08-20T04:41:22Z",
@@ -20066,10 +20131,24 @@
     },
     "746c-185a-0e48-4b83": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Problem\n`tests/conftest.py`'s autouse `_no_repo_root_leaks` fixture (line 297) **deletes files it did not create**, using a before/after directory snapshot that cannot distinguish a leaking test from a concurrent process making a legitimate write.\n\n```python\nbefore = _repo_leak_snapshot(_REPO_ROOT)          # :300\n...\nafter = _repo_leak_snapshot(_REPO_ROOT)           # :304\nleaked = {name for name in (after - before) if not _is_coverage_artifact(name)}\nfor name in sorted(leaked, key=len, reverse=True):\n    target = _REPO_ROOT / name\n    if target.is_dir():\n        shutil.rmtree(target, ignore_errors=True)  # :313\n    else:\n        target.unlink()                            # :316\n```\n\nAnything that appears under `_REPO_ROOT` between the two snapshots is deleted. The fixture's own comment says cleanup is \"best-effort\" and suppresses `OSError` so a race cannot mask the real failure \u2014 sound reasoning for the leak it was built to catch, but it means a deletion that hits an unintended target is **silent**.\n\n## Why this is dangerous in THIS repository specifically\nrebar's ticket store lives **under the repo root** (`.tickets-*`), and rebar writes to it constantly \u2014 every `comment`, `edit`, `set-file-impact`, `claim`, `transition`. This project also runs many agents concurrently, each in its own worktree but frequently issuing `rebar` commands while a suite runs. A tracker write landing under a worktree's `_REPO_ROOT` during a test is, to this fixture, indistinguishable from a leak \u2014 and gets deleted.\n\nThis is not theoretical. Multiple agents in the 2026-08-19/20 session reported this guard firing because of concurrent `rebar` writes, e.g. \"one leak guard tripped because a `rebar transition` wrote `.rebar/workflow_runs` mid-run\", and \"`.tickets-tracker` written under that same worktree root mid-run\". Every one of those reports was treated as harmless noise. The deletion half was noticed only when one agent read the fixture and observed that it **removes** what it flags \u2014 so running rebar tracker writes during a suite in the same worktree is *actively unsafe, not merely noisy*.\n\n## Bounding the damage honestly\nTicket events auto-commit and auto-push to `sync.remote` on write, so an event that completed its push survives on the remote even if the local file is deleted. The exposure is the window between the write landing on disk and its push completing \u2014 plus any local-only state the fixture removes (`.rebar/workflow_runs` and similar are not ticket events and have no remote copy).\n\nSo this is not \"the tracker gets destroyed\". It is: a test fixture can silently delete another process's files, in a repo whose primary datastore lives at that path, with no attribution check and suppressed errors. The blast radius is bounded by the auto-push, not by the fixture's design.\n\n## The design gap\nThe fixture asks \"what appeared under REPO_ROOT during this test?\" when the question it needs is \"what did THIS TEST create?\". A snapshot diff cannot answer the second in the presence of any other writer.\n\nCandidate remedies, to be decided on evidence rather than assumed:\n- **Attribute before deleting** \u2014 only remove paths the test's own process created, or that match\n  the known leak shapes, rather than any diff entry.\n- **Fail without deleting** \u2014 the `pytest.fail()` already surfaces the leak; deletion is a\n  convenience. Removing it converts a silent data-loss risk into a loud, harmless failure. The\n  burden of proof should be on keeping the deletion, not on removing it.\n- **Exclude the datastore** \u2014 never delete under `.tickets-*` / `.rebar/`, on the grounds that no\n  legitimate test leak lives there and every legitimate concurrent write does.\n- **Detect concurrent writers** and skip cleanup when one is active.\n\n## Acceptance Criteria\n- [ ] A concurrent, legitimate write under `_REPO_ROOT` during a test run is NOT deleted \u2014 proven by\n      a test that writes from a separate process mid-test and asserts the file survives.\n- [ ] The fixture still catches the leak it exists for: a test that genuinely leaks into REPO_ROOT\n      still FAILS. Prove it by seeding a leaking test and observing the failure, so this does not\n      become a silent weakening of the guard.\n- [ ] If deletion is retained in any form, deletions are ATTRIBUTED (the fixture can say why it\n      believes it created each removed path) and are no longer silent on error.\n- [ ] Guidance records whether running `rebar` commands against a worktree while its suite runs is\n      supported. If it is not, say so in `docs/local-dev-env.md` \u2014 several agents did it all session\n      believing the resulting errors were cosmetic.\n- [ ] `make lint` and `make typecheck` pass; `python scripts/check_complexity_baseline.py --check`\n      reports `new=0 increased=0 stale=0`.\n\n## Provenance\nFixture behaviour read directly at `tests/conftest.py:296-320` on origin/main; the concurrent-write reports are from four separate agents' own logs during the 2026-08-19/20 session. Surfaced by the implementer on `dirt-prior-falcon`, which flagged the deletion rather than absorbing it.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Leak-guard fixture deletes files it did not create, including concurrent tracker writes under REPO_ROOT"
       },
       "created_at": "2026-08-21T04:33:17Z",
@@ -22451,10 +22530,24 @@
     },
     "8386-a512-4815-4e6b": {
       "baseline": {
-        "assignee": null,
+        "assignee": {
+          "accountId": "712020:6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "accountType": "atlassian",
+          "active": true,
+          "avatarUrls": {
+            "16x16": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/16",
+            "24x24": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/24",
+            "32x32": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/32",
+            "48x48": "https://avatar-management--avatars.us-west-2.prod.public.atl-paas.net/712020:6471376f-4e5e-4ed2-8c05-330827bc387e/c9f3f52f-0a2a-4dd9-a376-afc5dff5b245/48"
+          },
+          "displayName": "Joe Oakhart",
+          "emailAddress": "joeoakhart@navapbc.com",
+          "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
+          "timeZone": "America/Los_Angeles"
+        },
         "description": "## Discovered from\n\nrebar-debug on bug `masonic-abeyant-stagbeetle` (3a52-2d79-320d-4fed), root cause RC-A. See that ticket's \"Phase 1 EXIT\" comment for the full evidence trail.\n\n## Problem\n\n`src/rebar/llm/gate_source.py:99` calls `materialize_tickets(...)` on every attested gate resolution. `materialize_tickets` (`src/rebar/_snapshot/repo_snapshot.py:675-703`) content-addresses the entry as `<store>/tickets-<sha>` and builds it with `_materialize_tree` (`:373-410`, `git read-tree` + `git checkout-index`) \u2014 every file written fresh, with no hardlinking, no delta against a neighbouring entry, and no per-review release (`SnapshotHandle._cleanup` at `:199` is never assigned by any producer).\n\nThe key is the live tickets-branch tip: `_pin_tickets_sha` (`:534-609`) resolves the tracker via `config.tracker_dir()`, and `tracker_dir_override()` (`src/rebar/_config_sources.py:65-79`) returns `REBAR_TRACKER_DIR` verbatim.\n\nMeasured on `origin/tickets`:\n\n- **69,984 blobs**, \u2248620 MiB (~800 MiB allocated). The code snapshot alongside it is\n  41.6 MiB / 3,131 files \u2014 **15x smaller**.\n- **1,374 commits** in a 10-hour window (2026-08-17 18:00 \u2192 2026-08-18 04:00 PDT): the tip\n  moves every ~26 seconds.\n- each of the last 5 consecutive tickets commits changed **exactly 1 file**.\n\nSo a one-file delta produces a fresh 620 MiB copy \u2014 roughly 10^5x write amplification \u2014 on a key with effectively **zero reuse**. The review-bot's own `code_review` artifact write (`REBAR_SYNC_PUSH: always`, `infra/compose/docker-compose.yml:120`) guarantees the ref advances between reviews even if nothing else in the fleet were writing.\n\nOn the review-bot host this modelled 2.5-10 GiB/h of root-disk growth; the measured rate during the 2026-08-17 incident was 4.4 GiB/h.\n\n## Why this is a defect\n\n`docs/adr/0005-snapshot-cache-architecture.md` D2 rests on \"an immutable SHA is a perfect cache key\", which holds only for keys with **reuse**. This key has none, so the structure behaves as an append-only log of full copies rather than the bounded, reclaimable cache the ADR describes.\n\n## Acceptance criteria\n\n- [ ] A review no longer writes a full copy of the ticket tree when the previous entry differs\n      by a handful of files (hardlink/reflink against the prior entry, materialize only the\n      paths the gate actually reads, or pin a coarser/stabler key) \u2014 with the chosen approach\n      justified against ADR 0005's integrity guarantees.\n- [ ] A test observes the amplification RED (N reviews across N adjacent tickets SHAs consume\n      ~1 tree, not N trees) and GREEN after the repair.\n- [ ] `materialize_tickets` participates in the store's byte accounting (see the sibling\n      ticket) so the entries it creates are visible to any size-based reclaim.\n- [ ] ADR 0005 / `docs/repo-snapshot-gates.md` updated to state the key-reuse assumption and how\n      the tickets key satisfies it.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Gate snapshot store copies the whole ~620 MiB ticket tree per review on a cache key with no reuse"
       },
       "created_at": "2026-08-19T21:43:46Z",
@@ -25368,6 +25461,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:05:51Z"
     },
+    "938d-d6e9-2580-4faa": {
+      "created_at": "2026-08-21T07:41:48Z",
+      "jira_id": "4589653",
+      "jira_key": "REB-3359",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T07:41:51Z"
+    },
     "93d0-adbb-f982-4d39": {
       "baseline": {
         "assignee": null,
@@ -26726,9 +26826,17 @@
       "updated_at": "2026-08-15T15:06:42Z"
     },
     "9b40-2fd7-3456-4e74": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Discovered from\n\nrebar-debug on bug `smart-disloyal-naga` (8386-a512-4815-4e6b). Re-verified there by two methods and by runtime observation; recorded rather than fixed, because removing it is a public-dataclass change unrelated to that bug's performance fix.\n\n## Problem\n\n`SnapshotHandle._cleanup` (`src/rebar/_snapshot/repo_snapshot.py:199`) is declared as `Callable[[], None] | None = None` and read only by `__exit__` (`:212-213`). **No producer anywhere in `src/` ever assigns it.** `grep -rn \"_cleanup\" src/` returns exactly those two sites; Serena agrees.\n\nConfirmed at runtime through a real `resolve_gate_handle(...)`:\n\n    handle.source=attested sha=49d6fb2e tickets_path=set\n    handle._cleanup = None\n    after __exit__: cleanup invoked? False  (entry still on disk: True)\n\nSo `SnapshotHandle.__exit__` is a permanent no-op, and `with handle:` reads \u2014 to anyone skimming \u2014 as though it releases something.\n\n## Why it matters\n\nIt is not a leak (the entry is a *cache*; per-review release would defeat caching, which is why 8386 was fixed by adding reuse rather than by adding release). The cost is that it is **misleading dead code** on a class whose whole subject is resource lifetime, in the exact module where a reader goes to ask \"who cleans these up?\". The honest answer is \"the janitor, never the handle\", and the field says otherwise.\n\n## Acceptance criteria\n\n- [ ] Either the field is removed (and `__enter__`/`__exit__` kept or dropped deliberately), or\n      it is assigned by a real producer with a documented purpose.\n- [ ] If removed, `SnapshotHandle`'s docstring states that entry lifetime is the janitor's\n      responsibility and not the handle's.\n- [ ] No caller constructs `SnapshotHandle(_cleanup=...)` (verified: none does today).",
+        "priority": "Lowest",
+        "status": "To Do",
+        "summary": "Remove or wire SnapshotHandle._cleanup \u2014 no producer assigns it, so __exit__ is a no-op"
+      },
       "created_at": "2026-08-21T06:38:44Z",
       "jira_id": "4589647",
       "jira_key": "REB-3353",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:47Z"
     },
@@ -27906,9 +28014,17 @@
       "updated_at": "2026-08-15T15:07:30Z"
     },
     "a197-d055-ae44-45de": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\nUnder sustained multi-writer load the tracker's auto-push **livelocks**: the reconcile-and-push cycle cannot complete before another writer advances `origin/tickets`, so the push is rejected as a non-fast-forward, the local branch keeps accumulating commits, and none of the work reaches the remote.\n\nThis is not a stuck lock and not a corrupted store. The mechanism is working exactly as designed and still fails to converge.\n\n## Measured\n\nOn a checkout with roughly five concurrent agents writing ticket events:\n\n```\nt0  ahead: 447   behind: 1\nt1  ahead: 463   (90 seconds later, after `git fetch`)\n```\n\n**The backlog GREW by 16 commits in 90 seconds.** Sampled repeatedly over ~10 minutes it never decreased. `rebar tracker-maintenance --status` reports the store itself healthy \u2014 `stranded index entries: 0`, `foreign top-level paths: 0` \u2014 so the only defect is that nothing lands.\n\nEvidence the auto-reconcile is running and is not the problem: the newest local commit is\n\n```\n5f3646d283 Merge origin/tickets (auto-reconcile during push retry)\n```\n\nSo the retry path fetches, merges, and re-pushes. It simply loses the race: by the time the merge commit exists, another writer has advanced the remote again.\n\nThe oldest unpushed commit was ~40 minutes old at the time of measurement, so this is not long-standing drift \u2014 it began when write concurrency rose.\n\n## Why it matters\n\n`docs/concurrency.md` states the store shares every write immediately via auto-commit + auto-push to `sync.remote`. That guarantee is what lets parallel agents see each other's work. While this condition holds:\n\n- ticket events are **not durable on the remote** \u2014 they exist only in one local tracker;\n- **other sessions cannot see them**, so the coordination the parallel-agent workflow depends on is\n  silently absent;\n- the divergence compounds, so the eventual reconciliation gets larger and riskier the longer it\n  runs.\n\nNothing warns the operator. The only visible symptom is an incidental `(N unpushed commits on origin/tickets..HEAD)` line in the tail of an unrelated command's output.\n\n## Not to be confused with\n\n- **Store corruption** \u2014 there is none; `tracker-maintenance --status` is clean.\n- **A stale or held lock** \u2014 `rebar doctor` reports the tickets write locks free.\n- **A credential or network failure** \u2014 the push is *rejected on its merits* (non-fast-forward), not\n  failing to connect.\n\n## Contributing factor worth checking\n\n`nuclear-calm-heron` (`da68-fc7c-068c-4c53`) records that from a worktree the tracker resolves to the **worktree's own path**. If several worktrees each hold a tracker copy pushing to the same `origin/tickets`, the number of independent writers racing for that ref is larger than the number of sessions \u2014 which would make this livelock easier to reach than it looks. Verify rather than assume; it may be a separate cause or the same one.\n\n## Directions (not a prescription)\n\n- **Bounded backoff with jitter** on the push retry, so competing writers desynchronise rather than\n  collide repeatedly. The current retry appears to re-attempt promptly, which is what keeps the\n  race live.\n- **Batch under contention** \u2014 when N commits are already unpushed, reconcile once and push the\n  whole range rather than per-write, so the window shrinks relative to the remote's movement.\n- **Surface the condition.** A backlog that grows monotonically for minutes should warn loudly, not\n  appear as a parenthetical. An operator has no way to notice the store has stopped sharing.\n- **A drain path** an operator can invoke deliberately, quiescing local writes long enough for one\n  reconcile-and-push to win.\n\n## Acceptance Criteria\n\n- [ ] Under sustained concurrent writes from several writers, the unpushed backlog converges to\n      zero rather than growing \u2014 verified by a test that drives concurrent writers and asserts the\n      backlog is bounded and decreasing, not by a single observation.\n- [ ] The store's own guarantee is restored or its limits documented: either every write reaches\n      `sync.remote` under the concurrency this project actually runs, or `docs/concurrency.md`\n      states the bound beyond which it does not.\n- [ ] A growing unpushed backlog is surfaced to the operator distinctly from ordinary output \u2014\n      verified by a test asserting the warning fires.\n- [ ] No change weakens the existing fail-safes: `tracker-maintenance`'s backup ref, its refusal on\n      unpushed ticket commits, and the audit trail all still apply.\n- [ ] `make lint`, `make typecheck`, and `python scripts/check_complexity_baseline.py --check`\n      (`new=0 increased=0 stale=0`) pass.\n\n## Provenance\n\nObserved 2026-08-20/21 on `/Users/joeoakhart/rebar/.tickets-tracker` while roughly five agents were writing ticket events concurrently. Surfaced by an incidental unpushed-commit line in the tail of a `rebar transition` that otherwise succeeded.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Tracker auto-push livelocks under concurrent writers: backlog grows, nothing reaches sync.remote"
+      },
       "created_at": "2026-08-21T06:38:47Z",
       "jira_id": "4589648",
       "jira_key": "REB-3354",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:49Z"
     },
@@ -29248,9 +29364,17 @@
       "updated_at": "2026-08-21T05:38:45Z"
     },
     "a991-09dd-aa6a-4a27": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Problem\n\n`tests/conftest.py`'s `_no_repo_commits` guard fails a test whose checkout HEAD moved and ends its message with an unconditional instruction:\n\n    f\"git repo. Undo the stray commit(s) with: git reset --hard {before[:10]}\"\n\nLike the REPO_ROOT leak guard next to it, this guard compares two snapshots of SHARED checkout state and therefore cannot tell a test that committed from a concurrent `git commit` made by another process in the same checkout. That second case is real and observed: the `carryable-basalt-beagle` scope-correction comment records `Test moved the repo HEAD (<sha> -> <sha>)` errors seen twice in one session from a concurrent commit, and `f0fb` established the same shared-checkout condition for the leak guard.\n\nFollowed literally by someone whose HEAD moved because ANOTHER process committed, `git reset --hard <sha>` discards that commit and every uncommitted change in the worktree. The guard is handing out a destructive remedy for a cause it cannot confirm.\n\nThis is **wording, not behaviour** \u2014 the guard itself deletes nothing. It is filed separately from `carryable-basalt-beagle` (which removed the leak guard's actual deletion) to keep that change tight around its proven root cause.\n\n## Prior art for the fix shape\n\n`tests/_isolation.py:leak_failure_message` was corrected under `f0fb` (commit `c9a5388a83`) to name both causes instead of asserting the one it cannot know, and `tests/unit/test_external_mutation_diagnostics.py` pins that property. The same treatment applies here: name the concurrent-commit possibility, and condition the `reset --hard` on the reader having confirmed the commit is theirs.\n\n## Acceptance Criteria\n\n- [ ] The HEAD-move message no longer prescribes `git reset --hard` unconditionally; the\n      destructive step is explicitly gated on the reader confirming the commit came from the\n      test rather than from another process sharing the checkout.\n- [ ] The message names the concurrent-external-commit possibility, mirroring\n      `leak_failure_message`.\n- [ ] A test pins both properties, alongside the existing ones in\n      `tests/unit/test_external_mutation_diagnostics.py`.\n- [ ] `make lint` and `make typecheck` pass.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "HEAD-move guard prescribes an unconditional git reset --hard"
+      },
       "created_at": "2026-08-21T06:38:50Z",
       "jira_id": "4589649",
       "jira_key": "REB-3355",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:53Z"
     },
@@ -29431,9 +29555,9 @@
           "self": "https://jira-prod-us-51-as-2.prod.atl-paas.net/rest/api/3/user?accountId=712020%3A6471376f-4e5e-4ed2-8c05-330827bc387e",
           "timeZone": "America/Los_Angeles"
         },
-        "description": "## Context\n\nPhase 1 (`darkish-enormous-raptors`, `76b2-4b5f-5682-45e5`) removed **29,931** duplicate bridge-echo comments across 30 Jira issues, identified by the reconciler marker `RECONCILER_MARKER = \"<!-- rebar:reconciler-echo -->\"` on the pre-strip rendered ADF text.\n\nIt deliberately **skipped 836 comments** across three issues \u2014 **REB-1567 (418), REB-1931 (278), REB-2605 (140)** \u2014 because they carry no marker and therefore failed phase 1's authoritative identifier. That restraint was correct: the identifying rule for them is inferred, not the precedent's, and deletion is irreversible.\n\nThey are not human comments. Each is the **same bot accountId** as phase 1 (`712020:6471376f-\u2026`), appears in roughly 139 identical copies per issue, is **exactly 32767 rendered characters**, and ends in the reconciler's own `_TRUNCATION_SUFFIX`.\n\n## Why the marker is missing \u2014 a real defect, filed separately\n\n`unreal-empathetic-illadopsis` (`5931-78a3-95d2-44cd`): outbound truncation appends the marker **after** the body, so the 32767-char cut removes it. The loop-breaker is therefore already inert for any over-length comment \u2014 which is exactly why these three issues duplicated despite phase 1's mechanism existing.\n\n## Scope: this ticket is the CLEANUP only\n\nFixing the truncation-order defect belongs to `5931`. This ticket removes the duplicates that defect already produced.\n\n**Deliberately NOT folded into `76b2`.** That ticket's plan and acceptance criteria describe the marker-based cleanup; its plan-review attestation covers that plan. Widening it to absorb a different identifying rule would be a material scope change to a reviewed plan \u2014 the failure mode `bediasite-bilineate-stoat` documents.\n\n## Identification rule \u2014 all four conditions, conjunctive\n\nA comment is a candidate ONLY if every one holds:\n\n1. author accountId == the phase-1 bot accountId;\n2. rendered text length == **exactly 32767**;\n3. rendered text ends with `_TRUNCATION_SUFFIX`;\n4. the comment carries **no** `RECONCILER_MARKER` (marker-bearing comments were phase 1's business).\n\nAny comment failing ANY condition is not a candidate and is never deleted.\n\nThe tightened rule is already implemented in `/Users/joeoakhart/jira-cleanup-20260820/cleanup.py` behind `--include-truncated`; the exact-length check (condition 2) was added after the earlier dry run, so **the previously observed REB-2605 figure (145 -> 7 kept, 138 deletions) is an UPPER BOUND** and must be re-confirmed by a fresh dry run before any execution.\n\n## Sequencing hazard \u2014 read before executing\n\n`_record_comment_id` records a comment id **only on a successful new post**; it does not backfill ids for comments already in Jira (`dispatch_apply_phases.py:311-333`). So on the FIRST bridge pass after re-enabling, these comments have no recorded id, the PRIMARY id-identity skip cannot fire, and the SECONDARY body-equality skip cannot match them (their bodies were truncated). **They will be re-posted once, then deduped from pass 2 onward.**\n\nCleaning before the bridge is re-enabled therefore does not durably remove them. The operator's instruction is to clean first, then re-enable; this ticket follows that order and records the consequence explicitly so the re-post is expected rather than mistaken for a regression, and so a final sweep after the first pass is planned rather than improvised.\n\n## Acceptance Criteria\n\n- [x] A fresh dry run under the four-condition rule is produced and inspected BEFORE any deletion,\n      and its candidate count is recorded per issue.\n- [x] [non-codebase] Pre-deletion backup of the full comment payload for each affected issue exists before any\n      DELETE, gated on `len(fetched) == total`.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 backups and the live post-deletion re-fetch are operator-local artifacts outside this repository; completeness proven by exact reconciliation (backup - deleted = observed, all three issues).\n- [x] Canary: execute on the smallest issue (REB-2605) alone, verify it fully, before touching the\n      other two.\n- [x] **Keep-one holds**: for each distinct normalized body the OLDEST copy survives; a body with a\n      single copy is never deleted \u2014 verified per issue by re-fetching and asserting every distinct\n      body present before is present after.\n- [x] Non-candidate comments are untouched \u2014 verified by comparing non-candidate counts before and\n      after.\n- [x] Ambiguous cases are SKIPPED and reported, never guessed.\n- [x] The observed population matches the expected ~836 across exactly those three issues; a\n      material divergence stops execution and is reported instead.",
+        "description": "## Context\n\nPhase 1 (`darkish-enormous-raptors`, `76b2-4b5f-5682-45e5`) removed **29,931** duplicate bridge-echo comments across 30 Jira issues, identified by the reconciler marker `RECONCILER_MARKER = \"<!-- rebar:reconciler-echo -->\"` on the pre-strip rendered ADF text.\n\nIt deliberately **skipped 836 comments** across three issues \u2014 **REB-1567 (418), REB-1931 (278), REB-2605 (140)** \u2014 because they carry no marker and therefore failed phase 1's authoritative identifier. That restraint was correct: the identifying rule for them is inferred, not the precedent's, and deletion is irreversible.\n\nThey are not human comments. Each is the **same bot accountId** as phase 1 (`712020:6471376f-\u2026`), appears in roughly 139 identical copies per issue, is **exactly 32767 rendered characters**, and ends in the reconciler's own `_TRUNCATION_SUFFIX`.\n\n## Why the marker is missing \u2014 a real defect, filed separately\n\n`unreal-empathetic-illadopsis` (`5931-78a3-95d2-44cd`): outbound truncation appends the marker **after** the body, so the 32767-char cut removes it. The loop-breaker is therefore already inert for any over-length comment \u2014 which is exactly why these three issues duplicated despite phase 1's mechanism existing.\n\n## Scope: this ticket is the CLEANUP only\n\nFixing the truncation-order defect belongs to `5931`. This ticket removes the duplicates that defect already produced.\n\n**Deliberately NOT folded into `76b2`.** That ticket's plan and acceptance criteria describe the marker-based cleanup; its plan-review attestation covers that plan. Widening it to absorb a different identifying rule would be a material scope change to a reviewed plan \u2014 the failure mode `bediasite-bilineate-stoat` documents.\n\n## Identification rule \u2014 AS EXECUTED (two conditions, conjunctive)\n\nA comment was a deletion candidate ONLY if BOTH held on the ADF-rendered body returned by Jira:\n\n1. it contains the reconciler's own truncation suffix `_TRUNCATION_SUFFIX`\n   (`\" \u2026 [truncated by reconciler]\"`, `comment_limits.py:46`); AND\n2. it does NOT contain `RECONCILER_MARKER` (`outbound_comments.py:78`).\n\nBoth constants are in-repo and verifiable. The rule is stated here in full rather than by reference to an external script, so it can be checked without reading anything outside the repository.\n\n**Correction to the rule this ticket originally planned.** The plan named a third condition, `len(rendered_text) == 32767`. That condition is WRONG and was NOT used. `fit_comment` (`comment_limits.py:67-70`) truncates to `_JIRA_COMMENT_MAX_CHARS = 32767` **raw** characters pre-ADF; the rendered text Jira returns is shorter \u2014 the real duplicates render at 22,182 chars \u2014 so the condition matches essentially nothing. A dry run under it returned `DELETE=0` on all three issues. Removing it restored the rule the earlier dry run had already validated.\n\nWhy the marker is absent follows from the same code: `RECONCILER_MARKER` is appended AFTER the body (`outbound_comments.py:205`), so truncation cuts it off. On REB-2605 **all 140** unmarked comments carried the truncation suffix, which is what establishes their origin as the reconciler rather than a foreign author.\n\nKeep-one: for each distinct normalized body the OLDEST copy survives (lowest Jira comment id, which is monotonic). Safe because `comment_ids` was empty at execution time, so no recorded id could be orphaned.\n\n## Sequencing hazard \u2014 read before executing\n\n`_record_comment_id` records a comment id **only on a successful new post**; it does not backfill ids for comments already in Jira (`dispatch_apply_phases.py:311-333`). So on the FIRST bridge pass after re-enabling, these comments have no recorded id, the PRIMARY id-identity skip cannot fire, and the SECONDARY body-equality skip cannot match them (their bodies were truncated). **They will be re-posted once, then deduped from pass 2 onward.**\n\nCleaning before the bridge is re-enabled therefore does not durably remove them. The operator's instruction is to clean first, then re-enable; this ticket follows that order and records the consequence explicitly so the re-post is expected rather than mistaken for a regression, and so a final sweep after the first pass is planned rather than improvised.\n\n## Acceptance Criteria\n\n- [x] A fresh dry run under the four-condition rule is produced and inspected BEFORE any deletion,\n      and its candidate count is recorded per issue.\n- [x] [non-codebase] Pre-deletion backup of the full comment payload for each affected issue exists before any\n      DELETE, gated on `len(fetched) == total`.\n      provenance: environment=jira-cloud-production; principal=RebarBotNava; privilege_posture=production-equivalent; instrument=live-call \u2014 backups and the live post-deletion re-fetch are operator-local artifacts outside this repository; completeness proven by exact reconciliation (backup - deleted = observed, all three issues).\n- [x] Canary: execute on the smallest issue (REB-2605) alone, verify it fully, before touching the\n      other two.\n- [x] **Keep-one holds**: for each distinct normalized body the OLDEST copy survives; a body with a\n      single copy is never deleted \u2014 verified per issue by re-fetching and asserting every distinct\n      body present before is present after.\n- [x] Non-candidate comments are untouched \u2014 verified by comparing non-candidate counts before and\n      after.\n- [x] Ambiguous cases are SKIPPED and reported, never guessed.\n- [x] The observed population matches the expected ~836 across exactly those three issues; a\n      material divergence stops execution and is reported instead.",
         "priority": "Medium",
-        "status": "In Progress",
+        "status": "Done",
         "summary": "Phase 2 Jira cleanup: remove truncated bridge-echo duplicates that carry no reconciler marker"
       },
       "created_at": "2026-08-21T04:33:43Z",
@@ -32327,9 +32451,17 @@
       "updated_at": "2026-08-15T15:10:00Z"
     },
     "b9b4-f460-2d54-4872": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nDiscovered during the Step 7 parity census for bug `5931-78a3-95d2-44cd`. On Jira Data Center the outbound comment send path applies **no length fit at all**, so an over-length comment is handed to Jira unfitted.\n\n## Evidence\n\n- `adapters/jira_datacenter/_links.py:82-84` \u2014 `_CommentsMixin.add_comment` passes `body`\n  straight to `self._client.add_comment(remote_id, body)`; no fit, no sanitize.\n- `adapters/jira_datacenter/backend.py:493-494` \u2014 `JiraDCBackend.add_comment` is a bare\n  delegate to that transport.\n- `_DCSanitizer.sanitize_comment` (`backend.py:259-273`) \u2014 the send-side sanitizer with\n  its operator warning \u2014 has **no production caller**. `grep -rn \"\\.sanitize_comment(\" src tests`\n  returns test files ONLY (`test_dc_comment_ceiling_049e.py`,\n  `test_dc_backend_characterization.py`, `test_backend_characterization.py`). The same is\n  true for Cloud's `_JiraSanitizer.sanitize_comment`.\n- `fit_comment` (the differ-side twin) IS wired, via `outbound_comments._diff_comments`.\n  So the comparison half of the convergence pair is live and the SEND half is not.\n\n## Why it matters\n\nBug `6afc-20ee-84e5-4dd5` established that Jira exits 0 on an over-length comment rejection, so the comment never lands and is re-emitted every pass \u2014 the outbound comment-sync loop. DC's ceiling is lower than Cloud's and is deployment-resolved (`comment_max_chars()`, bug `049e`), which makes an unfitted DC body more likely to be rejected, not less. `test_dc_outbound_comment_length_convergence.py` pins the CONTRACT but not the WIRING.\n\nNote this is NOT bug 5931's mechanism \u2014 with no truncation on the DC path there is nothing to cut the RECONCILER_MARKER off. It is the mirror-image gap found by the same census: Cloud truncates and loses the marker; DC does not truncate at all.\n\n## Acceptance Criteria\n\n- [ ] The DC outbound comment send path fits the body through the deployment-resolved\n      ceiling before handing it to the transport.\n- [ ] A test drives the DC send path with an over-length body and asserts the wire value\n      is within `comment_max_chars()` (RED on current code).\n- [ ] Cloud's `sanitize_comment` is either wired or removed \u2014 a send-side sanitizer with\n      no caller is a false assurance.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Jira DC outbound comments are never length-fitted: sanitize_comment has no production caller"
+      },
       "created_at": "2026-08-21T06:38:53Z",
       "jira_id": "4589650",
       "jira_key": "REB-3356",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:55Z"
     },
@@ -38088,7 +38220,7 @@
         "assignee": null,
         "description": "## Problem\n\nTwo gates make incompatible demands on a ticket description:\n\n1. **The close gate** requires every `[non-codebase]` acceptance criterion to carry an indented\n   structured continuation line:\n   `provenance: environment=<v>; principal=<v>; privilege_posture=<...>; instrument=<...> \u2014 <justification>`\n2. **Plan-review admission** rejects a description over **8,000 characters**, which makes the\n   ticket unclaimable.\n\nA ticket with several externally-evidenced criteria cannot satisfy both. Each provenance line costs roughly 130-200 characters; nine of them is ~1,200-1,800.\n\n## Observed\n\nClosing `darkish-enormous-raptors` (`76b2-4b5f-5682-45e5`), which had **9** `[non-codebase]` criteria:\n\n- description at **7,989** chars (already near the cap after an earlier gate demanded provenance\n  detail be added);\n- adding the nine required provenance lines projected to roughly **9,070** chars;\n- that is over the admission cap, so the ticket would have become unclaimable \u2014 trading a close\n  failure for a worse failure.\n\nThe refusal is not wrong on its own terms. `[non-codebase]` without provenance IS attestation laundering, and the cap protects review quality. Neither gate can see the other's constraint.\n\n## Worked around, not solved\n\nI moved the plan narrative verbatim into a ticket comment, leaving a 4,440-char description carrying all 14 acceptance criteria plus the nine provenance lines. Nothing was lost, and the close proceeded.\n\nThat workaround has real costs, which is why this is filed rather than shrugged off:\n\n- **Each description edit stales the plan-review attestation**, forcing a full agentic re-review.\n  This ticket took FOUR review cycles to close, three of them caused purely by formatting demands\n  rather than by anything about the plan.\n- **The plan and its evidence end up in different places.** A later reader sees a description that\n  no longer contains the reasoning, and must know to look in comments.\n- **It is not discoverable.** Nothing tells an author the cap exists until a review is rejected,\n  and nothing tells them provenance lines will consume their remaining budget.\n\nAn independent session hit the same cap the same day authoring `aphidious-florid-grison` and resolved it the same way \u2014 moving evidence tables into a comment. Two independent hits in one day.\n\n## Relationship to `bediasite-bilineate-stoat`\n\nSame shape, different pair: there, the completion gate demanded a `file_impact` widening that the plan-review gate then treated as staling. That was resolved by making the first gate's message name the consequence. This one cannot be fixed by wording alone, because the two demands are genuinely incompatible above a certain number of external criteria \u2014 no ordering of steps satisfies both.\n\n## Directions (not a prescription)\n\n- Exclude `provenance:` continuation lines from the character count. They are gate-mandated\n  boilerplate, not authored plan content, so counting them against a budget meant to bound review\n  scope is arguably a category error.\n- Or allow provenance to live in a ticket comment keyed to the criterion, which is where the\n  evidence itself already lives.\n- Or raise the cap when tagged criteria are present, proportional to their count.\n- Or have the close gate detect the collision and say so, rather than issuing a demand that cannot\n  be met \u2014 the minimum viable fix, and the one most in keeping with how `stoat` was resolved.\n\nWhichever is chosen, an author should not have to discover the conflict by hitting both walls in sequence.\n\n## Acceptance Criteria\n\n- [ ] A ticket with enough `[non-codebase]` criteria that the required provenance lines would\n      exceed the admission cap can be closed without moving content out of the description \u2014\n      verified by a test constructing exactly that ticket.\n- [ ] Whichever mechanism is chosen, adding a gate-mandated provenance line does NOT by itself\n      stale a plan-review attestation, since it is boilerplate the gate demanded rather than an\n      author's change of plan \u2014 verified by a test.\n- [ ] The collision is detectable before it is hit: an author is told the projected length will\n      exceed the cap at the point the provenance lines are demanded, not after a rejected review.\n- [ ] `make lint`, `make typecheck`, and `python scripts/check_complexity_baseline.py --check`\n      (`new=0 increased=0 stale=0`) pass.",
         "priority": "Medium",
-        "status": "To Do",
+        "status": "Done",
         "summary": "Close gate's provenance requirement and plan-review's 8000-char admission cap are mutually unsatisfiable"
       },
       "created_at": "2026-08-21T05:38:54Z",
@@ -39484,9 +39616,17 @@
       "updated_at": "2026-08-15T15:13:47Z"
     },
     "e339-9709-15fe-419a": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Summary\n\nDiscovered while proving bug `5931-78a3-95d2-44cd` (marker dropped by truncation). The Cloud outbound comment path fits the SAME body with TWO different rules, so the body-equality dedup can never match for an over-length comment.\n\n- **Differ / comparison key** \u2014 `outbound_comments._diff_comments` computes\n  `sanitizer.fit_comment(body)`. Cloud's `_JiraSanitizer.fit_comment`\n  (`adapters/jira/backend.py:152-154`) is `comment_limits.truncate_comment_body`, a\n  PLAIN-CHARACTER cap at `_JIRA_COMMENT_MAX_CHARS = 32767`.\n- **Send path** \u2014 `adapters/jira/acli_cli_ops.add_comment` fits with\n  `AdfCodec.fit_outbound` -> `adf.fit_text_to_adf_limit`, which measures the SERIALIZED\n  ADF against `_ADF_DESCRIPTION_LIMIT = 32000`.\n\n## Runtime evidence\n\nDriving both with a 40,000-char body (worktree `fix-illadopsis-marker`, repo venv):\n\n```\ncompare key len:      32767\nlanded jira key len:  31887\nBODY-EQUALITY SECONDARY SKIP HITS (today): False\n```\n\nThe two keys can never be equal for any over-length comment.\n\n## Why it matters\n\n`emersed-specific-mutt` made the ID-based skip (`binding_store.is_comment_mapped` / `jira_comment_id`) PRIMARY, so this is the belt-and-suspenders layer \u2014 but that layer is exactly the guard against a lost map write (a crash between `add_comment` and `record_comment_id`). For over-length comments it is structurally dead, so a lost map write re-posts every pass. `comment_limits.py`'s own docstring states the convergence requirement this violates: \"If the two paths used different truncation logic they could never agree on the landed body, and the loop would persist.\"\n\nNot fixed under 5931 \u2014 that bug's fix is confined to preserving the marker and does not change any comparison key. This divergence predates it and is unchanged by it.\n\n## Acceptance Criteria\n\n- [ ] The differ's comment comparison key and the Cloud send path apply the identical fit.\n- [ ] A test drives both and asserts the landed body equals the comparison key for an\n      over-length comment (RED on current code).",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Cloud comment dedup key is fitted at 32767 while the send path fits at the 32000 ADF limit"
+      },
       "created_at": "2026-08-21T06:38:56Z",
       "jira_id": "4589651",
       "jira_key": "REB-3357",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-21T06:38:58Z"
     },
@@ -42590,6 +42730,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:27Z"
     },
+    "f400-987f-45f6-419a": {
+      "created_at": "2026-08-21T07:41:51Z",
+      "jira_id": "4589654",
+      "jira_key": "REB-3360",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T07:41:54Z"
+    },
     "f406-49ba-1de1-46c0": {
       "created_at": "2026-08-15T15:15:28Z",
       "jira_key": "REB-388",
@@ -43157,6 +43304,13 @@
       "peer_parent": "REB-2557",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:43Z"
+    },
+    "f79d-e364-5fdb-417d": {
+      "created_at": "2026-08-21T07:41:54Z",
+      "jira_id": "4589655",
+      "jira_key": "REB-3361",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T07:41:57Z"
     },
     "f7bf-492d-86af-4514": {
       "baseline": {
@@ -44577,6 +44731,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:24Z"
     },
+    "ff2e-339c-237e-4519": {
+      "created_at": "2026-08-21T07:41:58Z",
+      "jira_id": "4589656",
+      "jira_key": "REB-3362",
+      "state": "confirmed",
+      "updated_at": "2026-08-21T07:42:00Z"
+    },
     "ff64-ca12-7132-40e7": {
       "created_at": "2026-08-15T15:16:25Z",
       "jira_key": "REB-1720",
@@ -45428,7 +45589,28 @@
     "1787293231303595001": "__rebar_unknown_comment_id__",
     "1787293285961340001": "__rebar_unknown_comment_id__",
     "1787293573717931001": "__rebar_unknown_comment_id__",
-    "1787293784965604001": "__rebar_unknown_comment_id__"
+    "1787293784965604001": "__rebar_unknown_comment_id__",
+    "1787294299847511001": "__rebar_unknown_comment_id__",
+    "1787295180864957001": "__rebar_unknown_comment_id__",
+    "1787295379457238001": "__rebar_unknown_comment_id__",
+    "1787295393584086001": "__rebar_unknown_comment_id__",
+    "1787295611281544001": "__rebar_unknown_comment_id__",
+    "1787295615931642001": "__rebar_unknown_comment_id__",
+    "1787295739323498001": "__rebar_unknown_comment_id__",
+    "1787296439270792001": "__rebar_unknown_comment_id__",
+    "1787296456530648001": "__rebar_unknown_comment_id__",
+    "1787296827378806001": "__rebar_unknown_comment_id__",
+    "1787297057929991001": "__rebar_unknown_comment_id__",
+    "1787297113707115001": "__rebar_unknown_comment_id__",
+    "1787297115402099001": "__rebar_unknown_comment_id__",
+    "1787297162696705001": "__rebar_unknown_comment_id__",
+    "1787297189575302001": "__rebar_unknown_comment_id__",
+    "1787297225728525001": "__rebar_unknown_comment_id__",
+    "1787297251248477001": "__rebar_unknown_comment_id__",
+    "1787297617983260001": "__rebar_unknown_comment_id__",
+    "1787297886207307001": "__rebar_unknown_comment_id__",
+    "1787297916698423001": "__rebar_unknown_comment_id__",
+    "1787297958247204001": "__rebar_unknown_comment_id__"
   },
   "reverse": {
     "REB-1": "00da-b1af-89d4-4c47",
@@ -47269,7 +47451,12 @@
     "REB-3355": "a991-09dd-aa6a-4a27",
     "REB-3356": "b9b4-f460-2d54-4872",
     "REB-3357": "e339-9709-15fe-419a",
+    "REB-3358": "0740-8c81-cf58-4edc",
+    "REB-3359": "938d-d6e9-2580-4faa",
     "REB-336": "d843-1ed1-c7da-4d22",
+    "REB-3360": "f400-987f-45f6-419a",
+    "REB-3361": "f79d-e364-5fdb-417d",
+    "REB-3362": "ff2e-339c-237e-4519",
     "REB-337": "d8f5-82c1-373b-4cd4",
     "REB-338": "da27-c916-f04e-4885",
     "REB-339": "dab5-dbae-033d-49c5",
