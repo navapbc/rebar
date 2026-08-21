@@ -108,9 +108,14 @@ def _audit_serve(host: str, port: int) -> int:
         top = (exc.name or "").split(".")[0]
         if top and top not in {"fastapi", "uvicorn", "jinja2", "starlette"}:
             raise  # a genuinely unrelated missing module — surface it, don't mask
+        # The selected ``serve`` boundary (after ``audit show`` has already been ruled out)
+        # enforces the ``audit_ui`` semantic capability; its install guidance is single-sourced
+        # from the capability registry (RP-05 S4).
+        from rebar._capabilities import install_hint
+
         sys.stderr.write(
             "Error: the audit web UI requires optional dependencies. Install them with "
-            "`pip install 'nava-rebar[ui]'`.\n"
+            f"`{install_hint('audit_ui')}`.\n"
         )
         return 1
     return 0

@@ -140,9 +140,14 @@ def _jira_client_class() -> type[Any]:
     try:
         import jira as _jira_pkg
     except ImportError as exc:
+        # Selected-backend boundary (RP-05 S4): the Jira Data Center client is being
+        # constructed, so enforce the ``jira_datacenter`` semantic capability here; its
+        # install guidance is single-sourced from the capability registry.
+        from rebar._capabilities import install_hint
+
         raise ImportError(
             "the Jira Data Center transport needs the 'jira-datacenter' extra "
-            "(pycontribs/jira). Install it with: pip install 'nava-rebar[jira-datacenter]'"
+            f"(pycontribs/jira). Install it with: {install_hint('jira_datacenter')}"
         ) from exc
     return _jira_pkg.JIRA
 

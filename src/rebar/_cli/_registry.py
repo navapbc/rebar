@@ -17,9 +17,16 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
-# Capability ids map to packaging extras that actually exist. Every capability
-# id used by any route in ROUTES must be a member of this set.
-KNOWN_CAPABILITIES: frozenset[str] = frozenset({"mcp", "reviewbot", "ui", "agents"})
+from rebar._capabilities import CAPABILITY_KEYS
+
+# The possible-capability references a route may advertise are the SEMANTIC capability
+# keys of the descriptive capability registry (``rebar._capabilities``, ADR 0100 §7) —
+# single-sourced here so route validation and the capability seam never drift. This is
+# descriptive validation only: a route *advertises* a capability it may exercise; nothing
+# is enforced at route/help construction (the ``rebar._capabilities`` module is stdlib-only
+# and imports no optional package, so this preserves the registry's import-isolation
+# contract). Enforcement happens later, at the selected execution boundary.
+KNOWN_CAPABILITIES: frozenset[str] = CAPABILITY_KEYS
 
 # The closed set of invocation-adapter kinds — the exact runtime call shape a
 # selected handler is invoked through (RP-05 S3). This is intentionally small and

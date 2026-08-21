@@ -118,9 +118,15 @@ def build_bedrock_provider(cfg: LLMConfig, *, session=None):
     try:
         from pydantic_ai.providers.bedrock import BedrockProvider
     except ImportError as exc:
+        # Selected-provider boundary (RP-05 S4): the ``bedrock`` model/provider was chosen, so
+        # enforce the ``bedrock_provider`` semantic capability here. Its install guidance is
+        # single-sourced from the capability registry (the pydantic-ai-slim form, not
+        # nava-rebar[bedrock]) rather than hard-coded.
+        from rebar._capabilities import install_hint
+
         raise LLMConfigError(
             "a bedrock model/provider is configured but the optional bedrock provider "
-            "package is not installed: pip install 'pydantic-ai-slim[bedrock]'"
+            f"package is not installed: {install_hint('bedrock_provider')}"
         ) from exc
     import boto3
     from botocore.config import Config as BotoConfig
