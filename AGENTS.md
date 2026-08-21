@@ -218,6 +218,10 @@ ceiling — **never** bumping the baseline: `--lock`/`--update-stale` are mainte
 contributor's escape hatch. Read a function's current score with
 `ruff check --select C901 <file>`, and check the whole ratchet with
 `python scripts/check_complexity_baseline.py --check`.
+When your change makes a baselined function **simpler**, `--check` reports it as `stale` and
+**passes** — that is the sanctioned path, so just land the change. Do **not** hand-edit
+`.github/complexity-baseline.json` and do **not** run `--update-stale` to tidy the entry away;
+maintenance drains stale entries later.
 
 ## Navigating the codebase (when editing rebar itself)
 

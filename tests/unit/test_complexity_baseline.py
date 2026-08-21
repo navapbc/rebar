@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import types
@@ -111,7 +112,12 @@ def test_census_transport_exit_zero_same_count():
 
 
 def test_wrapper_check_on_committed_baseline():
-    """Command 3: --check on the committed tree exits 0 with active==live count."""
+    """Command 3: --check on the committed tree exits 0 with the shrink-only verdict.
+
+    The gate's contract is ``new=0`` and ``increased=0`` — ``active``/``stale`` are
+    informational. A contributor who legitimately REDUCES a baselined function makes
+    ``stale`` nonzero (and drops that symbol out of ``active``) and must still pass.
+    """
     live = _live_count()
     proc = subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--check"],
@@ -120,7 +126,13 @@ def test_wrapper_check_on_committed_baseline():
         text=True,
     )
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.strip() == f"active={live} new=0 increased=0 stale=0"
+    match = re.fullmatch(r"active=(\d+) new=(\d+) increased=(\d+) stale=(\d+)", proc.stdout.strip())
+    assert match is not None, f"unexpected verdict line: {proc.stdout!r}"
+    active, new, increased, _stale = (int(g) for g in match.groups())
+    assert new == 0
+    assert increased == 0
+    # Only a live finding sitting exactly at its ceiling can be `active`.
+    assert active <= live
 
 
 # ─────────────────────────── pyproject / baseline ───────────────────────────
@@ -157,7 +169,10 @@ def test_committed_baseline_schema_and_count():
     doc = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     assert doc["schema_version"] == 1
     assert type(doc["schema_version"]) is int
-    assert len(doc["ceilings"]) == live
+    # Every live finding must have a baseline key, or `--check` would report `new>0`.
+    # The baseline may additionally retain keys for functions that have since dropped
+    # below the threshold (reported as `stale`, an allowed improvement).
+    assert len(doc["ceilings"]) >= live
     # every value > threshold; keys sorted
     keys = list(doc["ceilings"])
     assert keys == sorted(keys)
@@ -167,14 +182,21 @@ def test_committed_baseline_schema_and_count():
 
 
 def test_committed_baseline_loads_and_checks_clean():
+    """The committed tree carries no NEW or INCREASED debt.
+
+    `stale` is not asserted away: a legitimate complexity reduction is reported as
+    `stale` and still passes the gate. What holds structurally is that the counters
+    partition the baseline (they are mutually exclusive) and that only live findings
+    sitting exactly at their ceiling can be `active`.
+    """
     ceilings = ccb.load_baseline(BASELINE_PATH)
     findings = ccb.run_scanner()
     current = ccb.normalize_findings(findings, ccb.REPO_ROOT)
     counters = ccb.compare(current, ceilings)
     assert counters.new == []
     assert counters.increased == []
-    assert counters.stale == []
-    assert len(counters.active) == _live_count()
+    assert len(counters.active) + len(counters.increased) + len(counters.stale) == len(ceilings)
+    assert len(counters.active) <= _live_count()
 
 
 # ───────────────────────────── schema validation ────────────────────────────
@@ -897,3 +919,71 @@ def test_no_merge_base_falls_back_to_the_tip_and_says_so(tmp_path: Path, monkeyp
 
     assert rev == "main"
     assert "no merge base" in capsys.readouterr().out
+
+
+# ──────────────────── local gate vs CI: shrink agreement (bug d319) ──────────
+
+
+@pytest.mark.parametrize(
+    "current, expect_rc, expect_token",
+    [
+        # A baselined function DROPPED below its ceiling and left the census
+        # entirely -- the exact state a behaviour-preserving extraction produces.
+        ({"src/rebar/a.py::a": 20}, 0, "stale=1"),
+        # A baselined function got simpler but is still over the threshold.
+        ({"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 22}, 0, "stale=1"),
+    ],
+)
+def test_tree_assertions_agree_with_gate_on_a_reduction(
+    tmp_path, monkeypatch, capsys, current, expect_rc, expect_token
+):
+    """A genuine complexity REDUCTION must get the SAME verdict locally and in CI.
+
+    ``make lint`` runs ``--check``, which allows ``stale>0`` as an improvement
+    (script docstring, "Exit-code contract"). The tree-scoped assertions CI runs
+    must not be stricter, or a contributor who improves a baselined function gets a
+    green ``make lint`` and a red ``Verified`` -- which is what Gerrit 1928 hit.
+    """
+    baseline_file = tmp_path / "baseline.json"
+    _write_committed_style_baseline(
+        baseline_file, {"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25}
+    )
+    monkeypatch.setattr(ccb, "BASELINE_PATH", baseline_file)
+    monkeypatch.setattr(ccb, "run_scanner", lambda **k: [])
+    monkeypatch.setattr(ccb, "normalize_findings", lambda f, root: current)
+    # The same synthetic tree as the committed-tree tests see it.
+    monkeypatch.setattr(f"{__name__}.BASELINE_PATH", baseline_file)
+    monkeypatch.setattr(f"{__name__}._live_census", lambda: ([{"code": "C901"}] * len(current), 1))
+
+    # Half 1 -- the local gate allows the reduction.
+    rc = ccb._run_check(tmp_path)
+    out = capsys.readouterr().out
+    assert rc == expect_rc, out
+    assert expect_token in out
+
+    # Half 2 -- the assertions CI enforces on that same tree must agree.
+    test_committed_baseline_schema_and_count()
+    test_committed_baseline_loads_and_checks_clean()
+
+
+@pytest.mark.parametrize(
+    "current, expect_token",
+    [
+        ({"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25, "src/rebar/c.py::c": 30}, "new=1"),
+        ({"src/rebar/a.py::a": 33, "src/rebar/b.py::b": 25}, "increased=1"),
+    ],
+)
+def test_shrink_only_guard_still_bites(tmp_path, monkeypatch, capsys, current, expect_token):
+    """Tolerating ``stale`` must not weaken the ratchet: new/increased still fail."""
+    baseline_file = tmp_path / "baseline.json"
+    _write_committed_style_baseline(
+        baseline_file, {"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25}
+    )
+    monkeypatch.setattr(ccb, "BASELINE_PATH", baseline_file)
+    monkeypatch.setattr(ccb, "run_scanner", lambda **k: [])
+    monkeypatch.setattr(ccb, "normalize_findings", lambda f, root: current)
+
+    rc = ccb._run_check(tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 1, out
+    assert expect_token in out

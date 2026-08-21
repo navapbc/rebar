@@ -33,8 +33,10 @@ Five distinct commands describe the debt and the gate (``<N>`` = the LIVE census
        src/rebar`` -> exit 0, JSON length ``<N>``.
   3. Repository gate: ``python scripts/check_complexity_baseline.py --check`` -> exit 0
      only when every current finding is at or below its recorded ceiling and no
-     scanner/schema error exists; prints ``active=<N> new=0 increased=0 stale=0`` on the
-     committed baseline.
+     scanner/schema error exists; prints ``active=<A> new=0 increased=0 stale=<S>`` and
+     passes whenever ``new`` and ``increased`` are zero. ``stale=0`` additionally holds
+     only on a FRESHLY DRAINED baseline: a contributor's legitimate complexity reduction
+     makes ``stale`` nonzero (and drops that symbol out of ``active``) and still passes.
   4. Maintenance rewrite: ``python scripts/check_complexity_baseline.py --update-stale``
      -> lowers still-over-threshold ceilings and removes vanished entries, REFUSING to
      write (nonzero) if ``new>0``/``increased>0``/scanner/schema error.
