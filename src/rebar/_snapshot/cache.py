@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Iterable
 from pathlib import Path
 from typing import IO
 
@@ -126,7 +127,14 @@ def add_bytes(delta: int, root: Path | None = None) -> int:
 
 
 def entry_size(path: Path) -> int:
-    """Total bytes of a materialized entry (one walk; used to account a populate)."""
+    """Total bytes of a materialized entry, ignoring any sharing (one walk).
+
+    This is a REPORTING figure — "how big is this tree" — and it deliberately double-counts a
+    blob that several entries hardlink. It is NOT a safe basis for accounting or reclamation;
+    use :func:`exclusive_size` (what populating added / evicting frees) and
+    :func:`distinct_bytes` (what the store really occupies) for those. It stays the
+    subsystem's exported size primitive precisely because "how big is this tree" is still a
+    question worth asking — just not the one the byte total is answering."""
     total = 0
     for dirpath, _dirnames, filenames in os.walk(path):
         for name in filenames:
@@ -134,6 +142,60 @@ def entry_size(path: Path) -> int:
                 total += os.lstat(os.path.join(dirpath, name)).st_size
             except OSError:  # pragma: no cover - racing eviction
                 pass
+    return total
+
+
+def exclusive_size(path: Path) -> int:
+    """Bytes that exist ONLY because of this entry — its files with no other hard link.
+
+    This is the one figure that is correct for BOTH ends of the store's incremental
+    accounting, and the two uses are the same question asked in opposite directions:
+
+    * **Populating** an entry adds exactly the bytes whose FIRST link it created. A file the
+      builder hardlinked from a neighbour (:mod:`rebar._snapshot.delta_tree`) was already
+      counted when that neighbour was built, and has ``st_nlink > 1`` here.
+    * **Evicting** an entry frees exactly the bytes whose LAST link it removes. Dropping one
+      of ``k`` links frees NOTHING; the survivors still pin the inode.
+
+    Because each inode is therefore added once and subtracted once, the running total tracks
+    :func:`distinct_bytes` exactly, with no drift and no rounding.
+
+    An apportioned ``st_size // st_nlink`` was tried and is wrong for both: it is a sensible
+    way to divide bytes up for a report, but as an increment it credits a fraction of bytes
+    that are still on disk, so the free-space loop stops short of the watermark and the
+    ``max_bytes`` cap evicts against space it never recovered."""
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for name in filenames:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:  # pragma: no cover - racing eviction
+                continue
+            if st.st_nlink == 1:
+                total += st.st_size
+    return total
+
+
+def distinct_bytes(paths: Iterable[Path]) -> int:
+    """Bytes ``paths`` really occupy, charging every distinct inode exactly once.
+
+    The authoritative ground truth the janitor's startup sweep reconciles to. Summing
+    :func:`entry_size` over entries would over-count every shared blob once per entry that
+    links it."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for path in paths:
+        for dirpath, _dirnames, filenames in os.walk(path):
+            for name in filenames:
+                try:
+                    st = os.lstat(os.path.join(dirpath, name))
+                except OSError:  # pragma: no cover - racing eviction
+                    continue
+                key = (st.st_dev, st.st_ino)
+                if key in seen:
+                    continue
+                seen.add(key)
+                total += st.st_size
     return total
 
 
@@ -200,5 +262,5 @@ def acquire(
                 )
             handle = materialize(sha, source_mode=SOURCE_ATTESTED, repo_root=repo_root, fetch=False)
             # We performed the populate — account its bytes exactly once.
-            add_bytes(entry_size(dest), root)
+            add_bytes(exclusive_size(dest), root)
             return handle

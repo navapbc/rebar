@@ -194,8 +194,15 @@ def _remove_sidecars(root: Path, sha: str) -> None:
 def _evict(root: Path, entry: Path) -> int:
     """Evict ONE entry: measure it, atomically rename it into trash (it disappears from the
     canonical path immediately; readers holding open fds keep reading), rmtree the trash
-    copy, drop the byte total, and remove sidecars. Returns the bytes reclaimed."""
-    size = _cache.entry_size(entry)
+    copy, drop the byte total, and remove sidecars. Returns the bytes reclaimed.
+
+    "Reclaimed" means bytes that actually LEFT the disk, which since bug 8386 is not the same
+    as the entry's size: ticket entries hardlink their unchanged blobs to a neighbour, and
+    dropping one of several links to an inode frees nothing at all. Both consumers of this
+    number need the honest one — the caller credits it to ``free`` against the watermark, and
+    it is the decrement applied to the running byte total — so it is measured with
+    ``exclusive_size`` BEFORE the rename, while the links are still countable."""
+    size = _cache.exclusive_size(entry)
     sha = entry.name
     dest = _trash_dir(root) / f"{uuid.uuid4().hex}"
     try:
@@ -302,7 +309,9 @@ def startup_sweep(root: Path | None = None) -> int:
     root = root or store_root()
     sweep_tmp(root)
     drain_trash(root)
-    total = sum(_cache.entry_size(e) for e in _entries(root))
+    # Charge each inode ONCE: summing per-entry sizes would count a blob shared by k entries
+    # k times, and the incremental path (exclusive_size) counts it once.
+    total = _cache.distinct_bytes(_entries(root))
     # Authoritative reset (not an increment) — the walk IS ground truth.
     delta = total - _cache.byte_total(root)
     _cache.add_bytes(delta, root)

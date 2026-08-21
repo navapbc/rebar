@@ -47,6 +47,45 @@ requests to one materialization; a lost race is merely wasteful (same SHA == sam
 never wrong. A running byte total is maintained incrementally (atomic flock read-modify-
 write) so the janitor never needs a hot-path `du`.
 
+**The key must have REUSE — an immutable key is not automatically a good one.** "No staleness"
+makes an immutable SHA *safe* to cache under; it does not make the cache *bounded*. That
+follows only when the same key is requested again, which is why this decision was taken for
+`origin/main`, a ref that moves per merge. A key that moves faster than it is queried never
+hits, and the store degenerates into an append-only log of full copies — measured on the
+`tickets` key at 64,483 entries / 47.2 GiB before it was corrected (bug `8386-a512-4815-4e6b`).
+
+Two entry kinds live here and they satisfy this differently:
+
+* **Code entries (`<sha>`)** satisfy it by *key reuse*: `origin/main` is stable for hours and
+  concurrent gates collapse onto one SHA, so the hit rate carries the bound.
+* **Ticket entries (`tickets-<sha>`)** cannot: the pin tracks the live tracker `HEAD`, which
+  advances every ~26s while each commit touches a handful of files, so the key is effectively
+  never requested twice. They satisfy the bound by *content reuse instead* — a new entry is
+  built by hardlinking a verified neighbouring entry and rewriting only the paths that differ
+  (`git diff --name-status` between the two SHAs). Adjacent SHAs therefore cost one delta, not
+  one tree.
+
+**Sharing changes what the byte total may be built from.** Once entries share inodes, "the
+size of an entry" splits into three different questions, and using one answer for all three is
+a defect: `entry_size` (plain `st_size`, double-counts a shared blob) is for REPORTING only;
+`exclusive_size` (files with `st_nlink == 1`) is the increment for BOTH ends of the running
+total, because populating adds exactly the bytes whose first link it created and evicting frees
+exactly the bytes whose last link it removed; and `distinct_bytes` (each inode once) is the
+ground truth the startup sweep reconciles to. Each inode is therefore added once and subtracted
+once, so the incremental total tracks the authoritative walk exactly.
+
+An apportioned `st_size // st_nlink` was tried and rejected. It is a fair way to divide bytes
+for a report, but as an increment it is wrong in the direction that matters: evicting one of
+`k` links credits a `1/k` share of bytes that are still on disk, so D5's free-space loop stops
+short of its watermark and the `max_bytes` cap evicts against space it never recovered.
+
+Sharing does not weaken D1's faithfulness guarantee: each entry still contains exactly the
+committed tree at its own SHA. `git checkout-index --force` unlinks and recreates rather than
+writing in place, and the delta path additionally unlinks every path it is about to rewrite, so
+a published entry is never mutated through a shared inode. The delta path is fail-closed — no
+donor, unresolvable objects, a donor whose file set does not match `git ls-tree -r` for its own
+SHA, or an un-hardlinkable filesystem all fall back to the full materialization.
+
 ### D3 — Reader safety via POSIX delete-on-last-close (and the REJECTED PID lease)
 
 Readers open files up front; eviction renames an entry to `trash/<uuid>` (atomic
