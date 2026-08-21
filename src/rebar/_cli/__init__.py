@@ -18,59 +18,24 @@ from __future__ import annotations
 import subprocess
 import sys
 
-from rebar._cli import _help, _help_route
+from rebar._cli import _help, _help_route, _registry
 from rebar._cli._init import ensure_initialized, ensure_store_mounted_best_effort
-from rebar._cli._llm_commands import (
-    _criteria,
-    _explain,
-    _llm,
-    _prompt,
-    _review_code,
-    _review_plan,
-    _scan_spec,
-    _sign_review,
-    _verify_completion,
-)
-from rebar._cli._workflow_commands import _workflow
 
-# Commands EXCLUDED from the central best-effort store-mount gate (bug ad9f): `init`
-# IS init (it must not pre-mount) and `scratch` is filesystem-only (it gets no
-# init). ``config validate`` is also excluded below: its job is to aggregate bad
-# config, so consulting config to locate a store would fail before that audit runs.
-# Everything else passes through the gate, which silently no-ops when there is no
-# attachable store, so no-store reads keep working store-less.
-_NO_AUTO_MOUNT = frozenset({"init", "scratch"})
-# Every pure-intercept subcommand `_main_dispatch` routes ABOVE the set-based arms. The
-# central store mount (bug ad9f) must keep firing for these — several touch the store yet
-# return before any per-arm ensure_initialized. Kept adjacent to the intercept ladder it
-# mirrors; test_central_mount_gate_ad9f pins the store-touching-intercept behavior.
-_INTERCEPTS = frozenset(
-    {
-        "reconcile",
-        "review-code",
-        "scan-spec",
-        "verify-completion",
-        "review-plan",
-        "sign-review",
-        "enrich",
-        "explain",
-        "verify-commit-ticket",
-        "verify-identity",
-        "verify-authorship",
-        "verify-opcert",
-        "trusted-env",
-        "remote-cert",
-        "workflow",
-        "llm",
-        "jira-onboard",
-        "prompt",
-        "criteria",
-        "identity",
-        "audit",
-        "config",
-        "metrics",
-    }
-)
+# The registry route table is the SOLE routing authority; the router derives the four
+# policy sets it still consults at runtime from it (RP-05 S6 cutover). ``_registry``
+# imports only stdlib, so this stays cheap and pulls in no command handlers.
+_DERIVED_POLICY_SETS = _registry.derive_policy_sets()
+# EXCLUDED from the central best-effort store-mount gate (bug ad9f): `init` IS init (it
+# must not pre-mount) and `scratch` is filesystem-only. ``config validate`` is also
+# excluded in ``_store_mount_eligible``: its job is to aggregate bad config, so consulting
+# config to locate a store would fail before that audit runs. Everything else passes
+# through the gate, which silently no-ops when there is no attachable store.
+_NO_AUTO_MOUNT = _DERIVED_POLICY_SETS["_NO_AUTO_MOUNT"]
+# Every pure-intercept subcommand the router routes through the executor. The central
+# store mount (bug ad9f) must keep firing for these — several touch the store yet return
+# before any per-arm ensure_initialized. test_central_mount_gate_ad9f pins the
+# store-touching-intercept behavior.
+_INTERCEPTS = _DERIVED_POLICY_SETS["_INTERCEPTS"]
 
 
 def _store_mount_eligible(argv: list[str]) -> bool:
@@ -97,34 +62,6 @@ def _store_mount_eligible(argv: list[str]) -> bool:
     return sub in _INTERCEPTS or sub in _help.known_subcommands()
 
 
-# Read arms that auto-init only; the read path owns its own throttled reconverge.
-_READS_INIT_ONLY = frozenset(
-    {"show", "list", "next-batch", "deps", "ready", "search", "session-logs"}
-)
-# Read-compute arm that runs with NO auto-init (self-manages).
-_READS_NO_INIT = frozenset({"validate"})
-# Field-read arms that run with FULL auto-init.
-_FIELD_READS = frozenset({"get-file-impact", "get-verify-commands"})
-# Resolution/display arms that run with FULL auto-init.
-_LOOKUPS = frozenset({"exists", "resolve", "format"})
-# Graph-traversal arm that runs with FULL auto-init.
-_DESCENDANTS = frozenset({"list-descendants"})
-# Per-ticket gate arms that run with NO auto-init (they read
-# transitively via `ticket show`, so the gate CLI itself does no auto-init).
-_GATES = frozenset({"clarity-check", "check-ac", "quality-check", "summary"})
-# Signature arms (native, no bash counterpart): `sign` is a write, `verify-signature`
-# a read; both need an initialized store + the environment signing key.
-_SIGNING = frozenset({"sign", "verify-signature"})
-# Write/lifecycle arms (E3): full auto-init + reconverge before the in-process write.
-_LIFECYCLE = frozenset({"transition", "reopen", "claim"})
-# Compaction arms (E3): full auto-init before the in-process SNAPSHOT write.
-_COMPACT = frozenset({"compact", "compact-all"})
-# Bridge commands share the explicit routing census, while retaining their own
-# initialization policies below.
-_BRIDGE = frozenset({"bridge", "bridge-status", "bridge-fsck"})
-_HIDDEN_ALIASES = frozenset({"bridge-status"})
-
-
 def _wants_help(rest: list[str]) -> bool:
     """Deprecated shim — see :func:`rebar._cli._help_route.wants_help`."""
     return _help_route.wants_help(rest)
@@ -135,35 +72,32 @@ def _help_requested(sub: str, rest: list[str]) -> bool:
     return _help_route.help_requested(sub, rest)
 
 
-# Import/export arms (P1.2): NDJSON interop projection. `export` is a read
-# (init-only); `import` composes writes (full init).
-_IO = frozenset({"export", "import"})
-# Leaf-write arms: full auto-init + reconverge before the in-process write.
-_WRITES_FULL = frozenset(
-    {
-        "create",
-        "idea",
-        "comment",
-        "link",
-        "unlink",
-        "revert",
-        "edit",
-        "tag",
-        "untag",
-        "archive",
-        "set-file-impact",
-        "set-verify-commands",
-        "attach-commits",
-        "session-log",
-    }
-)
-
-
 def _reconcile(argv: list[str]) -> int:
     """Compatibility wrapper for the established ``rebar reconcile`` spelling."""
     from rebar._cli._bridge_commands import launch_reconciler
 
     return launch_reconciler(argv)
+
+
+def _enrich(rest: list[str]) -> int:
+    """``rebar enrich`` handler — the enrich drain/status intercept."""
+    from rebar import config as _config
+    from rebar.llm.enrich_drain import cmd_enrich
+
+    return cmd_enrich(rest, str(_config.tracker_dir()))
+
+
+def _identity_intercept(rest: list[str]) -> int:
+    """``rebar identity`` handler — full-init (unless a help form) then dispatch.
+
+    Preserves the pre-cutover ladder behavior: the store is initialized for a real
+    invocation (and the bare/empty form) but NOT for an explicit help request, which
+    identity_cli renders itself."""
+    if not rest or rest[0] not in ("--help", "-h", "help"):
+        ensure_initialized(init_only=False)
+    from rebar._commands import identity as _identity
+
+    return _identity.identity_cli(rest)
 
 
 def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -> int:
@@ -250,13 +184,13 @@ def _emit_subcommand_help(sub: str) -> int:
 # The global --quiet / --output flags are pre-extracted here at the router — BEFORE
 # any partition dispatch — because the positional-only _REGISTRY leaves
 # (rebar._commands.__init__) usage-error on any option-looking token, so a
-# per-verb parse could never see them.
-_CONFIRM_SCOPE = _WRITES_FULL | _LIFECYCLE
-# Verbs that parsed --output themselves before the global extraction existed. The
-# extracted format is re-injected so their own parse_output keeps producing the
-# byte-identical, pre-existing JSON shapes (their parsers strip the flag again
-# before any positional handling, so the position of the re-injection is inert).
-_LEGACY_OUTPUT = frozenset({"create", "idea", "transition", "claim", "reopen"})
+# per-verb parse could never see them. Both sets are derived from the registry route
+# table (RP-05 S6): ``_CONFIRM_SCOPE`` is consulted by ``_dispatch``, ``_LEGACY_OUTPUT``
+# by ``_dispatch_confirmable`` (verbs that parsed --output themselves before the global
+# extraction existed — the extracted format is re-injected so their own parse_output
+# keeps producing the byte-identical, pre-existing JSON shapes).
+_CONFIRM_SCOPE = _DERIVED_POLICY_SETS["_CONFIRM_SCOPE"]
+_LEGACY_OUTPUT = _DERIVED_POLICY_SETS["_LEGACY_OUTPUT"]
 
 
 def _dispatch_confirmable(sub: str, rest: list[str]) -> int:
@@ -339,9 +273,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _main_dispatch(argv: list[str]) -> int:
-    """The full CLI dispatch body: the ``-c`` override parse, every in-process
-    intercept (reconcile/review/…/identity/config/audit), and ``return _dispatch(...)``.
-    Wrapped by :func:`main` in a ``RemovedInputError`` handler (see there)."""
+    """The full CLI dispatch body: the ``-c`` override parse, the shadow snapshot, the
+    central store-mount gate, and ``return _dispatch(...)`` (which routes every command,
+    intercepts included, through the registry executor). Wrapped by :func:`main` in a
+    ``RemovedInputError`` handler (see there)."""
     # Canonical help / overview / unknown pre-scan (RP-05 S2d): answer a help, bare-overview,
     # or unknown-subcommand request from the committed help artifacts BEFORE any operation
     # snapshot, config materialization, store mount, handler/factory resolution, or optional
@@ -383,7 +318,7 @@ def _main_dispatch(argv: list[str]) -> int:
     emit_shadow_snapshot(surface="cli")
 
     # Central store-mount gate (bug ad9f): every store-touching command — INCLUDING the pure
-    # intercepts below (verify-commit-ticket, ...) that historically bypassed the per-arm
+    # intercepts (verify-commit-ticket, ...) that historically bypassed the per-arm
     # ensure_initialized — mounts the store ONCE here, before dispatch, so none can silently skip
     # it. Best-effort (attach-if-possible, never error, never first-time-init, never reconverge):
     # the strict per-arm ensure_initialized calls remain and still own greenfield refusal +
@@ -392,144 +327,14 @@ def _main_dispatch(argv: list[str]) -> int:
     if _store_mount_eligible(argv):
         ensure_store_mounted_best_effort()
 
-    # reconcile intercept (a native rebar op, not a per-ticket command arm).
-    if argv and argv[0] == "reconcile":
-        return _reconcile(argv[1:])
-
-    # review-code intercept (native rebar.llm code-review op).
-    if argv and argv[0] == "review-code":
-        return _review_code(argv[1:])
-
-    # scan-spec intercept (native rebar.llm batch spec-scan op).
-    if argv and argv[0] == "scan-spec":
-        return _scan_spec(argv[1:])
-
-    if argv and argv[0] == "verify-completion":
-        return _verify_completion(argv[1:])
-
-    # review-plan intercept (native rebar.llm plan-review gate; owns its --help).
-    if argv and argv[0] == "review-plan":
-        return _review_plan(argv[1:])
-
-    # sign-review intercept (cheap re-sign of a plan-review attestation from the last
-    # REVIEW_RESULT sidecar; NO LLM. Owns its --help like review-plan).
-    if argv and argv[0] == "sign-review":
-        return _sign_review(argv[1:])
-
-    # enrich intercept (cross-ticket overlap drain + status; native rebar.llm, epic
-    # only-crave-art). `rebar enrich [--drain|--once|status]`.
-    if argv and argv[0] == "enrich":
-        from rebar import config as _enrich_config
-        from rebar.llm.enrich_drain import cmd_enrich
-
-        return cmd_enrich(argv[1:], str(_enrich_config.tracker_dir()))
-
-    # explain intercept (WS10: `rebar explain <criterion-id>` — a pure registry/guide READ, no
-    # LLM; owns its --help like review-plan, so no help/*.txt or dispatch arm).
-    if argv and argv[0] == "explain":
-        return _explain(argv[1:])
-
-    # verify-commit-ticket intercept (commit-message ticket gate; owns its --help). A pure
-    # intercept like review-plan: no help/*.txt, no dispatch arm, no golden capture.
-    if argv and argv[0] == "verify-commit-ticket":
-        from rebar._commands import verify_commit
-
-        return verify_commit.cli(argv[1:])
-
-    # verify-identity intercept (authenticated-authorship merge-gate; owns its --help). A
-    # pure intercept like verify-commit-ticket: no help/*.txt, no dispatch arm. `verify-identity`
-    # is the canonical name; `verify-authorship` is a back-compat alias (both dispatch here).
-    # BOTH use the equality-test form so the gen_cli_reference drift regex detects them and the
-    # curated CLI reference documents the command + its alias (epic gnu-whale-ichor / AC7).
-    if argv and argv[0] == "verify-identity":
-        from rebar._commands import verify_authorship
-
-        return verify_authorship.cli(argv[1:])
-    if argv and argv[0] == "verify-authorship":  # back-compat alias for verify-identity
-        from rebar._commands import verify_authorship
-
-        return verify_authorship.cli(argv[1:])
-    if argv and argv[0] == "verify-opcert":  # required-environment op-cert merge-gate (story 4214)
-        from rebar._commands import verify_opcert
-
-        return verify_opcert.cli(argv[1:])
-    if argv and argv[0] == "trusted-env":  # maintain .rebar/trusted_environments.yaml (story 4214)
-        from rebar._commands import trusted_env_cmd
-
-        return trusted_env_cmd.cli(argv[1:])
-    if argv and argv[0] == "remote-cert":  # trusted op-cert gate service client (story ee0b)
-        from rebar._commands import remote_cert
-
-        return remote_cert.cli(argv[1:])
-
-    # workflow intercept (native rebar.llm.workflow DSL toolchain; owns its --help).
-    if argv and argv[0] == "workflow":
-        return _workflow(argv[1:])
-
-    # llm intercept (the LLM-framework setup wizard; owns its --help).
-    if argv and argv[0] == "llm":
-        return _llm(argv[1:])
-
-    # Compatibility jira-onboard intercept. The canonical `bridge setup` child and
-    # this alias share jira_onboard; the alias retains its historical prog in help.
-    if argv and argv[0] == "jira-onboard":
-        from rebar._cli._jira_onboard import jira_onboard
-
-        return jira_onboard(argv[1:])
-
-    # prompt intercept (prompt evals — WS-G; owns its --help).
-    if argv and argv[0] == "prompt":
-        return _prompt(argv[1:])
-
-    # criteria intercept (per-criterion calibration eval — story 55b8; owns its --help).
-    if argv and argv[0] == "criteria":
-        return _criteria(argv[1:])
-
-    # identity intercept (the identity entity: create + self-pointer; owns its own
-    # --help like reconcile/review). Full auto-init (it composes a CREATE write).
-    if argv and argv[0] == "identity":
-        rest = argv[1:]
-        if not rest or rest[0] not in ("--help", "-h", "help"):
-            ensure_initialized(init_only=False)
-        from rebar._commands import identity as _identity
-
-        return _identity.identity_cli(rest)
-
-    # audit intercept (native audit read-layer aggregator; owns its own --help, like
-    # reconcile/review). `audit` HAS pinned help text (help/audit.txt registers it as a
-    # known subcommand), so `rebar audit --help` / `rebar help audit` fall through to the
-    # shared help machinery below; only an actual invocation (`rebar audit show …`) is
-    # intercepted here, so both help forms render the SAME pinned text byte-for-byte.
-    if argv and argv[0] == "audit" and not (len(argv) >= 2 and argv[1] in ("--help", "-h")):
-        from rebar._cli._audit_commands import audit_cli
-
-        return audit_cli(argv[1:])
-
-    # config intercept (native config-transparency read; owns its own --help, like
-    # reconcile/review). No store init: it reads working-tree config files only.
-    if argv and argv[0] == "config":
-        from rebar._commands import show_config
-
-        return show_config.config_cli(argv[1:])
-
     # Help, overview, and unknown-subcommand forms were already served by
     # ``_help_route.pre_scan`` at the top of this function (before any snapshot/config/mount).
-    # Reaching here means a real, help-backed command invocation (intercept commands and
-    # their own ``--help`` were handled by the ladder above); route it to the dispatcher.
+    # Reaching here means a real command invocation — including the intercept commands, which
+    # now carry registry execution metadata and route through the executor like every other
+    # command (RP-05 S6); route it to the dispatcher.
     sub, rest = argv[0], argv[1:]
     return _dispatch(sub, rest)
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-# --- RP-05 S2a shadow-only derivation (no route cutover) --------------------
-# The immutable route registry rebuilds the live policy frozensets above with
-# zero delta. This derived mirror is a shadow census only: the literal
-# frozensets remain the router's authoritative source, and nothing here changes
-# dispatch, help, or execution. ``_registry`` imports only stdlib, so this stays
-# cheap and pulls in no command handlers or optional dependencies.
-from rebar._cli import _registry as _registry  # noqa: E402
-
-_DERIVED_POLICY_SETS = _registry.derive_policy_sets()
