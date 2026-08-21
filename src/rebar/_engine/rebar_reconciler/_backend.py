@@ -377,12 +377,17 @@ class OutboundMapper(Protocol):
         emit_detach_clear: bool = False,
         *,
         suppressed_out: list[str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """``suppressed_out`` (ticket 8390): an optional sink an implementation MAY
         append to when it drops a parent it could otherwise have sent, so the caller
         can report the loss. Reporting only — it never changes the mapped dict, and a
         backend with no such suppression (Data Center maps no parent at all) accepts
-        and ignores it."""
+        and ignores it.
+
+        ``status_map`` (S2): the effective per-project local->Jira status map
+        (``config.effective_status_map``); ``None`` falls back to the built-in map. A
+        local status with NO target is OMITTED (map-or-drift), never coerced."""
         ...
 
     def map_fields_to_remote(
@@ -391,11 +396,16 @@ class OutboundMapper(Protocol):
         ticket: dict[str, Any] | None = None,
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Map a CANONICAL changed-fields dict (local field names → local values) to the
         backend's mutation-field shapes, at the emission boundary (ticket 625b). The core
         diffs in local shape; this translates only the changed subset back — field-name
-        reconciliation and value mapping (incl. rich-text fit) happen HERE."""
+        reconciliation and value mapping (incl. rich-text fit) happen HERE.
+
+        ``status_map`` (S2): the effective per-project local->Jira status map; ``None``
+        falls back to the built-in map. A local status with NO target is OMITTED
+        (map-or-drift), never coerced to ``"To Do"``."""
         ...
 
     def resolve_assignee(
