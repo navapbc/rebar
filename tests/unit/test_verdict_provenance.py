@@ -366,6 +366,40 @@ def test_bedrock_record_carries_the_region_and_the_rebar_knob_as_source(monkeypa
     assert rec["region_source"] == "REBAR_LLM_BEDROCK_REGION"
 
 
+@pytest.mark.parametrize("source", ["repo-config", "cli"])
+def test_bedrock_record_carries_the_configured_regions_true_origin(monkeypatch, source) -> None:
+    """cda8: a knob value that came from the config-file table (or the CLI) is labeled by its
+    TRUE origin — `bedrock_region_source`, resolved by the SAME `LLMConfig.from_env` pass that
+    produced the value and threaded by the runner — never blanket-labeled as the env var."""
+    _strip_region_env(monkeypatch)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name="us-east-1",
+        bedrock_region_source=source,
+    )
+    assert rec["region"] == "us-east-1"
+    assert rec["region_source"] == source
+
+
+def test_bedrock_region_source_alone_never_conjures_region_keys(monkeypatch) -> None:
+    """A threaded source label without a resolved VALUE records nothing — the keys stay
+    gated on the region itself, so a stale label cannot smuggle a guess into a signed record."""
+    _strip_region_env(monkeypatch)
+    rec = _provenance(
+        provider="bedrock",
+        model="bedrock:us.anthropic.claude-sonnet-4-6",
+        base_url=None,
+        caps=CAPS,
+        bedrock_region_name=None,
+        bedrock_region_source="repo-config",
+    )
+    assert "region" not in rec
+    assert "region_source" not in rec
+
+
 @pytest.mark.parametrize(
     ("var", "value"),
     [("AWS_DEFAULT_REGION", "eu-west-1"), ("AWS_REGION", "us-west-2")],
