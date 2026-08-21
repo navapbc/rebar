@@ -103,9 +103,7 @@ def test_every_env_reading_llm_helper_is_registered_at_the_right_position() -> N
     )
 
     wrong_position = {
-        name: (registered[name][0], idx)
-        for name, idx in expected.items()
-        if registered[name][0] != idx
+        name: (registered[name], idx) for name, idx in expected.items() if registered[name] != idx
     }
     assert wrong_position == {}, f"registered index != actual env_name position: {wrong_position}"
 
