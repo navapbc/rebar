@@ -610,3 +610,98 @@ def test_stamp_write_failure_keeps_a_ceiling_bounded_lock(
     reclaimed = D._acquire_advisory_lock(_tracker(repo))
     assert reclaimed is not None, "an unattributable lock must never wedge past the ceiling"
     D._release_advisory_lock(_tracker(repo), reclaimed)
+
+
+# --- Permanent per-item failures must not cycle (bug spongy-illjudged-terrier) --------------
+
+
+class _PermanentInputRejectionRunner(Runner):
+    """Raises the provider's deterministic over-context rejection, verbatim.
+
+    The raised error carries the SAME classified disposition ``run_failure`` attaches in
+    production (``ResolutionClass.CHANGE_INPUT`` / ``retryable=False``), so the drain sees
+    exactly the object it sees on the real path.
+    """
+
+    name = "permanent"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, req: RunRequest) -> dict:
+        from rebar.llm.errors import LLMUnavailableError
+        from rebar.llm.failure import LLMOutcome, ResolutionClass
+
+        self.calls += 1
+        err = LLMUnavailableError(
+            "the LLM provider call failed: status_code: 400, "
+            "model_name: us.anthropic.claude-haiku-4-5-20251001-v1:0, "
+            "'Message': 'prompt is too long: 206826 tokens > 200000 maximum'"
+        )
+        err.outcome = LLMOutcome(  # type: ignore[attr-defined]
+            ResolutionClass.CHANGE_INPUT,
+            {"status_code": 400},
+            retryable=False,
+        )
+        raise err
+
+    def preflight(self) -> None:
+        pass
+
+
+def _cycle_drains(repo: str, tid: str, runner: Runner, cycles: int) -> int:
+    """Drive `cycles` drains, advancing a virtual clock past each claim lease between them.
+
+    Returns the final virtual instant, so assertions read the queue at the same clock the
+    drains ran against. Time is a MONKEYPATCHED counter, never a sleep: the property under
+    test is algorithmic (does the entry converge to a terminal state?), not temporal.
+    """
+    import pytest as _pytest
+
+    mp = _pytest.MonkeyPatch()
+    try:
+        clock = {"n": Q._now_ns()}
+        mp.setattr(Q, "_now_ns", lambda: clock["n"])
+        for _ in range(cycles):
+            D.drain(_tracker(repo), repo_root=repo, runner=runner)
+            clock["n"] += 40 * Q._NS_PER_MIN  # past any plausible lease
+        return clock["n"]
+    finally:
+        mp.undo()
+
+
+def test_permanent_input_rejection_reaches_a_terminal_state(repo: str) -> None:
+    """A deterministically-failing entry converges instead of cycling forever.
+
+    The algorithmic property, not a wall-clock bound: across repeated drains that each see a
+    fresh (expired-lease) entry, a permanently-rejected item is attempted a BOUNDED number of
+    times and ends in a terminal state, so it leaves the pending set for good.
+    """
+    tid = rebar.create_ticket("task", "Too large to enrich", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    runner = _PermanentInputRejectionRunner()
+
+    end = _cycle_drains(repo, tid, runner, cycles=5)
+
+    final = Q.reduce_ticket(tid, _tracker(repo), now_ns=end)
+    assert final["done"] is True, "a permanently-rejected entry must reach a terminal state"
+    assert tid not in Q.pending_enrichment(end, _tracker(repo))
+    assert runner.calls == 1, (
+        f"a permanent rejection must be attempted once, not once per lease "
+        f"(saw {runner.calls} provider calls across 5 drain cycles)"
+    )
+
+
+def test_transient_failure_keeps_the_retry_posture(repo: str) -> None:
+    """The terminal branch is narrow: an UNCLASSIFIED failure still retries after the lease.
+
+    Guards the opposite error — classifying everything as permanent would tombstone the whole
+    queue on a transient outage or a bad credential.
+    """
+    tid = rebar.create_ticket("task", "Transiently broken", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+
+    end = _cycle_drains(repo, tid, _BoomRunner(), cycles=3)
+
+    assert Q.reduce_ticket(tid, _tracker(repo), now_ns=end)["done"] is False
+    assert tid in Q.pending_enrichment(end, _tracker(repo))
