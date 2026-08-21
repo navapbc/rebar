@@ -9,6 +9,7 @@ that do not contend on the repo index lock.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -259,3 +260,132 @@ def test_concurrent_different_shas_no_index_contention(tmp_path):
     # GIT_INDEX_FILE, so it never writes the repo index (which `status` would reflect).
     # This is the load-bearing assertion — drop GIT_INDEX_FILE and this regresses.
     assert _git(repo, "status", "--porcelain") == before_status
+
+
+# --------------------------------------------------------------------------------------
+# Bug 8386 — adjacent tickets SHAs must not each cost a whole fresh tree
+# --------------------------------------------------------------------------------------
+def _distinct_bytes(root: Path) -> int:
+    """Bytes the store really occupies: each inode charged exactly once.
+
+    A naive ``st_size`` sum counts a hardlinked blob once per entry that references it,
+    which is the very sharing under test — so recency/eviction accounting aside, the
+    honest measure of "how much disk did N materializations cost" is per-inode."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:  # pragma: no cover - racing eviction
+                continue
+            key = (st.st_dev, st.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            total += st.st_size
+    return total
+
+
+def test_adjacent_tickets_shas_reuse_unchanged_blobs(tmp_path):
+    """N gate resolutions across N adjacent tickets SHAs must cost ~ONE tree, not N trees.
+
+    The tickets tip advances every ~26s and each commit touches a handful of files, so the
+    ``tickets-<sha>`` key effectively never hits. ADR 0005 D2 grounds the store on "an
+    immutable SHA is a perfect cache key", which holds only for a key with REUSE; without
+    sharing, a one-file delta rewrites the whole tree and the store degenerates into an
+    append-only log of full copies (measured in the wild at 64k entries / 47.2 GiB).
+
+    The property asserted is algorithmic — distinct bytes consumed per resolution — never
+    wall-clock, and it is measured on observable on-disk output rather than any internal.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "seed.txt").write_text("seed\n")
+    _commit_all(repo, "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+
+    payload = "T" * 20_000
+    tickets = repo / "tickets"
+    tickets.mkdir()
+    for i in range(40):
+        (tickets / f"t{i:03d}.json").write_text(payload)
+    _commit_all(repo, "tickets base")
+
+    store = rs.store_root()
+    shas: list[str] = []
+    for i in range(4):
+        # Exactly ONE file changes per commit — the shape of a real tickets commit.
+        (tickets / f"t{i:03d}.json").write_text(payload[:-1] + "X")
+        shas.append(_commit_all(repo, f"one-file delta {i}"))
+        rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False)
+
+    one_tree = 40 * len(payload)
+    consumed = _distinct_bytes(store)
+
+    # Four resolutions, four distinct SHAs, four entries — but they differ by one file
+    # each, so the DISK cost must stay near a single tree. Without sharing this is ~4x.
+    assert consumed < one_tree * 2, (
+        f"4 adjacent-SHA resolutions consumed {consumed} bytes; one tree is ~{one_tree}. "
+        "Unchanged blobs are being rewritten instead of shared."
+    )
+
+    # The sharing is real, not an artefact of the measurement: a file untouched by every
+    # delta is ONE inode across all four entries.
+    entries = sorted(p for p in store.iterdir() if p.name.startswith("tickets-"))
+    assert len(entries) == 4, "each distinct tickets SHA still gets its own entry"
+    unchanged = {os.lstat(e / ".tickets-tracker" / "tickets" / "t039.json").st_ino for e in entries}
+    assert len(unchanged) == 1, f"an unchanged blob occupies {len(unchanged)} inodes, want 1"
+
+    # Faithfulness is NOT traded away for sharing: every entry must still byte-match the
+    # committed tree at its own SHA, including the file that changed in that commit.
+    for i, sha in enumerate(shas):
+        root = store / f"tickets-{sha}" / ".tickets-tracker"
+        listed = _git(repo, "ls-tree", "-r", "--name-only", sha).splitlines()
+        on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+        assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
+        for rel in listed:
+            want = _git(repo, "show", f"{sha}:{rel}")
+            assert (root / rel).read_text().rstrip("\n") == want.rstrip("\n"), (
+                f"entry {i} content diverges at {rel}"
+            )
+
+
+def test_donor_untracked_files_do_not_leak_into_a_new_entry(tmp_path):
+    """A donor entry holds untracked files; none of them may appear in the entry built from it.
+
+    A live ``tickets-<sha>`` entry is NOT just its committed tree: every ticket read drops a
+    ``.cache.json`` into each ticket dir (4,844 measured inside one live entry). They are
+    gitignored, so they belong to no tree. If the donor's contents were enumerated by walking
+    its directory instead of by ``git ls-tree``, those extras would be hardlinked into the new
+    entry — which would then no longer byte-match its own SHA — and any "walk count == tree
+    count" completeness check would fail forever in production, silently disabling the delta
+    path while still looking green on a clean fixture. This test makes that fixture dirty.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "seed.txt").write_text("seed\n")
+    _commit_all(repo, "seed")
+    _git(repo, "checkout", "--quiet", "-b", "tickets")
+    tickets = repo / "tickets"
+    tickets.mkdir()
+    for i in range(6):
+        (tickets / f"t{i}.json").write_text("T" * 500)
+    _commit_all(repo, "tickets base")
+
+    first = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+
+    # Simulate what a real read does to a published entry, post-materialization.
+    donor_tracker = first / ".tickets-tracker" / "tickets"
+    (donor_tracker / ".cache.json").write_text('{"derived": true}')
+    (donor_tracker / "..cache.json.abc.tmp").write_text("transient")
+
+    (tickets / "t0.json").write_text("T" * 499 + "X")
+    sha = _commit_all(repo, "one-file delta")
+    second = Path(rs.materialize_tickets("tickets", repo_root=str(repo), fetch=False))
+    assert second != first
+
+    listed = sorted(_git(repo, "ls-tree", "-r", "--name-only", sha).splitlines())
+    root = second / ".tickets-tracker"
+    on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+    assert on_disk == listed, (
+        "the new entry must contain exactly its committed tree; untracked donor files leaked"
+    )

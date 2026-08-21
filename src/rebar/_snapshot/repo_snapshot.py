@@ -65,6 +65,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from rebar._snapshot.delta_tree import materialize_via_donor
 from rebar._snapshot.git_fetch import (
     _GIT_TIMEOUT,
     SnapshotError,
@@ -687,7 +688,21 @@ def materialize_tickets(
         # `source_dir`: when the pin came from the tracker repo, only that repo is guaranteed
         # to hold the commit's objects.
         _ensure_blobs_present(source_dir, sha, remote)
-        _materialize_tree(source_dir, sha, tracker)
+        # The tickets tip advances every few seconds while each commit touches a handful of
+        # files, so the cache-hit branch above almost never fires and a full checkout-index
+        # would write a whole fresh copy of the tree per resolution (47 GiB measured in the
+        # wild). Build from a hardlinked neighbouring entry when one exists, rewriting only
+        # the changed paths; the helper fails CLOSED (returns False) on any doubt, and the
+        # full materialization below is then the unchanged behaviour.
+        if not materialize_via_donor(
+            source_dir,
+            sha,
+            tracker,
+            store=store,
+            entry_prefix="tickets-",
+            subdir=_TRACKER_DIRNAME,
+        ):
+            _materialize_tree(source_dir, sha, tracker)
         _fsync_dir(build)
         try:
             os.rename(build, dest)

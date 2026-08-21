@@ -126,14 +126,32 @@ def add_bytes(delta: int, root: Path | None = None) -> int:
 
 
 def entry_size(path: Path) -> int:
-    """Total bytes of a materialized entry (one walk; used to account a populate)."""
+    """Bytes of a materialized entry (one walk; used to account a populate).
+
+    Each file is charged ``st_size // st_nlink``, not ``st_size``. Ticket-store entries are
+    now built by hardlinking a neighbouring entry's unchanged blobs
+    (:mod:`rebar._snapshot.delta_tree`), so a blob shared by ``k`` entries occupies its bytes
+    ONCE on disk; charging every entry the full size would inflate ``byte_total`` by a factor
+    of ``k`` and make the janitor's size cap evict against bytes that do not exist. Charging
+    ``1/k`` to each of the ``k`` links sums back to exactly the true on-disk size. An
+    unshared file has ``st_nlink == 1`` and is charged in full, so code entries (never
+    hardlinked) are completely unaffected.
+
+    The INCREMENTAL total can transiently OVER-state: a donor entry was charged in full when
+    its links were still 1, and the new entry that links it is charged only a half share, so
+    the pair sums to more than the bytes on disk until a full walk revisits the donor. That
+    is the fail-safe direction for a cap (over-state -> evict sooner, never grow unbounded),
+    and the janitor's authoritative ``startup_sweep`` recount reconciles it downward. It is
+    also self-correcting under eviction: removing one of ``k`` entries drops the survivors'
+    ``st_nlink``, so a later walk re-attributes the full size across them."""
     total = 0
     for dirpath, _dirnames, filenames in os.walk(path):
         for name in filenames:
             try:
-                total += os.lstat(os.path.join(dirpath, name)).st_size
+                st = os.lstat(os.path.join(dirpath, name))
             except OSError:  # pragma: no cover - racing eviction
-                pass
+                continue
+            total += st.st_size // max(1, st.st_nlink)
     return total
 
 
