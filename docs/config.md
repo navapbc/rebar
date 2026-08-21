@@ -510,6 +510,85 @@ default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_
 (audited escape hatch for the agentic-op safeguard). CLI surfaces: `--ref` / `--source` on
 each of the five code-reading commands (one-to-one with the MCP tools' `ref`/`source` args).
 
+### Provider-neutral reconciler mapping (`[mapping]`) — reserved, provider-neutral core
+
+The reconciler's rebar↔Jira vocabulary mappings (statuses, issue types, link types,
+priorities, hierarchy ranks, and create-time defaults) are moving off hardcoded literals and
+onto config. `mapping` is a *reserved* section (the core loader recognises
+`[mapping]`/`[tool.rebar.mapping]` and never warns/rejects it, even under
+`REBAR_CONFIG_UNKNOWN_KEYS=error`) read raw by
+`rebar_reconciler.mapping_config.load_mapping_config`. This section ships the **provider-neutral
+core only** — no axis is wired into the reconciler yet; later stories wire the axes and the
+concrete adapter injects the target's built-in default vocabulary.
+
+```toml
+# ── the DEFAULT block: applies to every project unless a projects.<KEY> overlay wins ──
+[mapping.default.status_map]     # axis map: local status name → target status VALUE (or "skip")
+open        = "To Do"
+in_progress = "In Progress"
+closed      = "Done"
+
+[mapping.default.type_map]       # local type → target issue-type value
+story = "Story"
+bug   = "Bug"
+
+[mapping.default.link_map]       # local relation → target link-type value
+blocks = "Blocks"
+
+[mapping.default.priority_map]   # local priority key → target priority value
+2 = "Medium"
+
+[mapping.default.create_defaults]  # ungated create-time field defaults (free-form)
+labels = "rebar"
+
+[mapping.default]                # vocabulary DECLARATIONS (string lists) for offline validation
+statuses    = ["To Do", "In Progress", "Done"]
+issue_types = ["Story", "Bug", "Epic"]
+link_types  = ["Blocks"]
+
+[mapping.default.hierarchy]      # type → integer rank (str→int)
+Epic = 1
+
+# ── a per-project overlay, keyed by Jira project KEY; same shape as default ──
+[mapping.projects.REB.status_map]
+open = "Backlog"                 # overrides ONLY the "open" key for REB
+[mapping.projects.REB]
+statuses = ["Backlog", "In Progress", "Done"]
+```
+
+**Three-layer per-key merge.** The five axis maps (`status_map`, `type_map`, `link_map`,
+`priority_map`, `create_defaults`) deep-merge **per key**, from least- to most-specific:
+
+```
+built-in default  ←  [mapping.default]  ←  [mapping.projects.<KEY>]
+```
+
+An overlay entry overrides only the key it names; keys it does not name inherit the next-outer
+layer (so a project overlay setting `status_map.open` leaves the built-in `closed` mapping
+intact). A value of `"skip"` is the sole non-vocabulary axis-map value — it drops the local key
+rather than mapping it, and is always allowed regardless of the declared vocabulary.
+
+**Wholesale vocabulary replacement.** The four vocabulary declarations (`statuses`,
+`issue_types`, `link_types`, and the `hierarchy` table) do **not** merge per key — the
+most-specific declaring layer wins **wholesale**: a project's `statuses` fully supersedes the
+`default` block's (never a union), and a layer that declares nothing inherits the next-outer
+declaration.
+
+**Fail-closed offline validation.** `mapping_config.validate` checks a resolved layer against a
+`Capability` descriptor using config only (never the network): every non-`"skip"` axis-map value
+must fall inside its declared vocabulary when one is declared, and an axis the target's
+vocabulary lacks (per `Capability`) may not be referenced. Any malformed block or violation
+raises `MappingConfigError` (a `ConfigError` subclass), failing closed on the same load path as
+every other config error.
+
+**Orthogonal to `.bridge_state/projects.json`.** These are two different mappings that happen to
+share a Jira project KEY as their join. `.bridge_state/projects.json` (on the tickets branch, a
+property of the **store**) binds a store to a Jira project **IDENTITY** — *which* project this
+store syncs to. `[mapping.projects.<KEY>]` here declares that key's **VOCABULARY / semantics** —
+*how* rebar's local values translate to that project's statuses, types, and links. Identity and
+vocabulary are orthogonal concerns joined on the same Jira key; neither subsumes the other.
+
+
 ### Secrets — environment / `.env` only (never the config file)
 
 `REBAR_SIGNING_KEY`, `REBAR_LLM_API_KEY`, `JIRA_API_TOKEN`,
