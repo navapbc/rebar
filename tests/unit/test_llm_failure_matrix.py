@@ -476,20 +476,25 @@ class _ExplodingRunner:
 
 
 def test_disabled_code_review_never_invokes_runner():
-    """CURRENT(code_review/shim.py:136-139): with code-review disabled (the default), the
-    gate returns an inert empty review WITHOUT touching the runner — the feature-off path
-    short-circuits before any model call. Later stories must keep failure-handling code out
-    of this path entirely."""
-    from rebar.llm.code_review.shim import review_code
+    """CURRENT(workflow/gate_dispatch.py:_code_review_preflight): a DISPATCH-disabled code
+    review (enabled=False, or config off for a caller that leaves enabled=None) returns an
+    inert empty verdict WITHOUT touching the runner — the feature-off path short-circuits
+    before any model call. The EXPLICIT `review_code()` surface always runs the gate (bug
+    5b32-37c4-f99a-4315), so this guard now lives at the dispatch level, not the shim."""
+    from rebar.llm.config import LLMConfig
+    from rebar.llm.workflow import gate_dispatch
 
-    out = review_code(
-        base="HEAD~1",
-        head="HEAD",
-        diff_text="--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n",
-        runner=_ExplodingRunner(),  # would raise AssertionError if the guard let it through
-        repo_root=".",
+    v = gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(),
+            diff_text="--- a\n+++ b\n@@ -1 +1 @@\n-x\n+y\n",
+            runner=_ExplodingRunner(),  # would raise AssertionError if the guard let it through
+            repo_root=".",
+            enabled=False,
+        )
     )
-    assert out["findings"] == []  # inert result, no LLM ran
+    assert v["blocking"] == [] and v["advisory"] == []  # inert verdict, no LLM ran
+    assert v["coverage"]["enabled"] is False
 
 
 # ── Guard: --force SKIPS the plan-review / completion gates (no LLM) ────────────

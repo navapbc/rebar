@@ -182,12 +182,14 @@ class VerifyConfig:
     # RESOLVES in the store (alias/full/short/Jira). Default off; enabled per-project in
     # rebar.toml. Turning it off is the rollback. See docs/commit-ticket-trailer.md.
     require_ticket_for_commit: bool = False
-    # Opt-in agentic code-review capability (epic b744): when true, the public
-    # `review_code()` (CLI `rebar review-code` / MCP `review_code`) runs the four-pass
-    # code-review GATE (`gates/code-review.yaml`) and `produce_code_review_verdict` is live.
-    # Default OFF ⇒ INERT — `review_code()` returns a valid empty `review_result` (+ a
-    # 'capability disabled' note), zero LLM calls. Source-separated + off-by-default so it has
-    # no effect when disabled. Env override: REBAR_VERIFY_ENABLE_CODE_REVIEW.
+    # Agentic code-review DISPATCH enablement (epic b744): consulted only by
+    # `produce_code_review_verdict` callers that leave `enabled=None` (automated/gate-triggered
+    # dispatch) — when false such a dispatch is INERT (zero LLM calls). An EXPLICIT
+    # `review_code()` call (CLI `rebar review-code` / library / MCP `review_code`) always runs
+    # the four-pass code-review GATE (`gates/code-review.yaml`) regardless of this key — an
+    # explicit invocation is the caller's intent (bug 5b32-37c4-f99a-4315), mirroring
+    # review-plan, where config controls requiredness, never availability.
+    # Env override: REBAR_VERIFY_ENABLE_CODE_REVIEW.
     enable_code_review: bool = False
     # Progressive drift-refresh (Story 2, epic boil-golem-veto / ADR 0002): on a
     # drift-only-stale re-review, run a cheap E4+G1G2 probe and, if the plan still holds,

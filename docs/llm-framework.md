@@ -607,11 +607,13 @@ we run an **ephemeral self-hosted stack**, not a persistent server:
    (library `rebar.llm.review_code`, CLI `rebar review-code`, gated MCP `review_code`). As of
    epic b744 (WS4, ADR 0011) the throwaway single-pass route — deterministic reviewer selection
    → parallel reviewers → `aggregate_findings` — is RETIRED. `review_code` is now the gate-backed
-   shim: OFF by default (`verify.enable_code_review` / `REBAR_VERIFY_ENABLE_CODE_REVIEW`), it
-   returns an inert empty `review_result` when disabled, and when enabled runs the four-pass
-   code-review gate (`gates/code-review.yaml`: a base reviewer + two-round overlay escalation →
-   kernel Pass-2 verify / Pass-3 decide / Pass-4 coach, via `produce_code_review_verdict`) and
-   TRANSLATES the typed `code_review_verdict` → a `review_result` (preserving the public surface).
+   shim: an explicit call always runs the four-pass code-review gate (`gates/code-review.yaml`:
+   a base reviewer + two-round overlay escalation → kernel Pass-2 verify / Pass-3 decide /
+   Pass-4 coach, via `produce_code_review_verdict`) and TRANSLATES the typed
+   `code_review_verdict` → a `review_result` (preserving the public surface). The
+   `verify.enable_code_review` key (`REBAR_VERIFY_ENABLE_CODE_REVIEW`) gates only automated
+   dispatch callers that leave `enabled=None` — never the explicit surface (bug
+   5b32-37c4-f99a-4315).
    See `docs/review-kernel.md` (the code-review consumer section) + ADRs 0010/0011.
 3. **Scan open epics against a spec (batched)** — the shipped `scan_epics_for_spec`
    op (library, CLI `rebar scan-spec`, gated MCP `scan_spec`). A batch evaluator:

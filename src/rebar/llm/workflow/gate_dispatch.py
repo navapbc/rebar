@@ -275,7 +275,9 @@ def produce_plan_review_verdict(
 
 
 def code_review_enabled(repo_root=None) -> bool:
-    """Whether the off-by-default code-review capability is enabled (verify.enable_code_review)."""
+    """Whether code-review DISPATCH is enabled (``verify.enable_code_review``) — consulted only
+    when a :class:`CodeReviewRequest` leaves ``enabled=None``. The explicit ``review_code``
+    surface always passes ``enabled=True`` (bug 5b32-37c4-f99a-4315)."""
     from rebar import config as _config
 
     try:

@@ -113,9 +113,7 @@ def _force_flush_tracing() -> None:
 
 
 @_skip
-def test_live_review_exports_langfuse_trace(
-    rebar_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_live_review_exports_langfuse_trace(rebar_repo: Path) -> None:
     import rebar.llm as llm
     from rebar.llm.config import LLMConfig
 
@@ -131,11 +129,10 @@ def test_live_review_exports_langfuse_trace(
     (rebar_repo / "app.py").write_text("API_KEY = 'hardcoded-secret'\n", encoding="utf-8")
 
     # review_code (the surviving findings-returning op this test retargeted onto after the
-    # public review_ticket was removed — bug 751a) is an OFF-BY-DEFAULT four-pass gate
-    # (epic b744): enable it so this drives the REAL traced LLM run instead of the inert
-    # empty result. Any findings-returning op works as the trace vehicle; the assertion below
+    # public review_ticket was removed — bug 751a) always runs the four-pass gate (epic b744 +
+    # bug 5b32-37c4-f99a-4315), so this drives the REAL traced LLM run with no config key. Any
+    # findings-returning op works as the trace vehicle; the assertion below
     # only requires that a real review executed and produced a result.
-    monkeypatch.setenv("REBAR_VERIFY_ENABLE_CODE_REVIEW", "1")
     diff = "--- a/app.py\n+++ b/app.py\n@@ -0,0 +1 @@\n+API_KEY = 'hardcoded-secret'\n"
 
     # from_env() picks up the LANGFUSE_* creds so tracing is enabled for this run.
