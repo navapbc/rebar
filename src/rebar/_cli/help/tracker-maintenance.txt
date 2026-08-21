@@ -1,21 +1,8 @@
-Usage: rebar tracker-maintenance [--status] [--clean] [--force=<reason>]
+Usage: rebar tracker-maintenance [--status] [--clean] [--force FORCE]
 
-  --status          report what would change; makes NO writes (default)
-  --clean           perform the repair (backup ref first, then heal)
-  --force=<reason>  BREAK-GLASS: proceed even with unpushed ticket commits.
-                    Requires a written reason; recorded in the audit log.
+Supported door for raw git in the tracker; backup ref + refusal + audit.
 
-The supported alternative to ad-hoc `git` in the tickets tracker. Routine ticket
-writes must go through rebar; this is for a store rebar itself cannot write.
-
-Safety envelope:
-  * a backup ref (refs/rebar-maintenance/<utc>) is created at the current HEAD
-    BEFORE the first write, and printed with its rollback command;
-  * the run REFUSES when commits on HEAD are not yet on origin/tickets — the one
-    condition separating a recoverable local mess from real event loss. A refused
-    run makes no writes at all. It fails closed: a missing origin/tickets also
-    refuses, because local commits cannot then be proven safe;
-  * every run appends a durable audit line (actor, argv, backup ref, what changed,
-    whether the break-glass was used and why) to the tracker's git dir.
-
-Exit 0 = nothing to do / repaired; 1 = refused; 2 = fatal (no tracker / bad args).
+options:
+  --status       report tracker maintenance status
+  --clean        clean the tracker worktree
+  --force FORCE  break-glass override (--force=<reason>)

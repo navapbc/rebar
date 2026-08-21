@@ -1,1 +1,7 @@
-Usage: rebar untag <ticket_id> <tag>
+Usage: rebar untag [ticket_id] [tag]
+
+Remove a tag from a ticket.
+
+positional arguments:
+  ticket_id  the ticket to untag
+  tag        the tag to remove

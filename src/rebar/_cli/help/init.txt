@@ -1,10 +1,8 @@
 Usage: rebar init [--silent] [--force-new-store]
 
-Initialize (or mount) the ticket store. When a configured remote is reachable,
-rebar always mounts an advertised tickets branch and creates a new store only when
-that branch is absent. If the remote cannot be reached, initialization fails closed
-to avoid splitting ticket history.
+Initialize the ticket system.
 
-  --silent             Suppress successful initialization messages.
-  --force-new-store    Explicitly create a new store only when the configured remote
-                       cannot be reached. Has no effect for a reachable remote.
+options:
+  --silent           suppress successful init messages
+  --force-new-store  create a new store only when the configured remote is
+                     unreachable

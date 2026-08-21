@@ -1,1 +1,10 @@
-Usage: rebar check-ac <ticket_id> [--output json]   (exit 0=pass, 1=fail; AC_CHECK: pass|fail)
+Usage: rebar check-ac [--output {text,json}] [ticket_id]
+
+Check one ticket has an Acceptance Criteria block.
+
+positional arguments:
+  ticket_id             the ticket to check
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format

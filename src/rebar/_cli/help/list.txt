@@ -1,13 +1,30 @@
-Usage: rebar list [--status=<s>] [--type=<t>] [--priority=<n>] [--parent=<id>] [--has-tag=<tag>] [--without-tag=<tag>] [--sort=<key>] [--include-archived] [--exclude-deleted] [--no-pull] [--output llm]
-  --type=<type>      Filter by ticket type (bug, epic, story, task; comma-separated for OR)
-  --status=<status>  Filter by status: idea|open|in_progress|closed|blocked|archived|deleted
-                     (comma-separated for OR; error|fsck_needed also valid). An
-                     unrecognized status is a hard error, not an empty result.
-  --priority=<n>     Filter by priority 0-4 (comma-separated for OR; exact match; unset priority not matched)
-  --parent=<id>      Filter to direct children of <id>
-  --has-tag=<tag>    Filter to tickets having <tag> (comma-separated for OR);
-                     tags matching ^detected_by: auto-intersect with --type=bug
-  --without-tag=<tag>  Exclude tickets having ANY of <tag> (comma-separated)
-  --sort=<key>       Order by priority|created|updated|id|status ('-' prefix = descending;
-                     unset values sort last). Default keeps store order.
-  --no-pull          Skip the best-effort fetch/reconverge (also: REBAR_NO_SYNC=1)
+Usage: rebar list [--output {json,llm}] [--include-archived] [--exclude-deleted]
+                  [--full] [--with-children-count] [--unblocked] [--blocked]
+                  [--type TYPE] [--status STATUS] [--priority PRIORITY]
+                  [--parent PARENT] [--has-tag HAS_TAG]
+                  [--without-tag WITHOUT_TAG] [--min-children MIN_CHILDREN]
+                  [--sort <priority|created|updated|id|status>]
+
+List all tickets as JSON.
+
+options:
+  --output {json,llm}, -o {json,llm}
+                        output format
+  --include-archived    include archived tickets
+  --exclude-deleted     exclude deleted tickets
+  --full                emit full ticket records
+  --with-children-count
+                        annotate each ticket's child count
+  --unblocked           only tickets with no open blockers
+  --blocked             only tickets with open blockers
+  --type TYPE           filter by ticket type (comma-separated for OR)
+  --status STATUS       filter by status (comma-separated for OR)
+  --priority PRIORITY   filter by priority 0-4 (comma-separated for OR)
+  --parent PARENT       filter to direct children of <id>
+  --has-tag HAS_TAG     filter to tickets having <tag> (comma-separated for OR)
+  --without-tag WITHOUT_TAG
+                        exclude tickets having any of <tag> (comma-separated)
+  --min-children MIN_CHILDREN
+                        only tickets with at least N children
+  --sort <priority|created|updated|id|status>
+                        order by key ('-' prefix = descending)
