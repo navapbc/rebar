@@ -59,6 +59,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import functools
 import sys
 from pathlib import Path
 
@@ -89,6 +90,22 @@ class UnregisteredEnvReadHelper(RuntimeError):
     stayed green over a registry it knew nothing was missing from (measured: ``_gate_str_pref``
     cost ``REBAR_GATE_REF`` and ``REBAR_GATE_SOURCE``). Fix by adding a row to
     ``KNOWN_ENV_HELPERS`` giving the 0-indexed position of the env-name argument.
+    """
+
+
+class StaleEnvReadHelperRow(RuntimeError):
+    """Raised when ``KNOWN_ENV_HELPERS`` carries a row whose helper has no definition under the
+    shipped scan root.
+
+    Fail-closed by design, and kept DISTINCT from ``UnregisteredEnvReadHelper`` so the two
+    directions of the table's invariant stay separately diagnosable: that one validates
+    tree -> table (a helper missing a row), this one validates table -> tree (a row missing its
+    helper). Without it a row is UNFALSIFIABLE — deleting the helper's ``def`` produces no
+    signal from the generator, the drift gate, or the ownership gate, while the dead row keeps
+    publishing its name into ``docs/env-vars.md`` and keeps exempting its (now meaningless)
+    callee shape from ``scripts/check_config_ownership.py``'s shim seam. Fix by DELETING the
+    row; this seam deliberately validates only — pruning the table on the author's behalf would
+    silently discard a row whose helper was merely renamed.
     """
 
 
@@ -132,12 +149,13 @@ BULK_ENVIRON_ATTRS: frozenset[str] = frozenset(
 
 
 # helper name -> (0-indexed position of the env-name argument, name prefix).
-# Signatures verified against the current tree; extend by adding a row here.
+# Signatures verified against the current tree; extend by adding a row here. That claim is
+# ENFORCED by ``_raise_for_stale_rows`` below — a row whose helper has no definition under the
+# shipped scan root aborts the run (measured: the RP-04 config-ownership cutover drained
+# ``_rebar_env``, ``_env_int``, ``_str_pref`` and ``_int_pref`` out of the tree, and all four
+# rows survived here for free, publishing four names into docs/env-vars.md that named nothing
+# and exempting ``_int_pref(...)`` from the ownership gate entirely).
 KNOWN_ENV_HELPERS: dict[str, tuple[int, str]] = {
-    "_rebar_env": (0, "REBAR_"),  # reconciler shim: os.environ.get(f"REBAR_{name}")
-    "_env_int": (0, ""),  # outbound_differ.py, binding_store.py
-    "_str_pref": (0, ""),  # llm/gate_source.py
-    "_int_pref": (1, ""),  # _snapshot/janitor.py: (table, env_name, ...)
     "_llm_str": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     "_llm_int": (2, ""),  # llm/config.py: (table, cli, env_name, ...)
     # Omitting this one cost four undocumented vars (bug b00f): a helper absent from this table
@@ -363,6 +381,52 @@ def _raise_for_helpers(helpers: HelperSites) -> None:
     )
 
 
+@functools.lru_cache(maxsize=1)
+def _shipped_function_names() -> frozenset[str]:
+    """Every function name defined anywhere under ``DEFAULT_SCAN_ROOT``.
+
+    Deliberately resolved against ``DEFAULT_SCAN_ROOT`` and NEVER against ``scan``'s ``root``
+    argument — the same root-independence ``check_config_ownership._check_registry_completeness``
+    uses, and for the same reason. ``KNOWN_ENV_HELPERS`` describes the shipped ``src/rebar``
+    surface, but ``scan(root)`` accepts an arbitrary tree (a test temp dir, say), against which
+    every row would look stale.
+
+    A name counts when ``ast.walk`` finds a ``FunctionDef``/``AsyncFunctionDef`` for it — the
+    same notion of "defined" ``_unregistered_helpers`` applies in the other direction, so nested
+    defs and methods count.
+    """
+    names: set[str] = set()
+    for py in DEFAULT_SCAN_ROOT.rglob("*.py"):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"))
+        except (SyntaxError, OSError):
+            continue
+        names.update(
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        )
+    return frozenset(names)
+
+
+def _raise_for_stale_rows() -> None:
+    """Abort when any ``KNOWN_ENV_HELPERS`` row names a helper the shipped tree no longer
+    defines. Every stale row is reported at once, like the other two seams."""
+    defined = _shipped_function_names()
+    stale = sorted(name for name in KNOWN_ENV_HELPERS if name not in defined)
+    if not stale:
+        return
+    rel = DEFAULT_SCAN_ROOT.relative_to(REPO_ROOT).as_posix()
+    rows = "\n".join(f"  - {name} (row: {KNOWN_ENV_HELPERS[name]!r})" for name in stale)
+    raise StaleEnvReadHelperRow(
+        f"stale KNOWN_ENV_HELPERS row(s) — no function of this name is defined under {rel}/, so "
+        "the row documents a helper that no longer exists: it publishes a dead name into "
+        "docs/env-vars.md and exempts that callee shape from the config-ownership shim seam. "
+        f"Delete the row from {Path(__file__).name} (or, if the helper was renamed, re-key the "
+        f"row to its new name):\n{rows}"
+    )
+
+
 def scan(root: Path) -> tuple[Reads, Dynamic]:
     """Return (reads, dynamic) where ``reads`` maps each resolved env-var name to the set
     of module paths (relative to the repo root) that read it, and ``dynamic`` lists
@@ -371,9 +435,13 @@ def scan(root: Path) -> tuple[Reads, Dynamic]:
     Raises ``UnrecognisedEnvironAccess`` if any ``os.environ`` attribute access under
     ``root`` is neither key-bearing nor bulk, and ``UnregisteredEnvReadHelper`` if any
     function under ``root`` reads the environment under a key derived from its own
-    parameter without a ``KNOWN_ENV_HELPERS`` row. The arity of this return value is
-    load-bearing (``scripts/check_config_ownership.py`` unpacks a 2-tuple): the
-    fail-closed signal is the exception, never a third element."""
+    parameter without a ``KNOWN_ENV_HELPERS`` row. Raises ``StaleEnvReadHelperRow`` if any
+    ``KNOWN_ENV_HELPERS`` row names a helper with no definition under ``DEFAULT_SCAN_ROOT`` —
+    that third check validates the table against the SHIPPED surface it describes, never
+    against ``root``. The arity of this return value is load-bearing
+    (``scripts/check_config_ownership.py`` unpacks a 2-tuple): the fail-closed signal is the
+    exception, never a third element."""
+    _raise_for_stale_rows()
     reads: Reads = {}
     dynamic: Dynamic = []
     offenders: Dynamic = []
