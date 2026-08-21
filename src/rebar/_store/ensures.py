@@ -37,8 +37,14 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from rebar._store import fsutil
+
+# Late-bound through the module (never `from ... import canonical_tracker`): this
+# module is first imported LAZILY on the write path, so a by-value import executed
+# while a test holds `lock.canonical_tracker` monkeypatched captures the patch
+# permanently — monkeypatch teardown restores `lock`, not a copy already bound here
+# (bug d720-fc72: the whole ensure sweep then converged the wrong tracker).
+from rebar._store import lock as _lock
 from rebar._store.compat import StoreIncompatibleError
-from rebar._store.lock import LockTimeout, canonical_tracker, write_lock
 
 logger = logging.getLogger("rebar")
 
@@ -116,7 +122,7 @@ def applied_ids(tracker: str | os.PathLike) -> set[str]:
     non-list JSON degrades to the EMPTY set (never raises) — a pre-feature or
     corrupt marker simply reads as 'everything pending'."""
     try:
-        with open(_applied_path(canonical_tracker(tracker)), encoding="utf-8") as fh:
+        with open(_applied_path(_lock.canonical_tracker(tracker)), encoding="utf-8") as fh:
             raw = fh.read()
         data = json.loads(raw)
     except (OSError, ValueError):
@@ -160,7 +166,7 @@ def run_ensures(
     ``write_lock``'s defaults. A caller that must not block (e.g. MCP boot) passes a
     SHORT budget so a contended lock skips the sweep rather than delaying it.
     """
-    tracker = canonical_tracker(tracker)
+    tracker = _lock.canonical_tracker(tracker)
     lock_kwargs: dict[str, Any] = {}
     if timeout is not None:
         lock_kwargs["timeout"] = timeout
@@ -168,7 +174,7 @@ def run_ensures(
         lock_kwargs["attempts"] = attempts
     outcomes: list[EnsureOutcome] = []
     try:
-        with write_lock(tracker, **lock_kwargs):
+        with _lock.write_lock(tracker, **lock_kwargs):
             reg = _registry()
             for uid in REGISTRY_IDS:
                 fn = reg[uid]
@@ -178,7 +184,7 @@ def run_ensures(
                     logger.warning("ensure unit %s failed: %s", uid, exc)
                     outcomes.append(EnsureOutcome(uid, "failed", str(exc)))
             _write_applied(tracker, [o.id for o in outcomes if o.status != "failed"])
-    except LockTimeout as exc:
+    except _lock.LockTimeout as exc:
         logger.warning("run_ensures: write lock unavailable, skipping sweep: %s", exc)
     except StoreIncompatibleError:
         # Story 21dd (fail-closed integrity): the write-lock gate fired on a store this
@@ -215,7 +221,7 @@ def _reset_pending_cache() -> None:
 def _pending_ids(tracker: str) -> frozenset[str]:
     """The registry ids NOT yet in ``.ensure-applied`` for *tracker*, computed once
     per process per store and cached (so a converged store adds ≤1 marker read)."""
-    key = canonical_tracker(tracker)
+    key = _lock.canonical_tracker(tracker)
     cached = _pending_cache.get(key)
     if cached is None:
         cached = registry_ids() - applied_ids(key)
@@ -248,7 +254,7 @@ def maybe_emit_pending_hint(tracker: str | os.PathLike) -> None:
         cfg = _config.compose_config().ensure
         if not cfg.hint_enabled:
             return
-        real = canonical_tracker(tracker)
+        real = _lock.canonical_tracker(tracker)
         last = _read_hinted(real)
         now = time.time()
         if last is not None and (now - last) < cfg.hint_interval_secs:
