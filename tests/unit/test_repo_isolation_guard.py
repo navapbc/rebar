@@ -18,7 +18,9 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -341,3 +343,80 @@ def test_leak_guard_fails_a_test_that_writes_into_preexisting_state_dir(pytester
     result.assert_outcomes(passed=1, errors=1)
     assert result.ret != 0
     result.stdout.fnmatch_lines(["*leaked into REPO_ROOT*.rebar/leaked.txt*"])
+
+
+# ── the guard must not delete what it cannot attribute (bug 746c) ─────────────
+#
+# The guard diffs REPO_ROOT around each test, so "appeared during this test" is
+# all it can ever know — a concurrent write from another process in the same
+# checkout produces an identical diff entry (reproduced 1/1 with a bare `touch`
+# 8s into a 12s test body). Reporting such an entry is conservative: it costs a
+# re-run. REMOVING it is not: it destroys another process's file, irreversibly
+# and, for a directory, silently (`rmtree(..., ignore_errors=True)`).
+
+
+def _root_conftest(request: pytest.FixtureRequest):
+    """The live root-conftest plugin object (tests/conftest.py).
+
+    Taken from the plugin manager rather than imported: ``sys.modules["conftest"]``
+    is whichever conftest was imported last (the unit tier's), and re-importing the
+    file by path would re-run its import-time setup inside a running session.
+    """
+    for name, plugin in request.config.pluginmanager.list_name_plugin():
+        if name.endswith("tests/conftest.py") and hasattr(plugin, "_no_repo_root_leaks"):
+            return plugin
+    raise AssertionError("root conftest plugin not registered")
+
+
+def _drive_leak_guard(request: pytest.FixtureRequest, root: Path, during: Callable[[], None]):
+    """Run the REAL ``_no_repo_root_leaks`` against *root*, returning its failure.
+
+    Drives the fixture generator by hand: the first ``next()`` takes the
+    before-snapshot, *during* stands in for whatever appeared under REPO_ROOT while
+    the test body ran, and the second ``next()`` runs the teardown under test.
+    """
+    conftest = _root_conftest(request)
+    guard = getattr(conftest._no_repo_root_leaks, "__wrapped__", conftest._no_repo_root_leaks)
+    with patch.object(conftest, "_REPO_ROOT", root):
+        generator = guard()
+        next(generator)
+        during()
+        with pytest.raises(pytest.fail.Exception) as failure:
+            next(generator)
+    return str(failure.value)
+
+
+def test_leak_guard_leaves_entries_it_cannot_attribute_on_disk(request, tmp_path):
+    """A concurrent write from outside the suite must survive the guard's teardown.
+
+    Covers both removal branches — the file ``unlink()`` and the directory
+    ``rmtree()`` — since the guard cannot attribute either one.
+    """
+    stray_file = tmp_path / "EXTERNAL_MUTATION_PROBE"
+    stray_dir = tmp_path / "external_dir_probe"
+
+    def concurrent_writer() -> None:
+        stray_file.write_text("written by another process in this checkout")
+        stray_dir.mkdir()
+        (stray_dir / "payload.txt").write_text("another process's data")
+
+    _drive_leak_guard(request, tmp_path, concurrent_writer)
+
+    assert stray_file.is_file(), "the guard deleted a file it cannot attribute to the test"
+    assert stray_dir.is_dir(), "the guard deleted a directory it cannot attribute to the test"
+    assert (stray_dir / "payload.txt").read_text() == "another process's data"
+
+
+def test_leak_guard_still_fails_and_names_every_entry(request, tmp_path):
+    """Not deleting must not become a silent weakening: the guard still fails, and
+    the message still names each entry so a genuinely leaking test is actionable."""
+
+    def leaking_test_body() -> None:
+        (tmp_path / "depends_on").mkdir()  # the classic relative-path leak shape
+        (tmp_path / "stray_report.json").write_text("{}")
+
+    message = _drive_leak_guard(request, tmp_path, leaking_test_body)
+
+    assert "depends_on" in message
+    assert "stray_report.json" in message
+    assert "tmp_path" in message  # still tells an actually-leaking test how to fix itself

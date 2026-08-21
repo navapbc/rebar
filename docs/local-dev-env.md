@@ -436,7 +436,9 @@ test**. A concurrent commit, rebase, branch switch, or stray file therefore fail
 test happened to straddle it — an arbitrary, innocent one, different on each run:
 
 * `_no_repo_root_leaks` (`tests/conftest.py`) — a new top-level entry in the checkout.
-  It also **deletes** what it finds, so a file you create mid-run can disappear.
+  It reports only; it no longer removes what it finds, because it cannot tell your write
+  from a leaking test's (bug `746c-185a-0e48-4b83`). A genuine leak is therefore yours to
+  clean up, and the failure message names each entry.
 * `_no_repo_commits` (`tests/conftest.py`) — "Test moved the repo HEAD (X -> Y)".
 
 Both fire in **teardown**, so the run reports the test as *passed* AND raises an error: a
@@ -462,7 +464,10 @@ So, in order of preference:
    ```
 
 3. **If you must detach, do not work in that checkout until it exits** — not even a
-   `git commit`. Park edits in a different worktree.
+   `git commit`, and not a `rebar` command either: tracker writes land under the checkout
+   (`.rebar/`, `.tickets-*`) and read as new entries to the leak guard, failing whichever
+   test straddles them. Running `rebar` against a worktree while its own suite runs is
+   **not supported**. Park edits, and tracker work, in a different worktree.
 
 Do **not** conclude that an error from a detached run is spurious. Read it: if it names a
 repo-state guard or a `returncode` that is negative, it is an artifact of a concurrent
