@@ -15,27 +15,29 @@ import argparse
 from rebar._cli._parser import build_argument_parser
 
 
-def _base(prog: str) -> argparse.ArgumentParser:
-    return build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
+def _base(prog: str, description: str | None = None) -> argparse.ArgumentParser:
+    return build_argument_parser(
+        prog=prog, description=description, add_help=False, allow_abbrev=False
+    )
 
 
 def build_exists(*, prog: str) -> argparse.ArgumentParser:
     """``rebar exists <ticket_id>``."""
-    parser = _base(prog)
-    parser.add_argument("ticket_id", nargs="?")
+    parser = _base(prog, "O(1) presence check (exit 0=exists, 1=not found).")
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to check")
     return parser
 
 
 def build_resolve(*, prog: str) -> argparse.ArgumentParser:
     """``rebar resolve <id_or_alias_or_prefix>``."""
-    parser = _base(prog)
-    parser.add_argument("ticket_id", nargs="?")
+    parser = _base(prog, "Resolve an id/alias/prefix to a canonical ticket id.")
+    parser.add_argument("ticket_id", nargs="?", help="the id, alias, or prefix to resolve")
     return parser
 
 
 def build_format(*, prog: str) -> argparse.ArgumentParser:
     """``rebar format <ticket_id> [mode]``."""
-    parser = _base(prog)
-    parser.add_argument("ticket_id", nargs="?")
-    parser.add_argument("mode", nargs="?")
+    parser = _base(prog, "Render a ticket for display.")
+    parser.add_argument("ticket_id", nargs="?", help="the ticket to render")
+    parser.add_argument("mode", nargs="?", help="optional display mode")
     return parser

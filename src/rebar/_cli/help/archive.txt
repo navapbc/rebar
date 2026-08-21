@@ -1,1 +1,6 @@
-Usage: rebar archive <ticket_id>   (excludes from default list; idempotent)
+Usage: rebar archive [ticket_id]
+
+Archive an open ticket (excludes from default list; idempotent).
+
+positional arguments:
+  ticket_id  the ticket to archive

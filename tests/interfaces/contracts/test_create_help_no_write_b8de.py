@@ -80,6 +80,41 @@ def test_help_anywhere_before_terminator_shows_usage_no_write(
     assert _ticket_count(rebar_repo) == before, "help must not mutate the store"
 
 
+def test_flat_bridge_family_serves_pinned_help_for_nonleading_flag(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A FLAT compatibility command in the ``bridge`` group owns no nested children, so a
+    non-leading ``--help`` is ITS OWN usage request and must be served from the pinned,
+    capitalized artifact — not fall through to argparse's live lowercase ``usage: rebar`` with
+    the wrong prog. Regression for the ``_NESTED_FAMILY`` over-inclusion (deriving the set from
+    ``group == "bridge"`` wrongly swept in the flat, non-nested arm)."""
+    from rebar._cli._registry import ROUTES
+
+    flat = next(
+        r.name for r in ROUTES if r.group == "bridge" and not r.hidden and r.name != "bridge"
+    )
+    rc = _cli.main([flat, "somearg", "--help"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith(f"Usage: rebar {flat}"), out[:80]
+
+
+def test_help_behind_a_config_prefix_is_served_without_write(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A leading ``-c SECTION.KEY=VALUE`` config prefix is stripped by the pre-scan, so the
+    help request behind it is still served (exit 0, usage on stdout) and mutates nothing."""
+    before = _ticket_count(rebar_repo)
+
+    rc = _cli.main(["-c", "ticket.default_assignee=x@y", "create", "--help"])
+
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert out.startswith("Usage: rebar create"), out[:80]
+    assert _ticket_count(rebar_repo) == before, "help behind a config prefix must not write"
+
+
 def test_ordinary_create_still_writes(rebar_repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """A real title with no help flag creates exactly one ticket (no over-eager intercept)."""
     rc = _cli.main(["create", "task", "a real title"])

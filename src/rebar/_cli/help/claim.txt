@@ -1,2 +1,17 @@
-Usage: rebar claim <ticket_id> [--assignee=<name>] [--force[=<reason>]] [--review] [--output json]   (atomic open -> in_progress; exit 10 if already claimed; --force bypasses any enabled start-work gate, e.g. plan-review)
-Review: --review senses the plan-review gate first; when it applies and the attestation is stale/missing it runs the signed review (`review-plan`) BEFORE claiming — the claim proceeds only on PASS (BLOCK/INDETERMINATE/retryable exit 1/2/11 without claiming; gate disabled or exempt type prints a notice and claims). Not propagated to a cascaded parent claim. Review-then-claim is not atomic against concurrent store reconvergence — check currency cheaply with `rebar review-plan <id> --status`.
+Usage: rebar claim [--output {text,json}] [--assignee ASSIGNEE]
+                   [--force [FORCE]] [--review]
+                   [ticket_id]
+
+Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken).
+
+positional arguments:
+  ticket_id             the ticket to claim
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format
+  --assignee ASSIGNEE   override the default assignee (Jira-resolvable)
+  --force [FORCE]       bypass the start-work gate (--force=<reason>)
+  --review              emit the review payload
+
+--review: preview payload, not atomic; see review-plan --status.

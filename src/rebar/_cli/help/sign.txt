@@ -1,1 +1,11 @@
-Usage: rebar sign <ticket_id> <manifest_json>   (HMAC-sign a JSON array of verified-step strings with the environment key; [--output json])
+Usage: rebar sign [--output {text,json}] [ticket_id] [manifest_json]
+
+Sign a ticket's manifest of verified steps with the environment key.
+
+positional arguments:
+  ticket_id             the ticket to sign
+  manifest_json         JSON array of verified-step strings
+
+options:
+  --output {text,json}, -o {text,json}
+                        output format

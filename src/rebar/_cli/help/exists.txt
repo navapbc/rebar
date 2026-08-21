@@ -1,1 +1,6 @@
-Usage: rebar exists <ticket_id|alias>   (exit 0=exists, 1=not found)
+Usage: rebar exists [ticket_id]
+
+O(1) presence check (exit 0=exists, 1=not found).
+
+positional arguments:
+  ticket_id  the ticket to check

@@ -1,1 +1,9 @@
-Usage: rebar unlink <source> <target> [relation]   (no relation: removes the most-recent link between the pair — call repeatedly for multiple; with relation: removes exactly that relation's link, leaving the pair's other relations)
+Usage: rebar unlink [source] [target] [relation]
+
+Remove a link: unlink <source> <target> [relation] (no relation: most-recent for
+pair; relation: exactly that relation).
+
+positional arguments:
+  source    source ticket
+  target    target ticket
+  relation  optional relation selector

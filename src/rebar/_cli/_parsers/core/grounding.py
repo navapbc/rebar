@@ -17,6 +17,13 @@ from rebar._cli._parser import build_argument_parser
 
 def build(*, prog: str) -> argparse.ArgumentParser:
     """``rebar grounding-info [--output json]``."""
-    parser = build_argument_parser(prog=prog, add_help=False, allow_abbrev=False)
-    parser.add_argument("--output", "-o", choices=("text", "json"), default="text")
+    parser = build_argument_parser(
+        prog=prog,
+        description="Print the code-grounding oracle contract (dimensions/kinds/reasons/backends).",
+        add_help=False,
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--output", "-o", choices=("text", "json"), default="text", help="output format"
+    )
     return parser
