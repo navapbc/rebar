@@ -549,13 +549,28 @@ def try_break_if_stale(
     return new_oid
 
 
+def _default_sleep(seconds: float) -> None:
+    """The default steal wait: a patchable indirection over ``time.sleep``.
+
+    Deliberately a named function rather than ``sleep_fn=time.sleep`` in the
+    signature. A default expression is evaluated ONCE at import, capturing whatever
+    ``time.sleep`` was then — so a test patching ``time.sleep`` on its defining
+    module only reached :func:`steal` when this module happened not to be imported
+    yet, and the one-lease wait really slept otherwise (bug 9118, same class as
+    2c4b/5ea3). This indirection resolves ``time.sleep`` at CALL time, so the seam
+    is reliably patchable while production behaviour is byte-identical. Mirrors
+    ``access_check._retry_sleep``. An explicitly passed ``sleep_fn=`` bypasses it.
+    """
+    time.sleep(seconds)
+
+
 def steal(
     repo_root: Path,
     ref: str,
     *,
     holder: str,
     remote: str | None = None,
-    sleep_fn=time.sleep,
+    sleep_fn=_default_sleep,
 ) -> str | None:
     """Observe -> wait one (holder's) lease on our own clock -> :func:`try_break_if_stale`.
 

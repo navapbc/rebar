@@ -12,10 +12,24 @@ from typing import Any
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+def _default_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """The default jscpd runner: a patchable indirection over ``subprocess.run``.
+
+    Deliberately a named function rather than ``run: Runner = subprocess.run`` in
+    the signature — a default expression is evaluated ONCE at import, so a frozen
+    default silently escapes a test's ``subprocess.run`` patch on its defining
+    module and invokes the REAL external ``jscpd`` (bug 9118, same class as
+    2c4b/5ea3). Resolves ``subprocess.run`` at CALL time; production behaviour is
+    byte-identical, and an explicitly passed ``run=`` bypasses it. Mirrors
+    ``access_check._retry_sleep`` / ``_default_client``.
+    """
+    return subprocess.run(*args, **kwargs)
+
+
 def run_jscpd(
     scan_root: str | Path,
     *,
-    run: Runner = subprocess.run,
+    run: Runner = _default_run,
 ) -> dict[str, int | float]:
     """Run ``jscpd`` and return its total clone count and percentage.
 

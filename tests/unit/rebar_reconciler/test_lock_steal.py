@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 import types
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -175,3 +176,29 @@ def test_steal_pass_lock_fail_closed_on_exception(advisory_mod, monkeypatch):
 
     result = advisory_mod.steal_pass_lock("pass-y", REPO, sleep_fn=MagicMock())
     assert result is None
+
+
+def test_steal_pass_lock_default_sleep_resolves_time_sleep_at_call_time(advisory_mod, monkeypatch):
+    """A ``time.sleep`` patch applied AFTER the module is imported must reach the
+    default ``sleep_fn`` (bug 9118, same frozen-default class as 2c4b/5ea3).
+
+    The hostile order: ``advisory_mod`` is module-scoped, so ``_advisory_lock`` is
+    resident before the patch. A frozen ``sleep_fn=time.sleep`` default captured
+    the original function at import and silently escapes the patch.
+    """
+    fake_ref_lock = MagicMock()
+    fake_ref_lock.LOCK_REF = "refs/reconciler/lock"
+
+    def _steal(*_args, **kwargs):
+        kwargs["sleep_fn"](0)  # exercise the forwarded default at call time
+        return "stolen-oid"
+
+    fake_ref_lock.steal.side_effect = _steal
+    monkeypatch.setattr(advisory_mod, "_load_ref_lock", lambda: fake_ref_lock)
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+
+    result = advisory_mod.steal_pass_lock("pass-z", REPO)  # default sleep_fn
+
+    assert slept == [0], "the time.sleep patch did not reach the default sleep_fn"
+    assert result == "stolen-oid"
