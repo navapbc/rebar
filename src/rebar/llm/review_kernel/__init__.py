@@ -57,6 +57,21 @@ from .decide import (
     suppress_and_dedup,
     validity,
 )
+from .discovery import (
+    DISCOVERY_NAMESPACE_VERSION,
+    OUTCOME_KINDS,
+    CheckpointEnvelope,
+    DiscoveryStagePlan,
+    DiscoveryStageResult,
+    DiscoveryUnitPlan,
+    LocalOperationExhausted,
+    MemoryCheckpointStore,
+    SystemicDiscoveryError,
+    UnitOutcome,
+    Usage,
+    execute_stage,
+    unit_trace,
+)
 from .telemetry import (
     collect_contract_violations,
     decide_outcome_counts,
@@ -88,11 +103,23 @@ __all__ = [
     "DEFAULT_BLOCK_THRESHOLD",
     # Pass-2 — finding verifier + the verification contract
     "DEFAULT_VERIFY_WINDOW_HEADROOM",
+    "DISCOVERY_NAMESPACE_VERSION",
     "GRADED_BINARY",
-    # Pass-4 — coach mechanism + move-registry schema
     "MOVE_REGISTRY_SCHEMA",
+    "OUTCOME_KINDS",
     "VERIFIER_RULES",
     "VERIFIER_RULES_SCAFFOLD",
+    # RP-06 — the shared discovery-execution kernel
+    "CheckpointEnvelope",
+    "DiscoveryStagePlan",
+    "DiscoveryStageResult",
+    "DiscoveryUnitPlan",
+    # Pass-4 — coach mechanism + move-registry schema
+    "LocalOperationExhausted",
+    "MemoryCheckpointStore",
+    "SystemicDiscoveryError",
+    "UnitOutcome",
+    "Usage",
     "VerificationReshape",
     "applicable_moves",
     "coach",
@@ -103,6 +130,7 @@ __all__ = [
     "decide_outcome_counts",
     "dedup_key",
     "drain_contract_violations",
+    "execute_stage",
     "finding_body",
     "finding_listing",
     "impact",
@@ -123,6 +151,7 @@ __all__ = [
     "resolve_verifier_model",
     "severity_label",
     "suppress_and_dedup",
+    "unit_trace",
     "validate_move_registry",
     "validate_subject",
     "validity",
