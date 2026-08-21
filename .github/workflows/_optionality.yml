@@ -97,18 +97,45 @@ jobs:
       # registry and the committed help bytes. Prove they are byte-current when rendered by
       # the LEAN no-extras interpreter — a doc/help section that silently needed an optional
       # import to render would fail here rather than only reddening main post-merge.
+      # If-present guard per ticket ee2a (bug 1909-c1a7-9f20-440f): the Verified lane takes this
+      # workflow DEFINITION from the target branch but checks out the CHANGE'S tree, so a step
+      # added on main runs against every open change whose base predates it. The two generators
+      # landed at DIFFERENT times, so each is guarded on ITS OWN presence rather than jointly —
+      # a joint guard would silence the older check on every tree that has it
+      # (bug 5bc6-5496-4e17-403a).
       - name: parser-derived docs are byte-current on the lean wheel
         run: |
-          /tmp/clean/bin/python scripts/gen_cli_help.py --check
-          /tmp/clean/bin/python scripts/gen_cli_reference.py --check
+          if [ -f scripts/gen_cli_help.py ]; then
+            /tmp/clean/bin/python scripts/gen_cli_help.py --check
+          else
+            echo "scripts/gen_cli_help.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+          fi
+          if [ -f scripts/gen_cli_reference.py ]; then
+            /tmp/clean/bin/python scripts/gen_cli_reference.py --check
+          else
+            echo "scripts/gen_cli_reference.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+          fi
       # The clean-wheel distribution contract (AC4/AC7): the SAME repository-local pytest that
       # runs locally builds a no-extras wheel, renders every approved help form in a fresh
       # directory with exact committed bytes, asserts no operation/config/store/handler/heavy
       # import, and smoke-tests the `rebar-mcp` entry point (a concrete `--help` observable).
       # 600s: it builds a wheel + a nested clean venv; --timeout-method=thread because that
       # work blocks in C-level subprocess/venv calls the default `signal` method cannot fire in.
+      # If-present guard per ticket ee2a (bug 1909-c1a7-9f20-440f): this test file landed with the
+      # step, so on a tree whose base predates it pytest collects nothing and exits 4 — a
+      # Verified -1 caused by the gate rather than by the change under review
+      # (bug 5bc6-5496-4e17-403a). The guard precedes the pip install so an
+      # old-base tree does no work at all.
       - name: clean-wheel distribution + every-help-form byte contract (portable pytest)
         run: |
+          if [ ! -f tests/interfaces/contracts/test_cli_registry_distribution.py ]; then
+            echo "tests/interfaces/contracts/test_cli_registry_distribution.py not in checked-out tree" \
+                 "(change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           /tmp/clean/bin/pip install pytest pytest-timeout build 'mcp>=1.28.1,<2'
           /tmp/clean/bin/python -m pytest --timeout=600 --timeout-method=thread \
             tests/interfaces/contracts/test_cli_registry_distribution.py -rs
