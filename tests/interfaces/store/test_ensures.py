@@ -14,11 +14,12 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import rebar
-from rebar._store import ensures
+from rebar._store import ensures, lock
 from rebar._store.lock import LockTimeout
 
 
@@ -142,7 +143,16 @@ def test_run_ensures_swallows_lock_timeout(fresh_repo: Path, monkeypatch) -> Non
     def _boom(*_a, **_k):
         raise LockTimeout(60)
 
-    monkeypatch.setattr(ensures, "write_lock", _boom)
+    # ensures late-binds through its `_lock` module reference (bug d720-fc72), so stub
+    # that seam with a namespace — patching `lock.write_lock` itself would leak the stub
+    # to every other module for the test's duration.
+    monkeypatch.setattr(
+        ensures,
+        "_lock",
+        SimpleNamespace(
+            canonical_tracker=lock.canonical_tracker, write_lock=_boom, LockTimeout=LockTimeout
+        ),
+    )
     outcomes = ensures.run_ensures(tracker)  # must NOT raise
     assert outcomes == []
 
@@ -182,7 +192,13 @@ def test_init_continues_when_write_lock_unavailable(fresh_repo: Path, monkeypatc
     def _boom(*_a, **_k):
         raise LockTimeout(60)
 
-    monkeypatch.setattr(ensures, "write_lock", _boom)
+    monkeypatch.setattr(
+        ensures,
+        "_lock",
+        SimpleNamespace(
+            canonical_tracker=lock.canonical_tracker, write_lock=_boom, LockTimeout=LockTimeout
+        ),
+    )
     assert init_mod.init_core(repo_root=str(fresh_repo)) == 0
 
 

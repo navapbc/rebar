@@ -19,6 +19,7 @@ import logging
 import subprocess
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -181,7 +182,17 @@ def test_store_incompatible_still_fails_closed_under_the_boot_budget(
     def _incompatible(*_a, **_k):
         raise StoreIncompatibleError("store is from a newer rebar")
 
-    monkeypatch.setattr(ensures, "write_lock", _incompatible)
+    # ensures late-binds through its `_lock` module reference (bug d720-fc72): stub that
+    # seam rather than the shared lock module.
+    monkeypatch.setattr(
+        ensures,
+        "_lock",
+        SimpleNamespace(
+            canonical_tracker=_lock.canonical_tracker,
+            write_lock=_incompatible,
+            LockTimeout=_lock.LockTimeout,
+        ),
+    )
     with pytest.raises(StoreIncompatibleError):
         ensures.run_ensures(
             fresh_tracker,
