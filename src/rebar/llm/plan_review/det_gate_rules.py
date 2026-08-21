@@ -105,11 +105,20 @@ _DET_OVERLAY_RULES: dict[str, DetGateRule] = {
         "deploy-vocabulary",
         (r"\b(deploy|rollout|canary|feature flag|production traffic|rollback|blue.green)\b",),
     ),
-    # T13 prohibition-enumeration: mechanism-of-enforcement vocabulary (audit-amended).
+    # T13 prohibition-enumeration: mechanism-of-enforcement vocabulary (audit-amended),
+    # UNIONED with the additive-obligation lexicon (story 5bca-4ca9 P2: T13's trigger widened
+    # from prohibition to obligation, so additive-only phrasings must reach the LLM router).
+    # The enforcement branch stays byte-for-byte audit-verbatim; the additive branch is a
+    # separate alternation appended to it.
     "T13": DetGateRule(
         "mechanism-of-enforcement",
         (
-            r"\b(?:block\w*|reject\w*|refus\w*|enforc\w*|den(?:y|ies|ied)\b|forbid\w*|prohibit\w*|disallow\w*|outlaw\w*|must (?:pass|not)\b|cannot (?:merge|close|claim|submit|land|push)|fail(?:s|ing)? (?:the )?(?:build|ci|check|gate)|gate[sd]? (?:on|behind)|require\w*[^.\n]{0,60}\bbefore\b|no longer (?:allowed|permitted|accepts?)|restrict\w*|bounce\w*|veto\w*|\bbar(?:s|red|ring)\b|exit(?:s|ing)?\s+(?:code\s+)?(?:non-?zero|[0-9]+)|\bnon-?zero\b|raises?\s+\w*(?:Error|Exception)|\bunless\b|prerequisite\w*|precondition\w*|hard\s+(?:requirement|stop|fail)|only\s+[^.\n]{0,40}\b(?:may|can|are\s+allowed)\b|now\s+(?:needs|requires)|turns?\s+(?:the\s+)?(?:run|build|ci)\s+red|goes\s+red|\bgate\w*\b|\bhook\w*\b)",  # noqa: E501 — audit-verbatim trigger regex (ticket 696a); do not rewrap
+            r"\b(?:block\w*|reject\w*|refus\w*|enforc\w*|den(?:y|ies|ied)\b|forbid\w*|prohibit\w*|disallow\w*|outlaw\w*|must (?:pass|not)\b|cannot (?:merge|close|claim|submit|land|push)|fail(?:s|ing)? (?:the )?(?:build|ci|check|gate)|gate[sd]? (?:on|behind)|require\w*[^.\n]{0,60}\bbefore\b|no longer (?:allowed|permitted|accepts?)|restrict\w*|bounce\w*|veto\w*|\bbar(?:s|red|ring)\b|exit(?:s|ing)?\s+(?:code\s+)?(?:non-?zero|[0-9]+)|\bnon-?zero\b|raises?\s+\w*(?:Error|Exception)|\bunless\b|prerequisite\w*|precondition\w*|hard\s+(?:requirement|stop|fail)|only\s+[^.\n]{0,40}\b(?:may|can|are\s+allowed)\b|now\s+(?:needs|requires)|turns?\s+(?:the\s+)?(?:run|build|ci)\s+red|goes\s+red|\bgate\w*\b|\bhook\w*\b)"  # noqa: E501 — audit-verbatim trigger regex (ticket 696a); do not rewrap
+            # additive-obligation lexicon (story 5bca-4ca9 P2)
+            r"|\b(?:adds?|adding|introduces?|gains?)\s+(?:an?\s+|the\s+)?(?:new\s+)?"
+            r"(?:required|mandatory)\b|\bcallers?\s+must\b|\bevery\s+\w+\s+must\b"
+            r"|\bmust\s+(?:stay|be\s+kept|remain)\s+in\s+(?:sync|step)\b"
+            r"|\bnew\s+(?:contract|invariant|obligation|schema\s+field)\b",
         ),
     ),
     # T10 infra/IaC: the audited infra-vocabulary pre-filter (ticket bfa8; measured

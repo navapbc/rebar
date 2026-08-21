@@ -1118,20 +1118,20 @@
     "checklist": [
       {
         "key": "prohibition_call_sites_enumerated",
-        "check": "A NEW prohibition (block/reject/require-before/enforce/must-pass/cannot-merge-until) is translated into grep patterns over EXISTING call sites of the outlawed behavior, and each site is classified MIGRATED / EXEMPTED / UNCOVERED."
+        "check": "A NEW obligation — a prohibition (block/reject/require-before/enforce/must-pass/cannot-merge-until) or an addition (contract, invariant, schema field, required argument, second site that must stay in step) existing sites now owe — is translated into grep patterns over EXISTING sites that owe it, and each site is classified MIGRATED / EXEMPTED / UNCOVERED."
       },
       {
         "key": "uncovered_sites_flagged",
-        "check": "Each UNCOVERED call site (performs the outlawed behavior; plan neither migrates nor exempts it) is the finding, cited by location."
+        "check": "Each UNCOVERED site (owes the new obligation; plan neither migrates nor exempts it) is the finding, cited by location."
       },
       {
         "key": "fail_open_unenumerable",
-        "check": "Fail-open: if the outlawed behavior cannot be reduced to a checkable grep pattern, ABSTAIN with coverage rather than assert an ungroundable gap; never fabricate call sites."
+        "check": "Fail-open: if the obligation cannot be reduced to a checkable grep pattern, ABSTAIN with coverage rather than assert an ungroundable gap; never fabricate sites."
       }
     ],
     "routing": "overlay",
     "overlay_routing": "llm",
-    "trigger": "plan NEWLY FORBIDS a previously-permitted action. Deterministically PRE-GATED (ticket 4ee2, ADR 0034 amendment): skipped only on total absence of mechanism-of-enforcement vocabulary (rule mechanism-of-enforcement in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority (PASS not-applicable is cheap)"
+    "trigger": "plan NEWLY IMPOSES an obligation — FORBIDS a previously-permitted action, or ADDS an obligation (contract, invariant, schema field, required argument, second site that must stay in step) existing sites now owe. Deterministically PRE-GATED (ticket 4ee2, ADR 0034 amendment): skipped only on total absence of mechanism-of-enforcement AND additive-obligation vocabulary (rule mechanism-of-enforcement in det_gate_rules.py); a fired plan is still LLM-routed — the router remains the applicability authority (PASS not-applicable is cheap)"
   },
   "T14": {
     "exec": "AGENT",
