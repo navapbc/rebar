@@ -676,7 +676,13 @@ def materialize_tickets(
     dest = store / f"tickets-{sha}"
     if dest.is_dir():
         # Cache hit — immutable by SHA (same key scheme as the code entries, namespaced by
-        # the `tickets-` prefix so it never collides with a `<sha>` code entry).
+        # the `tickets-` prefix so it never collides with a `<sha>` code entry). Bump the
+        # entry's recency: the janitor evicts LRU by mtime, which every hit must touch
+        # (ADR 0005 D4) — mirrors ``cache.acquire``. Deferred import: ``cache`` imports
+        # THIS module, so a module-level import would be a cycle.
+        from rebar._snapshot.cache import touch_entry as _touch_entry
+
+        _touch_entry(dest)
         return str(dest)
 
     tmp_parent = _tmp_root(store)
