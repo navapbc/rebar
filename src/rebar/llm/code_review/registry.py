@@ -335,12 +335,15 @@ def project_criterion_applies(
     "escalation-only, never glob-fires" (:func:`glob_triggered_overlays`). The project meaning
     is forced: a ``project.`` id is not in :data:`OVERLAY_IDS`, so the base reviewer can never
     escalate to it and "empty = never run" would make every project criterion dead. The
-    collision is documented in ADR 0074.
+    collision is documented in ADR 0074. ``applies_to: ["**"]`` is repository-wide and
+    selects UNCONDITIONALLY — including for a review with NO changed files — via the shared
+    :func:`rebar.llm.criteria.snapshot.select_project_applicability` rule (see ADR 0102), so
+    the ``[]`` → ``["**"]`` overlay migration is behavior-preserving at that edge.
     """
     globs = project_applies_to_globs(criterion_id, repo_root)
-    if not globs:
-        return True
-    return any(_glob_match(f, g) for f in changed_files for g in globs)
+    from rebar.llm.criteria.snapshot import select_project_applicability
+
+    return select_project_applicability(globs, changed_files).applies
 
 
 # ── Content triggers (the analog of glob triggers, keyed on the DIFF's removed lines) ────────
