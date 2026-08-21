@@ -317,37 +317,46 @@ Checklist:
 - If producers/consumers/coordinated services change, deploy order and old+new coexistence is specified.
 
 ## T13
-**Behavioral-prohibition consumer scan** — exec:AGENT, advisory, facet:overlay-prohibition
+**Behavioral-obligation consumer scan** — exec:AGENT, advisory, facet:overlay-prohibition
 
-OVERLAY — apply only when the plan NEWLY FORBIDS a previously-permitted action: it introduces an
-enforcement/gate that will start rejecting something that used to be allowed. Trigger lexicon:
-"block", "reject", "require … before", "enforce", "must pass", "cannot merge until", "deny",
-"fail the build if". If the plan introduces no new prohibition, PASS as not-applicable.
+OVERLAY — apply only when the plan NEWLY IMPOSES an obligation, in either form. (1) A
+PROHIBITION: it introduces an enforcement/gate that will start rejecting something that used to
+be allowed. (2) An ADDITION: it creates a new obligation — a contract, invariant, schema field,
+required argument, config key, changed default, or a second site that must stay in step — that
+existing sites now owe. Trigger lexicon — prohibition: "block", "reject", "require … before",
+"enforce", "must pass", "cannot merge until", "deny", "fail the build if"; addition: "adds a
+required …", "now requires", "callers must", "every X must now", "must stay in sync/in step",
+"new contract/invariant/schema field". If the plan introduces no new obligation of either form,
+PASS as not-applicable.
 
-ENUMERATE THE INVISIBLE AFFECTED SET. A new prohibition silently breaks existing call sites that
-perform the now-outlawed behavior — nothing in the remaining plan references them, so they are
-invisible unless enumerated. Translate the prohibition into concrete grep patterns over EXISTING
-call sites of the behavior being outlawed, then Grep/Read to find them. Worked example:
+ENUMERATE THE INVISIBLE AFFECTED SET. A new obligation silently breaks the existing sites that
+owe it — nothing in the remaining plan references them, so they are invisible unless enumerated.
+Translate the obligation into concrete grep patterns over EXISTING sites that owe it — for a
+prohibition, the call sites of the behavior being outlawed; for an addition, the surfaces and
+consumers that must discharge the new obligation — then Grep/Read to find them. Worked examples:
 "require tests to pass before merge" → grep for `gh pr merge`, direct merge steps, and CI jobs
-that merge without the new gate.
+that merge without the new gate; "add a required `--class` argument to the CLI" → grep the other
+entry surfaces that build the same request (MCP tool schema, NDJSON import) for that field.
 
-CLASSIFY each existing call site into exactly one bucket:
-- MIGRATED — the plan already updates this site to satisfy the new prohibition.
-- EXEMPTED — the plan (or an explicit rationale) carves this site out of the prohibition.
-- UNCOVERED — the site performs the outlawed behavior and the plan neither migrates nor exempts
-  it. Each UNCOVERED site is the finding: the plan will start rejecting it with no migration path.
+CLASSIFY each existing site into exactly one bucket:
+- MIGRATED — the plan already updates this site to satisfy the new obligation.
+- EXEMPTED — the plan (or an explicit rationale) carves this site out of the obligation.
+- UNCOVERED — the site owes the obligation and the plan neither migrates nor exempts it. Each
+  UNCOVERED site is the finding: a prohibition will start rejecting it with no migration path;
+  an addition leaves it silently out of step.
 
-PASS when every existing call site is MIGRATED or EXEMPTED (or there are none). Report each
+PASS when every existing site is MIGRATED or EXEMPTED (or there are none). Report each
 UNCOVERED site with its location as the grounded evidence.
 
-FAIL-OPEN (abstain-with-coverage): if the outlawed behavior cannot be reduced to a checkable grep
-pattern, or the repository tools cannot enumerate its call sites, ABSTAIN — record the prohibition
-as covered-but-unenumerable rather than asserting an ungroundable gap. Do not fabricate call sites.
+FAIL-OPEN (abstain-with-coverage): if the obligation cannot be reduced to a checkable grep
+pattern, or the repository tools cannot enumerate the sites that owe it, ABSTAIN — record the
+obligation as covered-but-unenumerable rather than asserting an ungroundable gap. Do not
+fabricate sites.
 
 Checklist:
-- A NEW prohibition (block/reject/require-before/enforce/must-pass/cannot-merge-until) is translated into grep patterns over EXISTING call sites of the outlawed behavior, and each site is classified MIGRATED / EXEMPTED / UNCOVERED.
-- Each UNCOVERED call site (performs the outlawed behavior; plan neither migrates nor exempts it) is the finding, cited by location.
-- Fail-open: if the outlawed behavior cannot be reduced to a checkable grep pattern, ABSTAIN with coverage rather than assert an ungroundable gap; never fabricate call sites.
+- A NEW obligation — a prohibition (block/reject/require-before/enforce/must-pass/cannot-merge-until) or an addition (contract, invariant, schema field, required argument, second site that must stay in step) existing sites now owe — is translated into grep patterns over EXISTING sites that owe it, and each site is classified MIGRATED / EXEMPTED / UNCOVERED.
+- Each UNCOVERED site (owes the new obligation; plan neither migrates nor exempts it) is the finding, cited by location.
+- Fail-open: if the obligation cannot be reduced to a checkable grep pattern, ABSTAIN with coverage rather than assert an ungroundable gap; never fabricate sites.
 
 ## T14
 **CI-trigger / release-infrastructure coverage audit** — exec:AGENT, advisory, facet:overlay-citrigger

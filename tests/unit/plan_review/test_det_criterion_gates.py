@@ -72,6 +72,12 @@ def _routed_ids(description: str, *, state: dict | None = None, gate_log=None) -
         "You cannot merge without both votes.",
         "Landing now requires a signed attestation.",
         "A failing probe turns the build red.",
+        # additive-obligation lexicon (story 5bca-4ca9 P2: T13 widened to obligations)
+        "Every adapter must expose the new parameter.",
+        "Callers must pass the new argument explicitly.",
+        "The exporter adds a required class argument.",
+        "The MCP schema must stay in sync with the CLI grammar.",
+        "This introduces a new invariant on ticket identifiers.",
     ],
 )
 def test_t13_trigger_fires(sentence: str) -> None:
