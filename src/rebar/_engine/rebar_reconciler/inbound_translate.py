@@ -30,6 +30,8 @@ import importlib.util
 from pathlib import Path
 from typing import Any
 
+from rebar_reconciler.inbound_fields import recover_status_label  # noqa: F401
+
 # Map Jira issuetype -> local ticket_type. Anything else falls through to 'task'.
 _JIRA_TYPE_MAP: dict[str, str] = {
     "Bug": "bug",
@@ -40,15 +42,12 @@ _JIRA_TYPE_MAP: dict[str, str] = {
 }
 
 # rebar-status: annotation labels override the Jira workflow status on inbound
-# (blocked/cancelled have no live DIG workflow equivalent; the label is the
-# lossless encoding). Mirrors inbound_differ._REBAR_STATUS_LABEL_TO_LOCAL —
-# _apply_inbound_create applies the same precedence so a freshly imported
-# issue lands at the SAME local status the bound-ticket inbound differ would
-# compute on the next pass (ticket robe-creek-zealot).
-_REBAR_STATUS_LABEL_TO_LOCAL: dict[str, str] = {
-    "rebar-status:blocked": "blocked",
-    "rebar-status:cancelled": "cancelled",
-}
+# (a lossy forward mapping's local status is recovered directly from the label). The
+# shared, generalised recovery helper (``recover_status_label``, imported above and
+# re-exported for the leaf appliers) replaces the retired 2-entry
+# ``_REBAR_STATUS_LABEL_TO_LOCAL`` literal — _apply_inbound_create applies the same
+# precedence so a freshly imported issue lands at the SAME local status the
+# bound-ticket inbound differ would compute on the next pass (ticket robe-creek-zealot).
 
 # Bridge-internal label prefixes that must never leak into local ticket tags
 # at import time. Matches inbound_differ._EXCLUDED_PREFIXES minus "imported:"

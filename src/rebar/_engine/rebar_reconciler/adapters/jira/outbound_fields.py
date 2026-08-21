@@ -33,7 +33,16 @@ from typing import Any
 # import: this module is loaded via ``spec_from_file_location`` with no package
 # context in several tests, where a relative import would raise ImportError.
 from rebar_reconciler.adapters.jira_family import LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY
-from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL_TO_JIRA_STATUS
+
+# Kept as a MODULE ATTRIBUTE (read by tests and the state/test_config parity guard, and
+# pinned identical to ``LOCAL_STATUS_TO_JIRA`` by the jira-family boundary test) even
+# though S2 routes the status value through ``resolve_outbound_status`` (map-or-drift)
+# rather than subscripting this map directly. ``resolve_outbound_status`` falls back to
+# the same built-in object when no per-project map is supplied, so the no-config
+# behaviour is unchanged.
+from rebar_reconciler.adapters.jira_family import (  # noqa: F401
+    LOCAL_STATUS_TO_JIRA as _LOCAL_TO_JIRA_STATUS,
+)
 
 # Story bd9e (epic 3e73) extended the same de-duplication to the local->Jira TYPE
 # map, whose second copy lived in ``adapters/jira_datacenter/backend.py``; both
@@ -42,6 +51,7 @@ from rebar_reconciler.adapters.jira_family import LOCAL_STATUS_TO_JIRA as _LOCAL
 # ``tests/.../diffing/test_outbound_differ_session_log_exclusion.py``. Absolute
 # import for the same ``spec_from_file_location`` reason as above.
 from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE
+from rebar_reconciler.adapters.jira_family.outbound_mapper import resolve_outbound_status
 
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
 # _loader.py). Import it normally when package context exists, else bootstrap it
@@ -95,6 +105,7 @@ def _map_local_to_jira_fields(
     emit_detach_clear: bool = False,
     *,
     suppressed_out: list[str] | None = None,
+    status_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -131,9 +142,13 @@ def _map_local_to_jira_fields(
         "description": ticket.get("description") or "",
         "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
         "priority": _LOCAL_TO_JIRA_PRIORITY.get(ticket.get("priority", 2), "Medium"),
-        "status": _LOCAL_TO_JIRA_STATUS.get(ticket.get("status", "open"), "To Do"),
         "assignee": ticket.get("assignee") or "",
     }
+    # Map-or-drift (S2): a local status with NO Jira target is OMITTED entirely
+    # (Jira status left unchanged), never coerced to "To Do".
+    _status_target = resolve_outbound_status(ticket.get("status", "open"), status_map)
+    if _status_target is not None:
+        result["status"] = _status_target
     # Parent sync (ticket 8b25): resolve local parent_id → Jira key.
     # Omit the key entirely when unbound so _diff_fields skips it (retry next pass).
     local_parent_id = ticket.get("parent_id") or None

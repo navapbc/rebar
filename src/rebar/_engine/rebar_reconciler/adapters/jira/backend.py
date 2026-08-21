@@ -78,6 +78,7 @@ class _JiraOutbound:
         emit_detach_clear: bool = False,
         *,
         suppressed_out: list[str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return outbound_fields._map_local_to_jira_fields(
             ticket,
@@ -85,6 +86,7 @@ class _JiraOutbound:
             local_ticket_types,
             emit_detach_clear,
             suppressed_out=suppressed_out,
+            status_map=status_map,
         )
 
     def map_fields_to_remote(
@@ -93,11 +95,14 @@ class _JiraOutbound:
         ticket: dict[str, Any] | None = None,
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Delegate to the shared ``jira_family.outbound_mapper.OutboundFieldMapper``
         (story J3), constructed with Cloud's ``AdfCodec``. See that module for the
         mapping rules (field-name reconciliation, value maps, rich-text fit)."""
-        return self._mapper.map_fields_to_remote(changed, ticket, binding_store, local_ticket_types)
+        return self._mapper.map_fields_to_remote(
+            changed, ticket, binding_store, local_ticket_types, status_map
+        )
 
     def resolve_assignee(
         self,

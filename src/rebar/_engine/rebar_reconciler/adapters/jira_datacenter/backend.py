@@ -34,7 +34,10 @@ from rebar_reconciler.adapters.jira_family import (
 from rebar_reconciler.adapters.jira_family import sanitize_label as _shared_sanitize_label
 from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sanitize_summary
 from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
-from rebar_reconciler.adapters.jira_family.outbound_mapper import OutboundFieldMapper
+from rebar_reconciler.adapters.jira_family.outbound_mapper import (
+    OutboundFieldMapper,
+    resolve_outbound_status,
+)
 from rebar_reconciler.adapters.jira_family.rich_text import (
     _WIKI_TRUNCATION_SUFFIX,
     WikiTextCodec,
@@ -42,7 +45,6 @@ from rebar_reconciler.adapters.jira_family.rich_text import (
 )
 from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
-    LOCAL_STATUS_TO_JIRA,
 )
 
 # Story bd9e (epic 3e73): the local->Jira TYPE map used to be re-declared here as a
@@ -55,7 +57,9 @@ from rebar_reconciler.adapters.jira_family.value_maps import (
 )
 
 
-def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
+def _map_local_to_dc_fields(
+    ticket: dict[str, Any], status_map: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Full local-ticket -> DC field mapping (the CREATE path).
 
     Deliberately self-contained rather than delegating to Cloud's
@@ -65,9 +69,13 @@ def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
     ``adapters/jira/``). Uses the SAME Jira-family value maps Cloud uses, so the
     local<->Jira vocabulary stays one definition; only the rich-text fit
     (``WikiTextCodec`` — plain text, not ADF) differs.
+
+    ``status_map`` (S2): the effective per-project local->Jira status map; ``None``
+    falls back to the built-in ``LOCAL_STATUS_TO_JIRA``. A local status with NO target
+    (map-or-drift) OMITS the ``status`` field entirely, never coercing it.
     """
     codec = WikiTextCodec(rich="dc" in cutover_clients())
-    return {
+    fields: dict[str, Any] = {
         "summary": ticket.get("title") or "",
         # Render, then fit — ``to_wire(fit_outbound(...))``, matching ``_issues.py``'s
         # create path and ``OutboundFieldMapper``'s update path. Fitting WITHOUT
@@ -77,9 +85,12 @@ def _map_local_to_dc_fields(ticket: dict[str, Any]) -> dict[str, Any]:
         "description": codec.to_wire(codec.fit_outbound(ticket.get("description") or "")),
         "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
         "priority": LOCAL_PRIORITY_TO_JIRA.get(ticket.get("priority", 2), "Medium"),
-        "status": LOCAL_STATUS_TO_JIRA.get(ticket.get("status", "open"), "To Do"),
         "assignee": ticket.get("assignee") or "",
     }
+    target = resolve_outbound_status(ticket.get("status", "open"), status_map)
+    if target is not None:
+        fields["status"] = target
+    return fields
 
 
 class _DCOutbound:
@@ -115,11 +126,12 @@ class _DCOutbound:
         emit_detach_clear: bool = False,
         *,
         suppressed_out: list[str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         # ``suppressed_out`` (ticket 8390) is accepted and IGNORED on purpose:
         # ``_map_local_to_dc_fields`` never maps a parent at all, so this backend has
         # no suppression to report and appending anything here would invent one.
-        return _map_local_to_dc_fields(ticket)
+        return _map_local_to_dc_fields(ticket, status_map)
 
     def map_fields_to_remote(
         self,
@@ -127,8 +139,11 @@ class _DCOutbound:
         ticket: dict[str, Any] | None = None,
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
+        status_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        return self._mapper.map_fields_to_remote(changed, ticket, binding_store, local_ticket_types)
+        return self._mapper.map_fields_to_remote(
+            changed, ticket, binding_store, local_ticket_types, status_map
+        )
 
     def resolve_assignee(
         self,

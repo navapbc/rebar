@@ -51,7 +51,6 @@ from rebar_reconciler.inbound_fields import (  # noqa: F401
     _JIRA_TO_LOCAL_PRIORITY,
     _JIRA_TO_LOCAL_STATUS,
     _JIRA_TO_LOCAL_TYPE,
-    _REBAR_STATUS_LABEL_TO_LOCAL,
     _assignee_matches,
     _description_forms,
     _extract_jira_field_value,
