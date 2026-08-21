@@ -50,13 +50,17 @@ One tracked path is deliberately never shared: see :data:`_UNSHAREABLE_BASENAMES
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
+import subprocess
 from pathlib import Path
 
-from rebar._snapshot.git_fetch import git_run
+from rebar._snapshot.git_fetch import _GIT_TIMEOUT, git_run
 from rebar._store.gitutil import run_git
+
+_LOG = logging.getLogger(__name__)
 
 # Only plain blobs can be faithfully hardlinked: a symlink would be dereferenced by
 # ``os.link`` (POSIX defaults to follow_symlinks=True) and a gitlink has no blob at all.
@@ -237,17 +241,33 @@ def _apply_delta(
     if read.returncode != 0:
         return False
     payload = "\0".join(sorted(writes)) + "\0"
-    proc = run_git(
-        repo_root,
-        "checkout-index",
-        "--force",
-        "-z",
-        "--stdin",
-        f"--prefix={dest_tree}{os.sep}",
-        check=False,
-        env=env,
-        input_data=payload,
-    )
+    # Bounded by the SAME timeout as the sibling ``read-tree`` above. ``git_run`` cannot
+    # carry stdin, so the bound is applied here and a timeout is folded into the module's
+    # fail-closed shape: log a diagnostic naming the operation (so a stall is
+    # distinguishable from slow progress) and return False — the caller then falls back
+    # to a full materialization.
+    try:
+        proc = run_git(
+            repo_root,
+            "checkout-index",
+            "--force",
+            "-z",
+            "--stdin",
+            f"--prefix={dest_tree}{os.sep}",
+            check=False,
+            env=env,
+            input_data=payload,
+            timeout=_GIT_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        _LOG.warning(
+            "git checkout-index timed out after %ss writing %d path(s) into %s; "
+            "falling back to full materialization",
+            _GIT_TIMEOUT,
+            len(writes),
+            dest_tree,
+        )
+        return False
     return bool(proc.returncode == 0)
 
 
