@@ -230,6 +230,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 json.dumps(enumerate_library(repo_root=self.session.repo_root)),
                 "application/json",
             )
+        elif self.path == "/effective-policy":
+            # The READ-ONLY "Effective Policy" view (RP-06 S6): a narrow provenance
+            # projection of the S1 CriteriaSnapshot, kept DISTINCT from the editable
+            # authored workflow. Same token+Host guard as /library (it reveals compiled
+            # review policy); best-effort, so a bad overlay yields available:false, never 500.
+            if not self._authed():
+                self._send(403, '{"errors":["forbidden (bad token/origin)"]}', "application/json")
+                return
+            from . import editor_contracts
+
+            self._send(
+                200,
+                json.dumps(
+                    editor_contracts.effective_policy_view(repo_root=self.session.repo_root)
+                ),
+                "application/json",
+            )
         elif self.path == "/help":
             # The per-kind help DATA (story 998e): element kinds + expected JSON
             # shape per kind. Host-guarded (read-only, no token needed — it is the
@@ -357,8 +374,19 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 # ACTIVATION flow: a project.<name> criterion authored end-to-end (rubric at the
                 # sanitized criterion_prompt_id + its atomic routing overlay) so a net-new
                 # project.<name> round-trips (stew-kid). Requires the project-prefix (6e31).
+                from . import editor_contracts
                 from .criterion_preview import author_criterion
 
+                # Fail loud BEFORE writing (RP-06 S6 AC3): a code-review project LLM criterion
+                # authored without proper applies_to globs is refused with the located remedy.
+                errors = editor_contracts.validate_criterion_authoring(pid, routing)
+                if errors:
+                    self._send(
+                        400,
+                        json.dumps({"ok": False, "id": pid, "errors": errors}),
+                        "application/json",
+                    )
+                    return
                 path = author_criterion(str(self.session.repo_root), pid, meta, body_md, routing)
             elif kind == "criterion":
                 # REFERENCE flow (bug jinx-node-mudra): a batch step references a criterion rubric
