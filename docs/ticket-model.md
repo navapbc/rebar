@@ -135,11 +135,13 @@ Two consequences of the hierarchy that you will hit in practice:
 
 - **Parent-first claim/transition cascade.** Starting work on a child pulls its still-`open`
   parent into progress first — claiming a leaf task moves its open story and open epic to
-  `in_progress` too, carrying the same assignee up the chain. Only the `open → in_progress`
-  direction cascades; `close`/`reopen`/`blocked` never do. When the plan-review claim gate
-  is enabled the cascaded parent claim runs the **parent's own** gate, so a leaf claim can
-  be blocked by a parent's missing/stale attestation. The full contract — the up-the-chain
-  recursion, the fail-fast semantics, the cross-agent race ownership policy, and the gate
+  `in_progress` too, carrying the same assignee up the chain. Three edges cascade —
+  `open → in_progress`, the `closed → open` reopen, and the `closed → in_progress`
+  reactivation (the latter two pull a still-`closed` parent along with the child);
+  `close`/`blocked` never do. When the plan-review claim gate is enabled the cascaded
+  parent claim/transition runs the **parent's own** gate, so a leaf claim or reactivation
+  can be blocked by a parent's missing/stale attestation. The full contract — the
+  up-the-chain recursion, the fail-fast semantics, the cross-agent race ownership policy, and the gate
   interaction — is documented in [concurrency.md](concurrency.md) under "Parent-first
   claim/transition cascade".
 - **The open-children guard on close.** A parent cannot be closed while it has open
