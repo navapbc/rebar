@@ -103,13 +103,9 @@ git commit -m "component: what changed and why"
 git log -1   # confirm a "Change-Id: I…" line is present in the footer
 ```
 
-**Check whether you edited a GENERATED file.** Several checked-in files are derived from a
-source elsewhere in the tree and are regenerated-and-diffed by CI, so a direct edit either
-gets erased or fails the build. Each one says so at the top (a banner, or a `_generated_by`
-key in JSON), and
-[docs/README.md § Generated artifacts](docs/README.md#generated-artifacts) lists every such
-file with its source, its regenerate command, and the gate that enforces it. If you touched
-one, change its **source** and re-run the regenerate command instead.
+Follow the [documentation policy](docs/documentation-policy.md) for every new or edited maintained text.
+
+**Check whether you edited a generated file.** Several checked-in files are derived from a source elsewhere in the tree. CI regenerates these files and fails on differences. Each generated file identifies its regeneration command through a banner or a top-level `_generated_by` key. The [Generated artifacts catalog](docs/generated-artifacts.md) lists each file with its source, regeneration command, and enforcement gate. Change the source and run the regeneration command when a generated file needs correction.
 
 **Every commit must reference a rebar ticket.** CI's `Verified` gate rejects a commit to
 `main` whose message does not reference a rebar ticket that resolves in the store — via a

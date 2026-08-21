@@ -1,23 +1,9 @@
-"""Ticket 9100: every DERIVED surface says so, and `docs/README.md` indexes them all.
+"""Generated-surface catalog and marker contracts.
 
-Story 316a burned four CI iterations because a plan cited a *generated* file by line
-number and the implementer edited the artifact instead of its source. The fix is
-two-part and both parts are pinned here:
-
-1. **Each generated file is self-identifying** — a banner (markdown / Python) or, where
-   the format has no comment syntax, a reserved top-level ``_generated_by`` key (JSON).
-2. **`docs/README.md` carries one table indexing every derived surface** — so an author
-   who does not already know which of nine files is derived has one place to look.
-
-The table is the thing that can silently go stale, so :func:`test_readme_table_matches_registry`
-compares its row set against :data:`GENERATED` + :data:`GATED_HAND_AUTHORED` below — adding a
-generated surface without a table row fails here.
-
-Markdown/Python banners are byte-verified against their generators by the existing
-per-generator suites (``test_gen_cli_reference.py`` etc.); what those cannot catch is a
-*missing table row*, which is this module's job. The two JSON markers are new, so their
-fixed-point property is proven here directly: a marker that a regeneration strips would fail
-the drift gate, which is worse than no marker at all.
+Every generated file identifies its generator through a text banner or a reserved JSON key.
+``docs/generated-artifacts.md`` catalogs generated surfaces and hand-authored parity surfaces.
+The tests keep that catalog aligned with the focused registries below. See ticket
+``forworn-zanyish-narwhale`` for the adoption history.
 """
 
 from __future__ import annotations
@@ -32,12 +18,24 @@ from rebar.llm.plan_review import guide_parity
 from rebar.llm.prompting import prompts
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CATALOG_PATH = "docs/generated-artifacts.md"
+POLICY_PATH = "docs/documentation-policy.md"
+POLICY_ROLES = (
+    "Tickets",
+    "ADRs",
+    "Internal documentation",
+    "External documentation",
+    "Shipped help",
+    "Comments",
+    "Generated artifacts",
+    "Protected evidence",
+)
 
 #: The reserved top-level key that marks a generated JSON document.
 MARKER_KEY = "_generated_by"
 
-#: Every GENERATED surface: path → the regenerate command its marker must name.
-#: A new generator MUST be added here and to the `docs/README.md` table together.
+#: Every generated surface maps a path to the regenerate command its marker must name.
+#: A new generator MUST be added here and to the generated-artifact catalog together.
 GENERATED: dict[str, str] = {
     "docs/cli-reference.md": "python scripts/gen_cli_reference.py",
     "docs/config-reference.md": "python scripts/gen_config_reference.py",
@@ -56,9 +54,8 @@ GENERATED: dict[str, str] = {
     ),
 }
 
-#: Surfaces that are HAND-AUTHORED but gated for parity. These must appear in the
-#: README's second table and must NOT carry a generated banner — bannering them would
-#: send an author to a generator that does not exist.
+#: Hand-authored parity-gated surfaces that must appear in the catalog's second table.
+#: They must not carry a generated banner because no generator exists for them.
 GATED_HAND_AUTHORED: frozenset[str] = frozenset(
     {
         "server.json",
@@ -145,43 +142,51 @@ def test_guide_pins_marker_is_inert_for_the_parity_gate() -> None:
     )
 
 
-# ── the docs/README.md index (the part that can silently go stale) ───────────────
+# ── the generated-artifact catalog ──────────────────────────────────────────────
 
 _ROW = re.compile(r"^\|\s*`([^`]+)`\s*\|", re.MULTILINE)
 
 
-def _readme_rows(section: str) -> set[str]:
-    """Paths in the table under the `### <section>` heading of the Generated-artifacts part."""
-    readme = _read("docs/README.md")
-    start = readme.index(f"### {section}")
-    rest = readme[start + len(section) :]
+def _catalog_section(section: str) -> str:
+    """Return the content under one third-level catalog heading."""
+    catalog = _read(CATALOG_PATH)
+    start = catalog.index(f"### {section}")
+    rest = catalog[start + len(section) :]
     end = rest.find("\n## ")
     body = rest[: end if end != -1 else len(rest)]
     nxt = body.find("\n### ")
     if nxt != -1:
         body = body[:nxt]
-    return set(_ROW.findall(body))
+    return body
 
 
-def test_readme_table_matches_registry() -> None:
+def _catalog_rows(section: str) -> set[str]:
+    """Return paths from the table under one third-level catalog heading."""
+    return set(_ROW.findall(_catalog_section(section)))
+
+
+def test_catalog_table_matches_registry() -> None:
     """The generated-surface table cannot omit a known derived surface (nor invent one)."""
-    assert _readme_rows("Generated — never edit these by hand") == set(GENERATED)
+    assert _catalog_rows("Generated files") == set(GENERATED)
 
 
-def test_readme_lists_the_hand_authored_gated_surfaces() -> None:
-    assert _readme_rows("Hand-authored but parity-gated — do NOT banner these") == set(
-        GATED_HAND_AUTHORED
-    )
+def test_catalog_lists_the_hand_authored_gated_surfaces() -> None:
+    assert _catalog_rows("Hand-authored parity-gated files") == set(GATED_HAND_AUTHORED)
 
 
-def test_readme_rows_name_the_regenerate_command() -> None:
+def test_catalog_keeps_the_parseable_section_order() -> None:
+    catalog = _read(CATALOG_PATH)
+    generated = catalog.index("### Generated files")
+    parity = catalog.index("### Hand-authored parity-gated files")
+    assert generated < parity
+
+
+def test_catalog_rows_name_the_regenerate_command() -> None:
     """Each generated row must carry the command that regenerates it."""
-    readme = _read("docs/README.md")
-    start = readme.index("### Generated — never edit these by hand")
-    body = readme[start : start + readme[start:].find("\n### ")]
+    body = _catalog_section("Generated files")
     for rel, command in GENERATED.items():
         row = next(ln for ln in body.splitlines() if ln.startswith(f"| `{rel}`"))
-        assert command in row, f"docs/README.md row for {rel} must name `{command}`"
+        assert command in row, f"catalog row for {rel} must name `{command}`"
 
 
 @pytest.mark.parametrize("rel", sorted(set(GENERATED) - set(JSON_SURFACES)))
@@ -192,7 +197,33 @@ def test_text_surface_carries_a_banner(rel: str) -> None:
     assert GENERATED[rel] in head, f"{rel}'s banner must name `{GENERATED[rel]}`"
 
 
-def test_contributing_points_at_the_generated_artifacts_table() -> None:
+def test_contributing_points_at_the_generated_artifacts_catalog() -> None:
     contributing = _read("CONTRIBUTING.md")
     assert "Generated artifacts" in contributing
-    assert "docs/README.md#generated-artifacts" in contributing
+    assert CATALOG_PATH in contributing
+
+
+def test_policy_defines_all_documentation_roles() -> None:
+    policy = _read(POLICY_PATH)
+    header = (
+        "| Role | Primary audience | Purpose | Lifecycle | Canonical source | Citation use | "
+        "Correction method | Exclusions | Example |"
+    )
+    assert header in policy
+    for role in POLICY_ROLES:
+        assert f"| {role} |" in policy
+
+
+def test_policy_and_catalog_pointers_are_discoverable() -> None:
+    assert POLICY_PATH in _read("AGENTS.md")
+    contributing = _read("CONTRIBUTING.md")
+    assert POLICY_PATH in contributing
+    assert CATALOG_PATH in contributing
+    docs_index = _read("docs/README.md")
+    assert "(documentation-policy.md)" in docs_index
+    assert "(generated-artifacts.md)" in docs_index
+
+
+def test_contributing_drops_the_removed_catalog_anchor() -> None:
+    removed_anchor = "docs/README.md" + "#generated-artifacts"
+    assert removed_anchor not in _read("CONTRIBUTING.md")
