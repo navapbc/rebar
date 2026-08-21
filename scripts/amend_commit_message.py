@@ -31,6 +31,11 @@ BEHAVIOUR
 * FILE carries its own ``Change-Id`` -> dropped, and HEAD's carried forward instead.
   Gerrit rejects a commit with two ``Change-Id`` lines, and the one that matters is the
   one already published on the change.
+* HEAD carries ``Signed-off-by`` trailer(s) and FILE omits them -> carried forward, all
+  of them, in order. ``--file`` replaces the message wholesale, so without this the DCO
+  attestation would be lost as silently as the Change-Id — the very failure this wrapper
+  exists to prevent. A FILE that supplies its own sign-off is authoritative: nothing is
+  carried and nothing duplicated. A HEAD without one gets none invented.
 * Everything else is plain ``git commit --amend``: hooks are NOT bypassed (no
   ``--no-verify``, so the commit-message gates still fire), and anything staged is
   folded into the amended commit exactly as ``git commit --amend --no-edit`` would.
@@ -52,6 +57,11 @@ _TIMEOUT = 120
 # (any token, any case) so a hand-written or malformed trailer is still recognised as
 # one rather than being silently duplicated by the composition below.
 _CHANGE_ID_LINE = re.compile(r"^Change-Id:\s*(\S+)\s*$", re.IGNORECASE)
+
+# Deliberately loose for the same reason as ``_CHANGE_ID_LINE``: a hand-written or
+# oddly-cased sign-off in FILE must still be recognised as one, or the carry-forward
+# below would duplicate it.
+_SIGN_OFF_LINE = re.compile(r"^Signed-off-by:\s*(.+\S)\s*$", re.IGNORECASE)
 
 _NO_CHANGE_ID = """\
 ERROR: HEAD carries no Change-Id trailer, so there is nothing to carry forward.
@@ -108,19 +118,36 @@ def _git_stdout(*args: str, stdin: str | None = None) -> str:
     return proc.stdout
 
 
-def compose_message(new_message: str, change_id: str) -> str:
-    """Return *new_message* with *change_id* as its sole ``Change-Id`` trailer.
+def extract_sign_offs(message: str) -> list[str]:
+    """Return every ``Signed-off-by`` value in *message*, in order, possibly empty.
+
+    Unlike ``Change-Id`` — where only the last one is authoritative — multiple sign-offs
+    are legitimate (each is a distinct DCO attestation), so all of them are kept.
+    """
+    return [m.group(1) for line in message.splitlines() if (m := _SIGN_OFF_LINE.match(line))]
+
+
+def compose_message(new_message: str, change_id: str, sign_offs: Sequence[str] = ()) -> str:
+    """Return *new_message* carrying *change_id* and, when it omits one, *sign_offs*.
+
+    ``Change-Id`` handling is unchanged: any in *new_message* is stripped and HEAD's
+    re-attached as the sole trailer. *sign_offs* (HEAD's, in order) are appended only
+    when *new_message* itself carries no ``Signed-off-by`` — a file that supplies its
+    own is authoritative, so nothing is carried and nothing duplicated.
 
     Placement is delegated to ``git interpret-trailers`` rather than reimplemented: it
     already knows whether the final paragraph is a trailer block (append into it, next to
     ``Signed-off-by``) or prose (open a new one).
     """
-    return _git_stdout(
-        "interpret-trailers",
-        "--trailer",
-        f"Change-Id: {change_id}",
-        stdin=strip_change_id_lines(new_message),
-    )
+    stripped = strip_change_id_lines(new_message)
+    trailers: list[str] = []
+    if not extract_sign_offs(stripped):
+        trailers.extend(f"Signed-off-by: {sign_off}" for sign_off in sign_offs)
+    trailers.append(f"Change-Id: {change_id}")
+    args: list[str] = []
+    for trailer in trailers:
+        args.extend(("--trailer", trailer))
+    return _git_stdout("interpret-trailers", *args, stdin=stripped)
 
 
 # This IS the sanctioned amend path: the whole point of the wrapper is that a raw
@@ -157,10 +184,11 @@ def _read_message_file(raw: str) -> str:
 
 def _run(message_file: str) -> int:
     new_message = _read_message_file(message_file)
-    change_id = extract_change_id(_git_stdout("log", "-1", "--format=%B"))
+    head_message = _git_stdout("log", "-1", "--format=%B")
+    change_id = extract_change_id(head_message)
     if change_id is None:
         raise _Failure(_NO_CHANGE_ID.rstrip("\n"))
-    return amend_head(compose_message(new_message, change_id))
+    return amend_head(compose_message(new_message, change_id, extract_sign_offs(head_message)))
 
 
 def main(argv: Sequence[str] | None = None) -> int:
