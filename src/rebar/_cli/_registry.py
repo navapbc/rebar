@@ -21,6 +21,23 @@ from dataclasses import dataclass
 # id used by any route in ROUTES must be a member of this set.
 KNOWN_CAPABILITIES: frozenset[str] = frozenset({"mcp", "reviewbot", "ui", "agents"})
 
+# The closed set of invocation-adapter kinds — the exact runtime call shape a
+# selected handler is invoked through (RP-05 S3). This is intentionally small and
+# fixed: a route selects ONE kind, never a bespoke call site.
+#   dispatcher         → handler([name, *rest])          (reads.main / commands.main)
+#   argv               → handler([*argv_prefix, *rest])  (module <verb>_cli(rest))
+#   argv_tracker       → handler(rest, tracker_dir())
+#   argv_tracker_root  → handler(rest, tracker_dir(), dirname(tracker_dir()))
+ADAPTER_KINDS: frozenset[str] = frozenset(
+    {"dispatcher", "argv", "argv_tracker", "argv_tracker_root"}
+)
+
+# The closed set of init policies applied before a handler runs (RP-05 S3):
+#   none / init_only / full are the static policies; ``doctor`` and
+#   ``fsck_recover`` are the two genuinely conditional selectors preserved from
+#   the pre-cutover per-arm census.
+INIT_POLICIES: frozenset[str] = frozenset({"none", "init_only", "full", "doctor", "fsck_recover"})
+
 # Group buckets that derive a named policy frozenset (see derive_policy_sets).
 # Groups NOT listed here (e.g. "intercept", "bootstrap", "repair") are census
 # buckets that carry no policy-set membership of their own.
@@ -56,6 +73,13 @@ class Route:
     handler: str | None = None
     parser_factory: str | None = None
     capabilities: tuple[str, ...] = ()
+    # RP-05 S3 execution metadata. ``adapter`` names one of ADAPTER_KINDS (the
+    # runtime call shape); ``init`` names one of INIT_POLICIES; ``argv_prefix`` is
+    # prepended to the command remainder before an ``argv`` handler is called
+    # (only ``bridge-status`` uses it, to reach ``bridge_cli(["status", ...])``).
+    adapter: str = ""
+    init: str = "none"
+    argv_prefix: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,48 +153,164 @@ def _core_factory(name: str) -> str:
     return _CORE_FACTORIES[name]
 
 
+_READS_DISPATCHER = "rebar._engine_support.reads:main"
+_FIELD_READS_MOD = "rebar._engine_support.field_reads"
+_LOOKUPS_MOD = "rebar._engine_support.lookups"
+_GATES_MOD = "rebar._engine_support.gates"
+
+
 def _reads_init_only() -> tuple[Route, ...]:
     return tuple(
-        Route(name, group="reads_init_only", parser_factory=_core_factory(name))
+        Route(
+            name,
+            group="reads_init_only",
+            parser_factory=_core_factory(name),
+            handler=_READS_DISPATCHER,
+            adapter="dispatcher",
+            init="init_only",
+        )
         for name in ("show", "list", "next-batch", "deps", "ready", "search", "session-logs")
     )
 
 
 def _simple_read_groups() -> tuple[Route, ...]:
     return (
-        Route("validate", group="reads_no_init", parser_factory=_core_factory("validate")),
+        Route(
+            "validate",
+            group="reads_no_init",
+            parser_factory=_core_factory("validate"),
+            handler=_READS_DISPATCHER,
+            adapter="dispatcher",
+            init="none",
+        ),
         Route(
             "get-file-impact",
             group="field_reads",
             parser_factory=_core_factory("get-file-impact"),
+            handler=f"{_FIELD_READS_MOD}:file_impact_cli",
+            adapter="argv_tracker",
+            init="full",
         ),
         Route(
             "get-verify-commands",
             group="field_reads",
             parser_factory=_core_factory("get-verify-commands"),
+            handler=f"{_FIELD_READS_MOD}:verify_commands_cli",
+            adapter="argv_tracker",
+            init="full",
         ),
-        Route("exists", group="lookups", parser_factory=_core_factory("exists")),
-        Route("resolve", group="lookups", parser_factory=_core_factory("resolve")),
-        Route("format", group="lookups", parser_factory=_core_factory("format")),
+        Route(
+            "exists",
+            group="lookups",
+            parser_factory=_core_factory("exists"),
+            handler=f"{_LOOKUPS_MOD}:exists_cli",
+            adapter="argv_tracker",
+            init="full",
+        ),
+        Route(
+            "resolve",
+            group="lookups",
+            parser_factory=_core_factory("resolve"),
+            handler=f"{_LOOKUPS_MOD}:resolve_cli",
+            adapter="argv_tracker",
+            init="full",
+        ),
+        Route(
+            "format",
+            group="lookups",
+            parser_factory=_core_factory("format"),
+            handler=f"{_LOOKUPS_MOD}:format_cli",
+            adapter="argv_tracker_root",
+            init="full",
+        ),
         Route(
             "list-descendants",
             group="descendants",
             parser_factory=_core_factory("list-descendants"),
+            handler="rebar._engine_support.descendants:list_descendants_cli",
+            adapter="argv_tracker",
+            init="full",
         ),
-        Route("clarity-check", group="gates", parser_factory=_core_factory("clarity-check")),
-        Route("check-ac", group="gates", parser_factory=_core_factory("check-ac")),
-        Route("quality-check", group="gates", parser_factory=_core_factory("quality-check")),
-        Route("summary", group="gates", parser_factory=_core_factory("summary")),
-        Route("sign", group="signing", parser_factory=_core_factory("sign")),
+        Route(
+            "clarity-check",
+            group="gates",
+            parser_factory=_core_factory("clarity-check"),
+            handler=f"{_GATES_MOD}:clarity_check_cli",
+            adapter="argv_tracker_root",
+            init="none",
+        ),
+        Route(
+            "check-ac",
+            group="gates",
+            parser_factory=_core_factory("check-ac"),
+            handler=f"{_GATES_MOD}:check_ac_cli",
+            adapter="argv_tracker",
+            init="none",
+        ),
+        Route(
+            "quality-check",
+            group="gates",
+            parser_factory=_core_factory("quality-check"),
+            handler=f"{_GATES_MOD}:quality_check_cli",
+            adapter="argv_tracker",
+            init="none",
+        ),
+        Route(
+            "summary",
+            group="gates",
+            parser_factory=_core_factory("summary"),
+            handler=f"{_GATES_MOD}:summary_cli",
+            adapter="argv_tracker",
+            init="none",
+        ),
+        Route(
+            "sign",
+            group="signing",
+            parser_factory=_core_factory("sign"),
+            handler="rebar.signing:sign_cli",
+            adapter="argv",
+            init="full",
+        ),
         Route(
             "verify-signature",
             group="signing",
             parser_factory=_core_factory("verify-signature"),
+            handler="rebar.signing:verify_signature_cli",
+            adapter="argv",
+            init="full",
         ),
-        Route("compact", group="compact", parser_factory=_core_factory("compact")),
-        Route("compact-all", group="compact", parser_factory=_core_factory("compact-all")),
-        Route("export", group="io", parser_factory=_core_factory("export")),
-        Route("import", group="io", parser_factory=_core_factory("import")),
+        Route(
+            "compact",
+            group="compact",
+            parser_factory=_core_factory("compact"),
+            handler="rebar._commands.compact:compact_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "compact-all",
+            group="compact",
+            parser_factory=_core_factory("compact-all"),
+            handler="rebar._commands.compact:compact_all_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "export",
+            group="io",
+            parser_factory=_core_factory("export"),
+            handler="rebar._io._cli:export_cli",
+            adapter="argv",
+            init="init_only",
+        ),
+        Route(
+            "import",
+            group="io",
+            parser_factory=_core_factory("import"),
+            handler="rebar._io._cli:import_cli",
+            adapter="argv",
+            init="full",
+        ),
     )
 
 
@@ -182,6 +322,9 @@ def _lifecycle() -> tuple[Route, ...]:
             confirmable=True,
             legacy_output=True,
             parser_factory=_core_factory("transition"),
+            handler="rebar._commands.transition:transition_cli",
+            adapter="argv",
+            init="full",
         ),
         Route(
             "reopen",
@@ -189,6 +332,9 @@ def _lifecycle() -> tuple[Route, ...]:
             confirmable=True,
             legacy_output=True,
             parser_factory=_core_factory("reopen"),
+            handler="rebar._commands.transition:reopen_cli",
+            adapter="argv",
+            init="full",
         ),
         Route(
             "claim",
@@ -196,6 +342,9 @@ def _lifecycle() -> tuple[Route, ...]:
             confirmable=True,
             legacy_output=True,
             parser_factory=_core_factory("claim"),
+            handler="rebar._commands.transition:claim_cli",
+            adapter="argv",
+            init="full",
         ),
     )
 
@@ -225,6 +374,9 @@ def _writes_full() -> tuple[Route, ...]:
             confirmable=True,
             legacy_output=name in legacy,
             parser_factory=_core_factory(name),
+            handler="rebar._commands:main",
+            adapter="dispatcher",
+            init="full",
         )
         for name in names
     )
@@ -272,6 +424,9 @@ def _intercepts() -> tuple[Route, ...]:
             group="static_read",
             intercept=True,
             parser_factory=f"{_P}.metrics:build",
+            handler="rebar._commands.metrics:metrics_cli",
+            adapter="argv",
+            init="init_only",
         )
     )
     routes.append(
@@ -287,41 +442,107 @@ def _intercepts() -> tuple[Route, ...]:
 
 def _bridge_and_arms() -> tuple[Route, ...]:
     _P = "rebar._cli._parsers.advanced"
+    _BRIDGE_CMDS = "rebar._cli._bridge_commands"
     return (
-        Route("bridge", group="bridge", parser_factory=f"{_P}.bridge:build"),
+        Route(
+            "bridge",
+            group="bridge",
+            parser_factory=f"{_P}.bridge:build",
+            handler=f"{_BRIDGE_CMDS}:bridge_cli",
+            adapter="argv",
+            init="none",
+        ),
         Route(
             "bridge-status",
             group="bridge",
             hidden=True,
             parser_factory=f"{_P}.bridge:build",
+            handler=f"{_BRIDGE_CMDS}:bridge_cli",
+            adapter="argv",
+            init="none",
+            argv_prefix=("status",),
         ),
-        Route("bridge-fsck", group="bridge", parser_factory=f"{_P}.bridge_arms:build_fsck"),
+        Route(
+            "bridge-fsck",
+            group="bridge",
+            parser_factory=f"{_P}.bridge_arms:build_fsck",
+            handler=f"{_BRIDGE_CMDS}:bridge_fsck_cli",
+            adapter="argv",
+            init="none",
+        ),
         Route(
             "init",
             group="bootstrap",
             no_auto_mount=True,
             parser_factory=_core_factory("init"),
+            handler="rebar._commands.init:init_cli",
+            adapter="argv",
+            init="none",
         ),
         Route(
             "scratch",
             group="bootstrap",
             no_auto_mount=True,
             parser_factory=_core_factory("scratch"),
+            handler="rebar._commands.scratch:scratch_cli",
+            adapter="argv",
+            init="none",
         ),
-        Route("delete", group="delete", parser_factory=_core_factory("delete")),
-        Route("fsck", group="repair", parser_factory=_core_factory("fsck")),
-        Route("fsck-recover", group="repair", parser_factory=_core_factory("fsck-recover")),
+        Route(
+            "delete",
+            group="delete",
+            parser_factory=_core_factory("delete"),
+            handler="rebar._commands.delete:delete_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "fsck",
+            group="repair",
+            parser_factory=_core_factory("fsck"),
+            handler="rebar._commands.fsck:fsck_cli",
+            adapter="argv",
+            init="full",
+        ),
+        Route(
+            "fsck-recover",
+            group="repair",
+            parser_factory=_core_factory("fsck-recover"),
+            handler="rebar._commands.fsck_recover:fsck_recover_cli",
+            adapter="argv",
+            init="fsck_recover",
+        ),
         Route(
             "tracker-maintenance",
             group="repair",
             parser_factory=_core_factory("tracker-maintenance"),
+            handler="rebar._commands.tracker_maintenance:tracker_maintenance_cli",
+            adapter="argv",
+            init="full",
         ),
-        Route("doctor", group="repair", parser_factory=_core_factory("doctor")),
-        Route("bridge-probe", group="repair", parser_factory=f"{_P}.bridge_arms:build_probe"),
+        Route(
+            "doctor",
+            group="repair",
+            parser_factory=_core_factory("doctor"),
+            handler="rebar._commands.doctor:doctor_cli",
+            adapter="argv",
+            init="doctor",
+        ),
+        Route(
+            "bridge-probe",
+            group="repair",
+            parser_factory=f"{_P}.bridge_arms:build_probe",
+            handler="rebar._cli:_bridge_probe",
+            adapter="argv",
+            init="none",
+        ),
         Route(
             "grounding-info",
             group="static_read",
             parser_factory=_core_factory("grounding-info"),
+            handler="rebar._cli:_grounding_info",
+            adapter="argv",
+            init="none",
         ),
     )
 
@@ -436,12 +657,32 @@ def _check_contradictions(routes: tuple[Route, ...]) -> Iterator[Finding]:
             yield Finding("contradiction", route.name, "retired route cannot carry a handler")
 
 
+def _check_execution(routes: tuple[Route, ...]) -> Iterator[Finding]:
+    """Validate the RP-05 S3 execution metadata on live (non-retired) routes."""
+    for route in routes:
+        if route.retired:
+            continue
+        if route.adapter and route.adapter not in ADAPTER_KINDS:
+            yield Finding("unknown_adapter", route.name, f"unknown adapter {route.adapter!r}")
+        if route.init not in INIT_POLICIES:
+            yield Finding("unknown_init", route.name, f"unknown init policy {route.init!r}")
+        if route.handler is not None and not route.adapter:
+            yield Finding("handler_without_adapter", route.name, "handler set but adapter is empty")
+        if route.argv_prefix and route.adapter != "argv":
+            yield Finding(
+                "prefix_without_argv",
+                route.name,
+                f"argv_prefix set but adapter is {route.adapter!r}",
+            )
+
+
 _CHECKS = (
     _check_duplicates,
     _check_alias_retired,
     _check_capabilities,
     _check_references,
     _check_contradictions,
+    _check_execution,
 )
 
 
