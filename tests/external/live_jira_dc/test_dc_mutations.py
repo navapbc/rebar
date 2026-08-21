@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _child_diag import assert_child_ran_clean
 from _dc_support import ADMIN_USER, BASE, collect_base_urls, live_jira_ready
 from _dc_support import assert_bridge_alert_for_mutation as _assert_bridge_alert_for_mutation
 from _dc_support import assert_local_assignee_is as _assert_local_assignee_is
@@ -409,7 +410,7 @@ def test_inbound_mutation_round_trips(
     expected = mutate(dc_transport, jira_dc_project, key)
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"inbound pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound pass")
 
     oracle(_local(dc_store_copy_repo, local_id), expected)
 
@@ -464,7 +465,7 @@ def test_inbound_assign_round_trips(
     dc_transport.update_issue(key, assignee=None)
     _wait_until_dc_assignee_is(dc_transport, jira_dc_project, key, None, "the unassignment (setup)")
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"the unassign setup pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="the unassign setup pass")
     _assert_local_assignee_is(
         _local(dc_store_copy_repo, local_id), "", stage="SETUP (not the assignment)"
     )
@@ -474,7 +475,7 @@ def test_inbound_assign_round_trips(
     _wait_until_dc_assignee_is(dc_transport, jira_dc_project, key, ADMIN_USER, "the assignee")
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"inbound assign pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound assign pass")
 
     _assert_local_assignee_is(_local(dc_store_copy_repo, local_id), ADMIN_USER)
 
@@ -620,7 +621,7 @@ def test_outbound_mutation_round_trips(
     expected = mutate(dc_store_copy_repo, local_id)
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound pass")
 
     oracle(dc_transport.get_issue_by_rest(key), expected)
 
@@ -668,7 +669,7 @@ def test_outbound_create_stamps_both_provenance_markers(
     # Scoped to the LOCAL ID alone — deliberately, and it is the one case where that is right:
     # an outbound CREATE has no Jira key yet, which is why `bound_dc_issue` has to pass both.
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=local_id)
-    assert "Traceback" not in cp.stderr, f"outbound create pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound create pass")
 
     key = load_binding_store(dc_store_copy_repo).get_jira_key(local_id)
     if not key:
@@ -725,7 +726,7 @@ def test_outbound_remove_label_round_trips(
 
     rebar.tag(local_id, label, repo_root=dc_store_copy_repo)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound add-label pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound add-label pass")
     labels = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("labels") or []
     assert label in labels, (
         f"SETUP FAILED (not the removal): the tag never reached DC, so its absence later would "
@@ -734,7 +735,7 @@ def test_outbound_remove_label_round_trips(
 
     rebar.untag(local_id, label, repo_root=dc_store_copy_repo)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound remove-label pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound remove-label pass")
 
     _oracle_out_remove_label(dc_transport.get_issue_by_rest(key), label)
 
@@ -782,7 +783,7 @@ def test_outbound_unassign_round_trips(
     # mutate + oracle so the two cannot drift on how an assignment is expressed.
     expected = _out_assign(dc_store_copy_repo, local_id)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound assign pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound assign pass")
     assigned = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("assignee") or {}
     assert assigned.get("name") == expected, (
         f"SETUP FAILED (not the unassign): the assignment never reached DC, so a null assignee "
@@ -802,7 +803,7 @@ def test_outbound_unassign_round_trips(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound unassign pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound unassign pass")
 
     after = (dc_transport.get_issue_by_rest(key).get("fields") or {}).get("assignee")
     assert not after, (
@@ -868,7 +869,7 @@ def test_inbound_link_round_trips(
     # Priming pass: import + bind the link TARGET, so the link pass can resolve it.
     scope = f"{local_id},{key},{other_local},{other}"
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the link target raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the link target")
     bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
     assert bound_other == other, (
         f"SETUP FAILED: the link target {other_local} is not bound (got {bound_other!r}); an "
@@ -889,7 +890,7 @@ def test_inbound_link_round_trips(
         raise AssertionError(f"the issue link never became readable on {key}")
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound link pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound link pass")
 
     deps = _local(dc_store_copy_repo, local_id).get("deps") or []
     targets = {d.get("target_id") for d in deps}
@@ -963,7 +964,7 @@ def test_inbound_delete_link_round_trips(
     # (`inbound_differ.py:402-404` and `:409-412`).
     scope = f"{local_id},{key},{other_local},{other}"
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the link target raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the link target")
     bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
     assert bound_other == other, (
         f"SETUP FAILED (not the removal): the link target {other_local} is not bound (got "
@@ -977,7 +978,7 @@ def test_inbound_delete_link_round_trips(
         dc_transport, jira_dc_project, key, lambda seen: other in seen, "the link to remove"
     )
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound link-add pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound link-add pass")
     targets = {d.get("target_id") for d in (_local(dc_store_copy_repo, local_id).get("deps") or [])}
     assert other_local in targets, (
         f"SETUP FAILED (not the removal): the inbound link never reached the local ticket, so "
@@ -998,7 +999,7 @@ def test_inbound_delete_link_round_trips(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound unlink pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound unlink pass")
 
     after = {d.get("target_id") for d in (_local(dc_store_copy_repo, local_id).get("deps") or [])}
     assert other_local not in after, (
@@ -1040,7 +1041,7 @@ def test_outbound_link_round_trips(
     # and the cell would fail for a setup reason wearing the costume of a bridge defect.
     scope = f"{local_id},{key},{other_local},{other}"
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"binding pass for the link target raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="binding pass for the link target")
     bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
     assert bound_other == other, (
         f"SETUP FAILED: the link target {other_local} is not bound (got {bound_other!r}); an "
@@ -1049,7 +1050,7 @@ def test_outbound_link_round_trips(
 
     rebar.link(local_id, other_local, "blocks", repo_root=dc_store_copy_repo)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"outbound link pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound link pass")
 
     seen = _linked_keys(dc_transport.get_issue_links(key))
     assert other in seen, (
@@ -1094,7 +1095,7 @@ def test_outbound_delete_link_round_trips(
     # reason wearing the costume of a bridge defect (see `test_outbound_link_round_trips`).
     scope = f"{local_id},{key},{other_local},{other}"
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"binding pass for the link target raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="binding pass for the link target")
     bound_other = load_binding_store(dc_store_copy_repo).get_jira_key(other_local)
     assert bound_other == other, (
         f"SETUP FAILED (not the removal): the link target {other_local} is not bound (got "
@@ -1105,7 +1106,7 @@ def test_outbound_delete_link_round_trips(
     # SETUP — push the link and PROVE it landed on the instance.
     rebar.link(local_id, other_local, "blocks", repo_root=dc_store_copy_repo)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"outbound link-add pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound link-add pass")
     seen = _linked_keys(dc_transport.get_issue_links(key))
     assert other in seen, (
         f"SETUP FAILED (not the removal): the local 'blocks' link never reached DC, so its "
@@ -1119,7 +1120,7 @@ def test_outbound_delete_link_round_trips(
     # between the pair, which is what row 11 is about.
     rebar.unlink(local_id, other_local, repo_root=dc_store_copy_repo)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"outbound unlink pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound unlink pass")
 
     after = _linked_keys(dc_transport.get_issue_links(key))
     assert other not in after, (
@@ -1324,7 +1325,7 @@ def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
 
     scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
     assert bound == child, (
         f"SETUP FAILED (not the emit): the child {child_local} is not bound (got {bound!r}), so "
@@ -1353,7 +1354,7 @@ def test_outbound_epic_parent_reaches_dc_THROUGH_A_RECONCILE_PASS(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"outbound epic-parent pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound epic-parent pass")
 
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
     got = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
@@ -1415,7 +1416,7 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
 
     scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     assert load_binding_store(dc_store_copy_repo).get_jira_key(child_local) == child, (
         f"SETUP FAILED (not idempotence): the child {child_local} is not bound."
     )
@@ -1435,7 +1436,7 @@ def test_a_repeat_pass_over_a_converged_epic_parent_plans_nothing(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"converging epic-parent pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="converging epic-parent pass")
 
     # The attach must have LANDED before "a repeat plans nothing" means anything: over an
     # unconverged pair a second pass SHOULD plan work, and this cell would pass for the wrong
@@ -1664,7 +1665,7 @@ def test_inbound_set_parent_round_trips(
 
     scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     store = load_binding_store(dc_store_copy_repo)
     for local_ref, key_ref in ((child_local, child), (epic_local, epic_key)):
         bound = store.get_jira_key(local_ref)
@@ -1709,7 +1710,7 @@ def test_inbound_set_parent_round_trips(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound parent pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound parent pass")
 
     after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
     assert after == epic_local, (
@@ -1783,7 +1784,7 @@ def test_inbound_clear_parent_round_trips(
 
     scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
     assert bound == child, (
         f"SETUP FAILED (not the clear): the child {child_local} is not bound (got {bound!r})"
@@ -1818,7 +1819,7 @@ def test_inbound_clear_parent_round_trips(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"inbound clear-parent pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound clear-parent pass")
 
     after = _local(dc_store_copy_repo, child_local).get("parent_id") or ""
     assert not after, (
@@ -1926,7 +1927,7 @@ def test_outbound_clear_parent_round_trips(
 
     scope = ",".join((child_local, child, epic_local, epic_key))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     bound = load_binding_store(dc_store_copy_repo).get_jira_key(child_local)
     assert bound == child, (
         f"SETUP FAILED (not the clear): the child {child_local} is not bound (got {bound!r}), so "
@@ -1943,7 +1944,7 @@ def test_outbound_clear_parent_round_trips(
     # to propagate. Carried by a real pass and proven landed on the instance before continuing.
     rebar.edit_ticket(child_local, repo_root=dc_store_copy_repo, parent=epic_local)
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming attach pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="priming attach pass")
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
     primed = (body.get("fields") or {}).get(epic_field) if isinstance(body, dict) else "<unread>"
     assert primed == epic_key, (
@@ -1965,7 +1966,7 @@ def test_outbound_clear_parent_round_trips(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"outbound clear-parent pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound clear-parent pass")
 
     status, body = dc_request(f"/rest/api/2/issue/{child}?fields={epic_field}")
     # The STATUS is asserted before the value is read, and that is load-bearing rather than
@@ -2068,7 +2069,7 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
 
     scope = ",".join((child_local, child, parent_local, parent))
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, f"priming pass for the hierarchy raised:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="priming pass for the hierarchy")
     store = load_binding_store(dc_store_copy_repo)
     for local_ref, key_ref in ((child_local, child), (parent_local, parent)):
         bound = store.get_jira_key(local_ref)
@@ -2093,9 +2094,7 @@ def test_outbound_unrepresentable_parent_is_REPORTED_rather_than_silently_droppe
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=scope)
-    assert "Traceback" not in cp.stderr, (
-        f"outbound unrepresentable-parent pass raised:\n{cp.stderr[-2000:]}"
-    )
+    assert_child_ran_clean(cp, what="outbound unrepresentable-parent pass")
 
     # (1) THE OPERATOR IS TOLD. `assert_bridge_alert_for_mutation` refuses to read the store at
     # all unless the pass provably completed — an absent alert directory is otherwise
@@ -2362,7 +2361,7 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
         "the unassignment (setup)",
     )
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"the unassign setup pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="the unassign setup pass")
     cleared = _local(dc_store_copy_repo, local_id).get("assignee")
     assert not cleared, (
         f"SETUP FAILED (not a product finding): the local ticket is still assigned to {cleared!r} "
@@ -2401,7 +2400,7 @@ def test_the_inbound_assignee_mints_a_jira_family_identity(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"inbound assignee pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="inbound assignee pass")
 
     _assert_mint_registered(dc_store_copy_repo, ADMIN_USER)
 
@@ -2622,7 +2621,7 @@ def test_a_repeat_pass_over_a_converged_pair_plans_nothing(
     )
 
     cp = _run(dc_store_copy_repo, _WRITING_MODE, only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"the converging pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="the converging pass")
 
     # The write must have LANDED before "a repeat plans nothing" means anything: over an
     # unconverged pair a second pass SHOULD plan work, and the cell would pass or fail for the

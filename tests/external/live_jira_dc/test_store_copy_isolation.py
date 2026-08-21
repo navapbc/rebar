@@ -41,6 +41,7 @@ from typing import Any
 
 # Imported by bare name: pytest inserts this directory on sys.path (there is no `__init__.py`
 # anywhere under `tests/`), which is also why `_dc_support` is not a dotted path.
+from _child_diag import assert_child_ran_clean
 from _dc_support import CLOUD_CREDENTIAL_VARS, live_jira_ready, read_inherited_env
 from _dc_support import envelope as _envelope
 from _dc_support import is_ticket_entry as _is_ticket_entry
@@ -202,7 +203,7 @@ def test_a_dc_issue_reaches_the_local_store_inbound(
     # then reported `inbound_differ total=0` POST-filter, which read like the differ had planned
     # nothing at all. It had — the companion dry-run cell above proves it.
     cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"unhandled exception in the pass:\n{cp.stderr}"
+    assert_child_ran_clean(cp, what="the inbound bootstrap-strict pass")
 
     ticket_dir = dc_store_copy_repo / ".tickets-tracker" / local_id
     assert ticket_dir.exists(), (
@@ -253,7 +254,7 @@ def test_a_local_edit_reaches_the_dc_issue_outbound(
     rebar.edit_ticket(local_id, repo_root=dc_store_copy_repo, title=new_title)
 
     cp = _run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"outbound pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="outbound pass")
 
     remote = dc_transport.get_issue_by_rest(key)
     summary = (remote.get("fields") or {}).get("summary")

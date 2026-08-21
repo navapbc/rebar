@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _child_diag import assert_child_ran_clean
 
 # Bounded retry budget for the ONE network call this module makes (the `tickets` fetch).
 # Retry-then-FAIL, never retry-then-skip: a genuine misconfiguration must still red the lane
@@ -330,7 +331,7 @@ def bound_dc_issue(
     local_id = _jira_key_to_local_id(key)
 
     cp = run_reconcile(dc_store_copy_repo, "bootstrap-strict", only=f"{local_id},{key}")
-    assert "Traceback" not in cp.stderr, f"binding pass raised:\n{cp.stderr[-2000:]}"
+    assert_child_ran_clean(cp, what="binding pass")
 
     # ASSERT the binding before yielding. If this pass silently failed, every dependent cell
     # would fall back to the create path and pass for the wrong reason.
