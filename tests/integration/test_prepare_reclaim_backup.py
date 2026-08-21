@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
+from _git_upkeep import assert_no_detached_upkeep, init_bare_remote, missing_upkeep_pins
 from _topology_template import clone_topology_template
 
 SCRIPT = Path(__file__).parents[2] / "infra" / "scripts" / "prepare_reclaim_backup.py"
@@ -136,8 +137,11 @@ def _build_backup_fixture(workspace: Path, topology: Path) -> BackupFixture:
     blob_oid = _git(seed, "hash-object", "-w", "--stdin", input_text="blob pin\n").stdout.strip()
     _git(seed, "update-ref", "refs/tags/blob-pin", blob_oid)
 
-    remote.mkdir()
-    _git(remote, "init", "-q", "--bare")
+    # Pinned at creation, before either push below can reach it: at git's defaults a
+    # bare remote's receive-pack leaves a DETACHED `git maintenance run` behind every
+    # push, and `backup_fixture` copies this whole topology once per test in this module
+    # (bug b394-6198-6010-42f7).
+    init_bare_remote(remote)
     _git(seed, "remote", "add", "origin", str(remote))
     _git(seed, "push", "-q", "--all", "origin")
     _git(seed, "push", "-q", "--tags", "origin")
@@ -627,3 +631,43 @@ def test_refuses_empty_and_ticketsless_origins(
     assert ticketsless.returncode != 0
     assert "no refs/heads/tickets" in ticketsless.stderr.lower()
     assert _helper_refs(fixture.repo) == {}
+
+
+def test_backup_fixture_remote_leaves_no_detached_upkeep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A push into this module's own remote must leave nothing writing to it.
+
+    ``backup_fixture`` copies the whole topology — ``source.git`` included — with
+    ``clone_topology_template``, once per test in this module. That is only sound while
+    nothing is still rewriting the object database the copy walks. At git's defaults a
+    bare remote's ``receive-pack`` leaves a detached ``git maintenance run`` behind every
+    push, so the copy races a concurrent repack (bug b394-6198-6010-42f7).
+
+    Asserting the copy "works" cannot prove the mutator is gone — the race is a coin
+    flip, so a green copy is consistent with it still existing. Assert its ABSENCE
+    directly instead, from git's own process trace, driving a push into the remote THIS
+    MODULE'S OWN builder produced, so the guard fails if the builder stops pinning it.
+
+    The trace covers only the probe push. A trace spanning the whole build would also
+    record upkeep from ``seed`` — a non-bare repository outside the copied topology,
+    which nothing copies — and trace2 reports no worktree for a bare repository, so the
+    two cannot be told apart after the fact.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fixture = _build_backup_fixture(workspace, workspace / "topology")
+
+    assert missing_upkeep_pins(fixture.remote) == [], (
+        "the fixture built its bare remote without the upkeep pins"
+    )
+
+    _write(fixture.repo, "events/upkeep-probe.json", '{"event": "upkeep probe"}\n')
+    _commit(fixture.repo, "upkeep probe")
+    # Trace ONLY the push. The local commit above runs upkeep against `repo`, a separate
+    # repository whose posture is not what this guard is about.
+    trace = tmp_path / "trace2.json"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    _git(fixture.repo, "push", "-q", "origin", "HEAD:refs/heads/upkeep-probe")
+
+    assert_no_detached_upkeep(trace, fixture.remote)

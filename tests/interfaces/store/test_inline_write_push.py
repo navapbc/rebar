@@ -20,6 +20,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from _git_upkeep import assert_no_detached_upkeep, init_bare_remote, missing_upkeep_pins
 from _topology_template import clone_topology_template
 
 import rebar
@@ -33,9 +34,11 @@ def _git(*args: str, cwd: Path) -> None:
 def _build_repo_with_origin(root: Path) -> Path:
     origin = root / "origin.git"
     repo = root / "work"
-    subprocess.run(
-        ["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True, text=True
-    )
+    # Pinned at creation, before any write can push into it: at git's defaults a bare
+    # remote's receive-pack leaves a DETACHED `git maintenance run` behind every push,
+    # and this template is copied once per test in this module while `_ahead` fetches
+    # from the same object database (bug b394-6198-6010-42f7).
+    init_bare_remote(origin)
     repo.mkdir()
     _git("init", "-q", cwd=repo)
     _git("config", "user.email", "t@t.co", cwd=repo)
@@ -210,3 +213,52 @@ def test_compact_all_keeps_the_legacy_best_effort_push_contract(
 
     assert compact.compact_all_cli([], repo_root=str(repo)) == 0
     assert calls and all(kwargs == {} for _args, kwargs in calls)
+
+
+def test_a_write_pushing_to_the_origin_leaves_no_detached_upkeep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A push into this module's own origin must leave nothing writing to it.
+
+    ``repo_with_origin`` copies the whole template — ``origin.git`` included — with
+    ``clone_topology_template``. At git's defaults every push into an unpinned bare
+    remote leaves a detached ``git maintenance run`` behind, which repacks and prunes
+    that object database outside any lock the tests hold: the copy walks it, and
+    ``_ahead`` fetches from it on the statement after each write (bug
+    b394-6198-6010-42f7).
+
+    ``init_repo`` itself does NOT push — measured: it leaves ``origin.git`` with no refs
+    and no receive-pack in the trace. The first push comes from the first WRITE, so this
+    guard drives a write, which is the event the pins have to survive.
+
+    Assert the mutator's ABSENCE from git's own process trace rather than asserting that
+    a copy or a fetch happened to succeed — the race is a coin flip, so a green one is
+    consistent with the mutator still existing.
+    """
+    root = tmp_path / "origin-build"
+    root.mkdir()
+    repo = root / "work"
+    origin = root / "origin.git"
+    from rebar import config as _config
+    from rebar._store import ensures as _ensures
+
+    monkeypatch.setenv("REBAR_ROOT", str(repo))
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(root / "xdg-empty"))
+    for variable in ("REBAR_TRACKER_DIR", "REBAR_TRACKER_BRANCH", "REBAR_CONFIG"):
+        monkeypatch.delenv(variable, raising=False)
+    _config.reset_config_cache()
+    _ensures._reset_pending_cache()
+    try:
+        _build_repo_with_origin(root)
+        assert missing_upkeep_pins(origin) == [], (
+            "the fixture built its bare origin without the upkeep pins"
+        )
+        trace = tmp_path / "trace2.json"
+        monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+        rebar.create_ticket("task", "push into the fixture origin", return_alias=True)
+    finally:
+        _config.reset_config_cache()
+        _ensures._reset_pending_cache()
+
+    assert_no_detached_upkeep(trace, origin)
