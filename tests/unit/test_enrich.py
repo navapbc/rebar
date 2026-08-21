@@ -174,3 +174,78 @@ def test_enrich_quality_live() -> None:  # pragma: no cover - not run in CI
         }
         gold = [g.lower() for g in fx["gold"]]
         assert any(g in haystack for g in gold)
+
+
+# --- Prompt bounding against the resolved model's window (bug spongy-illjudged-terrier) ------
+
+
+class _CapturingRunner(Runner):
+    """Records the RunRequest it was handed, then returns a valid digest."""
+
+    name = "capture"
+
+    def __init__(self) -> None:
+        self.seen: RunRequest | None = None
+
+    def run(self, req: RunRequest) -> dict:
+        self.seen = req
+        return {**_VALID_DIGEST, "runner": self.name, "model": None, "trace_id": None}
+
+    def preflight(self) -> None:
+        pass
+
+
+# The conservative physical ceiling this op must respect: the resolved model's OWN context
+# window at 2 chars/token (English prose averages ~4, so 2 under-admits deliberately). This
+# mirrors `workflow.completion_criteria._CONTEXT_CHARS_PER_TOKEN`, the existing precedent for
+# deriving a character ceiling from a model window.
+def _ceiling_for(model: str) -> int:
+    from rebar.llm.model_classes import own_window_tokens
+
+    return own_window_tokens(model) * 2
+
+
+def test_oversized_source_is_bounded_before_the_wire() -> None:
+    """An over-window source never reaches the runner at full length.
+
+    The observable contract: whatever `enrich()` hands the runner as `instructions` fits the
+    resolved model's own context window, and the shortening is VISIBLE (a marker), never a
+    silent drop. Asserted on the request object handed to the injected runner seam — an
+    observable boundary, not an internal name.
+    """
+    cfg = LLMConfig(model="bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    ceiling = _ceiling_for("claude-haiku-4-5")
+    source = "x" * (ceiling * 3)
+    runner = _CapturingRunner()
+    enrich(text=source, config=cfg, runner=runner)
+    assert runner.seen is not None
+    sent = runner.seen.instructions or ""
+    assert len(sent) <= ceiling, f"sent {len(sent)} chars against a {ceiling}-char ceiling"
+    assert "truncated" in sent.lower(), "an over-long source must be shortened VISIBLY"
+
+
+def test_source_within_the_ceiling_is_passed_through_untouched() -> None:
+    """The bound is inert below the ceiling — a normal ticket's prompt is byte-identical."""
+    cfg = LLMConfig(model="bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    source = "Login is broken; users cannot log in."
+    runner = _CapturingRunner()
+    enrich(text=source, config=cfg, runner=runner)
+    assert runner.seen is not None
+    assert runner.seen.instructions == source
+
+
+def test_bounding_an_already_bounded_source_is_a_no_op() -> None:
+    """Applying the bound twice yields the same prompt as applying it once.
+
+    Idempotence matters because a digest is keyed by content hash: a non-idempotent bound
+    would make the same ticket produce different prompts on successive drains.
+    """
+    cfg = LLMConfig(model="bedrock:us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    first = _CapturingRunner()
+    enrich(text="z" * (_ceiling_for("claude-haiku-4-5") * 4), config=cfg, runner=first)
+    assert first.seen is not None
+    once = first.seen.instructions or ""
+    second = _CapturingRunner()
+    enrich(text=once, config=cfg, runner=second)
+    assert second.seen is not None
+    assert second.seen.instructions == once

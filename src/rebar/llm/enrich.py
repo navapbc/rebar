@@ -23,6 +23,86 @@ from rebar.llm.runner import Runner, RunRequest, get_runner
 # return additionally carries runner/model/trace_id provenance keys, which the op drops.
 _DIGEST_FIELDS = ("problem_keywords", "component_or_area", "key_entities", "propositions")
 
+# Chars-per-token for the physical context ceiling. VERBATIM the constant and the reasoning of
+# `rebar.llm.workflow.completion_criteria._CONTEXT_CHARS_PER_TOKEN`: English prose averages ~4
+# chars/token, so 2 is deliberately conservative and leaves room for the tokenizer's worst case
+# on the mixed prose/code/log text a ticket body actually contains. Duplicated rather than
+# imported because `rebar.llm.enrich` is on the STORE WRITE path (enrich_drain.maybe_drain) and
+# must not drag the completion-verifier workflow package into that import graph.
+_CONTEXT_CHARS_PER_TOKEN = 2
+
+# The visible shortening marker. Contract: the marker text is part of the string that is SENT,
+# so an operator reading the prompt (or a digest that looks thin) can see the source was cut
+# rather than silently losing the tail. Wording mirrors
+# `completion_prefetch.fit_within_ceiling`'s "<prefetch truncated to fit context ceiling>".
+_TRUNCATION_MARKER = "\n... <ticket source truncated to fit the model context ceiling> ..."
+
+
+def _bound_source(source: str, model: str | None, *, reserved_chars: int = 0) -> str:
+    """Shorten *source* so it can never overflow *model*'s own context window.
+
+    Bug 569c-931f-69a2-4c1d (spongy-illjudged-terrier): ``_assemble_text`` concatenates title +
+    description + EVERY comment body with no bound at all. On a long-lived ticket that reaches
+    millions of characters, and the provider rejects the request outright — ``status_code: 400
+    ... 'prompt is too long: 206826 tokens > 200000 maximum'`` against the `trivial` class's
+    200k-token window — so the queue's LARGEST entries were the ones that could never drain.
+
+    WHY TRUNCATE HERE, given :mod:`rebar.llm.pai_retry` states that "rebar fails closed rather
+    than SHORTENING authoritative system / user / tool content"?
+    That rule is scoped, not universal, and this content sits on the other side of the scope
+    line. ``pai_retry``'s ``_wire_keeps_response`` governs the *authoritative* conversation
+    carried on a RETRY wire for a verification op: the system prompt, the user's actual
+    instruction, and prior tool results are the evidence a verdict is computed from, so
+    silently shortening them would let a gate pass on partial evidence — an incorrect OUTCOME,
+    which is exactly what failing closed prevents.
+    The ticket-digest source is not that. It is *lossy summarizer input*: this op extracts four
+    constrained normalization fields for dedup candidate generation, and it is already lossy by
+    construction — ``enrich()`` truncates its own ``propositions`` output at
+    ``cfg.overlap_propositions_max`` a few lines below. A digest computed from a ticket's title,
+    description, and first N comments is a slightly weaker dedup hint; a digest that never
+    exists at all (the pre-fix behaviour) is no hint AND an infinite re-claim loop. The project
+    already takes exactly this position for assistance-class content in
+    ``completion_prefetch.fit_within_ceiling``, which trims a prefetch section to this same
+    ceiling and appends a visible marker rather than letting the run die. Failing closed here
+    would buy no correctness and cost the whole feature on precisely the tickets that most need
+    dedup.
+
+    Behaviour (mirrors ``fit_within_ceiling`` + ``comment_limits.truncate_comment_body``):
+
+    * a source at or below the budget is returned **byte-identical**;
+    * an over-budget source is cut on the last ``"\\n"`` join boundary that fits — the join
+      ``_assemble_text`` itself produces — so whole trailing COMMENTS are dropped rather than a
+      comment being severed mid-word, falling back to a hard cut when no boundary fits. Title
+      and description are joined first, so they always survive;
+    * the marker is counted against the budget and the result is defensively re-clamped, so the
+      return NEVER overflows the ceiling even after appending it;
+    * the operation is **idempotent** — the returned string is always within the budget, so a
+      second application returns it unchanged. This is load-bearing, not cosmetic: the digest
+      sidecar keys a stored digest by the ticket's content hash
+      (``overlap.digest_sidecar.freshness``), so a non-idempotent bound would make the same
+      ticket produce a different prompt on each drain and churn the sidecar forever.
+
+    ``reserved_chars`` is the caller's system-prompt size. The ceiling is already conservative,
+    but the budget should not pretend the system prompt is free.
+    """
+    from rebar.llm.model_classes import own_window_tokens
+
+    ceiling = own_window_tokens(model) * _CONTEXT_CHARS_PER_TOKEN
+    # Never let a pathological reservation drive the budget to nothing: floor it at half the
+    # ceiling. The reservation is ~1.9k chars against a six-figure ceiling in practice, so this
+    # floor is defensive only.
+    budget = max(ceiling - max(reserved_chars, 0), ceiling // 2)
+    if len(source) <= budget:
+        return source
+
+    allowance = budget - len(_TRUNCATION_MARKER)
+    if allowance <= 0:  # defensive: an absurdly small window
+        return source[:budget]
+    boundary = source[:allowance].rfind("\n")
+    trimmed = source[:boundary] if boundary > 0 else source[:allowance]
+    result = trimmed + _TRUNCATION_MARKER
+    return result[:budget] if len(result) > budget else result
+
 
 def _assemble_text(state: dict) -> str:
     """title + description + comment bodies, ``"\\n"``-joined (empties skipped).
@@ -92,6 +172,13 @@ def enrich(
 
     prompt = prompts.get_prompt("ticket-digest", repo_root=cfg.repo_path)
     system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
+
+    # Bound the prompt AFTER assembly and against the RESOLVED model (`cfg.model`, set by the
+    # model-class resolution above), so BOTH entry paths inherit it — the `text=` injection seam
+    # and the `ticket_id=` store read. Deliberately NOT inside `_assemble_text`: that helper is
+    # only on the store-read path, so bounding there would leave `text=` unbounded, and it would
+    # also have to learn the model, which it has no business knowing. Bug 569c-931f-69a2-4c1d.
+    source = _bound_source(source, cfg.model, reserved_chars=len(system_prompt))
 
     req = RunRequest(
         system_prompt=system_prompt,
