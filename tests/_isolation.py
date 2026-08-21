@@ -137,3 +137,28 @@ def head_move_failure_message(before: str, after: str) -> str:
         "uncommitted change in this worktree.\n"
         f"Once you own the commit(s), undo them with: git reset --hard {before[:10]}"
     )
+
+
+def working_tree_failure_message(leaked: Iterable[str]) -> str:
+    """The session working-tree backstop's failure text for *leaked* entries.
+
+    The backstop diffs two ``git status --porcelain`` snapshots taken around the
+    whole session, and an entry appearing across that window carries no writer
+    identity: a stray test write and a concurrent commit, build, or editor save
+    in the same checkout produce the same porcelain line. So the text names both
+    causes instead of asserting the one it cannot know — the same limit the
+    sibling guards hit (tickets 746c-185a, hot-guessable-ungulate).
+    """
+    entries = sorted(leaked)
+    return (
+        "REPO ISOLATION FAILURE: new changes appeared in the checkout during "
+        "this test run. Entries from `git status --porcelain`:\n  "
+        + "\n  ".join(entries[:40])
+        + "\nThe backstop only diffs `git status --porcelain` around the whole "
+        "session, so it cannot tell which process wrote them.\n"
+        "If a test wrote them, sandbox it — write under tmp_path (or another "
+        "disposable temp dir) instead of the checkout.\n"
+        "If none did, a concurrent write from outside the suite looks identical "
+        "here: a detached run shares this checkout with whatever else is "
+        "committing, building, or saving in it."
+    )

@@ -625,6 +625,7 @@ from _isolation import head as _repo_head  # noqa: E402
 from _isolation import head_move_failure_message as _head_move_failure_message  # noqa: E402
 from _isolation import leak_failure_message as _leak_failure_message  # noqa: E402
 from _isolation import porcelain as _repo_porcelain  # noqa: E402
+from _isolation import working_tree_failure_message as _working_tree_failure_message  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -724,11 +725,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not leaked:
         return
     reporter = session.config.pluginmanager.get_plugin("terminalreporter")
-    msg = (
-        "REPO ISOLATION FAILURE: the test run left new changes in the checkout "
-        "(a test wrote into the working tree instead of tmp_path). Offending "
-        "entries from `git status --porcelain`:\n  " + "\n  ".join(leaked[:40])
-    )
+    msg = _working_tree_failure_message(leaked)
     if reporter is not None:
         reporter.write_line("")
         reporter.write_line(msg, red=True, bold=True)

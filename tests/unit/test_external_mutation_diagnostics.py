@@ -24,7 +24,11 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 from _child_diag import child_failure_detail  # noqa: E402
-from _isolation import head_move_failure_message, leak_failure_message  # noqa: E402
+from _isolation import (  # noqa: E402
+    head_move_failure_message,
+    leak_failure_message,
+    working_tree_failure_message,
+)
 
 
 def test_leak_message_does_not_assert_the_test_created_the_entry():
@@ -134,3 +138,28 @@ def test_child_failure_detail_includes_stderr_when_the_child_wrote_any():
     detail = child_failure_detail(noisy)
 
     assert "real parse error" in detail
+
+
+def test_working_tree_backstop_message_does_not_assert_a_test_made_the_change():
+    """The session backstop diffs two ``git status --porcelain`` snapshots taken
+    around the WHOLE run, so an entry that appeared in that window has no writer
+    attached to it. A concurrent commit, rebase, branch switch or editor save from
+    another process in the same checkout produces an identical diff entry — the
+    misfire `docs/local-dev-env.md` already documents for this guard family. Same
+    finding as its two siblings (bugs `746c-185a` and `hot-guessable-ungulate`),
+    so the text must name that cause instead of asserting the one it cannot know.
+    """
+    message = working_tree_failure_message(["?? EXTERNAL_MUTATION_PROBE"])
+
+    # Detection is unchanged: it still fails the run and still names every entry.
+    assert "REPO ISOLATION FAILURE" in message
+    assert "?? EXTERNAL_MUTATION_PROBE" in message
+    # It must still tell an actually-leaking test how to fix itself.
+    assert "tmp_path" in message
+    # But it must NOT assert the test did it, nor presume wrongdoing...
+    assert "a test wrote into the working tree instead of tmp_path" not in message
+    assert "offending" not in message.lower()
+    # ...and it MUST offer the cause it cannot rule out.
+    lowered = message.lower()
+    assert "concurrent" in lowered
+    assert "outside" in lowered or "external" in lowered
