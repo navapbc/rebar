@@ -137,21 +137,23 @@ def test_oversize_comment_converges_over_two_passes(
     emitted = comment_mutations_1[0].comments
     assert len(emitted) == 1
     emitted_body = emitted[0]["body"]
-    # The applier hands the emitted (decorated) body to add_comment, which
-    # truncates it to Jira's limit before it lands. Reproduce that send-path
-    # transform here using the SAME shared helper to model what Jira stores.
-    comment_limits = _load_module(
-        "comment_limits_conv_test",
-        REPO_ROOT
-        / "src"
-        / "rebar"
-        / "_engine"
-        / "rebar_reconciler"
-        / "adapters"
-        / "jira"
-        / "comment_limits.py",
-    )
-    landed_body = comment_limits.truncate_comment_body(emitted_body)
+    # The applier hands the emitted (decorated) body to add_comment, which fits it
+    # before it lands. Reproduce that send-path transform by calling exactly what
+    # ``acli_cli_ops.add_comment`` calls, so this model cannot drift from it.
+    #
+    # Bug e339-9709-15fe-419a: this used to model the landed body as
+    # ``comment_limits.truncate_comment_body(emitted_body)``. That stopped being
+    # the send path at commit ``27b868ba55``, which moved Cloud onto
+    # ``fit_preserving_marker(body, AdfCodec.fit_outbound)`` — a SERIALIZED-ADF
+    # measure that also reserves budget for the marker. Modelling the superseded
+    # helper is why this convergence test stayed green while live convergence was
+    # broken, so the model is now taken from the real send path.
+    from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec
+    from rebar_reconciler.adapters.jira_family.rich_text import cutover_clients
+    from rebar_reconciler.outbound_comments import fit_preserving_marker
+
+    codec = AdfCodec(rich="cloud" in cutover_clients())
+    landed_body = fit_preserving_marker(emitted_body, codec.fit_outbound)
     assert len(landed_body) <= _JIRA_COMMENT_MAX_CHARS, (
         f"Landed body ({len(landed_body)} chars) must be within Jira's limit"
     )
