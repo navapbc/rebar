@@ -239,5 +239,6 @@ claim about them was wrong.** Change `c3aec3eae6` (the completion-verifier banki
 stored code-v3 sidecar, but its `correctness` finding sits at priority **0.3857 / validity 0.714** —
 below 0.54, so a flip would NOT have caught it. Change `d2dea317ec` has no code-v3 sidecar at all,
 so no recall statement is measurable for it. The flips rest on the precision/friction profile in the
-table: every would-block finding for both criteria was verifier-confirmed at validity >= 0.99, and
-neither exceeds a twentieth of the friction budget.
+table: the would-block sets are high-precision (mean validity 1.00 and 0.99, lowest single
+finding 0.93, none below 0.5), and both flips sit inside the 8.0% budget — `correctness` at half
+of it, `edge-cases` at under a quarter.
