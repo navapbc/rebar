@@ -204,6 +204,9 @@
     "force_close_reason": {
       "type": "string",
       "description": "The operator's reason from `--force=<reason>` when a close bypassed its gates. Written onto the `*->closed` STATUS event in the same locked write as the close and folded here, so the justification for a bypass survives without depending on the second lock acquisition the best-effort FORCE_CLOSE audit comment needs (bug defiant-orthoclase-buck). Present only on a force-closed ticket; absence means the close was not forced."
+    },
+    "completion_expectation": {
+      "$ref": "common.schema.json#/$defs/completion_expectation"
     }
   }
 }

@@ -432,7 +432,7 @@ def test_reason_only_close_skips_the_verifier_and_returns_the_disposition(store,
     _forbid_verifier(monkeypatch)
     tid = _make(store, "task", "obsolete under the gate")
 
-    out = close_precheck._completion_precheck(
+    out, expectation = close_precheck._completion_precheck(
         tid,
         "task",
         str(store),
@@ -443,6 +443,7 @@ def test_reason_only_close_skips_the_verifier_and_returns_the_disposition(store,
     )
 
     assert out is not None, "an unsigned close for a valid disposition is the 738a trap"
+    assert expectation == "disposition"
     assert out["disposition"] == "obsolete"
     assert out["close_reason"] == "premise gone"
 

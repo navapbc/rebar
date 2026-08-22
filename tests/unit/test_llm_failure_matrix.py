@@ -563,17 +563,17 @@ def test_force_close_skips_completion_gate(monkeypatch):
 
     monkeypatch.setattr(completion_sidecar, "emit", _record_completion_sidecar)
 
-    # --force path: returns None WITHOUT ever calling verify_completion.
-    assert (
-        _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="approved")
-        is None
-    )
+    # --force path: returns no sign signal WITHOUT ever calling verify_completion.
+    assert _tc._completion_precheck(
+        "rec-0000", "task", ".", None, reason="", force_close="approved"
+    ) == (None, "force_bypassed")
     assert calls == [], "verify_completion MUST NOT run on the --force path"
     assert emitted == [], "--force MUST NOT emit a completion sidecar"
 
     # Positive control: without --force the same enabled gate DOES invoke the LLM verify.
-    assert (
-        _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="") is None
+    assert _tc._completion_precheck("rec-0000", "task", ".", None, reason="", force_close="") == (
+        None,
+        "local_source",
     )
     assert calls == ["rec-0000"], "verify_completion must run when --force is absent"
     assert emitted == [

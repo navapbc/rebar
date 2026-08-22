@@ -39,6 +39,16 @@ CloseClass = Literal[
     "wontfix",
     "undetermined",
 ]
+CompletionExpectation = Literal[
+    "required",
+    "disposition",
+    "gate_off",
+    "gate_unreadable",
+    "force_bypassed",
+    "local_source",
+    "not_certifiable",
+    "not_applicable",
+]
 
 
 # --- shared objects (common.schema.json) ---
@@ -141,6 +151,7 @@ class TicketState(TypedDict):
     close_class: NotRequired[CloseClass]
     close_reason: NotRequired[str]
     force_close_reason: NotRequired[str]
+    completion_expectation: NotRequired[CompletionExpectation]
 
 
 class TicketStateLLM(TypedDict):

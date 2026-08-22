@@ -134,9 +134,10 @@ def _arm(monkeypatch, results: list[dict], *, max_resumes: int = 2):
 
 
 def _close(ticket_id: str = "res-0000", ref: str | None = None):
-    return _tc._completion_precheck(
+    result, _expectation = _tc._completion_precheck(
         ticket_id, "task", ".", None, reason="", force_close="", ref=ref
     )
+    return result
 
 
 # ── qualification: only an insufficiency-only FAIL resumes ───────────────────────────────────

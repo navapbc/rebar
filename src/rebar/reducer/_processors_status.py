@@ -75,6 +75,12 @@ def _fold_close_metadata(state: dict, data: dict) -> None:
     # this records why a truthful disposition closed, that one records why a gate was bypassed.
     if data.get("status") == "closed" and data.get("close_reason"):
         state["close_reason"] = data["close_reason"]
+    # WHY a completion signature was or was not expected for this close (story
+    # mechanical-coherent-wolverine) travels with the same edge, under the same present-only
+    # rule and the same winner-only application. Absent on a historical close event means
+    # unknown/legacy — the key stays ABSENT in reduced state, never guessed.
+    if data.get("status") == "closed" and data.get("completion_expectation"):
+        state["completion_expectation"] = data["completion_expectation"]
 
 
 def process_status(state: dict, event: dict, data: dict, _filepath: str) -> None:

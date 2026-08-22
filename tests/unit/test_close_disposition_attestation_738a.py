@@ -98,7 +98,7 @@ def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeyp
         close_disposition, "verdict", lambda *a, **k: called.append("verdict") or {"x": 1}
     )
 
-    out = close_precheck._completion_precheck(
+    out, expectation = close_precheck._completion_precheck(
         "0059-c7f0-cce1-4077",
         "bug",
         str(tmp_path),
@@ -109,6 +109,7 @@ def test_a_force_close_is_still_never_signed_even_for_a_linked_duplicate(monkeyp
     )
 
     assert out is None, "a --force must return no sign signal, so the close stays unsigned"
+    assert expectation == "force_bypassed"
     assert called == [], "the disposition attestation must not even be built for a force-close"
 
 
@@ -134,7 +135,7 @@ def test_the_precheck_ACTUALLY_returns_the_disposition_verdict(monkeypatch, tmp_
         lambda tid, cc, tracker: {"verdict": "PASS", "disposition": cc, "replacement": "r-1"},
     )
 
-    out = close_precheck._completion_precheck(
+    out, expectation = close_precheck._completion_precheck(
         "0059-c7f0-cce1-4077",
         "bug",
         str(tmp_path),
@@ -149,6 +150,7 @@ def test_the_precheck_ACTUALLY_returns_the_disposition_verdict(monkeypatch, tmp_
         "and its parent's certification withheld, which is exactly bug 738a"
     )
     assert out["disposition"] == "duplicate"
+    assert expectation == "disposition"
 
 
 def test_no_verdict_without_a_live_replacement():

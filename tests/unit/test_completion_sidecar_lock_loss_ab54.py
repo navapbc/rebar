@@ -167,7 +167,7 @@ def _drive_precheck_pass(store, monkeypatch, tid: str):
     monkeypatch.setattr(
         _llm, "verify_completion", lambda *a, **k: _pass_verdict(tid), raising=False
     )
-    return close_precheck._completion_precheck(
+    result, _expectation = close_precheck._completion_precheck(
         tid,
         "task",
         str(store),
@@ -175,6 +175,7 @@ def _drive_precheck_pass(store, monkeypatch, tid: str):
         reason="",
         force_close="",
     )
+    return result
 
 
 # ── AC2 + AC3 + AC5: a DROPPED PASS sidecar warns on stderr; the close still proceeds ────────

@@ -120,7 +120,10 @@ def _gate_on(monkeypatch, *, verdict=None):
     monkeypatch.setattr(
         transition_close,
         "_completion_precheck",
-        lambda *a, **k: verdict if verdict is not None else {"verdict": "PASS", "findings": []},
+        lambda *a, **k: (
+            verdict if verdict is not None else {"verdict": "PASS", "findings": []},
+            "required",
+        ),
     )
     monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: False)
 
@@ -330,9 +333,230 @@ def test_transition_core_does_not_accept_a_parameter_it_discards():
     signature = inspect.signature(txn.transition_core)
     body = source.split(":", 1)[1]  # drop the def line so params are not counted as reads
 
-    for name in ("close_class", "force_reason"):
+    for name in ("close_class", "force_reason", "completion_expectation"):
         assert name in signature.parameters, f"{name} should still be a parameter"
         assert body.count(name) > 1, (
             f"{name} is declared but never read in transition_core's body — the "
             "defiant-orthoclase-buck defect"
         )
+
+
+# ── durable close provenance: completion_expectation (story mechanical-coherent-wolverine) ──
+# "Closed with no attestation" used to collapse gate-off, --force, config-unreadable
+# fail-open, local-source, certifiable-False withholding and signature-append failure into
+# ONE indistinguishable state. The close STATUS event now records WHY a completion signature
+# was or was not EXPECTED (never the outcome — the STATUS commits BEFORE signing is
+# attempted), in the same locked write as the close, folded into reduced state.
+
+_GATE_ON = "[verify]\nrequire_completion_verification_for_close = true\n"
+# `[verify` never closes its table header -> tomllib raises -> ConfigError -> UNREADABLE.
+_BROKEN_CONFIG = "[verify\nrequire_completion_verification_for_close = true\n"
+
+
+def _write_config(repo: Path, text: str) -> None:
+    from rebar import config
+
+    (repo / "rebar.toml").write_text(text, encoding="utf-8")
+    config.reset_config_cache()
+
+
+def _pass_verifier(monkeypatch, extra: dict | None = None) -> None:
+    """Stub ONLY the billable LLM call; every deterministic precheck still runs."""
+    from rebar._commands import close_autoresume
+
+    result = {"verdict": "PASS", "findings": []}
+    result.update(extra or {})
+    monkeypatch.setattr(close_autoresume, "verify_with_auto_resume", lambda *a, **k: dict(result))
+    monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: False)
+
+
+def _close_event(repo: Path, tid: str) -> dict:
+    closes = [e for e in _status_events(repo, tid) if e["data"].get("status") == "closed"]
+    assert len(closes) == 1
+    return closes[0]
+
+
+def _expectation(repo: Path, tid: str) -> str | None:
+    return rebar.show_ticket(tid, repo_root=str(repo)).get("completion_expectation")
+
+
+def test_expectation_rides_the_close_own_locked_write(repo, monkeypatch):
+    """AC1: written in the SAME locked write as the close — the write-lock is acquired
+    exactly ONCE for the whole close, so the provenance cannot be lost to a second
+    acquisition timing out (the failure mode being recorded)."""
+    from rebar._commands import txn
+
+    tid = _open_ticket(repo)
+    acquisitions: list[object] = []
+    real = txn._acquire_write_lock
+
+    def counting(tracker_dir):
+        acquisitions.append(tracker_dir)
+        return real(tracker_dir)
+
+    monkeypatch.setattr(txn, "_acquire_write_lock", counting)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert len(acquisitions) == 1, "the close must take exactly one write-lock"
+    assert _close_event(repo, tid)["data"]["completion_expectation"] == "gate_off"
+
+
+def test_reduced_state_separates_signed_lost_and_gate_off(repo, monkeypatch):
+    """AC2: a later reader, holding no lock and reading only reduced state, tells apart
+    closed-and-signed / closed-with-signature-LOST / closed-with-gate-off."""
+    _write_config(repo, _GATE_ON)
+    _pass_verifier(monkeypatch)
+
+    t_signed = _open_ticket(repo)
+    rebar.transition(t_signed, "in_progress", "closed", repo_root=str(repo))
+
+    t_lost = _open_ticket(repo)
+
+    def _boom(*_a, **_kw):
+        raise _signing.SigningError("flock: could not acquire lock after 60s")
+
+    monkeypatch.setattr(transition_close, "sign_completion_verdict", _boom)
+    rebar.transition(t_lost, "in_progress", "closed", repo_root=str(repo))
+
+    _write_config(repo, "")
+    t_off = _open_ticket(repo)
+    rebar.transition(t_off, "in_progress", "closed", repo_root=str(repo))
+
+    readings = {}
+    for name, tid in (("signed", t_signed), ("lost", t_lost), ("off", t_off)):
+        state = rebar.show_ticket(tid, repo_root=str(repo))
+        attested = bool((state.get("attestations") or {}).get("completion-verifier"))
+        readings[name] = (state.get("completion_expectation"), attested)
+
+    assert readings["signed"] == ("required", True)
+    assert readings["lost"] == ("required", False)
+    assert readings["off"] == ("gate_off", False)
+    assert len(set(readings.values())) == 3, "all three states must read back distinctly"
+
+
+def test_force_bypassed_is_recorded_as_itself(repo, monkeypatch):
+    """AC3 + AC7: a --force past an ENABLED gate records force_bypassed, never gate_off —
+    computed independently of verified_result (which is None for a forced close)."""
+    _write_config(repo, _GATE_ON)
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", force="operator call", repo_root=str(repo))
+
+    assert _expectation(repo, tid) == "force_bypassed"
+
+
+def test_local_source_is_recorded_as_itself(repo, monkeypatch):
+    """AC3: an opt-in local (unattested) verdict is its own state, never gate_off."""
+    _write_config(repo, _GATE_ON)
+    _pass_verifier(monkeypatch, {"source": "local"})
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert _expectation(repo, tid) == "local_source"
+
+
+def test_not_certifiable_is_recorded_as_itself(repo, monkeypatch):
+    """AC3: certification withheld (uncertified descendant) is its own state, never gate_off."""
+    _write_config(repo, _GATE_ON)
+    _pass_verifier(monkeypatch, {"certifiable": False})
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert _expectation(repo, tid) == "not_certifiable"
+
+
+def test_unreadable_config_records_gate_unreadable_not_gate_off(repo, monkeypatch):
+    """AC4: the fail-OPEN skip on an unreadable config is a FAULT and must not be laundered
+    into the gate_off policy choice (consumes the GateState tri-state)."""
+    tid = _open_ticket(repo)
+    _write_config(repo, _BROKEN_CONFIG)
+
+    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+
+    assert _expectation(repo, tid) == "gate_unreadable"
+
+
+def test_disposition_close_records_disposition_not_required(repo, monkeypatch):
+    """AC5: a qualifying administrative disposition (reason-required class with its
+    --reason) is signed as a DISPOSITION, not a completion PASS, and reads back as such."""
+    _write_config(repo, _GATE_ON)
+    tid = rebar.create_ticket("bug", "a bug", repo_root=str(repo))
+    rebar.transition(tid, "open", "in_progress", repo_root=str(repo))
+
+    rebar.transition(
+        tid,
+        "in_progress",
+        "closed",
+        close_class="obsolete",
+        reason="the premise no longer holds",
+        repo_root=str(repo),
+    )
+
+    assert _expectation(repo, tid) == "disposition"
+
+
+def test_idea_to_closed_records_not_applicable(repo):
+    """AC6: an idea -> closed is a REJECT/DROP, not a completion — the gate never applied."""
+    _write_config(repo, _GATE_ON)
+    tid = rebar.create_ticket("task", "an idea", repo_root=str(repo))
+    rebar.transition(tid, "open", "idea", repo_root=str(repo))
+
+    rebar.transition(tid, "idea", "closed", repo_root=str(repo))
+
+    assert _expectation(repo, tid) == "not_applicable"
+
+
+def test_force_close_under_a_disabled_gate_records_gate_off(repo):
+    """AC7 (precedence): the gate state resolves FIRST — with the gate off there was no gate
+    to bypass, so a forced close records gate_off while the reason stays durable in
+    force_close_reason."""
+    tid = _open_ticket(repo)
+
+    rebar.transition(tid, "in_progress", "closed", force="belt and braces", repo_root=str(repo))
+
+    state = rebar.show_ticket(tid, repo_root=str(repo))
+    assert state["completion_expectation"] == "gate_off"
+    assert state["force_close_reason"] == "belt and braces"
+
+
+def test_a_legacy_close_event_without_the_field_reads_back_absent(tmp_path):
+    """AC8: backward compatibility — a historical close STATUS event lacking the key reduces
+    to state with the key ABSENT (unknown/legacy, never guessed)."""
+    from rebar.reducer import reduce_ticket
+
+    tdir = tmp_path / "aaaa-bbbb-cccc-dddd"
+    tdir.mkdir()
+    (tdir / "100-11111111-1111-1111-1111-111111111111-CREATE.json").write_text(
+        json.dumps(
+            {
+                "timestamp": 100,
+                "uuid": "11111111-1111-1111-1111-111111111111",
+                "event_type": "CREATE",
+                "env_id": "e",
+                "author": "t",
+                "data": {"ticket_type": "task", "title": "legacy"},
+            }
+        )
+    )
+    (tdir / "200-22222222-2222-2222-2222-222222222222-STATUS.json").write_text(
+        json.dumps(
+            {
+                "timestamp": 200,
+                "uuid": "22222222-2222-2222-2222-222222222222",
+                "event_type": "STATUS",
+                "env_id": "e",
+                "author": "t",
+                "data": {"status": "closed", "current_status": "open"},
+            }
+        )
+    )
+
+    state = reduce_ticket(str(tdir))
+
+    assert state["status"] == "closed"
+    assert "completion_expectation" not in state, (
+        "an absent field on a legacy event must stay absent — unknown, never guessed"
+    )

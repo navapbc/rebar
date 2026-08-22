@@ -62,7 +62,7 @@ def test_mcp_transition_carries_the_lost_signature_marker(repo: Path, monkeypatc
     monkeypatch.setattr(
         transition_close,
         "_completion_precheck",
-        lambda *a, **k: {"verdict": "PASS", "findings": []},
+        lambda *a, **k: ({"verdict": "PASS", "findings": []}, "required"),
     )
     monkeypatch.setattr(transition_close, "_material_drifted", lambda *_a: False)
 
