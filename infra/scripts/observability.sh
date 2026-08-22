@@ -13,7 +13,9 @@
 #   4d. continuous auto-deploy failures (AUTODEPLOY_ERROR in the unit journal) -> rebar/host:deploy_errors (epic 88ab/8903 alarm).
 #   4e. auto-deploys DEFERRED to avoid killing an in-flight review (AUTODEPLOY_DEFERRED) ->
 #       rebar/host:deploy_deferrals, and deploys that recreated the container ANYWAY
-#       (AUTODEPLOY_REVIEW_INTERRUPT) -> rebar/host:review_interrupts (bug 34cd alarm).
+#       (AUTODEPLOY_REVIEW_INTERRUPT) -> rebar/host:review_interrupts (bug 34cd alarm), and
+#       pressure-triggered reclaims on the no-op tick (AUTODEPLOY_DISK_PRESSURE) ->
+#       rebar/host:disk_pressure_prunes (diagnostic counter, task 9d15 — no alarm).
 #   4b. gerrit-to-platform CI-dispatch failures (Gerrit journald) -> rebar/host:g2p_dispatch_errors (epic 1fa8 alarm).
 #   5. Gate reachability -> Rebar/Gate:GerritReachable (1/0), watched by the S7 gate-down
 #      alarm (treat_missing_data=breaching catches a dead host / stopped probe).
@@ -269,8 +271,10 @@ DEFER_OFFSET_FILE="${DEFER_OFFSET_FILE:-/var/lib/rebar/autodeploy-defer-offset}"
 INTERRUPT_OFFSET_FILE="${INTERRUPT_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-offset}"
 INTERRUPT_BOUND_OFFSET_FILE="${INTERRUPT_BOUND_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-bound-offset}"
 INTERRUPT_SIGNAL_OFFSET_FILE="${INTERRUPT_SIGNAL_OFFSET_FILE:-/var/lib/rebar/autodeploy-interrupt-signal-offset}"
+DISK_PRESSURE_OFFSET_FILE="${DISK_PRESSURE_OFFSET_FILE:-/var/lib/rebar/autodeploy-disk-pressure-offset}"
 mkdir -p "$(dirname "$DEFER_OFFSET_FILE")" "$(dirname "$INTERRUPT_OFFSET_FILE")" \
-  "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")"
+  "$(dirname "$INTERRUPT_BOUND_OFFSET_FILE")" "$(dirname "$INTERRUPT_SIGNAL_OFFSET_FILE")" \
+  "$(dirname "$DISK_PRESSURE_OFFSET_FILE")"
 publish_autodeploy_marker_delta() {
   local token="$1" metric="$2" offset_file="$3" label="$4" total prev new
   total=$(journalctl -u rebar-autodeploy.service --no-pager -o cat 2>/dev/null | grep -cE "$token") || true
@@ -308,6 +312,12 @@ publish_autodeploy_marker_delta \
   '^AUTODEPLOY_REVIEW_INTERRUPT \{.*"reason":[[:space:]]*"signal-unavailable"' \
   review_interrupts_signal_unavailable "$INTERRUPT_SIGNAL_OFFSET_FILE" \
   "reviews interrupted with the in-flight signal UNREADABLE (deploys are running blind)"
+# Pressure-triggered reclaims on the quiescent no-op tick (autodeploy.sh reclaim_under_pressure,
+# story 28f9). A diagnostic counter, not an alarm input — the OUTCOME is already alarmed by
+# rebar-root-disk-pressure. It exists so an incident sweep can distinguish "the reclaim gate
+# never ran" from "it ran and reclaimed nothing" without host access (task 9d15-d576-e0ca-4596).
+publish_autodeploy_marker_delta '^AUTODEPLOY_DISK_PRESSURE \{' disk_pressure_prunes \
+  "$DISK_PRESSURE_OFFSET_FILE" "auto-deploy disk-pressure prunes"
 
 
 # --- 4b. gerrit-to-platform CI-dispatch failures (epic 1fa8) ---------------
