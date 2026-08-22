@@ -773,6 +773,19 @@ discarded) are recorded in the run **trace** for provenance, but their tokens ar
 into the aggregate successful-run usage tally — usage accounts the winning run, the trace
 accounts the attempts.
 
+**A mixed-provider fallback chain disables prompt caching — a 0/0 cache reading is not a
+regression.** A chain's capability record is the **conservative intersection** over its
+candidates (`runner_support._intersect_capabilities` is the authority): any candidate may be
+the one that answers, so a capability holds only if every candidate has it. Prompt-cache
+styles that disagree therefore collapse to `"none"` for the whole chain — each style's cache
+keys are provider-specific and would error on the candidate that does not share them. The
+observable consequence: an op running on such a chain (e.g.
+`["bedrock:…", "anthropic:…"]`) legitimately reports `cache_read_tokens = 0` and
+`cache_write_tokens = 0` (provenance `prompt_cache_style = "none"`) while the *same model
+called on its own* caches normally. The shipped configuration records the same fact — see the
+fallback note in `rebar.toml` ("Mixed-provider chains disable prompt caching because their
+provider-specific cache keys do not intersect").
+
 ## Completion verification + the close gate (`verify_completion`)
 
 The shipped `verify_completion` op (library `rebar.llm.verify_completion`, CLI `rebar
