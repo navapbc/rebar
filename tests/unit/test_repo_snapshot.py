@@ -445,3 +445,67 @@ def test_write_lock_never_shares_an_inode_between_entries(tmp_path):
             pytest.fail("a lock held in one entry blocked a writer in another entry")
         fcntl.flock(handle_b, fcntl.LOCK_UN)
         fcntl.flock(handle_a, fcntl.LOCK_UN)
+
+
+# --------------------------------------------------------------------------------------
+# Task 5b25 — adjacent CODE SHAs must not each cost a whole fresh tree (mirror of 8386)
+# --------------------------------------------------------------------------------------
+def test_adjacent_code_shas_reuse_unchanged_blobs(tmp_path):
+    """N code resolutions across N adjacent SHAs must cost ~ONE tree, not N trees.
+
+    Bug 8386 fixed this write amplification for ``tickets-<sha>`` entries; the bare
+    ``<sha>`` CODE entry path has the identical construct (``git read-tree`` +
+    ``checkout-index --all`` writes every blob fresh). ``--ref HEAD`` moves the code key
+    per commit — the fast-moving regime where the cache-hit branch never fires — so the
+    same hardlink-donor sharing must hold here (measured pre-fix at exactly 4.00x).
+
+    Sharing must not weaken the attestation basis: each ``<store>/<sha>`` entry must
+    still byte-match the committed tree at its own SHA, asserted below per entry. The
+    property is algorithmic — distinct-inode bytes per resolution — never wall-clock.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    payload = "C" * 20_000
+    src = repo / "src"
+    src.mkdir()
+    for i in range(40):
+        (src / f"m{i:03d}.py").write_text(payload)
+    _commit_all(repo, "code base")
+
+    store = rs.store_root()
+    shas: list[str] = []
+    for i in range(4):
+        # Exactly ONE file changes per commit — the shape of a real code commit.
+        (src / f"m{i:03d}.py").write_text(payload[:-1] + "X")
+        sha = _commit_all(repo, f"one-file delta {i}")
+        shas.append(sha)
+        rs.materialize(sha, repo_root=str(repo), fetch=False)
+
+    one_tree = 40 * len(payload)
+    consumed = _distinct_bytes(store)
+
+    # Four resolutions, four distinct SHAs, four entries — but they differ by one file
+    # each, so the DISK cost must stay near a single tree. Without sharing this is ~4x.
+    assert consumed < one_tree * 2, (
+        f"4 adjacent-SHA code resolutions consumed {consumed} bytes; one tree is "
+        f"~{one_tree}. Unchanged blobs are being rewritten instead of shared."
+    )
+
+    # The sharing is real, not an artefact of the measurement: a file untouched by every
+    # delta is ONE inode across all four entries.
+    entries = sorted(store / sha for sha in shas)
+    assert all(e.is_dir() for e in entries), "each distinct code SHA still gets its own entry"
+    unchanged = {os.lstat(e / "src" / "m039.py").st_ino for e in entries}
+    assert len(unchanged) == 1, f"an unchanged blob occupies {len(unchanged)} inodes, want 1"
+
+    # Faithfulness is NOT traded away for sharing (the attestation basis): every entry
+    # must still byte-match the committed tree at its own SHA.
+    for i, sha in enumerate(shas):
+        root = store / sha
+        listed = _git(repo, "ls-tree", "-r", "--name-only", sha).splitlines()
+        on_disk = sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+        assert on_disk == sorted(listed), f"entry {i} tree does not match {sha[:8]}"
+        for rel in listed:
+            want = _git(repo, "show", f"{sha}:{rel}")
+            assert (root / rel).read_text().rstrip("\n") == want.rstrip("\n"), (
+                f"entry {i} content diverges at {rel}"
+            )

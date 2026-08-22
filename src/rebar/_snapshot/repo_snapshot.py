@@ -514,7 +514,16 @@ def materialize(
         # Gated on "are blobs actually missing?", NOT on `fetch`: cache.acquire (the real
         # entry point) resolves the ref itself and calls us with fetch=False.
         _ensure_blobs_present(root_dir, sha, "origin")
-        _materialize_tree(root_dir, sha, build)
+        # Same write-amplification fix as the tickets entries (bug 8386, task 5b25):
+        # `--ref HEAD` moves this key per commit, so adjacent SHAs would each cost a whole
+        # fresh tree. Build from a hardlinked neighbouring entry when one exists, rewriting
+        # only the changed paths. Sharing does not weaken the attestation basis: the helper
+        # fails CLOSED (returns False) on any doubt — donor mismatch, symlink/gitlink in the
+        # tree, missing objects — and the entry it does build byte-matches the committed
+        # tree at `sha` (verified against `git ls-tree`), exactly like a full build. The
+        # code entry's tree sits at the entry ROOT, hence the empty prefix and subdir.
+        if not materialize_via_donor(root_dir, sha, build, store=store, entry_prefix="", subdir=""):
+            _materialize_tree(root_dir, sha, build)
         _fsync_dir(build)
         try:
             os.rename(build, dest)
