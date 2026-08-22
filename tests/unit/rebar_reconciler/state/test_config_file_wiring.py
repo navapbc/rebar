@@ -171,7 +171,7 @@ def test_id_guard_env_beats_file(tmp_path: Path, monkeypatch) -> None:
     assert rebar_id_audit._resolve_id_guard_bypass() is False
 
 
-@pytest.mark.parametrize("mode,expect", [("warn", True), ("raise", False)])
+@pytest.mark.parametrize(("mode", "expect"), [("warn", True), ("raise", False)])
 def test_id_guard_legacy_env_value_flip(tmp_path: Path, monkeypatch, mode, expect) -> None:
     monkeypatch.setenv("REBAR_ROOT", str(_proj(tmp_path)))
     monkeypatch.setenv("REBAR_ID_GUARD_MODE", mode)

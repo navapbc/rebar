@@ -132,7 +132,7 @@ def test_server_never_pushes_and_workspace_is_isolated(tmp_path, monkeypatch):
 
         seen["push"] = current_push_mode()
         seen["remotes"] = subprocess.run(
-            ["git", "-C", rr, "remote"], capture_output=True, text=True
+            ["git", "-C", rr, "remote"], capture_output=True, text=True, check=False
         ).stdout.strip()
         return {"verdict": "PASS", "model": "m", "runner": "r"}
 

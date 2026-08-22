@@ -228,7 +228,7 @@ def _seed_owner_stamp(tmp_path, content: str | None) -> str:
 
 
 @pytest.mark.parametrize(
-    "label,stamp",
+    ("label", "stamp"),
     [
         ("empty", ""),
         ("missing_colon", "hostnamewithnocolon"),

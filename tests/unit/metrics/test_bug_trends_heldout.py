@@ -296,6 +296,7 @@ def test_metrics_cli_renders_all_bug_trend_ids(tmp_path):
             "REBAR_SYNC_PUSH": "off",
         },
         cwd=str(tmp_path),
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     doc = json.loads(cp.stdout)

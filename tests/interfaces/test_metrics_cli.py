@@ -31,6 +31,7 @@ def _cli(*args: str, cwd: str, env: dict[str, str] | None = None) -> subprocess.
         text=True,
         cwd=cwd,
         env=env,
+        check=False,
     )
 
 

@@ -367,7 +367,10 @@ def delete_cli(argv: list[str], *, repo_root=None) -> int:
         rels = [_rel(tracker, p) for p in written]
         if rels:
             subprocess.run(
-                ["git", "-C", tracker, "reset", "-q", "--", *rels], capture_output=True, text=True
+                ["git", "-C", tracker, "reset", "-q", "--", *rels],
+                capture_output=True,
+                text=True,
+                check=False,
             )
         for p in written:
             try:

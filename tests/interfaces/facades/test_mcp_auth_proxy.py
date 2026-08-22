@@ -300,5 +300,6 @@ def test_proxy_env_vars_and_manifest():
         cwd=repo_root,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stdout + r.stderr

@@ -19,6 +19,7 @@ def _cli_search(repo: Path, *args: str) -> list:
         capture_output=True,
         text=True,
         env={**_env(repo)},
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     return json.loads(cp.stdout)
@@ -31,6 +32,7 @@ def _cli_search_run(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         env={**_env(repo)},
+        check=False,
     )
 
 

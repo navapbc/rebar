@@ -29,6 +29,7 @@ def _run(
         text=True,
         cwd=str(cwd),
         env=env,
+        check=False,
     )
 
 

@@ -271,4 +271,4 @@ def rebar_repo(tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
     repo = Path(tmp_path) / "repo"
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     build_scratch_rebar_repo(repo)
-    yield repo
+    return repo

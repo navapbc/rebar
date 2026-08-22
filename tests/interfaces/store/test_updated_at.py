@@ -38,6 +38,7 @@ def _compact(repo: Path, tid: str) -> None:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
 

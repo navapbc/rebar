@@ -245,7 +245,7 @@ def test_warn_mode_logs_and_does_not_raise(applier, errors_mod, caplog):
 
 
 @pytest.mark.parametrize(
-    "env_val,config_val,expected_raises",
+    ("env_val", "config_val", "expected_raises"),
     [
         # (a) env=warn + config=raise → warn behavior (env wins, no raise)
         ("warn", "raise", False),

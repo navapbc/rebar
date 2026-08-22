@@ -76,9 +76,10 @@ def test_guard_rejects_a_renarrowed_recipe() -> None:
     try:
         _assert_scope_covers_scripts(renarrowed)
     except AssertionError as exc:
-        assert "scripts" in str(exc)
+        refusal: BaseException = exc
     else:  # pragma: no cover - only reached if the guard has rotted
         raise AssertionError(
             "the scope guard accepted a `mypy src/rebar`-only recipe — it would not "
             "catch a revert of ticket cc99"
         )
+    assert "scripts" in str(refusal)

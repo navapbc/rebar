@@ -90,6 +90,7 @@ def _branch_mismatch(tracker: str, repo_root=None) -> str | None:
             capture_output=True,
             text=True,
             timeout=_FSCK_GIT_TIMEOUT,
+            check=False,
         )
     except subprocess.TimeoutExpired:
         return None  # watchdog (9305): a hung fs yields the best-effort no-report path

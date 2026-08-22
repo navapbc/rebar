@@ -42,7 +42,7 @@ def _rebar_cli(*args: str, repo: Path, push: str, timeout: int = 60) -> subproce
     rebar_bin = shutil.which("rebar")
     cmd = [rebar_bin, *args] if rebar_bin else [sys.executable, "-m", "rebar", *args]
     return subprocess.run(
-        cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=timeout
+        cmd, cwd=str(repo), env=env, capture_output=True, text=True, timeout=timeout, check=False
     )
 
 

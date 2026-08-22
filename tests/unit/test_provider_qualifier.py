@@ -46,9 +46,9 @@ def test_configured_provider_is_applied_to_a_versioned_bedrock_id(model):
     assert _resolve_target(model, "bedrock") == f"bedrock:{model}"
 
 
-def test_configured_provider_is_applied_to_an_unversioned_alias(model=_ALIAS):
+def test_configured_provider_is_applied_to_an_unversioned_alias():
     """The control: this shape already worked, and must keep working byte-for-byte."""
-    assert _resolve_target(model, "bedrock") == f"bedrock:{model}"
+    assert _resolve_target(_ALIAS, "bedrock") == f"bedrock:{_ALIAS}"
 
 
 @pytest.mark.parametrize("model", [_VERSIONED, _VERSIONED_GLOBAL, _ALIAS])

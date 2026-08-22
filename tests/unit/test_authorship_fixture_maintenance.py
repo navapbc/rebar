@@ -18,6 +18,7 @@ def _local_config(repo: Path, key: str) -> str:
         ["git", "-C", str(repo), "config", "--local", "--get", key],
         capture_output=True,
         text=True,
+        check=False,
     )
     return proc.stdout.strip() if proc.returncode == 0 else "<absent>"
 

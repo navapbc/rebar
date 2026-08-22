@@ -93,7 +93,7 @@ def test_prompt_is_agentic_and_resolves_through_production_loader() -> None:
 
 @pytest.mark.parametrize(
     "required",
-    (
+    [
         "every acceptance-criterion checkbox",
         "affirmative repository evidence",
         "exact file path",
@@ -106,7 +106,7 @@ def test_prompt_is_agentic_and_resolves_through_production_loader() -> None:
         "AWS",
         "database",
         "abstain",
-    ),
+    ],
 )
 def test_prompt_pins_classification_and_anti_false_positive_contract(required: str) -> None:
     assert required.casefold() in _prompt_text().casefold()

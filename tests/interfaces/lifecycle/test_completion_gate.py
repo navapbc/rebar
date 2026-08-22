@@ -284,6 +284,7 @@ def test_library_force_close_matches_cli(rebar_repo: Path, monkeypatch) -> None:
         cwd=str(rebar_repo),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
 

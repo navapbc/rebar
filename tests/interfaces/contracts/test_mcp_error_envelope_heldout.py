@@ -64,7 +64,12 @@ def _fresh_tracker(tmp: Path) -> Path:
 
 def _cli_json(root: Path, *args: str) -> tuple[dict, int]:
     p = subprocess.run(
-        ["rebar", *args], cwd=root, env=_clean_env(root), capture_output=True, text=True
+        ["rebar", *args],
+        cwd=root,
+        env=_clean_env(root),
+        capture_output=True,
+        text=True,
+        check=False,
     )
     return json.loads(p.stdout.strip().splitlines()[-1]), p.returncode
 
@@ -93,6 +98,7 @@ def _new_ticket(root: Path) -> str:
         env=_clean_env(root),
         capture_output=True,
         text=True,
+        check=False,
     )
     return re.search(r"[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}", p.stdout).group(0)
 

@@ -21,7 +21,7 @@ from rebar_reconciler.adapters.jira_family import instance_from_base_url
 
 
 @pytest.mark.parametrize(
-    "a,b",
+    ("a", "b"),
     [
         ("https://jira.example.com/jira", "https://jira.example.com/jira/"),  # trailing slash
         ("https://JIRA.example.com/jira", "https://jira.example.com/jira"),  # host case
@@ -38,7 +38,7 @@ def test_equivalent_spellings_of_one_deployment_agree(a: str, b: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "a,b",
+    ("a", "b"),
     [
         ("https://one.example.com/jira", "https://two.example.com/jira"),  # host
         ("https://jira.example.com/alpha", "https://jira.example.com/beta"),  # context path

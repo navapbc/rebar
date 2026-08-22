@@ -25,7 +25,7 @@ def _ref(name: str, eco: str) -> dict[str, object]:
 
 
 @pytest.mark.parametrize(
-    "name,eco",
+    ("name", "eco"),
     [
         ("requests", "pypi"),
         ("scikit_learn", "pypi"),  # PEP-503 normalization → scikit-learn
@@ -41,7 +41,7 @@ def test_live_real_packages_refute(name: str, eco: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name,eco",
+    ("name", "eco"),
     [
         ("superfast-jsonify-9000-slop-zzz", "pypi"),
         ("reactt-totally-not-real-xyz-9001", "npm"),

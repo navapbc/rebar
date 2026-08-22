@@ -48,6 +48,7 @@ def _run(conclusion: str, failure_observed: str = "false") -> subprocess.Complet
         },
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

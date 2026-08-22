@@ -41,6 +41,7 @@ def _cli(*args: str, cwd: str, **env: str) -> subprocess.CompletedProcess:
         text=True,
         cwd=cwd,
         env=e,
+        check=False,
     )
 
 

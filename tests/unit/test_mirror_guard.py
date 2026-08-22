@@ -45,7 +45,7 @@ def test_replication_diverged_is_unhealthy() -> None:
     assert v["gerrit_sha"] == "gerrit_sha" and v["github_sha"] == "old_github_sha"
 
 
-@pytest.mark.parametrize("g,h", [(None, "x"), ("x", None), (None, None), ("", "")])
+@pytest.mark.parametrize(("g", "h"), [(None, "x"), ("x", None), (None, None), ("", "")])
 def test_replication_missing_sha_is_unhealthy(g, h) -> None:
     assert mirror_guard.replication_verdict(g, h)["healthy"] is False
 

@@ -29,6 +29,7 @@ def _run_hook(script: Path, stdin: str, env_file: Path) -> subprocess.CompletedP
         capture_output=True,
         text=True,
         env={"CLAUDE_ENV_FILE": str(env_file), "PATH": _os_path()},
+        check=False,
     )
 
 
@@ -41,7 +42,9 @@ def _os_path() -> str:
 # ------------------------------------------------------------------ Claude Code hook
 def test_claude_code_hook_is_valid_shell() -> None:
     assert _CLAUDE_HOOK.exists()
-    r = subprocess.run(["bash", "-n", str(_CLAUDE_HOOK)], capture_output=True, text=True)
+    r = subprocess.run(
+        ["bash", "-n", str(_CLAUDE_HOOK)], capture_output=True, text=True, check=False
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -103,7 +106,8 @@ def test_claude_code_hook_noop_without_env_file(tmp_path) -> None:
         input='{"session_id":"abc"}',
         capture_output=True,
         text=True,
-        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},  # no CLAUDE_ENV_FILE
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+        check=False,  # no CLAUDE_ENV_FILE
     )
     assert r.returncode == 0
 

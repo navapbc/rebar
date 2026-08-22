@@ -159,7 +159,7 @@ def test_det_checks_still_runs_all_eleven_checks_in_order() -> None:
     ]
 
 
-@pytest.mark.parametrize("filename", ("det_floor.py", "det_advisory.py"))
+@pytest.mark.parametrize("filename", ["det_floor.py", "det_advisory.py"])
 def test_both_sides_of_the_seam_sit_inside_the_size_band(filename: str) -> None:
     """No sliver file, and real headroom under the cap — measured the way CI measures."""
     cap = read_limit()

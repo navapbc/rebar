@@ -34,7 +34,7 @@ def _call_read_tool(tool: str, **args: object) -> object:
 # `config.tracker_dir` instead and never hit the sys.exit site, so testing those
 # would pass whether or not the bug were fixed.
 @pytest.mark.parametrize(
-    "tool,args",
+    ("tool", "args"),
     [
         ("clarity_check", {"ticket_id": "abcd-1234-5678-9abc"}),
         ("check_ac", {"ticket_id": "abcd-1234-5678-9abc"}),

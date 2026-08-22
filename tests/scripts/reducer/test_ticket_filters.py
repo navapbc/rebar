@@ -43,7 +43,7 @@ def _ids(rows) -> list:
     return sorted(r["ticket_id"] for r in rows)
 
 
-@pytest.fixture()
+@pytest.fixture
 def corpus() -> list:
     return [
         _t("a", ticket_type="epic", priority=0, tags=["rev"]),

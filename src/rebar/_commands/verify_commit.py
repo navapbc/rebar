@@ -138,11 +138,13 @@ def _read_message(args: argparse.Namespace) -> tuple[str, bool]:
         except OSError as exc:
             raise _InfraError(f"cannot read --message-file {args.message_file!r}: {exc}") from exc
     rev = args.rev or "HEAD"
-    msg = subprocess.run(["git", "show", "-s", "--format=%B", rev], capture_output=True, text=True)
+    msg = subprocess.run(
+        ["git", "show", "-s", "--format=%B", rev], capture_output=True, text=True, check=False
+    )
     if msg.returncode != 0:
         raise _InfraError(f"git could not read commit {rev!r}: {(msg.stderr or '').strip()}")
     parents = subprocess.run(
-        ["git", "show", "-s", "--format=%P", rev], capture_output=True, text=True
+        ["git", "show", "-s", "--format=%P", rev], capture_output=True, text=True, check=False
     )
     is_merge = parents.returncode == 0 and len(parents.stdout.split()) > 1
     return msg.stdout, is_merge

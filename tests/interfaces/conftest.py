@@ -133,7 +133,7 @@ def rebar_repo(
     from rebar._store import ensures as _ensures
 
     _ensures._reset_pending_cache()
-    yield repo
+    return repo
 
 
 @pytest.fixture(autouse=True)

@@ -73,7 +73,9 @@ def _index_lock_path(tracker: str) -> Path:
 
 
 def _committed(tracker: str, ticket_id: str) -> bool:
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     return f"COMMENT {ticket_id}" in r.stdout
 
 

@@ -34,7 +34,9 @@ _MARKER_IGNORES = "*/.archived\n*/.write.lock\n"
 
 
 def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args], capture_output=True, text=True, check=False
+    )
 
 
 def _commit_count(cwd: Path) -> int:

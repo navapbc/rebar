@@ -79,6 +79,7 @@ def is_ancestor(sha: str, ref: str, *, cwd: str | Path | None = None) -> bool:
         cwd=cwd,
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode == 0:
         return True

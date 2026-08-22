@@ -50,7 +50,7 @@ def od() -> ModuleType:
     return _load_module("outbound_differ_bound_but_absent", OUTBOUND_DIFFER_PATH)
 
 
-@pytest.fixture()
+@pytest.fixture
 def binding_store_mod() -> ModuleType:
     return _load_module("binding_store_bba", BINDING_STORE_PATH)
 

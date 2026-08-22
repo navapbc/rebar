@@ -36,7 +36,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
-@pytest.fixture()
+@pytest.fixture
 def deploy_box(tmp_path: Path) -> dict[str, object]:
     """A fake box where main advanced and ONLY a secrets source (fetch-secrets.sh) changed."""
     bin_dir = tmp_path / "bin"
@@ -130,6 +130,7 @@ def _run(env: dict[str, object]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
 

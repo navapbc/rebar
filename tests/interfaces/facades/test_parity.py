@@ -158,6 +158,7 @@ def _cli_list_ids(*flags: str) -> set[str]:
         [sys.executable, "-m", "rebar.cli", "list", *flags],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, f"cli list {flags} failed: {cp.stderr}"
     return {t["ticket_id"] for t in json.loads(cp.stdout)}
@@ -183,6 +184,7 @@ def test_list_exclude_deleted_parity(rebar_repo: Path, exclude_deleted: bool) ->
         [sys.executable, "-m", "rebar.cli", "delete", doomed, "--user-approved"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, f"cli delete failed: {cp.stderr}"
 

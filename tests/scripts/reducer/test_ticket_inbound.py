@@ -49,7 +49,7 @@ ID_C = "cccc-cccc-cccc-cccc"
 ID_D = "dddd-dddd-dddd-dddd"
 
 
-@pytest.fixture()
+@pytest.fixture
 def inbound():
     """Import find_inbound_relationships, failing (RED) until it exists."""
     try:

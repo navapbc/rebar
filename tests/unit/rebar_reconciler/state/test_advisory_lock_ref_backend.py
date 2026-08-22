@@ -63,7 +63,7 @@ def _git(args: list[str], repo: Path, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], tmp_path)
@@ -72,7 +72,7 @@ def repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture()
+@pytest.fixture
 def ref_backend(advisory: ModuleType, monkeypatch: pytest.MonkeyPatch):
     """A local (no-remote) CAS and a short lease."""
     monkeypatch.setattr(advisory, "_lock_lease_secs", lambda: 1)
@@ -95,6 +95,7 @@ def test_acquire_returns_oid_and_writes_ref_not_tickets_file(
     show = subprocess.run(
         ["git", "-C", str(repo), "cat-file", "-e", "tickets:.reconciler-pass-lock"],
         capture_output=True,
+        check=False,
     )
     assert show.returncode != 0, "ref backend must NOT write a tickets-branch lock file"
     # Release tears the ref down.
@@ -103,6 +104,7 @@ def test_acquire_returns_oid_and_writes_ref_not_tickets_file(
         subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", ref_lock.LOCK_REF],
             capture_output=True,
+            check=False,
         ).returncode
         != 0
     )
@@ -449,6 +451,7 @@ def _has_main(repo: Path) -> bool:
         subprocess.run(
             ["git", "-C", str(repo), "rev-parse", "--verify", "--quiet", "main"],
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )
@@ -459,6 +462,7 @@ def _committed(repo: Path, path: str) -> bool:
         subprocess.run(
             ["git", "-C", str(repo), "cat-file", "-e", f"tickets:{path}"],
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )

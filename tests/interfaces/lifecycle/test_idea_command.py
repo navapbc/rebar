@@ -69,6 +69,7 @@ def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=cwd,
+        check=False,
     )
 
 

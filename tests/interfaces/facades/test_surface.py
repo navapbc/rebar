@@ -155,6 +155,7 @@ def _cli_usage() -> str:
         [sys.executable, "-m", "rebar.cli", "no-such-subcommand"],
         capture_output=True,
         text=True,
+        check=False,
     )
     return cp.stdout + cp.stderr
 
@@ -170,6 +171,7 @@ def test_cli_rejects_classify() -> None:
         [sys.executable, "-m", "rebar.cli", "classify"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode != 0
     assert "unknown subcommand" in (cp.stdout + cp.stderr).lower()

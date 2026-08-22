@@ -171,7 +171,10 @@ def test_malformed_event_mid_chunk_rolls_back_whole_chunk(tmp_path: Path) -> Non
 
     assert _commit_count(dst) == base, "no commit written"
     r = subprocess.run(
-        ["git", "-C", tracker, "diff", "--cached", "--name-only"], capture_output=True, text=True
+        ["git", "-C", tracker, "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert r.stdout.strip() == "", "index clean (no phantom staged blob)"
     assert not (Path(tracker) / "tk").exists() or not list((Path(tracker) / "tk").glob("*.json"))
@@ -205,7 +208,10 @@ def test_crash_before_later_chunk_leaves_whole_commit_or_none_and_resumes(
     # failing chunk left nothing (clean index, no partial).
     assert len(rebar.list_tickets(repo_root=str(dst))) == 512
     r = subprocess.run(
-        ["git", "-C", tracker, "diff", "--cached", "--name-only"], capture_output=True, text=True
+        ["git", "-C", tracker, "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert r.stdout.strip() == ""
     after_crash_commits = _commit_count(dst)

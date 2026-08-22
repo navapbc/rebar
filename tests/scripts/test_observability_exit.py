@@ -34,7 +34,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
-@pytest.fixture()
+@pytest.fixture
 def healthy_env(tmp_path: Path) -> dict[str, str]:
     """PATH-shim env where every external probe reports a healthy, in-sync box."""
     bin_dir = tmp_path / "bin"
@@ -85,6 +85,7 @@ def test_observability_exits_zero_on_healthy_run(healthy_env: dict[str, str]) ->
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 0, (
         "observability.sh must exit 0 on a healthy run so the systemd oneshot is "

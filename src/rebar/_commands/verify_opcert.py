@@ -101,6 +101,7 @@ def _commit_in_gated_history(commit: str, repo_root) -> bool:
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         return proc.returncode == 0
     except Exception:  # noqa: BLE001 — git failure → not provably in history → reject (fail-closed)

@@ -142,10 +142,11 @@ def test_dropping_a_used_helpers_row_fails_loudly_instead_of_shrinking(tmp_path)
     try:
         reads, _dyn = gen.scan(gen.DEFAULT_SCAN_ROOT)
     except RuntimeError as exc:
-        assert "_llm_float" in str(exc), "the refusal must name the helper whose row is missing"
-        return
-    lost = sorted(set(baseline) - set(reads))
-    raise AssertionError(
-        f"the scan returned silently after losing {len(lost)} variable(s): {lost} -- "
-        "a missing row for a live helper must fail loudly, not shrink the registry"
-    )
+        refusal: BaseException = exc
+    else:
+        lost = sorted(set(baseline) - set(reads))
+        raise AssertionError(
+            f"the scan returned silently after losing {len(lost)} variable(s): {lost} -- "
+            "a missing row for a live helper must fail loudly, not shrink the registry"
+        )
+    assert "_llm_float" in str(refusal), "the refusal must name the helper whose row is missing"

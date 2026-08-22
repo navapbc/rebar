@@ -128,7 +128,7 @@ def test_the_extracted_leaf_does_not_import_back_into_prompts() -> None:
     )
 
 
-@pytest.mark.parametrize("filename", ("prompts.py", "prompt_model.py"))
+@pytest.mark.parametrize("filename", ["prompts.py", "prompt_model.py"])
 def test_both_sides_of_the_seam_sit_inside_the_size_band(filename: str) -> None:
     """No sliver file, and real headroom under the cap — measured the way CI measures."""
     cap = read_limit()

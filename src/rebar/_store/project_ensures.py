@@ -55,7 +55,9 @@ def _git(tracker: str, *args: str) -> subprocess.CompletedProcess[str]:
     """Run ``git -C <tracker> <args>`` capturing text output (mirrors the raw-git
     helper the init ensure units use). Never raises on a non-zero status — callers
     inspect ``returncode`` — so a tree-check miss is data, not an exception."""
-    return subprocess.run(["git", "-C", tracker, *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", tracker, *args], capture_output=True, text=True, check=False
+    )
 
 
 def _effective_project() -> str:

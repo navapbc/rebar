@@ -81,6 +81,7 @@ def test_live_signed_event_verifies(store: Path, tmp_path: Path, monkeypatch) ->
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     # require_authenticated ON + every in-scope event verified ⇒ exit 0, ≥1 verified.
     assert res.returncode == 0, res.stdout + res.stderr

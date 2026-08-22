@@ -90,6 +90,7 @@ def run_quickstart(block: str) -> int:
             ["bash", "-euo", "pipefail", "-c", block],
             cwd=workdir,
             env=env,
+            check=False,
         )
         return proc.returncode
     finally:
