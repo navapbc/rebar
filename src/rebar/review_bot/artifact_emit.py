@@ -45,11 +45,13 @@ def _artifact_emit_error(**fields: Any) -> None:
     write-dead tickets store (e.g. a fresh single-branch clone lacking ``.env-id``) would
     otherwise be a SILENT no-op. Emit a distinct ``ARTIFACT_EMIT_ERROR`` line to stderr
     (journald) + a countable metric so the write-dead store is detectable in logs, WITHOUT
-    changing the continue-don't-crash behaviour."""
+    changing the continue-don't-crash behaviour. The stderr print is the SINGLE line-start
+    marker emission the observability anchor counts; the logger copy logs the JSON record
+    body only, so it cannot match the anchor (bug f829-152a-b415-44a4)."""
     record = {"event": "ARTIFACT_EMIT_ERROR", "timestamp": time.time(), **fields}
-    line = "ARTIFACT_EMIT_ERROR " + json.dumps(record, default=str)
-    logger.warning(line)
-    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    body = json.dumps(record, default=str)
+    logger.warning(body)
+    print("ARTIFACT_EMIT_ERROR " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
     _publish_artifact_emit_error_metric()
 
 
