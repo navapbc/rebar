@@ -12,6 +12,9 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -285,12 +288,72 @@ def counts_as_plan_material_child(state: dict) -> bool:
     return state.get("status") not in ("deleted", "archived")
 
 
+@dataclass
+class _MaterialChildIndexState:
+    """Holder for the ContextVar-scoped child index (bug 3d57): ``by_parent`` stays
+    ``None`` until the first :func:`live_material_children` call inside the context,
+    so a scope whose fingerprint never reads the store costs zero scans."""
+
+    repo_root: Any = None
+    by_parent: dict[str, list[dict]] | None = None
+
+
+_material_child_index: ContextVar[_MaterialChildIndexState | None] = ContextVar(
+    "_material_child_index", default=None
+)
+
+
+@contextmanager
+def material_child_index(*, repo_root=None) -> Iterator[None]:
+    """Scope in which :func:`live_material_children` answers from ONE shared
+    parent_id→children index instead of a per-parent full-store scan (bug 3d57: 89
+    identical full-store reductions per ``rebar show``). The index is built lazily
+    on first use from a single unfiltered wide ``list_tickets`` scan. Activation is
+    idempotent — a nested ``with`` is a no-op passthrough; only the outermost
+    context sets the ContextVar and restores its prior value on exit."""
+    if _material_child_index.get() is not None:
+        yield
+        return
+    token = _material_child_index.set(_MaterialChildIndexState(repo_root=repo_root))
+    try:
+        yield
+    finally:
+        _material_child_index.reset(token)
+
+
+def _indexed_children(state: _MaterialChildIndexState, canonical_id: str) -> list[dict]:
+    """Children of ``canonical_id`` from the shared snapshot, building it on first
+    use. One wide, unfiltered ``list_tickets`` scan grouped by ``parent_id`` yields
+    per-parent lists byte-identical to the per-parent enumeration (``list_tickets``
+    order is ticket-id directory order, which grouping preserves per parent)."""
+    if state.by_parent is None:
+        from rebar import _reads
+
+        by_parent: dict[str, list[dict]] = {}
+        for ticket in _reads.list_tickets(include_archived=True, repo_root=state.repo_root) or []:
+            parent = ticket.get("parent_id")
+            if parent:
+                by_parent.setdefault(parent, []).append(ticket)
+        state.by_parent = by_parent
+    return state.by_parent.get(canonical_id, [])
+
+
 def live_material_children(canonical_id: str, *, repo_root=None) -> list[dict]:
     """Gate-side counterpart to the signer's child enumeration: list the container's
     children WIDE (``include_archived=True``) and keep only those that count as plan
     material, through :func:`counts_as_plan_material_child`. Centralising the gate's
     enumeration here is what guarantees the claim gate and the signer cannot drift
-    apart (bug b7a2)."""
+    apart (bug b7a2). Inside an active :func:`material_child_index` context the
+    enumeration answers from the shared one-scan snapshot instead of its own
+    full-store scan (bug 3d57); BOTH paths filter through the same
+    :func:`counts_as_plan_material_child` predicate."""
+    index_state = _material_child_index.get()
+    if index_state is not None:
+        return [
+            k
+            for k in _indexed_children(index_state, canonical_id)
+            if counts_as_plan_material_child(k)
+        ]
     from rebar import _reads
 
     return [
