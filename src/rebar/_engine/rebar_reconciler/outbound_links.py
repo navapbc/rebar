@@ -24,6 +24,7 @@ avoiding an import cycle.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -31,11 +32,38 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 
+def _resolve_link(
+    relation: str,
+    links: Any,
+    link_map: Mapping[str, str] | None,
+) -> tuple[str, bool] | None:
+    """Resolve ``relation`` to ``(vendor_link_type, swap)`` under the effective ``link_map``,
+    or ``None`` to SKIP (never added, never removed, never approximated) — the single S4 seam
+    shared by BOTH the ADD (``_diff_links``) and REMOVE (``_diff_link_removals``) halves.
+
+    An override (a per-project ``[mapping]`` ``link_map`` entry) replaces the built-in Jira
+    link TYPE only, PRESERVING the built-in direction ``swap`` (``depends_on`` stays swapped);
+    the built-in payload alone supplies ``swap`` (False when the relation has no built-in
+    payload). A ``SKIP`` override — or a relation with no built-in payload and no override —
+    suppresses the link. ``link_map=None`` (or a relation absent from it) leaves the built-in
+    payload byte-for-byte what it is today."""
+    from rebar_reconciler.mapping_config import SKIP
+
+    override = link_map.get(relation) if link_map else None
+    if override == SKIP:
+        return None  # forced skip — neither added nor removed
+    payload = links.link_payload_for_relation(relation)
+    if isinstance(override, str) and override:
+        return (override, payload[1] if payload else False)
+    return payload  # built-in (may be None -> skip)
+
+
 def _diff_links(
     ticket: dict[str, Any],
     jira_fields: dict[str, Any],
     binding_store: Any,
     links: Any,
+    link_map: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compare a local ticket's ``deps`` to its Jira issuelinks. Emits ADDs and REMOVEs.
 
@@ -80,7 +108,7 @@ def _diff_links(
         relation = dep.get("relation")
         if not isinstance(relation, str):
             continue  # malformed dep — no relation to map
-        payload = links.link_payload_for_relation(relation)
+        payload = _resolve_link(relation, links, link_map)
         if payload is None:
             continue  # no reliable vendor link type — skip (no-op)
         vendor_type, swap = payload
@@ -113,7 +141,7 @@ def _diff_links(
     # delete so the inbound differ stops re-adding it (the churn). A never-managed
     # link is left for inbound ADOPT, never clobbered. The applier resolves the link
     # id at apply time (mirrors the ADD dedup probe), so we emit only (type, to_key).
-    mutations.extend(_diff_link_removals(ticket, jira_fields, binding_store, links))
+    mutations.extend(_diff_link_removals(ticket, jira_fields, binding_store, links, link_map))
     return mutations
 
 
@@ -122,6 +150,7 @@ def _diff_link_removals(
     jira_fields: dict[str, Any],
     binding_store: Any,
     links: Any,
+    link_map: Mapping[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Emit managed-ref-gated link REMOVE mutations (the symmetric half of _diff_links).
 
@@ -131,7 +160,10 @@ def _diff_link_removals(
     (inward vs outward — Blocks into blocks/depends_on) is already resolved by
     ``links.map_remote_links``, mirroring the inbound differ. Local import keeps the
     differ free of module-scope heavy imports (standalone-loaded in tests)."""
+    from collections import Counter
+
     from rebar.reducer._managed_refs import should_propagate_removal
+    from rebar_reconciler.mapping_config import SKIP
 
     canonical = links.map_remote_links(jira_fields)
     if not canonical:
@@ -139,6 +171,17 @@ def _diff_link_removals(
     get_local_id = getattr(binding_store, "get_local_id", None)
     if get_local_id is None:
         return []  # cannot resolve targets -> fail-open (no removal, additive-only)
+
+    # Config-aware attribution: the built-in reverse (link_direction.JIRA_LINK_TO_RELATION,
+    # used by map_remote_links) is config-UNAWARE, so a remote link carrying an OVERRIDDEN
+    # vendor type arrives with relation=None. Recover its relation from the inverted
+    # (SKIP-dropped) link_map so a remapped remote type is not silently left un-removed.
+    # A vendor type reached by MORE THAN ONE relation is genuinely ambiguous (the naive
+    # inversion would collapse it last-writer-wins and misattribute the removal), so it is
+    # EXCLUDED from the reverse map: an ambiguous remote type stays relation=None and is
+    # left for inbound ADOPT, exactly like an unknown one — never guessed at.
+    _vendor_counts = Counter(v for v in (link_map or {}).values() if v != SKIP)
+    reverse = {v: k for k, v in (link_map or {}).items() if v != SKIP and _vendor_counts[v] == 1}
 
     local_deps: set[tuple[str, str]] = set()
     for d in ticket.get("deps") or []:
@@ -152,10 +195,14 @@ def _diff_link_removals(
     removals: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for relation, other_key, opaque_vendor_type in canonical:
-        # An unmapped vendor link type (relation is None) is never managed by us —
-        # left for inbound ADOPT.
         if relation is None:
-            continue
+            # The built-in reverse did not know this remote type — recover it from the
+            # config overlay. Still None -> genuinely unmapped, left for inbound ADOPT.
+            relation = reverse.get(opaque_vendor_type)
+            if relation is None:
+                continue
+        if _resolve_link(relation, links, link_map) is None:
+            continue  # relation is skipped — neither added nor removed
         local_target = get_local_id(other_key)
         if not local_target:
             continue  # unbound — retry next pass
