@@ -20,14 +20,16 @@ import subprocess
 from collections.abc import Mapping
 
 from rebar import config
-from rebar._commands import txn
+from rebar._commands import close_disposition, txn
 from rebar._commands._seam import CommandError
 
 logger = logging.getLogger(__name__)
 
-_NON_COMPLETION_BUG_CLASSES = frozenset(
-    {"duplicate", "not_a_bug", "escalated", "obsolete", "superseded", "wontfix"}
-)
+#: The close classes that are DISPOSITIONS rather than completed work. An ALIAS of
+#: :data:`close_disposition.DISPOSITION_CLASSES`, not a second frozenset kept in sync by an
+#: equality assertion — that kind of drift is what bug ``frolicky-dependable-peccary`` was, and
+#: one object cannot drift. The NAME is load-bearing: the 738a suite reads it from this module.
+_NON_COMPLETION_BUG_CLASSES = close_disposition.DISPOSITION_CLASSES
 
 #: A sentinel distinguishing "this close is not a disposition at all" (keep normal completion
 #: verification) from a disposition path that yielded no sign signal (``None`` — the close
@@ -63,48 +65,25 @@ def _has_live_replacement_link(
 ) -> bool:
     """True when a non-completion bug close names a live replacement.
 
-    Replacement relationships are directional: either this bug duplicates a
-    canonical ticket, or another ticket supersedes this bug. Reduced state and
-    the inbound reader both expose only net-active links, including links baked
-    into snapshots.
+    A thin wrapper over :func:`close_disposition.replacement_of`; the two guards below are NOT
+    shared, and stay here on purpose. A non-bug close reaches the disposition path only through
+    the ADMINISTRATIVE subset (ticket fc20) — ``not_a_bug``/``escalated`` stay bug-only
+    vocabulary, which ``transition_core`` also refuses authoritatively at write time — so this
+    predicate is strictly LESS permissive for non-bug tickets than ``find_replacement``.
+
+    The NAME is a monkeypatch seam: the 738a suite patches it with ``raising=False``, so a
+    rename would go unnoticed and leave that test green while it no longer tested its claim.
+    ``on_subject_unreadable="stop"`` keeps the path fail-closed, since it gates a bypass.
     """
     if close_class not in _NON_COMPLETION_BUG_CLASSES:
         return False
-    if ticket_type != "bug":
-        from rebar._commands import close_disposition
-
-        # A non-bug close reaches the disposition path only through the ADMINISTRATIVE
-        # subset (ticket fc20) — not_a_bug/escalated stay bug-only vocabulary, which
-        # transition_core also refuses authoritatively at write time.
-        if close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
-            return False
-
-    from rebar.reducer import reduce_ticket
-
-    try:
-        state = reduce_ticket(os.path.join(tracker, ticket_id))
-    except Exception:  # noqa: BLE001 -- an unreadable source must retain fail-closed verification
+    if ticket_type != "bug" and close_class not in close_disposition.ADMINISTRATIVE_CLASSES:
         return False
-    if not isinstance(state, dict):
-        return False
-
-    for dep in state.get("deps") or []:
-        if dep.get("relation") != "duplicates":
-            continue
-        target = dep.get("target_id", dep.get("target", ""))
-        if target and _is_live_ticket(str(target), tracker):
-            return True
-
-    from rebar.reducer._inbound import find_inbound_relationships
-
-    try:
-        inbound = find_inbound_relationships(ticket_id, tracker)
-    except Exception:  # noqa: BLE001 -- a failed graph read must retain fail-closed verification
-        return False
-    return any(
-        link.get("relation") == "supersedes"
-        and _is_live_ticket(str(link.get("from_id") or ""), tracker)
-        for link in inbound.get("inbound_links") or []
+    return (
+        close_disposition.replacement_of(
+            ticket_id, tracker, require_live=True, on_subject_unreadable="stop"
+        )
+        is not None
     )
 
 
@@ -112,43 +91,20 @@ def _recorded_replacement_target(ticket_id: str, tracker: str) -> str | None:
     """The replacement ticket this bug NAMES, ignoring whether that target is usable.
 
     :func:`_has_live_replacement_link` answers "is there a usable replacement?"; this answers
-    the strictly weaker "was one ever recorded?". The two differ in exactly one case — a link
-    exists but its target is archived, deleted, or no longer resolvable — and that case earns a
-    different remedy ("re-link to a live canonical") from having recorded nothing at all ("run
-    ``rebar link``"). Kept SEPARATE from the predicate above rather than folded into it because
-    that predicate's bool signature is a monkeypatch target in the disposition-attestation suite
-    (bug 738a), and because the two questions genuinely differ.
+    the strictly weaker "was one ever recorded?" — hence ``require_live=False``. The two differ
+    in exactly one case, a link whose target is archived, deleted, or no longer resolvable, and
+    that case earns a different remedy ("re-link to a live canonical") from having recorded
+    nothing at all ("run ``rebar link``"). Observed on bug 9b70.
 
-    Reads only reduced state and the inbound graph — no LLM, no network. Any unreadable source
-    yields ``None``, which routes to the more conservative "you named none" message.
+    It carries NO class guard: its caller :func:`_ensure_duplicate_close_is_linked` has already
+    narrowed to ``{duplicate, superseded}``, and adding one here would change which remedy an
+    operator is shown. ``on_subject_unreadable="continue"`` is likewise deliberate — this reader
+    picks between two message strings rather than gating a bypass, so a partially readable store
+    should still name what the inbound graph knows. No LLM, no network.
     """
-    from rebar.reducer import reduce_ticket
-
-    try:
-        state = reduce_ticket(os.path.join(tracker, ticket_id))
-    except Exception:  # noqa: BLE001 -- an unreadable source degrades to the generic remedy
-        state = None
-    if isinstance(state, dict):
-        for dep in state.get("deps") or []:
-            if dep.get("relation") != "duplicates":
-                continue
-            target = str(dep.get("target_id", dep.get("target", "")) or "")
-            if target:
-                return target
-
-    from rebar.reducer._inbound import find_inbound_relationships
-
-    try:
-        inbound = find_inbound_relationships(ticket_id, tracker)
-    except Exception:  # noqa: BLE001 -- a failed graph read degrades to the generic remedy
-        return None
-    for link in inbound.get("inbound_links") or []:
-        if link.get("relation") != "supersedes":
-            continue
-        source = str(link.get("from_id") or "")
-        if source:
-            return source
-    return None
+    return close_disposition.replacement_of(
+        ticket_id, tracker, require_live=False, on_subject_unreadable="continue"
+    )
 
 
 def _ensure_duplicate_close_is_linked(
