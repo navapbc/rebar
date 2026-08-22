@@ -36,6 +36,8 @@ from rebar_reconciler.adapters.jira_family import sanitize_summary as _shared_sa
 from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
 from rebar_reconciler.adapters.jira_family.outbound_mapper import (
     OutboundFieldMapper,
+    merge_create_defaults,
+    resolve_outbound_priority,
     resolve_outbound_status,
     resolve_outbound_type,
 )
@@ -44,7 +46,14 @@ from rebar_reconciler.adapters.jira_family.rich_text import (
     WikiTextCodec,
     cutover_clients,
 )
-from rebar_reconciler.adapters.jira_family.value_maps import (
+
+# Story S5 routes the priority value through the shared ``resolve_outbound_priority``
+# (config-driven, map-or-drift) rather than subscripting this map directly, but the
+# INT-keyed built-in is kept imported as a MODULE ATTRIBUTE under its historical name so
+# the jira-family boundary/parity tests can pin Cloud and DC to the SAME object.
+# ``resolve_outbound_priority`` builds its own str-keyed VIEW of this same built-in when
+# no per-project map applies, so no-config behaviour is unchanged.
+from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: F401
     LOCAL_PRIORITY_TO_JIRA,
 )
 
@@ -64,6 +73,8 @@ def _map_local_to_dc_fields(
     ticket: dict[str, Any],
     status_map: dict[str, str] | None = None,
     type_map: dict[str, str] | None = None,
+    priority_map: dict[str, str] | None = None,
+    create_defaults: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Full local-ticket -> DC field mapping (the CREATE path).
 
@@ -78,6 +89,12 @@ def _map_local_to_dc_fields(
     ``status_map`` (S2): the effective per-project local->Jira status map; ``None``
     falls back to the built-in ``LOCAL_STATUS_TO_JIRA``. A local status with NO target
     (map-or-drift) OMITS the ``status`` field entirely, never coercing it.
+
+    ``priority_map`` (S5): the effective per-project local->Jira priority map; ``None``
+    falls back to the built-in. A local priority with NO target likewise OMITS the
+    ``priority`` field (map-or-drift), never coercing to ``"Medium"``. ``create_defaults``
+    (S5): str-valued required-beyond-baseline vendor fields merged UNDER this computed body
+    (baseline computed fields win on collision), CREATE-only.
     """
     codec = WikiTextCodec(rich="dc" in cutover_clients())
     fields: dict[str, Any] = {
@@ -89,13 +106,15 @@ def _map_local_to_dc_fields(
         # a freshly created issue read as broken formatting until someone edited it.
         "description": codec.to_wire(codec.fit_outbound(ticket.get("description") or "")),
         "issuetype": resolve_outbound_type(ticket.get("ticket_type", "task"), type_map),
-        "priority": LOCAL_PRIORITY_TO_JIRA.get(ticket.get("priority", 2), "Medium"),
         "assignee": ticket.get("assignee") or "",
     }
+    priority_target = resolve_outbound_priority(ticket.get("priority", 2), priority_map)
+    if priority_target is not None:
+        fields["priority"] = priority_target
     target = resolve_outbound_status(ticket.get("status", "open"), status_map)
     if target is not None:
         fields["status"] = target
-    return fields
+    return merge_create_defaults(create_defaults, fields)
 
 
 class _DCOutbound:
@@ -133,11 +152,13 @@ class _DCOutbound:
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
         type_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
+        create_defaults: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         # ``suppressed_out`` (ticket 8390) is accepted and IGNORED on purpose:
         # ``_map_local_to_dc_fields`` never maps a parent at all, so this backend has
         # no suppression to report and appending anything here would invent one.
-        return _map_local_to_dc_fields(ticket, status_map, type_map)
+        return _map_local_to_dc_fields(ticket, status_map, type_map, priority_map, create_defaults)
 
     def map_fields_to_remote(
         self,
@@ -146,9 +167,10 @@ class _DCOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         status_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return self._mapper.map_fields_to_remote(
-            changed, ticket, binding_store, local_ticket_types, status_map
+            changed, ticket, binding_store, local_ticket_types, status_map, priority_map
         )
 
     def resolve_assignee(

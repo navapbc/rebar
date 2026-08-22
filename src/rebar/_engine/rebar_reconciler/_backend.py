@@ -379,6 +379,8 @@ class OutboundMapper(Protocol):
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
         type_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
+        create_defaults: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """``suppressed_out`` (ticket 8390): an optional sink an implementation MAY
         append to when it drops a parent it could otherwise have sent, so the caller
@@ -393,7 +395,14 @@ class OutboundMapper(Protocol):
         ``type_map`` (S3): the effective per-project local->Jira type map
         (``config.effective_type_map``); ``None`` falls back to the built-in
         ``LOCAL_TYPE_TO_JIRA``. Unlike status, ``issuetype`` is mandatory on a create, so
-        an unmapped type falls back to ``"Task"`` (the built-in default)."""
+        an unmapped type falls back to ``"Task"`` (the built-in default).
+
+        ``priority_map`` (S5): the effective per-project local->Jira priority map
+        (``config.effective_priority_map``); ``None`` falls back to the built-in. A local
+        priority with NO target is OMITTED (map-or-drift), never coerced to ``"Medium"``.
+        ``create_defaults`` (S5): str-valued required-beyond-baseline vendor fields merged
+        UNDER the computed CREATE body (baseline computed fields win on collision),
+        CREATE-only."""
         ...
 
     def map_fields_to_remote(
@@ -403,6 +412,7 @@ class OutboundMapper(Protocol):
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         status_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Map a CANONICAL changed-fields dict (local field names → local values) to the
         backend's mutation-field shapes, at the emission boundary (ticket 625b). The core
@@ -411,7 +421,12 @@ class OutboundMapper(Protocol):
 
         ``status_map`` (S2): the effective per-project local->Jira status map; ``None``
         falls back to the built-in map. A local status with NO target is OMITTED
-        (map-or-drift), never coerced to ``"To Do"``."""
+        (map-or-drift), never coerced to ``"To Do"``.
+
+        ``priority_map`` (S5): the effective per-project local->Jira priority map; ``None``
+        falls back to the built-in. A local priority with NO target is OMITTED
+        (map-or-drift), never coerced to ``"Medium"``. ``create_defaults`` is CREATE-only
+        and is NOT threaded here."""
         ...
 
     def resolve_assignee(

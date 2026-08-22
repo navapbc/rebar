@@ -278,6 +278,8 @@ class _RecordingOutboundMapper:
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
         type_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
+        create_defaults: dict[str, str] | None = None,
     ) -> dict:
         self.calls.append(ticket)
         return {"summary": "SENTINEL-FROM-INJECTED-MAPPER"}

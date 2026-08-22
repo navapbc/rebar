@@ -154,7 +154,9 @@ def test_map_fields_to_remote_maps_every_priority_plus_unmapped_default():
         assert b.outbound.map_fields_to_remote({"priority": local_priority}) == {
             "priority": jira_name
         }
-    assert b.outbound.map_fields_to_remote({"priority": 99}) == {"priority": "Medium"}
+    # Map-or-drift (S5): an unmapped priority is OMITTED entirely (Jira left unchanged),
+    # never coerced to "Medium".
+    assert b.outbound.map_fields_to_remote({"priority": 99}) == {}
 
 
 def test_map_fields_to_remote_normalizes_and_fits_description():

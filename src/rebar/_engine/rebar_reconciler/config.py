@@ -253,3 +253,74 @@ def effective_link_map(project_key: str, root: object = None) -> dict[str, str]:
     resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
     mc.validate(resolved, mc.Capability(has_link_types=True))
     return {k: v for k, v in resolved.link_map.items() if v != mc.SKIP}
+
+
+# Local priority integer -> Jira priority NAME (S5). Like ``local_to_jira_status``,
+# ``LOCAL_TYPE_TO_JIRA`` and ``local_to_jira_link`` above, this is a SECOND, INDEPENDENT
+# literal of the same mapping (the SOLE definition site under ``adapters/`` is
+# ``adapters/jira_family/value_maps.LOCAL_PRIORITY_TO_JIRA``) and it is deliberately NOT an
+# import: this module imports nothing but ``__future__``, and ``adapters/jira_family`` is a
+# VENDOR package whose dependency direction is one-way (concrete backends import it; it never
+# imports core back), so importing it here would invert that layering and put this
+# operator-overridable surface behind an adapter import — the import-graph contract test
+# enforces exactly this. NOTE the two literals have DIFFERENT key TYPES on purpose: the
+# adapter-side ``LOCAL_PRIORITY_TO_JIRA`` is INT-keyed (``dict[int, str]``, 0-4), while the
+# config seam's keys are STRINGS (a ``[mapping.*.priority_map]`` TOML sub-table has string
+# keys), so this literal is str-keyed. A parity TEST keeps the two honest (the same
+# priority -> name pairs), exactly as it does for the other three axes.
+local_to_jira_priority: dict[str, str] = {
+    "0": "Highest",
+    "1": "High",
+    "2": "Medium",
+    "3": "Low",
+    "4": "Lowest",
+}
+
+
+def effective_priority_map(project_key: str, root: object = None) -> dict[str, str]:
+    """Resolve the EFFECTIVE outbound local->Jira priority map for ``project_key``.
+
+    The forward map is the built-in :data:`local_to_jira_priority` (this module's own
+    str-keyed literal) <- ``[mapping.default.priority_map]`` <-
+    ``[mapping.projects.<KEY>.priority_map]``, resolved through the S1 per-key three-layer
+    merge (``mapping_config.resolve_for_project``). A ``SKIP`` value
+    (``mapping_config.SKIP``) or an absent key means the local priority has NO Jira target
+    — dropped here so callers see only mappable priorities (map-or-drift: a caller that
+    gets no target for a local priority OMITS the field rather than coercing it).
+
+    Priority is a SOFT axis: it has NO vocabulary declaration, so there is NO
+    ``mapping_config.validate`` call (unlike :func:`effective_link_map`, which fail-closes
+    on an out-of-vocabulary link type). An unmapped priority simply DRIFTS.
+
+    With NO ``[mapping]`` block the result equals :data:`local_to_jira_priority` verbatim —
+    the config seam is inert until configured. ``mapping_config`` is imported LAZILY so this
+    module stays stdlib-only at import time (it imports nothing but ``__future__`` at the top
+    level — the operator-overridable priority literal above must never sit behind an
+    adapter/config import)."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(priority_map=local_to_jira_priority)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    return {k: v for k, v in resolved.priority_map.items() if v != mc.SKIP}
+
+
+def effective_create_defaults(project_key: str, root: object = None) -> dict[str, str]:
+    """Resolve the EFFECTIVE per-project str-valued ``create_defaults`` for ``project_key``.
+
+    ``create_defaults`` is a per-project axis of vendor field name -> literal string value,
+    merged into the CREATE body for required-beyond-baseline Jira fields (baseline computed
+    fields win on collision at the mapper). There is NO built-in defaults literal — an empty
+    ``MappingLayer`` is the built-in — so with NO ``[mapping]`` block the result is ``{}``,
+    the config seam inert until configured. Resolved through the same S1 per-key three-layer
+    merge (``[mapping.default.create_defaults]`` <- ``[mapping.projects.<KEY>.create_defaults]``);
+    any ``SKIP`` value drops the field. This axis is ungated (no vocabulary), and it is
+    CREATE-only — UPDATE applies none.
+
+    ``mapping_config`` is imported LAZILY so this module stays stdlib-only at import time."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(create_defaults={})
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    return {k: v for k, v in resolved.create_defaults.items() if v != mc.SKIP}
