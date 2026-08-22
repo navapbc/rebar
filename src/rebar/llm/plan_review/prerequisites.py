@@ -228,14 +228,13 @@ def run_focused_finder(
             # 'unlimited' output setting for every plan-review call).
             call_cfg = passes._max_output_cfg(dataclasses.replace(cfg, model=model))
             raw = runner.run(
-                RunRequest(
+                RunRequest.for_structured(
                     system_prompt=system,
                     instructions=instructions,
                     config=call_cfg,
                     reviewers=["plan-reviewer"],
-                    mode="structured",
                     output_schema="plan_review_prerequisite_coverage",
-                    execution_mode="single_turn",
+                    bounds=RunRequest.INHERIT_POLICY,
                 )
             )
             call_usage = raw.get("_usage") if isinstance(raw, dict) else None

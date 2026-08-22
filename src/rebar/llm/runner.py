@@ -19,7 +19,7 @@ import logging
 import time
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
 from rebar.llm import findings as _findings
 from rebar.llm import step_failures, usage_log
@@ -54,6 +54,7 @@ from rebar.llm.runner_support import (
 )
 from rebar.llm.structured_run import (
     FailureContext,
+    SingleTurnBounds,
     _extract_usage,
     _import_pydantic_ai,
     _pai_check_config,
@@ -141,6 +142,47 @@ class RunRequest:
     # (and a same-ticket re-review inside the TTL). Ignored unless it is a non-empty proper
     # prefix of ``system_prompt``. DEFAULTED None so every other caller is byte-unchanged.
     cache_prefix: str | None = None
+
+    #: The all-``None`` :class:`SingleTurnBounds` — "inherit run-wide policy", said out loud.
+    #: A ``ClassVar`` (so not a field) means a call site names it without a second import.
+    INHERIT_POLICY: ClassVar[SingleTurnBounds] = SingleTurnBounds(
+        output_tokens=None, timeout_s=None, structured_retries=None, transport_attempts=None
+    )
+
+    @classmethod
+    def for_structured(
+        cls,
+        *,
+        system_prompt: str,
+        instructions: str,
+        config: LLMConfig,
+        reviewers: list[str],
+        output_schema: str,
+        bounds: SingleTurnBounds,
+        target: dict | None = None,
+    ) -> RunRequest:
+        """The ONE constructor for a single-turn structured sub-call.
+
+        ``mode="structured"`` and ``execution_mode="single_turn"`` belong together (see
+        ``execution_mode`` above) and fourteen call sites used to re-assert the pair by hand,
+        so nothing enforced either the pairing or the bounding decision. ``bounds`` is REQUIRED:
+        a site that inherits run-wide policy says so with ``RunRequest.INHERIT_POLICY`` rather
+        than by leaving a keyword out, which is the omission bug
+        ``leathery-druidic-nurseshark`` turned on."""
+        return cls(
+            system_prompt=system_prompt,
+            instructions=instructions,
+            config=config,
+            reviewers=reviewers,
+            target={} if target is None else target,
+            mode="structured",
+            output_schema=output_schema,
+            execution_mode="single_turn",
+            output_token_limit=bounds.output_tokens,
+            request_timeout_limit_s=bounds.timeout_s,
+            structured_retry_limit=bounds.structured_retries,
+            transport_attempt_limit=bounds.transport_attempts,
+        )
 
     def effective_cache_prefix(self) -> str | None:
         """``cache_prefix`` iff it is a non-empty PROPER prefix of ``system_prompt``, else None.

@@ -169,14 +169,13 @@ def _score_floor_novelty(
         system = passes._resolve_system(passes.PASS_NOVELTY, ctx.plan_text, vcfg)
 
         def run_chunk(instructions: str, context: str) -> list[dict[str, Any]]:
-            req = RunRequest(
+            req = RunRequest.for_structured(
                 system_prompt=system,
                 instructions=f"{instructions}\n\n## Prior-review findings (context)\n{context}",
                 config=vcfg,
                 reviewers=["plan-novelty"],
-                mode="structured",
                 output_schema="plan_review_novelty",
-                execution_mode="single_turn",
+                bounds=RunRequest.INHERIT_POLICY,
             )
             return runner_sel.run(req).get("novelties", []) or []
 
