@@ -63,7 +63,7 @@ def concurrency() -> ModuleType:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_git_repo(tmp_path: Path) -> Path:
     """Create a minimal git repository with one commit and return its root."""
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)

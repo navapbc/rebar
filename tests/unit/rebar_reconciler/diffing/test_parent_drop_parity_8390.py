@@ -446,7 +446,7 @@ def _update_drop(remote_parent_id: str | None) -> list[tuple[str, str]]:
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    "remote_parent_id,expected",
+    ("remote_parent_id", "expected"),
     [
         (None, [("RBJ-9", "parent")]),  # the tracker holds NO parent — the edit was lost
         ("RBJ-1", []),  # the tracker ALREADY holds it — nothing was dropped

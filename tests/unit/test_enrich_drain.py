@@ -687,9 +687,7 @@ def _cycle_drains(repo: str, tid: str, runner: Runner, cycles: int) -> int:
     drains ran against. Time is a MONKEYPATCHED counter, never a sleep: the property under
     test is algorithmic (does the entry converge to a terminal state?), not temporal.
     """
-    import pytest as _pytest
-
-    mp = _pytest.MonkeyPatch()
+    mp = pytest.MonkeyPatch()
     try:
         clock = {"n": Q._now_ns()}
         mp.setattr(Q, "_now_ns", lambda: clock["n"])

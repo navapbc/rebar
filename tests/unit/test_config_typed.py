@@ -65,7 +65,7 @@ def test_string_coercion_from_env_or_flat_file() -> None:
 
 
 @pytest.mark.parametrize(
-    "raw, msg",
+    ("raw", "msg"),
     [
         ({"sync": {"push": "sometimes"}}, "sync.push"),
         ({"sync": {"pull": "maybe"}}, "sync.pull"),

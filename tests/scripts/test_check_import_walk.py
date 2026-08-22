@@ -28,7 +28,7 @@ def _write(path: Path, body: str) -> None:
     path.write_text(textwrap.dedent(body))
 
 
-@pytest.fixture()
+@pytest.fixture
 def broken_scripts_dir(tmp_path: Path) -> Path:
     """The exact pre-fix shape from spinal-grayish-perch: a bare sibling import, no insert."""
     scripts = tmp_path / "scripts"
@@ -100,7 +100,7 @@ class TestScriptsLeg:
         assert {s.name for s in skips} == set(walk.SCRIPTS_SKIPS)
 
 
-@pytest.fixture()
+@pytest.fixture
 def broken_package(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
     """A synthetic installed package with TWO independently broken modules."""
     pkg = tmp_path / "walkprobe_pkg"

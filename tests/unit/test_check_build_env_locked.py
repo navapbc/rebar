@@ -45,6 +45,7 @@ def _run(lock_text: str, freeze_text: str, tmp_path: Path) -> subprocess.Complet
         [sys.executable, str(SCRIPT), "--lock", str(lock), "--freeze", str(freeze)],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

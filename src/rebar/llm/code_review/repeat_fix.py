@@ -45,6 +45,7 @@ def _git(repo_root: str, *args: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
+            check=False,
         )
     except Exception:  # best-effort: any git/OS error → no escalation
         logger.debug("repeat-fix: git %s failed in %s", args[:1], repo_root, exc_info=True)

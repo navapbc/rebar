@@ -36,7 +36,7 @@ def binding_store_mod():
     return _load("_binding_store_for_capture", "binding_store.py")
 
 
-@pytest.fixture()
+@pytest.fixture
 def store(binding_store_mod, tmp_path):
     return binding_store_mod.BindingStore(tmp_path / ".tickets-tracker")
 

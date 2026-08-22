@@ -73,7 +73,7 @@ _ORPHAN_PLUS_CRIT = [
 
 # ───────────────────────────── score → exit tiers ────────────────────────────
 @pytest.mark.parametrize(
-    "name,tickets,expect_score",
+    ("name", "tickets", "expect_score"),
     [
         ("healthy", _HEALTHY, 5),
         ("dup_minor", _DUP, 4),

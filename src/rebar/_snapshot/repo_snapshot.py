@@ -393,6 +393,7 @@ def _ensure_blobs_present(repo_root: str, sha: str, remote: str) -> None:
             text=True,
             env=env,
             timeout=_GIT_TIMEOUT,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         pass  # best-effort: fall through to the plumbing, which still has lazy fetch
@@ -608,7 +609,10 @@ def _pin_tickets_sha(
     # one (`.git` is a FILE). Only the clone layout can drift, but both must resolve here, and
     # a `.git`-is-a-dir test silently excludes the worktree layout.
     probe = subprocess.run(
-        ["git", "-C", tracker, "rev-parse", "--git-dir"], capture_output=True, text=True
+        ["git", "-C", tracker, "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if probe.returncode != 0:
         return None
@@ -637,12 +641,13 @@ def _pin_tickets_sha(
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if probe.returncode != 0:
             return None
 
     head = subprocess.run(
-        ["git", "-C", tracker, "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", tracker, "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     )
     sha = (head.stdout or "").strip()
     if head.returncode != 0 or not sha:

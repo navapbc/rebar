@@ -184,7 +184,7 @@ def test_built_in_prompts_are_discovered() -> None:
     } <= ids
 
 
-@pytest.mark.parametrize("prompt_id,path", _packaged_prompt_paths())
+@pytest.mark.parametrize(("prompt_id", "path"), _packaged_prompt_paths())
 def test_built_in_prompt_round_trips_canonically(prompt_id: str, path) -> None:
     text = path.read_text(encoding="utf-8")
     with warnings.catch_warnings():

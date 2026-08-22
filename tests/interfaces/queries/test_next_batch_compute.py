@@ -316,7 +316,9 @@ def _run(tracker: Path, *args: str) -> subprocess.CompletedProcess:
             "REBAR_SYNC_PUSH": "off",
         }
     )
-    return subprocess.run([_CLI, "next-batch", *args], env=env, capture_output=True, text=True)
+    return subprocess.run(
+        [_CLI, "next-batch", *args], env=env, capture_output=True, text=True, check=False
+    )
 
 
 @pytest.fixture

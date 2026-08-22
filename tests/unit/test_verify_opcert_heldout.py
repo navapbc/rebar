@@ -116,7 +116,10 @@ def _write_trusted_env(repo: Path, env_id: str, pub: str, added_at_position: str
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra], capture_output=True, text=True
+        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 

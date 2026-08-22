@@ -71,7 +71,10 @@ def test_ticketquery_is_frozen():
     try:
         q.status = "open"  # type: ignore[misc]
     except Exception as exc:  # noqa: BLE001 — frozen dataclass raises FrozenInstanceError
-        assert "assign" in str(exc).lower() or "frozen" in type(exc).__name__.lower()
+        # PT017 is excluded here: the oracle accepts EITHER message shape or EITHER exception
+        # type, a disjunction `pytest.raises(..., match=...)` cannot express — and
+        # `pytest.raises(Exception)` would itself trip B017.
+        assert "assign" in str(exc).lower() or "frozen" in type(exc).__name__.lower()  # noqa: PT017
     else:  # pragma: no cover
         raise AssertionError("TicketQuery must be frozen")
 

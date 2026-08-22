@@ -61,7 +61,7 @@ def _isolate_git_from_enclosing_repo(tmp_path, monkeypatch):
         )
     )
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", ceilings)
-    yield
+    return
 
 
 @pytest.fixture(autouse=True)
@@ -96,4 +96,4 @@ def _link_writes_persist_without_repo(monkeypatch):
         return 0
 
     monkeypatch.setattr(_ea, "write_and_push", _persist)
-    yield
+    return

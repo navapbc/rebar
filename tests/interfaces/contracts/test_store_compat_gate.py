@@ -47,6 +47,7 @@ def _cli(*args: str, cwd: str, **env: str) -> subprocess.CompletedProcess:
         text=True,
         cwd=cwd,
         env=e,
+        check=False,
     )
 
 
@@ -144,6 +145,7 @@ def test_ensure_unit_writes_record_when_absent(rebar_repo: Path) -> None:
         ["git", "-C", str(tracker), "ls-files", "--error-unmatch", COMPAT_FILE],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert out.returncode == 0, f".store-compat.json is not tracked/committed: {out.stderr}"
 

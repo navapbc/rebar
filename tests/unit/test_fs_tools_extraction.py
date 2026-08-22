@@ -56,6 +56,7 @@ def test_importing_fs_tools_does_not_pull_the_agent_runtime() -> None:
         capture_output=True,
         text=True,
         env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "CLEAN", "importing rebar.llm.fs_tools pulled in the agents extra"

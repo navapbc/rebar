@@ -97,7 +97,7 @@ def test_api_key_is_never_carried_in_the_record() -> None:
 
 
 @pytest.mark.parametrize(
-    "provider,model,expected_tier",
+    ("provider", "model", "expected_tier"),
     [
         ("anthropic", "anthropic:claude-opus-4-8", "first_class"),
         ("bedrock", "bedrock:us.anthropic.claude-sonnet-4-6", "first_class"),

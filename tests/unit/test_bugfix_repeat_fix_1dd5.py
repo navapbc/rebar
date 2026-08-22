@@ -149,7 +149,11 @@ def test_merge_commits_are_not_counted_as_prior_fixes(repo, monkeypatch) -> None
     stamp = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
     env = subprocess_env(GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp)
     # A conflicting merge resolved to one side: the MERGE commit also "touches" the path.
-    subprocess.run(["git", "-C", str(repo), "merge", "--no-commit", "side"], capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "merge", "--no-commit", "side"],
+        capture_output=True,
+        check=False,
+    )
     (repo / "src" / "rebar" / "hot.py").write_text("merged\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", _bug_msg(3), env=env)

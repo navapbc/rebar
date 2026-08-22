@@ -64,6 +64,7 @@ def _live_census() -> list[dict]:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     return json.loads(proc.stdout), proc.returncode
 
@@ -103,6 +104,7 @@ def test_census_transport_exit_zero_same_count():
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0
     findings = json.loads(proc.stdout)
@@ -124,6 +126,7 @@ def test_wrapper_check_on_committed_baseline():
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     match = re.fullmatch(r"active=(\d+) new=(\d+) increased=(\d+) stale=(\d+)", proc.stdout.strip())
@@ -215,7 +218,7 @@ def test_valid_baseline_parses():
 
 
 @pytest.mark.parametrize(
-    "raw, needle",
+    ("raw", "needle"),
     [
         (b"\xff\xfe not utf8", "UTF-8"),
         (b"{ not json", "JSON"),
@@ -700,6 +703,7 @@ def test_help_documents_contracts():
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0
     text = proc.stdout
@@ -925,7 +929,7 @@ def test_no_merge_base_falls_back_to_the_tip_and_says_so(tmp_path: Path, monkeyp
 
 
 @pytest.mark.parametrize(
-    "current, expect_rc, expect_token",
+    ("current", "expect_rc", "expect_token"),
     [
         # A baselined function DROPPED below its ceiling and left the census
         # entirely -- the exact state a behaviour-preserving extraction produces.
@@ -967,7 +971,7 @@ def test_tree_assertions_agree_with_gate_on_a_reduction(
 
 
 @pytest.mark.parametrize(
-    "current, expect_token",
+    ("current", "expect_token"),
     [
         ({"src/rebar/a.py::a": 20, "src/rebar/b.py::b": 25, "src/rebar/c.py::c": 30}, "new=1"),
         ({"src/rebar/a.py::a": 33, "src/rebar/b.py::b": 25}, "increased=1"),

@@ -19,7 +19,7 @@ import json
 import pytest
 
 
-@pytest.fixture()
+@pytest.fixture
 def acli_ops():
     from rebar_reconciler.adapters.jira import acli_cli_ops
 

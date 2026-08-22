@@ -250,7 +250,7 @@ def test_construction_imports_no_command_handlers() -> None:
         f"leaked=[m for m in {forbidden!r} if m in sys.modules];"
         "print('LEAK:'+','.join(leaked) if leaked else 'CLEAN')"
     )
-    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "CLEAN", f"registry eagerly imported: {cp.stdout.strip()}"
 

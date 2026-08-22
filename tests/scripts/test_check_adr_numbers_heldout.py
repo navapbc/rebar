@@ -180,5 +180,6 @@ def test_real_check_script_runs_as_subprocess() -> None:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0, f"gate failed on real tree:\n{proc.stdout}\n{proc.stderr}"

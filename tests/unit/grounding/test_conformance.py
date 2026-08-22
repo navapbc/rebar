@@ -115,7 +115,7 @@ def _harness_version_skew() -> harness.RunResult:
 
 
 @pytest.mark.parametrize(
-    "failure_mode, factory, expected_reason",
+    ("failure_mode", "factory", "expected_reason"),
     [
         ("missing-tool", _harness_no_tool, "no_tool"),
         ("timeout", _harness_timeout, "timeout"),
@@ -193,7 +193,7 @@ def _dep(name: str = "requests", eco: str = "pypi") -> dict:
 
 
 @pytest.mark.parametrize(
-    "failure_mode, raiser, expected_reason",
+    ("failure_mode", "raiser", "expected_reason"),
     [
         ("timeout", TimeoutError("read timed out"), "timeout"),
         (
@@ -354,7 +354,7 @@ def test_metric_unsupported_lang_when_no_matching_files(tmp_path, monkeypatch) -
 
 
 @pytest.mark.parametrize(
-    "failure_mode, payload, args, kwargs, expected_reason",
+    ("failure_mode", "payload", "args", "kwargs", "expected_reason"),
     [
         ("hang (uninterruptible)", wp.hangs_forever, (), None, "timeout"),
         ("crash (signal death / segfault stand-in)", wp.hard_crash, (), None, "parse_error"),

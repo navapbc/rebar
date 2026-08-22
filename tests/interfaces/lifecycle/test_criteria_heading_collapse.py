@@ -45,6 +45,7 @@ def _cli_rc(*args: str, cwd: str) -> int:
         capture_output=True,
         text=True,
         cwd=cwd,
+        check=False,
     ).returncode
 
 

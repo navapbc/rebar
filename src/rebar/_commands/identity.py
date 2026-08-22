@@ -107,6 +107,7 @@ def _git_email(repo_root=None) -> str | None:
             capture_output=True,
             text=True,
             timeout=10,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

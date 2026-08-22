@@ -28,7 +28,9 @@ pytestmark = pytest.mark.unit
 
 
 def _git(d, *a, _in=None, check=True):
-    r = subprocess.run(["git", "-C", str(d), *a], input=_in, capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", str(d), *a], input=_in, capture_output=True, text=True, check=False
+    )
     if check and r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
     return r

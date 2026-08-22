@@ -93,13 +93,18 @@ def _ahead(repo: Path) -> int:
     """How many commits the local tickets branch is ahead of origin/tickets."""
     tracker = repo / ".tickets-tracker"
     subprocess.run(
-        ["git", "fetch", "-q", "origin", "tickets"], cwd=tracker, capture_output=True, text=True
+        ["git", "fetch", "-q", "origin", "tickets"],
+        cwd=tracker,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     out = subprocess.run(
         ["git", "rev-list", "--count", "FETCH_HEAD..HEAD"],
         cwd=tracker,
         capture_output=True,
         text=True,
+        check=False,
     )
     return int(out.stdout.strip() or "0")
 

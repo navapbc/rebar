@@ -84,6 +84,7 @@ def _gate(repo: Path, *args: str) -> subprocess.CompletedProcess:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

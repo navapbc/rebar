@@ -123,6 +123,7 @@ def test_cli_contract_for_an_uninitialized_cwd_is_unchanged(tmp_path: Path) -> N
         text=True,
         cwd=str(tmp_path),
         env=env,
+        check=False,
     )
     assert cp.returncode == 1, f"expected exit 1, got {cp.returncode}\n{cp.stderr}"
     assert _EXPECTED_STDERR in cp.stderr, cp.stderr

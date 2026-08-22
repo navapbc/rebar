@@ -51,6 +51,7 @@ def _origin_ref(origin: Path) -> str:
         ["git", "--git-dir", str(origin), "rev-parse", "--verify", "-q", "refs/heads/tickets"],
         capture_output=True,
         text=True,
+        check=False,
     )
     return r.stdout.strip() if r.returncode == 0 else "NONE"
 
@@ -78,7 +79,7 @@ def repo_with_origin(
     _git("remote", "add", "origin", str(origin), cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
-    yield repo, origin
+    return repo, origin
 
 
 def _write_git_shim(bin_dir: Path) -> None:

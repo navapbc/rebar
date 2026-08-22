@@ -125,7 +125,7 @@ def _module_level_imported_names(path: Path) -> set[str]:
     return names
 
 
-@pytest.mark.parametrize("filename,forbidden_mapper", _MAPPER_INJECTED)
+@pytest.mark.parametrize(("filename", "forbidden_mapper"), _MAPPER_INJECTED)
 def test_differ_apply_core_does_not_import_vendor_mapper(
     filename: str, forbidden_mapper: str
 ) -> None:

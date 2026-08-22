@@ -75,7 +75,7 @@ _FIXTURES = [
 ]
 
 
-@pytest.mark.parametrize("label,line,should_fire", _FIXTURES, ids=[f[0] for f in _FIXTURES])
+@pytest.mark.parametrize(("label", "line", "should_fire"), _FIXTURES, ids=[f[0] for f in _FIXTURES])
 def test_operator_evidence_fixtures(label: str, line: str, should_fire: bool) -> None:
     assert bool(_gaps(_ac(line))) is should_fire
 

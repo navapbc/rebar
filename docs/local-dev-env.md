@@ -401,6 +401,34 @@ make test      # default test suite (excludes integration + external)
 make format    # the ONLY target that rewrites files
 ```
 
+### The per-test hang budget (20 s) and how to override it
+
+`[tool.pytest.ini_options]` sets `timeout = 20`, `timeout_method = "thread"` and
+`timeout_func_only = true`, so **`make test` and a bare local `pytest` carry the same
+per-test budget CI does**. Before this the budget lived only on the CI command lines, so a
+deadlocked test hung a local run indefinitely and the CI-only guard could rot with no local
+signal.
+
+The value is measured, not guessed: the whole default tier (5097 tests) and the whole
+integration tier run clean at 20 s. `timeout_func_only` charges the budget to the test
+**body**, so a slow fixture cannot spend a test's allowance.
+
+A test that must legitimately run longer overrides the ini with a marker **and a one-line
+comment naming why** — silent exemptions are not acceptable:
+
+```python
+# timeout: drives a real 45 s subprocess handshake; there is no faster oracle.
+@pytest.mark.timeout(90, func_only=True)
+def test_something_genuinely_slow() -> None:
+    ...
+```
+
+Both halves are pinned by `tests/unit/test_timeout_budget.py`: that the marker still beats
+the ini, and — in a subprocess, since a permanently-red test cannot be committed — that the
+ini alone really does expire an over-budget test. The two `_build-and-test.yml` lanes are
+held equal to the ini value by `tests/unit/test_ci_workflow_parity.py`; the live-service,
+clean-venv and eval lanes keep their own, larger, calibrated budgets.
+
 ### Running the tests CI runs (the optional-extra surface)
 
 `make install` deliberately stays lean, so ~38 tests gated on
@@ -459,16 +487,18 @@ So, in order of preference:
 1. **Run it from a worktree you are not editing.** `make worktree name=<something>` and
    leave it alone until it finishes. This is the whole fix — with no concurrent writer,
    none of the guards above can misfire.
-2. **Use the CI selection and flags,** which are far faster and add a per-test hang guard.
-   `pytest-xdist` and `pytest-timeout` are already pinned in `[dev]` for local↔CI parity,
-   but they are **not** enabled by `addopts`, so a bare `pytest` is serial with no timeout:
+2. **Use the CI selection and flags,** which are far faster. The per-test hang guard now
+   comes from the ini (see "The per-test hang budget" above), so a bare `pytest` already has
+   one; `pytest-xdist` is still **not** enabled by `addopts`, so a bare `pytest` is serial:
 
    ```sh
    pytest -m "not integration and not external" -q \
      -n "$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || nproc)" --dist worksteal \
-     -p no:cacheprovider --timeout=300 --timeout-method=thread \
-     --basetemp="$(mktemp -d)"
+     -p no:cacheprovider --basetemp="$(mktemp -d)"
    ```
+
+   Passing `--timeout=` on the command line OVERRIDES the ini for the whole run — useful when
+   bisecting a genuine hang, but do not leave it in a script: it silently un-guards every test.
 
 3. **If you must detach, do not work in that checkout until it exits** — not even a
    `git commit`, and not a `rebar` command either: tracker writes land under the checkout

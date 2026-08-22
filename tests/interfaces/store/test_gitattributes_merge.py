@@ -29,7 +29,7 @@ def fresh_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "i"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    yield repo
+    return repo
 
 
 def _tracker(repo: Path) -> Path:
@@ -37,7 +37,9 @@ def _tracker(repo: Path) -> Path:
 
 
 def _git(tracker: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(tracker), *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", str(tracker), *args], capture_output=True, text=True, check=False
+    )
 
 
 # ── init installs both halves of the merge=ours policy ────────────────────────

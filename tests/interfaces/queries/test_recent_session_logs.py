@@ -41,6 +41,7 @@ def _cli_session_logs(repo: Path, *args: str) -> list[dict]:
         capture_output=True,
         text=True,
         cwd=str(repo),
+        check=False,
     )
     assert cp.returncode == 0, f"cli failed (rc={cp.returncode}): {cp.stderr}"
     return json.loads(cp.stdout)
