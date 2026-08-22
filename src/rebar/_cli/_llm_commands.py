@@ -404,26 +404,48 @@ def _render_step_failures(result: dict) -> None:
     )
 
 
+def _render_reuse_notation(result: dict) -> None:
+    """Reuse notation (b3e5/7e77, sharpened by task 167e): the rendered findings are the
+    LAST review's result REPLAYED because nothing that review read has changed — not a
+    fresh LLM run. Says so unmistakably on both reuse paths, keeps the ``--force``
+    pointer, and renders the stored review's recency anchor
+    (``coverage.replayed_review``: its timestamp + reviewed-code SHA) so the reader can
+    judge staleness — omitted gracefully when the sidecar carried none. The JSON already
+    carries ``coverage.idempotent_skip`` / ``coverage.verdict_reuse`` and
+    ``runner="reused"``; a fresh review prints nothing here."""
+    coverage = result.get("coverage", {}) or {}
+    if coverage.get("idempotent_skip"):
+        sys.stdout.write(
+            "  reused: replaying the last review's result — the plan is unchanged and its "
+            "attestation is still current, so no fresh LLM review ran "
+            "(pass --force to re-review)\n"
+        )
+    elif coverage.get("verdict_reuse"):
+        sys.stdout.write(
+            "  reused: replaying the last review's stored BLOCK — the plan and the "
+            "reviewed code are unchanged since it was recorded, so no fresh LLM review "
+            "ran (pass --force to re-review)\n"
+        )
+    else:
+        return
+    anchor = coverage.get("replayed_review") or {}
+    parts = []
+    if anchor.get("reviewed_at"):
+        from datetime import datetime, timezone
+
+        stamp = datetime.fromtimestamp(anchor["reviewed_at"] / 1e9, tz=timezone.utc)
+        parts.append(f"reviewed at {stamp.strftime('%Y-%m-%dT%H:%M:%SZ')}")
+    if anchor.get("verified_at_sha"):
+        parts.append(f"against code {str(anchor['verified_at_sha'])[:12]}")
+    if parts:
+        sys.stdout.write(f"  last review: {', '.join(parts)}\n")
+
+
 def _render_plan_review_text(result: dict) -> None:
     """Human-readable plan-review summary (verdict + blocking/advisory + coaching)."""
     v = result.get("verdict", "?")
     sys.stdout.write(f"PLAN REVIEW: {v} for {result.get('ticket_id')}\n")
-    # Idempotence short-circuit (feature b3e5): a REUSED verdict ran no LLM — the existing
-    # attestation was still current. Mark it distinctly so a fresh review is not confused with a
-    # cache hit (the JSON already carries coverage.idempotent_skip / runner="reused").
-    if (result.get("coverage", {}) or {}).get("idempotent_skip"):
-        sys.stdout.write(
-            "  reused: existing attestation is still current — no LLM re-run "
-            "(pass --force to re-review)\n"
-        )
-    # BLOCK verdict-reuse (bug 7e77): the stored BLOCK verdict was rendered back because the
-    # plan and the reviewed code are both unchanged since it was recorded — no LLM re-run.
-    # The JSON carries coverage.verdict_reuse / runner="reused"; exit code stays the BLOCK 1.
-    if (result.get("coverage", {}) or {}).get("verdict_reuse"):
-        sys.stdout.write(
-            "  reused: stored BLOCK verdict is still current (plan and code unchanged) — "
-            "no LLM re-run (pass --force to re-review)\n"
-        )
+    _render_reuse_notation(result)
     _render_step_failures(result)
     counts = (result.get("coverage", {}) or {}).get("counts", {}) or {}
     overflow = counts.get("advisory_overflow", 0)
