@@ -277,7 +277,11 @@ class JiraBackend:
         the missing var(s) rather than a cryptic downstream failure — raises the
         neutral :class:`BackendEnvError` (subclasses ``RuntimeError``). When composed
         with a captured scope (RP-04 S2), the readiness check runs against that scope
-        rather than re-resolving ambient state."""
+        rather than re-resolving ambient state — and is DELIBERATELY stricter than
+        this legacy ambient branch (ticket 4698-d85c): ``assert_cloud_scope_ready``
+        additionally requires ``JIRA_USER`` to be an email and ``jira.project`` to be
+        non-empty. That is an intended, canonical tightening (see its docstring), not
+        accidental path drift; the ambient branch below is the compatibility floor."""
         if self._scope is not None:
             from rebar_reconciler.runtime import assert_cloud_scope_ready
 
