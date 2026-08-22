@@ -3,13 +3,20 @@
 This eval deliberately exercises the real dense ticket that exposed the zero-bank loop.  The
 ticket and repository are read-only inputs: ``verify_completion`` is called with the local source
 handle, and this module never emits a sidecar or transitions tracker state.
+
+Measurement and oracle are denominated in evidence RESPONSES — distinct model responses
+(``ctx.run_step``) at which a governed repository tool actually executed — because that is the
+unit the completion evidence policy enforces (``max_evidence_responses`` in
+``src/rebar/llm/completion_tool_policy.py``).  Commit ``e1352535ace`` (ticket
+``dd41-239d-6e09-4a86``) deliberately lets a batched response execute ALL of its governed
+reads, so an executed-CALL denomination is unbounded per response and went stale (bug
+``9507-4676-27af-4344``).  Raw executed calls stay in the trial payload as a diagnostic only.
 """
 
 from __future__ import annotations
 
 import subprocess
 from functools import wraps
-from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +27,7 @@ import pytest
 import rebar
 import rebar.llm
 from rebar.llm import completion as completion_module
+from rebar.llm import completion_tool_policy as tool_policy
 from rebar.llm import pai_tools
 from rebar.llm.config import LLMConfig
 from rebar.llm.workflow import completion_banking as banking
@@ -57,10 +65,12 @@ def _observe_trial(
     graph: bool,
 ) -> dict[str, Any]:
     writes: list[str] = []
-    calls_at_first_write: list[int] = []
+    responses_at_first_write: list[int] = []
     evidence_calls = 0
+    evidence_steps: set[int] = set()
     original_upsert = banking.CriterionBank.upsert
     original_filesystem_tools = pai_tools.filesystem_tools
+    original_policy_wrap = tool_policy.wrap_completion_evidence_policy
 
     def counting_filesystem_tools(repo_path: str | None) -> list[Any]:
         tools = original_filesystem_tools(repo_path)
@@ -77,12 +87,18 @@ def _observe_trial(
         return counted
 
     observed_upsert = _bank_observer.make_observed_upsert(
-        original_upsert, writes, calls_at_first_write, lambda: evidence_calls
+        original_upsert, writes, responses_at_first_write, lambda: len(evidence_steps)
+    )
+    counting_policy_wrap = _bank_observer.make_response_counting_wrap(
+        original_policy_wrap, evidence_steps
     )
 
     with monkeypatch.context() as trial_patch:
         trial_patch.setattr(banking.CriterionBank, "upsert", observed_upsert)
         trial_patch.setattr(pai_tools, "filesystem_tools", counting_filesystem_tools)
+        # agent_call imports wrap_completion_evidence_policy function-locally at call time,
+        # so patching the source module attribute installs the response counter per run.
+        trial_patch.setattr(tool_policy, "wrap_completion_evidence_policy", counting_policy_wrap)
         trial_patch.setattr(
             completion_module,
             "_verifier_model_for_completion",
@@ -102,7 +118,8 @@ def _observe_trial(
                 "banked": len(set(writes)),
                 "verdict": verdict.get("verdict"),
                 "error": None,
-                "calls_at_bank": calls_at_first_write,
+                "responses_at_bank": responses_at_first_write,
+                "evidence_responses": len(evidence_steps),
                 "evidence_calls": evidence_calls,
             }
         except CompletionRecoveryError as exc:
@@ -110,22 +127,14 @@ def _observe_trial(
                 "banked": len(set(writes)),
                 "verdict": None,
                 "error": str(exc),
-                "calls_at_bank": calls_at_first_write,
+                "responses_at_bank": responses_at_first_write,
+                "evidence_responses": len(evidence_steps),
                 "evidence_calls": evidence_calls,
             }
 
 
 def _bounded_bank_gaps(trial: dict[str, Any], expected_criteria: int) -> bool:
-    points = trial["calls_at_bank"]
-    if not points:
-        return False
-    gaps = [points[0], *(later - earlier for earlier, later in pairwise(points))]
-    return (
-        trial["banked"] == expected_criteria
-        and trial["verdict"] in {"PASS", "FAIL"}
-        and len(gaps) == expected_criteria
-        and all(gap <= 3 for gap in gaps)
-    )
+    return _bank_observer.bounded_bank_gaps(trial, expected_criteria)
 
 
 def _dense_ticket(repo: Path) -> str:
