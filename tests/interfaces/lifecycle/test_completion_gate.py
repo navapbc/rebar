@@ -307,15 +307,21 @@ def test_bug_without_reason_rejected_before_verifier(rebar_repo: Path, monkeypat
     assert _status(tid, rebar_repo) == "in_progress"
 
 
-def test_unreadable_config_fails_gate_off_with_warning(
-    rebar_repo: Path, monkeypatch, capsys
+def test_unreadable_config_errors_the_close_before_any_verifier(
+    rebar_repo: Path, monkeypatch
 ) -> None:
-    # An unreadable config must NOT block this (opt-in) gate or preempt other gates.
-    (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n")
-    monkeypatch.setattr(rebar.llm, "verify_completion", _never)  # gate-off => never verifies
+    # Operator ruling 39f8-ae7c: an unreadable config is an ERROR — the close fails
+    # loudly naming the config fault, and the (billable) verifier is never reached.
+    monkeypatch.setattr(rebar.llm, "verify_completion", _never)
     tid = _make(rebar_repo)
-    rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
-    assert _status(tid, rebar_repo) == "closed"
+    (rebar_repo / "rebar.toml").write_text("this is = = not valid toml [[[\n")
+    from rebar import config as _config
+
+    _config.reset_config_cache()
+    with pytest.raises(_config.ConfigError) as ei:
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))
+    assert "config" in str(ei.value)
+    assert _status(tid, rebar_repo) == "in_progress"
 
 
 def _set_impact(tid: str, repo: Path) -> None:

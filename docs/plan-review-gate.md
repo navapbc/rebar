@@ -945,8 +945,10 @@ Enable it in a `[verify]` table in `rebar.toml` / `pyproject.toml`:
 require_plan_review_for_claim = true
 ```
 
-Default **off** ⇒ `claim` keeps today's behavior exactly. An unreadable config
-fails this opt-in gate *off* with a warning (it never auto-enables across a repo).
+Default **off** ⇒ `claim` keeps today's behavior exactly. An unreadable config is an
+**error**: the gated operation fails loudly with the parse fault (operator ruling
+39f8-ae7c) — it never silently resolves the gate to its default, and it never
+auto-enables across a repo.
 
 ## Close-time attestation gate
 

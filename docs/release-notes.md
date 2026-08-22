@@ -8,6 +8,30 @@ Agent-visible contract changes, newest first. rebar shares one `origin/tickets`
 across many clients, so contract changes are called out here when they could be
 observed by an agent or a different rebar version.
 
+## BREAKING (pre-1.0) — unreadable config errors gate resolution (no more fail-OPEN)
+
+Operator ruling on ticket 39f8-ae7c ("Unreadable config should result in an error"),
+2026-08-21. When `rebar.toml` exists but cannot be read, resolving any opt-in `verify.*`
+gate (the plan-review claim gate, the completion-verification close gate) now raises
+`rebar.config.ConfigError` — re-exported as `rebar.ConfigError` — with the parse fault
+chained as `__cause__`, instead of silently resolving the gate to its configured default
+and letting the operation proceed.
+
+Agent-visible effects:
+
+- `rebar claim` / `rebar transition` (CLI) fail with exit 1 and a clean
+  `Error: cannot resolve <gate> for <ticket>: …` line naming the config fault.
+- `rebar.claim()` / `rebar.transition()` (library) raise `ConfigError` where they
+  previously proceeded; callers that catch only `RebarError` will now see the
+  `ConfigError` propagate. Catch `rebar.ConfigError` to handle it.
+- The ticket is left in its prior state (the error is raised before the store lock;
+  no gate payload, stamp, or status write is recorded).
+- A **missing** config is unchanged: absent `rebar.toml` still means defaults.
+
+Remediation is always the same: fix the config file, then retry the operation. The
+`GateState.UNREADABLE` enum member introduced by ticket f5c4-b2d1 is removed with it
+(never released).
+
 ## Library force bypass carries its audit reason on `force`
 
 The public library lifecycle operations now share one force contract:
