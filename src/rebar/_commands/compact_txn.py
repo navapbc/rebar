@@ -8,11 +8,14 @@ engine. ``compact.py`` is now a thin CLI facade over this module and
 ``compact_rebuild``.
 
 Layering: ``compact`` -> ``compact_txn``, and ``compact_rebuild`` -> ``compact_txn``.
-This module imports NEITHER of them, which is why the SHARED snapshot primitives
-(``_git``, ``_git_author``, ``_snapshot_strip_keys``, ``_build_authorship_ledger``)
-live here rather than in ``compact_rebuild``: both the normal fold and the rebuild
-path need them, and hosting them in the repair module would make the dependency
-circular. It DOES import ``fsck_repair.is_snapshot_orphan`` (a leaf predicate;
+This module imports NEITHER of them, which is why the snapshot primitives that stayed
+here (``_git``, ``_snapshot_strip_keys``, ``_build_authorship_ledger``) live in this
+module rather than in ``compact_rebuild``: both the normal fold and the rebuild path
+need them, and hosting them in the repair module would make the dependency circular.
+The derivations BOTH paths share verbatim — the candidate listing, the SNAPSHOT
+envelope, the ``*.retired`` rename-back rule and the commit step — moved out to
+:mod:`rebar._commands.compact_plan` (story 3436), which imports neither engine. It DOES
+import ``fsck_repair.is_snapshot_orphan`` (a leaf predicate;
 ``fsck_repair`` imports no compact module, so this stays acyclic) — the fold's
 orphan-exclusion guard and fsck's scan must share ONE orphan definition (bug f96b).
 """
@@ -22,19 +25,18 @@ from __future__ import annotations
 import json
 import logging
 import os
-import subprocess
 import sys
 import time
-import uuid
 from pathlib import Path
 
-from rebar._commands import _seam, compact_recovery
+from rebar._commands import compact_plan, compact_recovery
 from rebar._commands._compact_policy import is_foldable
+from rebar._commands.compact_plan import Candidate
 from rebar._commands.fsck_repair import is_snapshot_orphan
-from rebar._store import compat, event_append, fsutil, hlc, lock
+from rebar._store import compat, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar._store.gitutil import run_git_write
-from rebar.reducer import KNOWN_EVENT_TYPES, reduce_ticket
+from rebar.reducer import reduce_ticket
 from rebar.reducer._cache import RETIRED_SUFFIX
 
 logger = logging.getLogger(__name__)
@@ -43,13 +45,6 @@ logger = logging.getLogger(__name__)
 # raw-git-ok: store-maintenance command, seam-internal
 def _git(tracker: str, *args: str):
     return run_git_write(tracker, *args, check=False)
-
-
-def _git_author() -> str:
-    cp = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True)
-    if cp.returncode != 0:
-        return "system"
-    return cp.stdout.strip()
 
 
 def _sync_before_compact(tracker: str) -> None:
@@ -193,45 +188,17 @@ def _maybe_pause_at_rename_barrier(n_renamed: int) -> None:
         time.sleep(0.02)
 
 
-def _parse_candidate_events(ticket_dir: str) -> list[tuple[str, str, int | None]]:
-    """Re-list the ticket's event files inside the lock (authoritative) and parse each
-    once into ``(path, uuid, timestamp)``.
+def _parse_candidate_events(ticket_dir: str) -> list[Candidate]:
+    """The ticket's LIVE event files, re-listed inside the lock (authoritative) and parsed
+    once, through the shared planner (:func:`compact_plan.list_candidates`).
 
-    Excludes ``-SYNC.json`` (bridge metadata that must survive compaction) and drops
-    forward-compat unknown-type events (written by a newer clone), which are preserved
-    untouched — never snapshotted or deleted. An unreadable/undecodable file is kept as a
-    candidate with a basename stand-in for its uuid and no timestamp, exactly as before."""
-    candidates = sorted(
-        os.path.join(ticket_dir, f)
-        for f in os.listdir(ticket_dir)
-        if f.endswith(".json") and not f.startswith(".") and not f.endswith("-SYNC.json")
-    )
-    parsed: list[tuple[str, str, int | None]] = []  # (path, uuid, ts)
-    for fp in candidates:
-        try:
-            with open(fp, encoding="utf-8") as f:
-                ev = json.load(f)
-            etype = ev.get("event_type", "")
-            euuid = ev.get("uuid", os.path.basename(fp))
-            raw_ts = ev.get("timestamp")
-            ets = raw_ts if isinstance(raw_ts, int) else None
-        except (json.JSONDecodeError, OSError):
-            etype, euuid, ets = "", os.path.basename(fp), None
-        if etype and etype not in KNOWN_EVENT_TYPES:
-            continue
-        parsed.append((fp, euuid, ets))
-    return parsed
+    Forward-compat unknown-type events (written by a newer clone) are dropped here: they are
+    preserved untouched, never snapshotted or deleted. An unreadable/undecodable file stays a
+    candidate with a basename stand-in for its uuid and no timestamp."""
+    return [c for c in compact_plan.list_candidates(ticket_dir) if c.is_known_type]
 
 
-def _is_snapshot_path(fp: str) -> bool:
-    """True when *fp* names a SNAPSHOT event file (live or ``.retired``)."""
-    return os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
-
-
-def _defer_presnapshot_foldables(
-    old: list[tuple[str, str, int | None]],
-    young: list[tuple[str, str, int | None]],
-) -> list[tuple[str, str, int | None]]:
+def _defer_presnapshot_foldables(old: list[Candidate], young: list[Candidate]) -> list[Candidate]:
     """Drop foldables governed by a SNAPSHOT that is NOT folding this pass.
 
     A fold-horizon race can leave a pre-snapshot event live (see
@@ -241,16 +208,14 @@ def _defer_presnapshot_foldables(
     positionally buried on replay, i.e. the same silent loss this fix exists to
     prevent. Defer such events until the governing snapshot folds with them.
     """
-    snaps = [os.path.basename(fp) for (fp, _u, _ts) in young if _is_snapshot_path(fp)]
+    snaps = [c.name for c in young if c.is_snapshot]
     if not snaps:
         return old
     governing = max(snaps)
-    return [(fp, u, ts) for (fp, u, ts) in old if os.path.basename(fp) >= governing]
+    return [c for c in old if c.name >= governing]
 
 
-def _exclude_snapshot_orphans(
-    old: list[tuple[str, str, int | None]],
-) -> list[tuple[str, str, int | None]]:
+def _exclude_snapshot_orphans(old: list[Candidate]) -> list[Candidate]:
     """Exclude fsck-orphans from the fold set so the fold cannot LAUNDER them.
 
     Anchor: the latest prior SNAPSHOT present in the fold set. An active event that
@@ -268,62 +233,28 @@ def _exclude_snapshot_orphans(
     anchor snapshot excludes nothing — fsck cannot classify orphans against it
     either (``_check_snapshot`` returns no findings for it).
     """
-    snaps = [fp for (fp, _u, _ts) in old if _is_snapshot_path(fp)]
+    snaps = [c for c in old if c.is_snapshot]
     if not snaps:
         return old
-    anchor = max(snaps, key=os.path.basename)
+    anchor = max(snaps, key=lambda c: c.name)
     try:
-        with open(anchor, encoding="utf-8") as f:
+        with open(anchor.path, encoding="utf-8") as f:
             sources = set(json.load(f).get("data", {}).get("source_event_uuids", []))
     except (json.JSONDecodeError, OSError):
         return old
-    anchor_name = os.path.basename(anchor)
-    kept: list[tuple[str, str, int | None]] = []
-    for fp, u, ts in old:
-        name = os.path.basename(fp)
-        etype = name.removesuffix(".json").rsplit("-", 1)[-1]
-        if is_snapshot_orphan(name, etype, u, anchor_name, sources):
+    kept: list[Candidate] = []
+    for c in old:
+        etype = c.name.removesuffix(".json").rsplit("-", 1)[-1]
+        if is_snapshot_orphan(c.name, etype, c.uuid, anchor.name, sources):
             logger.warning(
                 "compact: excluding pre-snapshot orphan %s from the fold — not captured by "
                 "%s; left live for fsck --repair-snapshots",
-                name,
-                anchor_name,
+                c.name,
+                anchor.name,
             )
             continue
-        kept.append((fp, u, ts))
+        kept.append(c)
     return kept
-
-
-def _build_snapshot_event(
-    tracker: str,
-    ticket_dir: str,
-    compiled_state: dict,
-    source_uuids: list[str],
-    snapshot_ts: int,
-) -> tuple[dict, str]:
-    """Assemble the SNAPSHOT event envelope and its destination path.
-
-    Denormalized author attribution (epic gnu-whale-ichor) is stamped onto the envelope.
-    There is no ``repo_root`` parameter on this path, so it is derived from the tracker —
-    mirroring the derivation in ``compact_rebuild.rebuild_snapshot_from_full_log``."""
-    snapshot_uuid = str(uuid.uuid4())
-    snapshot_event = {
-        "event_type": "SNAPSHOT",
-        "timestamp": snapshot_ts,
-        "uuid": snapshot_uuid,
-        "env_id": _seam.env_id(Path(tracker)),
-        "author": _git_author(),
-        "data": {
-            "compiled_state": compiled_state,
-            "source_event_uuids": source_uuids,
-            "compacted_at": snapshot_ts,
-        },
-    }
-    snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
-    final_path = os.path.join(
-        ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
-    )
-    return snapshot_event, final_path
 
 
 def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: str) -> int:
@@ -335,14 +266,14 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
     makes a re-compact a no-op, and an existing ``.retired`` target is skipped (idempotent).
     A rename failure is logged (never swallowed) and every completed rename is reversed
     before we abort, so the fold is atomic: either all sources are retired or none are."""
-    renamed: list[tuple[str, str]] = []
+    renamed: list[str] = []
     try:
         for fp in fold_files:
             retired = fp + RETIRED_SUFFIX
             if os.path.exists(retired):
                 continue  # idempotent re-run: source already retired
             os.rename(fp, retired)
-            renamed.append((fp, retired))
+            renamed.append(fp)
             logger.info("compact: retired folded event %s", os.path.basename(fp))
             _maybe_pause_at_rename_barrier(len(renamed))
     except OSError:
@@ -352,23 +283,11 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
             len(renamed),
             exc_info=True,
         )
-        rollback_clean = True
-        for orig, retired in reversed(renamed):
-            try:
-                os.rename(retired, orig)
-            except OSError:
-                rollback_clean = False
-                logger.warning(
-                    "compact: could not reverse rename %s -> %s", retired, orig, exc_info=True
-                )
-        if rollback_clean:
+        if compact_plan.restore_retired(reversed(renamed)):
             # CLEAN rollback: every completed rename was reversed, so the store is
             # back to its exact pre-fold state and the uncommitted SNAPSHOT is a
             # stray artifact — remove it. (Preserves the original behavior.)
-            try:
-                os.remove(final_path)
-            except OSError:
-                logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
+            compact_plan.discard_uncommitted_snapshot(final_path)
             sys.stderr.write("Error: failed to retire folded events while holding lock\n")
             return 1
         # INCOMPLETE rollback: at least one reverse-rename failed, so a source is
@@ -381,7 +300,7 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
         # rebuilds. Reads are already correct in this mixed window: the
         # reversed-to-active source keeps its original (pre-snapshot) filename, so
         # it is positionally skipped during replay and never double-counted. Do NOT
-        # "simplify" this back into an unconditional ``os.remove(final_path)``.
+        # "simplify" this back into an unconditional snapshot removal.
         logger.warning(
             "compact: rollback incomplete for %s — SNAPSHOT %s retained; run fsck",
             ticket_id,
@@ -401,17 +320,11 @@ def _retire_folded_sources(fold_files: list[str], ticket_id: str, final_path: st
 def _commit_compaction(tracker: str, ticket_id: str) -> int:
     """Stage and commit the ticket's compacted directory. Returns 0 on success (including
     the nothing-staged case), 1 on a git failure, having written the operator-facing line."""
-    add = _git(tracker, "add", "-A", f"{ticket_id}/")
-    if add.returncode != 0:
+    ok, err = compact_plan.commit_ticket_dir(tracker, ticket_id, f"ticket: COMPACT {ticket_id}")
+    if not ok:
         # Include git's stderr: the seam's lock-exhaustion guidance rides in it (9305).
-        sys.stderr.write(f"Error: git operation failed while holding lock: {add.stderr}\n")
+        sys.stderr.write(f"Error: git operation failed while holding lock: {err}\n")
         return 1
-    staged = _git(tracker, "diff", "--cached", "--quiet")
-    if staged.returncode != 0:
-        commit = _git(tracker, "commit", "-q", "--no-verify", "-m", f"ticket: COMPACT {ticket_id}")
-        if commit.returncode != 0:
-            sys.stderr.write(f"Error: git operation failed while holding lock: {commit.stderr}\n")
-            return 1
     return 0
 
 
@@ -421,28 +334,15 @@ def _rollback_fold(tracker: str, ticket_id: str, final_path: str, fold_files: li
     uncommitted SNAPSHOT, and unstage the ticket dir (a death between ``git add`` and
     ``git commit`` leaves a dirty INDEX that aborts the union merge just like dirty files).
 
-    Mirrors ``_retire_folded_sources``' data-loss guard: the SNAPSHOT is removed ONLY when
-    every reverse-rename succeeded. A source stuck as ``*.retired`` has its folded effect
+    The rename-back rule is the shared one (:func:`compact_plan.restore_retired`), whose
+    boolean IS the data-loss guard: the SNAPSHOT is removed ONLY when every reverse-rename
+    succeeded. A source stuck as ``*.retired`` has its folded effect
     living ONLY in the SNAPSHOT, so removing it then would silently drop that event —
     instead the SNAPSHOT is retained as the documented SNAPSHOT_INCONSISTENT state that
     ``fsck --repair-snapshots`` owns (the caller discards the intent journal, so the
     recovery preamble never touches that retained state)."""
-    rollback_clean = True
-    for fp in fold_files:
-        retired = fp + RETIRED_SUFFIX
-        if os.path.exists(retired) and not os.path.exists(fp):
-            try:
-                os.rename(retired, fp)
-            except OSError:
-                rollback_clean = False
-                logger.warning("compact: could not restore %s during rollback", fp, exc_info=True)
-    if rollback_clean:
-        try:
-            os.remove(final_path)
-        except FileNotFoundError:
-            pass
-        except OSError:
-            logger.warning("compact: could not remove uncommitted SNAPSHOT %s", final_path)
+    if compact_plan.restore_retired(fold_files):
+        compact_plan.discard_uncommitted_snapshot(final_path)
     else:
         logger.warning(
             "compact: rollback incomplete for %s — SNAPSHOT %s retained; run "
@@ -450,8 +350,7 @@ def _rollback_fold(tracker: str, ticket_id: str, final_path: str, fold_files: li
             ticket_id,
             final_path,
         )
-    # unstage the aborted fold's own index entries
-    _git(tracker, "reset", "-q", "--", f"{ticket_id}/")  # raw-git-ok: fold rollback
+    compact_plan.unstage_ticket_dir(tracker, ticket_id)
 
 
 def _abort_fold(
@@ -562,8 +461,8 @@ def _compact_locked(
         # behavior; the offline test suite defaults to 0).
         now = hlc.physical_now()
 
-        old = [(fp, u, ts) for (fp, u, ts) in parsed if is_foldable(ts, now, horizon)]
-        young = [(fp, u, ts) for (fp, u, ts) in parsed if not is_foldable(ts, now, horizon)]
+        old = [c for c in parsed if is_foldable(c.timestamp, now, horizon)]
+        young = [c for c in parsed if not is_foldable(c.timestamp, now, horizon)]
 
         if not old:
             sys.stdout.write("all events within the compaction horizon — nothing to fold\n")
@@ -577,14 +476,14 @@ def _compact_locked(
             return 0
         old = _exclude_snapshot_orphans(old)
 
-        fold_files = [fp for (fp, _u, _ts) in old]
+        fold_files = [c.path for c in old]
 
         # Pick a SNAPSHOT timestamp strictly between the newest folded event and the
         # youngest live one, so folded events sort before it (positionally skipped,
         # their state in compiled_state) and live events sort after it (replayed).
         if young:
-            old_ts = [ts for (_fp, _u, ts) in old if ts is not None]
-            young_ts = [ts for (_fp, _u, ts) in young if ts is not None]
+            old_ts = [c.timestamp for c in old if c.timestamp is not None]
+            young_ts = [c.timestamp for c in young if c.timestamp is not None]
             max_old = max(old_ts) if old_ts else now
             snapshot_ts = max_old + 1
             if young_ts and snapshot_ts >= min(young_ts):
@@ -630,13 +529,9 @@ def _compact_locked(
         # moment it does. `parsed` admits SNAPSHOT because it is a KNOWN_EVENT_TYPE, which
         # is how it ended up in this list. The REBUILD path in compact_rebuild already
         # skips snapshots when building its source list; this makes the two agree.
-        source_uuids = [
-            u
-            for (fp, u, _ts) in old
-            if not os.path.basename(fp).removesuffix(RETIRED_SUFFIX).endswith("-SNAPSHOT.json")
-        ]
+        source_uuids = compact_plan.source_uuids_of(old)
 
-        snapshot_event, final_path = _build_snapshot_event(
+        snapshot_event, final_path = compact_plan.build_snapshot_event(
             tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
         )
         if (
