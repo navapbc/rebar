@@ -270,8 +270,32 @@ class OutboundDiffConfig:
 _BRIDGE_TARGET_PROJECT_KEY = "_bridge_target_project"
 
 
+def _memoize_effective(
+    cache: dict[tuple[str, str], Any] | None,
+    axis: str,
+    project_key: str,
+    compute: Any,
+) -> Any:
+    """Pass-scoped memo for a per-project effective map (d378).
+
+    ``cache`` is a dict local to one ``compute_outbound_mutations`` pass, keyed by
+    ``(axis, project_key)``. On a miss it runs ``compute`` — the per-project config
+    discovery (``_discover_project_config`` filesystem stat-walk) plus the three-layer
+    overlay resolution — and stores the result, so that expensive work runs ONCE per
+    distinct project per axis per pass rather than once per ticket. Keying on both
+    ``axis`` and ``project_key`` keeps every project's map distinct (no cross-project
+    leak). ``cache is None`` disables memoization and computes on every call, so every
+    direct caller/test of the ``_effective_*_for`` helpers is byte-for-byte unchanged."""
+    if cache is None:
+        return compute()
+    key = (axis, project_key)
+    if key not in cache:
+        cache[key] = compute()
+    return cache[key]
+
+
 def _effective_status_map_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None, *, cache: Any = None
 ) -> dict[str, str] | None:
     """The effective per-project local->Jira status map for ``ticket``, or ``None``.
 
@@ -288,11 +312,16 @@ def _effective_status_map_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return None
-    return config.effective_status_map(project_key, root=repo_root)
+    return _memoize_effective(
+        cache,
+        "status",
+        project_key,
+        lambda: config.effective_status_map(project_key, root=repo_root),
+    )
 
 
 def _effective_type_map_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None, *, cache: Any = None
 ) -> dict[str, str] | None:
     """The effective per-project local->Jira TYPE map for ``ticket``, or ``None``.
 
@@ -310,11 +339,13 @@ def _effective_type_map_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return None
-    return config.effective_type_map(project_key, root=repo_root)
+    return _memoize_effective(
+        cache, "type", project_key, lambda: config.effective_type_map(project_key, root=repo_root)
+    )
 
 
 def _effective_priority_map_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None, *, cache: Any = None
 ) -> dict[str, str] | None:
     """The effective per-project local->Jira PRIORITY map for ``ticket``, or ``None``.
 
@@ -332,11 +363,16 @@ def _effective_priority_map_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return None
-    return config.effective_priority_map(project_key, root=repo_root)
+    return _memoize_effective(
+        cache,
+        "priority",
+        project_key,
+        lambda: config.effective_priority_map(project_key, root=repo_root),
+    )
 
 
 def _effective_create_defaults_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None, *, cache: Any = None
 ) -> dict[str, str] | None:
     """The effective per-project str-valued ``create_defaults`` for ``ticket``, or ``None``.
 
@@ -353,11 +389,16 @@ def _effective_create_defaults_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return None
-    return config.effective_create_defaults(project_key, root=repo_root)
+    return _memoize_effective(
+        cache,
+        "create_defaults",
+        project_key,
+        lambda: config.effective_create_defaults(project_key, root=repo_root),
+    )
 
 
 def _effective_link_map_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None, *, cache: Any = None
 ) -> dict[str, str] | None:
     """The effective per-project relation->Jira link-type map for ``ticket``, or ``None``.
 
@@ -380,15 +421,19 @@ def _effective_link_map_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return None
-    cfg = mc.load_mapping_config(repo_root)
-    builtin = mc.MappingLayer(link_map=config.local_to_jira_link)
-    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
-    mc.validate(resolved, mc.Capability(has_link_types=True))
-    return dict(resolved.link_map)
+
+    def _compute() -> dict[str, str]:
+        cfg = mc.load_mapping_config(repo_root)
+        builtin = mc.MappingLayer(link_map=config.local_to_jira_link)
+        resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+        mc.validate(resolved, mc.Capability(has_link_types=True))
+        return dict(resolved.link_map)
+
+    return _memoize_effective(cache, "link", project_key, _compute)
 
 
 def _effective_excluded_sync_types_for(
-    ticket: dict[str, Any], mapping: Any, repo_root: Any, *, builtin: Any
+    ticket: dict[str, Any], mapping: Any, repo_root: Any, *, builtin: Any, cache: Any = None
 ) -> Any:
     """The effective per-project excluded-sync-type set for ``ticket``.
 
@@ -404,7 +449,12 @@ def _effective_excluded_sync_types_for(
     project_key = projects_store.resolve_project(ticket, mapping)
     if not project_key:
         return builtin
-    return config.effective_excluded_sync_types(project_key, root=repo_root)
+    return _memoize_effective(
+        cache,
+        "excluded_sync_types",
+        project_key,
+        lambda: config.effective_excluded_sync_types(project_key, root=repo_root),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +588,13 @@ def compute_outbound_mutations(
 
     mutations: list[OutboundMutation] = []
 
+    # d378: pass-scoped memo for the per-project effective maps. A local dict keyed by
+    # ``(axis, project_key)`` so the ``_effective_*_for`` helpers' config discovery
+    # (``_discover_project_config`` filesystem stat-walk + three-layer overlay resolution)
+    # runs ONCE per distinct project per axis this pass, not once per ticket. Created fresh
+    # each pass (never a process-global), so a between-pass ``[mapping]`` change is re-read.
+    _effective_cache: dict[tuple[str, str], Any] = {}
+
     _selected_for_get_this_pass = _compute_outbound_select_absent_gets(
         local_tickets,
         jira_snapshot,
@@ -547,6 +604,7 @@ def compute_outbound_mutations(
         client,
         mapping=config.projects_mapping,
         repo_root=config.repo_root,
+        effective_cache=_effective_cache,
     )
 
     # Hierarchy pre-check map (ticket 8b25): {local_id → ticket_type}. Used to
@@ -604,7 +662,11 @@ def compute_outbound_mutations(
         # S3: the per-project effective excluded set (built-in base UNION any type this
         # project maps to SKIP), so a type-granular skip drops the ticket here too.
         _ticket_excluded_types = _effective_excluded_sync_types_for(
-            ticket, config.projects_mapping, config.repo_root, builtin=excluded_sync_types
+            ticket,
+            config.projects_mapping,
+            config.repo_root,
+            builtin=excluded_sync_types,
+            cache=_effective_cache,
         )
         if ticket.get("ticket_type", "") in _ticket_excluded_types:
             continue
@@ -636,6 +698,7 @@ def compute_outbound_mutations(
                 dropped_field_sink=dropped_field_sink,
                 mapping=config.projects_mapping,
                 repo_root=config.repo_root,
+                effective_cache=_effective_cache,
             )
         else:
             _compute_outbound_update_mutation(
@@ -662,6 +725,7 @@ def compute_outbound_mutations(
                 dropped_field_sink=dropped_field_sink,
                 mapping=config.projects_mapping,
                 repo_root=config.repo_root,
+                effective_cache=_effective_cache,
             )
 
     return mutations, absent_alive_fields
@@ -676,6 +740,7 @@ def _compute_outbound_select_absent_gets(
     client: TicketTransport,
     mapping: Any = None,
     repo_root: Any = None,
+    effective_cache: Any = None,
 ) -> set[str]:
     """Phase: rotation pre-selection of bound-but-absent keys eligible for a direct
     GET this pass (bug 1e08). Returns the K least-recently-GET'd selected keys.
@@ -709,7 +774,7 @@ def _compute_outbound_select_absent_gets(
         if _t.get("status", "") in excluded_statuses:
             continue
         _t_excluded_types = _effective_excluded_sync_types_for(
-            _t, mapping, repo_root, builtin=excluded_sync_types
+            _t, mapping, repo_root, builtin=excluded_sync_types, cache=effective_cache
         )
         if _t.get("ticket_type", "") in _t_excluded_types:
             continue

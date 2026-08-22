@@ -51,6 +51,7 @@ def _compute_outbound_create_mutation(
     dropped_field_sink: list[tuple[str, str]] | None = None,
     mapping: Any = None,
     repo_root: Any = None,
+    effective_cache: Any = None,
 ) -> None:
     """Phase: append the outbound CREATE mutation for an unbound local ticket.
 
@@ -82,10 +83,12 @@ def _compute_outbound_create_mutation(
     # Unbound -> outbound create
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).
-    status_map = _effective_status_map_for(ticket, mapping, repo_root)
-    type_map = _effective_type_map_for(ticket, mapping, repo_root)
-    priority_map = _effective_priority_map_for(ticket, mapping, repo_root)
-    create_defaults = _effective_create_defaults_for(ticket, mapping, repo_root)
+    status_map = _effective_status_map_for(ticket, mapping, repo_root, cache=effective_cache)
+    type_map = _effective_type_map_for(ticket, mapping, repo_root, cache=effective_cache)
+    priority_map = _effective_priority_map_for(ticket, mapping, repo_root, cache=effective_cache)
+    create_defaults = _effective_create_defaults_for(
+        ticket, mapping, repo_root, cache=effective_cache
+    )
     # S3: the type-axis annotation mirror — a collapsing per-project type_map stamps a
     # rebar-type: label so the local type is recoverable inbound. New issues carry no
     # labels yet, so only an ADD is possible here (never a REMOVE), like status.
@@ -185,6 +188,7 @@ def _compute_outbound_update_mutation(
     dropped_field_sink: list[tuple[str, str]] | None = None,
     mapping: Any = None,
     repo_root: Any = None,
+    effective_cache: Any = None,
 ) -> None:
     """Phase: for a bound ticket, resolve jira_fields (including the bounded
     bound-but-absent direct GET) and append an outbound UPDATE mutation when anything
@@ -251,9 +255,9 @@ def _compute_outbound_update_mutation(
 
     # Ticket 625b: the whole vendor-neutral field path (canonicalize snapshot +
     # baseline, diff in local shape, map back to vendor shape) lives in the core helper.
-    _status_map = _effective_status_map_for(ticket, mapping, repo_root)
-    _type_map = _effective_type_map_for(ticket, mapping, repo_root)
-    _priority_map = _effective_priority_map_for(ticket, mapping, repo_root)
+    _status_map = _effective_status_map_for(ticket, mapping, repo_root, cache=effective_cache)
+    _type_map = _effective_type_map_for(ticket, mapping, repo_root, cache=effective_cache)
+    _priority_map = _effective_priority_map_for(ticket, mapping, repo_root, cache=effective_cache)
     fields = compute_update_fields(
         ticket,
         jira_fields,
@@ -319,7 +323,7 @@ def _compute_outbound_update_mutation(
         jira_fields,
         binding_store,
         links,
-        link_map=_effective_link_map_for(ticket, mapping, repo_root),
+        link_map=_effective_link_map_for(ticket, mapping, repo_root, cache=effective_cache),
     )
 
     if fields or comment_mutations or label_mutations or link_mutations:
