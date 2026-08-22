@@ -585,7 +585,15 @@ means a crashed/killed review, not normal operation.
 - **Autodeploy prunes on every deploy.** `prune_docker_caches` in `infra/scripts/autodeploy.sh`
   runs `docker builder prune -f --keep-storage` + `docker image prune -f` on **both** deploy
   paths (bot rebuild and the periodic converge), keeping the build cache bounded and dangling
-  images swept without touching tagged images.
+  images swept without touching tagged images. When `main` is quiescent, a pressure-triggered
+  reclaim on the no-op tick runs the same prune (story 28f9), and each firing is counted into
+  `rebar/host:disk_pressure_prunes` (published by `observability.sh` from the
+  `AUTODEPLOY_DISK_PRESSURE` journal marker). During a disk incident that counter is the
+  discriminator: a value of 0 across the pressure window means **the reclaim gate never ran**
+  (throttled, threshold not met, or autodeploy not ticking), while a positive count with disk
+  still climbing means **it ran and reclaimed nothing** — go look at what is actually consuming
+  the disk instead of at the prune. It is a diagnostic counter, not an alarm input; the outcome
+  is alarmed by `rebar-root-disk-pressure`.
 - **Root-disk alarm.** The `rebar-root-disk-pressure` CloudWatch alarm
   (`infra/terraform/monitoring_autodeploy.tf`) fires when `rebar/host:root_disk_used_percent`
   (published by `observability.sh`, 5-min cadence) stays above 85% (2 of 3 periods). It pages
