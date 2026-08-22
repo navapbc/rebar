@@ -31,7 +31,13 @@ from rebar_reconciler import config
 # by status logic only); they must be excluded from the normal user-tag diff
 # so that rebar-status: labels on Jira do not produce spurious REMOVE mutations
 # via the tag diff path (ticket 929a).
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "rebar-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = (
+    "rebar-id:",
+    "rebar-id-",
+    "imported:",
+    "rebar-status:",
+    "rebar-type:",
+)
 
 
 def _diff_labels(
@@ -140,6 +146,79 @@ def _diff_status_annotation_labels(
         mutations.append({"action": "add", "label": desired_annotation})
 
     # Remove stale annotations (rebar-status: labels that no longer match)
+    for stale in sorted(jira_annotation_labels):
+        if stale != desired_annotation:
+            mutations.append({"action": "remove", "label": stale})
+
+    return mutations
+
+
+# ---------------------------------------------------------------------------
+# Type annotation label helpers (S3 — the type-axis mirror of status above)
+# ---------------------------------------------------------------------------
+
+_REBAR_TYPE_LABEL_PREFIX = "rebar-type:"
+
+
+def _desired_type_annotation(local_type: str, type_map: dict[str, str] | None) -> str | None:
+    """The ``rebar-type:<local_type>`` label to stamp for ``local_type``, or None.
+
+    Built-in-reverse stamp rule (S3, the type-axis mirror of ``_desired_status_annotation``):
+    a label is needed IFF the local type has a Jira target AND that target does NOT
+    reverse-map (via the built-in ``config.jira_to_local_type``) back to the local type —
+    i.e. the forward mapping is lossy (two local types COLLAPSE onto one Jira issue type)
+    and the raw issue type alone could not reconstruct the local type inbound.
+
+    ``type_map`` is the effective per-project forward map (``config.effective_type_map``);
+    ``None`` falls back to the built-in map (recovered by inverting the bijective
+    ``config.jira_to_local_type`` — ``outbound_labels`` imports ONLY ``config``, so the
+    built-in forward is derived from the reverse rather than reaching into an adapter
+    package). On the built-in bijective map every target reverses, so NOTHING is stamped;
+    a per-project collapse is what triggers a label. A DRIFTED type (no target) stamps
+    NOTHING (the lookup is guarded — never blindly subscripted)."""
+    forward = type_map
+    if forward is None:
+        forward = {jira: local for local, jira in config.jira_to_local_type.items()}
+    target = forward.get(local_type)
+    if target is None:
+        return None
+    # A COLLAPSE (two+ local types share this Jira target) is lossy for EVERY colliding
+    # local — even the one the built-in reverse would reconstruct — so each carries a
+    # distinguishing label. Otherwise the target is unique and only a target that does
+    # NOT reverse to this local (via the built-in ``config.jira_to_local_type``) is lossy.
+    collides = sum(1 for mapped in forward.values() if mapped == target) > 1
+    if not collides and config.jira_to_local_type.get(target) == local_type:
+        return None
+    return f"{_REBAR_TYPE_LABEL_PREFIX}{local_type}"
+
+
+def _diff_type_annotation_labels(
+    local_type: str,
+    existing_labels: list[str],
+    *,
+    type_map: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Compute add/remove mutations for ``rebar-type:`` annotation labels.
+
+    These labels encode lossless type information for local types whose forward mapping
+    is lossy (the Jira target reverse-maps to a DIFFERENT local type — a per-project
+    collapse). The type-axis mirror of ``_diff_status_annotation_labels``.
+
+    Rules:
+    - Emit ADD for the desired ``rebar-type:<local>`` label (per the built-in-reverse
+      stamp rule) when Jira does not already carry it.
+    - When a ``rebar-type:`` annotation label is present on Jira but no longer matches the
+      desired one, emit REMOVE to clean up the stale label.
+    """
+    mutations: list[dict[str, Any]] = []
+    desired_annotation = _desired_type_annotation(local_type, type_map)
+    jira_annotation_labels = {
+        label for label in existing_labels if label.startswith(_REBAR_TYPE_LABEL_PREFIX)
+    }
+
+    if desired_annotation is not None and desired_annotation not in jira_annotation_labels:
+        mutations.append({"action": "add", "label": desired_annotation})
+
     for stale in sorted(jira_annotation_labels):
         if stale != desired_annotation:
             mutations.append({"action": "remove", "label": stale})

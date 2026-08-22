@@ -77,6 +77,7 @@ from rebar_reconciler.outbound_labels import (  # noqa: F401
     _EXCLUDED_PREFIXES,
     _diff_labels,
     _diff_status_annotation_labels,
+    _diff_type_annotation_labels,
 )
 
 # The link-diff cluster lives in outbound_links.py (split for module size); ticket
@@ -290,20 +291,98 @@ def _effective_status_map_for(
     return config.effective_status_map(project_key, root=repo_root)
 
 
+def _effective_type_map_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+) -> dict[str, str] | None:
+    """The effective per-project local->Jira TYPE map for ``ticket``, or ``None``.
+
+    Story S3: the type-axis mirror of ``_effective_status_map_for``. Resolve the ticket's
+    project (``projects_store.resolve_project``) and return
+    ``config.effective_type_map(project_key, root=repo_root)`` so both create and update
+    map ``issuetype`` through the project's overlay. ``repo_root`` is the store root the
+    pass runs against; ``[mapping]`` MUST be read from it, never the CWD. ``None`` (the
+    built-in fallback the mappers already apply) when no project key is obtainable or
+    there is no ``[mapping]`` block."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return None
+    from rebar_reconciler import config, projects_store
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return None
+    return config.effective_type_map(project_key, root=repo_root)
+
+
+def _effective_excluded_sync_types_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any, *, builtin: Any
+) -> Any:
+    """The effective per-project excluded-sync-type set for ``ticket``.
+
+    Story S3: a local type mapped to ``mapping_config.SKIP`` is excluded for that project
+    ON TOP of the built-in :data:`config.EXCLUDED_SYNC_TYPES`. Resolve the ticket's project
+    and return ``config.effective_excluded_sync_types(project_key, root=repo_root)``; fall
+    back to ``builtin`` (the pass-level base set) when no mapping/project applies, so the
+    no-config path is unchanged."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return builtin
+    from rebar_reconciler import config, projects_store
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return builtin
+    return config.effective_excluded_sync_types(project_key, root=repo_root)
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
 
+def _assert_type_decisions_for_pass(
+    local_tickets: list[dict[str, Any]], projects_mapping: Any, repo_root: Any
+) -> None:
+    """S3 fail-closed gate: every SYNCABLE ticket type must be DECIDED (a Jira target or
+    SKIP) for every DISTINCT target project this pass touches. Run ONCE up front — after
+    config load, BEFORE the absent-GET pre-selection and the per-ticket mutation loop — so
+    an undecided type raises before any mutation is built (the parent AC's load-time
+    fail-closed). Tickets with no resolvable project are skipped; with no ``[mapping]``
+    block there are no keys and the gate is a no-op (the built-in map already decides all
+    four syncable types)."""
+    if projects_mapping is None or not getattr(projects_mapping, "projects", None):
+        return
+    from rebar_reconciler import config as _cfg
+    from rebar_reconciler import projects_store as _projects_store
+
+    decided_project_keys: set[str] = set()
+    for gate_ticket in local_tickets:
+        gate_key = _projects_store.resolve_project(gate_ticket, projects_mapping)
+        if gate_key and gate_key not in decided_project_keys:
+            decided_project_keys.add(gate_key)
+            _cfg.assert_type_decisions_complete(gate_key, root=repo_root)
+
+
+def _apply_pass_overrides(config: OutboundDiffConfig, mapping: Any, repo_root: Any) -> None:
+    """S2/S3: ``mapping``/``repo_root`` may be supplied directly (a caller that does not
+    build an OutboundDiffConfig) — route them onto the config so the per-project overlay +
+    fail-closed gate read a single source. An explicit kwarg wins; ``None`` leaves the
+    config's own value untouched."""
+    if mapping is not None:
+        config.projects_mapping = mapping
+    if repo_root is not None:
+        config.repo_root = repo_root
+
+
 def compute_outbound_mutations(
     local_tickets: list[dict[str, Any]],
     jira_snapshot: dict[str, Any],
-    binding_store: BindingStoreProtocol,
+    binding_store: BindingStoreProtocol | None = None,
     config: OutboundDiffConfig | None = None,
     *,
     outbound_mapper: OutboundMapper | None = None,
     inbound_mapper: InboundMapper | None = None,
     links: Any | None = None,
+    mapping: Any | None = None,
+    repo_root: Any | None = None,
 ) -> tuple[list[OutboundMutation], dict[str, dict[str, Any]]]:
     """Diff local tickets against Jira snapshot and return outbound mutations.
 
@@ -339,6 +418,7 @@ def compute_outbound_mutations(
     """
     if config is None:
         config = OutboundDiffConfig()
+    _apply_pass_overrides(config, mapping, repo_root)
     # Tickets 4af8/625b/eefd: the local->remote mapper, remote->local mapper, and
     # links capability are each injected via the Backend port (run_differs passes
     # ``backend.outbound``/``backend.inbound``/``backend``). A direct caller that
@@ -373,13 +453,26 @@ def compute_outbound_mutations(
     # Local ticket types that never sync to Jira (e.g. session_log) — verbose,
     # local, agent-facing artifacts with no Jira counterpart. Skipped in both the
     # absent-GET pre-selection and the main mutation loop, alongside the
-    # excluded-status check.
+    # excluded-status check. S3: this pass-level BASE set is unioned per project with
+    # any type mapped to SKIP (``_effective_excluded_sync_types_for``) at BOTH consumers.
     excluded_sync_types: frozenset[str] = _load_config().EXCLUDED_SYNC_TYPES
+
+    # S3 fail-closed gate — see :func:`_assert_type_decisions_for_pass`. Run ONCE up
+    # front, after config load and before the absent-GET pre-selection and the per-ticket
+    # mutation loop, so an undecided type raises before any mutation is built.
+    _assert_type_decisions_for_pass(local_tickets, config.projects_mapping, config.repo_root)
 
     mutations: list[OutboundMutation] = []
 
     _selected_for_get_this_pass = _compute_outbound_select_absent_gets(
-        local_tickets, jira_snapshot, binding_store, excluded_statuses, excluded_sync_types, client
+        local_tickets,
+        jira_snapshot,
+        binding_store,
+        excluded_statuses,
+        excluded_sync_types,
+        client,
+        mapping=config.projects_mapping,
+        repo_root=config.repo_root,
     )
 
     # Hierarchy pre-check map (ticket 8b25): {local_id → ticket_type}. Used to
@@ -427,10 +520,19 @@ def compute_outbound_mutations(
         status = ticket.get("status", "")
         if status in excluded_statuses:
             continue
-        if ticket.get("ticket_type", "") in excluded_sync_types:
+        # S3: the per-project effective excluded set (built-in base UNION any type this
+        # project maps to SKIP), so a type-granular skip drops the ticket here too.
+        _ticket_excluded_types = _effective_excluded_sync_types_for(
+            ticket, config.projects_mapping, config.repo_root, builtin=excluded_sync_types
+        )
+        if ticket.get("ticket_type", "") in _ticket_excluded_types:
             continue
 
         local_id = ticket["ticket_id"]
+        # A syncable ticket (survived the exclusion guards above) requires a binding
+        # store; the optional signature only supports callers whose tickets are all
+        # excluded (e.g. a type-granular SKIP pass) and so never reach this point.
+        assert binding_store is not None
         jira_key = binding_store.get_jira_key(local_id)
 
         # Lazy (function-local) import to break the import cycle: the builders
@@ -490,9 +592,17 @@ def _compute_outbound_select_absent_gets(
     excluded_statuses,
     excluded_sync_types,
     client: TicketTransport,
+    mapping: Any = None,
+    repo_root: Any = None,
 ) -> set[str]:
     """Phase: rotation pre-selection of bound-but-absent keys eligible for a direct
-    GET this pass (bug 1e08). Returns the K least-recently-GET'd selected keys."""
+    GET this pass (bug 1e08). Returns the K least-recently-GET'd selected keys.
+
+    S3: ``mapping``/``repo_root`` thread the per-project effective excluded set (built-in
+    base UNION any type mapped to SKIP for the ticket's project) so a type-granular skip
+    drops the ticket from the absent-GET pre-selection too — the second consumer, in
+    lock-step with the main mutation loop. ``None`` mapping preserves the pass-level base
+    ``excluded_sync_types`` for every ticket (legacy behaviour)."""
     # Bug 1e08 — rotation pre-selection for bound-but-absent direct GETs.
     # Compute the set of jira_keys eligible for a GET this pass: bound,
     # non-pending, non-retired, and ABSENT from this pass's search snapshot.
@@ -516,7 +626,10 @@ def _compute_outbound_select_absent_gets(
     for _t in local_tickets if client is not None else ():
         if _t.get("status", "") in excluded_statuses:
             continue
-        if _t.get("ticket_type", "") in excluded_sync_types:
+        _t_excluded_types = _effective_excluded_sync_types_for(
+            _t, mapping, repo_root, builtin=excluded_sync_types
+        )
+        if _t.get("ticket_type", "") in _t_excluded_types:
             continue
         _lid = _t.get("ticket_id")
         if not _lid:

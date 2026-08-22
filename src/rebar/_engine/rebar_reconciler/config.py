@@ -98,3 +98,112 @@ def effective_status_map(project_key: str, root: object = None) -> dict[str, str
     builtin = mc.MappingLayer(status_map=local_to_jira_status)
     resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
     return {k: v for k, v in resolved.status_map.items() if v != mc.SKIP}
+
+
+# Local ticket type -> Jira issue type NAME (S3). Like ``local_to_jira_status`` above,
+# this is a SECOND, INDEPENDENT literal of the same mapping (the SOLE definition site
+# under ``adapters/`` is ``adapters/jira_family/value_maps.LOCAL_TYPE_TO_JIRA``) and it is
+# deliberately NOT an import: this module imports nothing but ``__future__``, and
+# ``adapters/jira_family`` is a VENDOR package whose dependency direction is one-way
+# (concrete backends import it; it never imports core back), so importing it here would
+# invert that layering and put this operator-overridable surface behind an adapter import
+# — the import-graph contract test enforces exactly this. The parity TEST keeps the two
+# honest instead, exactly as it does for ``local_to_jira_status`` / ``jira_to_local_status``.
+LOCAL_TYPE_TO_JIRA: dict[str, str] = {
+    "bug": "Bug",
+    "story": "Story",
+    "task": "Task",
+    "epic": "Epic",
+}
+
+# Canonical reverse TYPE mapping: Jira issue type name -> local ticket type. Mirrors
+# ``jira_to_local_status`` above: a SECOND, INDEPENDENT literal (deliberately not an
+# import) of ``inbound_fields._JIRA_TO_LOCAL_TYPE``, kept in lock-step with it by a
+# parity test. ``outbound_labels`` imports ONLY this module, so the ``rebar-type:``
+# stamp rule (``_desired_type_annotation``) reads the Jira->local reverse from here
+# rather than reaching into an adapter package (which would invert the one-way
+# core<-adapter layering, exactly as the comment on ``jira_to_local_status`` explains).
+# The built-in type map is bijective, so this is its exact inverse today; a per-project
+# ``type_map`` overlay may collapse two local types onto one Jira type, and THAT lossy
+# case is what the annotation label recovers.
+jira_to_local_type: dict[str, str] = {
+    "Bug": "bug",
+    "Story": "story",
+    "Task": "task",
+    "Epic": "epic",
+}
+
+
+def effective_type_map(project_key: str, root: object = None) -> dict[str, str]:
+    """Resolve the EFFECTIVE outbound local->Jira type map for ``project_key``.
+
+    The forward map is the built-in :data:`LOCAL_TYPE_TO_JIRA` (this module's own literal)
+    <- ``[mapping.default.type_map]`` <- ``[mapping.projects.<KEY>.type_map]``, resolved
+    through the S1 per-key three-layer merge (``mapping_config.resolve_for_project``). A
+    ``SKIP`` value (``mapping_config.SKIP``) means the local type has NO Jira target for
+    this project (type-granular skip) — dropped here so callers see only mappable types
+    (its exclusion is surfaced separately via :func:`effective_excluded_sync_types`).
+
+    With NO ``[mapping]`` block the result equals :data:`LOCAL_TYPE_TO_JIRA` verbatim —
+    the config seam is inert until configured.
+
+    The built-in map is read as a MODULE GLOBAL at call time (never captured at import),
+    so a test may simulate an undecided type by monkeypatching this module's
+    ``LOCAL_TYPE_TO_JIRA``. ``mapping_config`` is imported LAZILY so this module stays
+    stdlib-only at import time (it imports nothing but ``__future__`` at the top level)."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(type_map=LOCAL_TYPE_TO_JIRA)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    return {k: v for k, v in resolved.type_map.items() if v != mc.SKIP}
+
+
+def effective_excluded_sync_types(project_key: str, root: object = None) -> set[str]:
+    """The EFFECTIVE set of local ticket types NOT synced to Jira for ``project_key``.
+
+    The built-in :data:`EXCLUDED_SYNC_TYPES` (session_log/code_review/identity) UNION
+    every local type mapped to ``mapping_config.SKIP`` in the SAME resolved layer
+    :func:`effective_type_map` uses. Reuses S1's ``SKIP`` sentinel as the type-granular
+    skip signal (no separate axis): a local type mapped to ``SKIP`` is excluded for that
+    project ON TOP of the built-in set."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(type_map=LOCAL_TYPE_TO_JIRA)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    return set(EXCLUDED_SYNC_TYPES) | {k for k, v in resolved.type_map.items() if v == mc.SKIP}
+
+
+def assert_type_decisions_complete(project_key: str, root: object = None) -> None:
+    """Fail-closed gate: every SYNCABLE local ticket type must be DECIDED for a project.
+
+    A syncable type is a member of ``rebar.types.TicketType`` MINUS the built-in
+    :data:`EXCLUDED_SYNC_TYPES`. Each such type must be DECIDED — present in
+    :func:`effective_type_map` (a Jira target) OR in :func:`effective_excluded_sync_types`
+    (mapped to ``SKIP``). An undecided type would be silently coerced to a default Jira
+    type downstream; this gate instead raises :class:`mapping_config.MappingConfigError`
+    naming the undecided type(s) so an operator's incomplete ``[mapping.*.type_map]``
+    (or a newly added ``TicketType`` with no sync decision) fails loudly, up front.
+
+    The built-in :data:`LOCAL_TYPE_TO_JIRA` covers all four syncable types today, so with
+    no ``[mapping]`` block this never fires. The syncable vocabulary and the built-in map
+    are both read at call time (the map via :func:`effective_type_map`, which reads this
+    module's global), so a test may simulate an undecided type by monkeypatching the
+    built-in."""
+    from typing import get_args
+
+    from rebar.types import TicketType
+    from rebar_reconciler import mapping_config as mc
+
+    syncable = set(get_args(TicketType)) - set(EXCLUDED_SYNC_TYPES)
+    decided = set(effective_type_map(project_key, root)) | effective_excluded_sync_types(
+        project_key, root
+    )
+    undecided = sorted(syncable - decided)
+    if undecided:
+        raise mc.MappingConfigError(
+            "type mapping is incomplete for project "
+            f"{project_key!r}: no decision (a Jira target or {mc.SKIP!r}) for syncable "
+            f"ticket type(s): {', '.join(undecided)}"
+        )
