@@ -1,0 +1,22 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "32a9d264_ec85ff29",
+        "filename": "src/rebar/_lib_writes.py",
+        "patchSetId": 3
+      },
+      "lineNbr": 271,
+      "author": {
+        "id": 1000009
+      },
+      "writtenOn": "2026-08-22T02:18:11Z",
+      "side": 1,
+      "message": "Versioned in patchset 3: CHANGELOG.md gains a BREAKING (pre-1.0) entry under [Unreleased] \u003e Changed, and docs/release-notes.md gains a full agent-visible contract section (what raises, the rebar.ConfigError re-export, the RebarError-only-catch migration note, the state-left-unchanged guarantee, and that a MISSING config still means defaults). The behavior change itself is the deliberate subject of the change per the operator ruling recorded on ticket 39f8-ae7c (\u0027Unreadable config should result in an error\u0027); patchset 2 already documented it in the claim/transition docstrings and re-exported rebar.ConfigError for catchability.",
+      "parentUuid": "b7e2cd9c_a4e1ee8c",
+      "revId": "83e1d5483453f1df00b02994368df3851f8a5d30",
+      "serverId": "fc71b410-f5b3-4446-8e2c-e56c4676521b"
+    }
+  ]
+}
