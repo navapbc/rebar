@@ -313,6 +313,37 @@ def _effective_type_map_for(
     return config.effective_type_map(project_key, root=repo_root)
 
 
+def _effective_link_map_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+) -> dict[str, str] | None:
+    """The effective per-project relation->Jira link-type map for ``ticket``, or ``None``.
+
+    Story S4: the link-axis mirror of ``_effective_status_map_for``. Resolve the ticket's
+    project (``projects_store.resolve_project``) and return the resolved ``link_map`` so the
+    UPDATE link diff maps relations through the project's overlay. ``repo_root`` is the store
+    root the pass runs against; ``[mapping]`` MUST be read from it, never the CWD. ``None``
+    (the built-in fallback the diff funcs already apply) when no project key is obtainable or
+    there is no ``[mapping]`` block.
+
+    Unlike ``config.effective_link_map`` (which DROPS ``SKIP`` for its callers), this RETAINS
+    ``SKIP`` entries: the diff funcs must distinguish a forced skip (suppress ADD and REMOVE)
+    from an absent key (fall through to the built-in payload). Fail-closed validation
+    (``mapping_config.validate``) still fires on an out-of-vocabulary link type."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return None
+    from rebar_reconciler import config, projects_store
+    from rebar_reconciler import mapping_config as mc
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return None
+    cfg = mc.load_mapping_config(repo_root)
+    builtin = mc.MappingLayer(link_map=config.local_to_jira_link)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    mc.validate(resolved, mc.Capability(has_link_types=True))
+    return dict(resolved.link_map)
+
+
 def _effective_excluded_sync_types_for(
     ticket: dict[str, Any], mapping: Any, repo_root: Any, *, builtin: Any
 ) -> Any:
