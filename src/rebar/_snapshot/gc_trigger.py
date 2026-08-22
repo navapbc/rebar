@@ -64,9 +64,13 @@ _WORKER_LOCK_NAME = "worker.lock"
 _LOG_NAME = "worker.log"
 
 
+#: The janitor's sidecar directory under the store root (it already hosts ``gc/lock``).
+_GC_DIRNAME = "gc"
+
+
 def _gc_dir(root: Path) -> Path:
     """``<store>/gc/`` — the janitor's own sidecar directory (it already hosts ``gc/lock``)."""
-    d = root / "gc"
+    d = root / _GC_DIRNAME
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -81,6 +85,19 @@ def _worker_lock_path(root: Path) -> Path:
 
 def _log_path(root: Path) -> Path:
     return _gc_dir(root) / _LOG_NAME
+
+
+def worker_lock_probe_path() -> Path:
+    """The worker lock's path on THIS host's store, derived read-only for diagnostics.
+
+    ``rebar doctor``'s lock census needs to name this lock without materialising anything:
+    :func:`~rebar._snapshot.repo_snapshot.store_root` mkdirs+chmods the root and
+    :func:`_gc_dir` mkdirs the sidecar directory as side effects, so this seam composes the
+    path from :func:`~rebar._snapshot.repo_snapshot.peek_store_root` instead — gc_trigger
+    owns the sidecar layout, so the census does not re-derive it."""
+    from rebar._snapshot.repo_snapshot import peek_store_root
+
+    return peek_store_root() / _GC_DIRNAME / _WORKER_LOCK_NAME
 
 
 def record_pass(root: Path) -> None:

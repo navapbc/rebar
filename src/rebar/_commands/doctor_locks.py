@@ -40,7 +40,7 @@ under contention, not a fault. A lock the shared staleness function calls stale 
 FINDING, because no live process claims it. Findings feed doctor's existing exit rule
 (exit 1 while anything is outstanding).
 
-Five legs are reported. The two tickets-store legs are the dual-window contract
+Six legs are reported. The two tickets-store legs are the dual-window contract
 (:mod:`rebar._store.lock`): ``.ticket-write.lock`` (fcntl) and ``.ticket-write.lock.d``
 (mkdir, the leg that carries the ownership stamp). ``.rebar/hlc.lock`` is the clock's
 short RMW lock (:mod:`rebar._store.hlc`) and ``.rebar/enrich-drain.lock`` is the drain
@@ -53,7 +53,14 @@ could only report ``not-assessable``). ``.rebar/compact-worker.lock`` is the com
 trigger's worker lock (:mod:`rebar._commands.compact_trigger`, which reuses the drain's
 stamped-lock machinery), the same existence-plus-stamp shape — and the lock most likely
 to be held by a DETACHED background process, which is exactly the holder an operator
-cannot find with ``ps``.
+cannot find with ``ps``. The sixth leg is the snapshot-GC trigger's worker lock
+(:mod:`rebar._snapshot.gc_trigger`, the same shared stamped-lock machinery and the same
+detached-worker shape) — the one leg NOT under the tracker: it lives on the PER-HOST
+snapshot store (``<store>/gc/worker.lock``, where the store root is
+``$REBAR_GATE_TMPDIR`` or the system tempdir), so it ignores which tracker is being
+scanned, and its path is derived READ-ONLY (:func:`gc_trigger.worker_lock_probe_path`)
+because a diagnostic must not materialise a store that does not exist yet — an absent
+store simply reports the lock free.
 """
 
 from __future__ import annotations
@@ -97,6 +104,7 @@ LEG_TICKETS_MKDIR = "tickets-write-mkdir"
 LEG_HLC = "hlc"
 LEG_ENRICH_DRAIN = "enrich-drain"
 LEG_COMPACT_WORKER = "compact-worker"
+LEG_SNAPSHOT_GC_WORKER = "snapshot-gc-worker"
 
 _HLC_LOCK_NAME = "hlc.lock"
 _DRAIN_LOCK_NAME = "enrich-drain.lock"
@@ -317,8 +325,22 @@ def _existence_report(name: str, path: str, *, note: str) -> dict[str, Any]:
     }
 
 
+def _snapshot_gc_worker_lock_path() -> str:
+    """The snapshot-GC worker lock's per-host path, derived read-only.
+
+    Imported lazily so the census does not pull the snapshot subsystem in at module
+    import; the seam (:func:`rebar._snapshot.gc_trigger.worker_lock_probe_path`) creates
+    nothing — a diagnostic must not materialise a store that does not exist yet."""
+    from rebar._snapshot import gc_trigger as _gc_trigger
+
+    return str(_gc_trigger.worker_lock_probe_path())
+
+
 def scan_locks(tracker: str) -> list[dict[str, Any]]:
     """Report every lock leg for *tracker*'s store. Read-only; writes nothing.
+
+    The snapshot-GC leg is the one exception to "for *tracker*": the snapshot store is
+    per-host (every checkout resolves the same root), so that row ignores *tracker*.
 
     Never raises: a diagnostic that fails because a lock vanished mid-read (the holder
     released) would be worse than the missing line it replaces, so each leg degrades to
@@ -366,6 +388,17 @@ def scan_locks(tracker: str) -> list[dict[str, Any]]:
                 LEG_COMPACT_WORKER,
                 os.path.join(rebar_dir, _COMPACT_WORKER_LOCK_NAME),
                 note="no detached compaction worker holds the compact-worker lock",
+            ),
+        ),
+        (
+            LEG_SNAPSHOT_GC_WORKER,
+            lambda: _existence_report(
+                LEG_SNAPSHOT_GC_WORKER,
+                str(_snapshot_gc_worker_lock_path()),
+                note=(
+                    "no detached snapshot-GC worker holds the snapshot store's worker "
+                    "lock (per-host store, not this tracker; the store may not exist yet)"
+                ),
             ),
         ),
     ]

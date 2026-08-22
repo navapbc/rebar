@@ -136,6 +136,17 @@ def in_snapshot_entry(path: str | os.PathLike[str]) -> bool:
     )
 
 
+def peek_store_root() -> Path:
+    """Where the store root IS (or would be) — the same derivation as :func:`store_root`
+    with NO side effects: nothing is created and no mode is touched, so a read-only
+    diagnostic (``rebar doctor``'s lock census) can name the path without materialising a
+    store on a host that never had one."""
+    from rebar import config
+
+    base = config.resolve_gate_tmpdir() or tempfile.gettempdir()
+    return Path(base) / _STORE_DIRNAME
+
+
 def store_root() -> Path:
     """The base directory of the content-addressed snapshot store.
 
@@ -143,10 +154,7 @@ def store_root() -> Path:
     otherwise :func:`tempfile.gettempdir` is used — never a hardcoded ``/tmp``. Created
     ``0700`` if absent. The override is resolved through the owned config seam
     (:func:`rebar.config.resolve_gate_tmpdir`), not read from ``os.environ`` here."""
-    from rebar import config
-
-    base = config.resolve_gate_tmpdir() or tempfile.gettempdir()
-    root = Path(base) / _STORE_DIRNAME
+    root = peek_store_root()
     root.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(root, 0o700)
