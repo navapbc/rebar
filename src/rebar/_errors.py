@@ -59,6 +59,7 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "criterion_missing_file",
         "llm_unavailable",
         "config_unreadable",
+        "config_insecure_url",
         "command_failed",
     }
 )
@@ -73,7 +74,8 @@ def error_code_for(exc: BaseException) -> str:
     1. ``ConcurrencyError`` / ``ConcurrencyMismatch`` → ``concurrency_conflict``
     2. ``TicketNotFoundError`` → ``ticket_not_found``
     3. ``TrackerRootError`` → ``tracker_root_unresolved``
-    4. ``ConfigError`` → ``config_unreadable``
+    4. ``InsecureUrlError`` → ``config_insecure_url``; any other ``ConfigError`` →
+       ``config_unreadable``
     5. a non-empty ``exc.error_code`` attribute → that code
     6. ``LLMError`` → ``llm_unavailable``
     7. fallback → ``command_failed``
@@ -107,6 +109,17 @@ def error_code_for(exc: BaseException) -> str:
 
     # 4. ConfigError — an unreadable/malformed config is an error (operator ruling
     #    39f8-ae7c); classified by type so MCP clients can branch on the fault.
+    #    InsecureUrlError is checked FIRST (ticket 7d6a): it is a deliberate
+    #    cleartext-URL security-policy rejection (bug bdb8) of a config that parsed
+    #    fine, so collapsing it into config_unreadable would mis-prompt an operator
+    #    to "fix an unreadable config".
+    try:
+        from rebar._config_schema import InsecureUrlError
+
+        if isinstance(exc, InsecureUrlError):
+            return "config_insecure_url"
+    except ImportError:
+        pass
     try:
         from rebar._config_coercion import ConfigError
 
