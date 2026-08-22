@@ -486,7 +486,9 @@ Separately, **`session_log` / `code_review` / `identity` tickets are exempt** fr
 gate (a distinct exemption axis, not part of container/leaf scrutiny). A **bug is NOT
 exempt**: since the bug review tier (epic 6982/R4) it gets a light advisory review — the DET
 floor plus the restricted `BUG_TIER_CRITERIA` probe — whose findings are always downgraded to
-advisory, so a bug can be coached but never BLOCKED. (A bug still needs no signed attestation
+advisory, so a bug in that tier can be coached but never BLOCKED unless it escalates out of it:
+a bug whose declared blast radius names non-test paths is reviewed by the full blocking rubric
+instead (see R4(c) below). (A bug still needs no signed attestation
 to be *claimed*; that CLI-side exemption is a separate axis and is unchanged.)
 Mechanical/test *leaves* suppress
 noisy criteria. Overlays fire from
@@ -1348,8 +1350,9 @@ bare exempt-PASS (`workflow_ops.plan_review_precheck` → `orchestrator._exempt_
 `llm_calls:0`), so a bug got no substantive review — verified on bug 5886, whose persisted
 `REVIEW_RESULT` was `{"runner":"exempt","verdict":"PASS","llm_calls":0}`. The bug tier instead
 runs a **light advisory review**: the DET floor + the `necessity` probe
-(`registry.BUG_TIER_CRITERIA = ("necessity",)`), and **never blocks a bug** — precheck downgrades
-every DET finding to advisory (`det_blocking:[]`) and the sole LLM criterion is advisory. The
+(`registry.BUG_TIER_CRITERIA = ("necessity",)`), and **never blocks a bug** not escalated out of
+the tier by (c) below: precheck downgrades every DET finding except P4's
+description admission limit to advisory, and the sole LLM criterion is advisory. The
 restriction is centralised in the single routing seam (`orchestrator.route_criteria` returns only
 `BUG_TIER_CRITERIA` for a `bug`), so BOTH the assemble step and the batch-runner's project-criteria
 fan-in honor it — an activated blocking `project.*` criterion can never be fanned into a bug review
@@ -1358,6 +1361,25 @@ so it applies to bugs. The CLI claim-time bug exemption (`rebar._commands.gates`
 bug still needs no signed attestation to be claimed; the tier only makes an explicit
 `rebar review-plan <bug>` (and any gate run) produce a substantive advisory review instead of
 exempt-PASS. `session_log` / `code_review` / `identity` stay fully exempt.
+
+**(c) The blast-radius escalation out of the bug tier (ad0d B1).** The light tier is sized for a
+small fix, so it is keyed on the fix staying small. A bug whose **persisted `file_impact` declares
+any non-test path** leaves the tier and is reviewed by the FULL, blocking-capable rubric — this is
+the one way a bug review blocks, and it is why the never-blocking language in (a) and (b) is a
+statement about the tier, not about bugs. The predicate is
+`orchestrator.bug_blast_radius_escalates(file_impact)`: a path counts as "test" iff it lives under
+`tests/` or its basename is `conftest.py` — the same classification the Gerrit bugfix-size gate
+(B2) applies to diff lines, so the plan-side and code-side ends agree. It is derived from ticket
+state rather than a diff, because at review time no diff exists yet.
+
+Both enforcement steps key on that one predicate, and an escalated bug is lifted on **both** bug
+axes, not one: `workflow_ops.plan_review_precheck` skips the light-tier arm (so DET findings keep
+their real blocking posture, exactly as for a non-bug), and `orchestrator.route_criteria` drops
+the `BUG_TIER_CRITERIA` restriction *and* passes `ticket_type=None` into the applicability check
+so the packaged `suppress_types: ["bug"]` axis that every full-suite criterion carries does not
+empty the escalation out. Coverage records it as `bug_tier: False` + `bug_blast_escalated: True`.
+The claim-time exemption is untouched — an escalated bug still needs no attestation to be claimed;
+what changes is that an explicit `rebar review-plan <bug>` can now return a blocking verdict.
 
 **Advisory-first + promotion.** Both pieces ship advisory (never block) and are validated by
 HAND-AUTHORED bounded sanity fixtures (`src/rebar/llm/eval_specs/plan-review-necessity.eval.yaml`,
