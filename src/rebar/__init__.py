@@ -25,6 +25,12 @@ import importlib.metadata
 import logging
 
 from rebar import config
+
+# The config-fault exception (raised when rebar.toml cannot be read while resolving a
+# verify.* gate — operator ruling 39f8-ae7c: an unreadable config is an ERROR, not a
+# silent fall-back to the gate's default). Re-exported so library callers can catch
+# ``rebar.ConfigError`` next to ``rebar.RebarError`` without importing rebar.config.
+from rebar._config_coercion import ConfigError
 from rebar._engine import engine_dir
 
 # Exception types live in the stdlib-only leaf ``rebar._errors`` (item 9.3) so readers
@@ -165,6 +171,7 @@ except importlib.metadata.PackageNotFoundError:  # pragma: no cover - dev checko
 __all__ = [
     "KNOWN_ERROR_CODES",
     "ConcurrencyError",
+    "ConfigError",
     # exceptions
     "RebarError",
     "__version__",

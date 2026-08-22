@@ -16,6 +16,7 @@ import pytest
 
 from rebar import config
 from rebar._commands import gates
+from rebar.config import ConfigError
 
 _ATTR = "require_plan_review_for_close"
 _OFF = f"[verify]\n{_ATTR} = false\n"
@@ -38,13 +39,27 @@ def cfg_root(tmp_path):
     config.reset_config_cache()
 
 
-@pytest.mark.parametrize("cfg", [_OFF, _UNREADABLE], ids=["disabled", "unreadable"])
-def test_neither_skip_verdict_counts_as_the_gate_having_run(cfg_root, cfg: str) -> None:
-    """BOTH skip states must answer False — that is what keeps the in-lock recheck off."""
+@pytest.mark.parametrize("cfg", [_OFF], ids=["disabled"])
+def test_the_skip_verdict_does_not_count_as_the_gate_having_run(cfg_root, cfg: str) -> None:
+    """The `disabled` skip answers False — that is what keeps the in-lock recheck off.
+
+    (The other historical skip, `unreadable`, no longer exists: per the 39f8 operator
+    ruling an unreadable config RAISES out of the gate before any payload is minted —
+    see `test_an_unreadable_config_raises_instead_of_minting_a_skip_payload`.)
+    """
     check = gates.close_plan_review_gate_check(_STATE["ticket_id"], _STATE, repo_root=cfg_root(cfg))
 
     assert check["gate_ran"] is False
     assert gates.gate_ran(check) is False
+
+
+def test_an_unreadable_config_raises_instead_of_minting_a_skip_payload(cfg_root) -> None:
+    """Ruling 39f8: a config FAULT errors out of the gate — no payload, so no stamp to
+    misread and nothing for the in-lock recheck decision to act on."""
+    with pytest.raises(ConfigError):
+        gates.close_plan_review_gate_check(
+            _STATE["ticket_id"], _STATE, repo_root=cfg_root(_UNREADABLE)
+        )
 
 
 def test_a_verdict_the_predicate_has_never_heard_of_cannot_change_close_behaviour() -> None:

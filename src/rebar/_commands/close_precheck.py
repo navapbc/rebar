@@ -516,15 +516,17 @@ def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> 
     """Resolve the completion-verification gate's SKIP provenance, or ``None`` to proceed.
 
     The gate state resolves FIRST (matching the historical branch order), so a ``--force``
-    under a DISABLED or UNREADABLE config records the gate state — there was no gate to
-    bypass — while the operator's reason stays durable in ``force_close_reason``.
-    ``force_bypassed`` is recorded only when an ENABLED gate was actually bypassed.
+    under a DISABLED config records the gate state — there was no gate to bypass — while
+    the operator's reason stays durable in ``force_close_reason``. ``force_bypassed`` is
+    recorded only when an ENABLED gate was actually bypassed.
 
-    * ``gate_unreadable`` — the config could not be read; the fail-OPEN skip is a FAULT and
-      must not be laundered into the ``gate_off`` policy choice (consumes the tri-state
-      :class:`~rebar._commands.gates.GateState`).
     * ``gate_off`` — the gate is genuinely configured off.
     * ``force_bypassed`` — an ENABLED gate was bypassed with ``--force``.
+
+    An UNREADABLE config is not a skip any more: :func:`~rebar._commands.gates.gate_enabled`
+    raises :class:`~rebar.config.ConfigError` out of this close (operator ruling 39f8-ae7c),
+    so the historical ``gate_unreadable`` provenance value survives only on already-written
+    close events — no new write produces it.
     """
     from rebar._commands import gates
 
@@ -533,10 +535,7 @@ def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> 
         "require_completion_verification_for_close",
         ticket_id=ticket_id,
         gate_label="the completion-verification close gate",
-        extra=" (other close gates still apply)",
     )
-    if state is gates.GateState.UNREADABLE:
-        return "gate_unreadable"
     if not state:
         return "gate_off"
     if force_close:
@@ -564,9 +563,11 @@ def _completion_precheck(
     ``completion_expectation`` is the write-time provenance for WHY a signature was or was not
     expected, stamped on the close STATUS event (story mechanical-coherent-wolverine):
     ``required`` (gate on, verified PASS, signature expected), ``disposition`` (signed as a
-    disposition, not a completion PASS), ``gate_off`` / ``gate_unreadable`` /
+    disposition, not a completion PASS), ``gate_off`` /
     ``force_bypassed`` (see :func:`_gate_skip_expectation` — gate state resolves FIRST, so a
-    forced close under a disabled/unreadable config records the gate state), ``local_source``
+    forced close under a disabled config records the gate state; an UNREADABLE config
+    raises :class:`~rebar.config.ConfigError` instead, per operator ruling 39f8-ae7c —
+    ``gate_unreadable`` survives only on historical events), ``local_source``
     (opt-in unattested verdict), ``not_certifiable`` (certification withheld by an
     uncertified descendant), or ``""`` for lifecycle-exempt types (present-only: the key is
     omitted). Raises :class:`CommandError` (block) on a FAIL verdict, or when
@@ -594,9 +595,10 @@ def _completion_precheck(
     # reads below continue to use the independently resolved tracker directory.
     code_root = str(config.repo_root(repo_root))
 
-    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
-    # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
-    # LLM is unavailable (below).
+    # Shared resolution + error-on-unreadable-config posture (see _commands/gates.py:
+    # an unreadable config raises ConfigError out of this close, per operator ruling
+    # 39f8-ae7c). The confirmed fail-CLOSED behavior still applies when the gate is
+    # readable-ON but the LLM is unavailable (below).
     skip = _gate_skip_expectation(ticket_id, code_root, force_close)
     if skip:
         return None, skip

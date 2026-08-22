@@ -257,11 +257,19 @@ def main(argv: list[str] | None = None) -> int:
     # a non-zero exit, NOT a raw traceback. (BaseException would otherwise print one.)
     from rebar._deprecations import RemovedInputError
     from rebar._errors import TrackerRootError
+    from rebar.config import ConfigError
 
     try:
         return _main_dispatch(argv)
     except RemovedInputError as e:
         sys.stderr.write(str(e) + "\n")
+        return 1
+    except ConfigError as e:
+        # An unreadable/invalid config is a LOUD, clean operator-facing error, never a
+        # traceback (operator ruling 39f8-ae7c: gated operations raise ConfigError on an
+        # unreadable config; this boundary renders it the same way the `-c` override
+        # parse below already renders its own ConfigError).
+        sys.stderr.write(f"Error: {e}\n")
         return 1
     except TrackerRootError as e:
         # bug 176d: the read core now RAISES instead of calling sys.exit, so the exit

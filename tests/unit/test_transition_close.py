@@ -349,7 +349,8 @@ def test_transition_core_does_not_accept_a_parameter_it_discards():
 # attempted), in the same locked write as the close, folded into reduced state.
 
 _GATE_ON = "[verify]\nrequire_completion_verification_for_close = true\n"
-# `[verify` never closes its table header -> tomllib raises -> ConfigError -> UNREADABLE.
+# `[verify` never closes its table header -> tomllib raises -> ConfigError (raised out of
+# the close per operator ruling 39f8-ae7c).
 _BROKEN_CONFIG = "[verify\nrequire_completion_verification_for_close = true\n"
 
 
@@ -468,15 +469,24 @@ def test_not_certifiable_is_recorded_as_itself(repo, monkeypatch):
     assert _expectation(repo, tid) == "not_certifiable"
 
 
-def test_unreadable_config_records_gate_unreadable_not_gate_off(repo, monkeypatch):
-    """AC4: the fail-OPEN skip on an unreadable config is a FAULT and must not be laundered
-    into the gate_off policy choice (consumes the GateState tri-state)."""
+def test_unreadable_config_errors_the_close_never_gate_unreadable(repo, monkeypatch):
+    """AC4, retargeted by operator ruling 39f8-ae7c ("Unreadable config should result in
+    an error"): the historical fail-OPEN skip is gone — the close RAISES ConfigError, the
+    ticket stays in_progress, and no close event (so no ``gate_unreadable`` provenance)
+    is ever written. ``gate_unreadable`` survives only on pre-ruling historical events."""
+    from rebar.config import ConfigError
+
     tid = _open_ticket(repo)
     _write_config(repo, _BROKEN_CONFIG)
 
-    rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
+    with pytest.raises(ConfigError, match="config"):
+        rebar.transition(tid, "in_progress", "closed", repo_root=str(repo))
 
-    assert _expectation(repo, tid) == "gate_unreadable"
+    _write_config(repo, "")
+    state = rebar.show_ticket(tid, repo_root=str(repo))
+    assert state["status"] == "in_progress", "a close under an unreadable config went through"
+    closes = [e for e in _status_events(repo, tid) if e["data"].get("status") == "closed"]
+    assert closes == [], "no close event may be written on the unreadable-config error path"
 
 
 def test_disposition_close_records_disposition_not_required(repo, monkeypatch):
