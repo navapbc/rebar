@@ -675,8 +675,18 @@ jobs:
         # tests (the live reconciler E2E) co-locate on one worker and stay serial.
         env:
           REBAR_REQUIRE_EXTRAS: "1"  # see the default-suite step above (bug 599e)
+        # --max-worker-restart=0 (bug 3fa7): under loadgroup a dead worker's pending workload
+        # — including the item that crashed it — is re-dispatched to respawned workers, which
+        # die on the same item up to xdist's default numprocesses*4 restarts, re-paying session
+        # setup each cycle toward the 60-min job cap (xdist #1094/#1189). =0 aborts the session
+        # on the first worker death instead. Exactly 0, not a small cap: the deterministic
+        # cause of worker deaths (the over-tight 20s budget) was fixed by the --timeout=300
+        # restore (change 2115), so any residual death is unexpected and should fail fast.
+        # The worksteal lane above must NOT get this flag — it never re-dispatches the crash
+        # item, so its default restart allowance only replaces lost capacity.
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
+          --max-worker-restart=0
           -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
