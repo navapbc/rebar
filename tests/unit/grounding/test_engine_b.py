@@ -428,6 +428,86 @@ def test_missing_opengrep_binary_fails_open(js_repo: Path, monkeypatch: pytest.M
     )
 
 
+def test_opengrep_validation_runs_once_per_source_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Ticket 7da8-9d47-9604-4257: `semgrep --validate --config <source>` validates the
+    # WHOLE source file, so detectors sharing one source must not each re-validate it.
+    # Within a single _run_opengrep call, validation is deduplicated per source_path
+    # (call-local only — no persistent or cross-scan caching).
+    from rebar.grounding import harness as _h
+
+    def _det(det_id: str, source: Path) -> reg_mod.Detector:
+        return reg_mod.Detector(
+            id=det_id,
+            backend=reg_mod.BACKEND_OPENGREP,
+            namespace="project",
+            source_path=str(source),
+            rule={"languages": ["js"]},
+            envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        )
+
+    shared = tmp_path / "shared.yaml"
+    other = tmp_path / "other.yaml"
+    dets = [_det("project.a", shared), _det("project.b", shared), _det("project.c", other)]
+
+    validate_configs: list[str] = []
+
+    def fake_run_tool(cmd, **kw):
+        if "--validate" in cmd:
+            validate_configs.append(cmd[cmd.index("--config") + 1])
+            return _h.RunResult(backend="opengrep", completed=True, returncode=0)
+        return _h.RunResult(backend="opengrep", completed=True, returncode=0, stdout='{"runs": []}')
+
+    monkeypatch.setattr(engine_b, "_resolve_binary", lambda _candidates: "semgrep")
+    monkeypatch.setattr(engine_b, "_binary_version", lambda b: "0.0")
+    monkeypatch.setattr(engine_b.harness, "run_tool", fake_run_tool)
+
+    records = engine_b._run_opengrep(dets, tmp_path)
+    _all_valid(records)
+    # Exactly one validation subprocess per unique source file, not per detector.
+    assert sorted(validate_configs) == [str(other), str(shared)]
+
+
+def test_opengrep_shared_source_validation_failure_fans_out_to_every_detector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Dedup must preserve the quarantine contract: when a shared source fails
+    # --validate, EVERY detector declared from it gets its own invalid_detector
+    # abstain, exactly as before the dedup.
+    from rebar.grounding import harness as _h
+
+    def _det(det_id: str, source: Path) -> reg_mod.Detector:
+        return reg_mod.Detector(
+            id=det_id,
+            backend=reg_mod.BACKEND_OPENGREP,
+            namespace="project",
+            source_path=str(source),
+            rule={"languages": ["js"]},
+            envelope={"job": ev.JOB_SMELL, "tier": ev.TIER_T1},
+        )
+
+    bad = tmp_path / "bad.yaml"
+    good = tmp_path / "good.yaml"
+    dets = [_det("project.a", bad), _det("project.b", bad), _det("project.c", good)]
+
+    def fake_run_tool(cmd, **kw):
+        if "--validate" in cmd:
+            rc = 7 if cmd[cmd.index("--config") + 1] == str(bad) else 0
+            return _h.RunResult(backend="opengrep", completed=True, returncode=rc)
+        return _h.RunResult(backend="opengrep", completed=True, returncode=0, stdout='{"runs": []}')
+
+    monkeypatch.setattr(engine_b, "_resolve_binary", lambda _candidates: "semgrep")
+    monkeypatch.setattr(engine_b, "_binary_version", lambda b: "0.0")
+    monkeypatch.setattr(engine_b.harness, "run_tool", fake_run_tool)
+
+    records = engine_b._run_opengrep(dets, tmp_path)
+    _all_valid(records)
+    quarantined = {r["detector_id"]: r for r in records if r.get("reason") == "invalid_detector"}
+    assert set(quarantined) == {"project.a", "project.b"}
+    assert all("--validate exit 7" in q["detail"] for q in quarantined.values())
+
+
 def test_missing_astgrep_binary_fails_open(js_repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(engine_b, "_ASTGREP_CANDIDATES", ("definitely-not-a-real-binary-xyz",))
     dets = list(reg_mod.load_registry().by_backend(reg_mod.BACKEND_ASTGREP))
