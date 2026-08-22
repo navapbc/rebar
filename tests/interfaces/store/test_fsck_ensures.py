@@ -133,7 +133,19 @@ class _StubServer:
 
 
 def test_mcp_startup_sweeps_before_run(repo: Path, monkeypatch) -> None:
+    import rebar._store as store_pkg
     from rebar import mcp_server
+
+    # Precondition, asserted loudly: the module-level ``ensures`` binding above (made at
+    # collection time) must be the SAME object that main()'s function-local
+    # ``from rebar._store import ensures`` resolves at call time. A test that re-imports
+    # ``rebar._store.ensures`` without restoring the parent-package attribute leaves two
+    # live copies, the monkeypatch below lands on the wrong one, and this test fails with
+    # a baffling ``['run']`` instead of naming the real problem (bug de95-1594-1056-436e).
+    assert store_pkg.ensures is ensures, (
+        "rebar._store.ensures diverges from the collection-time binding: an earlier test "
+        "re-imported the module and restored sys.modules but not the package attribute"
+    )
 
     order: list[str] = []
     stub = _StubServer()
