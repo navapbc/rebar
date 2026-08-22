@@ -94,14 +94,94 @@ def pct(xs: list[float], p: float) -> float:
     return xs[i]
 
 
+def _parse_block_impact_specs(specs: list[str]) -> list[tuple[str, float]]:
+    """Parse ``CRIT=THR`` block-impact specs into ``(criterion, threshold)`` pairs."""
+    out: list[tuple[str, float]] = []
+    for spec in specs:
+        crit, _, raw = spec.partition("=")
+        if not crit or not raw:
+            raise SystemExit(f"--block-impact expects CRIT=THR, got {spec!r}")
+        try:
+            out.append((crit, float(raw)))
+        except ValueError:
+            raise SystemExit(f"--block-impact threshold must be a number, got {raw!r}") from None
+    return out
+
+
+def block_impact(by_change: dict[str, list[dict]], criterion: str, thr: float) -> dict[str, Any]:
+    """Retrospective block-impact of ``thr`` on ``criterion`` over the pooled corpus.
+
+    Reproduces the columns of this document's "Block-impact of the proposed thresholds" table:
+    how many SURVIVING (blocking+advisory) findings tagged with the criterion carry
+    ``priority >= thr``, how many distinct changes that is, and the validity of that
+    would-block set. Purely retrospective — no sidecar is rewritten."""
+    surviving = would_block = low_validity = 0
+    hits: set[str] = set()
+    validities: list[float] = []
+    for change_key, revs in by_change.items():
+        for rev in revs:
+            for pool in SURFACED:
+                for f in rev["pools"][pool]:
+                    if not isinstance(f, dict) or criterion not in _crits(f):
+                        continue
+                    surviving += 1
+                    if float(f.get("priority") or 0.0) < thr:
+                        continue
+                    would_block += 1
+                    hits.add(change_key)
+                    v = f.get("validity")
+                    if v is None:
+                        continue
+                    validities.append(float(v))
+                    if float(v) < 0.5:
+                        low_validity += 1
+    total_changes = len(by_change)
+    return {
+        "criterion": criterion,
+        "thr": thr,
+        "surviving": surviving,
+        "would_block": would_block,
+        "of_surviving": round(100 * would_block / surviving, 1) if surviving else 0.0,
+        "changes_hit": len(hits),
+        "of_all_changes": round(100 * len(hits) / total_changes, 2) if total_changes else 0.0,
+        "mean_validity": round(statistics.mean(validities), 2) if validities else None,
+        "val_lt_half": low_validity,
+    }
+
+
+def print_block_impact(by_change: dict[str, list[dict]], specs: list[tuple[str, float]]) -> None:
+    """Print the block-impact table for each ``(criterion, threshold)`` spec."""
+    print(f"block-impact over {len(by_change)} changes\n")
+    print("| criterion | thr | surviving | would-block | of surviving | changes hit "
+          "| of all changes | mean validity | val<0.5 |")
+    print("|---|---|---|---|---|---|---|---|---|")
+    for criterion, thr in specs:
+        r = block_impact(by_change, criterion, thr)
+        mv = "n/a" if r["mean_validity"] is None else f"{r['mean_validity']:.2f}"
+        print(f"| {r['criterion']} | {r['thr']:.2f} | {r['surviving']} | {r['would_block']} "
+              f"| {r['of_surviving']}% | {r['changes_hit']} | {r['of_all_changes']}% "
+              f"| {mv} | {r['val_lt_half']} |")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--tracker", default=".tickets-tracker")
     ap.add_argument("--impact-model-version", default="code-v3")
     ap.add_argument("--emit", default=None, help="write a markdown report to this path")
+    ap.add_argument(
+        "--block-impact",
+        action="append",
+        default=[],
+        metavar="CRIT=THR",
+        help="print the retrospective block-impact table for CRIT at threshold THR "
+        "(repeatable) instead of the full calibration",
+    )
     args = ap.parse_args()
 
     by_change, skipped = load(args.tracker, args.impact_model_version)
+    if args.block_impact:
+        print_block_impact(by_change, _parse_block_impact_specs(args.block_impact))
+        return
     revs = [r for rs in by_change.values() for r in rs]
     total_reviews = len(revs)
     n_findings = sum(len(r["pools"][b]) for r in revs for b in POOLS)
