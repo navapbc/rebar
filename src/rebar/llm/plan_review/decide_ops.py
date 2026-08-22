@@ -46,18 +46,9 @@ from rebar.llm.plan_review.det_operator_attested import (
     _OPERATOR_ATTESTED_TAG_RE as _OPERATOR_ATTESTED_AC_RE,
 )
 from rebar.llm.workflow.executor import StepContext, register_step
+from rebar.llm.workflow.step_contracts import _ticket_id
 
 logger = logging.getLogger(__name__)
-
-
-def _ticket_id(ctx: StepContext) -> str:
-    tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
-    if not tid:
-        raise ValueError(
-            f"step {ctx.step_id!r} needs a ticket: pass `with: {{ticket_id: ...}}` or run "
-            f"the workflow against a target ticket"
-        )
-    return str(tid)
 
 
 # ── a8e5 Component 3: operator-attested AC awareness (pure DET, ADR-0043) ─────────────────────

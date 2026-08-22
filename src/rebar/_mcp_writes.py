@@ -30,6 +30,7 @@ from rebar._mcp_models import (
     WriteAckOut,
     tool_annotation_presets,
 )
+from rebar._operation_config import _shadow
 
 
 # Bug vapoury-attack-lamb. The tickets-branch push is best-effort: on failure it WARNS and
@@ -118,18 +119,6 @@ def _register_bridge_projects_writes(mcp, ann) -> None:
         _shadow("mcp.write.bridge_projects_remove")
         rebar.bridge_projects_remove(key)
         return _ack()
-
-
-def _shadow(surface: str) -> None:
-    """Emit ONE diagnostic shadow snapshot for an MCP operation (RP-04 S1).
-
-    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT gate
-    or alter the tool. A malformed/insecure config is swallowed by
-    ``emit_shadow_snapshot`` (logged redacted, never raised), so the shadow never
-    alters the tool's behavior."""
-    from rebar._operation_config import emit_shadow_snapshot
-
-    emit_shadow_snapshot(surface=surface)
 
 
 def register_write_tools(mcp, ctx) -> None:
