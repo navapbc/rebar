@@ -65,6 +65,11 @@ from rebar_reconciler.dispatch_apply_phases import (
     _update_one_filter_fields,
 )
 from rebar_reconciler.pass_io import _write_mapping_atomic, record_parent_divergence
+from rebar_reconciler.transition_replay import (
+    recorded_hops_for,
+    replay_should_drift,
+    replay_transition,
+)
 
 if TYPE_CHECKING:
     from ._backend import SupportsComments, TicketTransport
@@ -466,7 +471,13 @@ def update_one(
     _update_one_apply_reporter(fields, issue_key, client)
     fields = _update_one_filter_fields(fields, mutation)
     result, _applied = _update_one_scalar_update(
-        client, issue_key, fields, _has_parent_op, _attempted_status, _assignee_is_account_id
+        client,
+        issue_key,
+        fields,
+        _has_parent_op,
+        _attempted_status,
+        _assignee_is_account_id,
+        mutation.get("local_id"),
     )
     if fields_synced is not None:
         fields_synced.update(_applied)
@@ -587,6 +598,7 @@ def _update_one_scalar_update(
     _has_parent_op,
     _attempted_status,
     assignee_is_account_id=False,
+    local_id: str | None = None,
 ):
     """Phase: the scalar client.update_issue call + the 400 illegal-transition
     comment-fallback. Returns the update result (or None).
@@ -619,34 +631,73 @@ def _update_one_scalar_update(
             _extra = {"assignee_is_account_id": True} if assignee_is_account_id else {}
             result = _call_with_retry(client.update_issue, issue_key, **_extra, **fields)
             applied = dict(fields)  # reached ONLY on a completed write
-        except JiraAPIError as exc:
-            if not _is_illegal_transition_400(exc):
+        except (RuntimeError, ValueError, urllib.error.HTTPError, JiraAPIError) as exc:
+            # S6: a workflow that forbids the DIRECT end-state hop surfaces here as one of
+            # the transition-rejection shapes both backends raise — acli ``RuntimeError``,
+            # DC ``ValueError`` / ``IllegalTransitionError``, or an illegal-transition 400
+            # (``HTTPError`` / ``BackendHTTPError`` / ``JiraAPIError``). Replay walks rebar's
+            # OWN recorded intermediate hops; if it reaches the target the update lands.
+            #   * A NON-transition HTTP/API error (a non-illegal 400, a 404 stale binding, a
+            #     5xx) is NOT a rejection: it propagates unchanged to its upstream handler.
+            #   * If replay cannot reach the target, ``replay_should_drift`` decides between
+            #     the legacy comment-fallback DRIFT (illegal-400, no local_id, or a recorded
+            #     trail existed) and PROPAGATING the original error to the pre-S6 soft-fail
+            #     backstop (a bare transition error with no recorded trail to replay).
+            if _is_non_transition_http_error(exc):
                 raise
-            new_status = _attempted_status
-            comment = f"local status changed to {new_status}"
-            if _capability_present(
-                client,
-                SupportsComments,
-                "comments",
-                "add_comment",
-                "update_one.scalar_update_fallback",
-                issue_key,
-            ):
-                try:
-                    cast("SupportsComments", client).add_comment(issue_key, comment)
-                except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
-                    pass  # secondary failure must not mask the comment-fallback path
-            log_entry = json.dumps(
-                {
-                    "action": "comment_fallback",
-                    "issue_key": issue_key,
-                    "attempted_status": _attempted_status,
-                    "reason": "400_illegal_transition",
-                }
-            )
-            print(log_entry, file=sys.stderr)
-            result = None
+            # Read the recorded hop trail ONCE and thread it into BOTH replay helpers, so
+            # the drift decision does not re-glob/re-parse the store a second time in this
+            # same arm (avoids duplicate IO and a TOCTOU window).
+            _hops = recorded_hops_for(local_id)
+            if replay_transition(client, issue_key, local_id, _attempted_status, hops=_hops):
+                result = {"key": issue_key}
+                applied = dict(fields)
+            elif _is_illegal_transition_400(exc) or replay_should_drift(local_id, hops=_hops):
+                result = _scalar_update_comment_fallback(client, issue_key, _attempted_status)
+            else:
+                raise
     return result, applied
+
+
+def _is_non_transition_http_error(exc: Exception) -> bool:
+    """True for an HTTP/API error that is NOT an illegal-transition 400 — a non-illegal 400
+    (e.g. a missing required field), a 404 stale binding, or a 5xx. Such errors are not
+    workflow rejections and must propagate to their upstream handler rather than route into
+    the S6 replay/comment-fallback path. ``RuntimeError`` / ``ValueError`` (acli / DC
+    transition rejections) are never HTTP-like, so they always route to replay."""
+    if not isinstance(exc, (urllib.error.HTTPError, JiraAPIError)):
+        return False
+    return not _is_illegal_transition_400(exc)
+
+
+def _scalar_update_comment_fallback(client: TicketTransport, issue_key, _attempted_status):
+    """Legacy 400-illegal-transition drift arm: record the local status change as a
+    Jira comment (capability-gated) + a structured stderr log, and return ``None`` so
+    the mutation drifts. Reached only when replay could not walk to the target."""
+    new_status = _attempted_status
+    comment = f"local status changed to {new_status}"
+    if _capability_present(
+        client,
+        SupportsComments,
+        "comments",
+        "add_comment",
+        "update_one.scalar_update_fallback",
+        issue_key,
+    ):
+        try:
+            cast("SupportsComments", client).add_comment(issue_key, comment)
+        except Exception:  # noqa: BLE001 — secondary add_comment failure must not mask the comment-fallback path
+            pass  # secondary failure must not mask the comment-fallback path
+    log_entry = json.dumps(
+        {
+            "action": "comment_fallback",
+            "issue_key": issue_key,
+            "attempted_status": _attempted_status,
+            "reason": "400_illegal_transition",
+        }
+    )
+    print(log_entry, file=sys.stderr)
+    return None
 
 
 def _update_one_dispatch_labels(mutation, client: TicketTransport, issue_key) -> tuple[int, int]:
