@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -192,24 +193,13 @@ def test_subprocess_startup_failure():
         # inherit tests/conftest.py's normal insertion of tests/ for shared helpers.
         "PYTHONPATH": str(_TESTS_ROOT),
     }
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / f"pytest-{traceback_style}"),
-            f"--tb={traceback_style}",
-            str(probe),
-        ],
-        cwd=_REPO_ROOT,
+    return run_nested_pytest(
+        tmp_path / traceback_style,
+        "-q",
+        f"--tb={traceback_style}",
+        str(probe),
         env=child_env,
-        capture_output=True,
-        text=True,
-        check=False,
+        cwd=_REPO_ROOT,
     )
 
 

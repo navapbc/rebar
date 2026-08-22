@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 
 pytestmark = pytest.mark.unit
 
@@ -51,27 +51,14 @@ def test_render_fixture({fixture}):
         _SECRET_NAME: _SECRET_VALUE,
         "PATH": os.environ.get("PATH", os.defpath),
     }
-    command = [
-        sys.executable,
-        "-m",
-        "pytest",
-        "-p",
-        "no:cacheprovider",
-        "--basetemp",
-        str(tmp_path / f"pytest-{traceback_style}"),
-        f"--tb={traceback_style}",
-        "-q",
-        str(test_file),
-    ]
+    arguments = [f"--tb={traceback_style}", "-q", str(test_file)]
     if traceback_style == "long":
-        command.insert(-2, "--showlocals")
-    return subprocess.run(
-        command,
-        cwd=Path(__file__).parents[2],
+        arguments.insert(-2, "--showlocals")
+    return run_nested_pytest(
+        tmp_path / traceback_style,
+        *arguments,
         env=child_env,
-        text=True,
-        capture_output=True,
-        check=False,
+        cwd=Path(__file__).parents[2],
     )
 
 

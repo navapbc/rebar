@@ -22,10 +22,10 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -158,23 +158,15 @@ def _collect(tmp_path: Path, *dist_args: str, live_env: bool) -> subprocess.Comp
         env["JIRA_URL"] = "https://live-jira.invalid"
         env["JIRA_USER"] = "guard-probe"
         env["JIRA_API_TOKEN"] = "guard-probe"
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            _LIVE_MODULE,
-            "--collect-only",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            *dist_args,
-        ],
-        cwd=_REPO_ROOT,
+    return run_nested_pytest(
+        tmp_path,
+        _LIVE_MODULE,
+        "--collect-only",
+        "-q",
+        *dist_args,
         env=env,
-        capture_output=True,
-        text=True,
         timeout=300,
+        cwd=_REPO_ROOT,
     )
 
 

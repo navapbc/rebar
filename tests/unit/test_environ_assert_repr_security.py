@@ -18,10 +18,10 @@ from __future__ import annotations
 import ast
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 
 pytestmark = pytest.mark.unit
 
@@ -137,24 +137,13 @@ def _run_guard_probe(tmp_path: Path, traceback_style: str) -> subprocess.Complet
         _GUARDED_VAR: "/synthetic/path/that/forces/the/guard/to/fail",
         "PATH": os.environ.get("PATH", os.defpath),
     }
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / f"pytest-{traceback_style}"),
-            f"--tb={traceback_style}",
-            str(probe),
-        ],
-        cwd=_REPO_ROOT,
+    return run_nested_pytest(
+        tmp_path / traceback_style,
+        "-q",
+        f"--tb={traceback_style}",
+        str(probe),
         env=child_env,
-        capture_output=True,
-        text=True,
-        check=False,
+        cwd=_REPO_ROOT,
     )
 
 

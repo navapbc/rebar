@@ -18,11 +18,10 @@ SAME path a default CI run takes.
 from __future__ import annotations
 
 import ast
-import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 
 pytestmark = pytest.mark.unit
 
@@ -59,24 +58,7 @@ def test_external_dir_all_skipped_without_opt_in(tmp_path: Path) -> None:
     env.setdefault("JIRA_USER", "probe")
     env.setdefault("JIRA_API_TOKEN", "probe-token")
 
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(_EXTERNAL_DIR),
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / "bt"),
-            "-rs",
-            "-q",
-        ],
-        cwd=_REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    proc = run_nested_pytest(tmp_path, str(_EXTERNAL_DIR), "-rs", "-q", env=env, cwd=_REPO_ROOT)
     out = proc.stdout + proc.stderr
     # Exit 0 (no failures) and at least one skip, zero passes.
     assert proc.returncode == 0, f"external tier ran/failed without opt-in:\n{out}"

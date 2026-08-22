@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.integration
@@ -21,23 +21,10 @@ _FIXTURE_NODES = (
 )
 
 
-def _run_fixture_nodes(*, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            *_FIXTURE_NODES,
-        ],
-        cwd=_REPO_ROOT,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def _run_fixture_nodes(
+    tmp_path: Path, *, environment: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    return run_nested_pytest(tmp_path, "-q", *_FIXTURE_NODES, env=environment, cwd=_REPO_ROOT)
 
 
 def test_bare_repository_fixtures_are_portable_to_explicit_safety_policy(
@@ -62,7 +49,7 @@ def test_bare_repository_fixtures_are_portable_to_explicit_safety_policy(
         GIT_CONFIG_NOSYSTEM="1",
     )
 
-    strict = _run_fixture_nodes(environment=strict_environment)
+    strict = _run_fixture_nodes(tmp_path / "strict", environment=strict_environment)
 
     assert strict.returncode == 0, strict.stdout + strict.stderr
     assert "3 passed" in strict.stdout
@@ -71,7 +58,7 @@ def test_bare_repository_fixtures_are_portable_to_explicit_safety_policy(
         GIT_CONFIG_GLOBAL=os.devnull,
         GIT_CONFIG_NOSYSTEM="1",
     )
-    default = _run_fixture_nodes(environment=default_environment)
+    default = _run_fixture_nodes(tmp_path / "default", environment=default_environment)
     assert default.returncode == 0, default.stdout + default.stderr
     assert "3 passed" in default.stdout
 
