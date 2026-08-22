@@ -46,6 +46,21 @@ def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     user_cfg.reset_config_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_drift_warnings() -> None:
+    """Each status-mapping test starts with an empty ``_DRIFT_WARNED``.
+
+    The outbound mapper dedupes its stderr drift warning per distinct status per process
+    via the module-global ``_DRIFT_WARNED`` set. Without this reset, a test asserting a
+    drift warning IS emitted could be polluted under reordering if an earlier test already
+    recorded the same status, so drift-emission assertions would be order-dependent. The
+    reset uses the public ``reset_drift_warnings()`` seam, never the private set.
+    """
+    from rebar_reconciler.adapters.jira_family import outbound_mapper
+
+    outbound_mapper.reset_drift_warnings()
+
+
 def _proj(tmp: Path, mapping_toml: str = "", *, name: str = "proj") -> Path:
     """A repo root whose discovered ``rebar.toml`` carries ``mapping_toml`` verbatim."""
     p = tmp / name
@@ -379,3 +394,35 @@ def test_drift_warning_deduped_within_pass(
         assert outbound_mapper.resolve_outbound_status("blocked", {"open": "To Do"}) is None
     err = capsys.readouterr().err
     assert err.count("no Jira target") == 1
+
+
+# --- order-independence oracle for the _DRIFT_WARNED reset fixture ---
+
+
+def test_drift_records_status_in_shared_set(tmp_path: Path) -> None:
+    """ORACLE part 1: resolve a drifting status so ``_DRIFT_WARNED`` records it — this
+    simulates an earlier status-mapping test in a reordered run that already warned
+    about ``drifty_status``. Part 2 then proves the warning still fires despite this
+    prior record, which holds only because the autouse reset clears the set between
+    tests."""
+    from rebar_reconciler.adapters.jira_family import outbound_mapper
+
+    assert outbound_mapper.resolve_outbound_status("drifty_status", {"open": "To Do"}) is None
+
+
+def test_drift_warning_is_order_independent(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """ORACLE part 2: a drift warning for ``drifty_status`` must reach stderr even though
+    the preceding test already recorded that status in the process-global
+    ``_DRIFT_WARNED`` set. It passes only because the autouse reset gives each test a
+    clean set; without that fixture the dedupe suppresses the warning and this fails —
+    the observable proof that drift-emission assertions are order-independent."""
+    proj = _proj(
+        tmp_path,
+        '[mapping.projects.REB.status_map]\ndrifty_status = "skip"\n',
+    )
+    eff = cfg_mod.effective_status_map("REB", root=proj)
+    out = _mapper().map_fields_to_remote({"status": "drifty_status"}, status_map=eff)
+    assert "status" not in out
+    assert "drifty_status" in capsys.readouterr().err
