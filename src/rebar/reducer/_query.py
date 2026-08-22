@@ -26,10 +26,12 @@ only parses. Returned shapes:
 
 from __future__ import annotations
 
+from rebar.reducer._filters import PredicateValue
+
 KNOWN_FIELDS = frozenset({"status", "type", "priority", "assignee", "tag", "parent"})
 
 
-def _parse_value(field: str, raw: str) -> tuple[str, object]:
+def _parse_value(field: str, raw: str) -> tuple[str, PredicateValue]:
     """Map a raw field value to ``(op, value)``. ``priority`` understands range
     operators; every field understands comma-OR; otherwise it is exact (``eq``)."""
     if field == "priority":
