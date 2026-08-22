@@ -103,6 +103,7 @@ _BRIDGE_INTERNAL_LABEL_PREFIXES: tuple[str, ...] = (
     "rebar-id-",
     "imported:",
     "rebar-status:",
+    "rebar-type:",
 )
 
 

@@ -378,6 +378,7 @@ class OutboundMapper(Protocol):
         *,
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
+        type_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """``suppressed_out`` (ticket 8390): an optional sink an implementation MAY
         append to when it drops a parent it could otherwise have sent, so the caller
@@ -387,7 +388,12 @@ class OutboundMapper(Protocol):
 
         ``status_map`` (S2): the effective per-project local->Jira status map
         (``config.effective_status_map``); ``None`` falls back to the built-in map. A
-        local status with NO target is OMITTED (map-or-drift), never coerced."""
+        local status with NO target is OMITTED (map-or-drift), never coerced.
+
+        ``type_map`` (S3): the effective per-project local->Jira type map
+        (``config.effective_type_map``); ``None`` falls back to the built-in
+        ``LOCAL_TYPE_TO_JIRA``. Unlike status, ``issuetype`` is mandatory on a create, so
+        an unmapped type falls back to ``"Task"`` (the built-in default)."""
         ...
 
     def map_fields_to_remote(

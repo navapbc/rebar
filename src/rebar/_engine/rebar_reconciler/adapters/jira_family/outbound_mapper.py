@@ -25,6 +25,7 @@ from rebar_reconciler.adapters.jira_family.rich_text import RichTextCodec
 from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
     LOCAL_STATUS_TO_JIRA,
+    LOCAL_TYPE_TO_JIRA,
 )
 
 
@@ -69,6 +70,22 @@ def resolve_outbound_status(value: Any, status_map: dict[str, str] | None) -> st
             )
         return None
     return target
+
+
+def resolve_outbound_type(value: Any, type_map: dict[str, str] | None) -> str:
+    """Resolve a local ticket type to its Jira issue-type NAME.
+
+    ``type_map`` is the effective per-project forward map (``config.effective_type_map``);
+    ``None`` falls back to the built-in ``LOCAL_TYPE_TO_JIRA``. Unlike ``status`` (which is
+    OMITTED on a miss — a create carries no ``status``), ``issuetype`` is MANDATORY on a
+    create, so a type with no target falls back to ``"Task"`` — preserving the built-in
+    ``.get(ticket_type, "Task")`` behaviour EXACTLY when ``type_map`` is ``None``. The
+    up-front ``config.assert_type_decisions_complete`` gate already fail-closes on an
+    undecided syncable type before any mutation is built, so on the configured path this
+    fallback is only reached by a type the operator deliberately left unmapped. Shared by
+    both CREATE paths (Cloud + DC) so the rule has ONE implementation."""
+    effective = LOCAL_TYPE_TO_JIRA if type_map is None else type_map
+    return effective.get(value, "Task")
 
 
 class OutboundFieldMapper:

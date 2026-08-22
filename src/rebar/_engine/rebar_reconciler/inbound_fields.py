@@ -22,7 +22,9 @@ import importlib.util
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, get_args
+
+from rebar.types import TicketType
 
 if TYPE_CHECKING:
     from rebar_reconciler._backend import OutboundMapper
@@ -108,6 +110,33 @@ _JIRA_TO_LOCAL_TYPE: dict[str, str] = {
     "Task": "task",
     "Epic": "epic",
 }
+
+# The local-type vocabulary a ``rebar-type:<local>`` label may name (S3, the type-axis
+# mirror of ``_LOCAL_STATUS_VOCAB`` below). DERIVED from ``rebar.types.TicketType`` so it
+# cannot drift from the canonical type list — a label whose suffix is NOT a valid local
+# ticket type is ignored (fall back to the raw issue type), so a malformed/unknown label
+# never fabricates a bogus local type.
+_LOCAL_TYPE_VOCAB: frozenset[str] = frozenset(get_args(TicketType))
+
+_REBAR_TYPE_LABEL_PREFIX = "rebar-type:"
+
+
+def recover_type_label(labels: Any) -> str | None:
+    """Recover a local ticket type from a ``rebar-type:<local>`` annotation label.
+
+    The type-axis mirror of :func:`recover_status_label`. Scans ``labels`` for the first
+    ``rebar-type:`` label whose suffix is a valid local type (in :data:`_LOCAL_TYPE_VOCAB`)
+    and returns that ``<local>``; an unknown/malformed suffix is ignored so the caller
+    falls back to the raw Jira issue type. ``None`` when no valid label is present.
+    Reverse-map-free — it never consults a Jira->local table, so a per-project collapse
+    (two local types onto one Jira type) is recovered directly from the stamped label."""
+    for label in labels or []:
+        if isinstance(label, str) and label.startswith(_REBAR_TYPE_LABEL_PREFIX):
+            candidate = label[len(_REBAR_TYPE_LABEL_PREFIX) :]
+            if candidate in _LOCAL_TYPE_VOCAB:
+                return candidate
+    return None
+
 
 _JIRA_TO_LOCAL_PRIORITY: dict[str, int] = {
     "Highest": 0,
@@ -308,7 +337,13 @@ def _map_jira_to_local_fields(jira_fields: dict[str, Any]) -> dict[str, Any]:
         # string and the applier writes a string into the local EDIT event.
         description_raw = jira_fields.get("description")
         out["description"] = _normalize_jira_body(description_raw) if description_raw else ""
-    if "issuetype" in jira_fields:
+    recovered_type = recover_type_label(jira_fields.get("labels"))
+    if recovered_type is not None:
+        # S3: a rebar-type: annotation label WINS over the raw Jira issue type. The
+        # label recovers ANY valid local type directly (reverse-map-free), so a
+        # per-project collapse (two local types onto one Jira type) round-trips.
+        out["ticket_type"] = recovered_type
+    elif "issuetype" in jira_fields:
         issuetype_raw = _extract_jira_field_value(jira_fields, "issuetype") or "Task"
         out["ticket_type"] = _JIRA_TO_LOCAL_TYPE.get(issuetype_raw, "task")
     if "priority" in jira_fields:

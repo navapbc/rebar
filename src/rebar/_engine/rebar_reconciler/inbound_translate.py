@@ -56,6 +56,7 @@ _BRIDGE_INTERNAL_TAG_PREFIXES: tuple[str, ...] = (
     "rebar-id:",
     "rebar-id-",
     "rebar-status:",
+    "rebar-type:",
 )
 
 _JIRA_PRIORITY_MAP: dict[str, int] = {
