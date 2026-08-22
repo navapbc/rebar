@@ -141,10 +141,12 @@ def sanitize_diagnostic(fields: dict) -> dict:
 
 
 # ── Classification ────────────────────────────────────────────────────────────
-# Mirrors the phrasing list in ``sizing.is_context_limit_error`` (kept local so this
-# low-level boundary module has no dependency on the plan_review package — the two must
-# stay in sync; a context-length 400 classified CHANGE_INPUT here is the SAME error the
-# ladder there recognises, and this story changes no raised type so the ladder is intact).
+# The SINGLE definition of the provider context-length phrasings (story fcb7).
+# ``sizing.is_context_limit_error`` reads this tuple rather than carrying a copy: a
+# context-length 400 classified CHANGE_INPUT here is the SAME error the escalation ladder
+# there recognises, so two lists could drift apart and disagree. The dependency points
+# only inward (plan_review -> here), keeping this low-level boundary module free of any
+# dependency on the plan_review package.
 _CONTEXT_LEN_HINTS: tuple[str, ...] = (
     "context",
     "too many tokens",
