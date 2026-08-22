@@ -793,6 +793,52 @@ def test_the_shared_tier_lanes_carry_the_ini_timeout_budget() -> None:
         )
 
 
+def test_integration_lane_fails_fast_on_worker_crash_and_worksteal_lane_does_not() -> None:
+    """The loadgroup lane must carry ``--max-worker-restart=0``; the worksteal lane must NOT.
+
+    Under ``--dist loadgroup`` (and loadscope) a dead worker's pending workload — INCLUDING
+    the item that crashed it — is re-dispatched to respawned replacement workers, which die on
+    the same item, up to xdist's default restart cap of ``numprocesses * 4`` (16 here). Each
+    cycle re-pays session setup, so a single crashing test burns toward the 60-minute job
+    ceiling instead of failing in seconds (bug ``3fa7``'s RCA; upstream pytest-dev/pytest-xdist
+    #1094/#1189, whose ``docs/crash.rst`` sanctions ``=0``). ``--max-worker-restart=0`` makes
+    the first worker death abort the whole session immediately and cleanly (triggershutdown).
+
+    Exactly ``=0`` rather than a small cap: the deterministic cause of worker deaths (the
+    over-tight 20s budget) was fixed by the budget restore (change 2115, ``--timeout=300``),
+    so any residual worker death is UNEXPECTED and should fail fast and loudly, not be
+    absorbed by a retry allowance that hides it.
+
+    The worksteal (default-suite) lane must NOT get the flag: worksteal never re-dispatches
+    the crashing item, so xdist's default restart allowance there only replaces lost capacity
+    and lets the rest of the suite finish — one crash still fails the run, with more signal.
+    """
+    lanes = {
+        ("loadgroup" if "--dist loadgroup" in body else "worksteal"): (step, body)
+        for filename, step, body in _all_workflow_pytest_steps()
+        if filename == "_build-and-test.yml"
+    }
+    assert set(lanes) == {"loadgroup", "worksteal"}, (
+        "expected exactly one loadgroup (integration) and one worksteal (default-suite) lane "
+        f"in _build-and-test.yml; found {sorted(lanes)}"
+    )
+    step, body = lanes["loadgroup"]
+    assert "--max-worker-restart=0" in body, (
+        f"_build-and-test.yml step {step!r} runs `--dist loadgroup` without "
+        "`--max-worker-restart=0`: on a worker crash, loadgroup re-dispatches the crashing "
+        "item to respawned workers up to numprocesses*4 restarts, re-paying session setup "
+        "each cycle and burning toward the 60-min job cap (bug 3fa7). Fail fast instead:\n"
+        f"{body}"
+    )
+    step, body = lanes["worksteal"]
+    assert "--max-worker-restart" not in body, (
+        f"_build-and-test.yml step {step!r} runs `--dist worksteal` with a "
+        "--max-worker-restart cap. Worksteal does not re-dispatch a crashing item, so the "
+        "default restart allowance only replaces lost capacity and preserves suite-wide "
+        f"signal; do not add the flag here:\n{body}"
+    )
+
+
 def test_no_drift_script_gate_is_verified_only_in_branch_ci() -> None:
     """Auto-catch the drift class: any scripts/*.py a gate runs in the branch-CI lane (test.yml
     plus the reusable it calls) must also run in the Verified lane (gerrit-verify.yaml plus the
