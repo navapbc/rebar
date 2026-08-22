@@ -179,6 +179,53 @@ promptfoo) enforce typed CONTRACTS + OUTPUT/BEHAVIOR, never prompt-string greps.
 enforce the binary vocabulary as a typed contract and the soft rules as observable
 behavior; the rules' *wording* is intentionally not gated by a lint.
 
+## The cross-gate discovery cutover — ownership, deltas, and the shadow (RP-06)
+
+RP-06 finished draining the pre-kernel discovery derivations so BOTH review gates route
+criteria→units→outcomes through ONE shared spine. The ownership after the cutover is fixed:
+
+| Concern | Single owner | Surface |
+|---|---|---|
+| **Effective review policy** (which criteria run, routing, posture, project LLM/DET, provenance) | `CriteriaSnapshot` (RP-06 S1) | `rebar.llm.criteria.snapshot` — the ONE compiled authority; gates read policy off it, never re-reading ambient `.rebar/criteria_routing.json` / the packaged index. `registry.effective_routing → overlay.effective_routing` is the sanctioned reader chain; a direct `overlay._load_overlay` / `criteria_routing.json` read in a gate is prohibited. |
+| **Discovery execution** (dependency ordering, the six outcome kinds, exact usage, checkpoint reuse, shedding, cancellation, systemic vs local abort) | `review_kernel.discovery.execute_stage` (RP-06 S2) | The SINGLE scheduler. No second discovery scheduler may exist outside the kernel — a `graphlib` topological schedule over `DiscoveryUnitPlan`/`DiscoveryStagePlan` belongs here only. |
+| **The projection** (criteria→`DiscoveryStagePlan`/`DiscoveryUnitPlan`) | each gate | plan-review: `plan_review/sizing.py`; code-review: `code_review/batch_runner.py`. Each builds units FROM the snapshot and hands them to `execute_stage`. |
+| **The verdict** (Pass-2/3/4 decision math) | RP-01 — the shared four-pass kernel | `review_kernel.verify`/`decide`/`coach` (above). Discovery produces execution FACTS; it never decides a gate verdict. |
+
+**The approved-delta allowlist.** The cutover deliberately changes behavior in exactly six
+ways; everything else must be byte-identical to the legacy derivation. The approved deltas are
+effective built-in **retune/disable**, project **DET** inclusion, project **LLM applicability**
+filtering, positive **code-review budget** enforcement, typed **partial-failure continuation**
+(a local failure no longer aborts the whole stage), and **success-only checkpointing** (only a
+`success` outcome is checkpointed). These are the single source enumerated in
+`review_kernel.discovery_shadow.APPROVED_DELTAS`.
+
+**The shadow comparator** (`review_kernel.discovery_shadow`, RP-06 S7) certifies the cutover.
+From ONE observed call/result set of a review run it reconstructs the *legacy* reference
+derivation and diffs it, field by field, against the observed *RP-06* derivation over criterion
+selection/exclusion, order, prompt/contract identity, context hash, model/mode, dependencies,
+budgets, posture, usage, checkpoint decisions, and final disposition. It reports every
+divergence as a field-level `Mismatch` EXCEPT those matching the approved-delta allowlist (an
+`AcceptedDelta`). It is a **pure, deterministic** comparator: it issues **NO provider/model
+call**, takes no runner/store, and **never controls a gate's final verdict** — it only observes.
+
+**Sensitive-data boundary.** The shadow and the discovery journal operate on **content-free**
+facts only: unit ids, identity digests, outcome kinds, usage counters, and policy signals —
+never prompt/ticket/context/finding bodies or provider payloads. The kernel's `unit_trace`
+journal record is content-free and versioned (`DISCOVERY_NAMESPACE_VERSION`); it lives in the
+reducer-IGNORED sidecar, never on the public verdict schemas (`plan_review_verdict`,
+`plan_review_status`, `code_review_verdict`, `review_result`), which stay narrow. The live
+external-provider canary (`tests/external/test_review_discovery_live.py`) asserts only booleans
+/ enum verdicts / schema shape and must never print the credential, the raw plan/context body,
+the prompt, or the trace.
+
+**Legacy checkpoints + revert-based rollback.** New code **IGNORES** legacy-namespace
+checkpoint envelopes — a stored envelope whose `namespace_version` differs is treated as a
+cache miss and recomputed, never resumed; the shadow flags any RP-06 unit that `resumed` from a
+legacy envelope. Because the retained compatibility projection is just the pre-kernel derivation
+of the same facts (no separately-named legacy module, no new envelope format written), rolling
+the cutover back is a **plain code revert**: it needs no journal rewrite and no data cleanup,
+and any legacy envelope left on disk stays inert.
+
 ## Out of scope (decisions recorded)
 
 - The **completion verifier stays single-pass** (already binary-per-criterion; a full
