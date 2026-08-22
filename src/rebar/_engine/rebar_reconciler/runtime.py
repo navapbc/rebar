@@ -157,6 +157,12 @@ class ReconcilerRuntime:
         from rebar_reconciler.adapters.jira_datacenter.transport import JiraDataCenterTransport
 
         s = self.settings
+        # Symmetry with ``_build_cloud`` (ticket 4698-d85c): assert the NON-SECRET half
+        # of the DC scope (base url + project) at build, before any transport exists.
+        # PAT presence and network validation stay LAZY in ``_LazyDataCenterClient`` /
+        # ``build_client_from_settings``, so composing a DC backend still needs neither
+        # the ``[agents]``/jira extra nor a ``JIRA_PAT``.
+        assert_datacenter_nonsecret_scope_ready(s)
         if transport is not None:
             return JiraDataCenterBackend(transport=transport, scope=s)
         # Build the real ``jira.JIRA`` client LAZILY: composing the runtime (and reading
@@ -333,6 +339,16 @@ def assert_cloud_scope_ready(scope: ReconcilerSettings) -> None:
     essential (``JIRA_URL`` / ``JIRA_USER`` / ``JIRA_API_TOKEN``) is missing, when
     ``JIRA_USER`` is not an email (Cloud's Basic-auth username IS the account email), or
     when the read scope (``jira.project``) is empty — before any transport is built.
+
+    INTENDED TIGHTENING, not drift (ticket 4698-d85c). This check is DELIBERATELY
+    stricter than the legacy ambient ``JiraBackend.assert_env_ready`` path, which only
+    requires ``JIRA_URL``/``JIRA_USER``/``JIRA_API_TOKEN`` to be non-empty: the
+    email-format check catches a username that Cloud Basic auth would silently reject
+    (the Basic-auth username IS the Atlassian account email), and the non-empty-project
+    checks catch a scope that would otherwise query EVERY project on the instance. Real
+    Cloud deployments satisfy both, so the captured-scope path is the canonical
+    fail-closed behavior; the weaker ambient check is the compatibility floor for
+    backends built without a captured scope, not a parity target to relax to.
     """
     from rebar_reconciler._backend import BackendEnvError
 
@@ -373,6 +389,40 @@ def _assert_cloud_user_is_email(user: str) -> None:
             "invalid JIRA_USER: Jira Cloud authenticates with your Atlassian account "
             f"EMAIL as the Basic-auth username, but JIRA_USER={user.strip()!r} is not an "
             "email address. Set JIRA_USER to the email of the account that owns the token."
+        )
+
+
+def assert_datacenter_nonsecret_scope_ready(scope: ReconcilerSettings) -> None:
+    """Fail-closed check of the NON-SECRET Data Center scope — TYPED, no network.
+
+    The DC build-time analogue of :func:`assert_cloud_scope_ready` (ticket 4698-d85c):
+    raises :class:`~rebar_reconciler._backend.BackendEnvError` when the base ``url``
+    (``[tool.rebar.reconciler].base_url``) or the read/write project scope
+    (``jira.project``) is empty — before any transport or client is built. Deliberately
+    does NOT check ``JIRA_PAT``: the credential (and every network concern) stays lazy
+    in ``_LazyDataCenterClient``, so composing/building a DC backend never requires the
+    secret or the optional jira extra. The PAT is enforced by
+    :func:`assert_datacenter_scope_ready` (the ``assert_env_ready`` path) and by
+    ``build_client_from_settings`` at first real client use.
+    """
+    from rebar_reconciler._backend import BackendEnvError
+
+    if not (scope.base_url or "").strip():
+        raise BackendEnvError(
+            "missing Jira Data Center configuration: url "
+            "(set url via [tool.rebar.reconciler].base_url)."
+        )
+    if not scope.query_project.strip():
+        raise BackendEnvError(
+            "empty Jira Data Center read scope: the configured project (jira.project / "
+            "JIRA_PROJECT) is unset, so the inbound query would target every project. "
+            "Set jira.project (or JIRA_PROJECT) to the project the reconciler owns."
+        )
+    if not scope.project.strip():
+        raise BackendEnvError(
+            "empty Jira Data Center write scope: the configured project (jira.project / "
+            "JIRA_PROJECT) is unset, so a create/write would have no target project. "
+            "Set jira.project (or JIRA_PROJECT) to the project the reconciler owns."
         )
 
 

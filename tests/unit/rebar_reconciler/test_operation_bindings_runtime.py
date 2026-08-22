@@ -55,6 +55,50 @@ def test_compose_selects_datacenter_backend_when_configured() -> None:
     assert backend.project == "DIG"
 
 
+def test_datacenter_build_succeeds_without_pat(monkeypatch) -> None:
+    """Ticket 4698-d85c lazy-preserved half: the build-time non-secret scope assert
+    must NOT require JIRA_PAT — the credential (and the jira extra) stays lazy in
+    _LazyDataCenterClient, so a PAT-less compose+build still constructs the backend."""
+    monkeypatch.delenv("JIRA_PAT", raising=False)
+    runtime = compose_reconciler_runtime(
+        cli_overrides={
+            "reconciler.backend": "jira-datacenter",
+            "reconciler.base_url": "https://jira.example.internal",
+        }
+    )
+    backend = runtime.build_backend()
+    assert backend.project == "DIG"
+
+
+def test_datacenter_build_fails_closed_on_missing_base_url() -> None:
+    """Ticket 4698-d85c fail-closed half: an empty DC base url raises the TYPED
+    BackendEnvError at build — before any transport/client work — mirroring
+    _build_cloud's assert_cloud_scope_ready placement."""
+    from rebar_reconciler._backend import BackendEnvError
+
+    runtime = compose_reconciler_runtime(cli_overrides={"reconciler.backend": "jira-datacenter"})
+    with pytest.raises(BackendEnvError) as exc:
+        runtime.build_backend()
+    assert "url" in str(exc.value)
+
+
+def test_datacenter_build_fails_closed_on_empty_project(monkeypatch) -> None:
+    """Ticket 4698-d85c fail-closed half: an empty DC project scope raises the TYPED
+    BackendEnvError at build, so an unset project can never query every project."""
+    from rebar_reconciler._backend import BackendEnvError
+
+    monkeypatch.setenv("JIRA_PROJECT", "")
+    runtime = compose_reconciler_runtime(
+        cli_overrides={
+            "reconciler.backend": "jira-datacenter",
+            "reconciler.base_url": "https://jira.example.internal",
+        }
+    )
+    with pytest.raises(BackendEnvError) as exc:
+        runtime.build_backend()
+    assert "project" in str(exc.value).lower()
+
+
 def test_runtime_carries_tracker_layout() -> None:
     """The composed reconciler settings expose the tracker dir and branch the
     read/ref owners must use (default layout here)."""
