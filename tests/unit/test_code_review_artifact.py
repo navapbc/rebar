@@ -439,7 +439,12 @@ def test_latest_code_review_result_change_key_and_misses(store: Path) -> None:
     art = rebar.create_ticket("code_review", title, return_alias=True, repo_root=root)
     aid = str(art["id"] if isinstance(art, dict) else art)
     sidecar.emit(
-        {"verdict": "PASS", "deps": {"x.py": "hh"}, "advisory": [{"finding": "carry"}]},
+        {
+            "verdict": "BLOCK",
+            "deps": {"x.py": "hh"},
+            "advisory": [{"finding": "carry"}],
+            "blocking": [{"finding": "stop"}],
+        },
         target_ticket=aid,
         change_id="Ichg",
         revision="rev2",
@@ -447,7 +452,16 @@ def test_latest_code_review_result_change_key_and_misses(store: Path) -> None:
     )
     got = sidecar.latest_code_review_result("change:Ichg", repo_root=root)
     assert got is not None and got["deps"] == {"x.py": "hh"}
-    assert {f.get("finding") for f in got["findings"]} == {"carry"}
+    assert {f.get("finding") for f in got["findings"]} == {"carry", "stop"}
+    # The ORIGIN patchset rides along (story nitro-zombie-mealworm): the `change:` keyspace spans
+    # revisions, so a carried finding needs it to report which patchset it has been standing since.
+    assert got["revision"] == "rev2"
+    # Each surfaced item names the BUCKET it was surfaced under: the union flattens blocking and
+    # advisory into one list, and the carry-forward posture clamp needs that distinction.
+    assert {f["finding"]: f["origin_decision"] for f in got["findings"]} == {
+        "stop": "block",
+        "carry": "advisory",
+    }
     # misses → None
     assert sidecar.latest_code_review_result("bogus:Ichg", repo_root=root) is None
     assert sidecar.latest_code_review_result("session:never", repo_root=root) is None

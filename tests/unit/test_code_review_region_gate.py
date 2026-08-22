@@ -80,6 +80,9 @@ def _apply(
     prior = {
         "findings": prior_findings if prior_findings is not None else [{"id": "P1"}],
         "deps": {},
+        # The reader also returns the prior payload's revision (story nitro-zombie-mealworm);
+        # stubs carry it so the floor reads the same shape production does.
+        "revision": "ps1",
     }
     monkeypatch.setattr(
         "rebar.llm.code_review.sidecar.latest_code_review_result",

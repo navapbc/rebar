@@ -123,6 +123,9 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize the verdict's blocking + advisory findings to the receiver's logged shape
     (``{severity, dimension, detail, location}``).
 
+    ``standing`` is carried through for a finding re-raised from an earlier patchset, so the
+    Gerrit text can say which patchset it has been standing since.
+
     ``location`` is carried through (bug lacquer-grotesque-urson) so the voter can anchor a
     finding to a real file/line as an inline Gerrit comment; it was previously dropped here,
     which is why no anchor ever reached the Gerrit layer. The key is additive — consumers
@@ -130,16 +133,19 @@ def _translate_findings(verdict: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for f in (verdict.get("blocking") or []) + (verdict.get("advisory") or []):
         criteria = f.get("criteria") or []
-        out.append(
-            {
-                "severity": _KERNEL_TO_COMMON_SEVERITY.get(
-                    str(f.get("severity", "")).lower(), "info"
-                ),
-                "dimension": criteria[0] if criteria else "general",
-                "detail": str(f.get("finding", "")).strip(),
-                "location": f.get("location") or "",
-            }
-        )
+        item = {
+            "severity": _KERNEL_TO_COMMON_SEVERITY.get(str(f.get("severity", "")).lower(), "info"),
+            "dimension": criteria[0] if criteria else "general",
+            "detail": str(f.get("finding", "")).strip(),
+            "location": f.get("location") or "",
+        }
+        # `standing` rides along when the finding was carried from an earlier patchset (story
+        # nitro-zombie-mealworm) so finding_publish can mark it "since patchset k". Additive and
+        # only ever present on a carried finding — the four keys above are unchanged.
+        standing = f.get("standing")
+        if isinstance(standing, dict):
+            item["standing"] = dict(standing)
+        out.append(item)
     return out
 
 

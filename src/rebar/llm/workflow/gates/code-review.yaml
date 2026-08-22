@@ -41,6 +41,17 @@ inputs:
     type: string
     required: false
     default: ""
+  standing_findings:
+    description: >-
+      Findings carried forward from an earlier patchset of the same change/session, already
+      classified `still-present` by carry_forward.standing_items (which holds the prior review's
+      deps map). The merge step appends the ones this run's finders did not re-produce, so an
+      unresolved prior finding reaches the Pass-2 verifier instead of vanishing on the finder's
+      silence. Default [] ⇒ inert (first review, or no prior memory for the key) — declared so a
+      caller that omits it still resolves the merge step's reference.
+    type: array
+    required: false
+    default: []
 
 steps:
   # ── Pass 0: assemble the diff context ─────────────────────────────────────────────────────
@@ -155,6 +166,9 @@ steps:
       base_findings: ${{ steps.base.outputs.findings }}
       round_a_findings: ${{ steps.round_a.outputs.findings }}
       round_b_findings: ${{ steps.round_b.outputs.findings }}
+      # Carried-forward standing findings (story nitro-zombie-mealworm). Appended, never merged
+      # into the finder sources: the finders stay memory-blind by construction.
+      standing_findings: ${{ inputs.standing_findings }}
 
   # ── Pass 2: independent verifier (one aggregate pass over the merged findings). ─────────────
   - id: verify_inputs

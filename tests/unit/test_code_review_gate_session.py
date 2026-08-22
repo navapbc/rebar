@@ -471,10 +471,12 @@ def test_local_session_review_creates_reuses_artifact_with_session_and_deps(
 
 
 def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
-    """Neutrality invariant (ADR 0008 Invariant 1): prior SURFACED findings reach ONLY the
-    region-gated floor's novelty seam — NEVER the workflow that runs the Pass-1 finder. We capture
-    the workflow inputs during a produce run whose reader returns a distinctive prior finding, and
-    assert that sentinel appears nowhere in the finder's inputs."""
+    """Neutrality invariant (ADR 0008 Invariant 1): prior SURFACED findings never reach the
+    Pass-1 FINDER inputs. They may reach the post-Pass-1 seams — the region-gated floor's novelty
+    sub-call, and (story nitro-zombie-mealworm) the `standing_findings` input the MERGE step
+    consumes — but never the diff/context the finders are prompted with. We capture the workflow
+    inputs during a produce run whose reader returns a distinctive prior finding and assert the
+    sentinel appears in no finder-facing input."""
     from rebar.llm.code_review import sidecar
 
     repo, _tid = repo_with_origin
@@ -530,9 +532,89 @@ def test_pass1_finder_receives_no_prior_findings(repo_with_origin, monkeypatch):
         )
     )
     assert captured.get("inputs") is not None, "workflow must have run"
-    assert sentinel not in json.dumps(captured["inputs"]), (
+    finder_facing = {k: v for k, v in captured["inputs"].items() if k != "standing_findings"}
+    assert sentinel not in json.dumps(finder_facing), (
         "prior findings leaked into the Pass-1 finder inputs — the neutrality invariant is broken"
     )
+
+
+def test_carried_findings_reach_only_the_post_pass1_merge_input(repo_with_origin, monkeypatch):
+    """A GROUNDED prior finding whose cited region is unchanged is carried forward — and it lands
+    ONLY in `standing_findings` (consumed by the post-Pass-1 merge step), never in the diff or
+    context the finders are prompted with."""
+    from rebar.llm.code_review import sidecar
+
+    repo, _tid = repo_with_origin
+    sentinel = "CARRIED_SENTINEL_ZZZ"
+    monkeypatch.setattr(
+        sidecar,
+        "latest_code_review_result",
+        lambda key, repo_root=None: {
+            "findings": [
+                {
+                    "id": "P1",
+                    "finding": sentinel,
+                    "criteria": ["tests"],
+                    "priority": 0.5,
+                    "location": "x.py:1",
+                    "evidence": ["assert elapsed < 10"],
+                    "decision": "advisory",
+                }
+            ],
+            # No hash recorded for x.py ⇒ an unresolvable region ⇒ the conservative
+            # `still-present` default ⇒ carried.
+            "deps": {},
+            "revision": "ps2",
+        },
+    )
+    captured: dict = {}
+
+    monkeypatch.setattr(gate_dispatch, "code_review_enabled", lambda repo_root=None: True)
+    from rebar.llm.code_review import detectors as _det
+
+    monkeypatch.setattr(_det, "run_security_detectors", lambda **kw: {})
+
+    def _spy(doc, inputs, **kw):
+        captured["inputs"] = inputs
+
+        class _R:
+            run_id = "r"
+            workflow_name = doc.get("name")
+            status = "succeeded"
+            terminal_step = None
+            terminal_output: ClassVar[dict] = {
+                "verdict": "PASS",
+                "blocking": [],
+                "advisory": [],
+                "coverage": {},
+            }
+            outputs: ClassVar[dict] = {}
+            steps: ClassVar[dict] = {}
+            error = None
+
+        return _R()
+
+    from rebar.llm.workflow import executor as _executor
+
+    monkeypatch.setattr(_executor, "run_workflow", _spy)
+    gate_dispatch.produce_code_review_verdict(
+        gate_dispatch.CodeReviewRequest(
+            LLMConfig.from_env(repo_root=str(repo)),
+            head="HEAD",
+            diff_text=_DIFF,
+            changed_files=["x.py"],
+            runner=FakeRunner(structured={}),
+            session_id="sess-carry",
+            repo_root=str(repo),
+            enabled=True,
+        )
+    )
+    inputs = captured["inputs"]
+    carried = inputs["standing_findings"]
+    assert [f["finding"] for f in carried] == [sentinel]
+    assert carried[0]["standing"]["origin_revision"] == "ps2"
+    finder_facing = {k: v for k, v in inputs.items() if k != "standing_findings"}
+    assert sentinel not in json.dumps(finder_facing)
 
 
 def test_review_code_cli_mints_uuid_when_no_session(monkeypatch):

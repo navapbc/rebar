@@ -426,8 +426,23 @@ def _assemble_code_review_run(request: CodeReviewRequest) -> _CodeReviewPrep:
         "diff_text": dc.diff_text,
         "changed_files": list(dc.changed_files),
         "commit_message": request.commit_message,
+        # Carry-forward (story nitro-zombie-mealworm): the standing findings of the PRIOR patchset
+        # under this change/session. Resolved HERE because this is the only site that holds the
+        # memory key's ingredients (session_id / change_id); the workflow itself stays key-blind.
+        "standing_findings": _standing_findings(request),
     }
     return _CodeReviewPrep(dc, doc, rec, inputs, context_overrides, t_total)
+
+
+def _standing_findings(request: CodeReviewRequest) -> list[dict[str, Any]]:
+    """The prior patchset's carriable findings for this request's memory key — ``[]`` when there
+    is no key, no prior review, or nothing eligible. Best-effort: `standing_items` never raises."""
+    from rebar.llm.code_review import carry_forward, sidecar
+
+    key = sidecar.memory_key(request.session_id, request.change_id)
+    if not key:
+        return []
+    return carry_forward.standing_items(key, repo_root=request.repo_root)
 
 
 def _activated_code_review_project_criteria(

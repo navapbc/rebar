@@ -351,8 +351,25 @@ def all_review_results(ticket_id: str, *, repo_root=None) -> list[dict[str, Any]
         return []
 
 
+def memory_key(session_id: str | None, change_id: str | None) -> str | None:
+    """The TYPED code-review memory key this module's readers take — ``session:<id>`` for a local
+    review, ``change:<id>`` for a Gerrit one, or None when neither is set (a keyless review has no
+    memory, so both the region-gated floor and carry-forward self-gate inert). Disjoint keyspaces
+    by construction: a local session's memory can never seed a change's FIRST Gerrit review.
+
+    Single-sourced here because BOTH the pre-workflow carry-forward resolve (gate_dispatch) and the
+    post-verdict floor (finalize) key off the same rule, and a divergence between them would
+    silently split one change's memory across two keyspaces."""
+    if session_id:
+        return f"session:{session_id}"
+    if change_id:
+        return f"change:{change_id}"
+    return None
+
+
 def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | None:
-    """Return the most-recent SURFACED code-review findings + ``deps`` map for a TYPED memory key,
+    """Return the most-recent SURFACED code-review findings + ``deps`` map + ``revision`` for a
+    TYPED memory key,
     or ``None`` when nothing usable — the reader the region-gated novelty floor consumes.
 
     ``key`` is typed (disjoint keyspaces, so a prior LOCAL review can never seed a change's FIRST
@@ -362,6 +379,9 @@ def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | N
     - ``change:<id>`` (Gerrit) → strip the ``change:`` tag and match artifacts whose title starts
       with ``code-review: {id} @`` (spans revisions of the same change; the change is the memory
       key, the revision only makes each artifact idempotent).
+
+    Each returned finding carries ``origin_decision`` (``"block"``/``"advisory"``) naming the
+    bucket it was surfaced under, since the union erases that distinction.
 
     SURFACED-only (mandatory; bug old-frilly-plankton): ``code_review_result_v1`` stores findings in
     SEPARATE ``blocking``/``advisory``/``coaching`` buckets (no per-finding ``decision``), so
@@ -405,14 +425,29 @@ def latest_code_review_result(key: str, *, repo_root=None) -> dict[str, Any] | N
                 best_payload, best_ts = payload, ts
         if best_payload is None:
             return None
-        surfaced = list(best_payload.get("blocking") or []) + list(
-            best_payload.get("advisory") or []
-        )
+        # Each surfaced item is stamped with the BUCKET it was surfaced under (story
+        # nitro-zombie-mealworm). The union flattens two buckets into one list, so without this
+        # stamp a consumer cannot tell a prior BLOCK from a prior ADVISORY — which is exactly what
+        # the carry-forward posture clamp has to know. Sourced from the bucket, not from a
+        # per-finding key, so it is defined for every payload ever written.
+        surfaced = [
+            {**f, "origin_decision": "block"}
+            for f in best_payload.get("blocking") or []
+            if isinstance(f, dict)
+        ] + [
+            {**f, "origin_decision": "advisory"}
+            for f in best_payload.get("advisory") or []
+            if isinstance(f, dict)
+        ]
         return {
             "findings": surfaced,
             "deps": best_payload.get("deps") or {},
             "session_id": best_payload.get("session_id"),
             "change_id": best_payload.get("change_id"),
+            # The patchset the prior findings were raised on (story nitro-zombie-mealworm): the
+            # `change:` keyspace spans revisions, so a carried finding needs its ORIGIN revision to
+            # report "standing since patchset k". Additive — existing consumers ignore it.
+            "revision": best_payload.get("revision") or "",
         }
     except Exception:
         logger.warning(
