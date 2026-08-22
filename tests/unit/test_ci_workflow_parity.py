@@ -291,6 +291,99 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
     assert current.returncode == 17, current.stdout + current.stderr
 
 
+def test_degradation_step_runs_only_the_present_test_files(tmp_path: Path) -> None:
+    """Each degradation-path test file is guarded on ITS OWN presence (d93e-92ce-e2d0-4033).
+
+    All four presence combinations — the property a joint guard would break (bug
+    ``5bc6-5496-4e17-403a``): an absent file skips with the canonical message, a present one
+    still reaches pytest, so a tree with one file and not the other still runs the one it has.
+    The clean-lane no-agents-extra assertion must also still run whenever pytest does.
+    """
+    import subprocess
+
+    import yaml
+
+    workflow = yaml.safe_load(_read(_OPTIONALITY_REUSABLE_YML))
+    steps = workflow["jobs"]["clean-core-wheel"]["steps"]
+    step = next(
+        s for s in steps if s.get("name") == "degradation-path tests run with NO agents extra"
+    )
+    run = str(step["run"])
+
+    optionality = "tests/interfaces/store/test_llm_optionality.py"
+    completion = "tests/interfaces/lifecycle/test_completion_gate.py"
+    node_id = {
+        optionality: optionality,
+        completion: f"{completion}::test_gate_missing_llm_fails_closed",
+    }
+
+    combos: tuple[tuple[str, ...], ...] = (
+        (),
+        (optionality,),
+        (completion,),
+        (optionality, completion),
+    )
+    for index, present in enumerate(combos):
+        tree = tmp_path / f"combo-{index}"
+        stub_bin = tree / "stub-bin"
+        stub_bin.mkdir(parents=True)
+        calls = tree / "calls.log"
+        for tool in ("pip", "python"):
+            stub = stub_bin / tool
+            stub.write_text(
+                f"#!/usr/bin/env bash\nprintf '%s\\n' \"{tool} $*\" >> {str(calls)!r}\n",
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+        for path in present:
+            target = tree / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("def test_placeholder() -> None: ...\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [
+                "bash",
+                "--noprofile",
+                "--norc",
+                "-eo",
+                "pipefail",
+                "-c",
+                run.replace("/tmp/clean/bin/", f"{stub_bin}/"),
+            ],
+            cwd=tree,
+            env=subprocess_env({}),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"{present}: {result.stdout}{result.stderr}"
+
+        for path in (optionality, completion):
+            skipped = f"{path} not in checked-out tree" in result.stdout
+            assert skipped == (path not in present), (
+                f"{present}: expected the canonical skip message for exactly the absent "
+                f"files; {path} {'was' if skipped else 'was not'} reported skipped.\n"
+                f"{result.stdout}"
+            )
+
+        logged = calls.read_text(encoding="utf-8") if calls.exists() else ""
+        pytest_lines = [line for line in logged.splitlines() if "-m pytest" in line]
+        if not present:
+            assert logged == "", (
+                f"a fully pre-gate tree must do no work at all, but the step ran: {logged}"
+            )
+            continue
+        assert len(pytest_lines) == 1, f"{present}: expected one pytest run, got: {logged}"
+        assert "agents_extra_installed" in logged, (
+            f"{present}: the clean-lane agents-extra-ABSENT assertion no longer runs: {logged}"
+        )
+        for path in (optionality, completion):
+            selected = node_id[path] in pytest_lines[0]
+            assert selected == (path in present), (
+                f"{present}: pytest must run exactly the present files, got: {pytest_lines[0]}"
+            )
+
+
 def test_mutation_reusable_expands_selector_json_into_one_bounded_job_per_shard() -> None:
     """One selector topology serves push, PR, Gerrit, and weekly mutation lanes."""
     import re
