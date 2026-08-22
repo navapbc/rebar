@@ -330,6 +330,151 @@ dataset:
       +    # asserts the deliberately tightened contract — a valid narrowing, not a contradiction
       +    with pytest.raises(ValueError):
       +        claim("t1", "")
+  # ── fail-open oracle calibration corpus (story 3fce-cccf-d38b-4072) ──────────
+  # The four test-oracle instances from the nine-instance fail-open session
+  # (2026-08-20/21), each as its recorded PRE-FIX state (must fire) paired with
+  # its POST-FIX state (must stay silent). The pre-fix diffs are MINIMAL — the
+  # fail-open defect is the only defect seeded — so a finding is attributable.
+  - id: R-failopen-absence-from-child-output
+    corpus: dso
+    expect: finding
+    mode: failopen-absence-oracle
+    note: >-
+      Instance 1 (sound-bumpkinly-thrush pre-fix): asserts a string is ABSENT from a child
+      process's output with NO liveness check on the producer. A signal-killed child writes
+      nothing, so the string is trivially absent and a run that never executed reports GREEN.
+    diff: |
+      --- a/tests/test_worker_output.py
+      +++ b/tests/test_worker_output.py
+      @@ -1,3 +1,7 @@
+      +def test_worker_emits_no_deprecation_warning():
+      +    proc = subprocess.run([sys.executable, "-m", "rebar.worker"],
+      +                          capture_output=True, text=True)
+      +    # absence-only oracle: a signal-killed child writes NOTHING, so this
+      +    # passes identically when the worker never ran at all
+      +    assert "DeprecationWarning" not in proc.stderr
+  - id: FP-failopen-absence-with-liveness-anchor
+    corpus: dso
+    expect: pass
+    mode: failopen-absence-oracle-fixed
+    note: >-
+      Instance 1 post-fix: the SAME absence assertion anchored by producer liveness — the
+      returncode is checked and a PRESENCE from the same capture is asserted first. The
+      fixed form must NOT be flagged (it is exactly the remediation).
+    diff: |
+      --- a/tests/test_worker_output.py
+      +++ b/tests/test_worker_output.py
+      @@ -1,3 +1,9 @@
+      +def test_worker_emits_no_deprecation_warning():
+      +    proc = subprocess.run([sys.executable, "-m", "rebar.worker"],
+      +                          capture_output=True, text=True)
+      +    # producer liveness first: the worker RAN and produced its banner
+      +    assert proc.returncode == 0
+      +    assert "worker started" in proc.stdout
+      +    assert "DeprecationWarning" not in proc.stderr
+  - id: R-failopen-rederived-convergence
+    corpus: dso
+    expect: finding
+    mode: failopen-rederived-oracle
+    note: >-
+      Instance 2 (abusive-pebbly-sakimonkey pre-fix): the "convergence" test RE-DERIVES the
+      send path's dedup key with copied logic instead of DRIVING the send path, so it stays
+      green while live convergence is broken (paid for in 836 duplicate Jira comments).
+    diff: |
+      --- a/tests/test_comment_dedup.py
+      +++ b/tests/test_comment_dedup.py
+      @@ -1,3 +1,7 @@
+      +def test_comment_dedup_converges():
+      +    body = "sync note"
+      +    # re-derives the key with the same formula copied from the send path —
+      +    # never drives the real send, so a broken live path keeps this green
+      +    expected = hashlib.sha1(("marker:" + body).encode()).hexdigest()
+      +    assert dedup_key(body) == expected
+  - id: FP-failopen-drives-real-send-path
+    corpus: dso
+    expect: pass
+    mode: failopen-rederived-oracle-fixed
+    note: >-
+      Instance 2 post-fix: the convergence test DRIVES the real send path twice and asserts
+      the observable outcome (the duplicate was suppressed at the boundary). Must NOT fire.
+    diff: |
+      --- a/tests/test_comment_dedup.py
+      +++ b/tests/test_comment_dedup.py
+      @@ -1,3 +1,7 @@
+      +def test_comment_dedup_converges(fake_jira):
+      +    send_comment(fake_jira, "sync note")
+      +    send_comment(fake_jira, "sync note")
+      +    # drives the REAL send path twice; asserts the observable convergence
+      +    assert fake_jira.comment_count == 1
+  - id: R-failopen-colorized-grep-oracle
+    corpus: dso
+    expect: finding
+    mode: failopen-grep-oracle
+    note: >-
+      Instance 3 pre-fix: the kill-matrix harness greps "^FAILED" against COLORIZED pytest
+      output. ANSI prefixes mean it never matches, so it reports "0 failed" whether or not
+      anything failed — all five seeded mutations reported SURVIVING.
+    diff: |
+      --- a/tests/harness/run_kill_matrix.sh
+      +++ b/tests/harness/run_kill_matrix.sh
+      @@ -1,2 +1,6 @@
+      +pytest tests/ > out.log 2>&1
+      +# grep-over-output oracle: colorized pytest lines start with ANSI escapes, so
+      +# "^FAILED" never matches and this counts 0 regardless of the real outcome
+      +failures=$(grep -c "^FAILED" out.log || true)
+      +echo "surviving mutations: $failures"
+  - id: FP-failopen-grep-with-liveness-sentinel
+    corpus: dso
+    expect: pass
+    mode: failopen-grep-oracle-fixed
+    note: >-
+      Instance 3 post-fix: liveness sentinel established before the grep — at least one test
+      actually EXECUTED (a zero-collection run fails loudly too), `-rf` and `--color=no` make
+      the `^FAILED` summary lines actually matchable, and the result GATES the exit status.
+      Must NOT fire.
+    diff: |
+      --- a/tests/harness/run_kill_matrix.sh
+      +++ b/tests/harness/run_kill_matrix.sh
+      @@ -1,2 +1,9 @@
+      +set -euo pipefail
+      +pytest -rfE --color=no tests/ > out.log 2>&1 || true
+      +# producer liveness FIRST: at least one test actually ran (zero-collection fails too)
+      +grep -qE "[1-9][0-9]* (passed|failed|error)" out.log || { echo "pytest ran no tests" >&2; exit 2; }
+      +failures=$(grep -cE "^(FAILED|ERROR)" out.log || true)
+      +echo "surviving mutations: $failures"
+      +[ "$failures" -eq 0 ] || exit 1
+  - id: R-failopen-truncated-log-grep
+    corpus: dso
+    expect: finding
+    mode: failopen-truncated-log
+    note: >-
+      Instance 4 pre-fix: a sweep launched in a manual background subshell died at ~5%; a
+      truncated log and a clean log produce the SAME empty grep, so "sweep finished" and
+      "sweep was killed" are indistinguishable.
+    diff: |
+      --- a/tests/harness/check_sweep.sh
+      +++ b/tests/harness/check_sweep.sh
+      @@ -1,2 +1,5 @@
+      +nohup ./run_sweep.sh > sweep.log 2>&1 &
+      +# an orphaned/killed sweep leaves a truncated log; the empty grep below reads
+      +# identically for "no failures" and "sweep never finished"
+      +if ! grep -q "FAIL" sweep.log; then echo "sweep passed"; fi
+  - id: FP-failopen-completion-sentinel-first
+    corpus: dso
+    expect: pass
+    mode: failopen-truncated-log-fixed
+    note: >-
+      Instance 4 post-fix: completion sentinel asserted before the absence grep, and a FAIL line now fails the check loudly. Must NOT fire.
+    diff: |
+      --- a/tests/harness/check_sweep.sh
+      +++ b/tests/harness/check_sweep.sh
+      @@ -1,2 +1,7 @@
+      +set -euo pipefail
+      +./run_sweep.sh > sweep.log 2>&1
+      +# liveness sentinel first: the sweep RAN to completion
+      +grep -q "SWEEP COMPLETE" sweep.log || { echo "sweep did not finish" >&2; exit 2; }
+      +if grep -q "FAIL" sweep.log; then echo "sweep FAILED" >&2; exit 1; fi
+      +echo "sweep passed"
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
