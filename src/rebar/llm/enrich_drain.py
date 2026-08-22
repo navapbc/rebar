@@ -23,6 +23,7 @@ import sys
 import time
 
 from rebar._store.paths import StorePaths
+from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -96,86 +97,29 @@ def _describe_drain_lock_holder(path: str) -> str:
 
 
 def _acquire_advisory_lock(tracker: str) -> int | None:
-    """Best-effort non-blocking advisory drain lock. Returns an open fd on success, or None
-    if genuinely held by another drainer. NOT the store write lock and NOT the optimistic
-    queue claim — this only stops two drain PROCESSES from redundant work.
-
-    The lock file carries the SAME v2 ownership stamp the store's mkdir write lock writes,
-    and a collision is adjudicated by the SAME shared decision table
-    (:func:`lock_owner.stamped_file_is_stale`): pid-recycle qualification, refusal without
-    proof, and the wall-clock ceiling are inherited, not re-invented. Before that, a drainer
-    that died between acquire and release leaked this file forever and every later drain
-    silently skipped (bug knavish-stimulated-bluebottle).
-
-    A provably-orphaned lock is reclaimed LOUDLY and the create retried EXACTLY ONCE; a
-    second collision means another drainer won the race, so we give up rather than loop.
-    A lock whose holder the shared table will not condemn is always respected.
-
-    Mutual exclusion here is DEFEASIBLE ACROSS THE RECLAIM, by design — see the comment on
-    the ``os.unlink`` below for the window, the bounded harm, and why the fix is deferred."""
-    from rebar._store import lock_owner as _owner
-
-    rebar_dir = StorePaths(tracker).rebar_dir
+    """Best-effort non-blocking advisory drain lock: an open fd, or ``None`` if another drainer
+    holds it. NOT the store write lock and NOT the optimistic queue claim — it only stops two
+    drain PROCESSES from redundant work. The mechanism is
+    :func:`rebar._store.stamped_lock.stamped_file_lock`, shared with the compaction and
+    snapshot-GC triggers; drain-specific and so still here are the sidecar directory (the shared
+    helper creates none) and ``_describe_drain_lock_holder``, which names the holder in the
+    reclaim WARNING so a wedge is attributable without ``rebar doctor``."""
     try:
-        os.makedirs(rebar_dir, exist_ok=True)
+        os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
     except OSError:
         return None
-    path = _drain_lock_path(tracker)
-    for attempt in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            if attempt or not _owner.stamped_file_is_stale(path):
-                return None
-            logger.warning(
-                "enrich drain: reclaiming stale drain lock %s held by %s",
-                path,
-                _describe_drain_lock_holder(path),
-            )
-            # ACCEPTED RACE (task deathful-lettered-maltesedog, operator decision
-            # 2026-08-16). Nothing excludes another drainer between the
-            # `stamped_file_is_stale` verdict above and this unlink: both can condemn the
-            # same orphan, the winner can recreate and stamp a FRESH lock, and this unlink
-            # then removes that live lock — so two drains can run at once. (The mkdir leg
-            # has the same shape but is safe, because `_acquire_mkdir`'s precondition is
-            # that its caller already holds the exclusive fcntl leg; a single FILE lock has
-            # no such kernel leg to inherit.) The window is left open deliberately:
-            #   * Harm is bounded to REDUNDANT WORK, never to a wrong outcome. This lock is
-            #     advisory and exists only to stop two drain PROCESSES duplicating effort;
-            #     the correctness boundary is the per-ticket optimistic queue claim
-            #     (`overlap.queue.claim`, lease-bounded), which a second drainer loses.
-            #   * Closing it means changing the MECHANISM — a kernel leg (`flock`) or an
-            #     atomic create-and-rename — which is a larger change than the bug it would
-            #     prevent, on a path that is already strictly better than the permanent
-            #     wedge it replaced (bug knavish-stimulated-bluebottle).
-            #   * It is also self-limiting: the retry above is capped at ONE, so a contended
-            #     reclaim converges rather than spinning.
-            # Revisit only if drain work stops being idempotent, or if the queue claim
-            # ceases to be the correctness boundary — either would turn "redundant" into
-            # "wrong" and make the kernel leg worth its cost.
-            try:
-                os.unlink(path)
-            except OSError:
-                return None  # someone else got there first; let them drain
-            continue
-        except OSError:
-            return None  # any other open failure: a drain concern never fails a write
-        try:
-            os.write(fd, (_owner._owner_stamp() + "\n").encode("utf-8"))
-        except OSError:
-            # Best-effort, exactly like the mkdir leg's stamp write: an unstamped lock is
-            # still bounded by the shared wall-clock ceiling, so this cannot wedge.
-            logger.warning("enrich drain: could not stamp %s; lock is unattributable", path)
-        return fd
-    return None
+    return stamped_file_lock(
+        _drain_lock_path(tracker),
+        label="enrich drain",
+        lock_noun="drain lock",
+        describe_holder=_describe_drain_lock_holder,
+    )
 
 
 def _release_advisory_lock(tracker: str, fd: int) -> None:
-    try:
-        os.close(fd)
-        os.unlink(_drain_lock_path(tracker))
-    except OSError:
-        pass
+    """Drop the drain lock. The shared release closes and unlinks in INDEPENDENT legs — this
+    site did both in one ``try``, so a failing close leaked the lock for an hour (story 1cf6)."""
+    release_stamped_lock(_drain_lock_path(tracker), fd)
 
 
 def _drain_log_path(tracker: str) -> str:

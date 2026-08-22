@@ -49,6 +49,8 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
+
 if TYPE_CHECKING:
     from rebar._snapshot.janitor import JanitorConfig
 
@@ -108,54 +110,20 @@ def _pass_is_due(root: Path, interval_s: int) -> bool:
 
 def _acquire_worker_lock(root: Path) -> int | None:
     """Best-effort non-blocking advisory lock: an open fd, or ``None`` if a live worker holds
-    it. NOT any ticket-store lock — this only stops two GC workers doing redundant work, and a
-    caller that cannot get it simply does not spawn.
-
-    Carries the SAME v2 ownership stamp the store's mkdir lock writes, and a collision is
-    adjudicated by the SAME shared decision table
-    (:func:`rebar._store.lock_owner.stamped_file_is_stale`) the drain and compaction worker
-    locks use, so pid-recycle qualification, refuse-without-proof and the wall-clock ceiling
-    are inherited rather than re-invented. A provably-orphaned lock is reclaimed LOUDLY and
-    the create retried EXACTLY ONCE; a second collision means another worker won the race."""
-    from rebar._store import lock_owner as _owner
-
+    it. NOT any ticket-store lock — a caller that cannot get it simply does not spawn. The
+    mechanism is :func:`rebar._store.stamped_lock.stamped_file_lock`, shared with the drain and
+    compaction triggers; the directory is this site's own, because ``_gc_dir`` creates
+    ``<store>/gc/`` as a side effect of deriving the path — hence the wrapped call below."""
     try:
         path = _worker_lock_path(root)
     except OSError:
         return None
-    for attempt in range(2):
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            if attempt or not _owner.stamped_file_is_stale(str(path)):
-                return None
-            logger.warning("snapshot-GC trigger: reclaiming stale worker lock %s", path)
-            try:
-                os.unlink(path)
-            except OSError:
-                return None  # someone else got there first; let them collect
-            continue
-        except OSError:
-            return None
-        try:
-            os.write(fd, _owner._owner_stamp().encode("utf-8"))
-        except OSError:
-            pass  # a failed stamp only forfeits early reclamation of our own lock
-        return fd
-    return None
+    return stamped_file_lock(path, label="snapshot-GC trigger")
 
 
 def release_worker_lock(root: Path, fd: int) -> None:
-    """Drop the advisory lock (close the fd, unlink the file). Best-effort in both legs: a
-    failed unlink leaves a stamped file that the shared staleness table will reclaim."""
-    try:
-        os.close(fd)
-    except OSError:
-        pass
-    try:
-        os.unlink(_worker_lock_path(root))
-    except OSError:
-        pass
+    """Drop the advisory lock (close the fd, unlink the file), both legs best-effort."""
+    release_stamped_lock(_worker_lock_path(root), fd)
 
 
 def _janitor_config(repo_root: str | None) -> JanitorConfig:
