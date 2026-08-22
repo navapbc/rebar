@@ -557,15 +557,15 @@ def _completion_precheck(
     # reads below continue to use the independently resolved tracker directory.
     code_root = str(config.repo_root(repo_root))
 
-    # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
-    # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
-    # LLM is unavailable (below).
+    # Shared resolution + error-on-unreadable-config posture (see _commands/gates.py:
+    # an unreadable config raises ConfigError out of this close, per operator ruling
+    # 39f8-ae7c). The confirmed fail-CLOSED behavior still applies when the gate is
+    # readable-ON but the LLM is unavailable (below).
     if not gates.gate_enabled(
         code_root,
         "require_completion_verification_for_close",
         ticket_id=ticket_id,
         gate_label="the completion-verification close gate",
-        extra=" (other close gates still apply)",
     ):
         return None
     if force_close:

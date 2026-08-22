@@ -271,7 +271,12 @@ def transition(
 
     Raises :class:`ConcurrencyError` if the ticket's actual status no longer
     matches ``current_status`` (engine exit code 10), and :class:`RebarError`
-    for other failures.
+    for other failures. Raises :class:`rebar.config.ConfigError` (re-exported as
+    :class:`rebar.ConfigError`) when the rebar config cannot be read while
+    resolving a ``verify.*`` gate — an unreadable config is an ERROR, not a
+    silent fall-back to the gate's default (operator ruling 39f8-ae7c). This
+    changed in that ruling: previously an unreadable config fail-OPENed the
+    opt-in gates and the transition proceeded.
 
     ``force`` is the single force-bypass surface, shaped exactly like :func:`claim`'s:
     ``force: str | None`` where the value IS the audit reason. ``None`` means "not
@@ -376,7 +381,12 @@ def claim(
     Raises :class:`ConcurrencyError` (engine exit code 10) if the ticket is not
     ``open`` — i.e. someone else already claimed it — and :class:`RebarError` for
     other failures. This is the optimistic-concurrency primitive parallel agents
-    use to grab work without double-assignment.
+    use to grab work without double-assignment. Raises
+    :class:`rebar.config.ConfigError` (re-exported as :class:`rebar.ConfigError`)
+    when the rebar config cannot be read while resolving the plan-review claim
+    gate — an unreadable config is an ERROR, not a silent fall-back to the gate's
+    default (operator ruling 39f8-ae7c; previously the claim fail-OPENed and
+    proceeded).
 
     When the plan-review claim gate is enabled
     (``verify.require_plan_review_for_claim``), a non-bug/non-session_log claim

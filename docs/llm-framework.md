@@ -925,8 +925,9 @@ ticket's attestation under the MCP server's key; local installs cannot mint a CI
 attestation. The agent is read-only and never signs its own homework — a deterministic gate
 acts on its verdict, and a successful prompt-injection can at worst flip the *advisory* verdict,
 never forge the signature. The completion-verification close gate is the sole close-gate
-attestation (it signs a PASS verdict *after* the close). An unreadable config fails this gate **off** (with a warning), so it never auto-enables
-across repos that didn't opt in.
+attestation (it signs a PASS verdict *after* the close). An unreadable config is an **error** —
+gate resolution raises `ConfigError` and the close fails loudly (operator ruling 39f8-ae7c) — so a
+broken config can neither auto-enable the gate nor silently skip it.
 
 ## See also — reuse reference + the plan-review gate
 
