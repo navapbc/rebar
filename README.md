@@ -140,15 +140,9 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 
 **System prerequisites:**
 - [Python](https://www.python.org) ≥ 3.11
-- [`git`](https://git-scm.com) **≥ 2.38** — required (the store is a git orphan
-  branch + worktree). The engine is pure in-process Python; `bash` and `jq` are
-  **not** required at runtime. The **2.38 floor** is a *development* requirement:
-  the two-clone convergence regressions merge divergent tracker histories with
-  `git merge-tree --write-tree`, added in Git 2.38, and rebar enforces that floor
-  rather than skipping those tests on older clients — a test that quietly does not
-  run reads as coverage while providing none. The floor is declared once in
-  `.github/git-version-floor.txt` and enforced by both `tests/conftest.py` (the
-  suite refuses to start, naming the required version) and CI.
+- [`git`](https://git-scm.com) is a runtime prerequisite because the store uses a Git orphan branch and worktree. The runtime engine uses in-process Python and does not require `bash` or `jq`.
+- Git 2.38 or newer is required for development, tests, and CI. The floor is declared in `.github/git-version-floor.txt`. The test suite and CI fail when Git is below that floor.
+- Deployments that use the optional S3 repair path require Git 2.38 or newer because that path invokes `git merge-tree --write-tree`.
 - **No external lock binary is required.** Write serialization uses a two-window
   lock built entirely from the Python standard library — a `fcntl.flock(LOCK_EX)`
   advisory lock plus an atomic `mkdir` lock (`src/rebar/_store/lock.py`) — so there
@@ -158,19 +152,10 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
 - [`acli`](https://developer.atlassian.com/cloud/acli/) (Atlassian CLI) — only for
   **live** Jira reconciliation.
 
-**Python dependencies.** A base install (`pip install nava-rebar`) — the `rebar`
-CLI, the `import rebar` library, and the lean workflow engine — pulls only three
-runtime dependencies: [`pyyaml`](https://pyyaml.org) (the workflow DSL loader),
-[`jsonschema`](https://python-jsonschema.readthedocs.io) (the schema-registry +
-workflow input/output-contract validator), and
-[`referencing`](https://referencing.readthedocs.io) (the JSON Schema `$ref`
-resolver `jsonschema` builds on); the engine core and reconciler are
-otherwise stdlib-only. Everything else is an optional extra, lazy-imported so the
-base stays light (CI enforces that):
+**Python dependencies.** A base install (`pip install nava-rebar`) provides the `rebar` CLI, the `import rebar` library, and the lean workflow engine. It installs [`pyyaml>=6`](https://pyyaml.org) for the workflow DSL loader, [`jsonschema>=4.18`](https://python-jsonschema.readthedocs.io) for schema registry and workflow input and output validation, and [`referencing>=0.30`](https://referencing.readthedocs.io) for JSON Schema `$ref` resolution. The engine core and reconciler otherwise use the Python standard library. All other dependencies are optional extras that are imported lazily to keep the base installation light. CI verifies this boundary.
 
 - **Optional runtime capabilities** — install what you serve:
-  - **`[mcp]`** — the [`rebar-mcp` server](https://modelcontextprotocol.io)
-    (`mcp>=1.9`).
+  - **`[mcp]`** installs the [`rebar-mcp` server](https://modelcontextprotocol.io) with `mcp>=1.28.1,<2` and `pyjwt[crypto]>=2.10,<3`.
   - **`[agents]`** — the LLM agent-operations framework + agentic workflow steps
     (`rebar review-plan`, the `code_review` workflow): the provider-agnostic
     [pydantic-ai](https://ai.pydantic.dev) runtime (`pydantic-ai-slim[anthropic]`)
@@ -219,7 +204,7 @@ the MCP server via Homebrew users, install the `[mcp]` extra with pipx/uvx below
 
 ```bash
 pipx install nava-rebar              # isolated CLI on PATH: rebar (+ lean workflow engine)
-pip  install nava-rebar              # library: import rebar  (runtime deps: pyyaml, jsonschema)
+pip  install nava-rebar              # library: import rebar  (runtime deps: pyyaml, jsonschema, referencing)
 pip  install 'nava-rebar[mcp]'       # + MCP server: rebar-mcp
 pip  install 'nava-rebar[agents]'    # + LLM agent ops + agentic workflow steps (rebar.llm)
 pip  install 'nava-rebar[tracing]'   # + OTLP trace sink (write-only)
@@ -236,16 +221,9 @@ three-pass review pattern, and the prompt-library + eval seam — see
 [docs/workflow-engine.md](docs/workflow-engine.md); for visual editing specifically see
 [docs/workflow-editor.md](docs/workflow-editor.md).
 
-The `[agents]` extra adds the optional **LLM agent-operations framework**
-(`rebar.llm`) — tool-using agents that review tickets/code and emit structured
-findings, over library / CLI (`rebar review-plan`) / MCP. It is multi-provider
-(**Claude** and **ChatGPT** out of the box, plus Gemini and OpenAI-compatible local
-servers like LMStudio/Ollama, configured per model class in
-`[tool.rebar.llm.model_classes]` — or via `REBAR_LLM_<CLASS>_MODEL` /
-`REBAR_LLM_MODEL_PROVIDER` / `REBAR_LLM_BASE_URL`; the single bare `REBAR_LLM_MODEL`
-is **deprecated**, see [docs/llm-framework.md](docs/llm-framework.md)) and is **never required by core rebar** — none of the LLM
-stack is installed or imported unless you opt into this extra (CI enforces it);
-see [docs/llm-framework.md](docs/llm-framework.md).
+The `[agents]` extra adds the optional **LLM agent operations framework** (`rebar.llm`). It provides tool-using agents that review tickets and code through the library, CLI, and MCP interfaces. Model classes are configured in `[tool.rebar.llm.model_classes]` or with `REBAR_LLM_<CLASS>_MODEL`, `REBAR_LLM_MODEL_PROVIDER`, and `REBAR_LLM_BASE_URL`. The single `REBAR_LLM_MODEL` variable is deprecated. See [docs/llm-framework.md](docs/llm-framework.md).
+
+The `[agents]` extra installs the Anthropic provider used for Claude. Bedrock requires `nava-rebar[agents,bedrock]`. ChatGPT and OpenAI-compatible endpoints require `[agents]` plus `pydantic-ai-slim[openai]`. Gemini requires `[agents]` plus `pydantic-ai-slim[google]`. Core rebar never requires or imports the LLM stack unless an agent operation is used.
 
 ### MCP server — from the MCP Registry
 
@@ -290,7 +268,7 @@ disk-space watermark, the EFS/NFS `flock` caveat) are in
 
 ```bash
 git clone https://github.com/navapbc/rebar && cd rebar
-pip install .              # library + CLI (runtime deps: pyyaml, jsonschema)
+pip install .              # library + CLI (runtime deps: pyyaml, jsonschema, referencing)
 pip install '.[mcp]'      # + MCP server (FastMCP)
 # Developing rebar itself — the full dev environment (test/lint/type tooling +
 # the agents stack so the LLM validation tests RUN, not skip), installed through
