@@ -1,12 +1,14 @@
-Usage: rebar link [--dry-run] [source] [target] [relation]
+Usage: rebar link [--dry-run] [--force [FORCE]] [source] [target] [relation]
 
 Link two tickets (relation REQUIRED:
 blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by).
 
 positional arguments:
-  source     source ticket
-  target     target ticket
-  relation   the required relation
+  source           source ticket
+  target           target ticket
+  relation         the required relation
 
 options:
-  --dry-run  report without writing
+  --dry-run        report without writing
+  --force [FORCE]  bypass the caused_by referencing-commit check (reason
+                   recorded)

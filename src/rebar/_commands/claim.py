@@ -36,15 +36,14 @@ _CLAIM_USAGE = (
 
 
 def _parse_force(args: list[str]) -> str:
-    """Parse [--force[=<reason>]] from claim's args. A bare ``--force`` yields a
-    default justification so the bypass is still audit-logged (never empty)."""
-    for i, a in enumerate(args):
-        if a.startswith("--force="):
-            return a[len("--force=") :] or "(no reason given)"
-        if a == "--force":
-            nxt = args[i + 1] if i + 1 < len(args) else ""
-            return nxt if nxt and not nxt.startswith("--") else "(no reason given)"
-    return ""
+    """Parse ``[--force[=<reason>]]`` from claim's args (``""`` when absent).
+
+    Delegates to the ONE claim-style extractor so ``claim`` and ``link`` cannot drift on
+    the spelling; the name is kept because tests bind to it.
+    """
+    from rebar._cli._parsers.core.writes import extract_force
+
+    return extract_force(args)[0]
 
 
 def _parse_assignee(args: list[str]) -> str | None:

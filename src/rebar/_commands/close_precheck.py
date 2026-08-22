@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 from collections.abc import Mapping
 
 from rebar import config
@@ -271,41 +270,18 @@ def _check_file_impact_vs_diff(
 
 
 def _referencing_commits(accepted_ids: set[str], tracker: str, repo_root) -> list[str]:
-    """SHAs of commits referencing ANY of ``accepted_ids`` via a ``rebar-ticket:`` trailer
-    (or a leading ``<id>:`` subject token), newest first.
+    """SHAs of commits referencing ANY of ``accepted_ids``, newest first.
 
-    Each extracted candidate is put through the SAME shared resolver the commit-ticket gate
-    uses (:func:`resolve_ticket_id`), so every id form — full / short / alias / Jira key /
-    prefix — matches any of the accepted ids. Resolves run ``quiet`` — these are historical
-    candidates the user never supplied, so an unrelated ambiguity is noise, not a diagnostic
-    (bug af11); ambiguous candidates still resolve to ``None`` either way, so the decision is
-    unchanged. Resolves are cached across commits. A git failure (not a repo, no commits)
-    yields ``[]`` (no referencing commit found)."""
-    from rebar._commands.verify_commit import extract_ticket_refs
-    from rebar._engine_support.resolver import resolve_ticket_id
+    A thin delegate over the ONE implementation of the scan
+    (:func:`rebar._engine_support.commit_impact.referencing_commits`), which is shared with
+    the ``caused_by`` link-time check. The name is kept because it is the documented
+    monkeypatch target for the close-gate tests, and the ``or []`` preserves this function's
+    long-standing contract: a git failure (not a repo, no commits) yields ``[]`` — "no
+    referencing commit found" — where the shared scan reports ``None``.
+    """
+    from rebar._engine_support import commit_impact
 
-    proc = subprocess.run(
-        ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        return []
-    resolved_cache: dict[str, str | None] = {}
-    found: list[str] = []
-    for entry in proc.stdout.split("\0"):
-        sha, _, message = entry.partition("\x1f")
-        sha = sha.strip()
-        if not sha:
-            continue
-        for ref in extract_ticket_refs(message):
-            if ref not in resolved_cache:
-                resolved_cache[ref] = resolve_ticket_id(ref, tracker, quiet=True)
-            if resolved_cache[ref] in accepted_ids:
-                found.append(sha)
-                break
-    return found
+    return commit_impact.referencing_commits(accepted_ids, tracker, str(repo_root)) or []
 
 
 def _referencing_commit_exists(accepted_ids: set[str], tracker: str, repo_root) -> bool:

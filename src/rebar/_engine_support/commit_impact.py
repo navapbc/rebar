@@ -159,3 +159,49 @@ def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
         if proc.returncode != 0:
             invalid.append(sha)
     return invalid
+
+
+def referencing_commits(
+    ticket_ids: set[str] | list[str], tracker: str, repo_root: str
+) -> list[str] | None:
+    """SHAs of commits referencing ANY of ``ticket_ids``, newest first.
+
+    A commit references a ticket via a ``rebar-ticket:`` trailer or a leading ``<id>:``
+    subject token. Each extracted candidate goes through the SAME shared resolver the
+    commit-ticket gate uses, so every id form — full / short / alias / Jira key / prefix —
+    matches. Resolves run ``quiet``: these are historical candidates the user never supplied,
+    so an unrelated ambiguity is noise, not a diagnostic (bug af11); ambiguous candidates
+    resolve to ``None`` either way, so the decision is unchanged. Resolves are cached.
+
+    ``None`` is distinct from ``[]`` on purpose — the same distinction :func:`changed_paths`
+    makes. ``[]`` means "history was read and nothing references these ids"; ``None`` means
+    the history could not be read at all (not a repo, no commits yet). A caller that refuses
+    on "no referencing commit" must not refuse on "this clone has no history", and the close
+    gate — whose long-standing contract is a plain list — collapses ``None`` to ``[]``.
+    """
+    from rebar._commands.verify_commit import extract_ticket_refs
+    from rebar._engine_support.resolver import resolve_ticket_id
+
+    accepted = set(ticket_ids)
+    proc = subprocess.run(
+        ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return None
+    resolved_cache: dict[str, str | None] = {}
+    found: list[str] = []
+    for entry in proc.stdout.split("\0"):
+        sha, _, message = entry.partition("\x1f")
+        sha = sha.strip()
+        if not sha:
+            continue
+        for ref in extract_ticket_refs(message):
+            if ref not in resolved_cache:
+                resolved_cache[ref] = resolve_ticket_id(ref, tracker, quiet=True)
+            if resolved_cache[ref] in accepted:
+                found.append(sha)
+                break
+    return found

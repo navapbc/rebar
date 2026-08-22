@@ -334,7 +334,17 @@ def _inbound_update_apply_links(payload, local_id, repo_root) -> int:
                     skipped += 1
                     continue
                 try:
-                    rebar.link(local_id, target_local_id, relation, repo_root=repo_root)
+                    # force: an inbound edge is peer-authored, and its evidence (e.g. the
+                    # introducing commit behind a caused_by) may live only in the peer's
+                    # clone. Applying it unforced would let the caused_by referencing-commit
+                    # check drop a synced edge and record it as permanently impossible.
+                    rebar.link(
+                        local_id,
+                        target_local_id,
+                        relation,
+                        force="inbound reconcile: peer-authored edge",
+                        repo_root=repo_root,
+                    )
                     links_applied += 1
                 except Exception as exc:  # noqa: BLE001 — fail-open: skip this link, continue applying others
                     logger.warning(
