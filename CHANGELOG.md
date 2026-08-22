@@ -10,6 +10,20 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ## [Unreleased]
 
+### Added
+
+- **Config-driven reconciler mapping seam (`[tool.rebar.mapping]`).** The reconciler's
+  rebar↔Jira vocabulary translation (statuses, issue types, link types, priorities, hierarchy
+  ranks, and create-time defaults) is now an optional config overlay on top of the built-in
+  literals, resolved per Jira project KEY through a three-layer per-key merge. The mapping
+  engine is provider-neutral (the reuse seam for future targets such as Linear / GitLab /
+  GitHub Issues) and a read-only `rebar bridge suggest-mapping <PROJECT>` probe seeds a
+  `[mapping]` block from a live Jira project. **Additive and backward-compatible: an absent
+  `[tool.rebar.mapping]` section reproduces today's hardcoded behavior EXACTLY, there is no
+  store migration, and rollback is simply deleting the section.** See
+  [docs/mapping-seam.md](docs/mapping-seam.md) and
+  [docs/config.md](docs/config.md#provider-neutral-reconciler-mapping-mapping).
+
 ### Changed
 
 - **BREAKING (pre-1.0) — an unreadable config now ERRORS gate-bearing operations instead of

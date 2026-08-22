@@ -522,16 +522,20 @@ default the system temp dir — never a hardcoded `/tmp`) and `REBAR_GATE_ALLOW_
 (audited escape hatch for the agentic-op safeguard). CLI surfaces: `--ref` / `--source` on
 each of the five code-reading commands (one-to-one with the MCP tools' `ref`/`source` args).
 
-### Provider-neutral reconciler mapping (`[mapping]`) — reserved, provider-neutral core
+### Provider-neutral reconciler mapping (`[mapping]`)
 
 The reconciler's rebar↔Jira vocabulary mappings (statuses, issue types, link types,
-priorities, hierarchy ranks, and create-time defaults) are moving off hardcoded literals and
-onto config. `mapping` is a *reserved* section (the core loader recognises
+priorities, hierarchy ranks, and create-time defaults) are config-driven overlays on top of
+the built-in hardcoded literals. `mapping` is a *reserved* section (the core loader recognises
 `[mapping]`/`[tool.rebar.mapping]` and never warns/rejects it, even under
 `REBAR_CONFIG_UNKNOWN_KEYS=error`) read raw by
-`rebar_reconciler.mapping_config.load_mapping_config`. This section ships the **provider-neutral
-core only** — no axis is wired into the reconciler yet; later stories wire the axes and the
-concrete adapter injects the target's built-in default vocabulary.
+`rebar_reconciler.mapping_config.load_mapping_config`. The mapping layer is
+**provider-neutral**: the core (`mapping_config.py`) imports nothing from any vendor adapter and
+carries no vendor value literal; the concrete Jira adapter injects the target's built-in default
+vocabulary and a `Capability` descriptor. An **absent `[mapping]` block reproduces today's
+hardcoded behaviour exactly** — every `effective_*` resolver equals its built-in verbatim. For
+the end-to-end behavior (resolvers, skip/drift/collapse paths, the `suggest-mapping` probe, and
+the reuse seam) see [the mapping seam guide](mapping-seam.md).
 
 ```toml
 # ── the DEFAULT block: applies to every project unless a projects.<KEY> overlay wins ──
@@ -584,14 +588,23 @@ rather than mapping it, and is always allowed regardless of the declared vocabul
 `issue_types`, `link_types`, and the `hierarchy` table) do **not** merge per key — the
 most-specific declaring layer wins **wholesale**: a project's `statuses` fully supersedes the
 `default` block's (never a union), and a layer that declares nothing inherits the next-outer
-declaration.
+declaration. An **undeclared** axis is `None` — "inherit the next-outer layer" — which is
+distinct from an **empty list** `[]`, which declares an EMPTY vocabulary (so every non-`"skip"`
+axis-map value for that axis then fails validation).
 
-**Fail-closed offline validation.** `mapping_config.validate` checks a resolved layer against a
-`Capability` descriptor using config only (never the network): every non-`"skip"` axis-map value
-must fall inside its declared vocabulary when one is declared, and an axis the target's
-vocabulary lacks (per `Capability`) may not be referenced. Any malformed block or violation
-raises `MappingConfigError` (a `ConfigError` subclass), failing closed on the same load path as
-every other config error.
+**Fail-closed validation, on two paths.** `mapping_config.validate` checks a resolved layer
+against a `Capability` descriptor using config only (never the network): every non-`"skip"`
+axis-map value must fall inside its declared vocabulary when one is declared, and an axis the
+target's vocabulary lacks (per `Capability`) may not be referenced.
+
+- **At load time** (`load_mapping_config`), a malformed block — a non-table axis map, a
+  non-string vocabulary entry, or a **non-integer `hierarchy` rank** — raises
+  `MappingConfigError` (a `ConfigError` subclass), failing closed on the same load path as
+  every other config error.
+- **In the `rebar_reconciler.config` resolvers** (e.g. `effective_link_map`), an
+  **out-of-vocabulary** axis value raises `MappingConfigError` when the resolver validates
+  against the effective vocabulary — a link mapped outside a declared `link_types` fails the
+  pass rather than being approximated.
 
 **Orthogonal to `.bridge_state/projects.json`.** These are two different mappings that happen to
 share a Jira project KEY as their join. `.bridge_state/projects.json` (on the tickets branch, a
