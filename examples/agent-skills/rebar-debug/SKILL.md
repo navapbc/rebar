@@ -763,6 +763,30 @@ for other live instances:
   is expensive and you bounded it, say what you scanned and what you deliberately left — a
   bounded sweep must not read as "the whole class is clear."
 
+**Class review — when Axis 1 confirms one or more siblings, the class becomes declared scope
+before you fix past the first one.** Fixing sibling after sibling one commit at a time gets each
+*instance* reviewed and the *family* reviewed by nobody: the shape of the class fix — is this the
+right remedy for all of them, is the set complete — is never anyone's review. So, once the sweep
+has confirmed its siblings:
+
+1. **Every confirmed sibling becomes its own acceptance criterion** on the bug ticket — one
+   checkbox per sibling naming its path and symbol, plus one criterion asserting a structural
+   check over the class (a construct-uniqueness guard, or an equivalent that fails if a new
+   instance appears). The sibling list stops being sweep notes and becomes the scope the change
+   is judged against.
+2. **Record the whole sibling set as the change's file impact, then put the class-level plan
+   through plan review, before you fix past the first sibling.** When the project's tracker is
+   rebar that is `rebar set-file-impact <bug> '[{"path":…,"reason":…},…]'` followed by
+   `rebar review-plan <bug>` — the same declare-then-review directive the Phase 1 exit gate
+   already states for a non-trivial fix, applied now to the *class* rather than the single site;
+   see that gate above for why declaring non-test paths changes how the plan is scored, and do
+   not restate it here. Under any other tracker the equivalent is the same two moves: declare the
+   sibling set as the change's scope, and put the class-level plan through whatever plan review
+   the project runs.
+3. **A blocking verdict stops the sweep** until the plan is revised and re-reviewed. This one is
+   agent discipline, not a lock the tracker enforces — a bug is not claim-gated, so nothing
+   prevents you from carrying on. Carrying on anyway is the failure this step exists to prevent.
+
 **Axis 2 — parity sweep.** Run when the **fixed code sits on one of several parallel surfaces**
 (the same operation reachable through more than one channel). A parity sibling is an *absence*
 — the surface that never got the rule — so it is invisible to the construct grep above and can
