@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import ast
 import functools
+import itertools
 import pathlib
 from collections import Counter
 from collections.abc import Mapping
@@ -372,6 +373,12 @@ class _CallSite(NamedTuple):
     path: pathlib.Path
     tree: ast.Module
     node: ast.Call
+    #: Discovery position across the whole corpus. `RunRequest(...)` and
+    #: `RunRequest.for_structured(...)` land in DIFFERENT name buckets, so merging them back
+    #: into one corpus needs the original walk order; sorting by line number would not do —
+    #: `ast.walk` is breadth-first, so a call nested one level deeper is discovered later even
+    #: when it appears earlier in the file.
+    order: int
 
 
 class _AstIndex(NamedTuple):
@@ -385,6 +392,7 @@ class _AstIndex(NamedTuple):
 @functools.cache
 def _ast_index() -> _AstIndex:
     """Index each parsed source tree once for parent, function, and caller queries."""
+    order = itertools.count()
     parents_by_tree: dict[ast.AST, Mapping[ast.AST, ast.AST]] = {}
     functions_by_name: dict[str, list[_FunctionSite]] = {}
     calls_by_name: dict[str, list[_CallSite]] = {}
@@ -400,7 +408,9 @@ def _ast_index() -> _AstIndex:
             if isinstance(node, ast.Call):
                 called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
                 if called is not None:
-                    calls_by_name.setdefault(called, []).append(_CallSite(path, tree, node))
+                    calls_by_name.setdefault(called, []).append(
+                        _CallSite(path, tree, node, next(order))
+                    )
         parents_by_tree[tree] = MappingProxyType(parents)
 
     return _AstIndex(
@@ -517,12 +527,35 @@ def _verdict(tree: ast.AST, site: ast.Call, expr: str, depth: int) -> str:
     return _combine(seen) if seen else "unresolved"
 
 
+def _is_run_request_construction(func: ast.expr) -> bool:
+    """``RunRequest(...)`` or its ``RunRequest.for_structured(...)`` builder.
+
+    Matching the bare name alone would make this scan FAIL OPEN the day a site adopts the
+    builder: the single-turn structured sites would silently leave the corpus and every guard
+    below would pass on a smaller one — the exact vacuous-pass failure
+    :func:`test_the_provenance_analysis_can_see_the_sites_it_judges` exists to catch.
+    """
+    if isinstance(func, ast.Name):
+        return func.id == "RunRequest"
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "for_structured"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "RunRequest"
+    )
+
+
 def _run_request_sites() -> list[tuple[str, str, str]]:
-    """``(key, config_expr, verdict)`` for every ``RunRequest(...)`` construction in src/rebar."""
+    """``(key, config_expr, verdict)`` for every ``RunRequest`` construction in src/rebar."""
     sites = []
-    for call_site in _ast_index().calls_by_name.get("RunRequest", ()):
+    index = _ast_index()
+    found = (
+        *index.calls_by_name.get("RunRequest", ()),
+        *index.calls_by_name.get("for_structured", ()),
+    )
+    for call_site in sorted(found, key=lambda site: site.order):
         node = call_site.node
-        if getattr(node.func, "id", None) != "RunRequest":
+        if not _is_run_request_construction(node.func):
             continue
         cfg_kw = next((k.value for k in node.keywords if k.arg == "config"), None)
         expr = ast.unparse(cfg_kw) if cfg_kw is not None else ""

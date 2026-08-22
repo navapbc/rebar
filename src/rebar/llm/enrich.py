@@ -180,14 +180,13 @@ def enrich(
     # also have to learn the model, which it has no business knowing. Bug 569c-931f-69a2-4c1d.
     source = _bound_source(source, cfg.model, reserved_chars=len(system_prompt))
 
-    req = RunRequest(
+    req = RunRequest.for_structured(
         system_prompt=system_prompt,
         instructions=source,
         config=cfg,
         reviewers=["ticket-digest"],
-        mode="structured",
         output_schema="ticket_digest",
-        execution_mode="single_turn",
+        bounds=RunRequest.INHERIT_POLICY,
     )
     run_result = get_runner(cfg, override=runner).run(req)
 

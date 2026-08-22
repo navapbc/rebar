@@ -190,7 +190,7 @@ def pass2_completion(
 
     if not findings or not delivered_manifest:
         return {}
-    req = RunRequest(
+    req = RunRequest.for_structured(
         system_prompt=_resolve_system(PASS_COMPLETION, plan, cfg),
         instructions=(
             "## Delivered-children manifest (each already-delivered child + its own AC)\n"
@@ -202,9 +202,8 @@ def pass2_completion(
         ),
         config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-completion"],
-        mode="structured",
         output_schema="plan_review_completion",
-        execution_mode="single_turn",
+        bounds=RunRequest.INHERIT_POLICY,
     )
     try:
         raw = runner.run(req).get("completions", []) or []

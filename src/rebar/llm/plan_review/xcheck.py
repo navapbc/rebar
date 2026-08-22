@@ -196,7 +196,7 @@ def _assess_contradictions(
     try:
         runner_sel = runner or get_runner(cfg)
         vcfg = _verifier_cfg(cfg)
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=passes._resolve_system(passes.PASS_CONTRADICTION, ctx.plan_text, vcfg),
             instructions=(
                 "## Findings in THIS verdict (by combined index)\n"
@@ -207,9 +207,8 @@ def _assess_contradictions(
             ),
             config=vcfg,
             reviewers=["plan-contradiction"],
-            mode="structured",
             output_schema="plan_review_contradiction",
-            execution_mode="single_turn",
+            bounds=RunRequest.INHERIT_POLICY,
         )
         return runner_sel.run(req).get("pairs", []) or []
     except Exception:
@@ -334,7 +333,7 @@ def _assess_comment_trail(
     try:
         runner_sel = runner or get_runner(cfg)
         vcfg = _verifier_cfg(cfg)
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=passes._resolve_system(passes.PASS_COMMENT_TRAIL, ctx.plan_text, vcfg),
             instructions=(
                 "## Ticket comment trail (in order)\n"
@@ -346,9 +345,8 @@ def _assess_comment_trail(
             ),
             config=vcfg,
             reviewers=["plan-comment-trail"],
-            mode="structured",
             output_schema="plan_review_comment_trail",
-            execution_mode="single_turn",
+            bounds=RunRequest.INHERIT_POLICY,
         )
         raw = runner_sel.run(req).get("assessments", []) or []
     except Exception:
