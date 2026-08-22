@@ -24,6 +24,8 @@ import re
 from collections.abc import Mapping, MutableMapping, Sequence
 from typing import Any
 
+from rebar.llm.review_kernel import DISCOVERY_NAMESPACE_VERSION
+
 from .manifest import ManifestFormatError, ReviewPhaseMetadata, validate_review_phase_metadata
 from .relation_snapshot import PlanMaterialPin, is_canonical_ticket_id
 
@@ -31,6 +33,8 @@ logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "REVIEW_RESULT"
 
+# The version of the reducer-ignored discovery JOURNAL embedded in the sidecar payload.
+DISCOVERY_JOURNAL_VERSION = 1
 # The impact-model formula version that produced this sidecar's scores (story
 # raptorial-galloping-dragon). Stamped top-level so the calibration replay can SEGMENT
 # old-formula vs new-formula findings and never pool across versions (the same cohort-tagging
@@ -610,6 +614,19 @@ def _coverage_with_usage(coverage: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _discovery_journal(coverage: dict[str, Any]) -> dict[str, Any] | None:
+    """The reducer-IGNORED discovery execution journal: the safe (content-free) per-unit
+    Pass-1 trace records, or None when the run recorded none (shallow-copied, no content)."""
+    trace = coverage.get("discovery_trace")
+    if not isinstance(trace, list) or not trace:
+        return None
+    return {
+        "version": DISCOVERY_JOURNAL_VERSION,
+        "namespace_version": DISCOVERY_NAMESPACE_VERSION,
+        "units": [dict(u) for u in trace],
+    }
+
+
 def build_payload(
     verdict: dict[str, Any],
     *,
@@ -733,35 +750,29 @@ def build_payload(
         "ticket_type": verdict.get("ticket_type"),
         "material_fingerprint": material,
         # Per-component fingerprints of the SAME basis (bug 94a3), so `sign-review` can
-        # name which component moved instead of reciting every possibility. Diagnostic
-        # only; absent on a pre-94a3 sidecar, which simply degrades the message.
+        # name which component moved. Diagnostic only; absent on a pre-94a3 sidecar.
         "material_parts": {k: list(v) for k, v in (material_parts or {}).items()} or None,
         "review_phase": phase_metadata["phase"],
         # Remediation-eligibility baseline (story a850): the review-time code SHA + registry
-        # version, stamped on EVERY verdict (PASS and BLOCK alike, always self-sourced at emit)
-        # so a BLOCK loop leaves a usable baseline even though a BLOCK never signs. Sourcing
-        # failures stamp None (emit stays best-effort); an absent/None field simply fails the
-        # sidecar-branch precondition (fail-safe).
+        # version, stamped on EVERY verdict (PASS and BLOCK alike, self-sourced at emit) so a
+        # BLOCK loop leaves a usable baseline. Sourcing failures stamp None (fail-safe).
         "verified_at_sha": _baseline_sha,
         "regver": _baseline_regver,
-        # The resolved gate source (attested|local) of the review that produced this
-        # payload (bug 5128-0856): sign-review/resign refuses to re-certify a local-source
-        # PASS, and verified_at_sha above cannot carry that signal — review_code_sha falls
-        # back to the committed git HEAD exactly in local mode. None on legacy payloads
-        # (emitted before this field existed) and on callers that do not resolve a gate
-        # handle; resign treats only an explicit "local" as refusing.
+        # The resolved gate source (attested|local) of the review (bug 5128-0856):
+        # sign-review/resign refuses to re-certify a local-source PASS. None on legacy
+        # payloads and on callers that do not resolve a gate handle; resign treats only an
+        # explicit "local" as refusing.
         "source": source,
         "model": verdict.get("model"),
         "provider_provenance": verdict.get("provider_provenance"),
         "runner": verdict.get("runner"),
-        # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage for
-        # easy offline join (det_ms / llm_ms / total_ms / llm_calls / claim_path).
+        # Per-pass latency + cost-proxy metrics (db7b AC5), lifted from coverage.
         "metrics": (verdict.get("coverage", {}) or {}).get("metrics", {}),
         "coverage": _coverage_with_usage(verdict.get("coverage", {}) or {}),
+        "discovery_journal": _discovery_journal(verdict.get("coverage", {}) or {}),
         "findings": [_slim(f) for f in all_findings],
         # Persist the FULL pass-4 coaching record (story a3db) — move_name, subject, and the
-        # rendered coaching prose, not just {move_id, finding_refs} — so an audit UI can
-        # re-render the note. Schema-tolerant: a missing field yields None, never KeyError.
+        # rendered prose — so an audit UI can re-render. Schema-tolerant: missing yields None.
         "coaching": [
             {
                 "move_id": c.get("move_id"),
@@ -769,8 +780,7 @@ def build_payload(
                 "subject": c.get("subject"),
                 "finding_refs": c.get("finding_refs", []),
                 "coaching": c.get("coaching"),
-                # story 8086: which decision bucket the coached finding sits in
-                # ("block" | "advisory"); absent (None) on pre-8086 records.
+                # story 8086: decision bucket ("block" | "advisory"); None on pre-8086.
                 "decision": c.get("decision"),
             }
             for c in verdict.get("coaching", [])

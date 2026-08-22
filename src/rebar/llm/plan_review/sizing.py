@@ -9,16 +9,18 @@ context window" cluster). Owns:
   → escalate model → too-big failure finding; content never chunked);
 * :func:`shed_to_budget` — cap-hit shedding of the lowest-priority AGENT/overlay
   criteria first (→ INDETERMINATE);
-* :func:`load_checkpoint` / :func:`save_checkpoint` — chunk-atomic checkpointing so an
-  interrupted/restarted review RESUMES completed Pass-1 chunks instead of re-paying
-  for them (keyed by the ticket's MATERIAL fingerprint, so a material edit invalidates
-  the cache).
+* :func:`checkpoint_identity` / :func:`load_checkpoint` / :func:`save_checkpoint` —
+  envelope-based chunk-atomic checkpointing (over the shared
+  :mod:`rebar.llm.review_kernel` discovery kernel) so an interrupted/restarted review
+  RESUMES completed Pass-1 chunks instead of re-paying for them. The identity digest
+  binds the ticket MATERIAL fingerprint, the chunk's criterion set (prompt id), the
+  model/mode, the injected extra-context, and the policy/code/topology refs, so any of
+  those moving invalidates the cache; only a reusable SUCCESS envelope seeds reuse.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,11 @@ from typing import Any
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
+from rebar.llm.review_kernel import (
+    CheckpointEnvelope,
+    DiscoveryStagePlan,
+    DiscoveryUnitPlan,
+)
 from rebar.llm.runner import Runner
 
 from . import det_floor, passes, registry
@@ -666,50 +673,104 @@ def _checkpoint_dir(ctx: PlanContext) -> Path | None:
     return Path(ctx.repo_root) / ".rebar" / "cache" / "plan-review" / ctx.ticket_id
 
 
-def _checkpoint_key(material: str, chunk: list[dict], model: str | None, agentic: bool) -> str:
-    """A content key for a chunk's checkpoint: the ticket MATERIAL fingerprint (so a
-    material edit invalidates it) + the chunk's criterion ids + model + tier."""
-    ids = ",".join(sorted(c["id"] for c in chunk))
-    basis = f"{material}|{ids}|{model}|{int(agentic)}"
-    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:20]
+# The single registered discovery contract for a Pass-1 finder unit.
+_CHECKPOINT_CONTRACT_ID = "plan_review_findings"
 
 
-def load_checkpoint(
-    ctx: PlanContext, material: str, chunk: list[dict], model: str | None, agentic: bool
-) -> list[dict[str, Any]] | None:
-    """Return a completed chunk's checkpointed findings if present + matching (resume),
-    else None. Best-effort: any read/parse error → None (re-run the chunk)."""
+def _unit_id(chunk: list[dict], agentic: bool) -> str:
+    """The stable unit id for a chunk: tier prefix + sorted criterion ids."""
+    return ("agent:" if agentic else "single:") + ",".join(sorted(c["id"] for c in chunk))
+
+
+def _discovery_unit_plan(
+    *,
+    chunk: list[dict],
+    model: str | None,
+    agentic: bool,
+    extra_context: str = "",
+    policy_digest: str = "",
+) -> DiscoveryUnitPlan:
+    """Build the frozen typed unit plan for one Pass-1 finder chunk. The ``prompt_id``
+    is derived from the criterion ids so the identity changes with the criterion set;
+    the ``context_digest`` binds the injected store-derived extra context."""
+    ids = sorted(c["id"] for c in chunk)
+    context_digest = (
+        hashlib.sha256(extra_context.encode("utf-8")).hexdigest() if extra_context else ""
+    )
+    return DiscoveryUnitPlan(
+        unit_id=_unit_id(chunk, agentic),
+        prompt_id="plan-review:" + ",".join(ids),
+        contract_id=_CHECKPOINT_CONTRACT_ID,
+        model=str(model),
+        mode="agent" if agentic else "single",
+        context_digest=context_digest,
+        policy_digest=policy_digest,
+    )
+
+
+def checkpoint_identity(
+    ctx: PlanContext,
+    *,
+    material: str,
+    chunk: list[dict],
+    model: str | None,
+    agentic: bool,
+    extra_context: str = "",
+    policy_digest: str = "",
+    code_ref: str = "",
+    topology_digest: str = "",
+) -> str:
+    """The deterministic identity digest for a Pass-1 chunk's checkpoint, over the
+    shared kernel's :meth:`CheckpointEnvelope.identity_digest`. Any of the material,
+    criterion set, model/mode, injected extra-context, or policy/code/topology refs
+    moving changes the digest (so the stored checkpoint is invalidated)."""
+    unit = _discovery_unit_plan(
+        chunk=chunk,
+        model=model,
+        agentic=agentic,
+        extra_context=extra_context,
+        policy_digest=policy_digest,
+    )
+    stage = DiscoveryStagePlan(
+        units=(unit,),
+        material=material,
+        code_ref=code_ref,
+        topology_digest=topology_digest,
+    )
+    return CheckpointEnvelope.identity_digest(unit_plan=unit, stage_plan=stage)
+
+
+def load_checkpoint(ctx: PlanContext, digest: str) -> CheckpointEnvelope | None:
+    """Return the reusable-SUCCESS checkpoint envelope stored at ``digest`` (resume),
+    else None. Best-effort: any read/parse error, corrupt JSON, legacy namespace, a
+    digest mismatch, or a non-reusable kind ⇒ None (re-run the chunk)."""
     d = _checkpoint_dir(ctx)
     if d is None:
         return None
     try:
-        path = d / f"{_checkpoint_key(material, chunk, model, agentic)}.json"
+        path = d / f"{digest}.json"
         if path.is_file():
-            return json.loads(path.read_text(encoding="utf-8"))
+            env = CheckpointEnvelope.from_json(path.read_text(encoding="utf-8"))
+            if env is not None and env.digest == digest and env.is_reusable_success():
+                return env
     except Exception:  # noqa: BLE001 — checkpoint read is a best-effort resume optimization; any failure ⇒ no cached result (recompute)
         return None
     return None
 
 
-def save_checkpoint(
-    ctx: PlanContext,
-    material: str,
-    chunk: list[dict],
-    model: str | None,
-    agentic: bool,
-    findings: list[dict[str, Any]],
-) -> bool:
-    """Persist a chunk's findings ATOMICALLY (tmp + rename) so a restarted review
-    resumes it. Best-effort: any write error → False (the review still proceeds)."""
+def save_checkpoint(ctx: PlanContext, envelope: CheckpointEnvelope) -> bool:
+    """Persist an envelope ATOMICALLY (tmp + rename) at its own digest so a restarted
+    review resumes it. Best-effort: any write error → False (the review still
+    proceeds). Callers only ever save successes; ``load_checkpoint`` is what refuses a
+    non-reusable envelope on the way back out."""
     d = _checkpoint_dir(ctx)
     if d is None:
         return False
     try:
         d.mkdir(parents=True, exist_ok=True)
-        key = _checkpoint_key(material, chunk, model, agentic)
-        path = d / f"{key}.json"
-        tmp = d / f".tmp-{key}.json"
-        tmp.write_text(json.dumps(findings, ensure_ascii=False), encoding="utf-8")
+        path = d / f"{envelope.digest}.json"
+        tmp = d / f".tmp-{envelope.digest}.json"
+        tmp.write_text(envelope.to_json(), encoding="utf-8")
         tmp.replace(path)
         return True
     except Exception:  # noqa: BLE001 — checkpoint write is a best-effort resume optimization; any failure ⇒ not cached (the review still proceeds)
@@ -723,6 +784,7 @@ __all__ = [
     "MODEL_LADDER",
     "USAGE_TOKEN_FIELDS",
     "centrality",
+    "checkpoint_identity",
     "container_budget",
     "escalation_rungs",
     "is_context_limit_error",

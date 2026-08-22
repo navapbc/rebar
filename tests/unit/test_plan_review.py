@@ -1276,14 +1276,34 @@ def _fake_cfg():
 
 
 def test_checkpoint_save_resume_and_material_invalidation(tmp_path) -> None:
+    from rebar.llm.review_kernel import (
+        DISCOVERY_NAMESPACE_VERSION,
+        CheckpointEnvelope,
+        Usage,
+    )
+
     ctx = _ctx(_GOOD_AC, repo_root=str(tmp_path))
     chunk = [{"id": "E2"}]
-    assert sizing.load_checkpoint(ctx, "matFP", chunk, "m", False) is None  # cold miss
-    sizing.save_checkpoint(ctx, "matFP", chunk, "m", False, [{"finding": "x", "criteria": ["E2"]}])
-    got = sizing.load_checkpoint(ctx, "matFP", chunk, "m", False)  # resume
-    assert got and got[0]["finding"] == "x"
-    # A material edit (different fingerprint) ⇒ cache miss (stale checkpoint ignored).
-    assert sizing.load_checkpoint(ctx, "OTHER_FP", chunk, "m", False) is None
+    digest = sizing.checkpoint_identity(
+        ctx, material="matFP", chunk=chunk, model="m", agentic=False
+    )
+    assert sizing.load_checkpoint(ctx, digest) is None  # cold miss
+    env = CheckpointEnvelope(
+        unit_id="single:E2",
+        kind="success",
+        digest=digest,
+        namespace_version=DISCOVERY_NAMESPACE_VERSION,
+        content=[{"finding": "x", "criteria": ["E2"]}],
+        usage=Usage(),
+    )
+    sizing.save_checkpoint(ctx, env)
+    got = sizing.load_checkpoint(ctx, digest)  # resume
+    assert got and got.content[0]["finding"] == "x"
+    # A material edit (different fingerprint) ⇒ a different identity ⇒ cache miss.
+    other = sizing.checkpoint_identity(
+        ctx, material="OTHER_FP", chunk=chunk, model="m", agentic=False
+    )
+    assert sizing.load_checkpoint(ctx, other) is None
 
 
 def test_centrality_from_ticket_graph() -> None:

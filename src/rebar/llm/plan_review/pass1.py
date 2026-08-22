@@ -24,6 +24,13 @@ from typing import Any
 from rebar.llm import capabilities
 from rebar.llm.config import LLMConfig
 from rebar.llm.errors import LLMUnavailableError
+from rebar.llm.review_kernel import (
+    DISCOVERY_NAMESPACE_VERSION,
+    CheckpointEnvelope,
+    UnitOutcome,
+    Usage,
+    unit_trace,
+)
 from rebar.llm.runner import Runner
 
 from . import det_floor, generation, passes, registry, sidecar, sizing
@@ -156,6 +163,72 @@ def _no_file_impact_context(ctx: PlanContext) -> str:
     )
 
 
+def _policy_digest(ctx: PlanContext) -> str:
+    """Best-effort compiled-criteria snapshot digest (binds the identity to the active
+    criterion policy). Any failure (offline / no repo) degrades to ``""``."""
+    try:
+        from rebar.llm.criteria.snapshot import compile_snapshot
+
+        return compile_snapshot(ctx.repo_root).digest
+    except Exception:  # noqa: BLE001 — a policy-digest failure must never break an offline/no-repo review
+        return ""
+
+
+def _code_ref(ctx: PlanContext) -> str:
+    """Best-effort review-time code SHA (binds the identity to the reviewed code). Any
+    failure degrades to ``""``."""
+    try:
+        return sidecar.review_code_sha(ctx.repo_root) or ""
+    except Exception:  # noqa: BLE001 — a code-ref failure must never break an offline/no-repo review
+        return ""
+
+
+def _topology_digest(chunks: list[list[dict]], agent: list[dict], container: list[dict]) -> str:
+    """A deterministic digest of the canonical chunk partition, so re-chunking (a
+    different single/agent/container split) changes every unit's identity."""
+    canonical = json.dumps(
+        {
+            "single": [sorted(c["id"] for c in ch) for ch in chunks],
+            "agent": sorted(c["id"] for c in agent),
+            "container": sorted(c["id"] for c in container),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _chunk_usage(calls: list[dict[str, Any]]) -> Usage:
+    """Sum the per-call usage records into a kernel :class:`Usage`."""
+    return sum(
+        (
+            Usage(
+                input_tokens=int(r.get("input_tokens", 0) or 0),
+                output_tokens=int(r.get("output_tokens", 0) or 0),
+                requests=int(r.get("requests", 0) or 0),
+            )
+            for r in calls
+        ),
+        Usage(),
+    )
+
+
+def _chunk_extra_context(chunk: list[dict], ctx: PlanContext, decomp_context: str) -> str:
+    """The criterion-scoped store-derived context injected into a chunk's finder call,
+    in a stable order (child-state first, no-file-impact declaration second)."""
+    context_parts: list[str] = []
+    if any(c.get("id") == "G5" for c in chunk) and decomp_context:
+        context_parts.append(decomp_context)
+    if any(c.get("id") == "no-file-impact" for c in chunk):
+        context_parts.append(_no_file_impact_context(ctx))
+    return "\n\n".join(context_parts)
+
+
+def _trace_record(unit_plan, kind: str, usage: Usage, envelope) -> dict[str, Any]:
+    """Build the SAFE (content-free) discovery-journal record for one unit outcome."""
+    outcome = UnitOutcome(unit_id=unit_plan.unit_id, kind=kind, usage=usage, envelope=envelope)
+    return unit_trace(outcome, unit_plan=unit_plan)
+
+
 def run_pass1(
     ctx: PlanContext,
     cfg: LLMConfig,
@@ -210,10 +283,19 @@ def run_pass1(
     findings: list[dict[str, Any]] = list(budget_indeterminate)
     call_records: list[dict[str, Any]] = []
     ladder_events: list[str] = []
-    # Chunk-atomic CHECKPOINTING: resume completed Pass-1 chunks from a prior run
-    # (keyed by the ticket's MATERIAL fingerprint, so an edit invalidates the cache),
-    # and persist each chunk's result atomically as it completes.
+    # Chunk-atomic CHECKPOINTING over the shared discovery kernel: resume completed
+    # Pass-1 chunks from a prior run and persist each SUCCESS envelope atomically as it
+    # completes. The identity digest binds the ticket MATERIAL fingerprint, the
+    # criterion set, model/mode, injected extra-context, and the policy/code/topology
+    # refs — any of them moving invalidates the cache. Computed ONCE here (after the
+    # single/agent/container partition is finalised).
     material = material_fingerprint(ctx)
+    policy_digest = _policy_digest(ctx)
+    code_ref = _code_ref(ctx)
+    topology_digest = _topology_digest(chunks, agent, container)
+    # Safe (content-free) per-unit execution journal. Only ``.append`` runs in workers
+    # (GIL-atomic, exactly like ``ladder_events``).
+    discovery_trace: list[dict[str, Any]] = []
     resumed = 0
 
     def _chunk(
@@ -223,26 +305,59 @@ def run_pass1(
         # Mid-run cancellation (story 2c89): once the run is cancelled (the ticket's OWN
         # material changed), a not-yet-started chunk returns empty WITHOUT a runner call
         # or checkpoint I/O — everything after the edit is waste (the checkpoints are
-        # fingerprint-keyed and already orphaned). In-flight runner calls are not
+        # identity-keyed and already orphaned). In-flight runner calls are not
         # interruptible; up to pool-width of them complete as sunk cost. The ContextVar
         # scope reaches pool workers via _submit_ctx's copy_context().
         if generation.review_cancelled():
+            cancel_plan = sizing._discovery_unit_plan(
+                chunk=chunk, model=cfg.model, agentic=agentic, policy_digest=policy_digest
+            )
+            discovery_trace.append(_trace_record(cancel_plan, "cancelled", Usage(), None))
             return [], []
-        cached = sizing.load_checkpoint(ctx, material, chunk, cfg.model, agentic)
+        # The injected extra-context is part of the checkpoint identity, so it is built
+        # BEFORE the cache lookup.
+        extra = _chunk_extra_context(chunk, ctx, decomp_context)
+        unit_plan = sizing._discovery_unit_plan(
+            chunk=chunk,
+            model=cfg.model,
+            agentic=agentic,
+            extra_context=extra,
+            policy_digest=policy_digest,
+        )
+        digest = sizing.checkpoint_identity(
+            ctx,
+            material=material,
+            chunk=chunk,
+            model=cfg.model,
+            agentic=agentic,
+            extra_context=extra,
+            policy_digest=policy_digest,
+            code_ref=code_ref,
+            topology_digest=topology_digest,
+        )
+        cached = sizing.load_checkpoint(ctx, digest)
         if cached is not None:
             resumed += 1
             # A checkpoint-served chunk made NO LLM call this run — zero usage records.
-            return cached, []
-        # These criterion-scoped contexts compose in a stable order when G5 and
-        # no-file-impact share a facet chunk: child-state first, declaration second.
-        context_parts: list[str] = []
-        if any(c.get("id") == "G5" for c in chunk) and decomp_context:
-            context_parts.append(decomp_context)
-        if any(c.get("id") == "no-file-impact" for c in chunk):
-            context_parts.append(_no_file_impact_context(ctx))
-        extra = "\n\n".join(context_parts)
+            discovery_trace.append(_trace_record(unit_plan, "resumed", cached.usage, cached))
+            return cached.content, []
         out, calls = _pass1_with_ladder(runner, cfg, plan, chunk, agentic, ladder_events, extra)
-        sizing.save_checkpoint(ctx, material, chunk, cfg.model, agentic, out)
+        # FALSE-SUCCESS FIX: a unit that completed NO real LLM call AND produced NO
+        # finding is a FAILURE — never checkpoint it (a resumable clean success).
+        if (not calls) and (not out):
+            discovery_trace.append(_trace_record(unit_plan, "failed", Usage(), None))
+            return out, calls
+        usage = _chunk_usage(calls)
+        env = CheckpointEnvelope(
+            unit_id=unit_plan.unit_id,
+            kind="success",
+            digest=digest,
+            namespace_version=DISCOVERY_NAMESPACE_VERSION,
+            content=out,
+            usage=usage,
+        )
+        sizing.save_checkpoint(ctx, env)
+        discovery_trace.append(_trace_record(unit_plan, "success", usage, env))
         return out, calls
 
     max_workers = max(1, min(6, len(chunks) + len(agent)))
@@ -330,6 +445,7 @@ def run_pass1(
     if ladder_events:
         coverage["size_ladder"] = ladder_events
     coverage["checkpoint"] = {"chunks_resumed": resumed, "chunks_total": len(chunks) + len(agent)}
+    coverage["discovery_trace"] = discovery_trace
 
     # Container criteria (G3 child coverage / G4 child consistency): evaluate
     # (parent + ONE child) per call, both whole, and AGGREGATE — never the whole
