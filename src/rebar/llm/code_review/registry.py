@@ -196,6 +196,51 @@ def effective_criteria(repo_root: str | None = None) -> tuple[str, ...]:
 # its own DET invariant criterion + detector without touching the consumer code.
 
 
+# Model-emitted SYNONYMS of packaged criterion ids (ticket d890-e711-156e-444b): on the
+# code-v3 corpus the reviewer occasionally labelled findings `sec` / `documentation`, which
+# match no known id and so fell to the 0.95 unknown-label default instead of `security` /
+# `docs`' tuned routing. A MAPPING, not a whitelist — the criteria vocabulary stays open by
+# design (prompt-specified dimensions like maintainability/correctness/edge-cases and
+# project criteria pass through :func:`normalize_criteria` untouched).
+CRITERIA_SYNONYMS: dict[str, str] = {
+    "sec": "security",
+    "documentation": "docs",
+}
+
+
+def normalize_criteria(criteria: Sequence[str], repo_root: str | None = None) -> list[str]:
+    """Map model-emitted synonym labels onto their canonical criterion ids.
+
+    Rules (ticket d890-e711-156e-444b): a label already present in the EFFECTIVE vocabulary
+    (:func:`effective_criteria` — project overlay included, never the packaged index alone)
+    is NEVER rewritten; a :data:`CRITERIA_SYNONYMS` key maps to its canonical id; any other
+    label passes through UNCHANGED. Order-preserving, deduplicating (a finding carrying both
+    a synonym and its canonical id yields the canonical id once)."""
+    known = set(effective_criteria(repo_root))
+    out: list[str] = []
+    for label in criteria:
+        canonical = label if label in known else CRITERIA_SYNONYMS.get(label, label)
+        if canonical not in out:
+            out.append(canonical)
+    return out
+
+
+def normalize_finding_criteria(
+    findings: Sequence[dict[str, Any]], repo_root: str | None = None
+) -> list[dict[str, Any]]:
+    """Apply :func:`normalize_criteria` to each finding's ``criteria`` list (shallow-copying
+    a finding it rewrites; findings without criteria pass through by reference). Called by
+    ``workflow_ops.code_review_decide`` BEFORE the pass3 threshold lookup and before
+    nit-suppression, so a synonym-labelled finding gets its criterion's tuned routing."""
+    out: list[dict[str, Any]] = []
+    for f in findings:
+        crit = f.get("criteria") if isinstance(f, dict) else None
+        if crit:
+            f = {**f, "criteria": normalize_criteria(list(crit), repo_root)}
+        out.append(f)
+    return out
+
+
 def det_criteria() -> dict[str, dict[str, Any]]:
     """The `exec: "DET"` routing entries as ``{criterion_id: {detector, fail_mode}}``.
 
