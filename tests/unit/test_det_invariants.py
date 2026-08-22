@@ -344,3 +344,46 @@ def test_verify_command_lint_keeps_det_checks_p1_to_p11():
 
     ids = [c.__name__ if callable(c) else c for c in DET_CHECKS]
     assert len(DET_CHECKS) == 11, f"DET_CHECKS must stay P1-P11, got {len(DET_CHECKS)}: {ids}"
+
+
+# ── RP-06 S3: project DET selection comes from the effective snapshot (not packaged routing) ──
+def test_project_det_from_snapshot_includes_activated_project_detector(tmp_path):
+    from rebar.llm.code_review import detectors
+    from rebar.llm.criteria.snapshot import compile_snapshot
+
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "code_review": {"project.no-eval": _DET_ROUTING},
+            "activate": ["project.no-eval"],
+        },
+    )
+    snap = compile_snapshot(root)
+    det_map = detectors.det_criteria_from_snapshot(snap)
+    assert "project.no-eval" in det_map
+    assert det_map["project.no-eval"]["fail_mode"] == "closed"
+    assert det_map["project.no-eval"]["detector"] == {"id": "project.no-eval"}
+
+
+def test_project_det_from_snapshot_excludes_llm_project_criteria(tmp_path):
+    from rebar.llm.code_review import detectors
+    from rebar.llm.criteria.snapshot import compile_snapshot
+
+    root = _make_repo(
+        tmp_path,
+        overlay={
+            "code_review": {
+                "project.llm-only": {
+                    "exec": "1-TURN",
+                    "applies_to": ["**"],
+                    "default_posture": "advisory",
+                    "block_threshold": 0.8,
+                    "blocking_enabled": False,
+                }
+            },
+            "activate": ["project.llm-only"],
+        },
+    )
+    snap = compile_snapshot(root)
+    det_map = detectors.det_criteria_from_snapshot(snap)
+    assert "project.llm-only" not in det_map  # LLM criteria never enter the DET map
