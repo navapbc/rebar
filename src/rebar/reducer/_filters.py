@@ -25,11 +25,82 @@ this function assumes already-validated inputs and treats an empty string as
 
 from __future__ import annotations
 
+from collections.abc import Set as AbstractSet
+from typing import TypeAlias
+
+# The predicate value's shape is TAGGED BY ``op``: a scalar string for the
+# comparison ops (``eq``/``lt``/``le``/``gt``/``ge``), a set for ``in``, and a
+# ``(lo, hi)`` pair (either bound ``None``) for ``range``. Both producers build
+# exactly these shapes (``_query._parse_value`` and ``apply_ticket_filters``),
+# so the matcher narrows by construction instead of widening to ``Any``
+# (ticket d893-e003-0539-47fc; the ``Any`` failure mode is documented in cc77).
+PredicateValue: TypeAlias = str | AbstractSet[str] | tuple[str | None, str | None]
+
 # Query-field name → reduced-state key. Fields not listed map to themselves.
 _FIELD_KEY = {"type": "ticket_type", "parent": "parent_id"}
 
 
-def match_predicate(state: dict, field: str, op: str, value) -> bool:
+def _match_tag(state: dict, op: str, value: PredicateValue) -> bool:
+    """``tag`` membership: ANY of the set for ``in``, exact member for ``eq``."""
+    tags = state.get("tags") or []
+    if op == "in":
+        return isinstance(value, AbstractSet) and any(v in tags for v in value)
+    return value in tags
+
+
+def _priority_in_range(pv: int, bounds: tuple[str | None, str | None]) -> bool:
+    """``lo <= pv <= hi`` with either bound ``None`` meaning open-ended."""
+    lo, hi = bounds
+    if lo is not None and pv < int(lo):
+        return False
+    if hi is not None and pv > int(hi):
+        return False
+    return True
+
+
+def _match_priority(state: dict, op: str, value: PredicateValue) -> bool:
+    """``priority`` comparisons, coercing predicate values to ``int``.
+
+    A ticket with no explicit priority never matches; an uncoercible value
+    yields ``False`` rather than raising.
+    """
+    pv = state.get("priority")
+    if pv is None:
+        return False
+    try:
+        if op == "in":
+            return isinstance(value, AbstractSet) and pv in {int(v) for v in value}
+        if op == "range":
+            return isinstance(value, tuple) and _priority_in_range(pv, value)
+        if not isinstance(value, str):
+            return False
+        ival = int(value)
+    except (TypeError, ValueError):
+        return False
+    if op == "eq":
+        return pv == ival
+    if op == "lt":
+        return pv < ival
+    if op == "le":
+        return pv <= ival
+    if op == "gt":
+        return pv > ival
+    if op == "ge":
+        return pv >= ival
+    return False
+
+
+def _match_string_field(state: dict, field: str, op: str, value: PredicateValue) -> bool:
+    """String-valued fields: status, ticket_type, assignee, parent_id."""
+    actual = state.get(_FIELD_KEY.get(field, field))
+    if op == "in":
+        return isinstance(value, AbstractSet) and actual in set(value)
+    if op == "eq":
+        return actual == value
+    return False
+
+
+def match_predicate(state: dict, field: str, op: str, value: PredicateValue) -> bool:
     """Evaluate ONE field predicate against a reduced ticket-state dict.
 
     The single comparison vocabulary shared by the structured-query parser
@@ -39,53 +110,17 @@ def match_predicate(state: dict, field: str, op: str, value) -> bool:
 
     ``field`` is a query-field name (``status``/``type``/``priority``/
     ``assignee``/``tag``/``parent``). ``op`` is one of ``eq``/``in``/``lt``/
-    ``le``/``gt``/``ge``/``range``. ``value`` is a scalar for the scalar ops, a
-    set/iterable for ``in``, and a ``(lo, hi)`` pair (either bound ``None``) for
-    ``range``. ``priority`` values are coerced to ``int``; a ticket with no
-    explicit priority never matches a priority predicate.
+    ``le``/``gt``/``ge``/``range``. ``value`` is op-tagged (see
+    :data:`PredicateValue`): a scalar for the scalar ops, a set for ``in``, and
+    a ``(lo, hi)`` pair (either bound ``None``) for ``range``. ``priority``
+    values are coerced to ``int``; a ticket with no explicit priority never
+    matches a priority predicate.
     """
     if field == "tag":
-        tags = state.get("tags") or []
-        if op == "in":
-            return any(v in tags for v in value)
-        return value in tags
-
+        return _match_tag(state, op, value)
     if field == "priority":
-        pv = state.get("priority")
-        if pv is None:
-            return False
-        try:
-            if op == "in":
-                return pv in {int(v) for v in value}
-            if op == "range":
-                lo, hi = value
-                if lo is not None and pv < int(lo):
-                    return False
-                if hi is not None and pv > int(hi):
-                    return False
-                return True
-            ival = int(value)
-        except (TypeError, ValueError):
-            return False
-        if op == "eq":
-            return pv == ival
-        if op == "lt":
-            return pv < ival
-        if op == "le":
-            return pv <= ival
-        if op == "gt":
-            return pv > ival
-        if op == "ge":
-            return pv >= ival
-        return False
-
-    # String-valued fields: status, ticket_type, assignee, parent_id.
-    actual = state.get(_FIELD_KEY.get(field, field))
-    if op == "in":
-        return actual in set(value)
-    if op == "eq":
-        return actual == value
-    return False
+        return _match_priority(state, op, value)
+    return _match_string_field(state, field, op, value)
 
 
 def apply_ticket_filters(
