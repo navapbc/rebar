@@ -458,7 +458,12 @@ _CONCURRENCY_TOKENS: tuple[str, ...] = (
 )
 
 
-def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> list[str]:
+def content_triggered_overlays(
+    diff_text: str,
+    repo_root: str | None = None,
+    *,
+    changed_files: Sequence[str] = (),
+) -> list[str]:
     """The overlays triggered by the DIFF CONTENT (the ``content`` operand of ``overlay_union``,
     unioned alongside the glob triggers), ordered by :data:`OVERLAY_IDS`.
 
@@ -469,7 +474,14 @@ def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> 
     headers excluded) fires that project-extended built-in overlay. ``repo_root`` None / no
     overlay ⇒ the committed deletion-impact behavior only (byte-identical to before): a pure
     add-only diff, a body-only edit that keeps the signature, and removed comment/blank lines
-    all yield ``[]``."""
+    all yield ``[]``.
+
+    ``changed_files`` (keyword-only, default empty — every existing positional call site is
+    unaffected) enables the third scan: the ``tests`` overlay fires when the diff ADDS a
+    declaration the same file does not also remove AND no changed file matches the ``tests``
+    globs. That second half is a PATH predicate, which is why it needs an operand the diff text
+    cannot supply: the composed context is truncated at a char cap, while the changed-files list
+    is not."""
     if not diff_text:
         return []
     fired: set[str] = set()
@@ -477,8 +489,100 @@ def content_triggered_overlays(diff_text: str, repo_root: str | None = None) -> 
         fired.add("deletion-impact")
     if _has_concurrency_token(diff_text):
         fired.add("concurrency")
+    if _content_selects_tests(diff_text, changed_files, repo_root):
+        fired.add("tests")
     _scan_project_tokens(diff_text, project_trigger_extensions(repo_root), fired)
     return [oid for oid in OVERLAY_IDS if oid in fired]
+
+
+# ── Added-declaration content trigger for the `tests` overlay (story 2e0f-e4dc-ee9d-4855) ─────
+#: Extensions whose content is documentation or data, never a declaration site. A fenced code
+#: block in a docs change must not read as new product behaviour. Extension-keyed, NOT
+#: layout-keyed: a `src/**` predicate would be a repository-layout assumption that silently
+#: never fires for a Ruby (`lib/`), Java (`src/main/java`) or Next.js (`app/`) target project.
+_NON_CODE_EXTS: tuple[str, ...] = (
+    ".md",
+    ".rst",
+    ".txt",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".cfg",
+    ".ini",
+    ".lock",
+)
+
+#: The NAME a declaration line introduces. Mirrors the keyword vocabulary of
+#: :data:`_REMOVED_DECL_PATTERNS`, so the added side stays as polyglot as the removed side.
+_DECL_NAME_RE = re.compile(
+    # Go method with a receiver — `func (r *T) Name(` — its own alternative so the METHOD name
+    # is captured; the receiver's identifier sits inside `(...)` and is never captured.
+    r"func\s+\([^)]*\)\s*([A-Za-z_$][\w$]*)"
+    r"|(?:def|class|fn|func|function)\s+([A-Za-z_$][\w$]*)"
+    r"|(?:const|let|var)\s+([A-Za-z_$][\w$]*)"
+)
+
+
+def _diff_file_path(raw: str) -> str | None:
+    """The new-side path a ``diff --git a/x b/x`` (or ``+++ b/x``) header names, else None."""
+    if raw.startswith("diff --git "):
+        m = re.search(r" b/(\S+)$", raw)
+        return m.group(1) if m else None
+    if raw.startswith("+++ "):
+        path = raw[4:].strip()
+        return None if path == "/dev/null" else path[2:] if path.startswith("b/") else path
+    return None
+
+
+def _declared_name(body: str) -> str | None:
+    """The identifier a declaration line declares (``def compute(`` -> ``compute``)."""
+    m = _DECL_NAME_RE.search(body)
+    if not m:
+        return None
+    return next((g for g in m.groups() if g), None)
+
+
+def _has_added_declaration(diff_text: str) -> bool:
+    """Whether the diff ADDS a declaration whose name the SAME file does not also remove.
+
+    Comparing NAMES rather than line TEXT is load-bearing: an annotation-only rewrite that also
+    re-wraps a signature across lines changes the text of every declaration line while
+    introducing no new declaration, and only a name comparison suppresses it. A MOVE between
+    files is deliberately NOT suppressed — the reviewed diff carries no rename detection, so a
+    move arrives as delete-in-A + add-in-B and B genuinely gains a declaration."""
+    added: dict[str, set[str]] = {}
+    removed: dict[str, set[str]] = {}
+    path: str | None = None
+    for raw in diff_text.splitlines():
+        header = _diff_file_path(raw)
+        if header is not None or raw.startswith(("diff --git ", "+++ ", "--- ")):
+            path = header if header is not None else path
+            continue
+        if path is None or path.endswith(_NON_CODE_EXTS):
+            continue
+        if not raw.startswith(("+", "-")) or not _REMOVED_DECL_RE.search(raw[1:]):
+            continue
+        name = _declared_name(raw[1:])
+        if name is not None:
+            (added if raw.startswith("+") else removed).setdefault(path, set()).add(name)
+    return any(names - removed.get(f, set()) for f, names in added.items())
+
+
+def _content_selects_tests(
+    diff_text: str, changed_files: Sequence[str], repo_root: str | None
+) -> bool:
+    """Whether the ``tests`` overlay fires from diff CONTENT: the change adds a declaration and
+    touches no test file. When a test file IS touched the overlay already fires by glob, so the
+    content scan would be redundant (the two operands are unioned, never substituted)."""
+    if not changed_files:
+        return False
+    globs = applies_to_globs("tests") + project_trigger_extensions(repo_root).get("tests", {}).get(
+        "applies_to", []
+    )
+    if any(_glob_match(f, g) for f in changed_files for g in globs):
+        return False
+    return _has_added_declaration(diff_text)
 
 
 def _has_removed_declaration(diff_text: str) -> bool:

@@ -94,7 +94,13 @@ genuinely broken test — judge test quality on its own terms.
   oracle antipattern above); (iv) table-driven / equivalence /
   classifier tests, including exact-value assertions on a pure function's output that "look
   tautological"; (v) exit-code / emitted-signal assertions; (vi) mocks at the EXTERNAL boundary;
-  (vii) bare coverage-gap demands ("no test for X") without a concrete failure path — not blocking;
+  (vii) a coverage gap is blocking-eligible ONLY when it BOTH concerns newly introduced
+  behaviour AND states a named violating input; decide both from the diff alone — behaviour is
+  *newly introduced* when its implementing lines appear as ADDED (`+`) lines in the diff under
+  review, behaviour reachable only through lines the diff does not add is *pre-existing* and
+  its gap stays advisory, and a *named violating input* is a concrete input value, argument or
+  call sequence you state verbatim that the added lines mishandle. A bare coverage-gap demand
+  ("no test for X") with no such input — on new or pre-existing code — is not blocking;
   (viii) a skip guarding an optional platform/dependency that the CI context DOES exercise, and a
   strict xfail (`strict=True`) whose `reason=` (or an adjacent comment/linked ticket) names a
   concrete removal condition — a bare non-strict xfail, or a strict one with no stated reason,
