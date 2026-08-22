@@ -32,6 +32,30 @@ Remediation is always the same: fix the config file, then retry the operation. T
 `GateState.UNREADABLE` enum member introduced by ticket f5c4-b2d1 is removed with it
 (never released).
 
+## BREAKING (pre-1.0) — the MCP gate resolvers error on an unreadable config too
+
+The same 39f8-ae7c ruling, applied to the MCP surface (ticket 8408-54bb). The
+`mcp.readonly`, `mcp.allow_llm`, and `mcp.allow_jira_sync` gate resolvers
+(`rebar.config.mcp_readonly()` / `rebar.config.mcp_gate()`) now raise `ConfigError` —
+chained from the parse fault, naming the gate — when the config cannot be read, instead
+of silently resolving to a fallback (read-only for `mcp_readonly`, the removed `fail`
+keyword's value for `mcp_gate`).
+
+Agent-visible effects:
+
+- An MCP tool call that hits an unreadable config fails with the structured error
+  envelope carrying the new `config_unreadable` code (in `rebar.KNOWN_ERROR_CODES`),
+  so a driving agent can distinguish a broken config from a deliberate read-only/off
+  policy refusal and tell the operator to fix the file.
+- `rebar.config.mcp_gate(attr)` drops its `fail` keyword — there is no malformed-config
+  fallback to choose any more. Callers pass just the attribute name.
+- The LLM runner's read-only sensing (`comment_ticket` withholding) propagates the same
+  error instead of silently going read-only.
+- The effective capability posture is unchanged: a broken config still never enables
+  writes, billable LLM calls, or live Jira sync — the fault now surfaces loudly instead
+  of reading as configuration.
+- A **missing** config is unchanged: absent `rebar.toml` still means defaults.
+
 ## Library force bypass carries its audit reason on `force`
 
 The public library lifecycle operations now share one force contract:

@@ -37,6 +37,7 @@ def _envelope_error(exc: Exception) -> McpEnvelopeError | None:
     not part of rebar's error vocabulary — e.g. a workflow-fence ``ValueError``).
     """
     from rebar._commands._seam import CommandError
+    from rebar._config_coercion import ConfigError
     from rebar._errors import RebarError, error_code_for
 
     try:
@@ -53,7 +54,7 @@ def _envelope_error(exc: Exception) -> McpEnvelopeError | None:
     except ImportError:
         llm_error_type = type(None)
 
-    if isinstance(exc, (RebarError, CommandError, mismatch_type, llm_error_type)):
+    if isinstance(exc, (RebarError, CommandError, ConfigError, mismatch_type, llm_error_type)):
         from rebar._engine_support.output import error_envelope
 
         env = error_envelope(error_code_for(exc), "", str(exc), getattr(exc, "returncode", None))
@@ -66,7 +67,7 @@ def install_error_guard(mcp) -> None:
 
     Wraps ``mcp.tool`` so every subsequently registered tool is automatically guarded:
     when the body raises a known rebar exception (``RebarError`` and subclasses,
-    ``ConcurrencyMismatch``, ``CommandError``, ``LLMError``), it re-raises
+    ``ConcurrencyMismatch``, ``CommandError``, ``ConfigError``, ``LLMError``), it re-raises
     ``McpEnvelopeError`` with a structured ``error_envelope``. Async tool bodies
     (e.g. ``run_workflow``) are wrapped in an async guard so the coroutine is awaited
     and FastMCP still sees a coroutine function.

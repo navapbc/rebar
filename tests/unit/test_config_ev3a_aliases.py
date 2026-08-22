@@ -126,17 +126,20 @@ def test_mcp_allow_jira_sync_gate(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         mcp_server._allow_jira_sync()
 
 
-def test_mcp_allow_jira_sync_failsafe_on_garbage(
+def test_mcp_allow_jira_sync_errors_on_garbage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A bad boolean must resolve the gate CLOSED (off), never crash or fail open."""
+    """A bad boolean ERRORS the gate (operator ruling 39f8-ae7c) — never fails open,
+    and never silently reads as the configured 'off' either."""
     from rebar import mcp_server
+    from rebar.config import ConfigError
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "maybe")  # invalid bool -> ConfigError
     cfg.reset_config_cache()
-    assert mcp_server._allow_jira_sync() is False  # fail-safe off
+    with pytest.raises(ConfigError):
+        mcp_server._allow_jira_sync()
 
 
 # ── mcp.readonly / mcp.allow_llm gates: reported == enforced (review fix) ──────
@@ -167,23 +170,28 @@ def test_mcp_readonly_honors_config_file_and_env(
     assert mcp_server._readonly() is False
 
 
-def test_mcp_readonly_fails_closed_on_malformed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A malformed config locks the server READ-ONLY (fail-closed, like the verify
-    gate) — never exposes write tools on a broken config."""
+def test_mcp_readonly_errors_on_malformed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A malformed config ERRORS the read-only gate (operator ruling 39f8-ae7c) — the
+    fault surfaces to the operator instead of silently reading as configured
+    read-only (the pre-ruling posture failed closed, which withheld writes but
+    laundered the fault into a policy value)."""
     from rebar import mcp_server
+    from rebar.config import ConfigError
 
     p = _proj_git(tmp_path)
     monkeypatch.chdir(p)
     monkeypatch.delenv("REBAR_ROOT", raising=False)  # cwd resolution under test
     (p / "pyproject.toml").write_text("[tool.rebar] broken === [[\n", encoding="utf-8")
     cfg.reset_config_cache()
-    assert mcp_server._readonly() is True  # fail-CLOSED
+    with pytest.raises(ConfigError):
+        mcp_server._readonly()
 
 
-def test_mcp_allow_llm_gate_and_failsafe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mcp_allow_llm_gate_and_error_on_bad_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from rebar import mcp_server
+    from rebar.config import ConfigError
 
     p = _proj_git(tmp_path)
     monkeypatch.chdir(p)
@@ -194,4 +202,5 @@ def test_mcp_allow_llm_gate_and_failsafe(tmp_path: Path, monkeypatch: pytest.Mon
     assert mcp_server._allow_llm() is True  # config-file honored
     monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "garbage")  # invalid -> ConfigError
     cfg.reset_config_cache()
-    assert mcp_server._allow_llm() is False  # fail-safe off (never enable on bad config)
+    with pytest.raises(ConfigError):  # errors per 39f8-ae7c — never a silent default
+        mcp_server._allow_llm()
