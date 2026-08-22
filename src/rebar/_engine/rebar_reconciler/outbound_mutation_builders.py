@@ -180,6 +180,7 @@ def _compute_outbound_update_mutation(
     inbound_mapper,
     links,
     *,
+    local_parents: Any = None,
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
     mapping: Any = None,
@@ -282,6 +283,8 @@ def _compute_outbound_update_mutation(
         inbound_mapper=inbound_mapper,
         binding_store=binding_store,
         codec=getattr(outbound_mapper, "comment_codec", None),
+        local_parents=local_parents,
+        local_ticket_types=local_ticket_types,
     )
     # bug a06c: intent-gated REMOVE. When local_label_intent is
     # provided but lacks an entry for this local_id, fall back to
