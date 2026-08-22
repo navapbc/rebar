@@ -36,7 +36,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from rebar._store import compat
+from rebar._store import compat, git_outcome
 from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch
 from rebar._store.push_classify import (
     _DIRTY_WD,
@@ -273,8 +273,11 @@ def _merge_with_transport_retry(
     on-demand promisor fetches. Run 31420498173 died as
     ``merge-recovery-blocked: ... server certificate verification failed`` together with
     ``could not fetch ... from promisor remote`` — a TRANSPORT fault wearing the merge
-    reason. Retry only when the transport classifier matches; a genuine merge conflict is
-    never transport-retriable and stays terminal on the first failure.
+    reason. The transient runner-FS faults (``could not parse HEAD`` / ``bad object`` / a
+    loose-object temp-create blip) abort the merge before it writes anything and clear on
+    retry the same way, so they earn the same bounded retry rather than the terminal
+    abort-and-warn path. A genuine merge conflict is neither, and stays terminal on the
+    first failure.
     """
     for transport_attempt in range(1, _MAX_TRANSPORT_ATTEMPTS + 1):
         merge = core._git(
@@ -287,11 +290,13 @@ def _merge_with_transport_retry(
         )
         if merge.returncode == 0 or transport_attempt == _MAX_TRANSPORT_ATTEMPTS:
             return merge
-        if not _is_transport_retriable(merge.stderr or ""):
+        kind = git_outcome.classify(merge, operation=git_outcome.PUSH).kind
+        if kind not in (git_outcome.GitKind.TRANSPORT, git_outcome.GitKind.TRANSIENT_FS):
             return merge
         core.logger.debug(
-            "push-recovery merge hit a transient transport fault "
-            "(transport attempt %s/%s); retrying automatically, no action needed: %s",
+            "push-recovery merge hit a transient %s fault "
+            "(attempt %s/%s); retrying automatically, no action needed: %s",
+            kind.value,
             transport_attempt,
             _MAX_TRANSPORT_ATTEMPTS,
             (merge.stderr or "").strip()[:200],

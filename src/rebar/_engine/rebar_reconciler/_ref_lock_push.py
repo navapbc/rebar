@@ -61,37 +61,30 @@ import subprocess
 from pathlib import Path
 from types import ModuleType
 
-# A rejected ``--force-with-lease`` prints "stale info" (the lease mismatch) or a
-# "! [rejected]" / "cannot lock ref" line — distinct from a genuine transport
-# failure ("Authentication failed", "Could not resolve host"), which we do NOT
-# classify as a CAS mismatch (fail-closed).
-PUSH_REJECT_MARKERS = ("stale info", "rejected", "cannot lock ref")
+from rebar._store import git_outcome as _git_outcome
 
-# Bug 4afc: only "stale info" is the --force-with-lease signal; ``rejected`` and
-# ``cannot lock ref`` also cover hook declines, rate limits, server errors and
-# ref.lock contention, which are not lease movement.
-LEASE_MISMATCH_MARKER = "stale info"
-NON_CAS_REJECT_MARKERS: tuple[str, ...] = (
-    "file exists",  # server-side ref.lock contention
-    "hook declined",
-    "internal server error",
-    "rate limit",
-    "fatal error in commit_refs",  # bug ebee: GitHub 5xx ref-transaction fault
-    "(failure)",
-)
+# The lease/reject marker tables live in the shared registry
+# (:mod:`rebar._store.git_outcome`), which owns every git marker string. Re-exported here
+# under their historical names because ``_ref_lock`` and its tests read them from this
+# module. Bug 4afc: only "stale info" is the --force-with-lease signal; ``rejected`` and
+# the ref-lock marker also cover hook declines, rate limits, server errors and ref.lock
+# contention, which are not lease movement. Bug ebee added ``fatal error in commit_refs``
+# to the same non-CAS set.
+PUSH_REJECT_MARKERS = _git_outcome.PUSH_REJECT_MARKERS
+LEASE_MISMATCH_MARKER = _git_outcome.LEASE_MISMATCH_MARKER
+NON_CAS_REJECT_MARKERS: tuple[str, ...] = _git_outcome.NON_CAS_REJECT_MARKERS
 
 
 def is_cas_mismatch_stderr(stderr: str) -> bool:
     """Whether *stderr* (lowercased) shows the LEASE moved, not merely a rejection.
 
     "stale info" is conclusive; a broader marker counts only when nothing names a
-    non-lease cause, so ambiguity fails closed per the documented posture.
+    non-lease cause, so ambiguity fails closed per the documented posture. A lookup
+    against the shared registry under the ``lease-push`` operation — the SAME text
+    classifies differently under ``local`` and ``ref-cas``, which is why the registry is
+    keyed by the pair and this verdict is not merged with theirs.
     """
-    if LEASE_MISMATCH_MARKER in stderr:
-        return True
-    if any(m in stderr for m in NON_CAS_REJECT_MARKERS):
-        return False
-    return any(m in stderr for m in PUSH_REJECT_MARKERS)
+    return _git_outcome.is_lease_mismatch(stderr)
 
 
 def push_lease_cas(

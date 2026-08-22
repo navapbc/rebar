@@ -51,7 +51,7 @@ from pathlib import Path
 
 from rebar._store import compat
 from rebar._store import lock as _lock
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import _with_transient_fault_retry, run_git, run_git_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +64,10 @@ _GIT_TIMEOUT = 30
 
 # raw-git-ok: locked store seam internal
 def _git(tracker: str, *args: str) -> subprocess.CompletedProcess:
-    try:
-        return run_git(tracker, *args, check=False, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", "-C", tracker, *args],
-            124,
-            "",
-            f"git timed out after {_GIT_TIMEOUT}s",
-        )
+    """This module's bounded git seam; the timeout fold is the shared
+    :func:`gitutil.run_git_bounded`, handed THIS module's ``run_git`` so the tests that
+    patch ``sync.run_git`` by name keep intercepting every sync git call."""
+    return run_git_bounded(tracker, *args, timeout=_GIT_TIMEOUT, runner=run_git)
 
 
 # raw-git-ok: locked store seam internal
@@ -182,15 +177,23 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
         logger.warning("%s", problem or "tickets store epoch guard could not pin remote ref")
         return
 
-    merge = _git(
-        tracker,
-        "merge",
-        *extra,
-        merge_target,
-        "--no-edit",
-        "-m",
-        f"Merge {remote} (auto-reconcile during sync)",
-    )
+    def _merge_once() -> subprocess.CompletedProcess:
+        return _git(
+            tracker,
+            "merge",
+            *extra,
+            merge_target,
+            "--no-edit",
+            "-m",
+            f"Merge {remote} (auto-reconcile during sync)",
+        )
+
+    # A transient runner-FS fault (``could not parse HEAD`` / ``bad object`` / a
+    # loose-object temp-create blip) aborts the merge BEFORE it writes anything, so the
+    # identical merge succeeds on retry. Without this the blip fell straight into the
+    # abort-and-warn path below and a converged sync was abandoned. The s3 doctor already
+    # got this self-heal; this merge and push_recovery's were the two left out.
+    merge = _with_transient_fault_retry(_merge_once)
     if merge.returncode == 0:
         return
 
@@ -204,15 +207,7 @@ def _union_merge(tracker: str, remote: str, *extra: str) -> None:
     #       deletions from HEAD, quarantine-copy modifications, then restore.
     # Any other failure keeps today's abort-only path.
     if _recover_merge_abort(tracker, merge):
-        retry = _git(
-            tracker,
-            "merge",
-            *extra,
-            merge_target,
-            "--no-edit",
-            "-m",
-            f"Merge {remote} (auto-reconcile during sync)",
-        )
+        retry = _with_transient_fault_retry(_merge_once)
         if retry.returncode == 0:
             return
 

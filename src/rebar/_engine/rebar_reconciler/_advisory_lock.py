@@ -26,6 +26,8 @@ import sys
 import time
 from pathlib import Path
 
+from rebar._store import git_outcome as _git_outcome
+
 # ---------------------------------------------------------------------------
 # Module-level logger
 # ---------------------------------------------------------------------------
@@ -282,27 +284,11 @@ def _mode_blocks(target_mode, gated_mode_str: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _is_cas_mismatch(
-    exc: subprocess.CalledProcessError, ref_name: str = "refs/heads/tickets"
-) -> bool:
-    """Return True iff *exc* is an ``update-ref`` compare-and-swap old-sha mismatch.
-
-    ``git update-ref <ref> <new> <old>`` (create-only or advance) reports a CAS
-    old-sha mismatch as **exit 128**; the delete form ``git update-ref -d <ref>
-    <old>`` reports it as **exit 1**. Both carry ``cannot lock ref '<ref>'`` in
-    stderr, so we accept exit 128 OR an exit-1 ``cannot lock ref`` — a strict superset
-    that never misclassifies an unrelated failure. We discriminate on the command
-    shape (an ``update-ref`` invocation naming *ref_name*) so an unrelated exit-128
-    from some other git command is not treated as a retryable race.
-    """
-    args = exc.cmd or []
-    is_update_ref = "update-ref" in args and ref_name in args
-    if not is_update_ref:
-        return False
-    if exc.returncode == 128:
-        return True
-    stderr = getattr(exc, "stderr", "") or ""
-    return "cannot lock ref" in stderr
+# The registry's ``ref-cas`` STRUCTURAL predicate: it reads the command SHAPE and the EXIT
+# CODE, which no ``(marker, operation) -> kind`` table can express. It moved to the shared
+# registry verbatim and is re-exported here under its historical name, so ``_ref_lock``'s
+# acquire / release / steal / renew seams — and ``_cas_once`` below — are untouched.
+_is_cas_mismatch = _git_outcome.is_cas_mismatch
 
 
 def _cas_once(mutate_and_advance, ref_name: str = "refs/heads/tickets") -> bool:

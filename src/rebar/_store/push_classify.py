@@ -9,12 +9,11 @@ The push loop imports these names; they do not import it.
 from __future__ import annotations
 
 import logging
-import re
 import time
 from collections.abc import Callable
 
 from rebar._optional import OptionalDependencyError
-from rebar._store import push_state
+from rebar._store import git_outcome, push_state
 from rebar._store.push_state import unpushed_summary as _unpushed_summary
 
 logger = logging.getLogger(__name__)
@@ -45,103 +44,21 @@ def _raise_if_strict(
         raise PushDeliveryError(reason, detail, base_path, remote_ref)
 
 
-_NON_FF = re.compile(r"non-fast-forward|rejected|fetch first", re.IGNORECASE)
-
-# Bug 2a76: the bare token ``rejected`` above is NOT specific to a non-fast-forward.
-# git prints ``! [remote rejected] HEAD -> tickets (pre-receive hook declined)`` for
-# EVERY server-side decline — GitHub push protection (GH013 secret scanning), a
-# pre-receive hook, branch protection, a rate limit, an internal server error. Those
-# are PERMANENT policy rejections: a fetch+merge cannot fix them, so classifying them
-# as non-fast-forward burned all three retries (three real hits on the remote's hook,
-# zero merge commits) and then reported only "failed after 3 retries" — the reason git
-# gave us was thrown away, making an 8-hour outage indistinguishable from transient
-# contention while commits piled up locally. The fix is the same SUBTRACTIVE exclusion
-# shape already proven in _engine/rebar_reconciler/_ref_lock.py (bug 4afc): a broad
-# marker counts only when nothing names a non-mergeable cause.
-_POLICY_DECLINE_MARKERS = (
-    "hook declined",  # pre-receive / update hook (incl. GitHub push protection GH013)
-    "push declined",
-    "protected branch",
-    "branch protection",
-    "internal server error",
-    "rate limit",
-    "gh0",  # GitHub push-protection / policy error codes: GH006, GH013, ...
-)
+# The non-FF / policy-decline / transport marker tables moved to
+# :mod:`rebar._store.git_outcome`, which owns every git marker string in the store. The
+# SUBTRACTIVE shape they encode is unchanged and now stated once there: bug 2a76 (the bare
+# token ``rejected`` is not specific to a non-fast-forward — every server-side decline
+# carries it, and those are PERMANENT), bug f61c (a TRANSPORT fault is not a permanent rule
+# violation), and bug 4afc (the same exclusion shape in _ref_lock). These names stay as
+# lookups because the push loop imports them.
+_is_policy_decline = git_outcome.is_policy_decline
+_is_non_fast_forward = git_outcome.is_non_fast_forward
 
 
-def _is_policy_decline(stderr: str) -> bool:
-    """Whether the remote explicitly declined the push for a policy reason."""
-    return any(marker in stderr.lower() for marker in _POLICY_DECLINE_MARKERS)
+_is_multi_bundle = git_outcome.is_multi_bundle
+_is_transport_retriable = git_outcome.is_transport_retriable
 
-
-def _is_non_fast_forward(stderr: str) -> bool:
-    """Whether *stderr* shows a genuine non-fast-forward (retriable by fetch+merge).
-
-    A policy decline also carries the word ``rejected``, so it must be excluded
-    explicitly; ambiguity resolves to TERMINAL (report the reason once) rather than
-    to a retry loop that provably cannot converge (bug 2a76).
-    """
-    if _is_policy_decline(stderr):
-        return False
-    return bool(_NON_FF.search(stderr))
-
-
-def _is_multi_bundle(stderr: str) -> bool:
-    """Whether *stderr* shows the git-remote-s3 multi-bundle state (a ref with two bundles).
-
-    True when the message reports ``multiple bundles`` or ``multiple updates for ref``
-    (case-insensitive); False for a plain non-fast-forward or a transport error.
-    """
-    low = stderr.lower()
-    return "multiple bundles" in low or "multiple updates for ref" in low
-
-
-# Bug f61c: a TRANSPORT fault is not a permanent rule violation. The terminal branch below
-# was written for policy declines ("hitting the remote twice more cannot change a permanent
-# rule violation") but swallowed transport faults too, so a converged reconcile pass was
-# abandoned after ONE blip: an observed CI pass died on `server certificate verification
-# failed. CAfile: none CRLfile: none` (the hosted runner's CA bundle not resolving) with 3
-# unpushed commits, and another lost merge recovery the same way. Those commits die with the
-# runner: a converged pass whose events never reach origin/tickets is silently lost work.
-#
-# Same SUBTRACTIVE shape as _is_non_fast_forward (bug 2a76) and _ref_lock (bug 4afc): a policy
-# decline can never be transport-retriable, and ambiguity resolves to TERMINAL rather than to a
-# retry loop that provably cannot converge.
-_TRANSPORT_RETRIABLE_MARKERS = (
-    "server certificate verification failed",  # runner CA bundle unresolved (CAfile: none)
-    "ssl certificate problem",
-    "gnutls_handshake",
-    "openssl ssl_read",
-    "could not resolve host",
-    "connection reset by peer",
-    "connection timed out",
-    "operation timed out",
-    "failed to connect",
-    "empty reply from server",
-    "the remote end hung up unexpectedly",
-    "early eof",
-    "rpc failed",
-    "unable to access",  # git's generic transport preamble (curl/http layer)
-    "from promisor remote",  # blob:none partial clone: on-demand fetch hit the network
-    "git timed out after",  # the synthetic _GIT_TIMEOUT CompletedProcess (returncode 124)
-)
-
-
-def _is_transport_retriable(stderr: str) -> bool:
-    """Whether *stderr* shows a TRANSIENT transport fault worth another attempt.
-
-    False for a policy decline (permanent) and for a non-fast-forward (which has its own
-    fetch+merge recovery path); ambiguity resolves to False, i.e. terminal.
-    """
-    if _is_policy_decline(stderr):
-        return False
-    low = stderr.lower()
-    return any(marker in low for marker in _TRANSPORT_RETRIABLE_MARKERS)
-
-
-_DIRTY_WD = re.compile(
-    r"would be overwritten by merge|local changes.*would be overwritten", re.IGNORECASE
-)
+_DIRTY_WD = git_outcome.DIRTY_WD_RE
 _MAX_RETRIES = 5
 # Bug f61c: attempts at a transport fault, and the backoff between them. Deliberately small —
 # the goal is to ride out a blip, not to sit on a real outage while commits pile up. The sleep

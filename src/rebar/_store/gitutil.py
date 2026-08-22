@@ -58,6 +58,8 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 
+from rebar._store import git_outcome
+
 logger = logging.getLogger(__name__)
 
 
@@ -165,6 +167,39 @@ def run_git(
     )
 
 
+# raw-git-ok: locked store seam internal
+def run_git_bounded(
+    cwd: str | os.PathLike[str] | None,
+    *args: str,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
+    runner: Callable[..., subprocess.CompletedProcess] | None = None,
+) -> subprocess.CompletedProcess:
+    """:func:`run_git` with the watchdog timeout FOLDED INTO a synthetic failed result.
+
+    This is the ONE place rebar's store builds git's rc-124 "timed out" outcome. Before it
+    the same three-line ``try/except TimeoutExpired`` lived in four modules with three
+    different timeout constants, and only one classifier treated the result as retriable —
+    the drift this seam exists to make impossible. A hung git therefore fails the op
+    cleanly (unwinding out of any lock the caller holds) rather than raising a
+    :class:`subprocess.TimeoutExpired` the returncode-inspecting callers do not expect.
+
+    The marker that RECOGNISES this result lives in :mod:`rebar._store.git_outcome` (it is
+    a TRANSPORT-retriable row); constructing it lives here, where the shared runner is.
+    ``check`` is always ``False``: a caller wanting an exception inspects the returncode.
+
+    ``runner`` lets a module hand in ITS OWN late-bound ``run_git`` global so a test that
+    patches ``<module>.run_git`` by name still intercepts the call — folding the timeout
+    here must not quietly relocate a module's monkeypatch seam.
+    """
+    invoke = run_git if runner is None else runner
+    try:
+        return invoke(cwd, *args, check=False, env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        argv = ["git", *args] if cwd is None else ["git", "-C", str(cwd), *args]
+        return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {timeout}s")
+
+
 # The tickets tracker is a SHARED git worktree, so rebar's own write lock (which only
 # serialises writes WITHIN one clone) does not stop a concurrent rebar process — or a
 # crashed git that left a stale lock — from colliding on git's OWN ``.git/index.lock``.
@@ -213,26 +248,31 @@ def _lock_retry_budget_s() -> float:
 
 
 def _is_index_lock_error(text: str) -> bool:
-    """True if *text* is git's index.lock-contention signature (case-insensitive)."""
-    low = text.lower()
-    return "index.lock" in low and ("file exists" in low or "another git process" in low)
+    """True if *text* is git's index.lock-contention signature (case-insensitive).
+
+    A lookup against the shared registry (:mod:`rebar._store.git_outcome`), which owns
+    the marker strings; kept under this name so the existing call sites are unchanged."""
+    return git_outcome.is_index_lock(text)
 
 
 def _is_git_lock_error(text: str) -> bool:
     """True if *text* is ANY git lock-conflict signature: the index.lock contention above,
-    a ref lock (``cannot lock ref``), or another ``<name>.lock`` create conflict
-    (``HEAD.lock`` / ``packed-refs.lock`` / ``config.lock``). Only index.lock gets the
-    stale-reclaim treatment; the others are purely ridden out (git's maintenance holds ref
-    locks for microseconds — retry has a real chance; 9305 research §1a)."""
-    if _is_index_lock_error(text):
-        return True
-    low = text.lower()
-    return "cannot lock ref" in low or (".lock'" in low and "file exists" in low)
+    a ref lock, or another ``<name>.lock`` create conflict (``HEAD.lock`` /
+    ``packed-refs.lock`` / ``config.lock``). Only index.lock gets the stale-reclaim
+    treatment; the others are purely ridden out (git's maintenance holds ref locks for
+    microseconds — retry has a real chance; 9305 research §1a).
+
+    A lookup against the shared registry; the markers live in
+    :mod:`rebar._store.git_outcome`."""
+    return git_outcome.is_git_lock(text)
 
 
 # git names the contended lock file in its own message ("Unable to create '<path>': File
 # exists." / "cannot lock ref '<ref>'"); parse it so the exhaustion error can name it.
 _LOCK_PATH_RE = re.compile(r"[Uu]nable to create '([^']+\.lock)'")
+# Parses the contended ref NAME out of git's message for the exhaustion hint — a formatting
+# concern, not a verdict, so it stays here with _augment_lock_exhaustion.
+# git-marker-ok: extracts the ref name for an error message; it classifies nothing.
 _LOCK_REF_RE = re.compile(r"cannot lock ref '([^']+)'")
 
 
@@ -357,6 +397,7 @@ def _reclaim_if_stale_index_lock(tracker: str, *, force: bool = False) -> None:
     git_dir = _resolve_tracker_git_dir(tracker)
     if not git_dir:
         return
+    # git-marker-ok: the lock file's filesystem PATH, not a failure marker.
     lock_file = os.path.join(git_dir, "index.lock")
     try:
         st = os.stat(lock_file)
@@ -446,50 +487,18 @@ def _with_index_lock_retry(
     return result
 
 
-# git intermittently fails to READ ``HEAD`` on CI runners during an index-mutating op that
-# must resolve it first — most often ``git commit``, which parses HEAD (``parse_commit``) to
-# set the new commit's parent. Under a SHARED tracker worktree the HEAD commit's loose object
-# in ``.git/objects/`` is transiently unreadable (a runner-FS read hiccup, NOT data
-# corruption), and git aborts with ``fatal: could not parse HEAD`` (exit 128) BEFORE writing
-# anything. It is the READ-side analogue of the WRITE-side object-DB temp-create
-# transient (``_TRANSIENT_WRITE_MARKERS`` below): the identical invocation succeeds on retry — a
-# re-run on the same state passes (a Gerrit ``recheck`` on the same patchset goes green) — so
-# retrying ONLY this signature turns a runner-FS blip from a hard write loss (which red-lights
-# unrelated CI) into a self-healed write. The op is safe to re-run because it failed at the
-# HEAD-parse step before mutating the store (idempotent). Kept a tight, greppable marker set
-# (only the proven ``could not parse HEAD`` signature) so it never masks a genuine error.
-# Bug childsafe-special-springtail.
-_TRANSIENT_HEAD_MARKERS = ("could not parse head",)
-# The object-DB analogue of the HEAD-parse transient above, and the SAME fault class: git
-# resolved the name to an OID but ``parse_object()`` returned NULL, so it aborts with
-# ``fatal: bad object <name>`` having read nothing and written nothing. Proven on this runner
-# fleet by three CI failures of the s3 doctor's bundle step (bug wrongful-chemic-squeaker),
-# where the merged tip's loose object — whose sha git had just printed — was briefly
-# unreadable, and the identical invocation succeeds on retry. The name in the message carries
-# no information: the same fault was raised as both ``bad object HEAD`` and ``bad object
-# <sha>``, so the marker matches the fault, not the argument. Deliberately does NOT cover
-# git's CORRUPT-object signatures (``loose object … is corrupt``, ``inflate: data stream
-# error``), which are real damage rather than a read blip; a genuinely broken object that
-# happens to also report ``bad object`` still surfaces once the bounded retries are spent.
-_TRANSIENT_OBJECT_MARKERS = ("bad object",)
-# The WRITE-side member of the same runner-FS fault family: git's loose-object temp create
-# under ``.git/objects/`` intermittently fails while writing a blob/tree/commit, returning
-# ENOENT on Linux ("unable to create temporary file: No such file or directory") or EINVAL on
-# macOS ("… Invalid argument"), surfaced as "failed to insert into database" / "unable to
-# index file". A filesystem hiccup, NOT a data fault — the identical op succeeds on retry (a
-# Gerrit ``recheck`` on the same patchset passes). Proven on ``git add`` by bugs
-# vocal-dip-robin / brainy-floral-globefish, where these markers first lived privately in
-# event_append; they moved here so EVERY caller of the shared write seam inherits the same
-# self-heal instead of only the ``git add`` path (bug unheedful-custodial-bluebottle, filed
-# after the s3 doctor's ``commit-tree`` hit this fault through :func:`run_git_write` and
-# red-lit CI). One definition, one budget, no second dialect. Like the read-side markers this
-# deliberately does NOT cover git's CORRUPT-object signatures, and a fault that outlives the
-# bounded retries still surfaces.
-_TRANSIENT_WRITE_MARKERS = (
-    "unable to create temporary file",
-    "failed to insert into database",
-    "unable to index file",
-)
+# The three runner-FS transient marker tables moved to :mod:`rebar._store.git_outcome`,
+# which owns every git marker string in the store; the reasoning that chose each one travels
+# with them. Re-exported here under their historical names because callers and tests read
+# them from this module.
+#   READ-side HEAD parse  — bug childsafe-special-springtail
+#   READ-side object DB   — bug wrongful-chemic-squeaker
+#   WRITE-side temp create — bugs vocal-dip-robin / brainy-floral-globefish, moved out of
+#                            event_append by bug unheedful-custodial-bluebottle so EVERY
+#                            caller of the shared write seam inherits the same self-heal
+_TRANSIENT_HEAD_MARKERS = git_outcome.TRANSIENT_HEAD_MARKERS
+_TRANSIENT_OBJECT_MARKERS = git_outcome.TRANSIENT_OBJECT_MARKERS
+_TRANSIENT_WRITE_MARKERS = git_outcome.TRANSIENT_WRITE_MARKERS
 _TRANSIENT_FAULT_ATTEMPTS = 3
 _TRANSIENT_FAULT_BACKOFF_S = 0.1
 
@@ -500,7 +509,7 @@ def is_transient_object_read_error(text: str) -> bool:
     Exposed so a caller that must distinguish this fault in the error it raises — an
     unreadable object is not a data conflict, and sends the operator to a different tool —
     classifies it against the SAME marker set the retry uses, never a second private copy."""
-    return any(marker in text.lower() for marker in _TRANSIENT_OBJECT_MARKERS)
+    return git_outcome.is_transient_object_read(text)
 
 
 def _is_transient_object_write_error(text: str) -> bool:
@@ -511,19 +520,14 @@ def _is_transient_object_write_error(text: str) -> bool:
     caller (the s3 doctor) folds a hint from it into the error it raises, and no caller
     classifies the write fault that way today. ``event_append`` re-exports this under its own
     historical name so there is still exactly ONE marker definition."""
-    return any(marker in text.lower() for marker in _TRANSIENT_WRITE_MARKERS)
+    return git_outcome.is_transient_object_write(text)
 
 
 def _is_transient_git_fault(text: str) -> bool:
     """True if *text* is any transient runner-FS git signature (case-insensitive): the
     READ-side HEAD-parse and ``bad object`` faults, or the WRITE-side loose-object
-    temp-create fault."""
-    low = text.lower()
-    return (
-        any(marker in low for marker in _TRANSIENT_HEAD_MARKERS)
-        or is_transient_object_read_error(low)
-        or _is_transient_object_write_error(low)
-    )
+    temp-create fault. A lookup against the shared registry."""
+    return git_outcome.is_transient_fs(text)
 
 
 def _with_transient_fault_retry(
@@ -594,15 +598,7 @@ def run_git_write(
     rather than being silently replaced when it adopts this seam."""
 
     def _bounded_once() -> subprocess.CompletedProcess:
-        try:
-            return run_git(tracker, *args, check=False, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return subprocess.CompletedProcess(
-                ["git", "-C", str(tracker), *args],
-                124,
-                "",
-                f"git timed out after {timeout}s",
-            )
+        return run_git_bounded(tracker, *args, timeout=timeout)
 
     result = _with_index_lock_retry(
         str(tracker),

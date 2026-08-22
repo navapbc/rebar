@@ -22,7 +22,7 @@ from collections.abc import Callable
 
 from rebar._optional import OptionalDependencyError
 from rebar._store import push_recovery, push_state
-from rebar._store.gitutil import run_git
+from rebar._store.gitutil import run_git, run_git_bounded
 from rebar._store.push_classify import (
     _MAX_RETRIES,
     PushDeliveryError,
@@ -69,15 +69,9 @@ _GIT_TIMEOUT = 30
 
 # raw-git-ok: locked store seam internal
 def _git(base: str, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
-    try:
-        return run_git(base, *args, check=False, env=env, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(
-            ["git", "-C", base, *args],
-            124,
-            "",
-            f"git timed out after {_GIT_TIMEOUT}s",
-        )
+    """This module's bounded git seam — ~25 tests monkeypatch it, so the NAME stays; the
+    timeout fold is the shared :func:`gitutil.run_git_bounded`."""
+    return run_git_bounded(base, *args, env=env, timeout=_GIT_TIMEOUT, runner=run_git)
 
 
 # ── Push-recovery (stash/dirty-tree + non-fast-forward) now lives in push_recovery.py ──
