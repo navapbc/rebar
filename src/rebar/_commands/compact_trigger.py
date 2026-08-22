@@ -37,6 +37,7 @@ import sys
 import time
 
 from rebar._store.paths import StorePaths
+from rebar._store.stamped_lock import release_stamped_lock, stamped_file_lock
 
 logger = logging.getLogger(__name__)
 
@@ -117,60 +118,20 @@ def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
 
 
 def _acquire_trigger_lock(tracker: str) -> int | None:
-    """Best-effort non-blocking advisory lock: an open fd, or ``None`` if a live compactor
-    holds it. NOT the store write lock — this only stops two worker PROCESSES doing redundant
-    work, and a caller that cannot get it simply does not spawn.
-
-    Carries the SAME v2 ownership stamp the store's mkdir lock writes, and a collision is
-    adjudicated by the SAME shared decision table
-    (:func:`rebar._store.lock_owner.stamped_file_is_stale`) the drain lock uses, so the
-    pid-recycle qualification, the refuse-without-proof branches and the wall-clock ceiling are
-    inherited rather than re-invented. Without that, a worker that died between acquire and
-    release would leak this file and silently disable the trigger forever — which is precisely
-    the bug that had to be fixed for the drain lock.
-
-    A provably-orphaned lock is reclaimed LOUDLY and the create retried EXACTLY ONCE; a second
-    collision means another worker won the race, so we give up rather than loop."""
-    from rebar._store import lock_owner as _owner
-
+    """Best-effort non-blocking advisory lock: an open fd, or ``None`` if a live compactor holds
+    it. NOT the store write lock — a caller that cannot get it simply does not spawn. The
+    mechanism is :func:`rebar._store.stamped_lock.stamped_file_lock`, shared with the drain and
+    snapshot-GC triggers; only the sidecar directory is this site's own."""
     try:
         os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
     except OSError:
         return None
-    path = _trigger_lock_path(tracker)
-    for attempt in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            if attempt or not _owner.stamped_file_is_stale(path):
-                return None
-            logger.warning("compaction trigger: reclaiming stale worker lock %s", path)
-            try:
-                os.unlink(path)
-            except OSError:
-                return None  # someone else got there first; let them compact
-            continue
-        except OSError:
-            return None
-        try:
-            os.write(fd, _owner._owner_stamp().encode("utf-8"))
-        except OSError:
-            pass  # a failed stamp only forfeits early reclamation of our own lock
-        return fd
-    return None
+    return stamped_file_lock(_trigger_lock_path(tracker), label="compaction trigger")
 
 
 def release_trigger_lock(tracker: str, fd: int) -> None:
-    """Drop the advisory lock (close the fd, unlink the file). Best-effort in both legs: a
-    failed unlink leaves a stamped file that the shared staleness table will reclaim."""
-    try:
-        os.close(fd)
-    except OSError:
-        pass
-    try:
-        os.unlink(_trigger_lock_path(tracker))
-    except OSError:
-        pass
+    """Drop the advisory lock (close the fd, unlink the file), both legs best-effort."""
+    release_stamped_lock(_trigger_lock_path(tracker), fd)
 
 
 def _spawn_detached_sweep(tracker: str) -> None:
