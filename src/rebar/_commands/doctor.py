@@ -50,7 +50,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from rebar._commands import doctor_locks
+from rebar._commands import doctor_locks, doctor_mapping
 from rebar._commands._repair_pause import owned_repair_pause
 from rebar._commands._seam import CommandError, tracker_dir
 from rebar._engine_support.output import OutputFormatError, parse_output
@@ -414,6 +414,7 @@ def _print_text(
     repaired: bool,
     lock_reports: list[dict[str, Any]],
     lock_faults: list[dict[str, Any]],
+    mapping_findings: list[dict[str, Any]],
 ) -> None:
     if pre_oid:
         print(f"doctor: pre-tag {PRE_REPAIR_TAG} @ {pre_oid[:12]}")
@@ -436,6 +437,12 @@ def _print_text(
     for line in doctor_locks.render_text(lock_reports, lock_faults):
         print(line)
     print(f"doctor: {len(lock_faults)} stale lock(s)")
+    # Mapping findings render in their own section — like locks, they stay OUT of the
+    # repair loop; each line carries the finding's detail (and its key where present).
+    for f in mapping_findings:
+        key = f.get("key")
+        prefix = f"mapping[{key}]" if key else "mapping"
+        print(f"{prefix} {f['severity']}: {f['detail']}")
 
 
 def doctor_cli(argv: list[str], *, repo_root=None) -> int:
@@ -474,6 +481,11 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
     lock_reports = doctor_locks.scan_locks(tracker)
     lock_faults = doctor_locks.lock_findings(lock_reports)
 
+    # Mapping-config diagnostics: their OWN list, deliberately outside `findings` so
+    # `run_repair` never iterates them (exactly as lock results stay out of the repair
+    # loop). The config root is the repo root, not the tracker dir.
+    mapping_findings = doctor_mapping.scan_mapping(repo_root)
+
     pre_oid = ""
     if do_repair and not dry_run and findings:
         try:
@@ -491,6 +503,7 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
                     "pre_repair_tag_oid": pre_oid,
                     "locks": lock_reports,
                     "lock_findings": lock_faults,
+                    "mapping_findings": mapping_findings,
                 }
             )
         )
@@ -501,10 +514,12 @@ def doctor_cli(argv: list[str], *, repo_root=None) -> int:
             repaired=do_repair and not dry_run,
             lock_reports=lock_reports,
             lock_faults=lock_faults,
+            mapping_findings=mapping_findings,
         )
 
     outstanding = _outstanding(findings)
     # A stale lock is outstanding by the same rule as an unrepaired link finding: no live
     # process claims it. A HELD lock with a live holder is information, not a finding, so
     # it never fails a CI gate keyed on this exit code.
-    return 1 if outstanding or lock_faults else 0
+    blocking_mapping = doctor_mapping.has_blocking_mapping(mapping_findings)
+    return 1 if outstanding or lock_faults or blocking_mapping else 0
