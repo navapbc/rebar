@@ -446,3 +446,66 @@ def test_escalation_changes_membership_not_the_verdict():
         == b.store["verdict"]["outputs"]["verdict"]
         == "PASS"
     )
+
+
+# ── RP-06 S3: pre-cutover contract parity when NO approved delta applies ─────────────────────
+class _CannedAgent:
+    def __init__(self):
+        self.calls = []
+
+    def run(self, ctx):
+        prompt = str(ctx.step["prompt"])
+        self.calls.append(prompt)
+        oid = prompt.replace("code-review-", "")
+        return _ex.StepResult(
+            outputs={
+                "findings": [{"finding": f"{oid} f", "criteria": [oid], "location": f"{oid}.py:1"}],
+                "_usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+        )
+
+
+def _batch_req(criteria, *, step_id="round_a", usd_budget=None):
+    from rebar.llm.workflow.runners import BatchRunRequest
+
+    return BatchRunRequest(
+        finder="code-review-base",
+        criteria=tuple(criteria),
+        usd_budget=usd_budget,
+        model_ladder=(),
+        workflow={},
+        target_ticket=None,
+        repo_root=None,
+        run_id="parity",
+        step_id=step_id,
+    )
+
+
+def test_cutover_preserves_findings_and_journal_when_no_delta_applies():
+    # With no budget, no failure, no project criteria, the migrated runner produces the SAME
+    # aggregated findings, ran-list, and criteria_count as the pre-cutover contract.
+    crits = [{"prompt": "code-review-security"}, {"prompt": "code-review-tests"}]
+    result = CodeReviewBatchRunner(context="DIFF").run(_batch_req(crits), _CannedAgent())
+    assert result.outputs["batch_plan"]["ran"] == ["code-review-security", "code-review-tests"]
+    assert result.outputs["criteria_count"] == 2
+    assert [f["finding"] for f in result.outputs["findings"]] == ["security f", "tests f"]
+    # usage totals still aggregate at the top level (parity with the historical shape).
+    assert result.outputs["_usage"]["input_tokens"] == 2
+
+
+def test_cutover_writes_no_checkpoints():
+    # code review retains NO discovery checkpoints — running the SAME plan twice re-dispatches
+    # every criterion (no resume/reuse), matching the pre-cutover no-checkpoint behavior.
+    runner = CodeReviewBatchRunner(context="DIFF")
+    a = _CannedAgent()
+    runner.run(_batch_req([{"prompt": "code-review-security"}]), a)
+    runner.run(_batch_req([{"prompt": "code-review-security"}]), a)
+    assert a.calls == ["code-review-security", "code-review-security"]  # re-run, not resumed
+
+
+def test_cutover_runs_criteria_sequentially_once_each():
+    a = _CannedAgent()
+    crits = [{"prompt": f"code-review-{o}"} for o in ("security", "tests", "docs")]
+    CodeReviewBatchRunner(context="DIFF").run(_batch_req(crits), a)
+    assert sorted(a.calls) == ["code-review-docs", "code-review-security", "code-review-tests"]
+    assert len(a.calls) == len(set(a.calls))  # exactly once each, sequential
