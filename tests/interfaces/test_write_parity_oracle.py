@@ -9,7 +9,7 @@ the same expectation, any surface drift — a param present on one adapter but
 missing on another, or a runtime rule enforced inconsistently — fails the suite
 WITHOUT an LLM, a change-detector, or a hand-maintained NxM matrix.
 
-Known, ticketed divergences (such as the remaining MCP close-reason gap) are
+Known, ticketed divergences are
 recorded as per-row strict-xfails: the suite is
 GREEN today, and when the gap is closed the MCP classification flips to match
 the expectation, the strict-xfail xpasses, and the marker must be deleted — the

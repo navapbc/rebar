@@ -540,6 +540,39 @@ def test_mcp_transition_closes_bug_with_close_class(rebar_repo) -> None:
     assert state.get("close_class") == "regression"
 
 
+# ── reason threads through MCP to become close_reason (ticket e1a2) ──────────
+# The write-parity oracle classifies the MCP surface by INTROSPECTING
+# transition_ticket's signature, so merely declaring ``reason`` would flip its
+# strict-xfail to xpass while the body silently discarded the datum (the
+# defiant-orthoclase-buck failure mode). This test asserts the datum ARRIVES:
+# the reason must be persisted as ``close_reason`` on the reduced state.
+def test_mcp_transition_persists_close_reason_on_reason_required_class(rebar_repo) -> None:
+    """transition_ticket must forward ``reason`` to rebar.transition so a
+    reason-required administrative close records its close_reason."""
+    srv = build_server()
+    tid = rebar.create_ticket(
+        "task", "MCP obsolete close", description="x" * 60, repo_root=str(rebar_repo)
+    )
+    asyncio.run(
+        srv.call_tool(
+            "transition_ticket",
+            {
+                "ticket_id": tid,
+                "current_status": "open",
+                "target_status": "closed",
+                "close_class": "obsolete",
+                "reason": "superseded by the consolidated surface",
+            },
+        )
+    )
+    state = rebar.show_ticket(tid, repo_root=str(rebar_repo))
+    assert state["status"] == "closed"
+    assert state.get("close_reason") == "superseded by the consolidated surface", (
+        "reason was accepted by the MCP tool but never reached the close disposition "
+        "— the parameter exists, the datum did not arrive"
+    )
+
+
 def test_mcp_transition_records_explicit_caused_by_edge(rebar_repo) -> None:
     culprit = rebar.create_ticket("task", "culprit", repo_root=str(rebar_repo))
     bug = rebar.create_ticket("bug", "attributed bug", repo_root=str(rebar_repo))
