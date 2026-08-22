@@ -31,6 +31,8 @@ extra or a model key, because it never runs the LLM tiers.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import Any
 
 from . import attest, sidecar
@@ -88,6 +90,68 @@ def _material_delta(payload: dict[str, Any], ticket_id: str, repo_root) -> str:
     return (
         "the changed component cannot be named: this review predates per-component fingerprinting"
     )
+
+
+def _collect_baseline_generation(
+    ticket_id: str, repo_root, recorded_verdict: str
+) -> tuple[Any, dict[str, Any] | None]:
+    """Collect resign's pre-signing generation baseline as ``(generation, refusal)``.
+
+    Ignore UNTRACKED files in the SHARED tickets-tracker (same rule as the review
+    preflight, bug d7cb-22ae): this is a READ that fingerprints the COMMITTED
+    tracker head, and an untracked path cannot change that head — so it cannot
+    change the answer. This machine runs many concurrent sessions against ONE
+    tracker symlinked into each of them, where an untracked ``.tmp-event-*`` is the
+    NORMAL transient state of another session's in-flight atomic write (write temp,
+    then rename) — not crash debris. Under the strict check, signing raced those
+    sessions and failed with store-read-failure at a rate that scaled with
+    concurrency. The authoritative under-lock re-check already tolerates them (see
+    generation.py's ``tracker_head_sha(..., ignore_untracked=True)``); tracked dirty
+    state (modified/staged/unmerged) still fails, as it must.
+
+    A transient ``store-read-failure`` — the STAGED half of that race, a peer's
+    in-flight ``git add``→``git commit`` index — is retried with the same bounded
+    attempts/jittered backoff as ``generation.sign_manifest``'s loop (bug 90c1-c112,
+    parity sibling of ec1e): resign's own signing step already inherits that retry,
+    so aborting terminally here made the recovery fail the exact concurrency it
+    exists to recover from. Deterministic snapshot reasons (missing/ambiguous/
+    malformed/reducer/id-mismatch) and any other failure stay terminal — the
+    recovery remains a structured no-throw API."""
+    from . import generation
+    from .relation_snapshot import PlanRelationSnapshotError
+
+    refusal = {"ok": False, "signed": False, "ticket_id": ticket_id, "verdict": recorded_verdict}
+    for attempt in range(1, generation.MAX_GENERATION_ATTEMPTS + 1):
+        try:
+            baseline = generation.collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
+        except PlanRelationSnapshotError as exc:
+            if exc.reason == "store-read-failure":
+                record = {
+                    "event": "plan_review_resign_collect_retry",
+                    "attempt": attempt,
+                    "reason": exc.reason,
+                }
+                logger.warning("plan_review_resign_collect_retry: %s", record, extra=record)
+                time.sleep(random.uniform(0, generation.STORE_READ_RETRY_BACKOFF_SECONDS * attempt))
+                continue
+            return None, {
+                **refusal,
+                "reason": f"plan review generation could not be collected: {exc}",
+            }
+        except Exception as exc:  # noqa: BLE001 - recovery remains a structured no-throw API
+            return None, {
+                **refusal,
+                "reason": f"plan review generation could not be collected: {exc}",
+            }
+        return baseline, None
+    return None, {
+        **refusal,
+        "reason": (
+            "plan review generation remained unreadable after "
+            f"{generation.MAX_GENERATION_ATTEMPTS} attempts (transient store-read-failure: "
+            "a concurrent session's in-flight tracker write) — retry `rebar sign-review`"
+        ),
+    }
 
 
 def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
@@ -162,31 +226,11 @@ def resign_plan_review(ticket_id: str, *, repo_root=None) -> dict[str, Any]:
             ),
         }
 
-    try:
-        from . import generation
-
-        # Ignore UNTRACKED files in the SHARED tickets-tracker (same rule as the review
-        # preflight, bug d7cb-22ae): this is a READ that fingerprints the COMMITTED
-        # tracker head, and an untracked path cannot change that head — so it cannot
-        # change the answer. This machine runs many concurrent sessions against ONE
-        # tracker symlinked into each of them, where an untracked `.tmp-event-*` is the
-        # NORMAL transient state of another session's in-flight atomic write (write temp,
-        # then rename) — not crash debris. Under the strict check, signing raced those
-        # sessions and failed with store-read-failure at a rate that scaled with
-        # concurrency. The authoritative under-lock re-check already tolerates them (see
-        # generation.py's tracker_head_sha(..., ignore_untracked=True)); tracked dirty
-        # state (modified/staged/unmerged) still fails, as it must.
-        initial_generation = generation.collect(
-            ticket_id, repo_root=repo_root, ignore_untracked=True
-        )
-    except Exception as exc:  # noqa: BLE001 - recovery remains a structured no-throw API
-        return {
-            "ok": False,
-            "signed": False,
-            "ticket_id": ticket_id,
-            "verdict": recorded_verdict,
-            "reason": f"plan review generation could not be collected: {exc}",
-        }
+    initial_generation, collect_refusal = _collect_baseline_generation(
+        ticket_id, repo_root, recorded_verdict
+    )
+    if collect_refusal is not None:
+        return collect_refusal
 
     children, child_state_error = _generation_child_states(initial_generation)
     if child_state_error:
