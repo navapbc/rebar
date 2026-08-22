@@ -41,7 +41,13 @@
    review gates error on an unreadable config**: a present-but-unreadable config makes
    gate resolution raise a `ConfigError` naming the gate, the ticket, and the parse
    fault, failing the claim/close loudly so the operator fixes the file (operator
-   ruling 39f8-ae7c; this replaced the earlier fail-open skip-with-a-warning). An
+   ruling 39f8-ae7c; this replaced the earlier fail-open skip-with-a-warning). The
+   **`mcp.*` gates** (`readonly` / `allow_llm` / `allow_jira_sync`) follow the same
+   ruling: their resolvers (`config.mcp_readonly` / `config.mcp_gate`) raise a
+   `ConfigError` naming the gate on an unreadable config instead of silently resolving
+   to a fallback (this replaced the earlier fail-closed/fail-safe defaults, which
+   safely withheld the capability but let the fault masquerade as a policy choice);
+   over MCP the fault is delivered as a structured `config_unreadable` error envelope. An
    absent config simply leaves the gate off — only a present config that cannot be
    parsed is a fault. A readable config resolves to `GateState.ENABLED`/`DISABLED`
    (`_commands/gates.py`), so a fault is never reported as a deliberate disable.

@@ -412,32 +412,36 @@ def _load_engine_mode():
 MODE_CAPS, Mode = _load_engine_mode()
 
 
-def _mcp_gate(attr: str, *, fail: bool) -> bool:
+def _mcp_gate(attr: str) -> bool:
     """Resolve a typed ``mcp.<attr>`` boolean gate through the single-source config
     (env ``REBAR_MCP_<ATTR>`` wins over a ``[tool.rebar.mcp]`` config file; the
     ``_as_bool`` coercion accepts 1/true/yes/on, any case, whitespace-tolerant). On a
-    MALFORMED config it returns ``fail`` — the SAFE direction for that gate, so the
-    value reported by ``rebar config`` is exactly what's enforced here."""
-    return rebar.config.mcp_gate(attr, fail=fail)
+    MALFORMED config the resolver raises ``ConfigError`` (operator ruling 39f8-ae7c) —
+    the structured-error guard delivers it to the client as a ``config_unreadable``
+    envelope, so the value reported by ``rebar config`` is exactly what's enforced
+    here and a fault never reads as a policy choice."""
+    return rebar.config.mcp_gate(attr)
 
 
 def _readonly() -> bool:
-    # Fail-CLOSED (read-only) on a malformed config — consistent with the verify
-    # gate; a broken config hides the write tools rather than exposing them. Routed
-    # through the ONE shared resolver in rebar.config so the LLM runner's read-only
-    # gate (runner._readonly_gate) resolves identically and the two can't drift.
-    # (_mcp_gate stays for the allow_llm / allow_jira_sync gates below.)
+    # ERRORS on a malformed config (operator ruling 39f8-ae7c) — consistent with the
+    # verify gates; a broken config surfaces the fault instead of silently locking
+    # read-only. Routed through the ONE shared resolver in rebar.config so the LLM
+    # runner's read-only gate (runner._readonly_gate) resolves identically and the two
+    # can't drift. (_mcp_gate stays for the allow_llm / allow_jira_sync gates below.)
     return rebar.config.mcp_readonly()
 
 
 def _allow_llm() -> bool:
-    # Fail-SAFE off — a malformed config never enables billable LLM calls.
-    return _mcp_gate("allow_llm", fail=False)
+    # Off by default; a malformed config ERRORS (never silently enables billable LLM
+    # calls — and never silently reads as the operator's "off" either).
+    return _mcp_gate("allow_llm")
 
 
 def _allow_jira_sync() -> bool:
-    # Fail-SAFE off — a malformed config never enables live/applying Jira writes.
-    return _mcp_gate("allow_jira_sync", fail=False)
+    # Off by default; a malformed config ERRORS (never silently enables live/applying
+    # Jira writes — and never silently reads as the operator's "off" either).
+    return _mcp_gate("allow_jira_sync")
 
 
 # Keep MCP workflow status/result payloads under the client's ~25K-token budget

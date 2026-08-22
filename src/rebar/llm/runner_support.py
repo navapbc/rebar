@@ -91,7 +91,10 @@ def _readonly_gate() -> bool:
 
     Resolves the SAME config-aware way as the MCP server's write-tool gate: env
     ``REBAR_MCP_READONLY`` wins over the ``[tool.rebar.mcp] readonly`` file key, and a
-    malformed config fails CLOSED (read-only). Previously this read ONLY the env var
+    malformed config raises ``ConfigError`` out of the shared resolver (operator ruling
+    39f8-ae7c: an unreadable config is an error, never a silent policy value — the
+    pre-ruling posture failed CLOSED here, which safely withheld the write but also let
+    the fault masquerade as configured read-only). Previously this read ONLY the env var
     (its own truthy parser) and ignored the file key, so a server set read-only via the
     config FILE alone still handed the review agent a live ``comment_ticket`` write in
     ``source=local`` mode — half-enforced read-only. Both this and ``mcp_server._readonly``

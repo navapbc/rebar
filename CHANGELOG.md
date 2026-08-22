@@ -22,6 +22,17 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
   `rebar.ConfigError`). Operator ruling on ticket 39f8-ae7c: "Unreadable config should
   result in an error." Fix the config file, then retry the operation.
 
+- **BREAKING (pre-1.0) — the MCP gate resolvers now ERROR on an unreadable config instead of
+  silently resolving to a fallback.** `config.mcp_readonly()` no longer falls back to
+  read-only and `config.mcp_gate()` no longer returns a caller-chosen default (its `fail`
+  keyword is removed) when the config cannot be read — both raise `ConfigError` naming the
+  gate, chained from the parse fault, per the same 39f8-ae7c operator ruling. Over MCP the
+  fault reaches the client as a structured error envelope with the new `config_unreadable`
+  code (added to `rebar.KNOWN_ERROR_CODES`), so a broken config is distinguishable from a
+  deliberate read-only/off policy. The safe capability posture is unchanged in effect — a
+  broken config still never enables writes, LLM calls, or Jira sync — but the fault now
+  surfaces to be fixed instead of masquerading as configuration.
+
 - **Library `transition` now uses the same reason-carrying force shape as `claim`.** Pass
   `force="<reason>"` to bypass whichever lifecycle gate the operation reaches; `None` alone
   means no bypass, and an explicitly empty string records `(no reason given)`. The former
