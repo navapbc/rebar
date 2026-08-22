@@ -35,6 +35,7 @@ import pytest
 
 import rebar
 from rebar._commands import compact_trigger
+from rebar._store.paths import StorePaths
 
 pytestmark = pytest.mark.unit
 
@@ -202,7 +203,7 @@ def test_a_stale_worker_lock_is_reclaimed(store: Path) -> None:
     """A worker that died between acquire and release must not disable the trigger forever —
     the exact failure the drain lock had to be fixed for."""
     tracker = _tracker(store)
-    os.makedirs(compact_trigger._rebar_dir(tracker), exist_ok=True)
+    os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
     path = compact_trigger._trigger_lock_path(tracker)
     # An unrecognised (pre-stamp shaped) lock, aged past the shared wall-clock ceiling.
     with open(path, "w", encoding="utf-8") as fh:

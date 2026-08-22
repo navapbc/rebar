@@ -22,6 +22,8 @@ import subprocess
 import sys
 import time
 
+from rebar._store.paths import StorePaths
+
 logger = logging.getLogger(__name__)
 
 _DRAIN_LOCK_NAME = "enrich-drain.lock"
@@ -37,41 +39,8 @@ def _drainer_id() -> str:
     return f"drainer-{os.getpid()}-{_DRAINER_SEQ}"
 
 
-def _canonical_tracker(tracker: str) -> str:
-    """*tracker* resolved through symlinks, degrading to the raw value.
-
-    Delegates to :func:`rebar._store.lock.canonical_tracker` — the same resolution the store
-    write lock uses — rather than re-deriving one, so a caller reaching the store through a
-    symlink lands on the same paths as a caller holding its real path. Lazily imported and
-    never-raising, matching this module's posture: the drain rides the tail of ordinary
-    writes, where a background concern must not fail the operation that triggered it (the
-    same reasoning as :func:`rebar._proc.detached_child_cwd`)."""
-    try:
-        from rebar._store import lock as _lock
-
-        return _lock.canonical_tracker(tracker)
-    except OSError:
-        return tracker
-
-
-def _rebar_dir(tracker: str) -> str:
-    """The repo's ``.rebar/`` — the sibling of the CANONICAL ``.tickets-tracker`` dir.
-
-    Resolving *tracker* first is load-bearing, not cosmetic (bug ``da68-fc7c-068c-4c53`` /
-    ``nuclear-calm-heron``). A ``make worktree`` worktree's ``.tickets-tracker`` is a SYMLINK
-    to the canonical store while its ``.rebar`` is a real per-worktree directory, so a bare
-    ``dirname`` stops at the CALLER and keys the drain lock and the drain log on the view
-    instead of the store. That defeated both: two agents in two worktrees held two DIFFERENT
-    lock files while draining the SAME queue, and the log was written into — and deleted with
-    — an ephemeral worktree. Doing the resolution HERE, inside the derivation, is what makes
-    the invariant hold for every path helper at once and keeps a caller from defeating it
-    (the shape ``_commands.compact_trigger._rebar_dir`` landed for the same class, bug
-    ``93a9-66cf-e681-4f49``)."""
-    return os.path.join(os.path.dirname(_canonical_tracker(tracker)), ".rebar")
-
-
 def _drain_lock_path(tracker: str) -> str:
-    return os.path.join(_rebar_dir(tracker), _DRAIN_LOCK_NAME)
+    return StorePaths(tracker).sidecar(_DRAIN_LOCK_NAME)
 
 
 # Vocabulary for a drain lock whose stamp names no holder. These are VERBATIM the phrases
@@ -146,7 +115,7 @@ def _acquire_advisory_lock(tracker: str) -> int | None:
     the ``os.unlink`` below for the window, the bounded harm, and why the fix is deferred."""
     from rebar._store import lock_owner as _owner
 
-    rebar_dir = _rebar_dir(tracker)
+    rebar_dir = StorePaths(tracker).rebar_dir
     try:
         os.makedirs(rebar_dir, exist_ok=True)
     except OSError:
@@ -210,7 +179,7 @@ def _release_advisory_lock(tracker: str, fd: int) -> None:
 
 
 def _drain_log_path(tracker: str) -> str:
-    return os.path.join(_rebar_dir(tracker), _DRAIN_LOG)
+    return StorePaths(tracker).log(_DRAIN_LOG)
 
 
 def status(tracker: str, *, now_ns: int | None = None, repo_root=None) -> dict[str, int]:
@@ -431,7 +400,7 @@ def _spawn_detached_drain(tracker: str) -> None:
             # — is derived from this argument. Handing over a worktree's SYMLINK leaves the
             # running child pointed at a path that dies with the worktree
             # (bug da68-fc7c-068c-4c53: "Error: cannot list '<retired>/.tickets-tracker'").
-            _canonical_tracker(tracker),
+            StorePaths(tracker).canonical,
             env={**os.environ},
             stderr=log_fh,
         )

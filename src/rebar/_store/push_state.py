@@ -47,6 +47,7 @@ import time
 from typing import Any
 
 from rebar._store import fsutil
+from rebar._store.paths import StorePaths
 
 logger = logging.getLogger(__name__)
 
@@ -86,34 +87,8 @@ NON_FAILURE_REASONS = frozenset(
 _DETAIL_LIMIT = 2000
 
 
-def _git_dir(tracker: str | os.PathLike[str]) -> str:
-    """The tracker's git dir, resolved WITHOUT a git subprocess.
-
-    ``<tracker>/.git`` is a directory in a normal clone and a FILE holding
-    ``gitdir: <path>`` in a linked worktree or a submodule. Both are handled here rather
-    than by shelling out to ``git rev-parse --git-dir``: this runs on the write path of
-    every push, and a status read must stay a file read. Falls back to ``<tracker>/.git``
-    if the pointer is unreadable — the caller's write then fails and is swallowed, which is
-    the correct best-effort degradation.
-    """
-    dot_git = os.path.join(str(tracker), ".git")
-    if os.path.isdir(dot_git):
-        return dot_git
-    try:
-        with open(dot_git, encoding="utf-8") as fh:
-            for line in fh:
-                if line.startswith("gitdir:"):
-                    target = line.partition(":")[2].strip()
-                    if not os.path.isabs(target):
-                        target = os.path.join(str(tracker), target)
-                    return os.path.normpath(target)
-    except OSError:
-        pass
-    return dot_git
-
-
 def _marker_path(tracker: str | os.PathLike[str]) -> str:
-    return os.path.join(_git_dir(tracker), MARKER)
+    return os.path.join(StorePaths(tracker).git_dir, MARKER)
 
 
 # raw-git-ok: locked store seam internal

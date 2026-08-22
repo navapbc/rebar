@@ -476,16 +476,16 @@ def test_gate_marker_lives_outside_the_tracker(repo: str) -> None:
     dir and NEVER inside the tracker — the tracker auto-commits and auto-pushes, so a marker
     written there would travel to every clone and be reported as store drift.
 
-    Also pins the path against ``enrich_drain._rebar_dir``, the other implementation of the
-    tracker→``.rebar`` sibling convention: the two are deliberately separate (importing
-    ``enrich_drain`` from ``queue`` would invert the dependency, since ``enrich_drain``
-    imports ``queue``), so a test keeps them in lockstep instead.
+    The lockstep half of this test is SUBSUMED by story ``6f18-05de-beaf-42be``: the marker
+    and the drain lock no longer have two implementations of the tracker→``.rebar`` sibling
+    convention to keep in step — both derive from the one owner,
+    :class:`rebar._store.paths.StorePaths`, so the assertion now names that owner directly.
     """
-    from rebar.llm import enrich_drain as D
+    from rebar._store.paths import StorePaths
 
     tracker = _tracker(repo)
     marker = Q._gate_marker_path(tracker)
-    assert os.path.dirname(marker) == D._rebar_dir(tracker)
+    assert os.path.dirname(marker) == StorePaths(tracker).rebar_dir
     assert not os.path.abspath(marker).startswith(os.path.abspath(tracker) + os.sep)
     Q.pending_enrichment(37_000_000_000_000, tracker)  # writes one
     assert os.path.exists(marker)

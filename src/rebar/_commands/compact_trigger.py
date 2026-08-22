@@ -36,6 +36,8 @@ import subprocess
 import sys
 import time
 
+from rebar._store.paths import StorePaths
+
 logger = logging.getLogger(__name__)
 
 #: Beside ``enrich-drain.lock`` in the repo's ``.rebar/`` — one compactor at a time.
@@ -45,56 +47,23 @@ _SWEEP_STAMP_NAME = "compact-sweep.stamp"
 _TRIGGER_LOG = "logs/compact-worker.log"
 
 
-def _canonical_tracker(tracker: str) -> str:
-    """*tracker* resolved through symlinks, degrading to the raw value.
-
-    Delegates to :func:`rebar._store.lock.canonical_tracker` — the same resolution the store
-    write lock uses — rather than re-deriving one, so a caller reaching the store through a
-    symlink lands on the same paths as a caller holding its real path. Lazily imported and
-    never-raising, matching this module's posture: this runs on the tail of a close, where a
-    background concern must not fail the operation that triggered it (the same reasoning as
-    :func:`rebar._proc.detached_child_cwd`)."""
-    try:
-        from rebar._store import lock as _lock
-
-        return _lock.canonical_tracker(tracker)
-    except OSError:
-        return tracker
-
-
-def _rebar_dir(tracker: str) -> str:
-    """The repo's ``.rebar/`` (sibling of the ``.tickets-tracker`` dir), as the drain uses.
-
-    Resolving *tracker* first is load-bearing, not cosmetic (bug ``93a9-66cf-e681-4f49`` /
-    ``intangible-ladyish-vicuna``). A ``make worktree`` worktree's ``.tickets-tracker`` is a
-    SYMLINK to the canonical store while its ``.rebar`` is a real per-worktree directory, so a
-    bare ``dirname`` stops at the CALLER and keys every sidecar on the view instead of the
-    store. That defeats each of them differently: the worker lock stops excluding anything (two
-    worktree views of one store each take "the" lock and compact concurrently), the sweep stamp
-    stops being a store-wide clock (a view re-fires a sweep the store just had, because it
-    reads its own empty stamp), and the log is written into — and deleted with — an ephemeral
-    worktree. Doing the resolution HERE, inside the derivation, is what makes the invariant
-    hold for every path helper at once and keeps a caller from defeating it."""
-    return os.path.join(os.path.dirname(_canonical_tracker(tracker)), ".rebar")
-
-
 def _trigger_lock_path(tracker: str) -> str:
-    return os.path.join(_rebar_dir(tracker), _TRIGGER_LOCK_NAME)
+    return StorePaths(tracker).sidecar(_TRIGGER_LOCK_NAME)
 
 
 def _sweep_stamp_path(tracker: str) -> str:
-    return os.path.join(_rebar_dir(tracker), _SWEEP_STAMP_NAME)
+    return StorePaths(tracker).sidecar(_SWEEP_STAMP_NAME)
 
 
 def _trigger_log_path(tracker: str) -> str:
-    return os.path.join(_rebar_dir(tracker), _TRIGGER_LOG)
+    return StorePaths(tracker).log(_TRIGGER_LOG)
 
 
 def record_sweep(tracker: str) -> None:
     """Stamp "a sweep ran just now". Best-effort: a missing stamp only makes the staleness
     check fire sooner, which costs one no-op sweep, never correctness."""
     try:
-        os.makedirs(_rebar_dir(tracker), exist_ok=True)
+        os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
         with open(_sweep_stamp_path(tracker), "w", encoding="utf-8") as fh:
             fh.write(str(int(time.time())))
     except OSError:
@@ -165,7 +134,7 @@ def _acquire_trigger_lock(tracker: str) -> int | None:
     from rebar._store import lock_owner as _owner
 
     try:
-        os.makedirs(_rebar_dir(tracker), exist_ok=True)
+        os.makedirs(StorePaths(tracker).rebar_dir, exist_ok=True)
     except OSError:
         return None
     path = _trigger_lock_path(tracker)
@@ -227,7 +196,7 @@ def _spawn_detached_sweep(tracker: str) -> None:
             # `run_sweep` this argument also becomes `repo_root = dirname(tracker)`. Handing
             # over a worktree's SYMLINK would leave the running child pointed at a path that
             # dies with the worktree (bug 93a9-66cf-e681-4f49).
-            _canonical_tracker(tracker),
+            StorePaths(tracker).canonical,
             env={**os.environ},
             stderr=log_fh,
         )

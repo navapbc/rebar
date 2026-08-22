@@ -66,6 +66,7 @@ from typing import Any
 
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
+from rebar._store.paths import StorePaths
 
 # Report/finding vocabulary. Kept as constants so the schema, the renderer and the tests
 # name the same strings.
@@ -105,14 +106,6 @@ _STALE_ADVICE = (
     "no live process claims this lock; the next writer's acquire reclaims it "
     "automatically — doctor never removes a lock"
 )
-
-
-def _rebar_dir(tracker: str) -> str:
-    """The repo's ``.rebar`` directory, derived from *tracker* the way the drain lock
-    derives it: the tracker is ``<repo>/.tickets-tracker``, so ``.rebar`` is its sibling
-    (:func:`rebar.llm.enrich_drain._rebar_dir`). Derived rather than imported so this
-    module does not reach into the LLM package for a path join."""
-    return os.path.join(os.path.dirname(tracker), ".rebar")
 
 
 def _probe_fcntl(path: str) -> str:
@@ -332,7 +325,7 @@ def scan_locks(tracker: str) -> list[dict[str, Any]]:
     an ``unknown`` row rather than aborting the whole ``doctor`` run.
     """
     canonical = _lock.canonical_tracker(tracker)
-    rebar_dir = _rebar_dir(canonical)
+    rebar_dir = StorePaths(canonical).rebar_dir
     legs: list[tuple[str, Any]] = [
         (
             LEG_TICKETS_FCNTL,
