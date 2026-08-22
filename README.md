@@ -123,14 +123,7 @@ On top of that foundation, rebar adds what parallel agent work actually needs:
   to one another.
 - **Structural quality gates** — clarity, acceptance-criteria, dispatch-readiness,
   and repo-wide health checks keep work dispatch-ready.
-- **LLM review gates** *(optional)* — review an agent's *plan* before work starts,
-  its *completion* before the ticket closes, and its *code* before it merges.
-  Plan-review and code-review share one four-pass kernel — a finder cites evidence, a
-  *separate* verifier tests each claim with atomic yes/no questions, and a
-  **deterministic** policy (never the model) decides what blocks — so a review coaches
-  with grounded, cited findings rather than a black-box score. A passing plan or
-  completion review leaves an HMAC-signed attestation: a machine-checkable signal of
-  rigorous agentic development, not vibe-coding.
+- **LLM review gates** *(optional).* Review an agent's plan before work starts, its completion before the ticket closes, and its code before it merges. Plan-review and code-review share one four-pass kernel. A finder cites evidence, a separate verifier tests each claim with atomic yes or no questions, and deterministic policy decides what blocks. A passing plan or completion review records an operation certificate as a DSSE envelope. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate names that environment as its principal. The result is a machine-checkable process record for the reviewed work.
 - **Provenance links** — `discovered_from` ties emergent work back to the ticket
   that surfaced it.
 - **One store, three interfaces** — drive it from the CLI, a Python library, or
@@ -252,17 +245,7 @@ whitespace tolerated); anything else (incl. unset) is off.
 
 #### Private-repo fetch credentials (code-reading gates)
 
-The LLM code-reading gates (`review_plan`, `verify_completion`,
-`review_code`, `scan_spec`) default to **attested** mode: they `git fetch` the verified
-ref from `origin` and read an immutable snapshot at the pinned SHA — never the server's
-mutable checkout. So a server pointed (`REBAR_ROOT`) at a **private** repository needs
-**read credentials to fetch**: a git credential helper, a deploy key, or a token in the
-server's clone. With no credentials, attested mode **fails closed** with a descriptive,
-actionable error (it never hangs on a prompt — `GIT_TERMINAL_PROMPT=0`); `source=local`
-(read the in-place checkout, never signed) is the back-out that needs no fetch. Full
-semantics, the HMAC trust model, and the snapshot env knobs (`REBAR_GATE_TMPDIR`, the
-disk-space watermark, the EFS/NFS `flock` caveat) are in
-[docs/repo-snapshot-gates.md](docs/repo-snapshot-gates.md).
+The LLM code-reading gates `review_plan`, `verify_completion`, `review_code`, and `scan_spec` default to attested mode. They fetch the selected ref from `origin` and read an immutable snapshot at the pinned SHA. A server whose `REBAR_ROOT` points to a private repository therefore needs read credentials through a Git credential helper, deploy key, or token in the server clone. Without credentials, attested mode fails closed with a remediation message and disables terminal prompts through `GIT_TERMINAL_PROMPT=0`. `source=local` reads the in-place checkout without fetching and never signs the result. [The snapshot guide](docs/repo-snapshot-gates.md) documents these semantics, the operation-certificate trust model for DSSE envelopes that carry SSHSIG signatures over their PAE bytes, each produced with an environment's Ed25519 key and attributed to that environment, and the settings for temporary storage, disk-space thresholds, and EFS or NFS locking.
 
 ### From source
 
@@ -358,11 +341,7 @@ same pair you call `unlink` repeatedly. Note that **blocking** links
 below), so `unlink` must target the **promoted (ancestor)** endpoint to remove
 such a link.
 
-Ticket work also leaves an **HMAC-signed attestation** — a machine-checkable proof
-that a gate ran and that its verified steps are unaltered. For most projects this is
-produced automatically by the code-review, plan-review, and completion-verifier
-gates, so you never sign by hand. To sign manifests yourself or customize the
-process, see [docs/manifest-signing.md](docs/manifest-signing.md).
+A passing plan-review or completion-verifier records an **operation certificate**. The certificate is a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. Its principal identifies that environment. The code-review gate reports its verdict through the review system and does not create this ticket certificate. The `rebar sign` command and library surface can also attach a manifest certificate outside those two gates. See [docs/manifest-signing.md](docs/manifest-signing.md).
 
 ### Hierarchy promotion of blocking links
 
@@ -481,7 +460,7 @@ access = rebar.bridge_check_access()
 legacy = rebar.reconcile("dry-run")              # defaults to dry-run
 audit = rebar.bridge_fsck()                       # unchanged offline audit
 
-# Cryptographic attestation (environment-bound HMAC):
+# Sign a DSSE operation certificate by applying SSHSIG to its PAE bytes with the environment's Ed25519 key and principal.
 rebar.sign_manifest(tid, ["unit tests: PASS", "security review: clean"])
 verdict = rebar.verify_signature(tid)            # {"verified": True, "verdict": "certified", ...}
 
@@ -571,10 +550,7 @@ tracker.branch = "tickets"                 # orphan branch the event log lives o
 The full key set, the `REBAR_<KEY>` env names, and deprecation aliases are in
 [`docs/config.md`](docs/config.md).
 
-When the close gate is enabled, closing a story/epic requires a **certified
-signature made at the current HEAD** — sign a manifest of verified steps
-(`rebar sign <id> '[...]'`) then `rebar transition <id> closed`; re-sign if HEAD
-moved, or bypass with `--force=<reason>`.
+When the close gate is enabled, a close transition runs the completion verifier against the selected code ref. A passing verifier records a DSSE operation-certificate envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. Run the transition again if the verified code changes. `--force=<reason>` bypasses the gate and records no certificate.
 
 rebar keeps its writable state under `.rebar/` at the repo root. The `scratch`
 store defaults to `<repo>/.rebar/scratch/` (override with `scratch.base_dir` /
