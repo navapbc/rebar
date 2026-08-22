@@ -164,6 +164,22 @@
     "block_threshold": 0.54,
     "blocking_enabled": true
   },
+  "correctness": {
+    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 the base reviewer always evaluates it, so exec/applies_to are inert here and only the posture/threshold/blocking_enabled fields are consulted by registry.threshold_for. Until this story it had NO routing entry at all and fell through to the unknown-criterion default (0.95, advisory), which made the largest base dimension in the corpus untunable. Routed blocking@0.54 from the code-v3 block-impact replay (docs/experiments/calibrate_code_review_thresholds.py --block-impact): 62 of 715 surviving findings would block across 51 of 1262 changes = 4.04% of all changes, inside the 8.0% operator-accepted friction budget recorded on the `tests` entry, with mean would-block validity 1.00 and none below 0.5.",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.54,
+    "blocking_enabled": true
+  },
+  "edge-cases": {
+    "_comment": "story 4144-2784-6437-4efb: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 same shape and same inertness of exec/applies_to as `correctness` above. Routed blocking@0.54 from the same code-v3 block-impact replay: 27 of 485 surviving findings would block across 22 of 1262 changes = 1.74% of all changes, mean would-block validity 0.99, none below 0.5. `concurrency` was measured in the same run and HELD advisory \u2014 1 surviving finding is far below the calibration script's MIN_N=25 power floor. Numbers recorded in docs/experiments/code-review-threshold-calibration.md.",
+    "exec": "AGENT",
+    "applies_to": [],
+    "default_posture": "blocking",
+    "block_threshold": 0.54,
+    "blocking_enabled": true
+  },
   "error-handling": {
     "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings). Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the base reviewer prompt now carries fail-open check detection tagged to this dimension — a silent lookup/registry MISS path, a subprocess health check that never reads the returncode, a pgrep/pkill pattern that can match the matching process itself, and any best-effort check whose failure is invisible. Security-consequence fail-open (permissive authz/validation fallback) stays with the security overlay. Detection language lives in reviewers/code-review-base.md; calibration corpus in eval_specs/code-review-base.eval.yaml (R-/FP-failopen-* cases).",
     "exec": "AGENT",

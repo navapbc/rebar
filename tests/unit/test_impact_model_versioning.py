@@ -94,7 +94,10 @@ def test_code_review_approved_blocking_criteria_set() -> None:
     # (docs/experiments/calibrate_code_review_thresholds.py): api-compat@0.51,
     # deletion-impact@0.60, and the two base dimensions regression@0.54 and error-handling@0.50;
     # PLUS `tests`@0.54, flipped on by bug obese-dihedral-ermine from the code-v4 replay so the
-    # gate can block consequential test-sufficiency findings.
+    # gate can block consequential test-sufficiency findings; PLUS the two base dimensions story
+    # 4144-2784-6437-4efb routed and flipped at 0.54 off the same block-impact replay
+    # (correctness, edge-cases) — measured at 4.04% and 1.74% of all changes, inside the 8.0%
+    # operator-accepted friction budget recorded on the `tests` entry.
     # Any addition beyond this set must be a deliberate, re-approved change (this pin forces it).
     assert blocking == {
         "secret-detection",
@@ -105,6 +108,8 @@ def test_code_review_approved_blocking_criteria_set() -> None:
         "regression",
         "error-handling",
         "tests",
+        "correctness",
+        "edge-cases",
     }
     for c in ("secret-detection", "high-critical-security"):
         assert idx[c].get("exec") == "DET"

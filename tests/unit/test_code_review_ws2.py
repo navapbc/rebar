@@ -66,8 +66,12 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
     # the 9f25-derived threshold. ticket cranial-goodly-seahog then flipped four more from the
     # code-v3 sidecar calibration (api-compat@0.51, deletion-impact@0.60, regression@0.54,
     # error-handling@0.50); bug obese-dihedral-ermine flipped `tests`@0.54 from the code-v4
-    # replay. The approved blocking set is now exactly these eight, and adding a ninth must be
-    # a deliberate, re-approved change.
+    # replay. Story 4144-2784-6437-4efb then routed the two remaining un-routed base dimensions
+    # and flipped them at 0.54 off the same block-impact replay (correctness 4.04% of all
+    # changes, edge-cases 1.74%, both inside the 8.0% operator-accepted friction budget; see
+    # docs/experiments/code-review-threshold-calibration.md "Code-v4 friction replay at 0.54").
+    # The approved blocking set is now exactly these ten, and adding an eleventh must be a
+    # deliberate, re-approved change.
     blocking = [k for k, v in idx.items() if v.get("blocking_enabled")]
     assert set(blocking) == {
         "secret-detection",
@@ -78,6 +82,8 @@ def test_secrets_security_keys_are_the_ws5_blocking_handoff():
         "regression",
         "error-handling",
         "tests",
+        "correctness",
+        "edge-cases",
     }
 
 
