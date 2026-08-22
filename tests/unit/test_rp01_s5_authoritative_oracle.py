@@ -161,6 +161,16 @@ def _own_nodes(scope: ast.AST):
         yield from _own_nodes(child)
 
 
+def _is_for_structured(func: ast.expr) -> bool:
+    """True for the ``RunRequest.for_structured(...)`` builder, whose mode is structural."""
+    return (
+        isinstance(func, ast.Attribute)
+        and func.attr == "for_structured"
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "RunRequest"
+    )
+
+
 def _scope_constructs_structured(scope: ast.AST, inherited: dict[str, ast.AST]) -> bool:
     """True if ``scope`` (or a nested function scope) constructs a ``RunRequest`` whose
     effective ``mode`` resolves to ``"structured"``. Assignment bindings are collected PER
@@ -177,6 +187,21 @@ def _scope_constructs_structured(scope: ast.AST, inherited: dict[str, ast.AST]) 
         if isinstance(node, ast.Call):
             func = node.func
             name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if _is_for_structured(func):
+                # `RunRequest.for_structured(...)` FIXES mode="structured", so the keyword the
+                # census reads is no longer written at the call site. Matching only the keyword
+                # would silently drop every site that adopts the builder — the same fail-open
+                # this census exists to rule out.
+                return True
+            if name == "for_structured":
+                # The consolidated builder (story 44ff): `RunRequest.for_structured(...)` IS a
+                # structured construction, with the mode fixed inside the builder rather than
+                # passed at the call site. Before the consolidation these same consumers wrote
+                # `RunRequest(mode=..., ...)` by hand, and a census that only knows the old
+                # spelling reports them as gone the moment they are consolidated — measuring
+                # the SPELLING rather than the property. There is no `mode` keyword to resolve
+                # here: reaching the builder is itself the proof.
+                return True
             if name == "RunRequest":
                 for kw in node.keywords:
                     if kw.arg == "mode" and _mode_is_structured(kw.value, assignments):
