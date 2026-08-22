@@ -89,6 +89,94 @@ def _emit_toml(data: dict) -> str:
     return ("\n".join(lines) + "\n") if lines else ""
 
 
+def _render_scalar(value: Any) -> str:
+    """Render one scalar TOML value, fail-closed on an unsupported type — the same
+    contract :func:`_emit_toml` enforces internally, lifted to module scope so the nested
+    emitter renders values identically. ``bool`` is checked before ``int`` (``bool`` is an
+    ``int`` subclass); floats round-trip via ``repr``."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return repr(value)
+    if isinstance(value, str):
+        s = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{s}"'
+    raise ConfigError(
+        f"cannot serialize config value of type {type(value).__name__!r} "
+        f"({value!r}); rebar's config writer only supports scalars and flat lists"
+    )
+
+
+def _render_value(value: Any) -> str:
+    """Render a scalar or a flat list of scalars."""
+    if isinstance(value, list):
+        return "[" + ", ".join(_render_scalar(v) for v in value) + "]"
+    return _render_scalar(value)
+
+
+def _toml_key(key: str) -> str:
+    """Emit a TOML key, quoting it when it is not a bare-key-safe identifier. Discovered
+    Jira vocabulary (status names like ``"To Do"``) contains spaces, which are invalid as
+    bare keys, so a non-``[A-Za-z0-9_-]+`` key is emitted as a basic-quoted string."""
+    k = str(key)
+    if k and all(c.isalnum() or c in "_-" for c in k):
+        return k
+    s = k.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{s}"'
+
+
+def _emit_nested_toml(name: str, table: dict) -> str:
+    """Serialize ONE arbitrarily-nested table into TOML dotted-header sub-tables.
+
+    The companion to :func:`_emit_toml` for the reserved ``mapping`` block, which
+    ``_emit_toml`` deliberately rejects (it fail-closes on any nested sub-table). This
+    emitter recurses: at every level it writes the scalar / flat-list keys FIRST as
+    ``key = value`` lines under the current ``[dotted.header]``, THEN descends into each
+    nested dict as ``[dotted.header.child]`` — the ordering TOML requires (a bare key
+    after a sub-table header would bind to the wrong table). Reuses :func:`_render_value`
+    so value formatting and the fail-closed guard on an unsupported scalar type match
+    :func:`_emit_toml`. Only ever handed the ``mapping`` table by
+    :func:`_emit_config_toml`."""
+
+    def _emit(header: str, tbl: dict, out: list[str]) -> None:
+        scalars = {k: v for k, v in tbl.items() if not isinstance(v, dict)}
+        subtables = {k: v for k, v in tbl.items() if isinstance(v, dict)}
+        # A header is emitted for the table itself only when it carries scalar keys OR is
+        # a leaf (no children at all) — an empty non-leaf table is just a path prefix.
+        if scalars or not subtables:
+            if out:
+                out.append("")
+            out.append(f"[{header}]")
+            for key, value in scalars.items():
+                out.append(f"{_toml_key(key)} = {_render_value(value)}")
+        for key, sub in subtables.items():
+            _emit(f"{header}.{_toml_key(key)}", sub, out)
+
+    lines: list[str] = []
+    _emit(name, table, lines)
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+def _emit_config_toml(data: dict) -> str:
+    """Serialize a WHOLE rebar-owned config file that may mix flat and nested tables.
+
+    A real ``rebar.toml`` mixes FLAT siblings (``[jira]`` / ``[tracker]``) with the
+    NESTED reserved ``[mapping.*]`` block, so no single emitter can write it. This
+    orchestrator splits off the reserved ``mapping`` key, emits everything else (scalars +
+    the flat sibling sections) through the EXISTING :func:`_emit_toml` — which therefore
+    never receives ``mapping`` and keeps its fail-closed one-level contract — then appends
+    the nested ``mapping`` block via :func:`_emit_nested_toml`, joined by a blank line."""
+    flat = {k: v for k, v in data.items() if k != "mapping"}
+    text = _emit_toml(flat)
+    mapping = data.get("mapping")
+    if isinstance(mapping, dict) and mapping:
+        nested = _emit_nested_toml("mapping", mapping)
+        if text and nested:
+            return text.rstrip("\n") + "\n\n" + nested
+        return text or nested
+    return text
+
+
 def write_jira_config(
     url: str = "",
     user: str = "",
