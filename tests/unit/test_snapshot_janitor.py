@@ -179,11 +179,13 @@ def test_byte_total_consistent_under_concurrent_populate_evict(store, repo):
         for f in futs:
             f.result()
 
-    # Settle: re-acquire all, then the running total must equal a fresh full walk.
+    # Settle: re-acquire all, then the running total must equal a fresh full walk. The
+    # entries are adjacent SHAs, so they hardlink-share unchanged blobs (task 5b25) — the
+    # authoritative walk therefore charges each distinct inode once (a per-entry
+    # ``entry_size`` sum would double-count every shared blob).
     for s in shas:
         cache.acquire(s, repo_root=str(repo), fetch=False)
-    walk = sum(cache.entry_size(e) for e in store.iterdir() if janitor._is_entry(e))
-    assert cache.byte_total(store) == walk
+    assert cache.byte_total(store) == _real_store_bytes(store)
 
 
 # --------------------------------------------------------------------------------------
@@ -536,9 +538,12 @@ def test_max_bytes_cap_evicts_when_over_budget(store, repo):
     now = time.time()
     # DISTINCT mtimes, oldest first: LRU order must be well-defined, or "which entry goes
     # first" would fall through to filesystem iteration order and the assertion below would
-    # be an order-dependent flake rather than a statement about LRU.
+    # be an order-dependent flake rather than a statement about LRU order. ONE path with
+    # DISTINCT content per commit keeps the entries fully disjoint (no hardlink sharing,
+    # task 5b25), so "evict LRU until under the cap, newest survives" is well-defined here;
+    # the cap's interaction with SHARED entries is pinned by the bug-8386 tests below.
     entries = [
-        _populate(repo, store, f"f{i}.txt", "x" * 4096, mtime=now - 10_000 + i * 100)[1]
+        _populate(repo, store, "f.txt", str(i) * 4096, mtime=now - 10_000 + i * 100)[1]
         for i in range(4)
     ]
     total = cache.byte_total(store)
