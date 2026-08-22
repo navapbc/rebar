@@ -287,6 +287,18 @@ sets the env var, so both the sdist and the wheel-from-sdist bake the exact rele
 `sdist_test` job (env unset) proves the preserve-existing path end-to-end; ordinary CI catches
 the defect too via the `artifact-probe` job in `test.yml`.
 
+### Deterministic import walk (wheel probe)
+
+The artifact probe's wheel leg additionally runs `python scripts/check_import_walk.py` inside
+the clean wheel venv: it imports **every** `rebar.*` module of the *installed* package and each
+top-level `scripts/*.py` standalone (an isolated child process per script, so one script's
+`sys.path.insert` cannot mask a sibling's missing one), reporting **all** failures rather than
+stopping at the first. Sanctioned lazy-boundary modules (e.g. `rebar._mcp_auth` without the
+`[mcp]` extra) are declared in the script's `EXPECTED_OPTIONAL` table — each entry names the
+one dep the module may lack and a recorded reason; any other failure still fails the probe.
+It is CI-independent (project.portability): run `make import-walk`, or invoke the script
+directly from any venv with rebar installed.
+
 ---
 
 ## Release procedure

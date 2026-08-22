@@ -75,6 +75,10 @@ jobs:
           rebar-mcp --help
           python -c "import importlib.resources as r, json, rebar; fs=[f for f in r.files('rebar').rglob('*.json')]; assert fs; [json.loads(f.read_text()) for f in fs]"
           python -c "import os; from rebar import _build_info; assert _build_info.COMMIT == os.environ['REBAR_EXPECTED_COMMIT'], 'wheel baked the wrong COMMIT'"
+          # Deterministic import walk (ticket 37b9): import EVERY rebar.* module from the
+          # installed wheel + each top-level scripts/*.py standalone. Logic (and the
+          # documented skip tables) live in the script, which is equally runnable locally.
+          python scripts/check_import_walk.py
       - name: Probe install-from-sdist (REBAR_BUILD_COMMIT unset, preserve-existing)
         run: |
           python -m venv /tmp/sdist-probe
