@@ -138,6 +138,37 @@ Implemented in `src/rebar/_commands/claim.py` (`claim_compute`) and
 driven by the `_CASCADING_EDGES` table), via the shared `_resolve_parent_in_status`
 helper (`_resolve_open_parent` is its `open` specialization, which `claim` uses).
 
+#### Which write surfaces the invariant binds — ALL of them
+
+I4a is an invariant of the STORE, not a courtesy of the interactive verbs. Per the
+operator ruling recorded on ticket `bb73-97de-eeea-4899` ("rebar should maintain, as an
+invariant, that no non-terminal-state ticket can be a child of a closed ticket"), every
+surface that writes STATUS events upholds it:
+
+- **Interactive verbs** (`claim`, `transition`, `reopen`) — the cascade above.
+- **Inbound reconcile** (the Jira reconciler's inbound apply) — a Jira-originated status
+  change that takes a cascading edge cascades the same way:
+  `_cascade_inbound_status_parents` in
+  `src/rebar/_engine/rebar_reconciler/apply_inbound_events.py` shares the cascade
+  DECISION (the same `_CASCADING_EDGES` table and `_resolve_parent_in_status`
+  eligibility lookup) and writes the eligible ancestors' STATUS events first, topmost
+  ancestor first, on both the inbound-update and inbound-create paths. Only the write
+  primitive differs: parents are written through the reconciler's own event writer,
+  NOT through `transition_compute` — an inbound apply re-materialises a peer's recorded
+  state and must stay deterministic and gate-free (no start-work plan-review gate, no
+  eager per-event commit/push). Two reconcile-specific properties: a same-status
+  inbound write is a suppressed no-op, so a cascaded parent never fights the parent's
+  own status mutation later in the same batch (and re-applying an inbound payload is
+  idempotent); and when Jira itself holds the invalid shape (parent closed, child
+  active), the LOCAL invariant wins — the cascade reactivates the parent locally and
+  the outbound differ pushes that reactivation back to Jira on the next pass, exactly
+  as it would after an interactive reactivation.
+
+The `cascade=False` replay seam (NDJSON import) remains the one sanctioned
+non-cascading writer: it re-materialises a store that already satisfied the invariant,
+ticket by ticket, where pre-moving a parent would conflict with that parent's own
+explicit recorded transition.
+
 #### Gate interaction (the plan-review claim gate)
 
 The cascaded parent claim is a *full* claim — so it runs the parent's **own**

@@ -146,6 +146,61 @@ def _inbound_create_write_create_event(
     return tracker_dir, raw_labels, create_path
 
 
+def _cascade_inbound_status_parents(
+    tracker_dir, local_id, current_status: str, target_status: str
+) -> list[str]:
+    """Parent-first cascade for an inbound STATUS write (ticket bb73-97de-eeea-4899).
+
+    Operator ruling: "rebar should maintain, as an invariant, that no
+    non-terminal-state ticket can be a child of a closed ticket." The inbound-apply
+    surface therefore upholds the same I4a invariant the interactive verbs uphold
+    (docs/concurrency.md §I4a): when the child's ``(current, target)`` STATUS edge is a
+    CASCADING edge, every ancestor sitting in the eligible status is moved along the
+    SAME edge first — topmost eligible ancestor first — before the child's own STATUS
+    event is written. The DECISION is single-sourced on the interactive machinery
+    (``_CASCADING_EDGES`` + ``_resolve_parent_in_status``); only the write primitive
+    differs: parents are written through :func:`_write_event_file` like every other
+    inbound event, NOT through ``transition_compute`` — routing a Jira-originated
+    re-materialisation through the interactive verb would subject it to the start-work
+    plan-review gate and to eager per-event commit/push, breaking the reconciler's
+    deterministic batch orchestration.
+
+    Failure posture mirrors both existing seams: an absent / unreadable / ineligible
+    parent yields no cascade and the child proceeds alone (the exact
+    ``_resolve_parent_in_status`` contract the interactive cascade has), and a
+    ``_write_event_file`` failure propagates out of the leaf exactly as the child's own
+    STATUS write failure already does. The walk is cycle-guarded. Returns the written
+    parent event paths, cascade order (topmost first)."""
+    from rebar._commands.transition import _CASCADING_EDGES, _resolve_parent_in_status
+
+    eligible = _CASCADING_EDGES.get((current_status, target_status))
+    if eligible is None:
+        return []
+    # On every cascading edge the eligible parent status equals the child's current
+    # status, so each ancestor takes the same (eligible -> target) edge — walking the
+    # lookup up the chain is exactly the interactive cascade's recursion.
+    seen = {local_id}
+    chain: list[str] = []
+    ticket_id = local_id
+    while True:
+        parent_id = _resolve_parent_in_status(str(tracker_dir), ticket_id, eligible)
+        if parent_id is None or parent_id in seen:
+            break
+        chain.append(parent_id)
+        seen.add(parent_id)
+        ticket_id = parent_id
+    written: list[str] = []
+    for parent_id in reversed(chain):  # topmost eligible ancestor first
+        path = _write_event_file(
+            tracker_dir,
+            parent_id,
+            "STATUS",
+            {"status": target_status, "current_status": eligible},
+        )
+        written.append(str(path))
+    return written
+
+
 def _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id) -> None:
     """Phase: write a STATUS event when the Jira status reverse-maps to non-default."""
     # Status: write a STATUS event when the Jira status reverse-maps to
@@ -159,6 +214,10 @@ def _inbound_create_write_status_event(fields, raw_labels, tracker_dir, local_id
         if jira_status:
             local_status = _jira_status_to_local(jira_status)
     if local_status and local_status != "open":
+        # Parent-first cascade (ticket bb73-97de-eeea-4899): a fresh inbound ticket
+        # landing at an active status must not be left under a merely-open parent.
+        # The just-written CREATE event carries parent_id, so the resolver sees it.
+        _cascade_inbound_status_parents(tracker_dir, local_id, "open", local_status)
         _write_event_file(
             tracker_dir,
             local_id,
@@ -337,6 +396,18 @@ def _inbound_update_write_status_event(fields, tracker_dir, local_id, written) -
         # ticket_reducer/_processors.py:process_status).
         # Read the latest STATUS event from the ticket dir to obtain it.
         previous_status = _read_latest_status(tracker_dir, local_id)
+        if local_status == previous_status:
+            # No-op suppression (ticket bb73-97de-eeea-4899): the differ only emits a
+            # status that differs from LOCAL at diff time, but a parent-first cascade
+            # earlier in the SAME batch may have already moved this ticket. Skipping
+            # the same-status write keeps the cascade from fighting the ticket's own
+            # inbound mutation and makes re-applying an inbound payload idempotent.
+            return
+        # Parent-first cascade (ticket bb73-97de-eeea-4899): move eligible ancestors
+        # along the same edge BEFORE the child's STATUS event lands.
+        written.extend(
+            _cascade_inbound_status_parents(tracker_dir, local_id, previous_status, local_status)
+        )
         path = _write_event_file(
             tracker_dir,
             local_id,
