@@ -146,8 +146,15 @@ def _run_opengrep(detectors: list[Detector], repo_root: Path) -> list[dict[str, 
     version = engine_b._binary_version(binary)
     records: list[dict[str, Any]] = []
     valid: list[Detector] = []
+    # Call-local dedup (ticket 7da8-9d47-9604-4257): --validate checks the WHOLE
+    # source file, so validate each unique source_path once per invocation and fan
+    # the result out to every detector declared from it. No cross-call caching.
+    validated: dict[str, harness.RunResult] = {}
     for det in detectors:
-        vres = _opengrep_validate(binary, det)
+        vres = validated.get(det.source_path)
+        if vres is None:
+            vres = _opengrep_validate(binary, det)
+            validated[det.source_path] = vres
         if vres.abstained:
             records.append(
                 vres.as_abstain(
