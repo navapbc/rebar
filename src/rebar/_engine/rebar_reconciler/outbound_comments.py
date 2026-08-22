@@ -71,6 +71,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from rebar_reconciler.parent_breadcrumb import (  # noqa: F401 — tag re-exported (split seam)
+    PARENT_BREADCRUMB_TAG,
+    _breadcrumb_target,
+    _build_parent_breadcrumb,
+)
+
 if TYPE_CHECKING:
     from ._backend import TicketTransport
 
@@ -87,12 +93,12 @@ _COMMENT_FIELD_KEY = "comment"
 # loop-breaker pattern.
 RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
-# Stable identity tag carried by a parent-drift breadcrumb comment (S7). Dedup for
-# the breadcrumb keys on THIS tag, never on the (variable) ancestor Jira key, so the
-# append-once/first-writer-wins guard holds even if a later pass would name a
-# different ancestor. Unlike RECONCILER_MARKER this tag is NOT stripped by
-# _normalize_comment_body, so it survives into the resolved-comment dedup set.
-PARENT_BREADCRUMB_TAG = "<!-- rebar:parent-breadcrumb -->"
+# The parent-drift breadcrumb cluster (S7) — PARENT_BREADCRUMB_TAG,
+# _breadcrumb_target, _build_parent_breadcrumb — lives in the
+# ``parent_breadcrumb`` sibling module (split for the 800-line cap, bug
+# 9ebb-3114-4d0e-4528) and is re-imported above. Unlike RECONCILER_MARKER the
+# tag is NOT stripped by _normalize_comment_body, so it survives into the
+# resolved-comment dedup set.
 
 
 def _resolve_inbound_mapper(inbound_mapper: Any | None) -> Any:
@@ -448,71 +454,96 @@ def _is_machine_marker_comment(normalized_body: str) -> bool:
     return normalized_body.startswith(_EXCLUDED_COMMENT_PREFIXES)
 
 
-def _build_parent_breadcrumb(
-    ticket: dict[str, Any],
-    jira_bodies: set[str],
-    *,
-    binding_store: Any | None,
-    local_parents: dict[str, Any] | None,
-    local_ticket_types: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    """S7: build the echo-safe parent-drift breadcrumb mutations (0 or 1), pure.
+def _snapshot_comment_set(
+    jira_key: str,
+    comment_field: Any,
+    local_comments: list[Any],
+    client: TicketTransport | None,
+) -> list[Any]:
+    """Resolve the Jira comment list from a snapshot-carried ``comment`` field.
 
-    A pure helper (kept out of :func:`_diff_comments` so that function's
-    cyclomatic complexity does not rise past the CI ratchet). Returns a list of
-    at most one ``{"action": "add", "body": <decorated>}`` mutation — a list so
-    the caller can ``extend`` without adding a branch of its own.
-
-    Emit conditions, in order:
-      * the ancestor maps must both be provided AND a binding store available —
-        otherwise the feature is a strict no-op (every existing caller omits the
-        maps, so behaviour is unchanged);
-      * DRIFT: the ticket has a ``parent_id`` whose direct parent is present in
-        ``local_ticket_types`` with a non-epic type (mirrors the parent-field
-        suppression in ``adapters/jira/outbound_fields.py``). A missing/epic parent
-        type means the parent field is NOT suppressed → no breadcrumb;
-      * APPEND-ONCE: no already-resolved Jira comment carries
-        :data:`PARENT_BREADCRUMB_TAG` (first-writer-wins; dedup keys on the tag);
-      * a NEAREST bound ancestor exists: walking upward from the direct parent via
-        ``local_parents``, some ancestor has a bound Jira key. If none does, emit
-        nothing.
-
-    When ≥1 intervening ancestor was skipped for lacking a bound key, the body
-    additionally states that intervening levels are not represented.
+    Split from :func:`_diff_comments` (bug 9ebb-3114-4d0e-4528,
+    behaviour-preserving extraction). Truncation guard (bug 1f3d): the bulk
+    ``/search/jql`` enrichment (get_comment_map) CAPS embedded comments at ~20
+    per issue while reporting the true ``total``. Deduping against a truncated
+    set re-posts every comment past the cap — the exact 5000-comment inflation
+    this guard exists to stop (the per-ticket get_comments pagination fix alone
+    does NOT close it, because the SNAPSHOT path is production's primary
+    source). When the field is demonstrably truncated and a live client is
+    available, fetch the COMPLETE paginated set per-ticket instead.
     """
-    if local_parents is None or local_ticket_types is None or binding_store is None:
-        return []
-    parent_id = ticket.get("parent_id")
-    if not parent_id:
-        return []
-    parent_type = local_ticket_types.get(parent_id)
-    if parent_type is None or str(parent_type).lower() == "epic":
-        return []
-    if any(PARENT_BREADCRUMB_TAG in body for body in jira_bodies):
-        return []
+    embedded = comment_field.get("comments", []) if isinstance(comment_field, dict) else []
+    total = comment_field.get("total") if isinstance(comment_field, dict) else None
+    jira_comments: list = embedded if isinstance(embedded, list) else []
+    if (
+        isinstance(total, int)
+        and len(jira_comments) < total
+        and local_comments
+        and client is not None
+    ):
+        try:
+            fetched = client.get_comments(jira_key)
+            if isinstance(fetched, list):
+                jira_comments = fetched
+        except Exception as exc:  # noqa: BLE001 — fail-open to the truncated subset (bug 4292)
+            print(
+                f"WARNING: outbound_differ: live comment re-fetch for {jira_key!r} "
+                f"failed ({exc!r}); using the truncated snapshot set (may re-post).",
+                file=sys.stderr,
+            )
+    return jira_comments
 
-    nearest_key: str | None = None
-    skipped_intervening = False
-    ancestor: Any = parent_id
-    while ancestor is not None:
-        key = binding_store.get_jira_key(ancestor)
-        if key is not None:
-            nearest_key = key
-            break
-        skipped_intervening = True
-        ancestor = local_parents.get(ancestor)
-    if nearest_key is None:
-        return []
 
-    sentences = [
-        "This ticket's parent hierarchy could not be fully represented in Jira.",
-        f"Nearest tracked ancestor: {nearest_key}.",
-    ]
-    if skipped_intervening:
-        sentences.append("One or more intervening parent levels are not represented in Jira.")
-    sentences.append("Full parent context is maintained in rebar.")
-    body = " ".join(sentences) + "\n" + PARENT_BREADCRUMB_TAG
-    return [{"action": "add", "body": _decorate_outbound_comment(body)}]
+def _live_comment_set(
+    jira_key: str,
+    client: TicketTransport | None,
+    *,
+    has_local_comments: bool,
+    breadcrumb_applies: bool,
+) -> list[Any] | None:
+    """Resolve Jira comments in the live-search path; ``None`` = emit nothing.
+
+    Split from :func:`_diff_comments` (bug 9ebb-3114-4d0e-4528). ``None`` tells
+    the caller to emit NO comment mutations at all — either the Jira comment
+    state is unknown (no client, or the live fetch failed; bug-4292 safety:
+    never blind-add against unknown state) or there is provably nothing to do
+    (no local comments AND no parent-drift breadcrumb would apply, so the live
+    fetch is skipped as an unnecessary API call). When a breadcrumb WOULD
+    apply, the fetch proceeds even with zero local comments so the append-once
+    dedup set is the real Jira comment list (the bug 9ebb-3114 fix — this case
+    previously early-returned before the breadcrumb builder ran).
+    """
+    if not has_local_comments and not breadcrumb_applies:
+        return None
+    if client is None:
+        # No client provided. We cannot know the Jira comment state.
+        # Emit a warning and skip comment mutations to avoid blind duplicates.
+        print(
+            f"WARNING: outbound_differ: snapshot for {jira_key!r} lacks "
+            f"'comment' field (live search shape) and no client was provided. "
+            f"Skipping comment mutations to avoid blind duplicate adds. "
+            f"Pass a client to compute_outbound_mutations to enable live "
+            f"comment fetch.",
+            file=sys.stderr,
+        )
+        return None
+    # Fetch comments live. One call per ticket — bounded by the set of bound
+    # tickets with local comments (or a pending parent-drift breadcrumb).
+    try:
+        fetched = client.get_comments(jira_key)
+    except Exception as exc:  # noqa: BLE001 — fail-open: skip comment mutations, warn (bug 4292)
+        # Live fetch failed. Skip comment mutations entirely for this ticket.
+        # Never emit blind adds when comment state is unknown (bug 4292 safety
+        # invariant). Emit a loud warning + log to stderr.
+        print(
+            f"WARNING: outbound_differ: live comment fetch for {jira_key!r} "
+            f"failed ({exc!r}). Skipping comment mutations for this ticket "
+            f"to avoid emitting duplicate adds against unknown Jira state. "
+            f"Alert: jira_key={jira_key!r}",
+            file=sys.stderr,
+        )
+        return None
+    return fetched if isinstance(fetched, list) else []
 
 
 def _diff_comments(
@@ -567,10 +598,13 @@ def _diff_comments(
     ``comment`` field. When the snapshot entry for *jira_key* lacks the
     ``comment`` key, the comment state is unknown. If a ``client`` is provided,
     fetch comments live via ``client.get_comments(jira_key)``; this is bounded
-    (one call per ticket with local comments). If the live fetch FAILS, skip
-    comment mutations for this ticket entirely and emit a loud warning —
-    never emit blind adds against unknown Jira comment state (the root cause
-    of DIG-5301 reaching 14 duplicate comments).
+    (one call per ticket with local comments or a pending parent-drift
+    breadcrumb — bug 9ebb-3114-4d0e-4528: a drift-affected child with ZERO
+    local comments still fetches, so the S7 breadcrumb is emitted append-once
+    against the real Jira comment set instead of being skipped). If the live
+    fetch FAILS, skip comment mutations for this ticket entirely and emit a
+    loud warning — never emit blind adds against unknown Jira comment state
+    (the root cause of DIG-5301 reaching 14 duplicate comments).
 
     When the snapshot entry DOES carry a ``comment`` key (fixture/synthetic path),
     use it directly — the client is NOT consulted (fixture path preserved).
@@ -597,75 +631,32 @@ def _diff_comments(
     # discriminator, not the value (empty dict is a valid Jira response for an
     # issue with no comments, and indistinguishable from an absent key if we
     # only check truthiness).
+    resolved: list[Any] | None
     if _COMMENT_FIELD_KEY in jira_issue:
         # Snapshot-carried path (fixtures, synthetic, or the bulk get_comment_map
-        # enrichment). Normally used directly — do NOT call the client.
-        comment_field = jira_issue[_COMMENT_FIELD_KEY]
-        embedded = comment_field.get("comments", []) if isinstance(comment_field, dict) else []
-        total = comment_field.get("total") if isinstance(comment_field, dict) else None
-        jira_comments: list = embedded if isinstance(embedded, list) else []
-        # Truncation guard (bug 1f3d): the bulk ``/search/jql`` enrichment
-        # (get_comment_map) CAPS embedded comments at ~20 per issue while reporting
-        # the true ``total``. Deduping against a truncated set re-posts every comment
-        # past the cap — the exact 5000-comment inflation this fix exists to stop
-        # (the per-ticket get_comments pagination fix alone does NOT close it, because
-        # the SNAPSHOT path is production's primary source). When the field is
-        # demonstrably truncated and a live client is available, fetch the COMPLETE
-        # paginated set per-ticket instead.
-        if (
-            isinstance(total, int)
-            and len(jira_comments) < total
-            and local_comments
-            and client is not None
-        ):
-            try:
-                fetched = client.get_comments(jira_key)
-                if isinstance(fetched, list):
-                    jira_comments = fetched
-            except Exception as exc:  # noqa: BLE001 — fail-open to the truncated subset (bug 4292)
-                print(
-                    f"WARNING: outbound_differ: live comment re-fetch for {jira_key!r} "
-                    f"failed ({exc!r}); using the truncated snapshot set (may re-post).",
-                    file=sys.stderr,
-                )
+        # enrichment). Normally used directly — do NOT call the client (the
+        # bug-1f3d truncation guard inside is the one exception).
+        resolved = _snapshot_comment_set(
+            jira_key, jira_issue[_COMMENT_FIELD_KEY], local_comments, client
+        )
     else:
-        # Live search path: snapshot lacks comment field.
-        # When there are no local comments, nothing to compare — skip the
-        # live fetch (avoid an unnecessary API call).
-        if not local_comments:
-            return []
-
-        if client is None:
-            # No client provided. We cannot know the Jira comment state.
-            # Emit a warning and skip comment mutations to avoid blind duplicates.
-            print(
-                f"WARNING: outbound_differ: snapshot for {jira_key!r} lacks "
-                f"'comment' field (live search shape) and no client was provided. "
-                f"Skipping comment mutations to avoid blind duplicate adds. "
-                f"Pass a client to compute_outbound_mutations to enable live "
-                f"comment fetch.",
-                file=sys.stderr,
+        # Live search path: snapshot lacks the comment field (bug 4292). None
+        # means "emit no comment mutations" — unknown Jira state or nothing to do.
+        resolved = _live_comment_set(
+            jira_key,
+            client,
+            has_local_comments=bool(local_comments),
+            breadcrumb_applies=_breadcrumb_target(
+                ticket,
+                binding_store=binding_store,
+                local_parents=local_parents,
+                local_ticket_types=local_ticket_types,
             )
-            return []
-
-        # Fetch comments live. One call per ticket — bounded by the set of
-        # bound tickets with local comments.
-        try:
-            jira_comments = client.get_comments(jira_key)
-            if not isinstance(jira_comments, list):
-                jira_comments = []
-        except Exception as exc:  # noqa: BLE001 — fail-open: skip comment mutations, warn (bug 4292)
-            # Live fetch failed. Skip comment mutations entirely for this ticket.
-            # Never emit blind adds when comment state is unknown (bug 4292 safety
-            # invariant). Emit a loud warning + log to stderr.
-            print(
-                f"WARNING: outbound_differ: live comment fetch for {jira_key!r} "
-                f"failed ({exc!r}). Skipping comment mutations for this ticket "
-                f"to avoid emitting duplicate adds against unknown Jira state. "
-                f"Alert: jira_key={jira_key!r}",
-                file=sys.stderr,
-            )
-            return []
+            is not None,
+        )
+    if resolved is None:
+        return []
+    jira_comments: list = resolved
 
     jira_bodies: set[str] = set()
     for c in jira_comments:
@@ -756,6 +747,7 @@ def _diff_comments(
             binding_store=binding_store,
             local_parents=local_parents,
             local_ticket_types=local_ticket_types,
+            decorate=_decorate_outbound_comment,
         )
     )
     return mutations
