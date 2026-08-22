@@ -38,13 +38,13 @@
    dropped them silently — and flip to a hard error under
    `REBAR_CONFIG_UNKNOWN_KEYS=error` (the post-deprecation cutover). An invalid
    *value* always raises `ConfigError` at load (fail-fast). The opt-in **`verify.*`
-   review gates fail OPEN**: a present-but-unreadable config skips the gate with a stderr
-   warning rather than blocking every claim and close on a broken file, and an absent
-   config leaves the gate off. Because those are two different things — a fault and a
-   policy choice — an unreadable config resolves to its own `GateState.UNREADABLE`
-   (`_commands/gates.py`) and is never reported as a deliberate disable. (This bullet
-   previously described a fail-closed signature-on-close gate; that gate was retired with
-   `verify.require_signature_for_close`.)
+   review gates error on an unreadable config**: a present-but-unreadable config makes
+   gate resolution raise a `ConfigError` naming the gate, the ticket, and the parse
+   fault, failing the claim/close loudly so the operator fixes the file (operator
+   ruling 39f8-ae7c; this replaced the earlier fail-open skip-with-a-warning). An
+   absent config simply leaves the gate off — only a present config that cannot be
+   parsed is a fault. A readable config resolves to `GateState.ENABLED`/`DISABLED`
+   (`_commands/gates.py`), so a fault is never reported as a deliberate disable.
 
 ## Hard constraints (rebar-specific; deviations from the broader survey)
 

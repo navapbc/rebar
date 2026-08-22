@@ -491,11 +491,15 @@ def close_ticket(
                 _raise_plan_review_close_gate_error(ticket_id, check)
             # Install the under-lock recheck ONLY when the gate actually ran. The closure
             # below is invoked by `txn.transition_core` INSIDE the write lock, so it re-reads
-            # the config there; installing it after a SKIP (gate off, or config unreadable)
-            # would add a config read — and, on an unreadable config, a re-parse that can only
-            # fail again — to the critical section for a gate that never applied. Ask the
-            # producer's stamp, never a verdict string: the skip vocabulary grows, and a
-            # string comparison that misses a new skip verdict starts doing exactly that work.
+            # the config there; installing it after a SKIP (gate disabled) would add a config
+            # read to the critical section for a gate that never applied. (An unreadable
+            # config never reaches here: the pre-lock check above raises ConfigError, per
+            # operator ruling 39f8-ae7c — so the error is raised BEFORE the lock. In the rare
+            # window where the config turns unreadable between this check and the locked
+            # recheck, the recheck's ConfigError aborts the close via transition_core's
+            # fail-closed CommandError re-wrap.) Ask the producer's stamp, never a verdict
+            # string: the skip vocabulary can grow, and a string comparison that misses a
+            # new skip verdict starts doing exactly that work.
             if gates.gate_ran(check):
 
                 def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
