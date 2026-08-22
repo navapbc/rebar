@@ -100,15 +100,16 @@ and older readers ignore them.
   | `required` | the gate ran and PASSED; a completion signature was expected |
   | `disposition` | a qualifying administrative close: signed as a DISPOSITION, not a PASS |
   | `gate_off` | a readable config had the gate off (a policy choice) |
-  | `gate_unreadable` | unreadable config, gate failed open (a FAULT — never laundered into `gate_off`) |
+  | `gate_unreadable` | HISTORICAL only (pre-39f8-ae7c closes): unreadable config, gate failed open. No new write produces it — an unreadable config now errors the close (operator ruling 39f8-ae7c) |
   | `force_bypassed` | the gate was ENABLED and `--force` skipped it (reason in `force_close_reason`) |
   | `local_source` | verdict `source == "local"`: verified but never signed |
   | `not_certifiable` | `certifiable is False`: certification withheld |
   | `not_applicable` | `idea -> closed`: a reject/drop, not a completion |
 
   Gate-state precedence: the gate state resolves FIRST, so a forced close under a
-  disabled/unreadable config records `gate_off`/`gate_unreadable` (there was no gate to
-  bypass); `force_bypassed` is recorded only when an ENABLED gate was actually bypassed.
+  disabled config records `gate_off` (there was no gate to bypass; an unreadable config
+  errors before any of this — see above); `force_bypassed` is recorded only when an
+  ENABLED gate was actually bypassed.
   A reader combines the durable expectation with the durable attestation: `required` +
   attestation = closed and signed; `required` + none = **signature lost** (e.g. the
   signature-append failed after the close committed); `disposition` ± attestation =
