@@ -340,7 +340,7 @@ def finalize_code_review_verdict(
     # Bugfix-size attestation criterion (ticket ad0d B2): a Gerrit bug-fix change over the
     # non-test size floor must carry a valid plan-review attestation on its trailer ticket.
     # Gerrit-only (change_id) — a local `review-code` preview never blocks on it; the gate
-    # itself never raises (infra trouble degrades to an advisory finding).
+    # itself never raises (infra trouble abstains: the verdict becomes INDETERMINATE, bug 9011).
     if request.change_id:
         from rebar.llm.code_review import bugfix_size_gate as _bugfix_size
 
