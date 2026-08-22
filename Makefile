@@ -35,7 +35,7 @@ LOCAL_BIN := .tools/bin
 # fails a test instead of silently leaving every fresh venv on an interpreter nothing tests.
 PYTHON_VERSION_FILE := .github/python-version.txt
 
-.PHONY: help install hooks amend-msg venv worktree format lint typecheck config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
+.PHONY: help install hooks amend-msg venv worktree format lint typecheck import-walk config-check check test jira-dc-up jira-dc-down vendor-security-rules changelog actionlint-bin verify-mcp-pin
 
 help:  ## Show the available targets.
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -293,6 +293,9 @@ verify-mcp-pin:  ## Verify the embedded mcp-publisher SHA-256 matches the live p
 # `sys.path` bootstraps ae96 flagged as the structural obstacle.
 typecheck:  ## ERRORS ONLY: mypy over the whole library + scripts/ (gating).
 	mypy src/rebar scripts
+
+import-walk:  ## ERRORS ONLY: deterministic import walk — every rebar.* module + each scripts/*.py standalone (ticket 37b9; same check the CI wheel probe runs).
+	python scripts/check_import_walk.py
 
 config-check:  ## ERRORS ONLY: validate every infra config (fails CI on a malformed config -> can't reach main).
 	bash infra/scripts/config-check.sh
