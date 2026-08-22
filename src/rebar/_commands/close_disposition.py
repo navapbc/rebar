@@ -39,8 +39,9 @@ import os
 
 #: Close classes that are DISPOSITIONS — a statement about where the work lives (or why it
 #: will not happen), not a claim that this ticket's acceptance criteria were implemented.
-#: Mirrors ``close_precheck._NON_COMPLETION_BUG_CLASSES``; the two are asserted equal by
-#: ``tests/unit/test_close_disposition_attestation_738a.py`` so they cannot drift apart.
+#: ``close_precheck._NON_COMPLETION_BUG_CLASSES`` is an ALIAS of this object (story 111a),
+#: not a second frozenset kept in sync by an equality assertion — the two cannot drift apart
+#: because there is only one of them.
 DISPOSITION_CLASSES = frozenset(
     {"duplicate", "not_a_bug", "escalated", "obsolete", "superseded", "wontfix"}
 )
@@ -73,34 +74,60 @@ REASON_REQUIRED_CLASSES = frozenset({"obsolete", "wontfix", "not_a_bug", "escala
 REPLACEMENT_SATISFIES_REASON_CLASSES = frozenset({"not_a_bug", "escalated"})
 
 
-def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | None:
-    """The live ticket this disposition points AT, or ``None``.
+# replacement-walk-ok: this function is the SINGLE owner of the duplicates/supersedes walk
+# (story 111a-4626-8d2c-42bf). Every other caller in the tree is a thin wrapper over it.
+def replacement_of(
+    ticket_id: str,
+    tracker: str,
+    *,
+    require_live: bool,
+    on_subject_unreadable: str = "stop",
+) -> str | None:
+    """The ticket that replaces ``ticket_id``, or ``None`` — the ONE replacement-link walk.
 
-    Directional, exactly as ``close_precheck._has_live_replacement_link`` is: either this bug
-    ``duplicates`` a canonical ticket, or another ticket ``supersedes`` this bug. Returns the id
-    rather than a bool so it can be named in the signed manifest — an attestation that says "closed
-    as a duplicate" without saying OF WHAT is not auditable.
+    Three near-identical copies of this walk used to live in ``close_precheck`` and here, and
+    bug ``frolicky-dependable-peccary`` came from exactly that duplication: ``verdict()``
+    consulted one copy while the rule it needed lived in another. Only what was genuinely the
+    same is collapsed — the WALK and the liveness mode. Class and ``ticket_type`` filtering
+    stays in each wrapper, because the three differ there and merging those guards would
+    silently change which closes are exempt.
 
-    Fail-closed on any unreadable state: ``None`` means the caller keeps normal verification.
+    Replacement relationships are DIRECTIONAL, not symmetric: either this ticket ``duplicates``
+    a canonical one (an outbound ``deps`` entry), or another ticket ``supersedes`` this one (an
+    inbound link). Reduced state and the inbound reader both expose only net-active links,
+    including links baked into snapshots. The outbound pass wins when both exist.
+
+    ``require_live=True`` asks "is there a USABLE replacement?", filtering BOTH directions
+    through :func:`close_precheck._is_live_ticket`; ``False`` asks the strictly weaker "was one
+    ever RECORDED?", which bug 9b70's remedy needs — a link naming an archived target earns a
+    different message from having recorded nothing at all.
+
+    ``on_subject_unreadable`` fixes the posture when ``reduce_ticket`` on the SUBJECT fails or
+    returns a non-dict. ``"stop"`` returns ``None`` at once — the FAIL-CLOSED posture the two
+    live-mode callers depend on, since they gate a bypass and must not fall through to the
+    inbound pass and find a live ``supersedes`` source there. ``"continue"`` proceeds anyway,
+    for the reader that only picks between two remedy strings.
     """
-    if close_class not in DISPOSITION_CLASSES:
-        return None
-
     from rebar._commands.close_precheck import _is_live_ticket
     from rebar.reducer import reduce_ticket
 
+    def _usable(candidate: str) -> bool:
+        return bool(candidate) and (not require_live or _is_live_ticket(candidate, tracker))
+
     try:
         state = reduce_ticket(os.path.join(tracker, ticket_id))
-    except Exception:  # noqa: BLE001 — an unreadable source must retain fail-closed verification
-        return None
+    except Exception:  # noqa: BLE001 — an unreadable source never fails toward a bypass
+        state = None
     if not isinstance(state, dict):
-        return None
+        if on_subject_unreadable == "stop":
+            return None
+        state = {}
 
     for dep in state.get("deps") or []:
         if dep.get("relation") != "duplicates":
             continue
         target = str(dep.get("target_id", dep.get("target", "")) or "")
-        if target and _is_live_ticket(target, tracker):
+        if _usable(target):
             return target
 
     from rebar.reducer._inbound import find_inbound_relationships
@@ -113,9 +140,25 @@ def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | No
         if link.get("relation") != "supersedes":
             continue
         source = str(link.get("from_id") or "")
-        if source and _is_live_ticket(source, tracker):
+        if _usable(source):
             return source
     return None
+
+
+def find_replacement(ticket_id: str, close_class: str, tracker: str) -> str | None:
+    """The live ticket this disposition points AT, or ``None``.
+
+    Returns the id rather than a bool so it can be named in the signed manifest — an
+    attestation that says "closed as a duplicate" without saying OF WHAT is not auditable.
+
+    Guards on :data:`DISPOSITION_CLASSES` only and takes NO ``ticket_type``, making it strictly
+    MORE permissive for non-bug tickets than ``close_precheck._has_live_replacement_link``'s
+    extra ``ADMINISTRATIVE_CLASSES`` narrowing (ticket fc20). That difference is deliberate and
+    lives here, not in :func:`replacement_of`. Fail-closed on any unreadable state.
+    """
+    if close_class not in DISPOSITION_CLASSES:
+        return None
+    return replacement_of(ticket_id, tracker, require_live=True, on_subject_unreadable="stop")
 
 
 def _mint(close_class: str, **evidence: str) -> dict:
