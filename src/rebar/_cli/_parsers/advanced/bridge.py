@@ -116,6 +116,12 @@ def build(*, prog: str) -> argparse.ArgumentParser:
         help="Interactively configure and validate Jira access.",
     )
     setup.add_argument("args", nargs=argparse.REMAINDER)
+    suggest_mapping = commands.add_parser(
+        "suggest-mapping",
+        add_help=False,
+        help="Inspect a live Jira project (read-only) and suggest a [mapping] config section.",
+    )
+    suggest_mapping.add_argument("args", nargs=argparse.REMAINDER)
     projects = commands.add_parser(
         "projects",
         help="Manage the store's bridge-projects sync mapping.",
