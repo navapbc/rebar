@@ -19,9 +19,9 @@ _ESCAPE_MARKER = "# nested-pytest-ok:"
 _SYS_EXECUTABLE = object()
 
 
-def _launch_lines(tree: ast.AST) -> list[int]:
-    """Lines of every literal spelling ``sys.executable``, ``-m``, ``pytest`` in sequence."""
-    lines: list[int] = []
+def _launch_spans(tree: ast.AST) -> list[tuple[int, int]]:
+    """First and last line of every literal spelling ``sys.executable``, ``-m``, ``pytest``."""
+    spans: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.List | ast.Tuple):
             continue
@@ -40,8 +40,13 @@ def _launch_lines(tree: ast.AST) -> list[int]:
                 atoms.append(None)
         window = list(zip(atoms, atoms[1:], atoms[2:], strict=False))
         if (_SYS_EXECUTABLE, "-m", "pytest") in window:
-            lines.append(node.lineno)
-    return lines
+            spans.append((node.lineno, node.end_lineno or node.lineno))
+    return spans
+
+
+def _launch_lines(tree: ast.AST) -> list[int]:
+    """The first line of every launch literal."""
+    return [start for start, _ in _launch_spans(tree)]
 
 
 def _unmarked_launches(path: Path) -> list[int]:
@@ -52,7 +57,14 @@ def _unmarked_launches(path: Path) -> list[int]:
         for number, line in enumerate(body, start=1)
         if _ESCAPE_MARKER in line and line.split(_ESCAPE_MARKER, 1)[1].strip()
     }
-    return [line for line in _launch_lines(ast.parse(source)) if line not in marked]
+    # Black splits an argv list one element per line, so the marker may sit on ANY line of the
+    # literal — most naturally beside the element that names pytest, not beside the opening
+    # bracket.  Excuse a launch when a reasoned marker falls anywhere in its span.
+    return [
+        start
+        for start, end in _launch_spans(ast.parse(source))
+        if not marked.intersection(range(start, end + 1))
+    ]
 
 
 def test_the_launch_appears_only_in_the_helper() -> None:
@@ -80,6 +92,26 @@ def test_the_helper_is_defined_exactly_once() -> None:
     ]
 
     assert definitions == [_OWNER]
+
+
+def test_a_marker_inside_a_black_split_launch_excuses_it(tmp_path: Path) -> None:
+    """Real launches are split one element per line; the marker need not sit on the bracket."""
+    offender = tmp_path / "test_split.py"
+    launch = (
+        "import subprocess, sys\n"
+        "subprocess.run(\n"
+        "    [\n"
+        "        sys.executable,\n"
+        "        '-m',\n"
+        "        'pytest',{marker}\n"
+        "    ]\n"
+        ")\n"
+    )
+    offender.write_text(launch.format(marker=""))
+    assert _unmarked_launches(offender) == [3]
+
+    offender.write_text(launch.format(marker=f"  {_ESCAPE_MARKER} reproduces bug 291e"))
+    assert _unmarked_launches(offender) == []
 
 
 def test_an_escape_marker_without_a_reason_does_not_excuse_a_launch(tmp_path: Path) -> None:
