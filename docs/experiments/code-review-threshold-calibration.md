@@ -3,6 +3,27 @@
 corpus: 1760 sidecars / 1173 changes / 4359 pooled findings
 skipped remainder: 3135 sidecars ({'different_version': 114, 'untagged': 0, 'unparseable': 0, 'wrong_schema': 3021})
 
+> **Corrections (ticket d890-e711-156e-444b).** This document embedded a vocabulary
+> mistake in several load-bearing places, corrected in place at the five sites marked
+> **CORRECTION (A)–(E)** below. The shared root cause: every criterion label was compared
+> against the PACKAGED routing index rather than the EFFECTIVE vocabulary (the packaged
+> index merged with the project's `.rebar/criteria_routing.json` overlay). The `criteria`
+> dimension vocabulary is open by design (the base prompt's list is illustrative, project
+> criteria are first-class through the overlay), and the 0.95 default for an unrouted label
+> is the intended mostly-advisory v1 posture, not a routing bypass. The consequent
+> recommendation to constrain the reviewer prompt to a fixed vocabulary is REJECTED — a
+> closed enum would make project criteria unexpressible. **The four approved blocking flips
+> (`regression` 0.54, `api-compat` 0.51, `deletion-impact` 0.60, `error-handling` 0.50) and
+> the block-impact table are UNAFFECTED — all four already landed in the packaged routing
+> index — so this calibration's headline result stands.** The only genuine data defects are
+> the two model-emitted synonyms `sec`→`security` and `documentation`→`docs`, now normalized
+> before routing by `registry.normalize_criteria` (see (A)/(B)). One denominator note: this
+> document's figures are POOLED — `calibrate_code_review_thresholds.py` buckets sidecars by
+> `change_id` and segments them into material revision episodes before pooling findings —
+> whereas a raw per-sidecar label census (the 1663 sidecars / 5669 label instances recorded
+> on ticket d890-e711-156e-444b) is a different, larger denominator; the
+> two must never be compared directly.
+
 ## Per-criterion signals
 
 | criterion | n | surf | fire | mval | drop | indet | pblk | rev_rr | elig | p75 | p90 | p95 | pmax | worst subq (no-rate) |
@@ -71,6 +92,32 @@ skipped remainder: 3135 sidecars ({'different_version': 114, 'untagged': 0, 'unp
 | resource-management | 1 | LOW-DATA | advisory | 0.95 | n=1 below floor; interactive review |
 | behavior-change | 1 | LOW-DATA | advisory | 0.95 | n=1 below floor; interactive review |
 
+> **CORRECTION (A) — the `sec` row above is WRONG.** `sec` is not a deterministic/attestation
+> gate: it is an ordinary model-emitted LLM synonym of `security` (now normalized before
+> routing). The generator's DET/ATTEST branch fires on the statistical signature
+> `p_block > 0 and validity < 0.05` alone, without consulting any routing index — 8 findings
+> that blocked under `security`'s existing 0.54 threshold happened to carry the `sec` label
+> and were misclassified as a fixed-posture gate. The classification compared the label
+> against the PACKAGED routing index rather than the EFFECTIVE vocabulary; labels are open by
+> design and an unrouted label's 0.95 default is the intended v1 posture, so "not
+> LLM-tunable" is a category error here. Constraining the prompt to a fixed vocabulary is
+> rejected (see the corrections note at the top).
+>
+> **CORRECTION (B) — the `security` row is computed on a truncated sample.** Its 8 `sec`
+> findings (~12% of the 68 security-class findings) were split into a separate row by the
+> packaged-index comparison, so the `security` signals above (n=60, validity 0.764, drop
+> 0.267) understate the criterion; the synonym normalization (ticket d890-e711-156e-444b)
+> invalidates that row's inputs — treat it as approximate until a post-normalization re-run.
+> `documentation`/`docs` is the same defect at n=5 of 455 (~1%), where the split is
+> immaterial.
+>
+> **CORRECTION (C) — the `project.review-phase-boundaries` row ignores its overlay tune.**
+> The row proposes 0.95 "LOW-DATA" although this repo's `.rebar/criteria_routing.json`
+> overlay already tunes the criterion to `block_threshold: 0.9` — the generator script reads
+> no routing at all (packaged or overlay), so it printed the unknown-label default for an
+> overlay-activated first-class project criterion. Same root cause: the comparison used the
+> PACKAGED index, never the EFFECTIVE vocabulary.
+
 ## Block-impact of the proposed thresholds (retrospective over the code-v3 corpus)
 
 For each candidate, how many surviving (blocking+advisory) findings and distinct changes would
@@ -107,7 +154,9 @@ precision-first: they surface only verifier-confirmed, non-nit findings.
 **Keep as-is:**
 - `security` @ 0.54 (already blocking) — code-v3 confirms it is precise (0.26% of changes, all
   would-block validity 1.00). Borderline rev_rr (0.588) but precision-first blocking on a security
-  criterion is the right posture.
+  criterion is the right posture. *(These statistics were computed on a ~12% truncated sample —
+  the criterion's 8 `sec`-labelled findings were split out; see CORRECTION (B) above. The
+  keep-as-is verdict and the 0.54 threshold are unaffected.)*
 - The high-volume borderline set `tests` / `maintainability` / `correctness` / `edge-cases` stays
   advisory: high validity but rev_rr < 0.6, and blocking them at the ~0.30 priority mode would be
   high-friction (e.g. `tests` n=1838). Consistent with plan-review's "confident-but-ignored" class.
@@ -117,6 +166,11 @@ precision-first: they surface only verifier-confirmed, non-nit findings.
 
 **Not LLM-threshold-tunable (deterministic / attestation gates):** `bugfix-size-attestation`,
 `secret-detection`, `sec` — posture is fixed by the detector/attestation, not a priority threshold.
+
+> **CORRECTION (A, continued) — `sec` does not belong in this list.** It is an LLM synonym of
+> `security` (an ordinary threshold-tunable criterion, already blocking at 0.54), not a
+> deterministic or attestation gate; see the correction under the proposal table. The list is
+> correct for `bugfix-size-attestation` and `secret-detection`.
 
 ## Caveats (must hold before flipping in production)
 
@@ -138,3 +192,25 @@ Several finding `criteria` labels are NOT in `criteria_routing.json`: `sec`, `do
 that fall through to the default 0.95 posture and cannot be individually routed (`sec`≈`security`,
 `documentation`≈`docs`). The reviewer prompt should constrain emitted criteria to the registry
 vocabulary, or these silently bypass per-criterion routing.
+
+> **CORRECTION (D) — the paragraph above is both mis-characterized and under-inclusive, and
+> its recommendation is REJECTED.** The list compares labels to the PACKAGED routing index
+> rather than the EFFECTIVE vocabulary, and even on its own terms omits `maintainability`,
+> `correctness`, `edge-cases` and `bugfix-size-attestation` — none of which are in the
+> packaged index either. Almost nothing here is "free-text alias sloppiness":
+> `project.review-phase-boundaries` is a first-class project criterion activated (and tuned)
+> in this repo's `.rebar/criteria_routing.json` overlay; `bugfix-size-attestation` is a real
+> criterion (`bugfix_size_gate.py`); `maintainability`/`correctness`/`edge-cases` and the
+> other small labels are prompt-specified OPEN dimensions whose 0.95 default is the intended
+> mostly-advisory v1 posture, not a bypass. Only `sec` and `documentation` are genuine
+> synonyms of packaged criteria, and those are now normalized before routing
+> (`registry.normalize_criteria`, ticket d890-e711-156e-444b). Constraining the reviewer
+> prompt/schema to a fixed registry vocabulary is REJECTED: the dimension vocabulary is open
+> by design and a closed enum would make project-supplied criteria unexpressible.
+>
+> **CORRECTION (E) — the generator reproduces (A) and (C) on every re-run.**
+> `docs/experiments/calibrate_code_review_thresholds.py` reads no routing index at all
+> (neither the packaged `criteria_routing.json` nor the project overlay), so re-running it
+> reproduces the `sec` DET/ATTEST misclassification and the `project.review-phase-boundaries`
+> 0.95 row verbatim. Fixing the generator is deferred; until then, read its output against
+> the EFFECTIVE vocabulary and these corrections.

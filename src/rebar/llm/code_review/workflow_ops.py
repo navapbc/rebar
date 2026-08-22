@@ -397,7 +397,14 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm import review_kernel
     from rebar.llm.code_review import registry
 
-    findings = list(ctx.inputs.get("findings") or [])
+    # Normalize model-emitted criteria synonyms (sec→security, documentation→docs) BEFORE
+    # the pass3 threshold lookup and before nit-suppression, so a synonym-labelled finding
+    # gets its criterion's tuned routing instead of the 0.95 unknown-label default (ticket
+    # d890-e711-156e-444b). A mapping, not a whitelist: labels in the EFFECTIVE vocabulary
+    # and unknown open dimensions pass through unchanged.
+    findings = registry.normalize_finding_criteria(
+        list(ctx.inputs.get("findings") or []), ctx.repo_root
+    )
     raw_verifs = list(ctx.inputs.get("verifications") or [])
     reshape = review_kernel.reshape_verifications(raw_verifs, valid_indices=range(len(findings)))
     if reshape.has_violations:
