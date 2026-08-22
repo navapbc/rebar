@@ -115,3 +115,55 @@ def test_terminal_sign_failure_is_structured_and_unsigned(monkeypatch, caplog) -
         r for r in caplog.records if getattr(r, "event", None) == "plan_review_sign_aborted"
     )
     assert (error.attempt, error.reason) == (1, "RuntimeError")
+
+
+def _raising_head(reason: str, fail_times: int, stable: str = "b" * 40):
+    """tracker_head_sha stub: raise store-read-failure the first ``fail_times`` calls."""
+    from rebar.llm.plan_review.relation_snapshot import PlanRelationSnapshotError
+
+    calls = {"n": 0}
+
+    def _head(*a, **k):
+        calls["n"] += 1
+        if calls["n"] <= fail_times:
+            raise PlanRelationSnapshotError(reason)
+        return stable
+
+    return _head
+
+
+def test_transient_store_read_failure_is_retried_then_signs(monkeypatch, caplog) -> None:
+    """A peer session's in-flight staged index (transient store-read-failure) must be
+    retried like a moving HEAD, not aborted terminally (bug ec1e / staged-index race)."""
+    initial = _transaction(monkeypatch)
+    monkeypatch.setattr(
+        generation, "tracker_head_sha", _raising_head("store-read-failure", fail_times=1)
+    )
+    assert generation.sign_manifest("1111-2222-3333-4444", ["plan-review: PASS"], initial) == {
+        "signed": True
+    }
+
+
+def test_persistent_store_read_failure_is_retryable_not_terminal(monkeypatch) -> None:
+    """A store-read-failure that never clears exhausts the retry budget and surfaces as
+    a RETRYABLE signal, not a terminal unsigned PlanReviewGenerationError."""
+    initial = _transaction(monkeypatch)
+    monkeypatch.setattr(
+        generation, "tracker_head_sha", _raising_head("store-read-failure", fail_times=99)
+    )
+    with pytest.raises(generation.PlanReviewGenerationRetryable):
+        generation.sign_manifest("1111-2222-3333-4444", ["plan-review: PASS"], initial)
+
+
+def test_deterministic_relation_reason_stays_terminal_not_retried(monkeypatch, caplog) -> None:
+    """Only the transient ``store-read-failure`` is retried; a deterministic reason
+    (e.g. a malformed reference) must still abort terminally on the FIRST attempt."""
+    initial = _transaction(monkeypatch)
+    monkeypatch.setattr(
+        generation, "tracker_head_sha", _raising_head("malformed-reference", fail_times=99)
+    )
+    with pytest.raises(generation.PlanReviewGenerationError) as exc_info:
+        generation.sign_manifest("1111-2222-3333-4444", ["plan-review: PASS"], initial)
+    assert not isinstance(exc_info.value, generation.PlanReviewGenerationRetryable)
+    aborted = [r for r in caplog.records if getattr(r, "event", None) == "plan_review_sign_aborted"]
+    assert [(r.attempt, r.reason) for r in aborted] == [(1, "malformed-reference")]
