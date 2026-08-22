@@ -247,6 +247,7 @@ def compute_update_fields(
     conflict_sink: list[tuple[str, str]] | None = None,
     dropped_field_sink: list[tuple[str, str]] | None = None,
     status_map: dict[str, str] | None = None,
+    priority_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Canonicalize the snapshot entry (and arbitration baseline) via the injected
     ``InboundMapper``, diff in LOCAL shape, and map the changed subset back to the
@@ -295,6 +296,7 @@ def compute_update_fields(
         binding_store=binding_store,
         local_ticket_types=local_ticket_types,
         status_map=status_map,
+        priority_map=priority_map,
     )
 
 

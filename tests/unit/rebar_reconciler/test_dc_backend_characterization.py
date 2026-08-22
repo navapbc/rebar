@@ -203,15 +203,16 @@ def test_dc_create_path_defaults_on_a_bare_ticket():
 
 def test_dc_create_path_defaults_on_unmapped_values():
     # Present-but-unmapped is a DIFFERENT branch from missing: it exercises the
-    # ``.get(key, default)`` fallback of each value map rather than the ticket's.
-    # Map-or-drift (S2): an unmapped status is OMITTED entirely, never coerced.
+    # map-or-drift fallback of each value axis rather than the ticket's.
+    # Map-or-drift (S2/S5): an unmapped status AND an unmapped priority are OMITTED
+    # entirely, never coerced. (issuetype is mandatory on a create, so it still
+    # defaults to "Task".)
     assert _map_local_to_dc_fields(
         {"title": "t", "ticket_type": "no_such_type", "priority": 99, "status": "no_such_status"}
     ) == {
         "summary": "t",
         "description": "",
         "issuetype": "Task",
-        "priority": "Medium",
         "assignee": "",
     }
 
@@ -492,7 +493,8 @@ def test_dc_map_fields_to_remote_maps_every_priority_plus_unmapped_default():
         4: "Lowest",
     }.items():
         assert outbound.map_fields_to_remote({"priority": local_priority}) == {"priority": dc_name}
-    assert outbound.map_fields_to_remote({"priority": 99}) == {"priority": "Medium"}
+    # Map-or-drift (S5): an unmapped priority is OMITTED, never coerced to "Medium".
+    assert outbound.map_fields_to_remote({"priority": 99}) == {}
 
 
 def test_dc_map_fields_to_remote_passes_resolved_fields_through_by_own_name():

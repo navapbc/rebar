@@ -80,6 +80,8 @@ class _JiraOutbound:
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
         type_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
+        create_defaults: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return outbound_fields._map_local_to_jira_fields(
             ticket,
@@ -89,6 +91,8 @@ class _JiraOutbound:
             suppressed_out=suppressed_out,
             status_map=status_map,
             type_map=type_map,
+            priority_map=priority_map,
+            create_defaults=create_defaults,
         )
 
     def map_fields_to_remote(
@@ -98,12 +102,13 @@ class _JiraOutbound:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         status_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Delegate to the shared ``jira_family.outbound_mapper.OutboundFieldMapper``
         (story J3), constructed with Cloud's ``AdfCodec``. See that module for the
         mapping rules (field-name reconciliation, value maps, rich-text fit)."""
         return self._mapper.map_fields_to_remote(
-            changed, ticket, binding_store, local_ticket_types, status_map
+            changed, ticket, binding_store, local_ticket_types, status_map, priority_map
         )
 
     def resolve_assignee(
@@ -221,6 +226,8 @@ class JiraBackend:
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
         type_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
+        create_defaults: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Convenience delegator to the ``outbound`` role's CREATE mapper, so a caller
         holding the backend can map a local ticket without reaching into ``.outbound``
@@ -233,6 +240,8 @@ class JiraBackend:
             suppressed_out=suppressed_out,
             status_map=status_map,
             type_map=type_map,
+            priority_map=priority_map,
+            create_defaults=create_defaults,
         )
 
     # --- project accessors (ticket 97f2/bbf1) ---
