@@ -5,8 +5,7 @@ This is the contract table for the Pattern-B conformance oracle in
 adapter (library / CLI / MCP) against a fresh store and classified
 ``ACCEPTED`` / ``REJECTED(code)`` / ``PARAM_NOT_EXPOSED``. The oracle asserts
 every adapter agrees with a row's transport-agnostic expectation; a per-adapter
-strict-xfail records a KNOWN, ticketed divergence (such as the remaining MCP
-close-reason gap), so the suite is
+strict-xfail records a KNOWN, ticketed divergence, so the suite is
 GREEN until the gap is closed — at which point the classification flips, the
 xfail becomes an xpass, and the strict marker fails, forcing its removal.
 
@@ -30,10 +29,6 @@ import rebar
 ACCEPTED = "ACCEPTED"
 REJECTED = "REJECTED"
 PARAM_NOT_EXPOSED = "PARAM_NOT_EXPOSED"
-
-# The remaining scratchy-leprous-galago MCP gap: transition_ticket does not yet
-# expose the distinct close-reason parameter. Its row remains a strict-xfail.
-SCRATCHY = "scratchy-leprous-galago"
 
 # Per-adapter plumbing that is NOT part of the write contract: each surface wires
 # these differently (the library returns an alias, the MCP layer stamps a
@@ -190,7 +185,7 @@ CASES: list[Case] = [
         expected=Result(ACCEPTED),
         expected_status="in_progress",
     ),
-    # ── reason as close_reason (MCP gap → strict-xfail citing scratchy) ────────
+    # ── reason as close_reason (converged on all three surfaces) ──────────────
     Case(
         id="reason-close-obsolete",
         op="transition",
@@ -198,7 +193,6 @@ CASES: list[Case] = [
         inputs={"close_class": "obsolete", "reason": "no longer needed"},
         expected=Result(ACCEPTED),
         expected_status="closed",
-        xfail={"mcp": SCRATCHY},
     ),
     # ── caused_by on a bug close ─────────────────────────────────────────────
     Case(

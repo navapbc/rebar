@@ -81,7 +81,8 @@ def test_mcp_create_accepts_assignee() -> None:
 
 
 def test_mcp_transition_and_claim_expose_library_write_parameters() -> None:
-    """The MCP schema exposes the approved reason-carrying force contract."""
+    """The MCP schema exposes the full library write contract: the reason-carrying
+    force parameter plus every close-disposition datum (class, reason, culprit, ref)."""
     tools = _mcp_tools()
     transition = tools["transition_ticket"].inputSchema
     claim = tools["claim_ticket"].inputSchema
@@ -90,6 +91,7 @@ def test_mcp_transition_and_claim_expose_library_write_parameters() -> None:
         "current_status",
         "target_status",
         "close_class",
+        "reason",
         "force",
         "caused_by",
         "ref",

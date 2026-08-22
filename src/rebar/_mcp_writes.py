@@ -226,6 +226,7 @@ def register_write_tools(mcp, ctx) -> None:
         current_status: str,
         target_status: str,
         close_class: str = "",
+        reason: str = "",
         force: str | None = None,
         caused_by: str = "",
         ref: str | None = None,
@@ -250,6 +251,13 @@ def register_write_tools(mcp, ctx) -> None:
         transitions. Force does not relax this classification invariant: a bug
         close without a valid ``close_class`` is refused.
 
+        ``reason`` is the close reason for a reason-required ``close_class``
+        (``obsolete``/``wontfix``, and — absent a live replacement link —
+        ``not_a_bug``/``escalated``): it is recorded as the disposition's
+        ``close_reason`` and signed into the attestation. It is NOT the force
+        bypass note (that is ``force``'s value) and is discarded on any other
+        combination, exactly as on the CLI's ``--reason``.
+
         ``caused_by`` records the explicit culprit for a bug close. ``ref`` selects
         the committed tree used by completion verification; it defaults to HEAD."""
         _shadow("mcp.write.transition_ticket")
@@ -261,6 +269,7 @@ def register_write_tools(mcp, ctx) -> None:
                     current_status,
                     target_status,
                     close_class=close_class,
+                    reason=reason,
                     force=force,
                     caused_by=caused_by,
                     ref=ref,
