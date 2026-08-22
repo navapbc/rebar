@@ -287,6 +287,23 @@ def sign_manifest(
             fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
             after = tracker_head_sha(tracker, ignore_untracked=True)
         except PlanRelationSnapshotError as exc:
+            # A ``store-read-failure`` is the NORMAL transient state of many concurrent
+            # sessions sharing one tracker: a peer's in-flight ``git add``→``git commit``
+            # leaves a staged (or briefly unmerged) index that this pre-lock read observes
+            # as a non-empty ``git status``. Retry it exactly like a moving committed HEAD
+            # (the ``before != after`` branch below) instead of aborting; on exhaustion the
+            # loop's final ``raise PlanReviewGenerationRetryable`` surfaces it as retryable.
+            # d7cb-22ae tolerated the UNTRACKED half of this race; this is the STAGED half.
+            # Deterministic reasons (missing/ambiguous/malformed/reducer/id-mismatch) stay
+            # terminal — retrying cannot fix a genuinely broken reference.
+            if exc.reason == "store-read-failure":
+                _log(
+                    logging.WARNING,
+                    "plan_review_generation_retry",
+                    attempt=attempt,
+                    reason=exc.reason,
+                )
+                continue
             _log(logging.ERROR, "plan_review_sign_aborted", reason=exc.reason, attempt=attempt)
             raise PlanReviewGenerationError(exc.reason) from None
         if before != after:
