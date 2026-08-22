@@ -69,7 +69,13 @@ def test_cli_show_complete_or_erroring_under_write_burst(repo_with_origin_ticket
         rebar.create_ticket("task", f"burst target {i}", repo_root=str(repo)) for i in range(3)
     ]
 
-    for round_no in range(6):
+    # Storm right-sized to its measured detection floor (ce38-2914-d2f4-4826): the
+    # afa0-2e15 fault-seeding matrix showed this test's exclusive detections — F3/F6,
+    # exit 0 with a shape-valid but content-incomplete payload — fire deterministically
+    # on round 0 / ticket 0, and re-running the full F1-F7 seed set at 1 round
+    # reproduced the 6-round detection column exactly (F2/F3/F4/F6 RED, F1/F5/F7
+    # green). One round keeps the oracle; the extra five bought no detection.
+    for round_no in range(1):
         # Burst of writes (each spawns a background push to origin under =always).
         for i, t in enumerate(ids):
             _rebar_cli(
