@@ -212,45 +212,44 @@ def test_store_survives_snapshot_compaction_of_the_ticket_log(peer_confirmations
 def test_commit_only_peer_confirmations_is_staged_and_committed(tmp_path, monkeypatch):
     """AC9. A confirmation-ONLY change must actually commit.
 
-    ``_commit_binding_store_snapshot`` keeps TWO parallel lists: ``_rel_files``
-    (what gets staged) and ``_tracked_basenames`` (the bug-1e08 per-file
-    idempotency guard). Adding the sidecar to only the first makes
-    ``_tracked_basenames & _staged_basenames`` empty, so the helper returns
-    "already up-to-date" and the evidence is silently dropped on every pass. This
-    test fails if either list is missed.
+    ``_commit_binding_store_snapshot`` stages a deliberate file set and gets its
+    bug-1e08 per-file idempotency from the locked store seam's pathspec-scoped
+    status (ticket 11a9-b11b). Missing the sidecar from ``_rel_files`` would make
+    a confirmation-only pass a silent no-op, dropping the evidence on every
+    pass. This test drives a real tracker repo where ONLY the sidecar changed
+    and requires the commit to land.
     """
     helpers = importlib.import_module("rebar_reconciler.reconcile_helpers")
     git_adapter = importlib.import_module("rebar_reconciler.git_adapter")
 
     assert "PEER_CONFIRMATIONS_FILE" in git_adapter.__all__
 
-    committed: dict = {}
-
-    monkeypatch.setattr(
-        git_adapter, "add", lambda tracker_dir, *rel: committed.setdefault("staged", list(rel))
-    )
-    monkeypatch.setattr(
-        git_adapter,
-        "diff_cached_names",
-        lambda tracker_dir: os.path.basename(git_adapter.PEER_CONFIRMATIONS_FILE) + "\n",
-    )
-    monkeypatch.setattr(
-        git_adapter,
-        "commit",
-        lambda tracker_dir, message, **_kw: committed.setdefault("message", message),
-    )
-
     repo_root = tmp_path
     tracker_dir = repo_root / git_adapter.TRACKER_DIR
     (tracker_dir / ".bridge_state").mkdir(parents=True)
     (tracker_dir / git_adapter.PEER_CONFIRMATIONS_FILE).write_text('{"version": 1, "records": {}}')
+    for argv in (
+        ["git", "init", "-q", str(tracker_dir)],
+        ["git", "-C", str(tracker_dir), "config", "user.name", "ac9-test"],
+        ["git", "-C", str(tracker_dir), "config", "user.email", "ac9@test.invalid"],
+    ):
+        subprocess.run(argv, check=True, capture_output=True)
 
     ok = helpers._commit_binding_store_snapshot(object(), repo_root, "pass-1")
 
     assert ok is True
-    assert git_adapter.PEER_CONFIRMATIONS_FILE in committed["staged"]
-    assert "message" in committed, (
-        "confirmation-only change was not committed — _tracked_basenames is missing the sidecar"
+    show = subprocess.run(
+        ["git", "-C", str(tracker_dir), "show", "--name-only", "--format=%s", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert git_adapter.PEER_CONFIRMATIONS_FILE in show.stdout, (
+        "confirmation-only change was not committed — the sidecar is missing from "
+        f"the staged file set. HEAD shows:\n{show.stdout}"
+    )
+    assert "pass-1" in show.stdout.splitlines()[0], (
+        f"the snapshot commit message must name the pass, got {show.stdout.splitlines()[0]!r}"
     )
 
 

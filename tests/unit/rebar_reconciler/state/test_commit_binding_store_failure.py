@@ -195,40 +195,48 @@ def test_commit_failure_appends_alert(
 def test_commit_success_returns_true_no_alert(
     tmp_path: Path, reconcile_mod: ModuleType, alert_store_mod: ModuleType
 ) -> None:
-    """When git commit succeeds, _commit_binding_store_snapshot returns True
-    and no alert is written.
+    """When the locked-seam commit succeeds, _commit_binding_store_snapshot
+    returns True, the commit lands in the tracker repo, and no alert is written.
     """
+    import subprocess as _sp
+
     tracker_dir = tmp_path / ".tickets-tracker"
     bridge_dir = tracker_dir / ".bridge_state"
     bridge_dir.mkdir(parents=True)
     bindings_path = bridge_dir / "bindings.json"
     bindings_path.write_text(json.dumps({"bindings": {}, "reverse": {}}))
+    # A real tracker repo: the commit now goes through the locked store seam
+    # (rebar._store.push.commit_tickets_branch), which a global subprocess mock
+    # cannot meaningfully fake without restating the seam's internals.
+    for argv in (
+        ["git", "init", "-q", str(tracker_dir)],
+        ["git", "-C", str(tracker_dir), "config", "user.name", "cbsf-test"],
+        ["git", "-C", str(tracker_dir), "config", "user.email", "cbsf@test.invalid"],
+    ):
+        _sp.run(argv, check=True, capture_output=True)
 
     stub_bs = MagicMock()
-
-    def _succeeding_run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        result = MagicMock()
-        result.returncode = 0
-        if isinstance(cmd, list) and "diff" in cmd and "--cached" in cmd:
-            result.stdout = "bindings.json\n"
-        else:
-            result.stdout = ""
-        return result
 
     _alert_key = "rebar_reconciler.alert_store"
     sys.modules[_alert_key] = alert_store_mod
 
     try:
-        with patch("subprocess.run", side_effect=_succeeding_run):
-            result = reconcile_mod._commit_binding_store_snapshot(
-                stub_bs, tmp_path, "test-pass-ok-001"
-            )
+        result = reconcile_mod._commit_binding_store_snapshot(stub_bs, tmp_path, "test-pass-ok-001")
     finally:
         sys.modules.pop(_alert_key, None)
 
     assert result is True, (
         f"_commit_binding_store_snapshot must return True on success, got {result!r}"
+    )
+
+    head = _sp.run(
+        ["git", "-C", str(tracker_dir), "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "persist binding-store snapshot" in head.stdout, (
+        f"the snapshot commit must land on the tracker HEAD, got {head.stdout!r}"
     )
 
     # No alerts should be written on success

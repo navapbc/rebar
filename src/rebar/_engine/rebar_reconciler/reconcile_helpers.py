@@ -190,14 +190,11 @@ def preflight_status_mapping(mutations, repo_root: Path | None = None) -> None:
             )
 
 
-# The selective 5-file staging below cannot use the shared locked commit seam yet:
-# push.commit_and_push_tickets_branch stages with `git add -A`, which sweeps in
-# .bridge_state/last-pass.json (deliberately excluded here) and so advances the tickets
-# HEAD on every idempotent pass, turning test_reconcile_idempotency.py::
-# test_unchanged_second_pass_preserves_binding_store_bytes_and_head RED. Determined in
-# ticket 6454-d06e-7361-4e3d, which reverted that conversion for exactly this reason.
-# Ticket 11a9-b11b-e93d-4832 owns giving the seam a pathspec so this marker can go.
-# raw-git-ok: selective staging; the `add -A` seam breaks reconcile idempotency (6454-d06e)
+# The selective 5-file staging goes through the shared locked store seam:
+# push.commit_tickets_branch takes a pathspec (ticket 11a9-b11b-e93d-4832), so the
+# `add -A` sweep that broke reconcile idempotency in ticket 6454-d06e-7361-4e3d
+# (staging .bridge_state/last-pass.json advanced the tickets HEAD every pass) no
+# longer forces a raw git_adapter.add+commit composition here.
 def _commit_binding_store_snapshot(
     _binding_store: Any,
     repo_root: Path,
@@ -213,11 +210,14 @@ def _commit_binding_store_snapshot(
     bound tickets as unbound, generating outbound CREATE mutations instead of
     UPDATE mutations and producing a no-op dedup-skip rather than field updates.
 
-    Fix: after every successful binding_store.save(), git-stage the file and
-    commit it to the tickets orphan branch inside the .tickets-tracker worktree.
-    This mirrors what the GHA workflow's "commit-back" step does via
-    ``git add -A``, but runs inline so local probe runs that don't go through
-    GHA also get durable bindings.
+    Fix: after every successful binding_store.save(), commit the file set to the
+    tickets orphan branch inside the .tickets-tracker worktree, through the store's
+    locked commit seam (``rebar._store.push.commit_tickets_branch``) with a pathspec
+    scoped to exactly the binding-state files — never ``git add -A``, which would
+    sweep in ``.bridge_state/last-pass.json`` and advance the tickets HEAD on every
+    idempotent pass (ticket 6454-d06e). No push: local probe runs that don't go
+    through GHA still get durable bindings, and delivery stays with the GHA
+    commit-back / the store's own push paths.
 
     Returns:
         True  — commit succeeded (or nothing to commit — bindings already current).
@@ -253,33 +253,22 @@ def _commit_binding_store_snapshot(
         return True  # Nothing to commit — not a failure
 
     try:
-        # Stage only our three state files (never git add -A: avoid staging
-        # unrelated working-tree changes in the tickets worktree).
-        git_adapter.add(tracker_dir, *_existing_rel)
-        # Check if there is actually a diff to commit (idempotent).
-        staged_names = git_adapter.diff_cached_names(tracker_dir)
-        # PER-FILE idempotency (bug 1e08): the prior substring test
-        # ``"bindings.json" not in status.stdout`` does NOT match
-        # ``bindings-retired.json`` as a distinct file, so a retirement-only
-        # change (only bindings-retired.json staged) would be silently skipped.
-        # Match on basename membership over the staged-file lines instead.
-        _staged_basenames = {
-            os.path.basename(line.strip()) for line in staged_names.splitlines() if line.strip()
-        }
-        _tracked_basenames = {
-            os.path.basename(git_adapter.BINDINGS_FILE),
-            os.path.basename(git_adapter.BINDINGS_RETIRED_FILE),
-            os.path.basename(git_adapter.GET_ROTATION_FILE),
-            os.path.basename(git_adapter.IMPOSSIBLE_LINKS_FILE),
-            os.path.basename(git_adapter.PEER_CONFIRMATIONS_FILE),
-        }
-        if not (_tracked_basenames & _staged_basenames):
-            return True  # Already up-to-date; nothing to commit.
-        git_adapter.commit(
+        # Commit through the shared write-locked seam, staging ONLY our state files
+        # (never git add -A: avoid staging unrelated working-tree changes in the
+        # tickets worktree). The pathspec-scoped status inside the seam gives the
+        # PER-FILE idempotency of bug 1e08: a change in ANY of the five files —
+        # including a retirement-only bindings-retired.json change — commits, and no
+        # change in any of them leaves HEAD unmoved. strict=True turns every seam
+        # failure (stage, commit, lock timeout, rebase guard) into a raised
+        # PushDeliveryError, which the fail-open handler below converts to the
+        # existing False + stderr + bridge_alerts contract.
+        from rebar._store.push import commit_tickets_branch
+
+        commit_tickets_branch(
             tracker_dir,
-            f"reconciler: persist binding-store snapshot [pass {pass_id}]",
-            no_verify=True,
-            quiet=True,
+            message=f"reconciler: persist binding-store snapshot [pass {pass_id}]",
+            paths=_existing_rel,
+            strict=True,
         )
         return True
     except Exception as exc:  # noqa: BLE001 — fail-open: return False, log + alert, FS copy persists

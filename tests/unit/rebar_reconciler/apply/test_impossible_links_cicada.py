@@ -483,12 +483,13 @@ def test_the_record_file_is_staged_for_commit_back(monkeypatch):
         "the impossible-link record is not staged by _commit_binding_store_snapshot, "
         "so it will not survive to the next pass"
     )
-    basenames_block = source[
-        source.index("_tracked_basenames = {") : source.index("if not (_tracked_basenames")
-    ]
-    assert "IMPOSSIBLE_LINKS_FILE" in basenames_block, (
-        "the record is staged but not in the per-file idempotency set, so a pass that "
-        "changes ONLY this file would be skipped and never committed"
+    # The bug-1e08 per-file idempotency now comes from the locked store seam's
+    # pathspec-scoped status (ticket 11a9-b11b): the staged set must be handed to
+    # commit_tickets_branch as the pathspec, or a record-only change is either
+    # swept in with unrelated files or silently skipped.
+    assert "commit_tickets_branch(" in source and "paths=_existing_rel" in source, (
+        "the staged file set is not passed as the pathspec to the locked commit "
+        "seam, so a pass that changes ONLY this file would be skipped and never committed"
     )
 
 

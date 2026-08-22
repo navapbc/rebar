@@ -12,7 +12,9 @@ Test contract card::
       and loads reconcile.py with spec_from_file_location.
     production_path: >
       reconcile.py -> by-path reconcile_helpers.py ->
-      _commit_binding_store_snapshot -> canonical git-adapter seam.
+      _commit_binding_store_snapshot -> rebar._store.push.commit_tickets_branch
+      (the locked store commit seam; the git-adapter module is still loaded for
+      the tracker/state-file path constants).
     test_tier: >
       unit test driving a real isolated Python subprocess; an in-process unit is
       insufficient because prior imports can leak package/sys.modules context.
@@ -54,8 +56,11 @@ assert "rebar_reconciler" not in sys.modules
 
 adapter_key = "rebar_reconciler.git_adapter"
 seeded_adapter = None
-calls = []
 if scenario != "no_state":
+    # The helper reads the tracker/state-file constants from this module; the
+    # commit itself now goes through rebar._store.push.commit_tickets_branch
+    # (ticket 11a9-b11b), so no add/diff/commit callables are seeded — the
+    # observable is the real tracker repo (success) or the diagnostic (failure).
     seeded_adapter = ModuleType(adapter_key)
     seeded_adapter.TRACKER_DIR = ".tickets-tracker"
     seeded_adapter.BINDINGS_FILE = ".bridge_state/bindings.json"
@@ -63,22 +68,6 @@ if scenario != "no_state":
     seeded_adapter.GET_ROTATION_FILE = ".bridge_state/get_rotation.json"
     seeded_adapter.IMPOSSIBLE_LINKS_FILE = ".bridge_state/impossible-links.json"
     seeded_adapter.PEER_CONFIRMATIONS_FILE = ".bridge_state/peer-confirmations.json"
-
-    def add(tracker_dir, *paths):
-        calls.append(["add", str(tracker_dir), *paths])
-
-    def diff_cached_names(tracker_dir):
-        calls.append(["diff_cached_names", str(tracker_dir)])
-        return ".bridge_state/bindings.json\n"
-
-    def commit(tracker_dir, message, *, no_verify, quiet):
-        calls.append(["commit", str(tracker_dir), message, no_verify, quiet])
-        if scenario == "failure":
-            raise RuntimeError("simulated git failure")
-
-    seeded_adapter.add = add
-    seeded_adapter.diff_cached_names = diff_cached_names
-    seeded_adapter.commit = commit
     sys.modules[adapter_key] = seeded_adapter
 
 spec = importlib.util.spec_from_file_location("_standalone_reconcile_contract", reconcile_path)
@@ -89,6 +78,17 @@ spec.loader.exec_module(reconcile)
 
 result = reconcile._commit_binding_store_snapshot(object(), repo_root, "standalone-contract")
 resolved_adapter = sys.modules.get(adapter_key)
+head_subject = None
+if scenario == "success":
+    import subprocess
+
+    head = subprocess.run(
+        ["git", "-C", str(repo_root / ".tickets-tracker"), "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    head_subject = head.stdout.strip() if head.returncode == 0 else None
 print(
     json.dumps(
         {
@@ -97,7 +97,7 @@ print(
             "adapter_name": getattr(resolved_adapter, "__name__", None),
             "adapter_file": getattr(resolved_adapter, "__file__", None),
             "same_adapter": seeded_adapter is None or resolved_adapter is seeded_adapter,
-            "calls": calls,
+            "head_subject": head_subject,
         }
     )
 )
@@ -130,10 +130,18 @@ def _result(proc: subprocess.CompletedProcess[str]) -> dict:
     return json.loads(proc.stdout)
 
 
-def _write_binding_state(tmp_path: Path) -> None:
-    binding_file = tmp_path / ".tickets-tracker" / ".bridge_state" / "bindings.json"
+def _write_binding_state(tmp_path: Path, *, git_repo: bool) -> None:
+    tracker = tmp_path / ".tickets-tracker"
+    binding_file = tracker / ".bridge_state" / "bindings.json"
     binding_file.parent.mkdir(parents=True)
     binding_file.write_text("{}")
+    if git_repo:
+        for argv in (
+            ["git", "init", "-q", str(tracker)],
+            ["git", "-C", str(tracker), "config", "user.name", "standalone-contract"],
+            ["git", "-C", str(tracker), "config", "user.email", "standalone@contract.test"],
+        ):
+            subprocess.run(argv, check=True, capture_output=True)
 
 
 def test_package_free_no_state_returns_true_and_loads_canonical_adapter(tmp_path: Path) -> None:
@@ -146,20 +154,25 @@ def test_package_free_no_state_returns_true_and_loads_canonical_adapter(tmp_path
 
 
 def test_package_free_state_reuses_preseeded_adapter_and_reaches_git_ops(tmp_path: Path) -> None:
-    _write_binding_state(tmp_path)
+    _write_binding_state(tmp_path, git_repo=True)
     result = _result(_run_standalone(tmp_path, "success"))
 
     assert result["result"] is True
     assert result["same_adapter"] is True
-    assert [call[0] for call in result["calls"]] == ["add", "diff_cached_names", "commit"]
+    # The locked store seam really committed the snapshot to the tracker repo.
+    assert result["head_subject"] == (
+        "reconciler: persist binding-store snapshot [pass standalone-contract]"
+    )
 
 
 def test_package_free_adapter_failure_returns_false_with_diagnostic(tmp_path: Path) -> None:
-    _write_binding_state(tmp_path)
+    # The tracker directory exists with state but is NOT a git repository, so the
+    # strict locked commit seam raises and the helper degrades to False + stderr.
+    _write_binding_state(tmp_path, git_repo=False)
     proc = _run_standalone(tmp_path, "failure")
     result = _result(proc)
 
     assert result["result"] is False
     assert result["same_adapter"] is True
     assert "binding-store commit to tickets branch failed" in proc.stderr
-    assert "simulated git failure" in proc.stderr
+    assert "PushDeliveryError" in proc.stderr
