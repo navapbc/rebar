@@ -609,7 +609,7 @@ def score_code_novelty(
         system = _prompts.strip_volatile_marker(system)
         batch = list(enumerate(findings))
         context = verify.prior_findings_block(prior_findings)
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=system,
             instructions=(
                 f"## Diff under review\n{diff_text}\n\n"
@@ -619,9 +619,8 @@ def score_code_novelty(
             # Model-max output budget (bug 30a2) — the shared review-kernel rule.
             config=verify.max_output_cfg(cfg),
             reviewers=["code-novelty"],
-            mode="structured",
             output_schema="code_review_novelty",
-            execution_mode="single_turn",
+            bounds=RunRequest.INHERIT_POLICY,
         )
         raw = runner_sel.run(req).get("novelties", []) or []
         reshaped = verify.reshape_novelties(raw, valid_indices=range(len(findings)))

@@ -36,6 +36,7 @@ from rebar.llm.errors import (
 )
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
+from rebar.llm.structured_run import SingleTurnBounds
 
 from . import completion_banking as _bank
 from . import completion_verdict_cache as _cache
@@ -401,16 +402,19 @@ class CompletionAgentStep(_ex.AgentStepRunner):
                 },
             )
         return runner.run(
-            RunRequest(
+            RunRequest.for_structured(
                 system_prompt=finalizer.text,
                 instructions=finalizer_instructions,
                 config=self._config,
                 reviewers=[finalizer.id],
                 target={"kind": "ticket", "ticket_ids": [ticket_id]},
-                mode="structured",
                 output_schema="completion_verdict",
-                execution_mode="single_turn",
-                output_token_limit=_FINALIZER_OUTPUT_TOKENS,
+                bounds=SingleTurnBounds(
+                    output_tokens=_FINALIZER_OUTPUT_TOKENS,
+                    timeout_s=None,
+                    structured_retries=None,
+                    transport_attempts=None,
+                ),
             )
         )
 

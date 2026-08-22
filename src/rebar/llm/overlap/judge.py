@@ -18,6 +18,7 @@ from rebar.llm.config import LLMConfig
 from rebar.llm.model_classes import STANDARD_CLASS, resolve_model_string
 from rebar.llm.prompting import prompts
 from rebar.llm.runner import Runner, RunRequest, get_runner
+from rebar.llm.structured_run import SingleTurnBounds
 
 logger = logging.getLogger(__name__)
 
@@ -160,14 +161,13 @@ def judge_one(
                 system_prompt, first if shared_side == "first" else second
             )
         instructions = _pair_instructions(first, second, shared_side)
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=system_prompt,
             instructions=instructions,
             config=cfg,
             reviewers=["overlap-judge"],
-            mode="structured",
             output_schema="overlap_verdict",
-            execution_mode="single_turn",
+            bounds=RunRequest.INHERIT_POLICY,
         )
         return _verdict(get_runner(cfg, override=runner).run(req))
     except Exception:
@@ -200,18 +200,18 @@ def judge_batch(
         cfg = replace(cfg, model=resolve_model_string(STANDARD_CLASS, cfg.repo_path))
         prompt = prompts.get_prompt("overlap-judge", repo_root=cfg.repo_path)
         system_prompt, _meta = prompts.resolve_prompt(prompt, {}, repo_root=cfg.repo_path)
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=_hoisted_system_prompt(system_prompt, shared),
             instructions=_batch_instructions(pairs, shared_side=shared_side),
             config=cfg,
             reviewers=["overlap-judge"],
-            mode="structured",
             output_schema="overlap_verdict_batch",
-            execution_mode="single_turn",
-            output_token_limit=_batch_output_token_limit(len(pairs)),
-            structured_retry_limit=0,
-            transport_attempt_limit=1,
-            request_timeout_limit_s=60,
+            bounds=SingleTurnBounds(
+                output_tokens=_batch_output_token_limit(len(pairs)),
+                timeout_s=60,
+                structured_retries=0,
+                transport_attempts=1,
+            ),
         )
         res = get_runner(cfg, override=runner).run(req)
         entries = res.get("verdicts") if isinstance(res, dict) else None

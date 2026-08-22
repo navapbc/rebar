@@ -263,7 +263,7 @@ def _screen_one(bug: dict, system_prompt: str, cfg: LLMConfig, runner: Runner | 
     the operator's class table), inside the try so a config error degrades like any other
     screen failure."""
     cfg = replace(cfg, model=resolve_model_string(TRIVIAL_CLASS, cfg.repo_path))
-    req = RunRequest(
+    req = RunRequest.for_structured(
         system_prompt=system_prompt,
         instructions=(
             f"{_bug_digest(bug)}\n\n"
@@ -272,9 +272,8 @@ def _screen_one(bug: dict, system_prompt: str, cfg: LLMConfig, runner: Runner | 
         ),
         config=cfg,
         reviewers=[_PROMPT_ID],
-        mode="structured",
         output_schema=_OUTPUT_SCHEMA,
-        execution_mode="single_turn",
+        bounds=RunRequest.INHERIT_POLICY,
     )
     return get_runner(cfg, override=runner).run(req)
 

@@ -466,7 +466,7 @@ def pass1_isf(
         if ticket_graph
         else ""
     )
-    req = RunRequest(
+    req = RunRequest.for_structured(
         system_prompt=_resolve_system(PASS_ISF, plan, cfg),
         instructions=(
             "## Linked session log (the external intent of record)\n"
@@ -479,9 +479,8 @@ def pass1_isf(
         ),
         config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
         reviewers=["plan-isf"],
-        mode="structured",
         output_schema="plan_review_findings",
-        execution_mode="single_turn",
+        bounds=RunRequest.INHERIT_POLICY,
     )
     result = runner.run(req)
     out: list[dict[str, Any]] = []
@@ -579,14 +578,13 @@ def pass4_coach(
     triggers = {c for f in blocking + surviving for c in f.get("criteria", []) or []}
 
     def _pick(instructions: str, _applicable: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-        req = RunRequest(
+        req = RunRequest.for_structured(
             system_prompt=_resolve_system(PASS_COACH, plan, cfg),
             instructions=instructions,
             config=_max_output_cfg(cfg),  # model-max output budget (bug 30a2)
             reviewers=["plan-coach"],
-            mode="structured",
             output_schema="plan_review_coach",
-            execution_mode="single_turn",
+            bounds=RunRequest.INHERIT_POLICY,
         )
         return runner.run(req).get("notes", []) or []
 

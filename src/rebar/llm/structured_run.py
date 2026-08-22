@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from rebar.llm import usage_log
@@ -142,6 +143,28 @@ def _pai_structured(
     return _run_prompted_output(
         Agent, model, model_cls, req, kwargs, usage_limits, artifact_dir=artifact_dir
     )
+
+
+@dataclass(frozen=True)
+class SingleTurnBounds:
+    """The four lowering-only ceilings a single-turn structured sub-call may declare.
+
+    Every field is REQUIRED — none has a default — so ``RunRequest.for_structured`` cannot
+    inherit a ceiling by OMISSION the way a hand-built ``RunRequest`` does. That omission is
+    what bug ``leathery-druidic-nurseshark`` cost: it bounded ``judge_batch`` and left the
+    identical ``judge_one`` block four lines above it unbounded, because a missing keyword and
+    a deliberate decision to inherit read exactly the same.
+
+    ``None`` on a field means "inherit run-wide policy" — precisely what an omitted seam does
+    today, since every seam is lowering-only: :func:`runner._effective_config` ``min()``s
+    ``timeout_s`` and ``llm_retry_max_attempts``, :func:`output_retry_allowance` ``min()``s the
+    structured-output retries, and :func:`build_model_settings` ``min()``s the output cap.
+    """
+
+    output_tokens: int | None
+    timeout_s: int | None
+    structured_retries: int | None
+    transport_attempts: int | None
 
 
 def output_retry_allowance(req: RunRequest) -> int:
