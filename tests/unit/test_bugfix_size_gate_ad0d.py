@@ -271,9 +271,11 @@ def test_oversized_bug_fix_with_accepted_attestation_passes(
 
 
 @pytest.mark.parametrize("infra", ["unavailable", "error", "brand-new-future-verdict"])
-def test_infra_or_unknown_classification_is_advisory_never_blocks(
+def test_infra_or_unknown_classification_abstains_indeterminate(
     monkeypatch: pytest.MonkeyPatch, infra: str
 ) -> None:
+    """Bug 9011: an unclassifiable attestation must ABSTAIN (INDETERMINATE), never read as a
+    satisfied gate — a PASS-with-advisory kept `LLM-Review +1` on an oversized bug fix."""
     _arm(monkeypatch, classification=infra)
     verdict = _verdict()
     bsg.apply_bugfix_size_gate(
@@ -281,10 +283,27 @@ def test_infra_or_unknown_classification_is_advisory_never_blocks(
         diff_text=_file_diff("src/rebar/big.py", added=_BIG),
         commit_message="Fix thing\n\nrebar-ticket: beef-0000-0000-0001",
     )
-    assert verdict["verdict"] == "PASS"
+    assert verdict["verdict"] == "INDETERMINATE"
     assert verdict["blocking"] == []
-    assert len(verdict["advisory"]) == 1
-    assert verdict["advisory"][0]["criteria"] == [bsg.CRITERION_ID]
+    assert verdict["advisory"] == []  # no finding that reads as a pass
+    note = verdict["coverage"]["bugfix_size_gate"]
+    assert note["bucket"] == "infra" and note["verdict"] == infra
+
+
+def test_infra_classification_does_not_downgrade_an_existing_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An abstain must never WEAKEN a verdict: a BLOCK already on the table stays a BLOCK."""
+    _arm(monkeypatch, classification="error")
+    verdict = _verdict()
+    verdict["verdict"] = "BLOCK"
+    verdict["blocking"] = [{"criteria": ["other"], "decision": "block"}]
+    bsg.apply_bugfix_size_gate(
+        verdict,
+        diff_text=_file_diff("src/rebar/big.py", added=_BIG),
+        commit_message="Fix thing\n\nrebar-ticket: beef-0000-0000-0001",
+    )
+    assert verdict["verdict"] == "BLOCK"
     assert verdict["coverage"]["bugfix_size_gate"]["bucket"] == "infra"
 
 
@@ -342,7 +361,8 @@ def test_unresolvable_ticket_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None
     assert verdict == _verdict()
 
 
-def test_classifier_exception_degrades_to_advisory(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_classifier_exception_abstains_indeterminate(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bug 9011: an exception ESCAPING the classifier is the same infra class — abstain."""
     _arm(monkeypatch)
 
     def _explode(tid, repo_root=None, state=None):
@@ -355,9 +375,9 @@ def test_classifier_exception_degrades_to_advisory(monkeypatch: pytest.MonkeyPat
         diff_text=_file_diff("src/rebar/big.py", added=_BIG),
         commit_message="Fix thing\n\nrebar-ticket: beef-0000-0000-0001",
     )
-    assert verdict["verdict"] == "PASS"
+    assert verdict["verdict"] == "INDETERMINATE"
     assert verdict["blocking"] == []
-    assert len(verdict["advisory"]) == 1
+    assert verdict["advisory"] == []
     assert verdict["coverage"]["bugfix_size_gate"]["verdict"] == "error"
 
 

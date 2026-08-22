@@ -13,9 +13,12 @@ Design constraints:
 
 * **Gerrit-only** — ``finalize_code_review_verdict`` invokes this gate only when the request
   carries a ``change_id``; a local ``rebar review-code`` preview never blocks on it.
-* **Fail-open on infrastructure** — a store read failure or an unknown future verdict yields
-  an ADVISORY finding (never a block). Only an affirmative "the attestation is
-  missing/stale-material" classification blocks.
+* **Fail-CLOSED (abstain) on infrastructure** — a store read failure or an unknown future
+  verdict makes the review ABSTAIN: the verdict becomes ``INDETERMINATE`` (never silently
+  downgrading an existing ``BLOCK``), so no ``LLM-Review +1`` is cast and the change cannot
+  merge on the gate's silence (bug 9011). The classification error stays surfaced in the
+  coverage record for the bot's infra-recovery loop. Only an affirmative "the attestation is
+  missing/stale-material" classification blocks with a finding.
 * **Code drift is ACCEPTED** — ``stale-code`` / ``stale-head`` mean the plan WAS reviewed and
   the tree moved on afterwards (routine on a rebase-if-necessary trunk); punishing them would
   make the gate flaky-by-design.
@@ -77,7 +80,7 @@ FLAG_VERDICTS = KNOWN_VERDICTS - ACCEPTED_VERDICTS - INFRA_VERDICTS
 
 
 def bucket_for_verdict(verdict: str) -> str:
-    """``accepted`` / ``flag`` / ``infra``. Unknown future literals fail OPEN (infra)."""
+    """``accepted`` / ``flag`` / ``infra``. Unknown future literals are infra (abstain)."""
     if verdict in ACCEPTED_VERDICTS:
         return "accepted"
     if verdict in FLAG_VERDICTS:
@@ -254,8 +257,9 @@ def apply_bugfix_size_gate(
     Predicate: the commit resolves to a ``bug`` ticket AND the diff exceeds
     ``BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES`` non-test lines. Then the bug's plan-review
     attestation classification decides: ACCEPTED → coverage note only; FLAG → kernel-shaped
-    blocking finding (mirrors ``detectors.apply_failclosed``); INFRA → advisory finding.
-    Never raises."""
+    blocking finding (mirrors ``detectors.apply_failclosed``); INFRA → INDETERMINATE abstain
+    (never downgrading an existing BLOCK) — an unclassifiable attestation must not read as a
+    satisfied gate (bug 9011). Never raises."""
     ticket_id: str | None = None
     try:
         non_test = count_non_test_diff_lines(diff_text or "")
@@ -271,7 +275,7 @@ def apply_bugfix_size_gate(
             ticket_id, repo_root=repo_root, state=state
         )
     except Exception as exc:
-        logger.warning("bugfix-size gate degraded to advisory", exc_info=True)
+        logger.warning("bugfix-size gate evaluation failed; abstaining", exc_info=True)
         try:
             non_test = count_non_test_diff_lines(diff_text or "")
         except Exception:  # noqa: BLE001 — cannot even size the diff; stay silent
@@ -303,20 +307,10 @@ def apply_bugfix_size_gate(
         )
         verdict["verdict"] = "BLOCK"
     elif bucket == "infra":
-        verdict.setdefault("advisory", []).append(
-            {
-                "criteria": [CRITERION_ID],
-                "severity": "medium",
-                "decision": "advise",
-                "tier": "DET",
-                "finding": (
-                    f"{CRITERION_ID}: could not classify bug {ticket_id}'s plan-review "
-                    f"attestation ({classification.get('verdict')}: "
-                    f"{classification.get('reason')}); the size floor "
-                    f"({non_test} non-test lines > {BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES}) "
-                    "was met but the gate fails open on infrastructure trouble."
-                ),
-                "location": None,
-            }
-        )
+        # Fail CLOSED by abstaining (bug 9011): an unclassifiable attestation must not keep an
+        # `LLM-Review +1` on an over-floor bug fix. INDETERMINATE maps downstream to the
+        # voter's fail-closed coverage-gap vote; the coverage record above carries the error
+        # for the infra-recovery loop. A verdict already at BLOCK is never weakened.
+        if verdict.get("verdict") != "BLOCK":
+            verdict["verdict"] = "INDETERMINATE"
     return verdict
