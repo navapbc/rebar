@@ -44,12 +44,9 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
 
-from rebar._store import compat
+from rebar._store import compat, merge_recovery
 from rebar._store import lock as _lock
 from rebar._store.gitutil import _with_transient_fault_retry, run_git, run_git_bounded
 
@@ -223,8 +220,8 @@ def _recover_merge_abort(tracker: str, merge: subprocess.CompletedProcess) -> bo
     Returns True — licensing exactly ONE retry — only if every abort class present
     was recovered in full; any parse miss or partial recovery answers False so the
     caller keeps the abort-only net."""
-    leftovers = _untracked_overwrite_paths(merge)
-    local_changes = _local_change_paths(merge)
+    leftovers = merge_recovery.untracked_overwrite_paths(merge)
+    local_changes = merge_recovery.local_change_paths(merge)
     if not leftovers and not local_changes:
         return False
     _git(tracker, "merge", "--abort")
@@ -233,110 +230,19 @@ def _recover_merge_abort(tracker: str, merge: subprocess.CompletedProcess) -> bo
     return not local_changes or _restore_local_changes(tracker, local_changes)
 
 
-# Lines that terminate git's indented path list inside an abort message. "Please …"
-# covers both "Please move or remove them" (untracked) and "Please commit your
-# changes or stash them" (local changes); ort appends "Merge with strategy … failed."
-_ABORT_TRAILER_PREFIXES = ("Please ", "Aborting", "Merge with strategy", "error:", "fatal:")
-
-
-def _merge_abort_named_paths(merge: subprocess.CompletedProcess, marker: str) -> list[str]:
-    """Parse the repo-relative paths git names under ``marker`` in a merge-abort
-    message (one per indented line between the marker line and the trailer) — or []
-    if the marker is absent, which fences recovery to exactly the recoverable case."""
-    combined = f"{merge.stdout or ''}\n{merge.stderr or ''}"
-    lines = combined.splitlines()
-    start = next((i for i, line in enumerate(lines) if marker in line), None)
-    if start is None:
-        return []
-    paths: list[str] = []
-    for line in lines[start + 1 :]:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if stripped.startswith(_ABORT_TRAILER_PREFIXES):
-            break
-        paths.append(stripped)
-    return paths
-
-
-def _untracked_overwrite_paths(merge: subprocess.CompletedProcess) -> list[str]:
-    """Variant (a): untracked local files origin wants to create."""
-    return _merge_abort_named_paths(
-        merge, "untracked working tree files would be overwritten by merge"
-    )
-
-
-def _local_change_paths(merge: subprocess.CompletedProcess) -> list[str]:
-    """Variant (b): tracked local files with uncommitted changes origin wants to touch."""
-    return _merge_abort_named_paths(
-        merge, "Your local changes to the following files would be overwritten by merge"
-    )
-
-
-def _quarantine_dir(tracker: str) -> Path | None:
-    """A fresh timestamped quarantine dir OUTSIDE any working tree — under the git
-    common dir — shared by every recovery class. The quarantine is the durable
-    safety copy; it is never pruned. Materialized lazily by the first write."""
-    common = _git(tracker, "rev-parse", "--git-common-dir").stdout.strip()
-    if not common:
-        return None
-    return _quarantine_dir_under(common, tracker)
-
-
-def _quarantine_dir_under(common: str, tracker: str) -> Path:
-    """Pure path computation for the shared quarantine dir (no subprocess): resolve a
-    ``--git-common-dir`` answer (relative ones resolve against the tracker root) to a
-    fresh ``<common>/reconverge-quarantine/<utc-ts>/``. Shared with push_recovery,
-    whose git calls must stay on its own late-bound ``core._git`` seam — it obtains
-    ``common`` itself and only borrows the path arithmetic."""
-    common_dir = Path(common)
-    if not common_dir.is_absolute():
-        common_dir = Path(tracker) / common_dir
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-    return common_dir.resolve() / "reconverge-quarantine" / stamp
-
-
 def _quarantine_untracked(tracker: str, paths: list[str]) -> bool:
-    """Relocate (move, never delete) each named untracked path into quarantine so it
-    cannot re-collide on retry. Returns True only if every path was moved (a
-    mis-identified file must stay recoverable)."""
-    quarantine = _quarantine_dir(tracker)
-    if quarantine is None:
-        return False
-    tracker_root = Path(tracker)
-    for rel in paths:
-        src = tracker_root / rel
-        if not src.exists():
-            return False
-        dest = quarantine / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
-    return True
+    """Relocate the named untracked paths into quarantine. A thin adapter over the
+    shared :func:`merge_recovery.quarantine_untracked`, handing it THIS module's
+    ``_git`` so the tests that patch ``sync._git`` by name keep intercepting every
+    call. ``_commands.doctor`` reaches for this name too, so the shared mover's
+    untracked (``??``) fence now covers the doctor's leftover repair as well."""
+    return merge_recovery.quarantine_untracked(_git, tracker, paths)
 
 
 def _restore_local_changes(tracker: str, paths: list[str]) -> bool:
-    """Non-destructively clear the local changes git named, per porcelain state:
-    a DELETION of a tracked file — worktree (`` D``) or staged (``D ``, what an
-    interrupted compaction fold leaves after its ``git add -A``) — is restored from
-    HEAD (the bytes are already committed, nothing can be lost); a worktree
-    MODIFICATION (`` M``) is first copied (never moved) into quarantine, then
-    restored. Any other state — a staged modification, a conflict, an unparsed
-    line — answers False so the caller keeps the abort-only net."""
-    quarantine = _quarantine_dir(tracker)
-    if quarantine is None:
-        return False
-    tracker_root = Path(tracker)
-    for rel in paths:
-        state = _git(tracker, "status", "--porcelain", "--", rel).stdout[:2]
-        if state == " M":
-            dest = quarantine / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(tracker_root / rel), str(dest))
-        elif state not in (" D", "D "):
-            return False
-        if not _ok(tracker, "checkout", "HEAD", "--", rel):
-            return False
-    return True
+    """Restore the tracked files git named as locally changed. Adapter over the shared
+    :func:`merge_recovery.restore_local_changes`, on this module's ``_git`` seam."""
+    return merge_recovery.restore_local_changes(_git, tracker, paths)
 
 
 def reconverge(tracker: str | os.PathLike, *, lock_timeout: int = _SYNC_LOCK_TIMEOUT) -> None:

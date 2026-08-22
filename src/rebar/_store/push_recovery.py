@@ -29,14 +29,12 @@ NOTHING from ``push``.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from collections.abc import Callable
-from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from rebar._store import compat, git_outcome
+from rebar._store import compat, git_outcome, merge_recovery
 from rebar._store.gitutil import discard_unmerged_paths, path_is_foreign_to_branch
 from rebar._store.push_classify import (
     _DIRTY_WD,
@@ -48,12 +46,11 @@ from rebar._store.push_classify import (
 )
 
 # The untracked-overwrite recovery is PARITY with sync.py's reconverge (variant (a),
-# loris/1757, generalized by wolverine/1767): the PARSER and the quarantine PATH
-# arithmetic are pure (no subprocess), so they are shared from sync; the MOVER is
-# deliberately NOT — sync's `_quarantine_untracked` shells through sync's module-level
-# `_git`, which would bypass the late-bound `core._git` seam every function here keeps
-# for the ~25 `push._git` monkeypatch sites (see the module docstring).
-from rebar._store.sync import _quarantine_dir_under, _untracked_overwrite_paths
+# loris/1757, generalized by wolverine/1767). The whole toolkit — parser, quarantine path
+# arithmetic AND the mover — now lives in the neutral `merge_recovery` owner, which takes
+# the git runner as a PARAMETER; that is what lets this module keep handing it the
+# late-bound `core._git` seam the ~25 `push._git` monkeypatch sites depend on (see the
+# module docstring) instead of forking a second mover, as it had to before.
 
 # Bounded wait for the write lock around the push-retry merge (attempts=1, like sync.py's
 # reconverge). A timeout means another writer holds the lock, so we skip the merge and
@@ -217,7 +214,7 @@ def _retry_untracked_overwrite(
     git names and retry the merge ONCE, returning the retry. Any other failure class
     — or a quarantine refusal — returns ``merge`` unchanged, so the caller keeps
     today's abort net exactly."""
-    leftovers = _untracked_overwrite_paths(merge)
+    leftovers = merge_recovery.untracked_overwrite_paths(merge)
     if not leftovers:
         return merge
     core._git(base_path, "merge", "--abort")
@@ -234,30 +231,13 @@ def _retry_untracked_overwrite(
 
 
 def _quarantine_untracked_paths(core: ModuleType, base_path: str, paths: list[str]) -> bool:
-    """Move (never delete) the named paths into the shared reconverge-quarantine dir.
+    """Move (never delete) the named untracked paths into the shared reconverge-quarantine.
 
-    Local twin of sync's ``_quarantine_untracked``: the DIR PATH arithmetic is the
-    shared ``sync._quarantine_dir_under``, but every git call runs through the
-    late-bound ``core._git`` seam. The fence is checked for ALL paths before any
-    move: a named path that is not genuinely UNTRACKED (``??``) refuses the whole
-    recovery — a mis-parse must never relocate tracked data."""
-    common = core._git(base_path, "rev-parse", "--git-common-dir").stdout.strip()
-    if not common:
-        return False
-    for rel in paths:
-        status = core._git(base_path, "status", "--porcelain", "-uall", "--", rel).stdout
-        if not status.startswith("??"):
-            return False
-    quarantine = _quarantine_dir_under(common, base_path)
-    tracker_root = Path(base_path)
-    for rel in paths:
-        src = tracker_root / rel
-        if not src.exists():
-            return False
-        dest = quarantine / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
-    return True
+    A thin adapter over :func:`merge_recovery.quarantine_untracked` — the ONE mover —
+    that resolves ``core._git`` at CALL time, so the late-bound seam survives the
+    consolidation. The name is kept because ``_retry_untracked_overwrite`` resolves it at
+    module scope and the push-recovery suite both calls and monkeypatches it."""
+    return merge_recovery.quarantine_untracked(core._git, base_path, paths)
 
 
 def _merge_with_transport_retry(
