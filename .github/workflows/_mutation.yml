@@ -113,7 +113,11 @@ jobs:
       - name: Install the pinned development environment
         run: uv sync --locked --extra dev
       - name: Run mutation shard
-        run: uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD --shard "${{ matrix.shard }}"
+        run: |
+          # predates-gate-ok: transitively guarded — this job runs only when the selector set
+          # has-shards=true, and the selector's own `-f scripts/mutation_gate.py` guard forces
+          # has-shards=false on a tree that predates the script.
+          uv run --locked python scripts/mutation_gate.py run --base HEAD^ --head HEAD --shard "${{ matrix.shard }}"
       - name: Publish mutation evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

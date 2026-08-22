@@ -171,9 +171,16 @@ jobs:
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
       - name: README quickstart golden-path (against the installed rebar)
-        run: python scripts/check_readme_quickstart.py
+        run: |
+          # predates-gate-ok: KNOWN GAP, tracked as cushy-soldierly-sunbear
+          # (e818-564e-d3b6-4eaa). gerrit-verify.yaml guards this same script; adding the
+          # guard here changes which gates run on an old base, so it lands as its own change.
+          python scripts/check_readme_quickstart.py
       - name: End-to-end CLI probe (against the installed rebar)
-        run: python scripts/probe_rebar.py </dev/null
+        run: |
+          # predates-gate-ok: KNOWN GAP, tracked as cushy-soldierly-sunbear
+          # (e818-564e-d3b6-4eaa) together with the quickstart step above.
+          python scripts/probe_rebar.py </dev/null
 
   # Artifact-provenance probe (story 6168). The job body now lives in the reusable
   # _artifact-probe.yml (workflow_call), shared verbatim with gerrit-verify.yaml (the
@@ -230,6 +237,8 @@ jobs:
              "artifact-probe": "${{ needs.artifact-probe.result }}"}
         run: |
           set -euo pipefail
+          # predates-gate-ok: this job runs only on `schedule`/`workflow_dispatch`, which
+          # always check out the default branch — never an arbitrary patchset.
           python scripts/main_health_report.py \
             --ref-name "$GITHUB_REF_NAME" \
             --head-sha "$GITHUB_SHA" \
