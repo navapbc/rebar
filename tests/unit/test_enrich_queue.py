@@ -566,3 +566,126 @@ def test_a_mutation_in_one_worktree_invalidates_the_marker_another_wrote(
     assert Q._read_gate_marker(a) is None, (
         "a mutation from one worktree left another worktree's stale marker standing"
     )
+
+
+# ── scoped gate marker: a standing backlog no longer disables the fast path store-wide ───────
+# (task tireless-convenable-canvasback 4144-75d3-6af1-47d3)
+#
+# The 958e marker was all-or-nothing: written only by a scan that found NOTHING pending, so a
+# single standing pending entry forced a full store walk on every write. The marker now also
+# records the LIVE set (ids with an enqueued, not-DONE entry at full-scan time), asserting
+# "nothing is pending OUTSIDE this set" — probes then reduce only the live entries. Honesty is
+# unchanged: pending verdicts always come from reducing real queue events; the marker only
+# ever asserts absence. Counted by instrumenting reduce_ticket, never wall clock.
+
+
+@pytest.mark.parametrize("n_tickets", [4, 40])
+def test_standing_backlog_probe_scales_with_backlog_not_store(
+    repo: str, monkeypatch: pytest.MonkeyPatch, n_tickets: int
+) -> None:
+    """One permanently pending entry (never claimed, never done) must not cost a full store
+    walk per probe: after one cold scan, a repeat probe reduces exactly the live set — one
+    ticket — independent of store size."""
+    tracker = _tracker(repo)
+    now = 40_000_000_000_000
+    for i in range(n_tickets):
+        rebar.create_ticket("task", f"T{i}", repo_root=repo)
+    tid = rebar.create_ticket("task", "backlog", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now + 1, tracker) == [tid]  # cold: full walk, records the set
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 2, tracker) == [tid]
+    assert seen == [tid], (
+        f"a standing backlog of 1 reduced {len(seen)} tickets at n={n_tickets} — the gate is "
+        "paying a full store walk"
+    )
+
+
+def test_scoped_marker_never_hides_a_new_enqueue(repo: str) -> None:
+    """An enqueue AFTER the live set was recorded is never hidden behind it: the append
+    invalidates the marker, so the next probe sees the newcomer."""
+    tracker = _tracker(repo)
+    now = 41_000_000_000_000
+    t1 = rebar.create_ticket("task", "A", repo_root=repo)
+    Q.enqueue(t1, soak_min=0, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now + 1, tracker) == [t1]  # live set = {t1}
+    t2 = rebar.create_ticket("task", "B", repo_root=repo)
+    Q.enqueue(t2, soak_min=0, repo_root=repo, now_ns=now + 2)
+    assert sorted(Q.pending_enrichment(now + 3, tracker)) == sorted([t1, t2])
+
+
+def test_scoped_probe_does_not_refresh_the_ttl(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The TTL bounds the time since the last FULL walk. Scoped probes must not refresh it,
+    or an entry hidden by the accepted append-during-scan race would stay hidden forever."""
+    tracker = _tracker(repo)
+    now = 42_000_000_000_000
+    others = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(3)]
+    tid = rebar.create_ticket("task", "backlog", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now + 1, tracker) == [tid]  # full walk at now+1
+    ttl = Q._GATE_MARKER_TTL_NS
+    for probe_ns in (now + 2, now + ttl // 2, now + ttl):  # scoped probes across the window
+        assert Q.pending_enrichment(probe_ns, tracker) == [tid]
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 1 + ttl + 1, tracker) == [tid]
+    assert set(seen) >= {tid, *others}, (
+        "a probe past the TTL did not perform a full walk — scoped probes refreshed the TTL"
+    )
+
+
+def test_wrong_typed_live_field_is_untrusted(repo: str) -> None:
+    """A marker whose ``live`` field is wrong-typed is untrusted AS A WHOLE — degrading to
+    the full scan, never to a trusted quiet claim standing beside a garbage live set."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 43_000_000_000_000
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)
+    marker = Q._gate_marker_path(tracker)
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    for bad_live in ("nonsense", [1, 2], {"a": 1}, [None]):
+        with open(marker, "w", encoding="utf-8") as fh:
+            json.dump({"next_eligible_ns": None, "written_ns": now, "live": bad_live}, fh)
+        assert Q.pending_enrichment(now + 1, tracker) == [tid], (
+            f"marker with live={bad_live!r} was trusted"
+        )
+
+
+def test_soak_expiry_is_answered_from_the_scoped_path(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Time-driven transitions stay honest AND cheap: a soaking live entry becomes pending
+    at its deadline via scoped reductions, not a full walk. The soak here is shorter than
+    the marker TTL — a deadline beyond the TTL is (correctly) a full rescan under rule 3."""
+    tracker = _tracker(repo)
+    now = 44_000_000_000_000
+    others = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(3)]
+    del others
+    tid = rebar.create_ticket("task", "soaking", repo_root=repo)
+    assert 6 * _MIN < Q._GATE_MARKER_TTL_NS  # precondition: the deadline probe is TTL-fresh
+    Q.enqueue(tid, soak_min=5, repo_root=repo, now_ns=now)
+    assert Q.pending_enrichment(now + 1, tracker) == []  # quiet; records deadline + live set
+    seen = _count_reductions(monkeypatch)
+    assert Q.pending_enrichment(now + 6 * _MIN, tracker) == [tid]
+    assert seen == [tid], (
+        f"the soak-deadline rescan reduced {len(seen)} tickets instead of only the live entry"
+    )
+
+
+def test_scoped_path_preserves_the_service_order(repo: str) -> None:
+    """The f400 service-order contract holds on the scoped path: same ids, same
+    ``(not_before_ns, id)`` order as the full walk for the same store state."""
+    tracker = _tracker(repo)
+    now = 45_000_000_000_000
+    tids = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(3)]
+    # Distinct soak deadlines, deliberately NOT in creation order.
+    for tid, offset in zip(tids, (2, 0, 1), strict=True):
+        Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now + offset)
+    cold = Q.pending_enrichment(now + 10, tracker)  # full walk; records the live set
+    scoped = Q.pending_enrichment(now + 11, tracker)  # scoped
+    Q._clear_gate_marker(tracker)
+    full = Q.pending_enrichment(now + 11, tracker)  # full walk again, same store state
+    assert scoped == full == cold
+    expected = [
+        tid for _, tid in sorted((offset, tid) for tid, offset in zip(tids, (2, 0, 1), strict=True))
+    ]
+    assert scoped == expected, "the scoped path broke the (not_before_ns, id) service order"
