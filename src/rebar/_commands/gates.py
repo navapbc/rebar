@@ -2,12 +2,13 @@
 
 The completion-verification *close* gate (``transition.py``) and the plan-review
 *start-work* gate (``claim.py`` + ``transition.py``) each resolve a single ``verify.*``
-config flag and, on an **unreadable** config, fail the gate **OPEN** (skip it) with a
-stderr warning rather than blocking every operation on a broken config. That skip
-resolves to its own state (:class:`GateState.UNREADABLE`) rather than collapsing into
-"the operator turned this gate off", so a caller can tell a FAULT from a POLICY CHOICE:
-the posture is unchanged, the distinction is added. That resolution
-+ fail-open posture is identical between them and is exactly the kind of copy-pasted,
+config flag. On an **unreadable** config that resolution RAISES a
+:class:`rebar.config.ConfigError` naming the gate, the ticket, and the parse fault —
+the operator ruling on ticket 39f8-ae7c ("Unreadable config should result in an
+error"): a config FAULT must fail the gated operation loudly, never silently resolve
+the gate to its default (the retired fail-OPEN posture) and never mint a blocked
+``unavailable`` verdict a fail-closed gate could not act on. That resolution + error
+posture is identical between the gates and is exactly the kind of copy-pasted,
 security-relevant logic that drifts between sessions — so it lives here, once.
 
 The **plan-review start-work gate** itself (:func:`plan_review_precheck`) also lives
@@ -23,7 +24,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any, cast
@@ -47,29 +47,24 @@ logger = logging.getLogger(__name__)
 
 
 class GateState(Enum):
-    """The resolution of an opt-in ``verify.*`` gate flag — three states, not two.
+    """The resolution of an opt-in ``verify.*`` gate flag from a READABLE config.
 
-    ``DISABLED`` is a **POLICY CHOICE**: someone read the flag and deliberately turned the
-    gate off. ``UNREADABLE`` is a **FAULT**: the config could not be read or parsed at all,
-    so no one chose anything and the gate was *skipped*. Collapsing the two into a bare
-    ``False`` launders a fault into a policy choice — the audit trail then asserts an
-    operator decision that never happened, which is exactly the failure this enum exists to
-    prevent (the same "a distinct verdict, never a reused one" reasoning as the
-    ``disposition`` close verdict below).
+    ``ENABLED`` and ``DISABLED`` are both **POLICY CHOICES**: someone's config was read
+    and answered. An unreadable config is a **FAULT** and is not a state at all any more:
+    per the 39f8-ae7c operator ruling, :func:`gate_enabled` raises a
+    :class:`~rebar.config.ConfigError` instead of resolving it (the pre-ruling
+    ``UNREADABLE`` member — a falsey fail-OPEN skip — was removed with that ruling).
 
-    :meth:`__bool__` is truthy for ``ENABLED`` **only**, so ``UNREADABLE`` remains falsey and
-    the historical **fail-OPEN** posture is byte-identical to the previous bare-``bool``
-    behaviour. Every existing ``if not gate_enabled(...)`` call site keeps its exact
-    semantics; the distinction this type adds is purely **additive information** for callers
-    (and audit payloads) that want to tell a fault from a choice.
+    :meth:`__bool__` is truthy for ``ENABLED`` **only**, so every existing
+    ``if not gate_enabled(...)`` call site keeps its exact semantics and the test modules
+    that monkeypatch :func:`gate_enabled` with a plain bool keep working.
     """
 
     ENABLED = "enabled"
     DISABLED = "disabled"
-    UNREADABLE = "unreadable"
 
     def __bool__(self) -> bool:
-        """Truthy only for :attr:`ENABLED` — preserves the fail-OPEN skip as falsey."""
+        """Truthy only for :attr:`ENABLED`."""
         return self is GateState.ENABLED
 
 
@@ -93,34 +88,23 @@ def _claim_gate_reason(check: Mapping[str, object]) -> str:
     return f"{reason} ({verdict}; targets: {', '.join(stale_ids)})"
 
 
-def gate_enabled(
-    cfg_root: str, attr: str, *, ticket_id: str, gate_label: str, extra: str = ""
-) -> GateState:
-    """Resolve an opt-in ``verify.<attr>`` gate flag, failing OPEN on an unreadable config.
+def gate_enabled(cfg_root: str, attr: str, *, ticket_id: str, gate_label: str) -> GateState:
+    """Resolve an opt-in ``verify.<attr>`` gate flag, ERRORING on an unreadable config.
 
     ``attr`` is a ``VerifyConfig`` attribute name (e.g.
     ``"require_completion_verification_for_close"``). Returns
-    :attr:`GateState.ENABLED` when the flag is on, :attr:`GateState.DISABLED` when a
-    readable config has it off, and :attr:`GateState.UNREADABLE` when the config can't be
-    read — in the latter case a single-line warning is printed to stderr (``gate_label`` +
-    optional ``extra`` clause), so the skip is observable and never silent.
+    :attr:`GateState.ENABLED` when the flag is on and :attr:`GateState.DISABLED` when a
+    readable config has it off. When the config cannot be read or parsed it raises a
+    :class:`~rebar.config.ConfigError` — chained from the parse fault and naming
+    ``gate_label`` and ``ticket_id`` — so the gated operation FAILS loudly and the
+    operator sees exactly what to fix.
 
-    The return value is **falsey for both** ``DISABLED`` and ``UNREADABLE``, so
-    ``if not gate_enabled(...)`` behaves exactly as it did when this returned a bare
-    ``bool``; the three-state result only lets a caller that cares distinguish an
-    operator's choice from a fault.
-
-    Rationale for fail-OPEN, in two legs that still hold:
-
-    1. These are opt-in, **default-off** gates. An unreadable config must not auto-enable
-       a (possibly billable) gate across every repo and every ticket.
-    2. A skipped gate mints **no attestation**, and that absence is itself the
-       "not validated" signal CI checks — so failing open here does not make unvalidated
-       work look validated.
-
-    A historical third leg ("the stronger signature gate fail-CLOSES independently") was
-    retired along with the signature gate itself (``verify.require_signature_for_close``
-    and its close-gate code were deleted), so it is no longer claimed here.
+    That error posture is the 39f8-ae7c operator ruling ("Unreadable config should
+    result in an error"), which retired both alternatives it was asked to choose
+    between: the historical fail-OPEN skip silently resolved every gate to its default
+    (laundering a fault into a policy outcome), and a fail-CLOSED gate on an unreadable
+    config could only answer ``unavailable`` — a hard block that buys zero enforcement,
+    because the same unreadable config makes the attestation unreadable too.
     """
     from rebar.config import ConfigError, compose_config
 
@@ -129,12 +113,11 @@ def gate_enabled(
             return GateState.ENABLED
         return GateState.DISABLED
     except ConfigError as exc:
-        print(
-            f"Warning: could not read rebar config ({exc}); {gate_label} is skipped "
-            f"for {ticket_id}{extra}.",
-            file=sys.stderr,
-        )
-        return GateState.UNREADABLE
+        raise ConfigError(
+            f"cannot resolve {gate_label} for {ticket_id}: the rebar config could not "
+            f"be read ({exc}). An unreadable config is an error (operator ruling "
+            "39f8-ae7c) — fix the config file, then retry the operation."
+        ) from exc
 
 
 def gate_ran(check: Mapping[str, object]) -> bool:
@@ -143,7 +126,7 @@ def gate_ran(check: Mapping[str, object]) -> bool:
     The single reader of the ``gate_ran`` stamp that
     :func:`close_plan_review_gate_check` writes on every payload it returns. Callers ask
     this instead of comparing ``verdict`` against a skip string: the verdict vocabulary
-    grows (``disabled`` and ``unreadable`` are both skips today), and a comparison that
+    grows (``disabled`` is a skip today), and a comparison that
     silently misclassifies a new skip verdict as "ran" is the fragility this predicate
     removes.
 
@@ -215,27 +198,18 @@ def close_plan_review_gate_check(
         "require_plan_review_for_close",
         ticket_id=ticket_id,
         gate_label="the plan-review close gate",
-        extra=" (other close gates still apply)",
     )
     if not state:
-        # Two categorically different skips, so two verdicts (the distinction
-        # :class:`GateState` exists to preserve): `disabled` is a POLICY CHOICE — someone
-        # read the flag and turned the gate off — while `unreadable` is a FAULT: the config
-        # could not be parsed, so nobody chose anything. Reporting a fault as `disabled`
-        # launders it into an operator decision that never happened. `ok` stays True in both
-        # cases: the fail-OPEN posture is unchanged, only the reporting is honest now.
-        # Consumers must not read these strings to learn whether the gate ran — that is
-        # what the `gate_ran` stamp below (and :func:`gate_ran`) is for.
-        unreadable = state is GateState.UNREADABLE
+        # A DISABLED gate is a POLICY CHOICE — someone read the flag and turned the gate
+        # off — so the skip payload says exactly that. (An unreadable config never reaches
+        # here: gate_enabled raises, per the 39f8 operator ruling.) Consumers must not
+        # read the verdict string to learn whether the gate ran — that is what the
+        # `gate_ran` stamp below (and :func:`gate_ran`) is for.
         return {
             "ok": True,
             "gate_ran": False,
-            "verdict": "unreadable" if unreadable else "disabled",
-            "reason": (
-                "plan-review close gate was skipped: the rebar config could not be read"
-                if unreadable
-                else "plan-review close gate is disabled"
-            ),
+            "verdict": "disabled",
+            "reason": "plan-review close gate is disabled",
         }
     if ticket_state.get("ticket_type") not in ("task", "story", "epic"):
         return {
@@ -298,7 +272,7 @@ def close_plan_review_gate_check(
 
 def _plan_review_gate_applies(cfg_root: str, ticket_type: str, *, ticket_id: str) -> bool:
     """Whether the plan-review START-WORK gate applies to this ticket at all: the
-    ``verify.require_plan_review_for_claim`` flag is on (fail-OPEN on an unreadable
+    ``verify.require_plan_review_for_claim`` flag is on (ERRORING on an unreadable
     config, via :func:`gate_enabled`) AND the ticket type is not exempt.
 
     Shared by :func:`plan_review_precheck` and ``claim --review``'s stage-1
@@ -398,7 +372,7 @@ def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reas
     from rebar._commands._seam import CommandError
     from rebar.reducer import reduce_ticket as _reduce
 
-    # Shared resolution + fail-OPEN-on-unreadable-config posture (see gate_enabled),
+    # Shared resolution + error-on-unreadable-config posture (see gate_enabled),
     # mirroring the completion close gate so the two can't drift. Applicability
     # (flag on + non-exempt type) is single-sourced in _plan_review_gate_applies,
     # which `claim --review` also senses (story a114).

@@ -12,6 +12,16 @@ with `git-cliff` and then hand-curated. Agent-visible contract changes live in
 
 ### Changed
 
+- **BREAKING (pre-1.0) — an unreadable config now ERRORS gate-bearing operations instead of
+  fail-OPENing the opt-in `verify.*` gates.** When `rebar.toml` is present but cannot be read
+  (malformed TOML, invalid values), claim/transition/close now fail loudly with a
+  `ConfigError` naming the gate, the ticket, and the chained parse fault — previously the
+  gates silently resolved to their configured defaults and the operation proceeded
+  unverified. Applies to the CLI (clean `Error:` line, exit 1) and the library
+  (`rebar.claim` / `rebar.transition` raise `ConfigError`, now re-exported as
+  `rebar.ConfigError`). Operator ruling on ticket 39f8-ae7c: "Unreadable config should
+  result in an error." Fix the config file, then retry the operation.
+
 - **Library `transition` now uses the same reason-carrying force shape as `claim`.** Pass
   `force="<reason>"` to bypass whichever lifecycle gate the operation reaches; `None` alone
   means no bypass, and an explicitly empty string records `(no reason given)`. The former
