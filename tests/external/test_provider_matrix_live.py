@@ -68,8 +68,10 @@ def test_the_ambient_default_model_also_resolves_to_the_declared_provider() -> N
     from rebar.llm.config import LLMConfig
 
     resolved = LLMConfig.from_env().model
-    assert resolved.startswith(f"{_expected}:"), (
-        f"arm declares provider {_expected!r} but the ambient cfg.model resolves to {resolved!r} — "
+    qualifier, sep, _ = resolved.partition(":")
+    assert sep and _live_llm.provider_family(qualifier) == _expected, (
+        f"arm declares provider family {_expected!r} but the ambient cfg.model resolves to "
+        f"{resolved!r}, whose qualifier's provider family does not match — "
         f"an op that reads cfg.model instead of naming a class would call the wrong provider. "
         f"Check that REBAR_LLM_CONFIG_FILE "
         f"({os.environ.get('REBAR_LLM_CONFIG_FILE')!r}) sets an [llm] model key, not only "
@@ -83,10 +85,17 @@ def test_every_model_class_resolves_to_the_declared_provider() -> None:
     "ambient default" this story removes."""
     from rebar.llm.model_classes import resolve_model_string
 
+    def _matches_family(model: str) -> bool:
+        # The resolver emits protocol-specific qualifiers (e.g. openai-chat, ticket 1d22);
+        # the arm declares the FAMILY. An unqualified string (no ":") never matches.
+        qualifier, sep, _ = model.partition(":")
+        return bool(sep) and _live_llm.provider_family(qualifier) == _expected
+
     resolved = {c: resolve_model_string(c) for c in _CLASSES}
-    wrong = {c: m for c, m in resolved.items() if not m.startswith(f"{_expected}:")}
+    wrong = {c: m for c, m in resolved.items() if not _matches_family(m)}
     assert not wrong, (
-        f"arm declares provider {_expected!r} but these model classes resolve elsewhere: "
+        f"arm declares provider family {_expected!r} but these model classes resolve to a "
+        f"different family: "
         f"{wrong} — check REBAR_LLM_CONFIG_FILE "
         f"({os.environ.get('REBAR_LLM_CONFIG_FILE')!r}) is readable and sets "
         f"[llm.model_classes] for every class"

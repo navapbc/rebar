@@ -528,3 +528,52 @@ def test_a_module_pinning_a_provider_asks_the_probe_about_that_provider() -> Non
         f"about the ARM's provider instead — on a mismatched arm they report ready and then "
         f"call a provider that arm holds no credential for: {offenders}"
     )
+
+
+# ── the live tier reports the arm's provider FAMILY, not a protocol qualifier ──────────
+@pytest.mark.parametrize("arm", _arms(), ids=lambda a: str(a["provider"]))
+def test_every_arm_reports_its_declared_provider_family(
+    arm: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    _clean_config_env: None,
+) -> None:
+    """Bug cb46: ticket 1d22 renamed the openai model qualifier to `openai-chat` and updated
+    THIS module's `_MODEL_QUALIFIER_BY_PROVIDER`, but not the live tier — so on the openai arm
+    `configured_provider()` reported the QUALIFIER, the credential map missed, every llm_live
+    test skipped, and the arm-equality guard in `test_provider_matrix_live.py` false-positived.
+    The workflow declares the FAMILY (`matrix.provider` -> REBAR_EXPECTED_LLM_PROVIDER), so the
+    live tier's reported provider must be the family name for EVERY arm."""
+    mod = _live_llm_module()
+    monkeypatch.setenv("REBAR_LLM_CONFIG_FILE", str(_ROOT / arm["config_file"]))
+    root_cfg.reset_config_cache()
+
+    reported = mod.configured_provider(str(_ROOT))
+    assert reported == arm["provider"], (
+        f"overlay {arm['config_file']} makes the live tier report provider {reported!r}, but the "
+        f"workflow declares this arm as {arm['provider']!r} — the arm-equality guard and the "
+        f"credential map both key on the family name, so a protocol qualifier leaking through "
+        f"skips the whole arm"
+    )
+
+
+def test_the_openai_arm_is_live_ready_with_its_own_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    _clean_config_env: None,
+) -> None:
+    """The user-visible half of bug cb46: with the openai overlay active and OPENAI_API_KEY
+    present, the readiness probe must say READY. While `configured_provider()` returned
+    `openai-chat`, `credential_present()` looked up a key that env var name doesn't exist
+    under, `live_llm_ready()` was False, and the live openai arm silently skipped everything."""
+    mod = _live_llm_module()
+    monkeypatch.setenv("REBAR_LLM_CONFIG_FILE", str(_ROOT / ".github/llm-providers/openai.toml"))
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-used-for-any-call")
+    for foreign in ("ANTHROPIC_API_KEY", "REBAR_LLM_API_KEY"):
+        monkeypatch.delenv(foreign, raising=False)
+    monkeypatch.setattr(mod, "agents_extra_installed", lambda: True)
+    root_cfg.reset_config_cache()
+
+    assert mod.live_llm_ready() is True, (
+        "the openai arm carries OPENAI_API_KEY yet the probe reports not-ready — every "
+        f"llm_live test would skip and the arm validates nothing (reason: "
+        f"{mod._skip_reason()!r})"
+    )

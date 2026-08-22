@@ -51,14 +51,37 @@ _PROVIDER_KEY_ENV = {
 #: best-effort OpenAI-compatible endpoint (story S4) is not forced to borrow OPENAI_API_KEY.
 _GENERIC_KEY_ENV = "REBAR_LLM_API_KEY"
 
+#: The matrix dimension names the provider family; Pydantic AI's OpenAI provider has
+#: protocol-specific model qualifiers. Rebar deliberately selects Chat Completions, so its
+#: resolver canonicalizes every openai-family spec to ``openai-chat:`` (ticket 1d22) — while
+#: the workflow's ``REBAR_EXPECTED_LLM_PROVIDER`` and this module's credential table stay keyed
+#: by the FAMILY name ``openai``. This map is the single qualifier→family translation point for
+#: the live tier (ticket cb46).
+_PROVIDER_FAMILY_BY_QUALIFIER = {
+    "openai-chat": "openai",
+    "openai-responses": "openai",
+}
+
+
+def provider_family(qualifier: str) -> str:
+    """The provider FAMILY a resolved model qualifier belongs to.
+
+    Returns the family for a known protocol-specific qualifier (e.g. ``openai-chat`` →
+    ``openai``); any other qualifier is already its own family and is returned unchanged.
+    """
+    return _PROVIDER_FAMILY_BY_QUALIFIER.get(qualifier, qualifier)
+
 
 def configured_provider(repo_root: str | None = None) -> str:
-    """The provider this run will actually call, read from the resolved ``standard`` class.
+    """The provider FAMILY this run will actually call, read from the resolved ``standard`` class.
 
     Resolution goes through :func:`rebar.llm.model_classes.resolve_model_string`, so a
     ``REBAR_LLM_CONFIG_FILE`` overlay (how the CI matrix selects its arm) and the discovered
-    config are honoured by the same code the run itself uses. A resolved string with no
-    ``provider:`` prefix means the shipped default, :data:`DEFAULT_PROVIDER`.
+    config are honoured by the same code the run itself uses. The resolved qualifier is
+    translated to its provider family via :func:`provider_family` — the resolver emits
+    protocol-specific qualifiers like ``openai-chat`` (ticket 1d22), while credential lookup
+    and the arm-equality guard are keyed by family. A resolved string with no ``provider:``
+    prefix means the shipped default, :data:`DEFAULT_PROVIDER`.
     """
     try:
         from rebar.llm.model_classes import resolve_model_string
@@ -66,7 +89,9 @@ def configured_provider(repo_root: str | None = None) -> str:
         return DEFAULT_PROVIDER
     resolved = resolve_model_string("standard", repo_root)
     provider, _, _ = resolved.partition(":")
-    return provider or DEFAULT_PROVIDER
+    if not provider:
+        return DEFAULT_PROVIDER
+    return provider_family(provider)
 
 
 def _aws_credentials_resolvable() -> bool:
