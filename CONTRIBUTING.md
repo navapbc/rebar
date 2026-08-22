@@ -103,7 +103,7 @@ git commit -m "component: what changed and why"
 git log -1   # confirm a "Change-Id: I…" line is present in the footer
 ```
 
-Follow the [documentation policy](docs/documentation-policy.md) for every new or edited maintained text.
+Use the [documentation policy](docs/documentation-policy.md) to identify ownership, select the canonical source, and apply the documented correction path.
 
 **Check whether you edited a generated file.** Several checked-in files are derived from a source elsewhere in the tree. CI regenerates these files and fails on differences. Each generated file identifies its regeneration command through a banner or a top-level `_generated_by` key. The [Generated artifacts catalog](docs/generated-artifacts.md) lists each file with its source, regeneration command, and enforcement gate. Change the source and run the regeneration command when a generated file needs correction.
 

@@ -147,7 +147,7 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
 These topics have an authoritative home in `docs/`; read them there rather than expecting them
 restated here:
 
-- **Documentation ownership and writing rules** are defined in `docs/documentation-policy.md`.
+- The **documentation ownership and correction policy** is defined in `docs/documentation-policy.md`.
 - **Ticket model** — the `idea` status, parent/child hierarchy, the six link relations +
   blocking-link promotion, and tags (incl. `--set-tags` add-wins) → `docs/ticket-model.md`.
 - **Writing a plan that PASSES the plan-review gate** — the author-facing on-ramp: the

@@ -50,7 +50,7 @@ Common symptoms and the fix:
 
 ## Documentation policy and generated artifacts
 
-The [documentation policy](documentation-policy.md) defines audience, lifecycle, ownership, citation, correction, and writing requirements.
+The [documentation policy](documentation-policy.md) defines audience, lifecycle, ownership, canonical sources, citation, and correction methods.
 
 The [generated artifact catalog](generated-artifacts.md) identifies derived and parity-gated files with their source, regeneration command, and enforcement gate.
 

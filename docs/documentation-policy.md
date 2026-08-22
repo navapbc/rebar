@@ -1,6 +1,6 @@
 # Documentation policy
 
-This policy defines ownership and writing rules for maintained documentation and durable records. Authors classify each surface before changing it and correct the canonical source named below.
+This policy defines ownership, lifecycle, canonical sources, and correction methods for maintained documentation and durable records. Authors classify each surface before changing it and correct the canonical source named below.
 
 ## Documentation roles
 
@@ -28,27 +28,3 @@ ADR decision substance remains intact. Authors use substance-preserving annotati
 Protected evidence remains unchanged. Authors place corrections or provenance metadata beside the evidence and preserve the original artifact.
 
 Authors cite tickets or ADRs when historical context is needed. They do not restate that history in current-state documentation.
-
-## Writing rules
-
-These rules apply to new or edited maintained text.
-
-Do not use the em dash, en dash, spaced hyphen connector, semicolon, or clause-joining colon.
-
-Use a colon only to introduce an item list or as a structural label. Keep spoken narration free of colons.
-
-Use hyphens only in compound words, technical names or identifiers, Markdown list bullets, table separators, horizontal rules, and code or SQL operators. Do not use a plain hyphen as a dash.
-
-Keep every Markdown paragraph on one logical line. Use line breaks only when Markdown structure requires them.
-
-Write formal complete sentences with precise verbs. Do not use contractions, colloquialisms, casual connectors, filler, or authenticity padding. Leave a noun unmodified unless an adjective selects one option from several.
-
-The default banned words and phrases are: `real`, `actual`, `genuine`, `live` when it acts as a value adjective, `simply`, `just`, `quietly`, `seamlessly`, `robust`, `powerful`, `leverage`, `truly`, `in real time`, `concretely`, and `today` when it adds emphasis rather than a date.
-
-The default authenticity padding phrases are: `not a placeholder`, `live for this run`, `the thing that matters`, and `this is not a mock`.
-
-Describe the mechanism or source instead of claiming authenticity.
-
-## Protected forms
-
-These writing rules do not authorize changes to licenses, quotations, captures, frozen output, serialized fixtures, technical syntax, wording fixtures, generated outputs, historical ticket events, ADR decision substance, or protected evidence. Corrections follow the method assigned to each role.
