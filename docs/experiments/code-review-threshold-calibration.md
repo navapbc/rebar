@@ -214,3 +214,30 @@ vocabulary, or these silently bypass per-criterion routing.
 > reproduces the `sec` DET/ATTEST misclassification and the `project.review-phase-boundaries`
 > 0.95 row verbatim. Fixing the generator is deferred; until then, read its output against
 > the EFFECTIVE vocabulary and these corrections.
+
+## Code-v4 friction replay at 0.54 (correctness, edge-cases, concurrency)
+
+Story `4144-2784-6437-4efb`. The 2026 adjudication above held `correctness` and `edge-cases`
+advisory on a *rev_rr* argument, without ever measuring what a 0.54 threshold would actually
+block; `concurrency` shipped advisory pending fire data. This is that measurement, produced by
+`calibrate_code_review_thresholds.py --block-impact <crit>=0.54 --tracker <checkout>/.tickets-tracker`
+over the code-v3 sidecar corpus (1262 changes). `decision` is the posture now committed in
+`src/rebar/llm/code_review/criteria_routing.json`; the `of all changes` column is the friction the
+flip costs, held to the 8.0% operator-accepted budget recorded on the `tests` routing entry.
+
+| criterion | thr | surviving | would-block | of surviving | changes hit | of all changes | mean validity | val<0.5 | decision |
+|---|---|---|---|---|---|---|---|---|---|
+| correctness | 0.54 | 715 | 62 | 8.7% | 51 | 4.04% | 1.00 | 0 | flip |
+| edge-cases | 0.54 | 485 | 27 | 5.6% | 22 | 1.74% | 0.99 | 0 | flip |
+| concurrency | 0.54 | 1 | 0 | 0.0% | 0 | 0.0% | n/a | 0 | hold |
+
+`concurrency` is HELD advisory: its single surviving finding is far below the script's
+`MIN_N = 25` power floor, so 0.00% is an absence of evidence, not evidence of low friction.
+
+**Recall of the two escaped defects is NOT the justification for these flips, and the originating
+claim about them was wrong.** Change `c3aec3eae6` (the completion-verifier banking bug) does have a
+stored code-v3 sidecar, but its `correctness` finding sits at priority **0.3857 / validity 0.714** —
+below 0.54, so a flip would NOT have caught it. Change `d2dea317ec` has no code-v3 sidecar at all,
+so no recall statement is measurable for it. The flips rest on the precision/friction profile in the
+table: every would-block finding for both criteria was verifier-confirmed at validity >= 0.99, and
+neither exceeds a twentieth of the friction budget.
