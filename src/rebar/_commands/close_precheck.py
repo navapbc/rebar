@@ -512,6 +512,39 @@ def _administrative_disposition(
     return _NO_DISPOSITION
 
 
+def _gate_skip_expectation(ticket_id: str, code_root: str, force_close: str) -> str | None:
+    """Resolve the completion-verification gate's SKIP provenance, or ``None`` to proceed.
+
+    The gate state resolves FIRST (matching the historical branch order), so a ``--force``
+    under a DISABLED or UNREADABLE config records the gate state — there was no gate to
+    bypass — while the operator's reason stays durable in ``force_close_reason``.
+    ``force_bypassed`` is recorded only when an ENABLED gate was actually bypassed.
+
+    * ``gate_unreadable`` — the config could not be read; the fail-OPEN skip is a FAULT and
+      must not be laundered into the ``gate_off`` policy choice (consumes the tri-state
+      :class:`~rebar._commands.gates.GateState`).
+    * ``gate_off`` — the gate is genuinely configured off.
+    * ``force_bypassed`` — an ENABLED gate was bypassed with ``--force``.
+    """
+    from rebar._commands import gates
+
+    state = gates.gate_enabled(
+        code_root,
+        "require_completion_verification_for_close",
+        ticket_id=ticket_id,
+        gate_label="the completion-verification close gate",
+        extra=" (other close gates still apply)",
+    )
+    if state is gates.GateState.UNREADABLE:
+        return "gate_unreadable"
+    if not state:
+        return "gate_off"
+    if force_close:
+        # close, but withhold the signed confirmation (no verify, no sign)
+        return "force_bypassed"
+    return None
+
+
 def _completion_precheck(
     ticket_id: str,
     ticket_type: str,
@@ -525,32 +558,36 @@ def _completion_precheck(
 ):
     """The completion-verification close gate's PRE-close half (runs outside the write lock).
 
-    Returns the PASS verdict ``result`` (the sign signal, fed to
-    :func:`sign_completion_verdict` after a confirmed close), or ``None`` when the gate is off or
-    the
-    close is a ``--force`` (which closes WITHOUT verifying or signing — withholding the
-    signed confirmation, so a closed-without-signature ticket is the durable signal that
-    validation did not pass). Raises :class:`CommandError` (block) on a FAIL verdict, or when
+    Returns the PAIR ``(verified_result, completion_expectation)``. ``verified_result`` is the
+    PASS verdict ``result`` (the sign signal, fed to :func:`sign_completion_verdict` after a
+    confirmed close), or ``None`` when no signature will be produced.
+    ``completion_expectation`` is the write-time provenance for WHY a signature was or was not
+    expected, stamped on the close STATUS event (story mechanical-coherent-wolverine):
+    ``required`` (gate on, verified PASS, signature expected), ``disposition`` (signed as a
+    disposition, not a completion PASS), ``gate_off`` / ``gate_unreadable`` /
+    ``force_bypassed`` (see :func:`_gate_skip_expectation` — gate state resolves FIRST, so a
+    forced close under a disabled/unreadable config records the gate state), ``local_source``
+    (opt-in unattested verdict), ``not_certifiable`` (certification withheld by an
+    uncertified descendant), or ``""`` for lifecycle-exempt types (present-only: the key is
+    omitted). Raises :class:`CommandError` (block) on a FAIL verdict, or when
     the LLM is unavailable / any verifier error (fail-closed). The ``rebar.llm`` import is LAZY
     so the optionality contract holds: core stays stdlib-only unless the gate is on AND a
     non-force close is attempted.
 
-    THE RETURN CONTRACT HAS A THIRD CASE, and leaving it out of this docstring is part of what let
-    bug 738a hide. A **disposition** close (a bug closed ``duplicate`` / ``not_a_bug`` /
+    THE ``None`` RESULT HAS SEVERAL CAUSES, and leaving them out of this docstring is part of
+    what let bug 738a hide. A **disposition** close (a bug closed ``duplicate`` / ``not_a_bug`` /
     ``escalated`` while naming a live replacement) skips the billable verifier — it never claimed to
     implement its own criteria — but still returns a sign signal, built by
     :mod:`rebar._commands.close_disposition`. It used to return ``None``, so the closure was
     unsigned, and :func:`rebar.llm.completion.child_closure_findings` counts ANY unsigned closure as
     uncertified and withholds the parent's signature. Read as "unsigned implies gate-off or forced",
-    which is what this docstring said, that state looked like a force-close and was reopened as one.
-    So: ``None`` means off or forced; a disposition returns a verdict whose manifest says
-    ``DISPOSITION``, not ``PASS``."""
+    which is what an earlier docstring said, that state looked like a force-close and was reopened
+    as one. The ``completion_expectation`` half of the pair now records each cause durably."""
     # session_log / code_review are lifecycle-exempt — they cannot be transitioned, so
     # transition_core will refuse this close authoritatively. Skip the gate BEFORE the (billable)
     # verifier runs, so a doomed close attempt never fires an LLM call.
     if ticket_type in ("session_log", "code_review", "identity"):
-        return None
-    from rebar._commands import gates
+        return None, ""
 
     # The tracker may be relocated outside the code checkout. Resolve code/config concerns
     # from the caller's explicit root (or REBAR_ROOT / the cwd git toplevel), while tracker
@@ -560,16 +597,9 @@ def _completion_precheck(
     # Shared resolution + fail-OPEN-on-unreadable-config posture (see _commands/gates.py).
     # The confirmed fail-CLOSED behavior still applies when the gate is readable-ON but the
     # LLM is unavailable (below).
-    if not gates.gate_enabled(
-        code_root,
-        "require_completion_verification_for_close",
-        ticket_id=ticket_id,
-        gate_label="the completion-verification close gate",
-        extra=" (other close gates still apply)",
-    ):
-        return None
-    if force_close:
-        return None  # close, but withhold the signed confirmation (no verify, no sign)
+    skip = _gate_skip_expectation(ticket_id, code_root, force_close)
+    if skip:
+        return None, skip
 
     # Cheap precondition BEFORE the billable LLM call: an invalid close-class combination
     # (missing bug class, non-administrative class on a non-bug, missing reason for a
@@ -597,7 +627,7 @@ def _completion_precheck(
     # structural/write-time close guards still apply.
     disposition = _administrative_disposition(ticket_id, ticket_type, close_class, reason, tracker)
     if disposition is not _NO_DISPOSITION:
-        return disposition
+        return disposition, "disposition"
 
     # NO usable replacement. A `duplicate`/`superseded` close cannot be rescued by the
     # completion verifier — the work it would ask about lives on the replacement ticket — so
@@ -724,7 +754,7 @@ def _completion_precheck(
     # no source — e.g. a legacy caller — keeps the prior sign-on-PASS behavior). A local close
     # yields a closed-without-signature ticket (the documented "not attested" signal).
     if result.get("source") == "local":
-        return None
+        return None, "local_source"
     # A closed-but-uncertified (force-closed) descendant WITHHOLDS certification (it
     # propagates): close WITHOUT signing, and SAY SO (bug 96d1 — this path was silent,
     # unlike the drift/SigningError arms of the same seam, which both warn).
@@ -736,5 +766,5 @@ def _completion_precheck(
             "withheld: an uncertified (e.g. force-closed) descendant leaves the subtree "
             "unattested. Re-close that descendant through the gate, then reopen and re-close.\n"
         )
-        return None
-    return result
+        return None, "not_certifiable"
+    return result, "required"

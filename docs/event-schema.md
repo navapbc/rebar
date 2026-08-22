@@ -44,7 +44,7 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 | TYPE | Written by | Effect on replayed state |
 |------|-----------|--------------------------|
 | `CREATE` | `ticket-create.sh` | Seeds `ticket_type`, `title`, `parent_id`, `priority`, `assignee`, `description`, `tags`, an UNCONDITIONAL `creation_channel` (the ingress that produced this genesis — one of `cli`/`mcp`/`python`/`jira`/`import`; see "Creation-channel provenance" below), and MAY carry an optional `status` (the reducer defaults it to `open` when absent). A non-`open` genesis `status` is produced ONLY by the `rebar idea` command/`create_idea` MCP tool/`rebar.idea(...)` library entry — which emit a single CREATE with `status=idea` for an `epic`, so an idea is born in `idea` (never momentarily `open`/claimable) with no intervening `STATUS` event. There is no general `create --status` flag. Exactly one CREATE per ticket (fsck checks presence). Valid `ticket_type`s: `task`, `story`, `bug`, `epic`, `session_log`. **`session_log`** is a verbose-log type that is gate/lifecycle-exempt, excluded from the graph/health compiles (via `reduce_all_tickets(exclude_session_logs=…)`) and default `list`, never synced to Jira, and refuses `STATUS` (no claim/transition) — see [The session_log ticket type](#the-session_log-ticket-type) below. |
-| `STATUS` | `_commands/txn.py` (transition/claim) | Sets `status`; carries `current_status` (the optimistic-concurrency expectation) and `parent_status_uuid` (the prior STATUS uuid) for fork resolution. |
+| `STATUS` | `_commands/txn.py` (transition/claim) | Sets `status`; carries `current_status` (the optimistic-concurrency expectation) and `parent_status_uuid` (the prior STATUS uuid) for fork resolution. A `*->closed` edge additionally carries the present-only close-metadata keys `close_class`, `close_reason`, `force_close_reason`, and `completion_expectation` — see [Close metadata on the `*->closed` STATUS event](#close-metadata-on-the--closed-status-event). |
 | `EDIT` | `ticket-edit.sh`, `_commands/txn.py` (claim) | Merges `data.fields` (title/priority/assignee/description/parent) into state (last-writer-by-replay-order). **Tags are no longer mutated via `EDIT` (P2.3)** — historical `EDIT.fields.tags` still replays as the base, but no upgraded writer emits it; use `TAG_DELTA`. |
 | `TAG_DELTA` | `edit --add-tag/--remove-tag/--set-tags`, `tag`/`untag`, Jira inbound applier | Convergent tag add/remove deltas: `data.{added[], removed[]}` mutate the current `tags` in replay order (remove-then-add, so **add wins** on an intra-event conflict; idempotent). Replaces the whole-field `EDIT.tags` clobber so two clones adding different tags both survive. `--set-tags` is compiled to a delta vs observed tags (add-wins). The inbound reconciler marks `data.source="inbound"` so `local_label_intent` excludes it from user-intent. |
 | `COMMENT` | `ticket-comment.sh` | Appends `{body, author, timestamp}` to `comments`. |
@@ -65,6 +65,55 @@ Replay dispatch: `reducer/_processors.py` (`process_*`).
 in-process Python write path (`rebar._commands` leaf/lifecycle writers +
 `rebar._store` append/commit, with `rebar.reducer`/`rebar.graph` for replay/relations).
 It identifies the originating event producer, not a current file path.*
+
+## Close metadata on the `*->closed` STATUS event
+
+A `*->closed` STATUS event may carry up to four close-metadata keys in `data`, stamped by
+`txn._stamp_close_metadata` inside the SAME locked write that commits the close (no second
+lock acquisition — an audit comment or follow-up event would append through the very
+write-lock whose timeout is one of the failures being recorded). All four are
+**present-only**: absent → key omitted → the event is byte-identical to a pre-feature close
+event, which is what keeps each addition backward-compatible. The reducer
+(`reducer/_processors_status.py:_fold_close_metadata`) folds each key into reduced state on
+the winning `*->closed` edge only; a historical close event lacking a key reduces to state
+with that key **absent** (unknown/legacy — never guessed). Per
+[docs/migrations.md](migrations.md) these are additive, reducer-known fields: no migration,
+and older readers ignore them.
+
+- **`close_class`** — the validated `--class <value>` bug-close classification (bounded
+  vocabulary in `common.schema.json#/$defs/close_class`), folded as `state["close_class"]` →
+  see [docs/ticket-model.md](ticket-model.md).
+- **`close_reason`** — the operator's justification for a reason-required administrative
+  close (`--reason` on a non-force disposition close). Distinct from `force_close_reason`:
+  this records why a truthful disposition closed, that one records why a gate was bypassed.
+  Persisted only for a reason-required class.
+- **`force_close_reason`** — the operator's `--force=<reason>` when a close bypassed its
+  gates. Recording it on the close's own event (instead of the old best-effort second-lock
+  audit comment) is what made the bypass reason durable (bug defiant-orthoclase-buck).
+- **`completion_expectation`** — WHY a completion signature was or was not **expected** for
+  this close (story mechanical-coherent-wolverine). It records the write-time expectation,
+  never the signing outcome — the STATUS commits before signing is attempted. The enum
+  (`common.schema.json#/$defs/completion_expectation`):
+
+  | value | meaning at close time |
+  |---|---|
+  | `required` | the gate ran and PASSED; a completion signature was expected |
+  | `disposition` | a qualifying administrative close: signed as a DISPOSITION, not a PASS |
+  | `gate_off` | a readable config had the gate off (a policy choice) |
+  | `gate_unreadable` | unreadable config, gate failed open (a FAULT — never laundered into `gate_off`) |
+  | `force_bypassed` | the gate was ENABLED and `--force` skipped it (reason in `force_close_reason`) |
+  | `local_source` | verdict `source == "local"`: verified but never signed |
+  | `not_certifiable` | `certifiable is False`: certification withheld |
+  | `not_applicable` | `idea -> closed`: a reject/drop, not a completion |
+
+  Gate-state precedence: the gate state resolves FIRST, so a forced close under a
+  disabled/unreadable config records `gate_off`/`gate_unreadable` (there was no gate to
+  bypass); `force_bypassed` is recorded only when an ENABLED gate was actually bypassed.
+  A reader combines the durable expectation with the durable attestation: `required` +
+  attestation = closed and signed; `required` + none = **signature lost** (e.g. the
+  signature-append failed after the close committed); `disposition` ± attestation =
+  disposition-signed / disposition-signature-lost; any other value = no signature was
+  expected, and the value says exactly why. Absent = unknown/legacy (a pre-feature close).
 
 ## File-impact declarations (`FILE_IMPACT`)
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from rebar import config
@@ -386,6 +386,53 @@ def _hint_disposition_alternative(close_class: str) -> None:
     )
 
 
+def _plan_review_close_recheck(
+    ticket_id: str,
+    ticket_state: Mapping[str, Any],
+    *,
+    repo_root,
+    close_class: str,
+    tracker: str,
+) -> Callable[[Mapping[str, Any]], None] | None:
+    """Run the plan-review close gate NOW (outside the write lock) and, when it actually
+    ran, return the under-lock recheck closure for ``txn.transition_core``; ``None`` when
+    the gate was skipped. Raises via :func:`_raise_plan_review_close_gate_error` on a block.
+
+    Install the under-lock recheck ONLY when the gate actually ran. The closure is invoked
+    by ``txn.transition_core`` INSIDE the write lock, so it re-reads the config there;
+    installing it after a SKIP (gate off, or config unreadable) would add a config read —
+    and, on an unreadable config, a re-parse that can only fail again — to the critical
+    section for a gate that never applied. Ask the producer's stamp, never a verdict string:
+    the skip vocabulary grows, and a string comparison that misses a new skip verdict starts
+    doing exactly that work."""
+    from rebar._commands import gates
+
+    check = gates.close_plan_review_gate_check(
+        ticket_id,
+        ticket_state,
+        repo_root=repo_root,
+        close_class=close_class,
+        tracker=tracker,
+    )
+    if not check.get("ok"):
+        _raise_plan_review_close_gate_error(ticket_id, check)
+    if not gates.gate_ran(check):
+        return None
+
+    def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
+        locked_check = gates.close_plan_review_gate_check(
+            ticket_id,
+            locked_state,
+            repo_root=repo_root,
+            close_class=close_class,
+            tracker=tracker,
+        )
+        if not locked_check.get("ok"):
+            _raise_plan_review_close_gate_error(ticket_id, locked_check)
+
+    return plan_review_recheck
+
+
 def close_ticket(
     ticket_id: str,
     current_status: str,
@@ -456,6 +503,7 @@ def close_ticket(
     # and `idea -> closed`), and is omitted from the payload entirely in that case.
     completion_signature: dict[str, object] | None = None
     verified_result = None
+    completion_expectation = ""
     plan_review_recheck = None
     if target_status == "closed" and current_status != "idea":
         if ref is None:
@@ -478,38 +526,15 @@ def close_ticket(
         ticket_state = _reduce(os.path.join(tracker, ticket_id)) or {}
         ticket_type = ticket_state.get("ticket_type", "")
         if not force_close and ticket_type in _PLAN_REVIEW_CLOSE_TYPES:
-            from rebar._commands import gates
-
-            check = gates.close_plan_review_gate_check(
+            plan_review_recheck = _plan_review_close_recheck(
                 ticket_id,
                 ticket_state,
                 repo_root=repo_root,
                 close_class=close_class,
                 tracker=tracker,
             )
-            if not check.get("ok"):
-                _raise_plan_review_close_gate_error(ticket_id, check)
-            # Install the under-lock recheck ONLY when the gate actually ran. The closure
-            # below is invoked by `txn.transition_core` INSIDE the write lock, so it re-reads
-            # the config there; installing it after a SKIP (gate off, or config unreadable)
-            # would add a config read — and, on an unreadable config, a re-parse that can only
-            # fail again — to the critical section for a gate that never applied. Ask the
-            # producer's stamp, never a verdict string: the skip vocabulary grows, and a
-            # string comparison that misses a new skip verdict starts doing exactly that work.
-            if gates.gate_ran(check):
 
-                def plan_review_recheck(locked_state: Mapping[str, Any]) -> None:
-                    locked_check = gates.close_plan_review_gate_check(
-                        ticket_id,
-                        locked_state,
-                        repo_root=repo_root,
-                        close_class=close_class,
-                        tracker=tracker,
-                    )
-                    if not locked_check.get("ok"):
-                        _raise_plan_review_close_gate_error(ticket_id, locked_check)
-
-        verified_result = _completion_precheck(
+        verified_result, completion_expectation = _completion_precheck(
             ticket_id,
             ticket_type,
             repo_root_str,
@@ -519,6 +544,9 @@ def close_ticket(
             close_class=close_class,
             ref=ref,
         )
+    elif target_status == "closed":
+        # `idea -> closed` is a reject/drop, not a completion: the gate never applied.
+        completion_expectation = "not_applicable"
 
     from rebar._commands import _seam
 
@@ -536,6 +564,7 @@ def close_ticket(
         close_class=close_class,
         close_reason=close_reason,
         force_reason=force_close,
+        completion_expectation=completion_expectation,
         repo_root=repo_root,
         pre_status_check=plan_review_recheck,
     )

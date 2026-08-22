@@ -94,7 +94,7 @@ def _bug_state(deps: list[dict] | None = None) -> dict:
 
 def _run(store, tmp_path, monkeypatch, *, close_class: str, force: str = ""):
     _install(monkeypatch, store, tmp_path)
-    return close_precheck._completion_precheck(
+    result, _expectation = close_precheck._completion_precheck(
         _BUG,
         "bug",
         str(tmp_path),
@@ -103,6 +103,7 @@ def _run(store, tmp_path, monkeypatch, *, close_class: str, force: str = ""):
         force_close=force,
         close_class=close_class,
     )
+    return result
 
 
 def test_a_duplicate_close_with_no_link_names_the_exact_link_command(monkeypatch, tmp_path):

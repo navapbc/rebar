@@ -55,7 +55,7 @@ def test_unreadable_config_closes_and_is_not_reported_as_disabled(
     rebar_repo: Path, monkeypatch, gate_payloads: list[dict]
 ) -> None:
     tid = _make(rebar_repo)
-    monkeypatch.setattr(transition_close, "_completion_precheck", lambda *a, **k: None)
+    monkeypatch.setattr(transition_close, "_completion_precheck", lambda *a, **k: (None, ""))
     (rebar_repo / "rebar.toml").write_text(_UNREADABLE, encoding="utf-8")
     config.reset_config_cache()
 

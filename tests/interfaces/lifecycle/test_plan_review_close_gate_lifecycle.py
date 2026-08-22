@@ -61,7 +61,7 @@ def test_locked_recheck_detects_change_after_precheck(rebar_repo: Path, monkeypa
         }
 
     monkeypatch.setattr(gates, "close_plan_review_gate_check", changes_between_checks)
-    monkeypatch.setattr(transition_close, "_completion_precheck", lambda *a, **k: None)
+    monkeypatch.setattr(transition_close, "_completion_precheck", lambda *a, **k: (None, ""))
 
     with pytest.raises(rebar.RebarError) as exc:
         rebar.transition(tid, "in_progress", "closed", repo_root=str(rebar_repo))

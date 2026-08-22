@@ -236,6 +236,60 @@ def close_class_refusal(
     return None
 
 
+def _stamp_close_metadata(
+    status_data: dict,
+    target_status: str,
+    *,
+    close_class: str,
+    close_reason: str,
+    force_reason: str,
+    completion_expectation: str,
+) -> None:
+    """Stamp the close-metadata keys on a ``*->closed`` STATUS event's ``data``.
+
+    All present-only (mirrors ``_stamp_session``): absent -> key omitted -> byte-identical
+    to the pre-feature close event, which is what keeps every addition here
+    backward-compatible (a legacy event without a key reduces with the key ABSENT — unknown,
+    never guessed).
+
+    * ``close_class`` — bug-close classification (ticket ed13): the validated ``--class``,
+      folded by the reducer into ``state["close_class"]``.
+    * ``close_reason`` — the operator's justification for a reason-only administrative close
+      (ticket fc20): the CLI ``--reason`` on a NON-force administrative close. DISTINCT from
+      ``force_close_reason`` — this key records why a truthful disposition closed, that one
+      records why a gate was bypassed. Persisted ONLY for a reason-required class: any other
+      close discards the value rather than smuggling a free-text rationale past the bounded
+      vocabulary (ticket 3803's honesty rule, enforced write-side).
+    * ``force_close_reason`` — the operator's ``--force=<reason>`` for bypassing the close
+      gates (the unified ``force_reason`` in memory — ticket blusterous-earthly-kitten). The
+      PERSISTED key stays ``force_close_reason``: it is durable reduced state (the reducer +
+      schema fold it), so renaming it would be an out-of-scope event-schema migration. This
+      parameter was previously accepted and DISCARDED (bug defiant-orthoclase-buck): the only
+      durable trace of a bypass reason was a best-effort FORCE_CLOSE audit comment written
+      afterwards via a SECOND lock acquisition and swallowed on failure — least reliable under
+      exactly the contention that makes force-closing attractive. Recording it here costs no
+      extra lock: this write already holds one.
+    * ``completion_expectation`` — WHY a completion signature was or was not expected for
+      this close (story mechanical-coherent-wolverine): the write-time provenance that lets a
+      later reader distinguish gate-genuinely-off from force-bypassed, unreadable-config
+      fail-open, local-source, certification-withheld, and signature-append failure. Records
+      the EXPECTATION, never the outcome — the STATUS commits before signing is attempted, so
+      ``required`` + no attestation reads as "a signature was expected and is missing".
+    """
+    if target_status != "closed":
+        return
+    if close_class:
+        status_data["close_class"] = close_class
+    from rebar._commands import close_disposition
+
+    if close_reason and close_class in close_disposition.REASON_REQUIRED_CLASSES:
+        status_data["close_reason"] = close_reason
+    if force_reason:
+        status_data["force_close_reason"] = force_reason
+    if completion_expectation:
+        status_data["completion_expectation"] = completion_expectation
+
+
 # raw-git-ok: locked store seam internal
 def transition_core(
     tracker_dir: str,
@@ -248,6 +302,7 @@ def transition_core(
     close_class: str = "",
     close_reason: str = "",
     force_reason: str = "",
+    completion_expectation: str = "",
     repo_root=None,
     pre_status_check: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> None:
@@ -339,41 +394,14 @@ def transition_core(
         # crust-fetch-stump, story 68ef). Absent -> key omitted -> byte-identical.
         if current_status == "open" and target_status == "in_progress":
             _stamp_session(status_data)
-        # Bug-close classification (ticket ed13): record the validated ``--class`` on the
-        # ``*->closed`` STATUS edge so the reducer can fold it into ``state["close_class"]``.
-        # Present-only (mirrors ``_stamp_session``): absent -> key omitted -> byte-identical
-        # to the pre-feature close event for the (non-bug / no-class) paths.
-        if target_status == "closed" and close_class:
-            status_data["close_class"] = close_class
-        # The operator's justification for a reason-only administrative close (ticket fc20):
-        # the CLI ``--reason`` on a NON-force administrative close. Same present-only
-        # discipline as ``close_class``, and DISTINCT from ``force_close_reason`` below —
-        # this key records why a truthful disposition closed, that one records why a gate
-        # was bypassed. Persisted ONLY for a reason-required class: any other close
-        # discards the value rather than smuggling a free-text rationale past the bounded
-        # vocabulary (ticket 3803's honesty rule, now enforced write-side).
-        from rebar._commands import close_disposition
-
-        if (
-            target_status == "closed"
-            and close_reason
-            and close_class in close_disposition.REASON_REQUIRED_CLASSES
-        ):
-            status_data["close_reason"] = close_reason
-        # The operator's `--force=<reason>` for bypassing the close gates (the unified
-        # ``force_reason`` in memory — ticket blusterous-earthly-kitten). Same present-only
-        # discipline as `close_class` above, so an ordinary close omits the key and stays
-        # byte-identical to the pre-feature event. The PERSISTED status key stays
-        # ``force_close_reason``: it is durable reduced state (the reducer + schema fold it),
-        # so renaming it would be an out-of-scope event-schema migration — only the in-memory
-        # parameter was unified to ``force_reason``. This parameter was previously accepted and
-        # DISCARDED (bug defiant-orthoclase-buck): the only durable trace of a bypass reason
-        # was a best-effort FORCE_CLOSE audit comment written afterwards via a SECOND lock
-        # acquisition and swallowed on failure — least reliable under exactly the contention
-        # that makes force-closing attractive. Recording it here costs no extra lock: this
-        # write already holds one.
-        if target_status == "closed" and force_reason:
-            status_data["force_close_reason"] = force_reason
+        _stamp_close_metadata(
+            status_data,
+            target_status,
+            close_class=close_class,
+            close_reason=close_reason,
+            force_reason=force_reason,
+            completion_expectation=completion_expectation,
+        )
         event = {
             "timestamp": timestamp,
             "uuid": event_uuid,
