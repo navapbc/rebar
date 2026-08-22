@@ -15,6 +15,10 @@ local→Jira comment comparison and the create-path comment mapping:
     - ``fit_preserving_marker`` — the send-path fit that keeps that marker inside
       the backend's size budget instead of letting the fitter shear it off the
       tail (bug 5931).
+    - ``fit_for_send`` — the ONE fit behind an outbound comment (story 4cee):
+      it returns the wire text the transport is handed together with that text's
+      decoded readback, so the dedup key is taken FROM the bytes sent instead of
+      predicting them.
     - ``_is_machine_marker_comment`` — the bridge-internal machine-comment
       exclusion (bug 6afc).
 
@@ -64,6 +68,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -333,6 +338,60 @@ def fit_comment_as_sent(text: str, fit: Callable[[str], str]) -> str:
     return landed
 
 
+@dataclass(frozen=True)
+class FittedComment:
+    """The two values an outbound comment needs, derived from ONE fit.
+
+    ``wire_body``
+        The exact decorated, fitted text handed to the transport.
+    ``landed_text``
+        The marker-free decode of that text's wire form — the differ's dedup key
+        and the value the Jira-side key (the same decode over the FETCHED wire)
+        is compared against.
+
+    They are produced together so the key cannot be a prediction of the send.
+    """
+
+    landed_text: str
+    wire_body: str
+
+
+def fit_for_send(
+    body: str,
+    *,
+    sanitizer: Any | None = None,
+    codec: Any | None = None,
+    inbound_mapper: Any | None = None,
+) -> FittedComment:
+    """Derive the outbound comment's wire text and its dedup key from ONE fit.
+
+    The dedup key used to be a PREDICTION. ``_diff_comments`` composed
+    decorate → :meth:`fit_comment` → ``to_wire`` → decode to build it, while the
+    mutation it queued carried the UNFITTED decorated body; each adapter then
+    re-derived the wire at send time (Cloud in ``acli_cli_ops.add_comment``, Data
+    Center in ``JiraDataCenterBackend.add_comment``). The key was correct only
+    while three separately-maintained compositions agreed, and every historical
+    divergence made an over-length comment un-matchable, so it re-posted on every
+    pass (bugs 6afc, 5931, b9b4, 17c3).
+
+    Computing both here removes the obligation instead of restating it: the
+    caller queues ``wire_body`` on the mutation, the enactment site hands that
+    string to the transport, and ``landed_text`` is by construction the readback
+    of what was sent rather than a forecast of it.
+
+    ``sanitizer``/``codec``/``inbound_mapper`` are the injected Backend-port
+    collaborators, resolved lazily from the configured backend when ``None``
+    exactly as :func:`_diff_comments` resolves them — so this stays the
+    backend-neutral core (no vendor and no numeric limit is named here).
+    """
+    fitted = _resolve_sanitizer(sanitizer).fit_comment(body)
+    wire_body = _decorate_outbound_comment(fitted)
+    landed_text = _normalize_comment_body(
+        _resolve_codec(codec).to_wire(wire_body), inbound_mapper=inbound_mapper
+    )
+    return FittedComment(landed_text=landed_text, wire_body=wire_body)
+
+
 def _common_prefix(left: str, right: str) -> str:
     """The shared leading run of two strings (returned as the prefix itself).
 
@@ -588,10 +647,14 @@ def _diff_comments(
         # HTML comment and ``markdown_to_adf`` degrades a document that would
         # drop one. So the secondary dedup was inert for every markdown-bearing
         # comment and re-posted it each pass.
-        compare_body = _normalize_comment_body(
-            codec.to_wire(_decorate_outbound_comment(sanitizer.fit_comment(body))),
-            inbound_mapper=inbound_mapper,
-        )
+        #
+        # Story 4cee: the key is no longer a PREDICTION of the send. ``fit_for_send``
+        # produces the wire text and its decoded readback together; the readback is
+        # the key and the wire text rides on the mutation, so the enactment site
+        # hands the transport the very bytes this key was taken from instead of
+        # re-deriving them from the unfitted body.
+        fitted = fit_for_send(body, sanitizer=sanitizer, codec=codec, inbound_mapper=inbound_mapper)
+        compare_body = fitted.landed_text
         if compare_body and compare_body not in jira_bodies:
             # Decorate the outbound body with the reconciler marker so the
             # inbound differ can identify (and filter) our own echoes on the
@@ -602,6 +665,9 @@ def _diff_comments(
                 {
                     "action": "add",
                     "body": _decorate_outbound_comment(body),
+                    # The bytes the transport must send, decided HERE (story 4cee).
+                    # ``body`` stays for the pre-cutover fallback and for readers.
+                    "wire_body": fitted.wire_body,
                     "local_comment_key": local_comment_key,
                 }
             )
