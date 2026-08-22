@@ -103,6 +103,7 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
         priority_floor=None,
         repo_root=None,
         source=None,
+        retry_lineage=None,
     ):
         captured.update(
             source=source,
@@ -111,6 +112,7 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
             review_phase=review_phase,
             priority_floor=priority_floor,
             repo_root=repo_root,
+            retry_lineage=retry_lineage,
         )
         return True
 
@@ -132,4 +134,5 @@ def test_full_review_emits_the_exact_pre_llm_snapshot(
         "review_phase": "planning",
         "priority_floor": None,
         "repo_root": "/repo",
+        "retry_lineage": None,  # a normal (non-retry) review carries no retry lineage
     }

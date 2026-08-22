@@ -133,6 +133,7 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
     agent_calls = 0
     verify_requests = 0  # Pass-2 verifier model-request count — step usage vs its budget (bug 59bc)
     usage_per_call: list[dict[str, Any]] = []  # d52a: per-call records off the batch `_usage`
+    batch_plans: list[dict[str, Any]] = []  # RP-06 S5: the opaque pass1 coverage plan(s)
     for s in rec.steps:
         if not isinstance(s, dict) or s.get("status") != "succeeded":
             continue
@@ -150,6 +151,9 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
             if isinstance(step_usage, dict):
                 per_call = step_usage.get("per_call") or []
                 usage_per_call += [r for r in per_call if isinstance(r, dict)]
+            batch_plan = (s.get("outputs") or {}).get("batch_plan")
+            if isinstance(batch_plan, dict):
+                batch_plans.append(batch_plan)
         elif kind == "agent":
             agent_calls += 1
             if step_id == STEP_VERIFY:
@@ -184,6 +188,39 @@ def _attach_plan_review_metrics(verdict: dict[str, Any], rec, total_ms: float) -
         }
     _attach_read_set(coverage, rec)
     coverage["metrics"] = metrics
+    _attach_discovery_trace(coverage, batch_plans)
+
+
+def _attach_discovery_trace(coverage: dict[str, Any], batch_plans: list[dict[str, Any]]) -> None:
+    """Surface the shared discovery kernel's per-unit journal from the batch step's opaque
+    ``batch_plan`` (the pass1 coverage) into the verdict coverage (RP-06 S5), so
+    ``sidecar.build_payload`` can persist the reducer-ignored ``discovery_journal`` used by
+    ``review-plan --retry`` eligibility. It is stripped from the SURFACED verdict by
+    ``_run_plan_review`` after the sidecar emit — the journal is never part of public output."""
+    trace: list[dict[str, Any]] = []
+    resumed = 0
+    total = 0
+    for plan in batch_plans:
+        unit_trace = plan.get("discovery_trace")
+        if isinstance(unit_trace, list):
+            trace += [u for u in unit_trace if isinstance(u, dict)]
+        checkpoint = plan.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            resumed += int(checkpoint.get("chunks_resumed") or 0)
+            total += int(checkpoint.get("chunks_total") or 0)
+    if trace:
+        coverage["discovery_trace"] = trace
+        coverage["checkpoint"] = {"chunks_resumed": resumed, "chunks_total": total}
+
+
+def strip_surfaced_journal(coverage: Any) -> None:
+    """Remove the reducer-ignored discovery journal keys (``discovery_trace`` /
+    ``checkpoint``) from a verdict's coverage. Called AFTER the sidecar emit so the journal
+    reaches the persisted payload (seeding ``review-plan --retry`` eligibility) but never the
+    surfaced ``--output json`` verdict (RP-06 S5 AC6). A no-op on a non-dict coverage."""
+    if isinstance(coverage, dict):
+        coverage.pop("discovery_trace", None)
+        coverage.pop("checkpoint", None)
 
 
 def _attach_read_set(coverage: dict[str, Any], rec) -> None:

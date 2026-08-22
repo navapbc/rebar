@@ -358,6 +358,18 @@ do **not** need to pay for the review again — `rebar sign-review <id>` re-sign
 recorded `REVIEW_RESULT` sidecar with **no LLM call**. It refuses if the plan changed since
 the review or if the recorded verdict was not a signable `PASS`.
 
+If a review landed on **INDETERMINATE** because a finder unit degraded or the budget cap
+shed some criteria, `rebar review-plan <id> --retry` resumes **only that latest review**:
+it reuses the checkpointed successes (zero model calls for them) and re-runs only the missing
+units under a fresh attempt budget. It acts only when the latest retained result is a
+retryable INDETERMINATE with a current, versioned discovery journal; otherwise (a PASS/BLOCK,
+a non-retryable indeterminate, or a missing/legacy/corrupt/stale journal) it **refuses before
+any model call**, exits `2`, and prints the full-review remedy — run `rebar review-plan <id>`.
+`--retry` is mutually exclusive with `--force`/`--status`/`--check`, compatible with
+`--no-sign`, and — unlike `--status` (which only reads currency) and `sign-review` (which
+re-certifies without re-running) — is the one path that pays for just the missing units. See
+[plan-review-gate.md](plan-review-gate.md#resuming-exactly-the-latest-review--review-plan---retry).
+
 `rebar claim <id> --force[=<reason>]` bypasses any enabled start-work gate (e.g.
 plan-review) — not just plan-review specifically, but whatever gate is configured to run
 on claim, now or in the future. `--force` is available on every surface — CLI, the library,
