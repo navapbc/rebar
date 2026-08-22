@@ -72,6 +72,57 @@ def resolve_outbound_status(value: Any, status_map: dict[str, str] | None) -> st
     return target
 
 
+def merge_create_defaults(
+    create_defaults: dict[str, str] | None, result: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge per-project ``create_defaults`` UNDER a computed CREATE body.
+
+    ``create_defaults`` (``config.effective_create_defaults``) is a str-valued map of
+    vendor field name -> literal value for required-beyond-baseline Jira fields. The
+    baseline computed ``result`` ALWAYS wins on collision — a default that names a field
+    the mapper already computes (``summary``/``priority``/...) never overrides it — so a
+    default only ever INJECTS a field the baseline body omits. CREATE-only: the UPDATE
+    mapper applies no defaults. Shared by both CREATE paths (Cloud + DC) so the merge has
+    ONE implementation."""
+    return {**(create_defaults or {}), **result}
+
+
+def resolve_outbound_priority(value: Any, priority_map: dict[str, str] | None) -> str | None:
+    """Resolve a local priority to its Jira target NAME under map-or-drift semantics.
+
+    ``priority_map`` is the effective per-project forward map
+    (``config.effective_priority_map``, str-keyed); ``None`` falls back to a str-keyed VIEW
+    of the built-in ``LOCAL_PRIORITY_TO_JIRA`` (which is INT-keyed here — this module must
+    not import ``config``, so the str-keyed fallback is built locally, not imported). The
+    lookup is always by ``str(value)`` so an int local priority and a str config key meet.
+
+    When the local ``value`` has NO target this returns ``None`` — the caller OMITS the
+    ``priority`` field entirely (Jira left unchanged), never coercing to ``"Medium"`` (this
+    REPLACES the old unconditional ``"Medium"`` fallback) — and emits a non-fatal drift
+    warning to stderr naming the priority. The warning reuses the SAME ``_DRIFT_WARNED``
+    dedupe set (and :func:`reset_drift_warnings`) as :func:`resolve_outbound_status`, keyed
+    by ``str(value)``, so a persistently drifting priority warns at most once per process.
+    Shared by the UPDATE mapper and both CREATE paths so the rule has ONE implementation."""
+    effective = (
+        {str(k): v for k, v in LOCAL_PRIORITY_TO_JIRA.items()}
+        if priority_map is None
+        else priority_map
+    )
+    key = str(value)
+    target = effective.get(key)
+    if target is None:
+        if key not in _DRIFT_WARNED:
+            _DRIFT_WARNED.add(key)
+            print(
+                f"rebar-reconciler: local priority {value!r} has no Jira target in the "
+                "effective priority map; leaving the Jira priority field unchanged "
+                "(map-or-drift).",
+                file=sys.stderr,
+            )
+        return None
+    return target
+
+
 def resolve_outbound_type(value: Any, type_map: dict[str, str] | None) -> str:
     """Resolve a local ticket type to its Jira issue-type NAME.
 
@@ -115,6 +166,7 @@ class OutboundFieldMapper:
         binding_store: Any | None = None,
         local_ticket_types: dict[str, str] | None = None,
         status_map: dict[str, str] | None = None,
+        priority_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         """Map a CANONICAL changed-fields dict (local field names -> local values) to
         the vendor-shaped mutation fields, at the emission boundary (ticket 625b).
@@ -126,7 +178,10 @@ class OutboundFieldMapper:
         (``config.effective_status_map``); ``None`` falls back to the built-in
         ``LOCAL_STATUS_TO_JIRA``. A local status with NO target (map-or-drift) causes
         the ``status`` field to be OMITTED entirely — never coerced — with a
-        non-fatal warning to stderr. ``assignee``/``parent``/``reporter`` values are
+        non-fatal warning to stderr. ``priority_map`` is the effective per-project
+        forward map (``config.effective_priority_map``); ``None`` falls back to the
+        built-in map, and a local priority with NO target is likewise OMITTED (map-or-drift),
+        never coerced to ``"Medium"``. ``assignee``/``parent``/``reporter`` values are
         already resolved by the core diff and pass through unchanged, as does the
         ``_assignee_is_account_id`` dispatch sentinel."""
         out: dict[str, Any] = {}
@@ -158,7 +213,9 @@ class OutboundFieldMapper:
                 if target is not None:
                     out["status"] = target
             elif name == "priority":
-                out["priority"] = LOCAL_PRIORITY_TO_JIRA.get(value, "Medium")
+                target = resolve_outbound_priority(value, priority_map)
+                if target is not None:
+                    out["priority"] = target
             else:
                 # assignee / parent / reporter (already resolved) + the
                 # _assignee_is_account_id sentinel pass through by their own name.

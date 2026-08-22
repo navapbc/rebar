@@ -18,7 +18,9 @@ from rebar_reconciler.outbound_differ import (
     _TRANSPORT_ERROR,
     OutboundMutation,
     _best_effort,
+    _effective_create_defaults_for,
     _effective_link_map_for,
+    _effective_priority_map_for,
     _effective_status_map_for,
     _effective_type_map_for,
     _is_retired,
@@ -82,6 +84,8 @@ def _compute_outbound_create_mutation(
     # so the annotation label only needs an ADD (never a REMOVE).
     status_map = _effective_status_map_for(ticket, mapping, repo_root)
     type_map = _effective_type_map_for(ticket, mapping, repo_root)
+    priority_map = _effective_priority_map_for(ticket, mapping, repo_root)
+    create_defaults = _effective_create_defaults_for(ticket, mapping, repo_root)
     # S3: the type-axis annotation mirror — a collapsing per-project type_map stamps a
     # rebar-type: label so the local type is recoverable inbound. New issues carry no
     # labels yet, so only an ADD is possible here (never a REMOVE), like status.
@@ -102,6 +106,8 @@ def _compute_outbound_create_mutation(
         suppressed_out=suppressed_parents,
         status_map=status_map,
         type_map=type_map,
+        priority_map=priority_map,
+        create_defaults=create_defaults,
     )
     if suppressed_parents and dropped_field_sink is not None:
         dropped_field_sink.append((local_id, "parent"))
@@ -246,6 +252,7 @@ def _compute_outbound_update_mutation(
     # baseline, diff in local shape, map back to vendor shape) lives in the core helper.
     _status_map = _effective_status_map_for(ticket, mapping, repo_root)
     _type_map = _effective_type_map_for(ticket, mapping, repo_root)
+    _priority_map = _effective_priority_map_for(ticket, mapping, repo_root)
     fields = compute_update_fields(
         ticket,
         jira_fields,
@@ -260,6 +267,7 @@ def _compute_outbound_update_mutation(
         conflict_sink=conflict_sink,
         dropped_field_sink=dropped_field_sink,
         status_map=_status_map,
+        priority_map=_priority_map,
     )
     # Comments use the resolved snapshot (the bounded-GET overlay) — NO second call (C3).
     # emersed-specific-mutt: thread the binding_store so _diff_comments' PRIMARY skip can

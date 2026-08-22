@@ -32,7 +32,16 @@ from typing import Any
 # names so this module's own call sites below need no further change. Absolute
 # import: this module is loaded via ``spec_from_file_location`` with no package
 # context in several tests, where a relative import would raise ImportError.
-from rebar_reconciler.adapters.jira_family import LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY
+#
+# Kept as a MODULE ATTRIBUTE (read by tests and the state/test_config parity guard, and
+# pinned identical across the jira-family) even though S5 now routes the priority value
+# through ``resolve_outbound_priority`` (map-or-drift) rather than subscripting this map
+# directly. ``resolve_outbound_priority`` builds its own str-keyed view of this same
+# built-in object when no per-project map is supplied, so the no-config behaviour is
+# unchanged.
+from rebar_reconciler.adapters.jira_family import (  # noqa: F401
+    LOCAL_PRIORITY_TO_JIRA as _LOCAL_TO_JIRA_PRIORITY,
+)
 
 # Kept as a MODULE ATTRIBUTE (read by tests and the state/test_config parity guard, and
 # pinned identical to ``LOCAL_STATUS_TO_JIRA`` by the jira-family boundary test) even
@@ -54,6 +63,8 @@ from rebar_reconciler.adapters.jira_family import (  # noqa: F401
     LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE,
 )
 from rebar_reconciler.adapters.jira_family.outbound_mapper import (
+    merge_create_defaults,
+    resolve_outbound_priority,
     resolve_outbound_status,
     resolve_outbound_type,
 )
@@ -112,6 +123,8 @@ def _map_local_to_jira_fields(
     suppressed_out: list[str] | None = None,
     status_map: dict[str, str] | None = None,
     type_map: dict[str, str] | None = None,
+    priority_map: dict[str, str] | None = None,
+    create_defaults: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -142,14 +155,24 @@ def _map_local_to_jira_fields(
 
     The returned dict is unchanged by this parameter on every input — nothing
     rebar sends to Jira depends on it.
+
+    ``priority_map`` (S5) is the effective per-project local->Jira priority map
+    (``config.effective_priority_map``); ``None`` falls back to the built-in map. A local
+    priority with NO target is OMITTED (map-or-drift), never coerced to ``"Medium"``.
+    ``create_defaults`` (S5) is a str-valued map of required-beyond-baseline vendor fields
+    merged UNDER this computed body (baseline computed fields win on collision), CREATE-only.
     """
     result: dict[str, Any] = {
         "summary": ticket.get("title") or "",
         "description": ticket.get("description") or "",
         "issuetype": resolve_outbound_type(ticket.get("ticket_type", "task"), type_map),
-        "priority": _LOCAL_TO_JIRA_PRIORITY.get(ticket.get("priority", 2), "Medium"),
         "assignee": ticket.get("assignee") or "",
     }
+    # Map-or-drift (S5): a local priority with NO Jira target is OMITTED entirely
+    # (Jira priority left unchanged), never coerced to "Medium".
+    _priority_target = resolve_outbound_priority(ticket.get("priority", 2), priority_map)
+    if _priority_target is not None:
+        result["priority"] = _priority_target
     # Map-or-drift (S2): a local status with NO Jira target is OMITTED entirely
     # (Jira status left unchanged), never coerced to "To Do".
     _status_target = resolve_outbound_status(ticket.get("status", "open"), status_map)
@@ -190,7 +213,7 @@ def _map_local_to_jira_fields(
                     suppressed_key = binding_store.get_jira_key(local_parent_id)
                     if suppressed_key:
                         suppressed_out.append(suppressed_key)
-                return result
+                return merge_create_defaults(create_defaults, result)
 
         jira_parent_key = binding_store.get_jira_key(local_parent_id)
         if jira_parent_key:
@@ -217,7 +240,7 @@ def _map_local_to_jira_fields(
         # pre-check above is intentionally skipped for a clear — there is no
         # parent type to validate.
         result["parent"] = None
-    return result
+    return merge_create_defaults(create_defaults, result)
 
 
 def _extract_jira_field(jira_fields: dict[str, Any], field: str) -> Any:

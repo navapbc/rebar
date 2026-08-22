@@ -313,6 +313,49 @@ def _effective_type_map_for(
     return config.effective_type_map(project_key, root=repo_root)
 
 
+def _effective_priority_map_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+) -> dict[str, str] | None:
+    """The effective per-project local->Jira PRIORITY map for ``ticket``, or ``None``.
+
+    Story S5: the priority-axis mirror of ``_effective_status_map_for``. Resolve the
+    ticket's project (``projects_store.resolve_project``) and return
+    ``config.effective_priority_map(project_key, root=repo_root)`` so both create and
+    update map ``priority`` through the project's overlay (map-or-drift). ``repo_root`` is
+    the store root the pass runs against; ``[mapping]`` MUST be read from it, never the
+    CWD. ``None`` (the built-in fallback the mappers already apply) when no project key is
+    obtainable or there is no ``[mapping]`` block."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return None
+    from rebar_reconciler import config, projects_store
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return None
+    return config.effective_priority_map(project_key, root=repo_root)
+
+
+def _effective_create_defaults_for(
+    ticket: dict[str, Any], mapping: Any, repo_root: Any = None
+) -> dict[str, str] | None:
+    """The effective per-project str-valued ``create_defaults`` for ``ticket``, or ``None``.
+
+    Story S5: the CREATE-only axis of required-beyond-baseline vendor fields. Resolve the
+    ticket's project (``projects_store.resolve_project``) and return
+    ``config.effective_create_defaults(project_key, root=repo_root)``. ``repo_root`` is the
+    store root the pass runs against; ``[mapping]`` MUST be read from it, never the CWD.
+    ``None`` (no defaults merged) when no project key is obtainable or there is no
+    ``[mapping]`` block."""
+    if mapping is None or not getattr(mapping, "projects", None):
+        return None
+    from rebar_reconciler import config, projects_store
+
+    project_key = projects_store.resolve_project(ticket, mapping)
+    if not project_key:
+        return None
+    return config.effective_create_defaults(project_key, root=repo_root)
+
+
 def _effective_link_map_for(
     ticket: dict[str, Any], mapping: Any, repo_root: Any = None
 ) -> dict[str, str] | None:
