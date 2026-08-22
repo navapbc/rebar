@@ -195,46 +195,31 @@ def claim_compute(
     # Parent-first cascade: if this ticket has an OPEN parent, claim the parent first
     # (recursively up the chain) so a child is never claimed while its parent is still
     # open. If the parent claim fails, the child is NOT claimed and the error names the
-    # parent as the cause. _cascade_seen breaks any malformed parent cycle. The helper
-    # lives in .transition (claim re-exports through it); import lazily to avoid a cycle.
+    # parent as the cause; a parent that raced OUT of `open` between the lookup and the
+    # locked parent claim is a BENIGN race and the child proceeds. That walk — cycle
+    # guard, TOCTOU re-check and error attribution included — is shared with
+    # `transition`'s cascade in `lifecycle_cascade` (story 4329), so the two verbs cannot
+    # drift on what a raced parent means; only the write primitive below is claim's own.
+    # `_resolve_open_parent` lives in .transition (claim re-exports through it) and
+    # `lifecycle_cascade` is imported alongside it here: a function-body import keeps the
+    # module-level cycle transition -> claim broken.
+    from rebar._commands.lifecycle_cascade import cascade_parent_first
     from rebar._commands.transition import _resolve_open_parent
 
-    seen = _cascade_seen or frozenset()
-    parent_id = _resolve_open_parent(tracker, ticket_id)
-    if parent_id is not None and parent_id != ticket_id and parent_id not in seen:
-        try:
-            claim_compute(
-                parent_id,
-                assignee=assignee,
-                force_reason=force_reason,
-                repo_root=repo_root,
-                _cascade_seen=seen | {ticket_id},
-            )
-        except CommandError as exc:
-            # TOCTOU: the cascade DECISION above read the parent as ``open`` WITHOUT the
-            # write lock. A concurrent agent may have moved the parent
-            # ``open -> in_progress`` between that read and this locked parent claim, so
-            # the claim we just attempted was rejected. Re-check the parent's live
-            # status: if it is no longer ``open`` (a peer progressed it — or it is now
-            # closed/blocked), the cascade's whole purpose (never work a child under an
-            # OPEN parent) is already satisfied, so this is BENIGN — fall through and
-            # claim the child, matching the single-agent contract "parent already
-            # in_progress -> only the requested ticket moves". Only a parent still
-            # genuinely ``open`` (e.g. its own gate blocked the claim) is a real failure
-            # that must abort the child.
-            if _resolve_open_parent(tracker, ticket_id) is None:
-                pass  # parent progressed concurrently; proceed to claim the child
-            else:
-                msg = (
-                    f"Error: cannot claim {ticket_id}: claiming its parent {parent_id} failed "
-                    f"first, so the child was not claimed.\n  Parent error: {exc.message}"
-                )
-                # Preserve the concurrency identity: a parent that raced surfaces as
-                # exit-10 / ConcurrencyError at the leaf too (so the "pick another" retry
-                # path still fires). ConcurrencyMismatch hardcodes returncode=10.
-                if isinstance(exc, ConcurrencyMismatch):
-                    raise ConcurrencyMismatch(msg) from None
-                raise CommandError(msg, returncode=exc.returncode) from None
+    cascade_parent_first(
+        ticket_id,
+        eligible_status="open",
+        resolve_parent=lambda tid, _status: _resolve_open_parent(tracker, tid),
+        advance=lambda parent_id, seen: claim_compute(
+            parent_id,
+            assignee=assignee,
+            force_reason=force_reason,
+            repo_root=repo_root,
+            _cascade_seen=seen,
+        ),
+        verb="claim",
+        cascade_seen=_cascade_seen,
+    )
 
     from rebar._commands import _seam
 

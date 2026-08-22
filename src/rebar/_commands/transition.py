@@ -20,6 +20,7 @@ import sys
 
 from rebar import config
 from rebar._commands._seam import CommandError
+from rebar._commands.lifecycle_cascade import cascade_parent_first
 from rebar._commands.transition_close import close_ticket
 from rebar._commands.txn import ConcurrencyMismatch
 from rebar._engine_support.output import OutputFormatError, error_envelope, parse_output
@@ -442,6 +443,12 @@ def _cascade_parent_first(
     identity — a raced parent surfaces as exit-10 / ConcurrencyError at the leaf too).
     ``cascade_seen`` breaks any malformed parent cycle.
 
+    The WALK itself (ancestor lookup, cycle guard, benign-race TOCTOU re-check, error
+    attribution) lives once in :func:`rebar._commands.lifecycle_cascade.cascade_parent_first`
+    — story 4329 — which ``claim`` shares; this function only supplies the two things that
+    are genuinely transition-specific: which parent status is eligible on this edge, and
+    the write primitive (:func:`transition_compute`).
+
     A no-op unless ``cascade`` is set AND the edge is in :data:`_CASCADING_EDGES`;
     ``cascade=False`` (replay/import re-materializing a recorded status verbatim)
     suppresses it. Mirrors :func:`claim_compute`'s cascade, and like it is sequential
@@ -452,45 +459,22 @@ def _cascade_parent_first(
     parent_status = _CASCADING_EDGES.get((current_status, target_status))
     if parent_status is None:
         return
-    seen = cascade_seen or frozenset()
-    parent_id = _resolve_parent_in_status(tracker, ticket_id, parent_status)
-    if parent_id is None or parent_id == ticket_id or parent_id in seen:
-        return
-    try:
-        transition_compute(
+    cascade_parent_first(
+        ticket_id,
+        eligible_status=parent_status,
+        resolve_parent=lambda tid, status: _resolve_parent_in_status(tracker, tid, status),
+        advance=lambda parent_id, seen: transition_compute(
             parent_id,
             current_status,
             target_status,
             reason=reason,
             force_reason=force_reason,
             repo_root=repo_root,
-            _cascade_seen=seen | {ticket_id},
-        )
-    except CommandError as exc:
-        # TOCTOU: the cascade DECISION above read the parent's status WITHOUT the write
-        # lock. A peer may have moved the parent off `parent_status` between that read
-        # and this locked parent transition, so the transition we just attempted was
-        # rejected. Re-check the parent's live status: if it has left `parent_status`,
-        # the cascade's whole purpose (never leave the child ahead of its parent) is
-        # already satisfied, so this is BENIGN — fall through and move the child,
-        # matching the single-agent contract "parent already moved -> only the requested
-        # ticket moves". Only a parent still genuinely in `parent_status` (e.g. its own
-        # gate blocked the transition) is a real failure that must abort the child. This
-        # is the same benign-race re-check `claim_compute`'s cascade performs; without it
-        # the two cascades disagree about what a raced parent means.
-        if _resolve_parent_in_status(tracker, ticket_id, parent_status) is None:
-            return  # parent moved concurrently; proceed to transition the child
-        msg = (
-            f"Error: cannot move {ticket_id} to {target_status}: transitioning its "
-            f"parent {parent_id} to {target_status} failed first, so the child was not "
-            f"transitioned.\n  Parent error: {exc.message}"
-        )
-        # Preserve the concurrency identity: a parent that raced surfaces as
-        # exit-10 / ConcurrencyError at the leaf too. ConcurrencyMismatch
-        # hardcodes returncode=10.
-        if isinstance(exc, ConcurrencyMismatch):
-            raise ConcurrencyMismatch(msg) from None
-        raise CommandError(msg, returncode=exc.returncode) from None
+            _cascade_seen=seen,
+        ),
+        verb=f"move to {target_status}",
+        cascade_seen=cascade_seen,
+    )
 
 
 def _unarchive(ticket_id: str, target_status: str, tracker: str, repo_root_str: str) -> int:
