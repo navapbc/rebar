@@ -27,12 +27,12 @@ SNAPSHOT bytes go through the single canonical serializer
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
 
 from rebar import config
+from rebar._commands import compact_plan
 from rebar._commands._compact_policy import is_foldable
 from rebar._commands.compact_rebuild import (
     get_rebuild_count,
@@ -182,7 +182,8 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
     instead would select a ticket whose excess events are all inside the horizon; the fold
     would write nothing, and the next sweep would select it again — churn.
 
-    Matches the fold's candidate set exactly — ``*.json`` excluding dotfiles, already-retired
+    Matches the fold's candidate set exactly — it is the SAME listing
+    (:func:`compact_plan.list_candidates`), ``*.json`` excluding dotfiles, already-retired
     sources and ``-SYNC.json`` bridge metadata — and, like
     :func:`compact_txn._parse_candidate_events`, DROPS forward-compat unknown-type events. A
     newer clone's event type is preserved untouched by the fold rather than squashed, so
@@ -198,31 +199,15 @@ def _foldable_event_count(ticket_dir: str, now: int, horizon: int) -> int:
     An unreadable or undecodable file counts as foldable with an unknown timestamp only when
     the horizon is off, mirroring ``is_foldable``'s treatment of a ``None`` timestamp — and
     mirroring the fold, which keeps such a file as a candidate rather than dropping it."""
-    from rebar.reducer import KNOWN_EVENT_TYPES
-
-    count = 0
     try:
-        names = os.listdir(ticket_dir)
+        candidates = compact_plan.list_candidates(ticket_dir)
     except OSError:
         return 0
-    for name in names:
-        if name.startswith(".") or not name.endswith(".json") or name.endswith("-SYNC.json"):
-            continue
-        if name.endswith("-SNAPSHOT.json"):
-            continue  # already-folded state, not pending work
-        try:
-            with open(os.path.join(ticket_dir, name), encoding="utf-8") as fh:
-                event = json.load(fh)
-            etype = event.get("event_type", "")
-            raw_ts = event.get("timestamp")
-        except (json.JSONDecodeError, OSError):
-            etype, raw_ts = "", None
-        if etype and etype not in KNOWN_EVENT_TYPES:
-            continue  # forward-compat: the fold preserves these rather than squashing them
-        ts = raw_ts if isinstance(raw_ts, int) else None
-        if is_foldable(ts, now, horizon):
-            count += 1
-    return count
+    return sum(
+        1
+        for c in candidates
+        if c.is_known_type and not c.is_snapshot and is_foldable(c.timestamp, now, horizon)
+    )
 
 
 def _scan_snapshot_state(
@@ -272,11 +257,10 @@ def _scan_snapshot_state(
     for name in names:
         path = os.path.join(tracker, name)
         foldable = _foldable_event_count(path, now, horizon)
-        try:
-            has_snapshot = any(n.endswith("-SNAPSHOT.json") for n in os.listdir(path))
-        except OSError:
-            has_snapshot = True  # unreadable: never select it, the fold would fail anyway
-        if foldable > threshold or (foldable > 0 and not has_snapshot):
+        probe = compact_plan.has_snapshot(path)
+        # unreadable: never select it on the backfill arm, the fold would fail anyway
+        has_snapshot = True if probe is None else probe
+        if compact_plan.needs_folding(foldable, has_snapshot, threshold):
             needs.append(name)
         else:
             rest += 1

@@ -5,10 +5,16 @@ Extracted from ``compact.py`` (task b2bb). Its change-driver is the snapshot FOR
 the repair semantics, which move independently of the normal-fold transaction
 (``compact_txn``) and of the CLI surface (``compact``).
 
-The shared snapshot primitives it needs — ``_git``, ``_git_author``,
-``_snapshot_strip_keys``, ``_build_authorship_ledger`` — are imported from
-``compact_txn`` so the dependency runs one way (repair depends on the normal path) and
-never cycles.
+The shared snapshot primitives it needs — ``_snapshot_strip_keys``,
+``_build_authorship_ledger`` — are imported from ``compact_txn`` so the dependency runs one
+way (repair depends on the normal path) and never cycles. The derivations this path shares
+VERBATIM with the fold — the source listing, the SNAPSHOT envelope and the commit step —
+come from :mod:`rebar._commands.compact_plan` (story 3436) instead.
+
+What this path deliberately does NOT share is its FAILURE POLICY. The retire loop below
+tolerates a per-file rename failure and carries on, because the rebuild's crash model is the
+``.snapshot-rebuild.bak`` sentinel plus an idempotent restart — not the fold's
+journal-and-roll-back.
 
 The rebuild counter lives HERE, next to the function that increments it:
 ``rebuild_snapshot_from_full_log`` does ``global _REBUILD_COUNT``, so hosting
@@ -18,23 +24,15 @@ silently report zero. ``compact`` re-exports it to preserve its public path.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import uuid
-from pathlib import Path
 
-from rebar._commands import _seam, fsck_repair
-from rebar._commands.compact_txn import (
-    _build_authorship_ledger,
-    _git,
-    _git_author,
-    _snapshot_strip_keys,
-)
-from rebar._store import compat, event_append, fsutil, hlc, lock
+from rebar._commands import compact_plan, fsck_repair
+from rebar._commands.compact_txn import _build_authorship_ledger, _snapshot_strip_keys
+from rebar._store import compat, fsutil, hlc, lock
 from rebar._store.canonical import canonical_str
 from rebar.reducer import reduce_ticket
-from rebar.reducer._cache import RETIRED_SUFFIX, is_active_event
+from rebar.reducer._cache import RETIRED_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +46,6 @@ def get_rebuild_count() -> int:
     return _REBUILD_COUNT
 
 
-def _read_event_uuid(path: str) -> str:
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f).get("uuid", os.path.basename(path))
-    except (json.JSONDecodeError, OSError):
-        return os.path.basename(path)
-
-
 def _partition_rebuild_sources(
     ticket_dir: str,
 ) -> tuple[list[str], list[str], list[str], list[str]]:
@@ -63,44 +53,31 @@ def _partition_rebuild_sources(
 
     Every raw (non-snapshot) event — active OR ``*.retired`` — becomes a source of the new
     SNAPSHOT; the live ones are retired by the caller, and superseded snapshot(s) are
-    retired too. ``-SYNC.json`` bridge metadata and dotfiles are skipped."""
+    retired too. The listing is the shared one (:func:`compact_plan.list_candidates`), which
+    skips dotfiles and ``-SYNC.json`` bridge metadata as this scan always did — and, unlike
+    the hand-rolled loop it replaces, requires the ``.json`` suffix the fold's own listing
+    always required, so a stray non-event file can no longer be cited as a source and
+    renamed to ``*.retired``."""
     live_raw: list[str] = []
     source_uuids: list[str] = []
     old_snaps: list[str] = []
     raw_paths: list[str] = []
-    for name in sorted(os.listdir(ticket_dir)):
-        if name.startswith(".") or name.endswith("-SYNC.json"):
+    for c in compact_plan.list_candidates(ticket_dir, include_retired=True):
+        if c.is_snapshot:
+            if c.is_active:
+                old_snaps.append(c.path)
             continue
-        path = os.path.join(ticket_dir, name)
-        base = name[: -len(RETIRED_SUFFIX)] if name.endswith(RETIRED_SUFFIX) else name
-        if base.endswith("-SNAPSHOT.json"):
-            if is_active_event(name):
-                old_snaps.append(path)
-            continue
-        source_uuids.append(_read_event_uuid(path))
-        raw_paths.append(path)
-        if is_active_event(name):
-            live_raw.append(path)
+        source_uuids.append(c.uuid)
+        raw_paths.append(c.path)
+        if c.is_active:
+            live_raw.append(c.path)
     return live_raw, source_uuids, old_snaps, raw_paths
 
 
-# raw-git-ok: store-maintenance command, seam-internal
 def _commit_rebuild(tracker: str, ticket_id: str) -> None:
     """Best-effort stage+commit of a rebuilt SNAPSHOT (failures are non-fatal: the
     rebuild itself already succeeded on disk and the next store write will carry it)."""
-    add = _git(tracker, "add", "-A", f"{ticket_id}/")
-    if add.returncode != 0:
-        return
-    staged = _git(tracker, "diff", "--cached", "--quiet")
-    if staged.returncode != 0:
-        _git(
-            tracker,
-            "commit",
-            "-q",
-            "--no-verify",
-            "-m",
-            f"ticket: REBUILD SNAPSHOT {ticket_id}",
-        )
+    compact_plan.commit_ticket_dir(tracker, ticket_id, f"ticket: REBUILD SNAPSHOT {ticket_id}")
 
 
 # raw-git-ok: store-maintenance command, seam-internal
@@ -161,23 +138,10 @@ def rebuild_snapshot_from_full_log(
             raw_paths, os.path.dirname(os.path.realpath(tracker))
         )
 
-        snapshot_uuid = str(uuid.uuid4())
         snapshot_ts = hlc.next_tick(tracker, ticket_id)
-        snapshot_event = {
-            "event_type": "SNAPSHOT",
-            "timestamp": snapshot_ts,
-            "uuid": snapshot_uuid,
-            "env_id": _seam.env_id(Path(tracker)),
-            "author": _git_author(),
-            "data": {
-                "compiled_state": compiled_state,
-                "source_event_uuids": source_uuids,
-                "compacted_at": snapshot_ts,
-            },
-        }
-        # Denormalized author attribution (epic gnu-whale-ichor) — derive repo_root from
-        # the tracker (no repo_root param on this fsck-repair path).
-        snapshot_event.update(_seam.attribution_fields(os.path.dirname(os.path.realpath(tracker))))
+        snapshot_event, final_path = compact_plan.build_snapshot_event(
+            tracker, ticket_dir, compiled_state, source_uuids, snapshot_ts
+        )
 
         # Sentinel/back-up the pre-rebuild snapshot BEFORE mutating.
         try:
@@ -190,9 +154,6 @@ def rebuild_snapshot_from_full_log(
             logger.warning("fsck: could not write rebuild sentinel for %s", ticket_id)
             return False
 
-        final_path = os.path.join(
-            ticket_dir, event_append.event_filename(snapshot_ts, snapshot_uuid, "SNAPSHOT")
-        )
         fsutil.atomic_write(final_path, canonical_str(snapshot_event), encoding="utf-8")
 
         for fp in live_raw + old_snaps:
