@@ -432,9 +432,14 @@ def verify_findings(
 #    verification sub-call above and Pass-1 never do, so the independence invariant holds by
 #    construction. ────────────────────────────────────────────────────────────────────────────
 def prior_findings_block(prior_findings: list[dict[str, Any]]) -> str:
-    """The PRIOR-review findings rendered as the novelty sub-call's context (the ONLY place the
-    prior findings appear). Each block carries the prior finding's id + prose so the sub-call can
-    answer the matches-prior questions and name ``matched_prior_id``."""
+    """The PRIOR-review findings rendered as the novelty sub-call's context. Each block carries the
+    prior finding's id + prose so the sub-call can answer the matches-prior questions and name
+    ``matched_prior_id``.
+
+    This used to be documented as the ONLY place prior findings appear. It is no longer: code
+    review's carry-forward backstop (story nitro-zombie-mealworm) injects an unresolved prior
+    finding into the CURRENT finding set post-Pass-1, so the Pass-2 verifier re-grounds it. That
+    injection carries its own wording code-review-locally and does not pass through this builder."""
     return "\n\n".join(
         f"### prior finding {p.get('id', '?')}\n"
         f"finding: {p.get('finding', '')}\n"

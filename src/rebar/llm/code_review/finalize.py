@@ -369,11 +369,7 @@ def finalize_code_review_verdict(
     # already reflects the convergence. Keyed by the TYPED keyspace — session (local) or change
     # (Gerrit). Always active (off switch retired in story 4cdf) + self-gates inert with no
     # prior memory; any error leaves the verdict unfiltered (no drops).
-    _novelty_key = None
-    if request.session_id:
-        _novelty_key = f"session:{request.session_id}"
-    elif request.change_id:
-        _novelty_key = f"change:{request.change_id}"
+    _novelty_key = _sidecar.memory_key(request.session_id, request.change_id)
     if _novelty_key:
         from rebar.llm.code_review import workflow_ops as _wops
 

@@ -93,6 +93,13 @@ TRIGGER LIKELIHOOD + DETECTION (drive the production-lane multiplier and the det
 - escapes_automation (bool) — TRUE if the defect escapes existing tests/CI/lint. (Either silent
   flag amplifies detection x1.0; neither ⇒ x0.8.)
 
+STANDING FINDINGS (carried from an earlier patchset): a finding may be marked as standing since
+an earlier patchset — it was raised on a previous revision of this change and this run's finders
+did not raise it again. Verify it EXACTLY as you verify a fresh finding: re-ground its evidence
+against the change under review. If the current change resolved it, or its evidence no longer
+holds, it must FAIL verification. That it was raised before is never, on its own, grounds to
+keep it.
+
 BINARY sub-answers (yes|no|insufficient): answer each on its own merits.
 cited_reference_accurate is yes|no|insufficient|na — answer it only when the finding cites a
 specific `path:line`, else na (read the file to confirm the cited lines; never guess).

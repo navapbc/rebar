@@ -230,11 +230,14 @@ def _cluster_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         "Concatenate the base + Round-A + Round-B finding lists (provenance preserved via each "
         "finding's reviewer_id), CLUSTER near-duplicates (same location+criterion within ~10 "
         "lines, or same criterion+text for location-less findings) so N overlays on one spot "
-        "don't inflate the Pass-2 budget, and assign a stable 0-based `id` per finding. Emits "
-        "{findings, merged_count, clustered_count}."
+        "don't inflate the Pass-2 budget, APPEND the carried-forward standing findings the fresh "
+        "finders did not re-produce, and assign a stable 0-based `id` per finding. Emits "
+        "{findings, merged_count, clustered_count, standing_count}."
     ),
 )
 def merge_findings(ctx: StepContext) -> dict[str, Any]:
+    from rebar.llm.code_review import carry_forward
+
     sources = ctx.inputs.get("sources")
     if sources is None:
         sources = [
@@ -248,12 +251,21 @@ def merge_findings(ctx: StepContext) -> dict[str, Any]:
             if isinstance(f, dict):
                 collected.append(dict(f))
     clustered = _cluster_findings(collected)
+    # Carry-forward (story nitro-zombie-mealworm): append the ALREADY-RESOLVED standing items the
+    # fresh finders did not re-produce, so an unresolved prior finding reaches the UNCHANGED Pass-2
+    # verifier instead of vanishing with the finder's silence. Their state was classified upstream
+    # (carry_forward.standing_items, which holds the prior review's deps map); this step only
+    # merges data, exactly as it does for the three finder sources.
+    standing = list(ctx.inputs.get("standing_findings") or [])
+    if standing:
+        clustered = carry_forward.inject_standing(clustered, standing)
     for i, f in enumerate(clustered):
         f["id"] = str(i)
     return {
         "findings": clustered,
         "merged_count": len(collected),
         "clustered_count": len(clustered),
+        "standing_count": sum(1 for f in clustered if isinstance(f.get("standing"), dict)),
     }
 
 
@@ -269,9 +281,16 @@ def merge_findings(ctx: StepContext) -> dict[str, Any]:
 )
 def code_review_verify_inputs(ctx: StepContext) -> dict[str, Any]:
     from rebar.llm import review_kernel
+    from rebar.llm.code_review import carry_forward
 
     findings = list(ctx.inputs.get("findings") or [])
     instructions = review_kernel.verify_instructions(list(enumerate(findings)))
+    # Standing-item wording is appended HERE, code-review-locally: `verify_instructions` is the
+    # SHARED kernel builder plan-review also calls, so adding it there would change plan-review's
+    # verifier prompt too (story nitro-zombie-mealworm).
+    note = carry_forward.verify_standing_note(findings)
+    if note:
+        instructions = f"{instructions}\n\n{note}"
     return {"instructions": instructions}
 
 
@@ -430,6 +449,13 @@ def code_review_decide(ctx: StepContext) -> dict[str, Any]:
         threshold_for=lambda criteria: registry.threshold_for(criteria, routing),
         impact_fn=review_kernel.impact_code,
     )
+    # Carry-forward posture clamp (story nitro-zombie-mealworm): pass3 RECOMPUTES every decision
+    # from the criterion's CURRENT routing, so a finding carried from an earlier patchset could
+    # otherwise be raised to BLOCK by memory alone. Clamp it to at most its origin decision;
+    # lowering is untouched.
+    from rebar.llm.code_review import carry_forward
+
+    carry_forward.clamp_standing_decisions(decided)
     # Nit-suppression (story grusome-uncheerful-nematode; impact-aware per bug 2dfe): an
     # ADVISORY finding whose criteria are ALL flagged nit_suppressed in the routing
     # (docs / llm-prompts) is demoted from surfaced to dropped ONLY when its deterministic

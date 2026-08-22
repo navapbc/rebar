@@ -116,6 +116,20 @@ def _detail_of(finding: dict[str, Any]) -> str:
     return f"{full[: MAX_DETAIL_CHARS - 1]}…" if len(full) > MAX_DETAIL_CHARS else full
 
 
+def _standing_suffix(finding: dict[str, Any]) -> str:
+    """`` (standing since patchset <k>)`` for a finding carried forward from an earlier patchset
+    (story nitro-zombie-mealworm), or ``""`` for an ordinary one. A reader must be able to tell a
+    finding this run's finders raised from one the gate is re-raising on their behalf — otherwise a
+    carried finding looks brand new on every patchset."""
+    standing = finding.get("standing")
+    if not isinstance(standing, dict):
+        return ""
+    origin = str(standing.get("origin_revision") or "").strip()
+    if not origin:
+        return " (standing since an earlier patchset)"
+    return f" (standing since patchset {origin})"
+
+
 def _criterion_of(finding: dict[str, Any]) -> str:
     criteria = finding.get("criteria") or []
     if criteria:
@@ -136,7 +150,7 @@ def render_findings_block(findings: list[dict[str, Any]], *, kind: str) -> str:
     lines = [_HEADERS.get(kind, "{n} finding(s):").format(n=len(findings))]
     for f in findings[:MAX_ITEMS]:
         loc = f" [{f.get('location')}]" if f.get("location") else ""
-        lines.append(f"- ({_criterion_of(f)}) {_detail_of(f)}{loc}")
+        lines.append(f"- ({_criterion_of(f)}) {_detail_of(f)}{_standing_suffix(f)}{loc}")
     omitted = len(findings) - MAX_ITEMS
     if omitted > 0:
         noun = "finding" if omitted == 1 else "findings"
@@ -160,7 +174,7 @@ def build_inline_comments(findings: list[dict[str, Any]]) -> dict[str, list[dict
         comments.setdefault(path, []).append(
             {
                 "line": line,
-                "message": f"({_criterion_of(f)}) {_detail_of(f)}",
+                "message": f"({_criterion_of(f)}) {_detail_of(f)}{_standing_suffix(f)}",
                 "unresolved": False,
             }
         )
