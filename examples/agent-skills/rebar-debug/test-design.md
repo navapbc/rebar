@@ -89,6 +89,25 @@ contract. Examples of contract-level oracles:
   correct result;
 - rollback: state is restored exactly, no partial artifacts remain, and a retry succeeds.
 
+**Convergence tests: capture the external-effect side, never re-derive it.** When an
+assertion compares two paths that must agree — a differ against a send path, a dedup key
+against what actually landed — the side representing the external effect must be
+**captured from the real call site**: drive the production entry point with only the
+irreducible boundary stubbed, and assert on what it handed that boundary. A test that
+instead **re-derives** that side by recomposing the helpers the call site uses today
+measures the helpers it named, not the path that ships — it stays green when the call
+site drifts onto a different composition, which is the only failure it exists to catch.
+Worked example (rebar, twice in one module): a convergence test modelled the landed Jira
+comment body as `comment_limits.truncate_comment_body(emitted)`; when the send path moved
+onto a different fitter, the model went stale silently and live convergence broke. The
+first fix draft repeated the shape — its oracle recomputed
+`fit_preserving_marker(_decorate_outbound_comment(body), codec.fit_outbound)`, a copy of
+the composition under test, and passed CI while blind to the exact seeded regression. The
+landed fix captures the `--body` argument from a real `add_comment` call with only the
+subprocess runner stubbed, so the send side of the assertion moves with the send path.
+No lint can tell the two shapes apart (which side "is" the external effect is intent, not
+syntax) — this rule is the guard.
+
 ## 5. The minimum behavioral oracle
 
 **A. Prove the preconditions.** Assert the fixture reached the dangerous state before
