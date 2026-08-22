@@ -211,3 +211,28 @@ def test_a_marker_without_a_reason_is_rejected() -> None:
     unguarded = "python scripts/check_comment_hygiene.py"
     assert step_violation(f"# predates-gate-ok:\n{unguarded}") is not None
     assert step_violation(f"# predates-gate-ok: gated by the guarded selector\n{unguarded}") is None
+
+
+def test_golden_path_guards_match_the_verified_lane() -> None:
+    """Both lanes guard the golden-path gate scripts (bug e818-564e-d3b6-4eaa).
+
+    ``gerrit-verify.yaml`` grew the guards first and ``test.yml``'s twin steps stayed bare —
+    the one-lane-only drift this module exists to prevent. Pin that every step running either
+    script, in EITHER lane, carries its own ``-f`` guard and the canonical skip message.
+    """
+    scripts = ("scripts/check_readme_quickstart.py", "scripts/probe_rebar.py")
+    lanes = (".github/workflows/test.yml", ".github/workflows/gerrit-verify.yaml")
+    for lane in lanes:
+        runs = {
+            script: [run for _, _, run in _run_steps(lane) if script in run] for script in scripts
+        }
+        for script, bodies in runs.items():
+            assert bodies, f"{lane} no longer runs {script} — this guard's anchor is stale"
+            for body in bodies:
+                assert not unguarded_paths(body), (
+                    f"{lane} runs {script} with no `-f` guard — the twin lane guards it, so a "
+                    "base older than the script reddens only this lane"
+                )
+                assert SKIP_MESSAGE in body, (
+                    f"{lane}'s guard for {script} does not use the canonical skip message"
+                )
