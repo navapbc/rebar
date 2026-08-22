@@ -104,6 +104,10 @@ def _passthrough(command: str, argv: Sequence[str]) -> int:
         from rebar._cli._jira_onboard import jira_onboard
 
         return jira_onboard(list(argv), prog="rebar bridge setup")
+    if command == "suggest-mapping":
+        from rebar._cli import _bridge_suggest_mapping
+
+        return _bridge_suggest_mapping(list(argv))
     raise AssertionError(f"unhandled bridge pass-through command: {command!r}")
 
 
@@ -256,8 +260,8 @@ def bridge_cli(argv: Sequence[str]) -> int:
     if not args:
         sys.stdout.write(_group_help())
         return 0
-    if args[0] in {"fsck", "check-access", "setup"}:
-        if args[0] != "setup" and args[1:] in (["--help"], ["-h"]):
+    if args[0] in {"fsck", "check-access", "setup", "suggest-mapping"}:
+        if args[0] not in {"setup", "suggest-mapping"} and args[1:] in (["--help"], ["-h"]):
             return _passthrough_help(args[0])
         return _passthrough(args[0], args[1:])
 
