@@ -1,19 +1,8 @@
 # Repo-snapshot isolation for the code-reading gates
 
-The rebar LLM **code-reading gates** — `review_plan`, `verify_completion`,
-`review_code`, `scan_spec` (CLI: `rebar review-plan` / `verify-completion` / `review` /
-`review-code` / `scan-spec`; the same five MCP tools) — read PROJECT SOURCE CODE. The MCP
-server is a long-lived process pinned to ONE working directory, so reading that mutable,
-shared checkout meant a gate read whatever branch + uncommitted edits happened to be present
-at call time. That produced a **false-negative completion verdict** when a parallel task
-switched the shared checkout, and an HMAC-signed verdict computed against a moving branch is
-not reproducible.
+The rebar LLM code-reading operations include `review_plan`, `verify_completion`, `review_code`, and `scan_spec`. Their CLI forms are `rebar review-plan`, `verify-completion`, `review`, `review-code`, and `scan-spec`, with `review` retained as an alias. These operations read project source code. Reading a shared mutable checkout previously allowed another task's branch or uncommitted edits to change the reviewed material. That caused a false-negative completion verdict and made the result non-reproducible.
 
-Every code-reading op now takes a client-chosen **`ref`** and a **`source`** mode and reads a
-*faithful, immutable, reproducible* view of the repository — never the server's mutable
-checkout. Design grounded against Gitaly, Sourcegraph gitserver/zoekt, the GitHub tarball API,
-Bazel, ccache, Nix, and in-toto. Architecture: [adr/0005-snapshot-cache-architecture.md](adr/0005-snapshot-cache-architecture.md);
-drift/ref coherence: [adr/0002-code-drift-invalidation.md](adr/0002-code-drift-invalidation.md).
+Every code-reading operation now accepts a client-selected `ref` and `source` mode. The default attested mode reads an immutable repository view. The local mode reads the in-place checkout. The design is grounded in Gitaly, Sourcegraph gitserver and zoekt, the GitHub tarball API, Bazel, ccache, Nix, and in-toto. See [ADR 0005](adr/0005-snapshot-cache-architecture.md) for the snapshot architecture and [ADR 0002](adr/0002-code-drift-invalidation.md) for drift and ref coherence.
 
 ## `ref` + `source` semantics
 
@@ -22,11 +11,7 @@ drift/ref coherence: [adr/0002-code-drift-invalidation.md](adr/0002-code-drift-i
 | `--ref` / `ref` | a branch, tag, or full SHA | `origin/main` | the code version the gate verifies |
 | `--source` / `source` | `attested` \| `local` | `attested` | how that code is read |
 
-- **`attested`** (default) — resolve `ref` to an immutable SHA (fetching `origin` first so a
-  moving branch/tag is current), materialize a faithful snapshot of the committed tree at that
-  SHA, and run the gate against it. The verdict is **reproducible** and **branch-independent**
-  (identical regardless of the server's checked-out branch), and it is **SIGNED**: the pinned
-  SHA is recorded as `verified_at_sha` and bound into the signature (see *HMAC trust model*).
+- **`attested`** is the default. It resolves `ref` to an immutable SHA, fetches `origin` first when needed, materializes the committed tree at that SHA, and runs the operation against that snapshot. The result is reproducible and independent of the server's checked-out branch. A signable plan-review or completion-verifier PASS records the pinned SHA in its manifest and produces a DSSE operation-certificate envelope. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. See [Operation-certificate trust model and limits](#operation-certificate-trust-model-and-limits).
 - **`local`** (opt-in) — read the server's in-place checkout directly (uncommitted/dirty
   content allowed). It is **NEVER signed** (no `verified_at_sha`, no attestation) and is the
   documented **back-out** that restores the prior "read the local checkout" behavior — e.g. a
@@ -133,22 +118,15 @@ on a prompt: `GIT_TERMINAL_PROMPT=0`):
 On the CLI these surface as a single `Error: …` line with a non-zero exit; over MCP they are
 raised to the caller.
 
-## HMAC trust model + limits (and the in-toto shape)
+## Operation-certificate trust model and limits
 
-An attested verdict is signed with **HMAC-SHA256** under the environment's signing key (see
-the README "Signing a manifest of verified steps" section). The verified SHA is bound through
-the **existing signed manifest channel** as a manifest step — `verified-at-sha:<sha>` — NOT a
-new signed-payload field: it enters the signed bytes without changing the canonical payload or
-bumping `PAYLOAD_VERSION`, so **no prior signature is invalidated**. `verify_signature` surfaces
-`verified_at_sha` (derived from the signed step — the trust anchor — never an unsigned echo).
+A signable attested PASS from plan-review or completion-verifier produces an operation certificate. The certificate is a DSSE envelope whose payload is an in-toto Statement. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 private key. The certificate principal identifies that environment. The signed predicate binds the ticket ID, attestation kind, material fingerprint, code commit, and full manifest. The manifest contains the `verified-at-sha:<sha>` step used by gate freshness checks.
 
-**Limits (by design):** HMAC gives **integrity + intra-domain authenticity** only — anyone
-holding the shared environment key can both produce and verify a signature. It provides **no
-non-repudiation, no public verifiability, and no transparency log**. The pin is shaped as an
-**in-toto v1 Statement** subject (`{name: <ticket_id>, digest: {sha1: <verified_at_sha>}}` +
-`predicateType`) so a future move to a DSSE / asymmetric-key / transparency-log envelope is an
-*envelope swap*, not a data-shape rewrite. A ticket **closed without a signature** is the
-durable signal that validation was not attested (a `--force`, or a `local`-mode verify).
+Local `verify-signature` checks the envelope against the current environment's Ed25519 public key and requires the principal to match that environment. A project can instead pin a trusted environment's public key in `.rebar/trusted_environments.yaml` for merge verification. Verification needs no shared secret and grants no ability to forge another certificate.
+
+The certificate establishes the integrity and environment attribution of the process record. It does not establish that the inputs or verdict are correct. The trusted-environment posture also depends on authoritative-state fetching and the append-only ticket-branch control described in [ADR 0049](adr/0049-opcert-asymmetric.md). A forced operation or a `local` source run records no certificate. That absence is the durable indication that the gate did not issue an attested PASS.
+
+Before the asymmetric operation-certificate migration, `plan-review` and `completion-verifier` records used HMAC-SHA256. The same symmetric secret produced and verified those records. Anyone able to verify could also forge a record, so the scheme provided no non-repudiation. Those legacy records remain readable in append-only history. They now return `unknown_scheme` and cannot certify a current gated operation. Generic HMAC helpers remain available for non-operation-certificate consumers. See [the HMAC operation-certificate removal record](migrations/hmac-opcert-removal.md).
 
 ## Adding a new agentic operation (the safeguard)
 

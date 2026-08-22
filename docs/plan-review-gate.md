@@ -54,24 +54,7 @@ stays fast — target p95 < ~50 ms, no LLM, no network):
    `bug` is reviewed under the bug tier (see above) and so is subject to this fast-fail
    like any other reviewed type.
 
-2. **The start-work gate** — when `verify.require_plan_review_for_claim` is on,
-   starting work on a ticket (**any** entry into `in_progress` — via `claim`, a plain
-   `transition <id> open in_progress`, a `blocked` resume, or reactivating a `closed`
-   ticket) does a **fast, local** check for a fresh, certified plan-review attestation
-   and blocks if it is absent/stale. Gating *entry into `in_progress`* (keyed on the
-   target status, not only the `open` edge) means no side-door —
-   `open → blocked → in_progress` or `open → closed → in_progress` — can start
-   un-reviewed work past the gate; a legitimately-reviewed ticket keeps a valid
-   attestation, so a normal block/resume passes. All entry points run the **same**
-   consolidated check (`rebar._commands.gates.plan_review_precheck`), so they cannot
-   diverge. No LLM, no
-   network — a pure HMAC verify + a light fingerprint recompute. Bugs and session_logs
-   are exempt **from this gate** — i.e. they need no signed attestation to be claimed. That
-   is a DIFFERENT axis from whether the plan-review gate *reviews* a ticket: a bug is not
-   claim-gated, but it IS reviewed (under the bug tier). Conflating the two is a common
-   error. `--force="<reason>"` bypasses it (audit-logged; on the `transition` path
-   pass `--force` and the `--reason` text becomes the audit note). `claim` additionally
-   reuses rebar's atomic claim primitive, so two agents still cannot both claim a ticket.
+2. **The start-work gate.** When `verify.require_plan_review_for_claim` is enabled, every entry into `in_progress` checks for a current certified plan-review attestation. This includes `claim`, `transition <id> open in_progress`, a resume from `blocked`, and reactivation from `closed`. Checking the target status prevents the paths `open → blocked → in_progress` and `open → closed → in_progress` from bypassing review. A reviewed ticket keeps its valid attestation across a normal block and resume. Every entry point calls `rebar._commands.gates.plan_review_precheck`. The check invokes no LLM and makes no network request. It verifies the DSSE envelope through SSHSIG against the signing environment's Ed25519 public key, requires the certificate principal to identify that environment, and recomputes the material fingerprint. Bugs and `session_log` tickets are exempt from the start-work gate. A bug can still receive a bug-tier plan review. `--force="<reason>"` bypasses the gate and records the reason. `claim` also uses the atomic claim primitive, so two agents cannot claim one ticket.
 
 A review is a **process, not a dialog**: when a finding blocks (or you want to
 clear advisories), revise the ticket and re-run `review-plan` to earn a fresh
@@ -501,13 +484,7 @@ model → if still too big, P8 fails it as "reduce the ticket").
 
 ## Attestation, freshness & invalidation
 
-On a non-blocking `PASS`, `review_plan` signs a manifest via the existing signing
-machinery (`rebar.signing.sign_manifest`; HMAC-SHA256 under the environment key; a
-`SIGNATURE` event — see [reuse-surface.md](reuse-surface.md)). The manifest's first
-line is `plan-review: PASS` (distinguishing it from a completion signature) and it
-binds a **material fingerprint** (a hash of description / acceptance-criteria /
-file-impact / decomposition). The start-work gate (`claim` / `transition
-open→in_progress`) verifies, in order:
+On a non-blocking `PASS`, `review_plan` calls `rebar.signing.sign_manifest` and appends a `SIGNATURE` event. The record contains a DSSE envelope whose in-toto Statement binds the full manifest. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. The manifest begins with `plan-review: PASS` and includes the material fingerprint derived from the description, acceptance criteria, file impact, and decomposition. The start-work gate verifies the following conditions:
 
 1. the signature is **certified** under the environment key;
 2. it is a **plan-review** manifest (not a completion one);
@@ -527,17 +504,7 @@ open→in_progress`) verifies, in order:
 5. it **post-dates the latest reopen** — reactivating a ticket (`closed → open`,
    recorded as `state["last_reopened_at"]`) invalidates an attestation signed before it.
 
-**Validity-on-read, not write-time mutation (epic dark-acme-lumen, ADR 0009).** These
-checks are computed when a gate reads an attestation, by the single
-`plan_review.attest.compute_validity(attestation, ticket_state, kind)` dispatcher — the
-attestation records themselves are **immutable** and are never cleared/mutated by a
-transition (the old reopen-time `retire_attested_pin` is gone). An attestation can thus be
-HMAC-`certified` (integrity intact) yet not **valid** for its gate (e.g. after a reopen or a
-material edit). **Invariant: gates call `compute_validity` on a certified attestation — they
-never trust HMAC certification alone, nor mutate a record.** This is also what lets a ticket
-hold a plan-review *and* a completion-verifier attestation at once without either clobbering
-the other (the kind-keyed `attestations` map; the legacy top-level `signature` is a
-back-compat mirror of the most-recent one).
+**Validity is computed on read.** `plan_review.attest.compute_validity(attestation, ticket_state, kind)` evaluates applicability whenever a gate reads a record. Transitions do not clear or mutate the record. A DSSE operation certificate that carries an SSHSIG signature over its PAE bytes, produced with the environment's Ed25519 key and attributed to that environment, can remain cryptographically certified while becoming invalid for the gate after a reopen, material edit, code change, or pin change. Gates therefore call `compute_validity` after certification. A legacy HMAC record for `plan-review` or `completion-verifier` remains in append-only history, but it returns `unknown_scheme` and cannot certify a current gated operation. The kind-keyed `attestations` map lets plan-review and completion-verifier records coexist. The top-level `signature` field remains a compatibility mirror of the most recent record. See ADR 0073 for the validity-on-read decision.
 
 ### Ticking an AC checkbox is attestation-SAFE — and the message now names what changed
 
@@ -722,22 +689,15 @@ Changing any of those fields invalidates the container attestation and forces th
 recomputed — that self-healing invalidates the **claim** only under
 `verify.enforce_plan_material_pins = true`, the recommended pairing (this project sets it).
 
-**The currency rule, as one expression.** An attestation is current iff **all** of: it is
-HMAC-`certified` · **AND** the code it was reviewed against has not drifted (scoped: the
-per-dependency hashes signed at the review's pinned SHA, re-hashed at a snapshot of the
-**current gate ref** — so a landed change to a reviewed file invalidates while an unrelated
-commit or an uncommitted working-tree edit does not; unscoped: whole-HEAD) · **AND** the bound material fingerprint equals
-the ticket's current one · **AND** it
-post-dates the latest reopen · **AND** any reviewed related-material pins are still fresh.
-These are two *independent* staleness axes the report singled out — **repo state**
-(`verified_at_sha` / dependency hashes) and **ticket content** (`material_fingerprint`) — plus
-the reopen/pin guards; a change on **any** axis flips the verdict away from
-`certified`. The **criteria-registry stamp is deliberately NOT on this list**: since ADR 0053 a
-rotated `regver` is grandfathered — surfaced as a non-blocking `registry_drift` on the result
-(the plan was reviewed under an older criteria registry) rather than invalidating the
-attestation, because a criteria edit changes neither the plan nor the code it was reviewed
-against. Re-gate (re-run `review-plan`) before implementing whenever `--status` is not
-`certified`; under the parallel epic/child workflow, a moving base ref makes this the norm.
+**Currency rule.** A current plan-review certificate is a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key and attributed to that environment through its principal. It remains current only when all of the following conditions hold:
+
+- The certificate is cryptographically certified.
+- The reviewed code has not drifted. Scoped reviews compare each signed dependency hash at the pinned SHA with a fresh hash from the current gate ref. A landed change to a reviewed file invalidates the certificate. An unrelated commit or an uncommitted working-tree edit does not. Unscoped reviews compare the whole HEAD.
+- The bound material fingerprint matches the current ticket.
+- The certificate postdates the latest reopen.
+- Every reviewed related-material pin remains current.
+
+Repository state and ticket content are independent staleness axes. Reopen state and related-material pins add separate guards. A change on any axis moves the verdict away from `certified`. The criteria-registry stamp is not a validity condition. ADR 0053 grandfathered a rotated `regver`, which appears as non-blocking `registry_drift` because a criteria edit changes neither the reviewed plan nor its code snapshot. Run `review-plan` again before implementation whenever `--status` is not `certified`. A moving base ref commonly requires this refresh in parallel epic and child workflows.
 
 ### `audit show` is a history view, not a status view
 
@@ -830,32 +790,13 @@ failed to *persist*, do not re-run the review — `rebar sign-review <id>`
 with **no LLM call**, refusing if the plan changed since the review or the recorded verdict
 was not a signable `PASS`.
 
-### What the `signature` field guarantees (read this before trusting it)
+### Interpreting the `signature` field
 
-A signature (a real `SIGNATURE` event + a manifest whose first line is `plan-review:
-PASS`) is emitted **only** on a genuine non-blocking `PASS` where the LLM tier actually
-ran — and never on a **degraded** run (one whose coverage carries a `resolution_class`;
-`attest.sign_plan_review` raises `SigningError` rather than certify an abnormal
-resolution) — i.e. **not** on `BLOCK`, **not** on `INDETERMINATE`, and **not** for an `exempt`
-runner (`session_log` / `code_review` / `identity`, which short-circuit the gate entirely; a
-`bug` is reviewed under the bug tier and is NOT exempt here). On every other
-outcome no manifest is signed and **no event is written to the ticket** (the ticket's
-own `signature` stays null), so the start-work gate has nothing to verify and the claim
-is denied.
+A durable `SIGNATURE` event whose manifest begins with `plan-review: PASS` is emitted only after a non-blocking `PASS` in which the LLM tier ran. A degraded run carries a `resolution_class` and cannot be signed because `attest.sign_plan_review` raises `SigningError`. `BLOCK`, `INDETERMINATE`, and exempt runners produce no `SIGNATURE` event. The exempt runner set contains `session_log`, `code_review`, and `identity`. A bug is reviewed under the bug tier and is not exempt from review. Without a durable certificate, the start-work gate denies the claim.
 
-The one subtlety that has misled callers: the `review_plan` **verdict JSON** always
-carries a `signature` *object* — its shape is `{signed: bool, …}`. On a signed PASS it
-is `{signed: true, key_id, head_sha}`; on every other outcome it is `{signed: false,
-reason: "<VERDICT>"}` (e.g. `{signed: false, reason: "BLOCK"}`, or even `{signed:
-false, reason: "PASS"}` for an *exempt* runner that returned PASS but was not signed).
+The `review_plan` verdict JSON always contains a `signature` object with a `signed` Boolean. A signed PASS uses `{signed: true, key_id, head_sha}`. Other outcomes use `{signed: false, reason: "<VERDICT>"}` or an error field when persistence fails. This object reports the signing attempt. It is not the durable certificate.
 
-> **Read `signature.signed` (a boolean), never the mere presence of the `signature`
-> object.** `if result["signature"]:` / `signed = bool(result.get("signature"))` is a
-> bug — the object is *always* present and truthy, so that check reports a signed BLOCK.
-> The trustworthy proof-of-PASS is the **certified `SIGNATURE` event** (`rebar
-> verify-signature <ticket>` / the claim gate's local HMAC verify), which a `BLOCK` can
-> never produce — `signature.signed == true` in the verdict JSON is only its in-band
-> echo.
+> Read `signature.signed`. Do not infer signing from the presence or truth value of the `signature` object. The durable proof of PASS is a certified `SIGNATURE` event containing a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key and attributed to that environment through its principal. `rebar verify-signature <ticket>` performs this local certification. A `BLOCK` cannot produce that event.
 
 ## The idempotence short-circuit (skip the LLM when nothing changed)
 
@@ -1511,52 +1452,23 @@ reason: "derived plan-review health unavailable"}` — and never change a gate d
 normal freshness profile; close uses its close profile (implementation code may advance), but
 both retain material, phase, and enabled-pin checks.
 
-`rebar verify-signature <ticket>` certifies the attestation; a CI process treats a
-**certified plan-review signature at the current HEAD** as the "this plan was
-reviewed" predicate, and a **claimed-without-signature** (or force-claimed) ticket
-as the durable signal that the review was skipped — exactly parallel to the
-completion close gate's signed-verdict / closed-without-signature pair.
+`rebar verify-signature <ticket>` locally certifies a DSSE envelope by verifying its SSHSIG signature against the signing environment's Ed25519 public key and requiring the certificate principal to identify that environment. A CI process that requires a named trusted environment uses `rebar verify-opcert` with the public key pinned in `.rebar/trusted_environments.yaml`. A certified current plan-review certificate records that the plan passed review. A claimed ticket without that certificate records that the review was bypassed. The completion close gate uses the corresponding distinction between a certified completion-verifier record and a close without one.
 
 ### Multiple attestation kinds + how a CI gate reads them
 
-A ticket carries a **kind-keyed `attestations` map** (epic dark-acme-lumen): independent
-attestations of different **kinds** — `plan-review` (signed out-of-band by `review-plan`,
-verified at claim) and `completion-verifier` (signed by the close transition), with room for
-future kinds — coexist instead of
-clobbering one slot. `rebar show <ticket>` renders the map (the raw HMAC hex is stripped from
-every kind); the legacy top-level `signature` is a back-compat mirror of the most-recent
-attestation (its removal is the deferred follow-up — see ADR 0009 / ticket
-`352b-5097-9971-4dc1`).
+A ticket carries a kind-keyed `attestations` map. The `plan-review` and `completion-verifier` entries can coexist. Current entries contain DSSE envelopes that carry SSHSIG signatures over their PAE bytes, produced with the signing environment's Ed25519 key. Each certificate principal identifies that environment. `rebar show <ticket>` renders the map. New records contain no HMAC hex field. The top-level `signature` field is a compatibility mirror of the most recent attestation. ADR 0073 and ticket `352b-5097-9971-4dc1` record the mirror's history. A legacy HMAC gate record remains readable, but it returns `unknown_scheme` and cannot certify a current gated operation.
 
-To read them:
-- **Per kind (the CI-gate form):** `rebar verify-signature <ticket> --kind plan-review`
-  (or `--kind completion-verifier`) — exit 0 iff that kind is certified. Since **only a PASS
-  is ever signed**, `certified` already implies the gate passed.
-- **All kinds at once:** the library `rebar.signing.verify_attestations(ticket)` →
-  `{kind: verdict}`; or the `attestations` field of `rebar show`.
-- **"Certified" ≠ "valid":** a record can be HMAC-`certified` yet stale (reopened / code
-  drifted / materially edited). A gate that cares about current applicability — including a
-  CI gate — must also confirm it (status, freshness), which is what
-  `plan_review.attest.compute_validity` does on the read path.
+Read the map through these interfaces:
 
-> **CI deployment constraint (known follow-up).** The signature is an HMAC under the
-> environment's signing key, so a CI runner that *verifies* attestations needs that same
-> `REBAR_SIGNING_KEY` (a shared secret). This is the symmetric-key limitation of the current
-> scheme; moving to asymmetric verification (a CI verifier needs only a public key) — and
-> associating attestations with the *code* under review, not just the ticket — is deliberately
-> **out of scope** here and tracked as future work. This epic builds the per-ticket primitives
-> and does **not** add a dedicated CI `gate-check` command.
+- **One kind.** `rebar verify-signature <ticket> --kind plan-review` selects plan-review. Use `--kind completion-verifier` for completion. Exit status 0 means the selected record is certified. Only a PASS produces a current operation certificate.
+- **All kinds.** `rebar.signing.verify_attestations(ticket)` returns `{kind: verdict}`. `rebar show` also exposes the `attestations` map.
+- **Certification and validity.** Cryptographic certification does not establish current applicability. A reopened ticket, code drift, a material edit, or stale related-ticket pins can invalidate a certified record. `plan_review.attest.compute_validity` performs these checks on read.
 
-## End-to-end time-to-first-work (honest)
+> A CI verifier needs the trusted environment's Ed25519 public key, not its private key or a shared HMAC secret. `.rebar/trusted_environments.yaml` pins that key and environment principal. `rebar verify-opcert` walks the merged ticket log, resolves each certificate's storage anchor, and verifies the DSSE envelope's SSHSIG signature. Without required-environment configuration, the certificate remains a local process record.
 
-The **claim** check is fast (a local HMAC verify; the ~50 ms target is a structural
-property — it makes no LLM/network call, proven by a test). But the **honest**
-end-to-end time to start work includes the out-of-band `review-plan` run: the LLM
-four-pass review takes seconds to minutes depending on ticket size + tier, and the
-edit→re-review convergence loop (~2–3 rounds for a plan that needs revision) busts
-the prompt cache each round, so the real cost-to-signature ≈ per-run cost ×
-revisions. Per-run latency/cost is captured on the sidecar for passive refinement —
-no upfront wall-clock benchmark is claimed.
+## End-to-end latency before work begins
+
+The claim check performs local DSSE and SSHSIG verification against the signing environment's Ed25519 public key, confirms that the certificate principal identifies that environment, and recomputes freshness data. It makes no LLM call or network request. The preceding `review-plan` operation runs a multi-pass LLM review and can take seconds or minutes depending on ticket size and review tier. A plan that needs revision may require several review rounds, and each edit invalidates the prompt cache. The review sidecar records latency and cost for later analysis.
 
 ## Asymmetric-error invariants (a design invariant — read before tuning a floor or adding a criterion)
 

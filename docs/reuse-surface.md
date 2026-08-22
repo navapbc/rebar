@@ -1,22 +1,10 @@
-# Reusable machinery — developer API reference
+# Reusable machinery for developers
 
-This is the **reuse/extension reference** for the load-bearing subsystems a new
-rebar capability is most likely to build *on*: the HMAC **signing** surface, the
-**LLM workflow runtime** (the runner + the declarative workflow executor), the
-**prompt/contract** model, and the **output-schema** seam. It complements the
-higher-level docs — [llm-framework.md](llm-framework.md) (why the LLM framework is
-shaped this way), [event-schema.md](event-schema.md) (the event-level view of
-`SIGNATURE`), and [workflow-authoring-v2.md](workflow-authoring-v2.md) (authoring
-workflows) — by giving the **exact signatures, return shapes, invariants, and
-extension points** for the next agent.
+This reference documents the subsystem contracts that another rebar capability can reuse. It covers operation-certificate signing, generic HMAC primitives, the LLM workflow runtime, the prompt and contract model, and the output-schema seam. Related guides explain the [LLM framework](llm-framework.md), the [`SIGNATURE` event](event-schema.md), and [workflow authoring](workflow-authoring-v2.md).
 
-Worked consumer of all four: the plan-review gate
-([plan-review-gate.md](plan-review-gate.md), `src/rebar/llm/plan_review/`).
+The plan-review gate demonstrates the operation-certificate, LLM runtime, prompt, and output-schema surfaces. See [the plan-review guide](plan-review-gate.md) and `src/rebar/llm/plan_review/`.
 
-> Audience: human developers and LLM agents. Every signature below is verified
-> against the current source by `tests/unit/test_reuse_surface_doc.py` (a CI
-> anti-drift gate that introspects each documented callable) — re-verify with
-> `inspect.signature(...)` if in doubt.
+> Audience: Human developers and LLM agents. `tests/unit/test_reuse_surface_doc.py` checks the documented callable signatures against the source. Use `inspect.signature(...)` for additional inspection.
 
 ## Public bridge operations — `rebar.*`
 
@@ -54,116 +42,106 @@ interactive and intentionally has no library or MCP operation.
 
 ---
 
-## 1. The signing surface — `rebar.signing`
+## 1. Signing surface in `rebar.signing`
 
-HMAC-SHA256 attestation over a ticket's **manifest of verified steps**, computed
-with an **environment-specific** key. Used by the completion close gate and the
-plan-review claim gate; reuse it for any "this was verified" attestation. No new
-key custody is ever needed — there is exactly one environment key.
+Current `sign_manifest` writes an operation certificate for a ticket's manifest of verified steps. The record contains a DSSE envelope with an in-toto Statement. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. The certificate principal identifies that environment. The plan-review and completion-verifier gates use this form. Generic HMAC primitives remain available for non-operation-certificate consumers.
 
-### Key custody
+### Operation-certificate key custody
 
 ```python
-signing.signing_key(tracker, *, create_if_missing=True) -> bytes
-signing.key_fingerprint(key: bytes) -> str        # domain-separated SHA-256 prefix; NEVER the key
+signing.ensure_opcert_key(tracker, *, create_if_missing=True, binding=None) -> str
+signing.opcert_principal(tracker, *, binding=None) -> str
 ```
 
-Resolution order: `REBAR_SIGNING_KEY` env var → `<tracker>/.signing-key` (a
-git-ignored, atomically-created UUID4, one per environment). On the **verify** path
-always pass `create_if_missing=False` — a read must never mint a secret on disk (a
-key-less environment then honestly reports `foreign_key`/`unsigned`).
-`key_fingerprint` is what a signature records as `key_id`, so verification can tell
-a *tampered manifest* apart from a signature made by a *different environment*
-without exposing the key.
+The default private key is `<tracker>/.opcert-key`, with a derived `.opcert-key.pub` sidecar. `REBAR_OPCERT_KEY_PATH` can select a provisioned private key. `REBAR_OPCERT_ENV_ID` supplies the environment principal when set, and the ticket store's `.env-id` supplies the default. A startup signer binding takes precedence when one is provided. The verification path does not create a missing private key.
 
-### Manifest + canonicalisation
+### Manifests
 
 ```python
-signing.parse_manifest(payload) -> list[str]      # validates a JSON array of non-empty strings
-signing.compute_signature(ticket_id, manifest, key) -> str   # hex HMAC over the canonical payload
+signing.parse_manifest(payload) -> list[str]
 ```
 
-A **manifest** is a list of non-empty strings (the "verified steps"). The signed
-payload is `(ticket_id, manifest)` canonicalised as sorted-key compact JSON
-(`PAYLOAD_VERSION = 1`, `ALGORITHM = "HMAC-SHA256"`). Keep manifests
-**deterministic** (no timestamps inside) so re-signing the same verified state is
-reproducible. Convention: the first line names the attestation kind, e.g.
-`"completion-verifier: PASS"` or `"plan-review: PASS"`, so a verifier can tell the
-two gates' signatures apart on the same `state['signature']`.
+A manifest is a list of non-empty strings. Keep its content deterministic when repeated verification of the same state should produce the same predicate. The first line convention identifies the attestation kind, such as `"completion-verifier: PASS"` or `"plan-review: PASS"`. Current operation certificates bind the full manifest inside the signed in-toto predicate.
 
-### Sign + verify (library operations)
+### Current sign and verify operations
 
 ```python
 signing.sign_manifest(ticket_id, manifest, *, kind=None, repo_root=None, signer=None) -> dict
-# → {manifest, algorithm, signature, key_id, head_sha, signed_at, ticket_id}
-# Appends a SIGNATURE event through the single locked write path. Raises SigningError.
-# `kind` (e.g. "plan-review"/"completion-verifier") is recorded UNSIGNED as a routing
-# hint for the reducer's kind-keyed attestations map; it never enters the signed payload.
+# Returns manifest, algorithm, envelope, material_fingerprint, merged_log_commit,
+# principal, head_sha, signed_at, ticket_id, and kind when supplied.
+# Appends a SIGNATURE event through the locked write path. Raises SigningError.
 
 signing.verify_signature(ticket_id, *, kind=None, repo_root=None) -> dict
-# READ-only (never mints a key). Reduces the ticket and verifies one signature record.
-# `kind=None` verifies the most-recent `signature` mirror (back-compat); an explicit kind
-# ("plan-review"/"completion-verifier") verifies that kind strictly from the attestations map.
-# → the verdict dict (below) + ticket_id (+ `kind` when one was requested).
+# Reduces the ticket and verifies one record without creating a key.
+# kind=None selects the most recent compatibility mirror.
+# An explicit kind selects that entry from the attestations map.
 
 signing.verify_attestations(ticket_id, *, repo_root=None) -> dict
-# READ-only. Verifies EVERY attestation kind on the ticket → {kind: verdict_dict} (sorted),
-# {} when none. The per-kind companion to verify_signature.
+# Verifies every recorded kind and returns a sorted mapping from kind to verdict.
 
-signing.verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict
-# Pure, no I/O. The core verifier (use when you already hold the record + key).
+signing.verify_attestation_record(record, ticket_id, *, kind=None, key=None, repo_root=None) -> dict
+# Dispatches by record shape to the operation-certificate or generic HMAC verifier.
 ```
 
-The **verdict** dict: `{verified: bool, verdict, reason, manifest, step_count,
-algorithm, key_id, signed_at, head_sha, ...}` where `verdict` ∈:
+An operation-certificate record uses `algorithm="sshsig"` and has no HMAC `signature` field. `verify_signature` performs same-environment verification. It requires the record principal to match the current environment and verifies the DSSE envelope through SSHSIG against that environment's Ed25519 public key. Verification of a certificate from another environment returns `foreign_key` on this path.
 
-| verdict | meaning |
-|---------|---------|
-| `certified` | the manifest matches the HMAC under *this* environment's key |
-| `mismatch` | a signature exists but does not verify (tampered manifest / bad sig) |
-| `foreign_key` | signed by a *different* environment's key (or no local key) |
-| `unsigned` | no signature on the ticket |
+The verdict dictionary contains `verified`, `verdict`, `reason`, `manifest`, `step_count`, `algorithm`, `key_id`, `signed_at`, `head_sha`, and authenticated operation-certificate fields where available. Common verdicts include:
 
-### Git-state (freshness) binding
+| Verdict | Meaning |
+|---|---|
+| `certified` | The selected certificate or generic HMAC record verifies under the applicable local key. |
+| `mismatch` | The signature, signed subject, ticket binding, or kind binding does not verify. |
+| `foreign_key` | The record identifies another environment or the local verification key is unavailable. |
+| `invalid` | The operation-certificate envelope or payload is malformed. |
+| `unavailable` | The configured signing scheme cannot run. |
+| `unknown_kind` | No verification policy exists for the attestation kind. |
+| `unknown_scheme` | The record uses a scheme that policy does not accept for the kind. |
+| `unsigned` | No signature record exists in the selected slot. |
+
+### Generic HMAC primitives
 
 ```python
-signing.head_sha(repo_root) -> str    # current HEAD sha, or 'unknown' when unresolvable
+signing.signing_key(tracker, *, create_if_missing=True) -> bytes
+signing.key_fingerprint(key: bytes) -> str
+signing.compute_signature(ticket_id, manifest, key) -> str   # hex HMAC over the canonical payload
+signing.verify_record(record: dict | None, ticket_id: str, key: bytes) -> dict
 ```
 
-Every signature records `head_sha`. A gate enforces freshness by recomputing the
-current HEAD and rejecting when `result['head_sha'] != head_sha` — treat
-`'unknown'` as **never matchable** (else `'unknown' == 'unknown'` would void the
-guard). This binds an attestation to the code at review time.
+These functions preserve the generic HMAC-SHA256 contract for consumers outside the two operation-certificate gates. `signing_key` resolves `REBAR_SIGNING_KEY` before `<tracker>/.signing-key`. `compute_signature` returns a hex HMAC over the versioned canonical payload containing the ticket ID and manifest. `verify_record` is a pure verifier when the caller already holds the record and key.
+
+Do not use the generic HMAC path for `plan-review` or `completion-verifier`. A legacy HMAC record for either kind remains readable, but it returns `unknown_scheme` and cannot certify a current gated operation.
+
+### Code and material freshness
+
+```python
+signing.head_sha(repo_root) -> str    # current HEAD sha, or "unknown" when unavailable
+```
+
+Current operation certificates bind the manifest, material fingerprint, and code commit inside the signed in-toto predicate. The record also retains `head_sha` for compatibility and unscoped freshness checks. Gate validity reads authenticated operation-certificate values before it compares ticket material, code state, reopen time, and related-ticket pins. Treat `"unknown"` as never matchable.
 
 ### The `SIGNATURE` event
 
-`sign_manifest` persists a `SIGNATURE` event; the reducer folds it into
-`state['signature']` **last-writer-wins** by replay (filename) order — concurrent
-signs converge deterministically to the lexicographically-last `{ts}-{uuid}-SIGNATURE.json`
-(re-sign to supersede). See [event-schema.md](event-schema.md).
+`sign_manifest` persists a `SIGNATURE` event. The reducer stores the most recent record for each kind in `state['attestations']` and maintains `state['signature']` as the compatibility mirror of the most recent record. Replay order resolves concurrent writes in one slot. See [event-schema.md](event-schema.md).
 
-### Worked example — a NEW gate reusing the surface
+### Worked example for a new gate
 
 ```python
-from rebar import signing, config
+from rebar import config, signing
 
-# 1. SIGN on a passing verification (a deterministic manifest; bind any extra state
-#    you want invalidated, e.g. a content fingerprint, IN the manifest so HMAC
-#    protects it):
 manifest = [f"my-gate: PASS", f"ticket: {tid}", f"material: {fingerprint}"]
 signing.sign_manifest(tid, manifest, repo_root=root)
 
-# 2. VERIFY fast at the gate (no LLM, no network — a pure HMAC verify):
 res = signing.verify_signature(tid, repo_root=root)
 ok = (
     res["verified"]
     and res["manifest"][0].startswith("my-gate:")
-    and res.get("head_sha") == signing.head_sha(config.repo_root(root)) != "unknown"
+    and res.get("merged_log_commit")
+    == signing.head_sha(config.repo_root(root))
+    != "unknown"
 )
 ```
 
-The plan-review gate's `attest.py` is exactly this pattern, adding a material
-fingerprint bound into the manifest for material-edit invalidation.
+The plan-review gate uses this path to store a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key and attributed to that environment. Its manifest also binds the material fingerprint used for material-edit invalidation.
 
 ---
 
