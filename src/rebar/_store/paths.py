@@ -41,6 +41,7 @@ cannot cycle.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 #: The per-clone state directory, always a sibling of the CANONICAL tracker dir.
@@ -70,6 +71,38 @@ def _rebar_dir(tracker: str | os.PathLike[str]) -> str:
     for why resolving first is load-bearing rather than cosmetic.
     """
     return os.path.join(os.path.dirname(_canonical_tracker(tracker)), _REBAR_DIR_NAME)
+
+
+#: The escape marker for a legitimate second tracker-sibling derivation. A reason is
+#: MANDATORY -- a bare marker would let the exception hide, so it is a violation in its own
+#: right (the rule ``scripts/check_raw_git_writes.py`` enforces for ``# raw-git-ok:``).
+_STORE_PATH_OK_RE = re.compile(r"#\s*store-path-ok:(.*)$")
+
+#: The atoms that, IN CONJUNCTION with the ``.rebar`` literal, constitute the tracker-sibling
+#: derivation this module owns. The bare literal is deliberately NOT the signature: roughly
+#: three dozen sites legitimately join ``.rebar`` to an explicit ``repo_root`` (prompts,
+#: scratch, the usage log, run snapshots), and those carry no symlink hazard. Only a
+#: parent-of-the-tracker step makes it THIS construct.
+_PARENT_ATOMS = ("os.path.dirname(", ".parent")
+
+
+def _offending_line(line: str) -> str | None:
+    """Why *line* is an unsanctioned tracker-sibling ``.rebar`` derivation, else ``None``.
+
+    Split out from the tree scan in ``tests/unit/store/test_store_paths.py`` so the guard can
+    be proven to FLAG, not merely to pass: a scan that only ever reports "no offender exists
+    today" reports exactly the same thing when its matcher is broken.
+    """
+    if '".rebar"' not in line and "'.rebar'" not in line:
+        return None
+    if not any(atom in line for atom in _PARENT_ATOMS):
+        return None
+    marker = _STORE_PATH_OK_RE.search(line)
+    if marker is None:
+        return "tracker-sibling '.rebar' derivation outside rebar._store.paths"
+    if marker.group(1).strip():
+        return None
+    return "store-path-ok marker requires a reason"
 
 
 def _resolve_pointer(target: str, base: str) -> str:

@@ -188,34 +188,24 @@ def test_git_dir_falls_back_to_dot_git_when_the_pointer_is_unreadable(tmp_path: 
 # ======================================================================================
 _MARKER_RE = re.compile(r"#\s*store-path-ok:(.*)$")
 
-#: The tracker-sibling ``.rebar`` construct, as its atoms actually appear in the code: the
-#: string ``".rebar"`` in CONJUNCTION with a parent-of-the-tracker step. The bare token
-#: ``".rebar"`` is deliberately NOT scanned — ~36 legitimate sites join it to an explicit
-#: ``repo_root`` (prompts, scratch, usage log, snapshots), which is a different derivation
-#: with no symlink hazard. Only the conjunction names THIS construct.
-_PARENT_ATOMS = ("os.path.dirname(", ".parent")
-
 
 def _tracker_sibling_offenders() -> list[str]:
+    """Every unsanctioned tracker-sibling derivation under ``src/rebar`` outside the owner.
+
+    The per-line rule itself lives in ``rebar._store.paths._offending_line`` and is unit-tested
+    directly below; re-implementing the matcher here would make this guard a second copy of the
+    very construct the guard exists to keep singular.
+    """
+    from rebar._store.paths import _offending_line
+
     offenders: list[str] = []
     for path in sorted(_SRC_REBAR.rglob("*.py")):
-        if path.resolve() == _OWNER:
+        if path.resolve() == _OWNER.resolve():
             continue  # the owner is exempt: refactoring INSIDE it cannot fail the guard
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-            if '".rebar"' not in line and "'.rebar'" not in line:
-                continue
-            if not any(atom in line for atom in _PARENT_ATOMS):
-                continue
-            marker = _MARKER_RE.search(line)
-            if marker and marker.group(1).strip():
-                continue  # a reasoned exception, visible in review
-            if marker:
-                offenders.append(
-                    f"{path.relative_to(_SRC_REBAR.parent)}:{lineno}: "
-                    "store-path-ok marker requires a reason"
-                )
-            else:
-                offenders.append(f"{path.relative_to(_SRC_REBAR.parent)}:{lineno}: {line.strip()}")
+            why = _offending_line(line)
+            if why:
+                offenders.append(f"{path.relative_to(_SRC_REBAR.parent)}:{lineno}: {why}")
     return offenders
 
 
@@ -344,3 +334,47 @@ def test_the_push_marker_still_follows_a_linked_worktrees_gitdir_pointer(tmp_pat
     (tracker / ".git").write_text(f"gitdir: {real_git}\n", encoding="utf-8")
 
     assert push_state._marker_path(str(tracker)) == str(real_git / push_state.MARKER)
+
+
+# The guard's own unit tests: the tree scan above proves "no offender exists TODAY", which
+# passes just as well if the scanner is broken. These exercise the classifier directly on
+# synthetic lines, so the guard is proven to FLAG as well as to pass.
+def test_the_scan_flags_a_tracker_sibling_join() -> None:
+    """The offence the guard exists to catch: joining ".rebar" to the tracker's parent."""
+    from rebar._store.paths import _offending_line
+
+    assert _offending_line('    return os.path.join(os.path.dirname(tracker), ".rebar")')
+    assert _offending_line('    return Path(tracker).resolve().parent / ".rebar"')
+
+
+def test_the_scan_ignores_a_repo_root_join() -> None:
+    """The negative control that makes the guard usable at all: ~36 sites legitimately join
+    ".rebar" to an explicit repo_root (prompts, scratch, usage log, snapshots). Those are a
+    different derivation with no symlink hazard, and a guard that flagged them would be turned
+    off within a day."""
+    from rebar._store.paths import _offending_line
+
+    assert _offending_line('    pdir = Path(repo_root) / ".rebar" / "prompts"') is None
+    assert _offending_line('    default = os.path.join(root, ".rebar", "usage.jsonl")') is None
+    assert _offending_line("    x = compute(a, b)  # unrelated") is None
+
+
+def test_a_reasoned_marker_suppresses_the_offence() -> None:
+    """A legitimate second use stays possible — but only VISIBLY, with its reason in review."""
+    from rebar._store.paths import _offending_line
+
+    assert (
+        _offending_line(
+            '    return os.path.join(os.path.dirname(t), ".rebar")  # store-path-ok: legacy shim'
+        )
+        is None
+    )
+
+
+def test_a_reason_less_marker_is_itself_an_offence() -> None:
+    """A bare marker would let the exception hide, so it is a violation in its own right --
+    the same rule ``scripts/check_raw_git_writes.py`` enforces for ``# raw-git-ok:``."""
+    from rebar._store.paths import _offending_line
+
+    got = _offending_line('    return os.path.join(os.path.dirname(t), ".rebar")  # store-path-ok:')
+    assert got is not None and "requires a reason" in got
