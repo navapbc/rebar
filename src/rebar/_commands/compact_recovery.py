@@ -25,8 +25,10 @@ discriminates the half-fold states:
   ``compact_txn._retire_folded_sources`` keeps for ``fsck --repair-snapshots`` has NO
   journal by construction, so recovery never sees it — fsck remains its sole owner.
 
-Layering: this module imports only ``rebar._store``; ``compact_txn`` and ``compact`` both
-import it (never the reverse).
+Layering: this module imports ``rebar._store`` and the leaf planner
+``rebar._commands.compact_plan`` (which owns the ``*.retired`` rename-back rule this
+recovery shares with the in-process rollback — story 3436); ``compact_txn`` and ``compact``
+both import it (never the reverse).
 """
 
 from __future__ import annotations
@@ -35,9 +37,9 @@ import json
 import logging
 import os
 
+from rebar._commands import compact_plan
 from rebar._store import fsutil, lock
 from rebar._store.gitutil import run_git_write
-from rebar.reducer._cache import RETIRED_SUFFIX
 
 logger = logging.getLogger(__name__)
 
@@ -131,27 +133,17 @@ def _revert_partial_fold(tracker: str, record: dict) -> None:
     snapshot, and unstage the ticket dir (a crash between ``git add`` and ``git commit``
     leaves a dirty INDEX that would also abort the union merge).
 
-    Mirrors ``_rollback_fold``'s data-loss guard: the snapshot is removed ONLY when every
-    reverse-rename succeeded. A source stuck as ``*.retired`` has its folded effect living
-    only in the snapshot, so removing it then would silently drop events — the snapshot is
-    retained instead as the SNAPSHOT_INCONSISTENT state that ``fsck --repair-snapshots``
-    owns (the caller discards the journal, so recovery never revisits it)."""
-    revert_clean = True
-    for rel in record.get("sources", []):
-        original = os.path.join(tracker, rel)
-        retired = original + RETIRED_SUFFIX
-        if os.path.exists(retired) and not os.path.exists(original):
-            try:
-                os.rename(retired, original)
-            except OSError:
-                revert_clean = False
-                logger.warning("compact recovery: could not restore %s", original)
+    The rename-back and its data-loss guard are the shared ones
+    (:func:`compact_plan.restore_retired`), so this cross-process revert and the in-process
+    ``_rollback_fold`` cannot drift: the snapshot is removed ONLY when every reverse-rename
+    succeeded. A source stuck as ``*.retired`` has its folded effect living only in the
+    snapshot, so removing it then would silently drop events — the snapshot is retained
+    instead as the SNAPSHOT_INCONSISTENT state that ``fsck --repair-snapshots`` owns (the
+    caller discards the journal, so recovery never revisits it)."""
+    originals = [os.path.join(tracker, rel) for rel in record.get("sources", [])]
     snapshot = os.path.join(tracker, record.get("snapshot", ""))
-    if revert_clean:
-        try:
-            os.remove(snapshot)
-        except OSError:
-            logger.warning("compact recovery: could not remove abandoned snapshot %s", snapshot)
+    if compact_plan.restore_retired(originals):
+        compact_plan.discard_uncommitted_snapshot(snapshot)
     else:
         logger.warning(
             "compact recovery: revert incomplete — snapshot %s retained; run "
@@ -160,8 +152,7 @@ def _revert_partial_fold(tracker: str, record: dict) -> None:
         )
     ticket_id = record.get("ticket_id", "")
     if ticket_id:
-        # unstage the abandoned fold's own index entries
-        _git(tracker, "reset", "-q", "--", f"{ticket_id}/")  # raw-git-ok: crash recovery
+        compact_plan.unstage_ticket_dir(tracker, ticket_id)
 
 
 def recover_abandoned_folds(tracker: str) -> int:
