@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from rebar.llm import failure
 from rebar.llm.config import LLMConfig, infer_provider
 from rebar.llm.errors import LLMUnavailableError
 from rebar.llm.model_classes import MODEL_WINDOW_LADDER as MODEL_LADDER
@@ -319,21 +320,16 @@ def usage_record(criteria: list[str], usage: dict[str, Any] | None) -> dict[str,
 
 def is_context_limit_error(exc: Exception) -> bool:
     """Heuristic: does ``exc`` look like a provider context-window/too-many-tokens
-    error (vs an unrelated failure)? Matches common phrasings across providers."""
+    error (vs an unrelated failure)? Matches common phrasings across providers.
+
+    The phrasings are OWNED by :mod:`rebar.llm.failure` and read from it at call time
+    (story fcb7): this predicate and ``failure``'s CHANGE_INPUT classifier judge the SAME
+    wire error, so a second copy here would let a fix to one silently leave the other
+    stale. The dependency runs one way only — ``failure`` still imports nothing from
+    ``plan_review``, which is the boundary its own comment records.
+    """
     msg = str(exc).lower()
-    return any(
-        s in msg
-        for s in (
-            "context",
-            "too many tokens",
-            "maximum context",
-            "context_length",
-            "prompt is too long",
-            "input length",
-            "exceeds the maximum",
-            "token limit",
-        )
-    )
+    return any(s in msg for s in failure._CONTEXT_LEN_HINTS)
 
 
 # Ladder rung FAMILY substring → the model class that rung stands for (task 7761). Keyed on the
