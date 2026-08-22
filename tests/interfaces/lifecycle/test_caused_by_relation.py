@@ -8,6 +8,8 @@ contracts live in the held-out companion.
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 import rebar
@@ -24,6 +26,25 @@ def test_caused_by_link_round_trips(rebar_repo) -> None:
     repo = str(rebar_repo)
     bug = rebar.create_ticket("bug", "the bug", repo_root=repo)
     culprit = rebar.create_ticket("task", "the culprit change", repo_root=repo)
+    # The culprit must have an introducing commit: an evidence-less caused_by
+    # target is refused at link time (story dormant-fibre-pterosaurs).
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-q",
+            "-m",
+            f"the culprit change\n\nrebar-ticket: {culprit}",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
 
     rebar.link(bug, culprit, "caused_by", repo_root=repo)
 

@@ -144,7 +144,7 @@ def test_deps_parity(adapter) -> None:
     lands directly on `b`.)"""
     a = adapter.create("task", "Blocker")
     b = adapter.create("task", "Blocked")
-    adapter.link(a, b, "blocks")
+    assert adapter.link(a, b, "blocks"), f"{adapter.name}: link was rejected"
     graph = adapter.deps(b)
     assert isinstance(graph, dict)
     assert graph["ticket_id"] == b

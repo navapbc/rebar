@@ -375,7 +375,7 @@ def register_write_tools(mcp, ctx) -> None:
         return _ack(description_warning=description_warning)
 
     @mcp.tool(annotations=_ANN["MUTATE"])
-    def link_tickets(id1: str, id2: str, relation: str) -> WriteAckOut:
+    def link_tickets(id1: str, id2: str, relation: str, force: str = "") -> WriteAckOut:
         """Link two tickets (one of the seven canonical relations: blocks |
         depends_on | relates_to | duplicates | supersedes | discovered_from |
         caused_by).
@@ -384,9 +384,12 @@ def register_write_tools(mcp, ctx) -> None:
         do not share a parent, so the RECORDED edge may differ from the requested one.
         When that happens the return value names both pairs — otherwise the caller
         would be told "ok" for an edge that was never written.
+
+        A ``caused_by`` link whose target has no commit referencing it is refused;
+        ``force`` (a reason string) bypasses that check.
         """
         _shadow("mcp.write.link_tickets")
-        record = rebar.link(id1, id2, relation)
+        record = rebar.link(id1, id2, relation, force=force)
         if not record:
             return _ack()
         original = record.get("original") or {}

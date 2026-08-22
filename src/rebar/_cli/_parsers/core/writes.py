@@ -71,14 +71,53 @@ def build_comment(*, prog: str) -> argparse.ArgumentParser:
     return parser
 
 
+def extract_force(argv: list[str]) -> tuple[str, list[str]]:
+    """Split the claim-style ``--force[=<reason>][ <reason>]`` out of ``argv``.
+
+    Returns ``(reason, remaining)``: ``""`` when the flag is absent, ``"(no reason given)"``
+    for a bare ``--force``, else the inline or following-token value. A bare ``--force``
+    consumes the NEXT token as its reason when that token does not start with ``--`` —
+    claim's long-standing following-token rule, pinned by ``test_claim_argparse_parse_fd48``
+    and matching ``build_link``'s ``nargs="?"`` grammar. This is the ONE implementation of
+    the claim-style spelling — ``claim`` and ``link`` both use it. ``transition`` and
+    ``tracker-maintenance`` keep their own parsers on purpose: transition's bare ``--force``
+    yields ``""`` so it can distinguish "absent" from "present with no reason", a different
+    contract rather than a copy of this one.
+    """
+    reason = ""
+    remaining: list[str] = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--force":
+            nxt = argv[i + 1] if i + 1 < len(argv) else ""
+            if nxt and not nxt.startswith("--"):
+                reason = nxt
+                i += 1
+            else:
+                reason = "(no reason given)"
+        elif arg.startswith("--force="):
+            reason = arg[len("--force=") :] or "(no reason given)"
+        else:
+            remaining.append(arg)
+        i += 1
+    return reason, remaining
+
+
 def build_link(*, prog: str) -> argparse.ArgumentParser:
-    """``rebar link <id1> <id2> <relation> [--dry-run]``."""
+    """``rebar link <id1> <id2> <relation> [--dry-run] [--force[=<reason>]]``."""
     parser = _base(
         prog,
         "Link two tickets (relation REQUIRED: "
         "blocks|depends_on|relates_to|duplicates|supersedes|discovered_from|caused_by).",
     )
     parser.add_argument("--dry-run", action="store_true", help="report without writing")
+    parser.add_argument(
+        "--force",
+        nargs="?",
+        const="(no reason given)",
+        help="bypass the caused_by referencing-commit check (reason recorded)",
+    )
     parser.add_argument("source", nargs="?", help="source ticket")
     parser.add_argument("target", nargs="?", help="target ticket")
     parser.add_argument("relation", nargs="?", help="the required relation")

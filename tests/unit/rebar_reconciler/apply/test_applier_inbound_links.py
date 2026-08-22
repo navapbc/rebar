@@ -59,8 +59,8 @@ def test_inbound_link_add_calls_rebar_link(applier, tmp_path, monkeypatch):
 
     calls: list[tuple] = []
 
-    def fake_link(src, dst, relation, *, repo_root=None):
-        calls.append((src, dst, relation, repo_root))
+    def fake_link(src, dst, relation, *, force="", repo_root=None):
+        calls.append((src, dst, relation, repo_root, force))
 
     monkeypatch.setattr(rebar, "link", fake_link)
 
@@ -77,9 +77,13 @@ def test_inbound_link_add_calls_rebar_link(applier, tmp_path, monkeypatch):
 
     result = applier._apply_inbound_update(mutation, repo_root=tmp_path)
 
-    assert calls == [("loc-a", "loc-b", "blocks", tmp_path)], (
+    assert [c[:4] for c in calls] == [("loc-a", "loc-b", "blocks", tmp_path)], (
         f"rebar.link not called with expected args. Calls: {calls}"
     )
+    # An inbound edge is peer-authored and its evidence may live only in the peer's
+    # clone, so it must be applied FORCED — otherwise the caused_by referencing-commit
+    # check would drop a synced edge and record it as permanently impossible.
+    assert calls[0][4], "inbound links must be applied with a force reason"
     assert result.payload["links_applied"] == 1
 
 
@@ -89,7 +93,7 @@ def test_inbound_link_repo_root_threads_through(applier, tmp_path, monkeypatch):
 
     seen_repo_root: list = []
 
-    def fake_link(src, dst, relation, *, repo_root=None):
+    def fake_link(src, dst, relation, *, force="", repo_root=None):
         seen_repo_root.append(repo_root)
 
     monkeypatch.setattr(rebar, "link", fake_link)
@@ -112,7 +116,7 @@ def test_inbound_link_failure_is_non_fatal(applier, tmp_path, monkeypatch, caplo
     the failed write."""
     import rebar
 
-    def boom_link(src, dst, relation, *, repo_root=None):
+    def boom_link(src, dst, relation, *, force="", repo_root=None):
         raise RuntimeError("cycle guard")
 
     monkeypatch.setattr(rebar, "link", boom_link)
@@ -138,7 +142,7 @@ def test_inbound_link_malformed_entries_skipped(applier, tmp_path, monkeypatch):
 
     calls: list[tuple] = []
 
-    def fake_link(src, dst, relation, *, repo_root=None):
+    def fake_link(src, dst, relation, *, force="", repo_root=None):
         calls.append((src, dst, relation))
 
     monkeypatch.setattr(rebar, "link", fake_link)

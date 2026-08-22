@@ -28,6 +28,51 @@ from rebar._engine_support.resolver import resolve_ticket_id
 logger = logging.getLogger(__name__)
 
 
+def caused_by_refusal(relation: str, target_id: str, tracker: str, code_root: str) -> str | None:
+    """The reason a ``caused_by`` link to ``target_id`` must be refused, or ``None``.
+
+    ``caused_by`` is the store's only machine-readable causation edge, and it is worth no
+    more than the evidence behind it: a target that never shipped a commit cannot be shown
+    to have introduced anything, so pointing at one silently corrupts the escaped-defect
+    lenses that read the edge. The rule checks the TARGET ITSELF, not its descendants —
+    ``caused_by`` must name the specific change that introduced the defect, and crediting an
+    epic through its children is exactly the misattribution the rule exists to stop.
+
+    Unverifiable is NOT invalid: :func:`rebar._engine_support.commit_impact.referencing_commits`
+    reports ``None`` when git history could not be read at all (no repo, no commits), and
+    that allows the link. A refusal must always mean "this target has no commit", never
+    "this checkout has no history".
+
+    This is a PREDICATE rather than an inline check because ``link``'s write path
+    (:func:`link_core`) and its preview path (:func:`_link_dry_run`) do not share a code
+    path — the preview never calls ``link_core`` — so a shared predicate is the only thing
+    that keeps the two from drifting apart.
+    """
+    if relation != "caused_by":
+        return None
+    from rebar._engine_support import commit_impact
+
+    found = commit_impact.referencing_commits({target_id}, tracker, code_root)
+    if found is None or found:
+        return None
+    return (
+        f"target ticket '{target_id}' has no commit referencing it, so it cannot be shown "
+        "to have introduced anything"
+    )
+
+
+def _code_root(repo_root) -> str:
+    """The CODE checkout the referencing-commit scan walks.
+
+    Deliberately NOT the tracker dir: an absolute ``tracker.dir`` relocates the store
+    outside the checkout, and scanning it would read the wrong history. Mirrors the
+    ``code_root``/``tracker`` split the close gate already makes.
+    """
+    from rebar import config
+
+    return str(config.repo_root(repo_root))
+
+
 def link_core(
     src_raw: str,
     tgt_raw: str,
@@ -35,6 +80,7 @@ def link_core(
     *,
     repo_root=None,
     quiet: bool = False,
+    force: str = "",
     on_outcome=None,
 ) -> dict | None:
     """Resolve endpoints and add a LINK via the shared graph (mirrors ticket_link's
@@ -61,6 +107,15 @@ def link_core(
     tgt_id = resolve_ticket_id(tgt_raw, str(tracker))
     if tgt_id is None:
         raise CommandError(f"Error: ticket '{tgt_raw}' does not exist")
+    if not force and (
+        reason := caused_by_refusal(relation, tgt_id, str(tracker), _code_root(repo_root))
+    ):
+        raise CommandError(
+            f"Error: cannot create {relation} link — {reason}. Point caused_by at the "
+            "ticket whose commit carries its 'rebar-ticket:' trailer, or override with "
+            '--force="<reason>".',
+            returncode=1,
+        )
     sink = io.StringIO()
     try:
         if quiet:
@@ -74,7 +129,9 @@ def link_core(
         raise CommandError(f"Error: {exc}") from None
 
 
-def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) -> int:
+def _link_dry_run(
+    src_raw: str, tgt_raw: str, relation: str, *, repo_root=None, force: str = ""
+) -> int:
     """In-process ``link --dry-run`` preview. Resolves endpoints, asks the shared
     hierarchy resolver what WOULD happen, and prints the ``[DRY RUN]`` line
     without writing any event. Missing tickets error like ``link`` itself;
@@ -90,6 +147,13 @@ def _link_dry_run(src_raw: str, tgt_raw: str, relation: str, *, repo_root=None) 
     if tgt_id is None:
         print(f"Error: ticket '{tgt_raw}' does not exist", file=sys.stderr)
         return 1
+    reason = None if force else caused_by_refusal(relation, tgt_id, tracker, _code_root(repo_root))
+    if reason:
+        print(
+            f"[DRY RUN] Would reject: {src_id} {relation} {tgt_id} — {reason}; "
+            "override with --force (no event written)"
+        )
+        return 0
     try:
         res = resolve_hierarchy_link(src_id, tgt_id, tracker, relation)
     except Exception:  # noqa: BLE001 — resolver unavailable → plain preview
@@ -138,7 +202,7 @@ def _confirm_link(outcome: dict | None, record: dict | None) -> None:
 
 def link_cli(argv: list[str], *, repo_root=None) -> int:
     """CLI route for ``link``: parse --dry-run, resolve, delegate."""
-    from rebar._cli._parsers.core.writes import build_link
+    from rebar._cli._parsers.core.writes import build_link, extract_force
     from rebar._commands import _confirm
 
     # The factory is the parser of record for the accepted grammar; the raw slicing
@@ -146,14 +210,14 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
     # ids, literal ``--dry-run`` membership, and ``--`` treated as a relation value).
     build_link(prog="rebar link").parse_known_args(argv)
     dry_run = "--dry-run" in argv
-    rest = [a for a in argv if a != "--dry-run"]
+    force, rest = extract_force([a for a in argv if a != "--dry-run"])
     if len(rest) < 3:
         print("Usage: ticket link <id1> <id2> <relation>", file=sys.stderr)
         return 1
     src_raw, tgt_raw, relation = rest[0], rest[1], rest[2]
 
     if dry_run:
-        return _link_dry_run(src_raw, tgt_raw, relation, repo_root=repo_root)
+        return _link_dry_run(src_raw, tgt_raw, relation, repo_root=repo_root, force=force)
 
     outcome: dict | None = None
 
@@ -171,6 +235,7 @@ def link_cli(argv: list[str], *, repo_root=None) -> int:
             relation,
             repo_root=repo_root,
             quiet=_confirm.json_mode(),
+            force=force,
             on_outcome=_capture,
         )
     except CommandError as exc:
