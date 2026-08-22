@@ -130,8 +130,10 @@ def _emit(level: int, event: str, **fields: Any) -> None:
 
 
 def _voter_error(**fields: Any) -> None:
-    """Structured fail-closed marker (greppable: ``VOTER_ERROR``). Always to stderr too
-    so it lands in journald even if logging is misconfigured."""
+    """Structured fail-closed marker (greppable: ``VOTER_ERROR``). The stderr print below
+    is the SINGLE line-start marker emission the observability anchor (``^VOTER_ERROR \\{``)
+    counts; the logger copy logs the JSON record body only — it deliberately does not match
+    the anchor, so configured logging cannot double the count (bug f829-152a-b415-44a4)."""
     record = {
         "event": "VOTER_ERROR",
         "timestamp": time.time(),
@@ -141,11 +143,12 @@ def _voter_error(**fields: Any) -> None:
         "http_status": fields.get("http_status"),
         "error": fields.get("error"),
     }
-    line = "VOTER_ERROR " + json.dumps(record, default=str)
-    logger.error(line)
-    # Also write straight to stderr (journald) so the greppable VOTER_ERROR marker — the
-    # source for the rebar/host:voter_errors metric — lands even if logging is reconfigured.
-    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    body = json.dumps(record, default=str)
+    logger.error(body)
+    # Write the token-prefixed marker straight to stderr (journald) so the greppable
+    # VOTER_ERROR line — the source for the rebar/host:voter_errors metric — lands exactly
+    # once, whether or not logging is configured.
+    print("VOTER_ERROR " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
     _publish_voter_error_metric()
 
 
@@ -209,7 +212,9 @@ def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) ->
     """Record the review's LLM token usage: a greppable ``LLM_TOKEN_USAGE`` journald line
     (the reliable, host-probe-parseable path) plus a best-effort direct CloudWatch publish.
     Best-effort throughout — the vote is already cast, so token accounting NEVER fails a
-    review (any error is swallowed)."""
+    review (any error is swallowed). The stderr print below is the SINGLE line-start marker
+    emission; the logger copy logs the JSON record body only, so configured logging cannot
+    double a future anchored count (bug f829-152a-b415-44a4)."""
     try:
         record = {
             "event": "LLM_TOKEN_USAGE",
@@ -218,9 +223,9 @@ def _emit_token_usage(change_id: str, revision: str, metrics: dict[str, Any]) ->
             "revision_id": revision,
             **{f: int(metrics.get(f) or 0) for f in _TOKEN_METRIC_FIELDS},
         }
-        line = "LLM_TOKEN_USAGE " + json.dumps(record, default=str)
-        logger.info(line)
-        print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+        body = json.dumps(record, default=str)
+        logger.info(body)
+        print("LLM_TOKEN_USAGE " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
         _publish_token_usage_metrics(metrics)
     except Exception:
         logger.warning("token-usage emission failed; continuing", exc_info=True)

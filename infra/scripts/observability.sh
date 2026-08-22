@@ -165,6 +165,9 @@ mkdir -p "$(dirname "$VOTER_OFFSET_FILE")"
 # shape), and journalctl -o cat prints the message alone — so `^<TOKEN> \{` matches every genuine
 # record (evidence: 221 line-start == 221 real) and no prose, whether the token appears mid-line or
 # opens one. A token is an alarm contract: keep this pattern in step with the emitter.
+# Since bug f829-152a-b415-44a4 the emitters' logger-stream copy logs the JSON record body
+# WITHOUT the line-start token — only the stderr print emits `<TOKEN> {json}` — so configured
+# application logging (whose stdout also lands in journald) cannot double this count.
 vtotal=$(journalctl CONTAINER_NAME="$VOTER_CONTAINER" --no-pager -o cat 2>/dev/null | grep -cE '^VOTER_ERROR \{') || true
 vtotal=${vtotal:-0}
 vprev=$(cat "$VOTER_OFFSET_FILE" 2>/dev/null || true)
