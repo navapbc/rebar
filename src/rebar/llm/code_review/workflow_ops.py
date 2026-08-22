@@ -74,8 +74,10 @@ def assemble_diff(ctx: StepContext) -> dict[str, Any]:
         "Compute the overlay inclusion set: (glob ∪ content ∪ base.recommend) − already_run, "
         "ONE-HOP, capped at N (configurable, default uncapped). `glob` = overlays whose applies_to "
         "globs match the changed files (registry.glob_triggered_overlays); `content` = overlays "
-        "triggered by the DIFF CONTENT (registry.content_triggered_overlays, e.g. deletion-impact "
-        "on a removed def/class/signature); `recommend` = the base reviewer's enum-validated "
+        "triggered by the DIFF CONTENT (registry.content_triggered_overlays: deletion-impact on a "
+        "removed def/class/signature, and tests when the diff ADDS a declaration the same file "
+        "does not also remove AND no changed file matches the tests globs); "
+        "`recommend` = the base reviewer's enum-validated "
         "recommend_overlays; `already_run` = the Round-A set (explicit with: input). scope-intent "
         "is the exception: included IFF `scope_context` (the assembler's resolved rebar-ticket "
         "trailer scope) is non-empty, never via glob/content/recommend. Emits "
@@ -96,7 +98,9 @@ def overlay_union(ctx: StepContext) -> dict[str, Any]:
     scope_context = str(ctx.inputs.get("scope_context") or "")
 
     glob_set = registry.glob_triggered_overlays(changed, repo_root=ctx.repo_root)
-    content_set = registry.content_triggered_overlays(diff_text, repo_root=ctx.repo_root)
+    content_set = registry.content_triggered_overlays(
+        diff_text, repo_root=ctx.repo_root, changed_files=changed
+    )
     recommend_ids = registry.recommend_overlay_ids(recommend)
     selected = set(glob_set) | set(content_set) | set(recommend_ids)
     # scope-intent is TRAILER-driven, not glob/diff-content/recommend driven: it fires iff the

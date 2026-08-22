@@ -475,6 +475,42 @@ dataset:
       +grep -q "SWEEP COMPLETE" sweep.log || { echo "sweep did not finish" >&2; exit 2; }
       +if grep -q "FAIL" sweep.log; then echo "sweep FAILED" >&2; exit 1; fi
       +echo "sweep passed"
+  - id: R-newbehaviour-named-violating-input
+    corpus: rebar
+    expect: finding
+    mode: gap-on-new-behaviour
+    note: >-
+      Story 2e0f: the overlay now content-fires on a change that ADDS a declaration and touches
+      no test file. The added parser mishandles a NAMED input — a leading `v` on the tag — so the
+      coverage gap carries a concrete violating input and IS blocking-eligible under guard (vii).
+    diff: |
+      --- a/src/rebar/release/tags.py
+      +++ b/src/rebar/release/tags.py
+      @@ -1,2 +1,8 @@
+      +def parse_release_tag(tag):
+      +    # "v1.2.3" keeps the leading "v", so int() raises for every tag the release
+      +    # pipeline actually emits; no test covers parse_release_tag at all
+      +    major, minor, patch = tag.split(".")
+      +    return (int(major), int(minor), int(patch))
+  - id: FP-preexisting-code-gap-no-new-behaviour
+    corpus: rebar
+    expect: pass
+    mode: gap-on-preexisting-code
+    note: >-
+      Story 2e0f: the same content trigger also fires on ordinary source changes, so the overlay
+      must NOT escalate a coverage gap whose subject is PRE-EXISTING behaviour. Here the diff adds
+      a declaration, but the untested branch is reachable only through lines the diff does not
+      add — guard (vii) keeps that advisory. Must NOT fire.
+    diff: |
+      --- a/src/rebar/release/tags.py
+      +++ b/src/rebar/release/tags.py
+      @@ -1,9 +1,12 @@
+      +def format_release_tag(parts):
+      +    """Pure inverse of the long-standing parse_release_tag; fully covered below."""
+      +    return ".".join(str(p) for p in parts)
+       def parse_release_tag(tag):
+           # unchanged, shipped and exercised in production for two years
+           return tuple(int(p) for p in tag.split("."))
 
 gold_set:
   - input: "A test that asserts a mock's own configured return value (tautological)."
