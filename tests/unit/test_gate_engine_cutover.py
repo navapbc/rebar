@@ -40,10 +40,14 @@ def _passing_verdict() -> dict:
     }
 
 
-def test_manifest_is_deterministic_and_path_independent() -> None:
+def test_manifest_is_deterministic_and_path_independent(monkeypatch) -> None:
     # The signed manifest is a pure function of the verdict STATE (no timestamps, no
     # path/engine identity) — so the bespoke and workflow paths, producing the same verdict
     # state, sign a byte-identical manifest. Building it twice must be byte-identical.
+    # The provenance stamp is pinned because gate_code_version samples live `git status`
+    # per call, and a concurrent xdist worker touching the checkout flips its `-dirty`
+    # suffix between builds (bug b44c-2a74).
+    monkeypatch.setattr("rebar.signing.gate_code_version", lambda: "test-version")
     v = _passing_verdict()
     m1 = attest.build_manifest(v, material="fp-abc", deps={"src/x.py": "h1"}, regver="rv1")
     m2 = attest.build_manifest(dict(v), material="fp-abc", deps={"src/x.py": "h1"}, regver="rv1")

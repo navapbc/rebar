@@ -952,7 +952,11 @@ def test_manifest_deps_roundtrip_and_backcompat() -> None:
     assert attest.manifest_deps(attest.build_manifest(verdict, material="x")) == {}
 
 
-def test_manifest_file_scope_contract_preserves_legacy_bytes() -> None:
+def test_manifest_file_scope_contract_preserves_legacy_bytes(monkeypatch) -> None:
+    # Pin the provenance stamp: build_manifest samples live `git status` per call via
+    # rebar.signing.gate_code_version, so a concurrent xdist worker touching the checkout
+    # flips the `-dirty` suffix between calls and fails the byte-equality (bug b44c-2a74).
+    monkeypatch.setattr("rebar.signing.gate_code_version", lambda: "test-version")
     verdict = {
         "verdict": "PASS",
         "ticket_id": "t1",
