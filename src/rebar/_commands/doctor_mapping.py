@@ -8,7 +8,9 @@ tiers:
   -- it never imports any ``adapters.jira*`` package; and
 * a best-effort LIVE-DRIFT tier that only attempts a read-only Jira probe when the
   optional ``jira-datacenter`` capability is installed, degrades to a single
-  ``unavailable`` finding otherwise (or on ANY probe failure/timeout), and never raises.
+  ``unavailable`` finding otherwise (or on ANY probe failure/timeout), degrades a
+  PARTIAL probe failure (one axis' read failed while the rest succeeded) to a distinct
+  per-axis could-not-check ``unavailable`` finding, and never raises.
 
 Every finding is a plain ``dict``: ``severity`` in ``{"error", "warning", "unavailable"}``,
 a stable ``kind``, a human ``detail``, and -- for drift findings -- ``axis``/``value``/``key``.
@@ -55,6 +57,7 @@ _DEFAULT_SENTINEL = "__rebar_default__"
 _KIND_ERROR = "mapping-config-error"
 _KIND_STUB = "mapping-config-stub"
 _KIND_UNAVAILABLE = "mapping-drift-unavailable"
+_KIND_AXIS_UNAVAILABLE = "mapping-drift-axis-unavailable"
 _KIND_DRIFT = "mapping-drift"
 
 
@@ -175,6 +178,18 @@ def _unavailable(reason: str) -> dict[str, Any]:
     )
 
 
+def _axis_unavailable(axis: str, reason: str) -> dict[str, Any]:
+    """A PER-AXIS could-not-check finding — the probe as a whole succeeded, but ONE axis
+    could not be read, so that axis degrades distinctly (never rendered as drift and
+    never silently dropped; Flutter doctor's ``notAvailable`` precedent)."""
+    return _finding(
+        "unavailable",
+        _KIND_AXIS_UNAVAILABLE,
+        f"live mapping-drift check could not check the {axis} axis: {reason}",
+        axis=axis,
+    )
+
+
 def _live_drift(cfg: Any, root: Any) -> list[dict[str, Any]]:
     """Attempt the live probe under the capability guard and a bounded timeout, folding
     every degradation cause into a single ``unavailable`` finding."""
@@ -217,15 +232,18 @@ def _run_bounded(fn: Callable[[], Any], timeout: float) -> Any:
     return box["value"]
 
 
-def _build_and_read_probe() -> tuple[set[str], set[str], set[str]]:
+def _build_and_read_probe() -> tuple[set[str], set[str], set[str] | None]:
     """Build the read-only probe (through the module attribute so tests can monkeypatch
-    it) and read the observed status / type / link vocabularies."""
+    it) and read the observed status / type / link vocabularies. The link axis is
+    ``None`` when the port's link-types read could not check (its fail-soft degradation),
+    kept distinct from a genuinely-empty observed set."""
     from rebar_reconciler import mapping_probe
 
     port = mapping_probe.build_probe()
     statuses = set(port.statuses())
     types = {t["name"] for t in port.issue_types() if t.get("name")}
-    links = set(port.issue_link_types())
+    raw_links = port.issue_link_types()
+    links = None if raw_links is None else set(raw_links)
     return statuses, types, links
 
 
@@ -250,21 +268,30 @@ _AXES: tuple[tuple[str, str], ...] = (
 
 
 def _drift_findings(
-    cfg: Any, root: Any, observed: tuple[set[str], set[str], set[str]]
+    cfg: Any, root: Any, observed: tuple[set[str], set[str], set[str] | None]
 ) -> list[dict[str, Any]]:
     """Diff each project's RESOLVED target values against the observed vocabulary, one
-    error finding per absent value. Hierarchy is excluded by design."""
+    error finding per absent value. An axis whose observed set is ``None`` (could not
+    check) is degraded to ONE distinct ``unavailable`` finding instead of being diffed —
+    a failed read must never report every configured target as drift — while the other
+    axes are still checked. Hierarchy is excluded by design."""
     from rebar_reconciler import config as rc
     from rebar_reconciler import mapping_config as mc
 
     observed_by_axis = dict(zip(("status", "type", "link"), observed, strict=True))
-    findings: list[dict[str, Any]] = []
+    findings: list[dict[str, Any]] = [
+        _axis_unavailable(axis, "the probe could not read the live vocabulary for it")
+        for axis, seen in observed_by_axis.items()
+        if seen is None
+    ]
     for key in sorted(cfg.projects):
         try:
             resolved = {axis: getattr(rc, fn)(key, root) for axis, fn in _AXES}
         except mc.MappingConfigError:
             continue  # already reported by the offline tier
         for axis, seen in observed_by_axis.items():
+            if seen is None:
+                continue
             for value in sorted(set(resolved[axis].values())):
                 if value not in seen:
                     findings.append(_drift(axis, value, key))
