@@ -648,6 +648,52 @@ paths all inherit it (ADR 0005; bug `melancholy-firstborn-shihtzu`). Pre-existin
 (pre-S4b) attestations remain readable. To review-and-sign offline, use the attested source
 with a local ref instead: `--ref HEAD` resolves from the local object DB with no network.
 
+### Resuming exactly the latest review — `review-plan --retry`
+
+A plan review can land on **INDETERMINATE** without failing on the merits: an LLM call for a
+finder unit degrades non-transiently, or the per-invocation budget cap sheds some criteria
+before they run. Re-running the full `review-plan` recomputes every unit; `--retry` is the
+narrow operator override that **resumes only the exact latest retained review** and pays the
+model only for what is still missing:
+
+```sh
+rebar review-plan <id> --retry         # resume the latest INDETERMINATE; add --no-sign to skip signing
+```
+
+**When it is eligible.** `--retry` acts only when the ticket's newest retained
+`REVIEW_RESULT` sidecar is an **INDETERMINATE** verdict carrying a current, versioned
+discovery journal with **at least one retryable missing unit** (a `failed`/`cancelled` unit,
+or a budget-shed criterion). It then reuses the checkpointed findings of the units that
+already succeeded — issuing **zero** model calls for them — and re-attempts only the missing
+units, under a **fresh per-invocation attempt budget** (so a unit shed or degraded last time
+gets a clean re-attempt; whether a shed unit actually issues a call still depends on the
+fresh cap admitting it). The reused set spans both clean and blocking successes; verification
+and coaching run only for findings newly recovered by the re-attempt, and the deterministic
+decision/assembly reruns over the combined set.
+
+**When it refuses — before any model call.** If the latest result is **not** an eligible
+retryable INDETERMINATE — a PASS or BLOCK, a non-retryable indeterminate, or a
+missing / legacy (no versioned journal) / corrupt / **stale** / digest-mismatched journal —
+`--retry` **refuses up front, issues no model or provider call, emits no new sidecar**, and
+exits **2** (the plan-review non-runnable code) with the normal full-review remedy on stderr:
+run `rebar review-plan <id>` for a fresh full review. "Stale" means the latest sidecar no
+longer reflects the present plan/code/registry (its recorded material fingerprint,
+verified-at SHA, registry version, or reusable checkpoints no longer match) — the same
+currency notion `--status` reports.
+
+**Fresh budget, recorded lineage.** Each explicit `--retry` gets its own attempt budget; the
+**cumulative** retry lineage (how much successive retries have spent) is recorded on the new
+sidecar as audit telemetry and is **never** enforced as a cap. The surfaced result stays a
+narrow end-result view — the same fields a normal verdict and `review-plan --status` expose;
+the per-unit discovery journal is never printed.
+
+**Flag interactions.** `--retry` is **mutually exclusive** with `--force`, `--status`, and
+`--check` (combining them is a usage error, exit 2) and is **compatible** with `--no-sign`
+(a recovered PASS can be reviewed without signing). It differs from `--status` (which only
+*reads* currency and never runs a model) and from `sign-review` (which re-certifies an
+existing attestation without re-running the review): `--retry` is the only path that issues
+fresh model calls for just the missing units of the latest review.
+
 **Containers inherit their children's declared scope.** File impact is tri-state: a ticket is
 **undeclared** until it records a scope, **paths** when it records one or more `{path, reason}`
 entries, and **none** when it explicitly declares that no repository files change. A

@@ -288,6 +288,14 @@ def _review_plan(argv: list[str]) -> int:
     parser = _llm_parsers.build_review_plan(prog="rebar review-plan")
     args = parser.parse_args(argv)
 
+    # --retry resumes ONLY the exact latest eligible INDETERMINATE review; it is an operator
+    # override of the read-only/status paths, so it is mutually exclusive with --force, --status,
+    # and --check (compatible with --no-sign). Mirror argparse's conflict convention (exit 2).
+    if getattr(args, "retry", False):
+        conflict = next((f for f in ("force", "status", "check") if getattr(args, f, False)), None)
+        if conflict is not None:
+            parser.error(f"--retry cannot be combined with --{conflict}")
+
     from rebar import llm
 
     if args.check:
@@ -320,6 +328,7 @@ def _review_plan(argv: list[str]) -> int:
             source=args.source,
             sign=not args.no_sign,
             force=args.force,
+            retry=getattr(args, "retry", False),
         )
     except llm.LLMError as exc:
         sys.stderr.write(f"Error: {exc}\n")
@@ -327,6 +336,12 @@ def _review_plan(argv: list[str]) -> int:
     except _gate_source_error() as exc:
         sys.stderr.write(f"Error: {exc}\n")
         return 1
+    # An ineligible --retry REFUSES before any model call: print the full-review remedy to stderr
+    # (the review itself carries the machine-readable reason on coverage.retry_refused) and exit 2.
+    if getattr(args, "retry", False) and (result.get("coverage") or {}).get("retry_refused"):
+        from rebar.llm.plan_review.retry import REMEDY
+
+        sys.stderr.write(REMEDY + "\n")
     if args.output == "json":
         sys.stdout.write(_json.dumps(result) + "\n")
     else:

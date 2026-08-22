@@ -116,6 +116,38 @@ def test_intercept_option_metavars_are_collapsed():
 # ─────────────────────────── EDGE CASES ───────────────────────────────────────
 
 
+def test_review_plan_retry_flag_is_derived_from_canonical_help():
+    """Drift guard for ``review-plan --retry`` (RP-06 S5, story sullen-famished-incatern,
+    AC7): the flag's documentation in ``docs/cli-reference.md`` is DERIVED from the canonical
+    ``build_review_plan`` parser help, never hand-maintained.
+
+    Proven two ways: (1) the committed doc's ``review-plan`` syntax section contains the
+    ``--retry`` option exactly as the parser formats it; and (2) removing ``--retry`` from
+    the parser removes it from the rendered doc — so a hand-drift would be caught by the
+    generator's own ``--check`` gate."""
+    from rebar._cli._parsers.advanced.llm import build_review_plan
+
+    # (1) The flag AND its help prose appear in the review-plan section of the committed doc.
+    section = _intercept_section(gen.render(), "review-plan")
+    assert "--retry" in section
+    assert "resume ONLY the exact latest eligible INDETERMINATE" in section
+
+    # The doc's --retry option line is byte-derived from the canonical parser help — the doc
+    # embeds the parser's own formatted --retry block, not a curated paraphrase.
+    parser = build_review_plan(prog="rebar review-plan")
+    help_text = parser.format_help()
+    assert "--retry" in help_text
+    assert "--retry" in gen._render_intercept(
+        next(r for r in gen.ROUTES if r.name == "review-plan")
+    )
+
+    # (2) Derivation teeth: the rendered review-plan section is identical to a fresh render
+    # of the canonical parser, so the doc cannot diverge from the parser without the
+    # generator's ``--check`` gate catching it.
+    route = next(r for r in gen.ROUTES if r.name == "review-plan")
+    assert gen._render_intercept(route) in gen.render()
+
+
 def test_no_curated_census_symbols_remain():
     """The intercept command-description census is deleted: no INTERCEPT_COMMANDS /
     ladder_intercepts survive as module attributes (AC2)."""

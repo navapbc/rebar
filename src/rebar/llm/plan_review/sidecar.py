@@ -35,6 +35,8 @@ EVENT_TYPE = "REVIEW_RESULT"
 
 # The version of the reducer-ignored discovery JOURNAL embedded in the sidecar payload.
 DISCOVERY_JOURNAL_VERSION = 1
+# The version of the reducer-ignored cumulative retry-lineage record (story RP-06 S5).
+RETRY_LINEAGE_VERSION = 1
 # The impact-model formula version that produced this sidecar's scores (story
 # raptorial-galloping-dragon). Stamped top-level so the calibration replay can SEGMENT
 # old-formula vs new-formula findings and never pool across versions (the same cohort-tagging
@@ -45,15 +47,13 @@ IMPACT_MODEL_VERSION = "plan-v5"
 # Retention bound (child db7b AC4). REVIEW_RESULT is reducer-IGNORED, so rebar's event
 # COMPACTION intentionally PRESERVES it (never snapshots/absorbs a non-KNOWN type) —
 # compaction therefore cannot bound its growth. A dedicated prune keeps the most-recent
-# RETAIN sidecars per ticket (recent history for offline analysis; each review
-# supersedes the prior, and prior runs were already captured at emit time) and removes
-# older ones, bounding growth without touching the reducer/compaction hot paths. That prune is
-# the DEFAULT bound for an EXPLICIT operator run — the write path never invokes it (see `prune`).
+# RETAIN sidecars per ticket and removes older ones, bounding growth without touching the
+# reducer/compaction hot paths. That prune is the DEFAULT bound for an EXPLICIT operator
+# run — the write path never invokes it (see `prune`).
 #
 # Bound raised 10 -> 50 (story fde0): drift-refresh re-reviews on one ticket can exceed 10
-# rounds, so 10 dropped still-relevant recent history; 50 covers observed single-digit
-# remediation-loop depth with headroom while still capping unbounded growth. This is the
-# SINGLE definition of the cap — code_review.sidecar imports it (no second literal).
+# rounds, so 10 dropped still-relevant history; 50 caps growth with headroom. SINGLE
+# definition of the cap — code_review.sidecar imports it (no second literal).
 RETAIN_PER_TICKET = 50
 
 
@@ -67,6 +67,7 @@ def emit(
     priority_floor: object = None,
     repo_root=None,
     source: str | None = None,
+    retry_lineage: dict[str, Any] | None = None,
 ) -> bool:
     """Append a ``REVIEW_RESULT`` sidecar event from a plan-review verdict. Append-ONLY:
     it never deletes a committed event, so independent clones always reconverge by union
@@ -91,6 +92,7 @@ def emit(
             priority_floor=priority_floor,
             repo_root=repo_root,
             source=source,
+            retry_lineage=retry_lineage,
         )
         append_event(verdict["ticket_id"], EVENT_TYPE, payload, tracker, repo_root=repo_root)
     except SecretScreenRefused:
@@ -637,6 +639,7 @@ def build_payload(
     priority_floor: object = None,
     repo_root=None,
     source: str | None = None,
+    retry_lineage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The sidecar payload: per-finding fingerprints + decisions + verification
     attributes (everything needed to reconstruct per-criterion FP/remediation rates
@@ -698,14 +701,9 @@ def build_payload(
             "scenarios": f.get("scenarios", []),
             "block_threshold": f.get("block_threshold"),
             "blocking_enabled": f.get("blocking_enabled"),
-            # DECISION MARGIN (story fixable-angular-caribou, C11 P0.2): how far this finding
-            # landed from the line it was actually judged against. pass3_decide blocks on
-            # `priority >= block_threshold`, so the margin is measured on PRIORITY (= validity x
-            # impact), NOT on impact alone — an impact-based margin would not describe the real
-            # boundary. Positive = at/above the block line, negative = below it. Flap telemetry
-            # for a future hysteresis decision; nothing reads it to decide anything today.
-            # None when either side is absent (an older row, or a finding decided off-threshold),
-            # so offline readers MUST treat a missing/None margin as "unknown", never as 0.0.
+            # DECISION MARGIN (story fixable-angular-caribou): how far this finding landed
+            # from the line it was judged against (priority - block_threshold). None when
+            # either side is absent → offline readers treat a missing margin as "unknown".
             "decision_margin": _decision_margin(f),
             # Blocking fix-unit grouping (story 5e64): the criteria-free group key + the
             # primary flag/criteria-union stamps, so offline replay can collapse one defect
@@ -714,11 +712,8 @@ def build_payload(
             "is_primary": f.get("is_primary"),
             "group_criteria": f.get("group_criteria"),
             # RECALL PROVENANCE (bug deceitful-flannel-jerboa): did this finding enter the
-            # review as a re-surfaced prior concern (`run_pass1`'s `_recall` marker) rather than
-            # from the fresh Pass-1 finder? Persisted so a replay chain is visible offline —
-            # the ratchet that motivated the fix was only diagnosable by inferring it from an
-            # empty `evidence` list. Nothing reads this to decide anything; `prior_concerns`
-            # gates on grounding evidence + material identity, not on this flag.
+            # review as a re-surfaced prior concern (`run_pass1`'s `_recall` marker)? Persisted
+            # so a replay chain is visible offline. Nothing reads this to decide anything.
             "recalled": bool(f.get("_recall")),
         }
 
@@ -797,4 +792,9 @@ def build_payload(
         ]
     if phase_metadata["priority_floor"] is not None:
         payload["priority_floor"] = phase_metadata["priority_floor"]
+    if retry_lineage is not None:
+        # Reducer-IGNORED cumulative retry lineage (story RP-06 S5): audit telemetry for
+        # how many explicit `--retry` resumes this review accrued and their summed usage.
+        # Recorded, never enforced as a cap. Absent on a review that was never retried.
+        payload["retry_lineage"] = retry_lineage
     return payload
