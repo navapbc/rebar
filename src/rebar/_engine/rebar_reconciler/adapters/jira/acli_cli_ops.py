@@ -528,6 +528,11 @@ def add_comment(
     from rebar_reconciler.outbound_comments import fit_preserving_marker
 
     codec = AdfCodec(rich="cloud" in cutover_clients())
+    # comment-fit-ok: the adapter's DEFENSIVE fit before the transport, not a second
+    # dedup-key derivation. The key is taken once in outbound_comments.fit_for_send and
+    # travels on the mutation as wire_body; re-fitting an already-fitted body is
+    # byte-identical (story 4cee AC5), so this cannot move the bytes after the key was
+    # taken - it only protects a body that reached the transport unfitted.
     body_arg = json.dumps(codec.to_wire(fit_preserving_marker(body, codec.fit_outbound)))
     cmd = [
         "jira",
