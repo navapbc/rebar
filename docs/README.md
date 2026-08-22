@@ -1,271 +1,138 @@
 # rebar documentation
 
-This is the index to rebar's `docs/` tree, grouped by **who you are and what you're
-trying to do**. rebar wears three hats — a Python library, a `rebar` CLI, and a
-`rebar-mcp` MCP server — over one git-backed, event-sourced ticket store, so the
-docs span a wide range. Rather than an alphabetical dump, the pages below are sorted
-into four audiences:
+Use this page to select documentation by task or audience. Rebar provides a Python library, the `rebar` CLI, and the `rebar-mcp` MCP server over one git-backed event-sourced ticket store. New clients should begin with the [user guide](user-guide.md).
 
-- **User** — you drive tickets day to day through the CLI.
-- **Operator** — you run, configure, deploy, and release rebar (and its Jira sync).
-- **Contributor** — you develop rebar itself.
-- **Agent** — you operate rebar's LLM-agent surfaces, or need the gate / workflow
-  internals behind them.
+## Common routes
 
-A page can matter to more than one audience; it is filed under the audience most
-likely to reach for it first. If you're brand new, start with the
-[user guide](user-guide.md).
-
-## Choose your path
-
-Jump straight to what you're trying to do:
-
-- **Start using rebar** (drive tickets from the CLI) → [user-guide.md](user-guide.md),
-  then [your-first-change.md](your-first-change.md).
-- **Drive rebar over MCP** (an LLM client / agent) → [mcp-reference.md](mcp-reference.md)
-  for the complete tool inventory, then [llm-framework.md](llm-framework.md) for the
-  agent surfaces and gate operations.
-- **Adopt rebar in your own project** (teach your agents to drive it) →
-  [../templates/AGENTS.md](../templates/AGENTS.md), a copyable, provider-neutral
-  `AGENTS.md` with placeholders for your project's own build/test/landing commands.
-- **Contribute a code change** → [your-first-change.md](your-first-change.md) and
-  [local-dev-env.md](local-dev-env.md), with the review/landing flow in
-  [../CONTRIBUTING.md](../CONTRIBUTING.md).
-- **Understand the internals** → [architecture.md](architecture.md),
-  [event-schema.md](event-schema.md), and [concurrency.md](concurrency.md).
-- **Authenticated identity** (entity, attribution, authorship signing, key rotation,
-  Jira mapping, opt-in enforcement) → [identity.md](identity.md). To **set it up in your own
-  project's environments** (local dev, CI, containers), see the project-agnostic
-  [identity-setup.md](identity-setup.md) client guide.
+- **Use the CLI.** Read the [user guide](user-guide.md), then follow [your first change](your-first-change.md) when contributing to this repository.
+- **Use MCP.** Read the [MCP reference](mcp-reference.md) for the tool inventory and the [LLM framework](llm-framework.md) for agent operations and gates.
+- **Adopt rebar in another project.** Copy and adapt the provider-neutral [AGENTS.md template](../templates/AGENTS.md).
+- **Contribute to rebar.** Follow [your first change](your-first-change.md), prepare the [local development environment](local-dev-env.md), and use the review and landing process in [CONTRIBUTING.md](../CONTRIBUTING.md).
+- **Study the implementation.** Begin with the [architecture](architecture.md), [event schema](event-schema.md), and [concurrency model](concurrency.md).
 
 ## Troubleshooting
 
-Common symptoms and the fix:
+| Symptom | Meaning and remedy |
+|---|---|
+| `claim` or `transition` exits with code `10` and `ConcurrencyError` | Another writer moved the ticket under the optimistic concurrency model. Read the ticket again and choose another. Do not force the operation. See the [concurrency model](concurrency.md). |
+| `rebar-mcp` is not found | The MCP server ships in an optional extra. Run `pipx install nava-rebar[mcp]` or `uvx --from nava-rebar[mcp] rebar-mcp`. See the [configuration design](config.md). |
+| `unknown key '…' ignored (typo?)` appears while developing rebar | A global installation is shadowing the checkout. Activate the worktree virtual environment so `rebar` resolves to the checkout build. See the [local development environment](local-dev-env.md). |
 
-| Symptom | What it means → fix |
-|---------|---------------------|
-| `claim`/`transition` exits **10** (`ConcurrencyError`) | Optimistic concurrency: someone else moved the ticket. Re-read and pick another — don't force. See [concurrency.md](concurrency.md). |
-| `rebar-mcp: command not found` | The MCP server ships in an extra — install it: `pipx install nava-rebar[mcp]` (or `uvx --from nava-rebar[mcp] rebar-mcp`). See [config.md](config.md). |
-| `unknown key '…' ignored (typo?)` | A stale global build is shadowing the repo — activate the repo venv so `rebar` resolves to the local build. See [local-dev-env.md](local-dev-env.md). |
+## Documentation ownership
 
-## Documentation policy and generated artifacts
+The [documentation policy](documentation-policy.md) defines roles, audiences, lifecycles, canonical sources, correction methods, and writing guidance. The rules are authoring guidance. They do not define a mechanical prose gate.
 
-The [documentation policy](documentation-policy.md) defines audience, lifecycle, ownership, canonical sources, citation, correction methods, and writing guidance.
+The [generated artifact catalog](generated-artifacts.md) identifies derived and parity-gated files with their sources, regeneration commands, and enforcement gates.
 
-The [generated artifact catalog](generated-artifacts.md) identifies derived and parity-gated files with their source, regeneration command, and enforcement gate.
+## Documentation directory
 
-## User
+Each maintained top-level Markdown page appears once in this directory. A page may serve more than one audience. Its primary route determines its placement.
 
-Day-to-day use of rebar through the CLI.
+### Clients
 
-- **[user-guide.md](user-guide.md)** — the practical, human-facing guide to using
-  rebar from the command line: create/claim/comment/link/transition tickets, search
-  and list, the `idea` parking lot, session logs, and the quality gates as you
-  experience them. Start here.
-- **[ticket-model.md](ticket-model.md)** — the agent-facing reference for the four
-  ticket-model concepts: the `idea` status, the parent/child hierarchy, links (the
-  six relations + promotion), and tags. The concept layer over
-  [event-schema.md](event-schema.md)'s event mechanics.
-- **[cli-reference.md](cli-reference.md)** — the complete CLI command reference
-  (generated from the CLI's own help data; do not edit by hand).
-- **[mcp-reference.md](mcp-reference.md)** — the complete MCP tool reference, grouped by
-  gate tier (generated from the MCP server's own registrars; do not edit by hand).
-- **[mcp-auth.md](mcp-auth.md)** — the operator guide to the optional OAuth 2.1
-  Resource-Server authentication for the MCP server over HTTP (the five verifier modes,
-  the composite audience choke point, transport hardening, and behind-a-proxy deployment).
-- **[README.md](README.md)** — this index of the `docs/` tree.
-- **[import-export.md](import-export.md)** — moving tickets in and out of the store
-  as NDJSON with `rebar export` / `rebar import` (a lossy interop projection, not a
-  backup).
+These pages explain supported use of rebar without requiring knowledge of its implementation.
 
-## Operator
+- **[README.md](README.md)**. This documentation landing page.
+- **[api-stability.md](api-stability.md)**. Stability expectations for each public surface during the `0.x` series.
+- **[cli-reference.md](cli-reference.md)**. Generated command and option reference for the `rebar` CLI.
+- **[clone-guidance.md](clone-guidance.md)**. Supported space-efficient checkout methods and their tradeoffs.
+- **[commit-ticket-trailer.md](commit-ticket-trailer.md)**. Commit trailer requirements for projects that require ticket references.
+- **[config-reference.md](config-reference.md)**. Generated reference for configuration keys, defaults, aliases, and lifecycle states.
+- **[env-vars.md](env-vars.md)**. Generated inventory of environment variables read by rebar.
+- **[exit-codes.md](exit-codes.md)**. Process status contract for CLI automation.
+- **[identity-setup.md](identity-setup.md)**. Environment setup for attribution, signing, key rotation, and Jira identity mapping.
+- **[import-export.md](import-export.md)**. NDJSON import and export procedures and their loss boundaries.
+- **[jira-sync-setup.md](jira-sync-setup.md)**. Setup for bidirectional synchronization with Jira.
+- **[llm-example-configs.md](llm-example-configs.md)**. Complete configuration examples for supported LLM provider combinations.
+- **[manifest-signing.md](manifest-signing.md)**. User-facing attestation signing and verification behavior.
+- **[mcp-auth.md](mcp-auth.md)**. OAuth 2.1 resource server authentication for MCP over HTTP.
+- **[mcp-reference.md](mcp-reference.md)**. Generated MCP tool inventory and schema reference.
+- **[output-schemas.md](output-schemas.md)**. Machine-readable output contracts for CLI operations.
+- **[s3-backend.md](s3-backend.md)**. Optional S3 ticket store setup and operating constraints.
+- **[scale-envelope.md](scale-envelope.md)**. Measured store sizes and supported operating expectations.
+- **[security.md](security.md)**. Generated reference for credential projection and child process environments.
+- **[session-id-shims.md](session-id-shims.md)**. Session provenance capture for supported coding agents.
+- **[ticket-model.md](ticket-model.md)**. Ticket status, hierarchy, links, tags, and lifecycle concepts.
+- **[user-guide.md](user-guide.md)**. Task-oriented guide for routine ticket work.
+- **[writing-a-passing-plan.md](writing-a-passing-plan.md)**. Entry point for plans that must pass the plan-review gate.
 
-Configuring, deploying, syncing, and releasing rebar.
+### Contributors
 
-- **[config.md](config.md)** — rebar's configuration surface: the `rebar.toml` (or
-  `[tool.rebar]` in `pyproject.toml`) keys, precedence, and the design of record behind
-  them.
-- **[config-reference.md](config-reference.md)** — the generated, machine-current
-  projection of the typed config schema: every `section.field` key with its type,
-  default, and lifecycle, plus the deprecated aliases and removed keys (kept in sync by
-  a drift test under `make test`; do not edit by hand).
-- **[security.md](security.md)** — the generated security reference: the adapter
-  send-credential name inventory and the child-process environment projection contract
-  (kept in sync by a drift test under `make test`; do not edit by hand).
-- **[env-vars.md](env-vars.md)** — the generated registry of every `REBAR_*` (and other)
-  environment variable read under `src/rebar`, with its reading module and alias status
-  (kept in sync by a CI drift gate).
-- **[jira-sync-setup.md](jira-sync-setup.md)** — automating the rebar ⇄ Jira
-  reconciler in GitHub Actions so a project can stand up bidirectional sync.
-- **[s3-backend.md](s3-backend.md)** — the optional S3 ticket-store backend: sync the
-  `tickets` branch to an SSE-KMS S3 bucket via `git-remote-s3` instead of a git host,
-  with the non-interactive lossless auto-doctor. Opt-in (`pip install 'nava-rebar[s3]'`);
-  core rebar never requires it.
-- **[bug-creation-contract.md](bug-creation-contract.md)** — the contract every
-  automated bug filer (CI canaries, the reconciler's conflict filer, future
-  watchdogs) must follow: dedup search, accumulation cap, abort-if-empty,
-  flake threshold, and `detected_by` provenance.
-- **[gerrit-aws-setup.md](gerrit-aws-setup.md)** — the optional/advanced deployment
-  of a self-hosted Gerrit + rebar review-bot to LLM-gate every commit to a GitHub
-  repo's `main`.
-- **[managed-refs.md](managed-refs.md)** — the managed-reference provenance gate that
-  lets a local removal of a cross-system reference propagate to a peer (e.g. Jira)
-  without being resurrected on the next inbound pass.
-- **[commit-ticket-trailer.md](commit-ticket-trailer.md)** — requiring every commit to
-  `main` to reference a resolving rebar ticket, enforced in the CI Verified gate.
-- **[scale-envelope.md](scale-envelope.md)** — how large a rebar store can comfortably
-  get, with representative measured numbers.
-- **[releasing.md](releasing.md)** — the runbook for cutting a release across PyPI,
-  Homebrew, and the MCP Registry.
-- **[release-notes.md](release-notes.md)** — agent-visible contract changes, newest
-  first (rebar shares one `origin/tickets` across many clients).
+These pages explain the development process, maintenance contracts, and contributor tools.
 
-## Contributor
+- **[bug-creation-contract.md](bug-creation-contract.md)**. Requirements for automated bug creation and deduplication.
+- **[chatgpt-agent-guide.md](chatgpt-agent-guide.md)**. Workflow for connector-limited sessions without a checkout or tracker.
+- **[code-navigation.md](code-navigation.md)**. Semantic and text search responsibilities for code navigation.
+- **[code-review-fp-ledger.md](code-review-fp-ledger.md)**. Process for preserving confirmed code-review false positives as evaluation cases.
+- **[coverage.md](coverage.md)**. Coverage baseline and measurement procedure.
+- **[documentation-policy.md](documentation-policy.md)**. Documentation roles, correction methods, protected forms, and writing guidance.
+- **[generated-artifacts.md](generated-artifacts.md)**. Ownership, regeneration, and enforcement catalog for derived and parity-gated files.
+- **[jira-fixtures.md](jira-fixtures.md)**. Jira fixture capture, replay, and maintenance procedure.
+- **[local-dev-env.md](local-dev-env.md)**. Checkout-specific environment setup for development commands and gates.
+- **[mutation-testing.md](mutation-testing.md)**. Mutation testing workflow and interpretation.
+- **[passing-code-review.md](passing-code-review.md)**. Entry point for preparing and previewing a Gerrit code review.
+- **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)**. Generated registry of plan-review criteria and detection detail.
+- **[reuse-surface.md](reuse-surface.md)**. Library API and reusable subsystem reference.
+- **[review-policy.md](review-policy.md)**. Meaning of the Gerrit `LLM-Review` and `Verified` votes.
+- **[workflow-authoring-v2.md](workflow-authoring-v2.md)**. Contract for authoring prompts and workflow steps.
+- **[workflow-editor.md](workflow-editor.md)**. Visual workflow editor usage and constraints.
+- **[your-first-change.md](your-first-change.md)**. Contributor walkthrough from setup through Gerrit submission.
 
-Developing rebar itself — architecture, internals, and the dev workflow.
+### Architecture
 
-- **[your-first-change.md](your-first-change.md)** — **start here if you're new:** a
-  warm, start-to-finish walkthrough of getting your first change reviewed and landed
-  through Gerrit. ([CONTRIBUTING.md](../CONTRIBUTING.md) is the full reference.)
-- **[architecture.md](architecture.md)** — the top-level design: event-sourced store,
-  the three facades (library / CLI / MCP), and how they fit together.
-- **[event-schema.md](event-schema.md)** — the append-only JSON event files and the
-  reducer that replays them into ticket state.
-- **[concurrency.md](concurrency.md)** — rebar's concurrency model: the structural
-  invariants (optimistic concurrency, convergent deltas) that make concurrent
-  operation safe without locks-in-the-large.
-- **[migrations.md](migrations.md)** — the idempotent ensure-registry (School B,
-  desired-state): how to add an ensure unit, where `run_ensures` runs, the applied-set
-  marker + write-path pending-hint, the accepted trade-offs, and the future A-tier ledger.
-- **[api-stability.md](api-stability.md)** — the 0.x stability promise per surface, so
-  you know what you can depend on today and how changes are communicated.
-- **[local-dev-env.md](local-dev-env.md)** — running the **repo checkout's** rebar (not
-  a stale global build) when developing or running the gates.
-- **[clone-guidance.md](clone-guidance.md)** — cloning this repository cheaply with
-  Git's blobless filter, including the accepted `git blame` trade-off.
-- **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)** —
-  real `review-plan` runs for the project-only `project.symbol-reference-completeness`
-  criterion, and the overlay-vs-coach-selection boundary they establish.
-- **[code-navigation.md](code-navigation.md)** — why Serena (LSP) and `grep` are both
-  load-bearing: the string-literal blind spot, the line-number caveat, and the reproductions
-  behind `AGENTS.md`'s division-of-labour table.
-- **[coverage.md](coverage.md)** — the line/branch coverage baseline and how it's
-  measured.
-- **[mutation-testing.md](mutation-testing.md)** — measuring whether the test suite
-  actually constrains behavior, via mutmut.
-- **[maintenance-audit-runbook.md](maintenance-audit-runbook.md)** — the repeatable
-  recipe for the periodic principal-engineer code-health audit.
-- **[dependency-advisory-runbook.md](dependency-advisory-runbook.md)** — what to do when
-  a `pip-audit` step goes red: which lane owns the finding, the severity bar, and why
-  `override-dependencies` (not `constraint-dependencies`) is the instrument for an
-  upstream cap.
-- **[jira-fixtures.md](jira-fixtures.md)** — the hermetic-but-honest Jira test fixtures
-  and why hand-built snapshot dicts caused a bug class.
-- **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)** — rebar
-  vs. OSS ticket systems: gaps, gotchas, and a prioritized remediation strategy.
-- **[remediation-implementation-plan.md](remediation-implementation-plan.md)** — the
-  detailed how-to companion to the OSS comparison (seams, schema impact, test plans).
-- **[reuse-surface.md](reuse-surface.md)** — the developer API reference for the
-  reusable subsystems (signing, LLM runtime, prompt/contract, output-schema seams).
-- **[attest-substrate.md](attest-substrate.md)** — the developer API reference for the
-  `rebar.attest` signing substrate (DSSE envelope, scheme registry, SSHSIG).
-- **[session-id-shims.md](session-id-shims.md)** — the session-provenance capture shims
-  that record which coding-agent session claimed a ticket.
-- **[chatgpt-agent-guide.md](chatgpt-agent-guide.md)** — detecting a checkout-less,
-  tracker-less ChatGPT-connector environment, the safe fallback ticket payload, and the
-  sanctioned exceptional `rebar import` path.
+These pages explain implementation boundaries, invariants, and subsystem contracts.
 
-## Agent
+- **[architecture.md](architecture.md)**. Top-level design of the store, library, CLI, and MCP facades.
+- **[attest-substrate.md](attest-substrate.md)**. Signing substrate, envelope format, and signature scheme registry.
+- **[concurrency.md](concurrency.md)**. Optimistic concurrency, convergent updates, and shared ticket writes.
+- **[config.md](config.md)**. Configuration design of record and precedence model.
+- **[event-schema.md](event-schema.md)**. Append-only event format and ticket state reduction.
+- **[grounding.md](grounding.md)**. Evidence oracle used to ground review findings in repository content.
+- **[identity.md](identity.md)**. Identity, attribution, authorship, and key lifecycle model.
+- **[llm-framework.md](llm-framework.md)**. LLM operation framework, execution seams, and structured findings.
+- **[managed-refs.md](managed-refs.md)**. Provenance model for references synchronized across systems.
+- **[migrations.md](migrations.md)**. Idempotent ensure registry and migration lifecycle.
+- **[plan-review-gate.md](plan-review-gate.md)**. Plan-review gate semantics, attestations, and invalidation rules.
+- **[repo-snapshot-gates.md](repo-snapshot-gates.md)**. Repository snapshot isolation for code-reading gates.
+- **[review-kernel.md](review-kernel.md)**. Shared multi-pass review framework.
+- **[workflow-engine.md](workflow-engine.md)**. Synchronous workflow interpreter and intended extension surface.
 
-The LLM-agent operations and the gate / workflow machinery behind them.
+Focused records cover the [batch runner seam](design/batch-runner-seam.md) and the [HMAC operation certificate removal](migrations/hmac-opcert-removal.md). The [sample ticket log](sample-ticket-log.jsonl) illustrates the event format.
 
-- **[llm-framework.md](llm-framework.md)** — the `rebar.llm` framework for tool-using
-  LLM agents that emit structured findings (review, verify-completion, and the seams
-  to add more).
-- **[llm-example-configs.md](llm-example-configs.md)** — four complete, paste-able
-  `[tool.rebar.llm]` configurations (Anthropic-only, Bedrock-only, mixed-provider, and
-  local+hosted-fallback), each sizing the three model classes.
-- **[ci-provider-matrix.md](ci-provider-matrix.md)** — the external suite's live-provider
-  matrix: how CI runs the live-LLM tests once per provider (Anthropic, Bedrock, OpenAI),
-  how an arm with no credential fails instead of skipping to green, and the **measured**
-  per-trigger cost behind the cadence decision.
-- **[jira-dc-capability-map.md](jira-dc-capability-map.md)** — **what Jira DC 8.17.1 actually
-  does**, measured against the pinned harness image and stable until the pin moves: the
-  `Epic Link`/`Epic Name` field ids, which templates yield `Epic`, the vocabulary and
-  length-limit diffs against rebar's hardcoded values, and the two accept-and-ignore parent
-  traps (a sub-task reparent returns 204 and does nothing; screen presence does not gate REST
-  writes). Read it before designing against DC. Also documents the on-demand
-  `workflow_dispatch` CI job that regenerates it and when to re-run.
-- **[plan-review-gate.md](plan-review-gate.md)** — the plan-review gate that runs when
-  work **starts** (on entry to `in_progress`), and its attestation model.
-- **[writing-a-passing-plan.md](writing-a-passing-plan.md)** — *author on-ramp:* the
-  description template + blocking checklist for writing a plan that passes the gate. The
-  canonical source is packaged in-package (`src/rebar/_guides/writing-a-passing-plan.md`) so any
-  install can serve it; read it with `rebar explain plan` (this `docs/` file is a pointer).
-- **[review-policy.md](review-policy.md)** — *policy:* what the `LLM-Review` and
-  `Verified` Gerrit gates mean and the two `+1` votes every change to `main` must earn.
-- **[passing-code-review.md](passing-code-review.md)** — *author on-ramp:* the commit
-  checklist, what the `LLM-Review` reviewer scores, and how to **preview the review locally**
-  with `rebar review-code` before you push. The canonical source is packaged in-package
-  (`src/rebar/_guides/passing-code-review.md`) so any install can serve it; read it with
-  `rebar explain review` (this `docs/` file is a pointer).
-- **[plan-review-criteria-guide.md](plan-review-criteria-guide.md)** — the
-  registry-generated reference of every plan-review criterion (one section per
-  criterion; `rebar explain <id>` prints one).
-- **[review-kernel.md](review-kernel.md)** — the shared four-pass review framework
-  (finder → … ) behind rebar's multi-pass LLM reviews.
-- **[code-review-fp-ledger.md](code-review-fp-ledger.md)** — recording confirmed
-  code-review false positives as tickets that become NO-FIRE eval cases.
-- **[grounding.md](grounding.md)** — the code-grounding oracle: a pure evidence oracle
-  that grounds review findings in the actual code (it never decides block/advisory).
-- **[repo-snapshot-gates.md](repo-snapshot-gates.md)** — repo-snapshot isolation for
-  the code-reading gates (review-plan / verify-completion / review / review-code /
-  scan-spec).
-- **[manifest-signing.md](manifest-signing.md)** — the HMAC attestation on a ticket:
-  a signed manifest of verified steps as machine-checkable proof a gate ran.
-- **[output-schemas.md](output-schemas.md)** — rebar's machine-readable output
-  contract: one canonical flag, every JSON shape pinned by a validated JSON Schema.
-- **[exit-codes.md](exit-codes.md)** — the CLI process-status contract the
-  parallel-agent workflow keys off (e.g. a lost claim race is exit 10).
-- **[workflow-engine.md](workflow-engine.md)** — the workflow engine's intended use:
-  the synchronous interpreter over YAML workflows that is the substrate for the LLM
-  gates.
-- **[workflow-authoring-v2.md](workflow-authoring-v2.md)** — authoring
-  contract-bearing prompts and steps (prompt front-matter, closed key set,
-  execution_mode, the CI drift gate).
-- **[workflow-editor.md](workflow-editor.md)** — the visual workflow editor
-  (`rebar workflow edit`) for authoring workflows.
+### Architecture Decision Records
 
-## Historical evidence
+Browse the generated [ADR index](adr/README.md) for numbered decisions and status information. ADRs preserve decisions that establish architectural invariants and the rationale behind them.
 
-Durable records of completed migrations and live-validation runs, kept for provenance.
-These are **not** living references — do not treat them as current guidance.
+### Operations
 
-- **[bash-migration.md](bash-migration.md)** — the record of the completed bash→Python
-  strangler-fig migration (kill-switches, the retired write seam, the dual-window rule).
-- **[88ab-feature-branch-evidence.md](88ab-feature-branch-evidence.md)** — live-validation
-  evidence for the epic-88ab Gerrit feature-branch flow.
-- **[dco-rollout-evidence.md](dco-rollout-evidence.md)** — the record that DCO sign-off
-  enforcement (`git commit -s` → `refs/for/*`) was validated end-to-end.
+These pages support deployment, release, incident response, and recurring maintenance.
 
-## Subdirectories
+- **[ci-provider-matrix.md](ci-provider-matrix.md)**. Credentialed provider coverage and test cadence for LLM integrations.
+- **[dependency-advisory-runbook.md](dependency-advisory-runbook.md)**. Response procedure for dependency vulnerability findings.
+- **[gerrit-aws-setup.md](gerrit-aws-setup.md)**. Deployment of Gerrit and the review bot on AWS.
+- **[jira-dc-capability-map.md](jira-dc-capability-map.md)**. Measured Jira Data Center behavior and regeneration workflow.
+- **[maintenance-audit-runbook.md](maintenance-audit-runbook.md)**. Repeatable principal-engineer maintenance audit.
+- **[releasing.md](releasing.md)**. Release procedure for PyPI, Homebrew, and the MCP Registry.
 
-- **[adr/](adr/)** — Architecture Decision Records. One file per decision, numbered
-  `NNNN-<slug>.md` starting at `0001` (a few numbers are shared across parallel
-  workstreams). Browse the directory for the full set rather than expecting them
-  listed here.
-- **[design/](design/)** — focused design notes for individual seams (e.g. the
-  batch-runner seam).
-- **[calibration/](calibration/)** — calibration notes for the LLM gates and judges
-  (completion floor, trust-boundary tuning, batched overlap-judge confidence).
-- **[experiments/](experiments/)** — reproducible prototypes and analysis backing the
-  remediation and plan-review work (scripts + markdown; see its own `README.md`).
-- **[archive/](archive/)** — completed, historical planning/handoff documents kept for
-  provenance; not living docs (see its own `README.md`).
-- **[licenses/](licenses/)** — third-party license texts bundled with rebar.
+The generated [security reference](security.md) also provides credential and process environment information for operators.
 
-## Reference data
+### Research
 
-- **[sample-ticket-log.jsonl](sample-ticket-log.jsonl)** — a small sample of the
-  append-only event log (one JSON event per line) that backs a ticket, for reference
-  when reading [event-schema.md](event-schema.md).
+These pages preserve analyses that inform future work without defining current behavior.
+
+- **[oss-comparison-and-remediation.md](oss-comparison-and-remediation.md)**. Comparison with open source ticket systems and a prioritized remediation strategy.
+- **[remediation-implementation-plan.md](remediation-implementation-plan.md)**. Implementation companion for the open source comparison.
+
+Additional research includes the [task decomposition survey](research/task-decomposition-sota-2026.md) and the [experiment index](experiments/README.md). Detailed experiment records cover the [plan-review gate](experiments/plan-review-gate/README.md), [code grounding](experiments/code-grounding-spike/README.md), and [workflow remediation prototypes](experiments/workflow-remediation-pocs/README.md).
+
+### Historical evidence
+
+These pages preserve completed migrations, contract changes, and validation results. They do not define maintained guidance.
+
+- **[88ab-feature-branch-evidence.md](88ab-feature-branch-evidence.md)**. Validation record for the Gerrit feature branch workflow.
+- **[bash-migration.md](bash-migration.md)**. Record of the completed Bash to Python migration.
+- **[dco-rollout-evidence.md](dco-rollout-evidence.md)**. End-to-end validation record for DCO enforcement.
+- **[release-notes.md](release-notes.md)**. Preserved contract changes for agents and maintainers.
+- **[serena-symbol-reference-coaching-sample.md](serena-symbol-reference-coaching-sample.md)**. Recorded plan-review runs for symbol reference coaching.
+
+The [archive index](archive/README.md) covers completed planning and handoff records. Frozen plan-review corpora are indexed under [recorded runs](experiments/plan-review-gate/runs/README.md). Calibration evidence includes the [trust boundary](calibration/T5c_trust_boundary.md), [completion floor](calibration/completion_floor.md), [overlap batch confidence](calibration/overlap_batch_confidence.md), and [plan kind sets](calibration/plan_v5_kind_sets.md). Third-party license texts are preserved under [licenses](licenses/).
