@@ -64,6 +64,12 @@ _ANNOTATIONS: dict[str, str] = {
 }
 
 
+def _first_paragraph_summary(description: str) -> str:
+    """Return the description's first paragraph as one physical line."""
+    first_paragraph = description.split("\n\n", 1)[0]
+    return " ".join(line.strip() for line in first_paragraph.splitlines())
+
+
 def _registrar_tools() -> dict[str, dict[str, str]]:
     """Enumerate each registrar onto its own FastMCP and return
     ``{"read"|"llm"|"write": {tool_name: one_line_summary}}``.
@@ -100,8 +106,7 @@ def _registrar_tools() -> dict[str, dict[str, str]]:
         out: dict[str, str] = {}
         for name in sorted(tools):
             desc = tools[name].description or ""
-            first = desc.splitlines()[0].strip() if desc else ""
-            out[name] = first
+            out[name] = _first_paragraph_summary(desc)
         return out
 
     return {
@@ -132,6 +137,7 @@ def _render_row(name: str, summary: str) -> str:
     cell = summary
     if annotation:
         cell = f"{summary} _({annotation})_" if summary else f"_{annotation}_"
+    cell = cell.replace("|", r"\|")
     return f"| `{name}` | {cell} |"
 
 
@@ -163,7 +169,7 @@ def render() -> str:
     lines.append(
         "The tools the rebar MCP server (`rebar-mcp`) exposes, enumerated from the "
         "server's own registrars and grouped by gate tier. Each tool is listed with the "
-        "first line of its description; the closed set of hybrid gate cases carry an "
+        "first paragraph of its description; the closed set of hybrid gate cases carry an "
         "inline note."
     )
     lines.append("")

@@ -232,13 +232,15 @@ def register_write_tools(mcp, ctx) -> None:
         required certification, the absent certified attestation is the durable audit
         signal.
 
-        ``close_class`` is REQUIRED to close a ``bug`` ticket (any ``*->closed``
-        from a non-``idea`` status): pass one of the bounded classification values
-        (``regression``, ``plan_defect``, ``env_integration``, ``flaky``,
-        ``preexisting``, ``not_a_bug``, ``duplicate``, ``escalated``,
-        ``undetermined``). It is IGNORED for non-bug closes and for non-closing
-        transitions. Force does not relax this classification invariant: a bug
-        close without a valid ``close_class`` is refused.
+        ``close_class`` is REQUIRED when closing a ``bug`` ticket. Bug closes accept
+        the full bounded vocabulary: ``regression``, ``plan_defect``,
+        ``env_integration``, ``flaky``, ``preexisting``, ``not_a_bug``,
+        ``duplicate``, ``escalated``, ``obsolete``, ``superseded``, ``wontfix``,
+        ``undetermined``. A non-bug ticket normally closes without ``close_class``;
+        only the administrative subset may be supplied: ``duplicate``, ``obsolete``,
+        ``superseded``, ``wontfix``. It is ignored for non-closing transitions. Force
+        does not relax this classification invariant: a bug close without a valid
+        ``close_class`` is refused.
 
         ``reason`` is the close reason for a reason-required ``close_class``
         (``obsolete``/``wontfix``, and — absent a live replacement link —
