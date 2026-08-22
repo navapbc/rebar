@@ -233,12 +233,25 @@ def reduce_ticket(ticket_id: str, tracker: str, *, now_ns: int | None = None) ->
 # auto-pushes, and a per-host cache file has no business travelling to every clone.
 #
 # Three rules keep it honest:
-#   1. It is only ever trusted to say "nothing is pending" (a fast ``[]``). It can never
-#      manufacture a pending ticket, so a wrong marker costs a delayed drain, never a wrong
-#      one.
+#   1. It is only ever trusted to assert the ABSENCE of pending work — a quiet store (a fast
+#      ``[]``), or, when the last full scan found live entries, "nothing is pending OUTSIDE
+#      the recorded ``live`` set" (the scan is then scoped to reducing those entries' real
+#      events). It can never manufacture a pending ticket, so a wrong marker costs a delayed
+#      drain, never a wrong one.
 #   2. Every queue append clears it (see ``_append``), so a state change is never hidden.
 #   3. It expires (``_GATE_MARKER_TTL_NS``), so even a marker that outlives its invalidation
-#      is retired on a clock rather than trusted forever.
+#      is retired on a clock rather than trusted forever. The TTL is measured from the last
+#      FULL walk: scoped probes never rewrite the marker, so they cannot refresh it.
+#
+# The ``live`` set (task 4144-75d3-6af1-47d3) exists because the original marker was
+# all-or-nothing — written only by a scan that found NOTHING pending — so one standing
+# pending entry disabled the fast path store-wide and every write paid a full walk (measured
+# linear in store size: ~1.2 s at 4,938 tickets, against a 20 ms quiet-path budget). The full
+# scan now always writes the marker, recording every id with a live (enqueued, not-DONE)
+# entry; a probe that cannot prove quiet reduces only those ids, so the standing-backlog cost
+# scales with the backlog, not the store. Rule 2 means the set cannot go stale-by-append
+# within a marker's lifetime, and time-driven transitions (soak deadlines, lease expiries)
+# are answered by re-reducing the live entries' events, never from the marker itself.
 #
 # ACCEPTED RACE, and rule 3 is its bound. Two windows let a marker outlive its invalidation:
 # a process dying between appending a queue event and clearing the marker, and an append that
@@ -283,11 +296,14 @@ def _clear_gate_marker(tracker: str) -> None:
         logger.debug("enrich gate: could not clear marker", exc_info=True)
 
 
-def _read_gate_marker(tracker: str) -> tuple[int | None, int] | None:
-    """``(next_eligible_ns, written_ns)`` from the marker, or ``None`` if it cannot be
+def _read_gate_marker(tracker: str) -> tuple[int | None, int, list[str] | None] | None:
+    """``(next_eligible_ns, written_ns, live)`` from the marker, or ``None`` if it cannot be
     trusted. Anything unexpected — absent, unreadable, not JSON, not an object, missing or
     wrong-typed fields — is reported as untrusted rather than raised, because the caller's
-    fallback (a full scan) is always correct and an exception here is not."""
+    fallback (a full scan) is always correct and an exception here is not. ``live`` is the
+    ticket ids the last full scan found a live entry for (``None`` from an older marker that
+    never recorded one); a wrong-typed ``live`` distrusts the WHOLE marker — a quiet claim is
+    not severable from the garbage set it was written beside."""
     try:
         with open(_gate_marker_path(tracker), encoding="utf-8") as fh:
             payload = json.load(fh)
@@ -298,38 +314,29 @@ def _read_gate_marker(tracker: str) -> tuple[int | None, int] | None:
         return None
     written = payload.get("written_ns")
     nxt = payload.get("next_eligible_ns")
+    live = payload.get("live")
     if not isinstance(written, int) or isinstance(written, bool):
         return None
     if nxt is not None and (not isinstance(nxt, int) or isinstance(nxt, bool)):
         return None
-    return (nxt, written)
+    if live is not None and (
+        not isinstance(live, list) or not all(isinstance(t, str) for t in live)
+    ):
+        return None
+    return (nxt, written, live)
 
 
-def _gate_marker_says_quiet(now_ns: int, tracker: str) -> bool:
-    """True iff a live marker proves nothing can be pending at *now_ns*. ``next_eligible_ns``
-    is ``None`` when the last scan found no live entry at all — then only the TTL limits the
-    fast path."""
-    marker = _read_gate_marker(tracker)
-    if marker is None:
-        return False
-    next_eligible, written = marker
-    # A marker stamped in the FUTURE is untrusted, not infinitely fresh. The TTL is a
-    # subtraction, so a clock that stepped backwards (or a marker from a host whose clock ran
-    # fast) makes this negative and the TTL could never elapse — turning the bounded-delay
-    # guarantee into an unbounded one. Out-of-range in EITHER direction means rescan.
-    if not 0 <= now_ns - written < _GATE_MARKER_TTL_NS:
-        return False
-    return next_eligible is None or now_ns < next_eligible
-
-
-def _write_gate_marker(tracker: str, now_ns: int, next_eligible_ns: int | None) -> None:
-    """Record "nothing can be pending before *next_eligible_ns*" as of *now_ns*.
+def _write_gate_marker(
+    tracker: str, now_ns: int, next_eligible_ns: int | None, live: list[str] | None = None
+) -> None:
+    """Record "nothing can be pending before *next_eligible_ns*, except possibly the ``live``
+    entries" as of *now_ns* (``live=None`` writes the pre-4144 quiet-only form).
 
     Written via a temp file in the same directory plus ``os.replace`` so a concurrent reader
     sees either the old marker or the new one, never a torn half-file. Best-effort throughout:
     failing to write the marker only forfeits the fast path, and must not fail the probe."""
     path = _gate_marker_path(tracker)
-    payload = {"next_eligible_ns": next_eligible_ns, "written_ns": now_ns}
+    payload = {"next_eligible_ns": next_eligible_ns, "written_ns": now_ns, "live": live}
     tmp: str | None = None
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -361,54 +368,87 @@ def _entry_eligible_ns(state: dict[str, Any]) -> int | None:
     return not_before
 
 
-def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
-    """All ticket ids past soak, unclaimed-or-lease-expired, with no later DONE.
+def _scan_pending(
+    now_ns: int, tracker: str, names: list[str]
+) -> tuple[list[str], int | None, list[str]]:
+    """Reduce *names* and return ``(pending, soonest_eligible_ns, live)``.
 
-    Answers from the O(1) gate marker when one proves the store is quiet (see the block
-    comment above); otherwise falls back to the full scan and, in that SAME pass, records the
-    marker for subsequent probes."""
-    if _gate_marker_says_quiet(now_ns, tracker):
-        return []
+    The one scan loop both the full walk and the marker-scoped walk call, so the two paths
+    cannot diverge on the verdicts OR on the order — ``pending`` is in service order (below).
+
+    Order by ``not_before_ns`` (soak deadline) first, ticket id only as a tiebreaker.
+
+    ``drain`` consumes this list as a PREFIX — it stops at the batch cap — so whatever key
+    orders it IS the service order. Sorting by ticket id alone (the prior behaviour) ordered
+    a queue by content-derived hex quads: an arbitrary permutation with no relation to when
+    an entry was enqueued or became eligible, and, worse, a STABLE one. Any entry that keeps
+    re-entering the queue (a re-certification, or the drain's own stale-digest self-heal)
+    sorted back to the same low position every run, spent the whole batch budget, and
+    entries further along in id order were never reached at all — unbounded starvation, not
+    slowness (bug f400-987f-45f6-419a; measured on the live store as 591 claims covering 100
+    tickets, all inside the first two deciles of id order).
+
+    ``not_before_ns`` is the field the queue ALREADY stores for exactly this question, and
+    the module docstring's debounce rule makes it the right one: a re-enqueue bumps it
+    FORWARD, so a churning entry moves to the BACK of the line and the long-waiting entries
+    it was displacing advance. That restores the story's "backlog drains over successive
+    runs" contract without touching the batch cap (raising it was tested and merely moves the
+    starvation threshold), without any new stored state, and without randomness — the ticket
+    id tiebreaker keeps the result fully deterministic for a given store state, so
+    ``os.listdir`` order still cannot leak through."""
     out: list[tuple[int, str]] = []
     soonest: int | None = None
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return []
-    for name in entries:
-        if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
-            continue
+    live: list[str] = []
+    for name in names:
         state = reduce_ticket(name, tracker, now_ns=now_ns)
         if state["pending"]:
             out.append((int(state["not_before_ns"] or 0), name))
         eligible = _entry_eligible_ns(state)
-        if eligible is not None and (soonest is None or eligible < soonest):
-            soonest = eligible
-    if out:
-        _clear_gate_marker(tracker)
-    else:
-        _write_gate_marker(tracker, now_ns, soonest)
-    # Order by ``not_before_ns`` (soak deadline) first, ticket id only as a tiebreaker.
-    #
-    # ``drain`` consumes this list as a PREFIX — it stops at the batch cap — so whatever key
-    # orders it IS the service order. Sorting by ticket id alone (the prior behaviour) ordered
-    # a queue by content-derived hex quads: an arbitrary permutation with no relation to when
-    # an entry was enqueued or became eligible, and, worse, a STABLE one. Any entry that keeps
-    # re-entering the queue (a re-certification, or the drain's own stale-digest self-heal)
-    # sorted back to the same low position every run, spent the whole batch budget, and
-    # entries further along in id order were never reached at all — unbounded starvation, not
-    # slowness (bug f400-987f-45f6-419a; measured on the live store as 591 claims covering 100
-    # tickets, all inside the first two deciles of id order).
-    #
-    # ``not_before_ns`` is the field the queue ALREADY stores for exactly this question, and
-    # the module docstring's debounce rule makes it the right one: a re-enqueue bumps it
-    # FORWARD, so a churning entry moves to the BACK of the line and the long-waiting entries
-    # it was displacing advance. That restores the story's "backlog drains over successive
-    # runs" contract without touching the batch cap (raising it was tested and merely moves the
-    # starvation threshold), without any new stored state, and without randomness — the ticket
-    # id tiebreaker keeps the result fully deterministic for a given store state, so
-    # ``os.listdir`` order still cannot leak through.
-    return [name for _, name in sorted(out)]
+        if eligible is not None:
+            live.append(name)
+            if soonest is None or eligible < soonest:
+                soonest = eligible
+    return [name for _, name in sorted(out)], soonest, live
+
+
+def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
+    """All ticket ids past soak, unclaimed-or-lease-expired, with no later DONE.
+
+    Answers from the O(1) gate marker when one proves the store is quiet; when a trusted
+    marker cannot prove quiet but recorded the last full walk's ``live`` set, reduces only
+    those entries (O(backlog), task 4144-75d3 — see the block comment above); otherwise falls
+    back to the full scan and, in that SAME pass, records the marker for subsequent probes."""
+    marker = _read_gate_marker(tracker)
+    if marker is not None:
+        next_eligible, written, live = marker
+        # A marker stamped in the FUTURE is untrusted, not infinitely fresh. The TTL is a
+        # subtraction, so a clock that stepped backwards (or a marker from a host whose clock
+        # ran fast) makes this negative and the TTL could never elapse — turning the
+        # bounded-delay guarantee into an unbounded one. Out-of-range in EITHER direction
+        # means full rescan. ``next_eligible_ns`` is ``None`` when the last scan found no
+        # live entry at all — then only the TTL limits the fast path.
+        if 0 <= now_ns - written < _GATE_MARKER_TTL_NS:
+            if next_eligible is None or now_ns < next_eligible:
+                return []
+            if live is not None:
+                # Scoped walk: rule 2 (every append clears the marker) means the live set
+                # cannot have grown while this marker stood, and re-reducing the live
+                # entries' real events answers every time-driven transition honestly. No
+                # marker rewrite: the TTL keeps counting from the last FULL walk (rule 3).
+                pending, _soonest, _live = _scan_pending(now_ns, tracker, live)
+                return pending
+    try:
+        entries = os.listdir(tracker)
+    except OSError:
+        return []
+    names = [
+        name
+        for name in entries
+        if not name.startswith(".") and os.path.isdir(os.path.join(tracker, name))
+    ]
+    pending, soonest, live = _scan_pending(now_ns, tracker, names)
+    _write_gate_marker(tracker, now_ns, soonest, live)
+    return pending
 
 
 def claim(
