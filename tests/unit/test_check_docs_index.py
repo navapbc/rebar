@@ -1,9 +1,4 @@
-"""Tests for the docs-index completeness / dead-link checker (ticket f088).
-
-The checker (scripts/check_docs_index.py) keeps docs/README.md honest: every living
-top-level docs/*.md must be linked from the index (with an allowlist for intentionally
-unindexed files), and every relative markdown link within docs/ must resolve.
-"""
+"""Tests for documentation index membership and repository-relative links."""
 
 from __future__ import annotations
 
@@ -30,12 +25,20 @@ chk = _load()
 
 
 def _make_docs(tmp_path: Path, files: dict[str, str]) -> Path:
-    """Build a fake docs/ dir; keys are filenames, values are file bodies."""
+    """Build a synthetic docs directory from relative names and file bodies."""
     d = tmp_path / "docs"
     d.mkdir()
     for name, body in files.items():
         (d / name).write_text(body, encoding="utf-8")
     return d
+
+
+def _write_markdown_tree(root: Path, files: dict[str, str]) -> None:
+    """Write Markdown fixtures below ``root``."""
+    for name, body in files.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
 
 
 # ─────────────────────────── HAPPY PATH (shown to implementer) ────────────────
@@ -156,6 +159,146 @@ def test_external_links_are_ignored(tmp_path: Path):
     assert chk.find_broken_links(docs) == []
 
 
+def test_declared_markdown_source_boundary_is_exact(tmp_path: Path):
+    included = {
+        "README.md",
+        ".agents/rules.md",
+        ".github/pull_request_template.md",
+        "docs/guide.md",
+        "examples/agent-skills/sample/SKILL.md",
+        "infra/runbooks/operations.md",
+        "infra/service/README.md",
+        "scripts/tool/README.md",
+        "src/rebar/_guides/guide.md",
+        "src/rebar/llm/eval_specs/README.plan-review.md",
+        "templates/AGENTS.md",
+        "tests/external/system/README.md",
+        "tests/unit/fixtures/README.md",
+    }
+    excluded = {
+        ".hidden.md",
+        "notes.local.md",
+        "docs/notes.local.md",
+        ".joe-janitor/report.md",
+        ".rebar/prompts/prompt.md",
+        "src/rebar/llm/reviewers/reviewer.md",
+        "tests/fixtures/corpus/README.md",
+        "tests/scripts/fixtures/copy.md",
+        "tests/unit/rebar_reconciler/integration_gates/story.md",
+        "infra/service/guide.md",
+        "scripts/tool/guide.md",
+        "tests/external/system/guide.md",
+    }
+    _write_markdown_tree(tmp_path, {path: "# Document\n" for path in included | excluded})
+
+    sources = {
+        path.relative_to(tmp_path).as_posix() for path in chk.find_markdown_sources(tmp_path)
+    }
+
+    assert sources == included
+
+
+def test_excluded_source_can_be_a_valid_link_target(tmp_path: Path):
+    _write_markdown_tree(
+        tmp_path,
+        {
+            "docs/source.md": "[prompt](../.rebar/prompts/prompt.md)\n",
+            ".rebar/prompts/prompt.md": "# Prompt\n",
+        },
+    )
+
+    assert chk.find_link_findings(tmp_path) == []
+
+
+def test_missing_and_escaping_targets_have_structured_findings(tmp_path: Path):
+    _write_markdown_tree(
+        tmp_path,
+        {
+            "docs/source.md": (
+                "# Source\n[missing](missing.md?download=1#part)\n![outside](../../outside.png)\n"
+            )
+        },
+    )
+
+    findings = chk.find_link_findings(tmp_path)
+
+    assert findings == [
+        chk.LinkFinding(
+            source_path="docs/source.md",
+            line_number=2,
+            raw_target="missing.md?download=1#part",
+            normalized_target_path="docs/missing.md",
+            reason="missing-target",
+        ),
+        chk.LinkFinding(
+            source_path="docs/source.md",
+            line_number=3,
+            raw_target="../../outside.png",
+            normalized_target_path="../outside.png",
+            reason="outside-repository",
+        ),
+    ]
+
+
+def test_ignored_syntax_and_valid_qualified_target_have_no_findings(tmp_path: Path):
+    _write_markdown_tree(
+        tmp_path,
+        {
+            "docs/source.md": (
+                "[fragment](#section)\n"
+                "[site](https://example.com/missing.md)\n"
+                "[mail](mailto:docs@example.com)\n"
+                "`[inline](missing-inline.md)`\n"
+                "```md\n"
+                "[fenced](missing-fenced.md)\n"
+                "```\n"
+                "[guide](guide.md?download=1#section)\n"
+            ),
+            "docs/guide.md": "# Guide\n",
+        },
+    )
+
+    assert chk.find_link_findings(tmp_path) == []
+
+
+def test_multiline_link_and_linked_image_are_scanned(tmp_path: Path):
+    _write_markdown_tree(
+        tmp_path,
+        {
+            "README.md": (
+                "[guide](\n"
+                "  missing-guide.md\n"
+                ")\n"
+                "[![badge](docs/badge.svg)](\n"
+                "  missing-license\n"
+                ")\n"
+            ),
+            "docs/badge.svg": "<svg/>\n",
+        },
+    )
+
+    assert [
+        (finding.line_number, finding.raw_target) for finding in chk.find_link_findings(tmp_path)
+    ] == [(1, "missing-guide.md"), (4, "missing-license")]
+
+
+def test_balanced_angle_and_escaped_destinations_resolve(tmp_path: Path):
+    _write_markdown_tree(
+        tmp_path,
+        {
+            "docs/source.md": (
+                '[balanced](guide(v1).md "Guide")\n'
+                '[angle](<guide with spaces.md> "Guide")\n'
+                "[escaped](guide\\(v1\\).md)\n"
+            ),
+            "docs/guide(v1).md": "# Guide\n",
+            "docs/guide with spaces.md": "# Guide\n",
+        },
+    )
+
+    assert chk.find_link_findings(tmp_path) == []
+
+
 # ─────────────────────────── E2E via main() (HELD OUT) ────────────────────────
 
 
@@ -192,28 +335,25 @@ def test_main_clean_synthetic_tree_exit_zero(tmp_path: Path, monkeypatch):
     assert chk.main(["--check"]) == 0
 
 
-def test_all_docs_relative_links_resolve():
-    """Every relative markdown link in docs/ must resolve — including links that
-    reach OUTSIDE docs/ (``../foo``), which check_docs_index deliberately excludes
-    from its within-docs remit. Regression guard for the dead
-    ``../session-logs/2026-06-09-architecture-review.md`` link (ticket 218b):
-    rebar session logs are ``session_log`` tickets, not files under a
-    ``session-logs/`` directory, so that target never existed.
-    """
-    import re
+def test_main_reports_every_structured_link_field(tmp_path: Path, monkeypatch, capsys):
+    docs = _make_docs(
+        tmp_path,
+        {
+            "README.md": "# Index\n\n- [alpha.md](alpha.md)\n",
+            "alpha.md": "[missing](missing.md?download=1#part)\n",
+        },
+    )
+    monkeypatch.setattr(chk, "DEFAULT_DOCS_DIR", docs, raising=False)
 
-    docs_dir = REPO_ROOT / "docs"
-    link_re = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
-    dead: list[tuple[str, str]] = []
-    for md in sorted(docs_dir.rglob("*.md")):
-        for m in link_re.finditer(md.read_text(encoding="utf-8")):
-            target = m.group(1).strip()
-            if target.startswith(("#", "http://", "https://", "mailto:")):
-                continue
-            path_part = target.split("#", 1)[0]
-            if not path_part:
-                continue
-            resolved = (md.parent / path_part).resolve()
-            if not resolved.exists():
-                dead.append((str(md.relative_to(REPO_ROOT)), target))
-    assert not dead, f"dead relative links in docs/: {dead}"
+    assert chk.main(["--check"]) == 1
+    error = capsys.readouterr().err
+    assert "docs/alpha.md" in error
+    assert "line 1" in error
+    assert "missing.md?download=1#part" in error
+    assert "docs/missing.md" in error
+    assert "missing-target" in error
+
+
+def test_all_docs_relative_links_resolve():
+    """Every declared Markdown source has resolvable repository-relative targets."""
+    assert chk.find_link_findings(REPO_ROOT) == []

@@ -29,6 +29,43 @@ Protected evidence remains unchanged. Authors place corrections or provenance me
 
 Authors cite tickets or ADRs when historical context is needed. They do not restate that history in current-state documentation.
 
+## Structural documentation checks
+
+`scripts/check_docs_index.py` preserves two repository contracts. It requires every top-level `docs/*.md` file other than `docs/README.md` and `*.local.md` files to appear as a Markdown link in `docs/README.md`. It also validates inline Markdown links and images from a declared maintained-source boundary.
+
+The link checker scans these Markdown sources:
+
+- Root `*.md` files.
+- `.agents/**/*.md`.
+- `.github/**/*.md`.
+- `docs/**/*.md`.
+- `examples/agent-skills/**/*.md`.
+- `infra/runbooks/**/*.md`.
+- `infra/**/README.md`.
+- `scripts/**/README.md`.
+- `src/rebar/_guides/**/*.md`.
+- `src/rebar/llm/eval_specs/**/*.md`.
+- `templates/**/*.md`.
+- `tests/external/**/README.md`.
+- `tests/unit/fixtures/README.md`.
+
+The source boundary excludes these Markdown sources:
+
+- `.joe-janitor/**/*.md`.
+- `.rebar/prompts/**/*.md`.
+- `src/rebar/llm/reviewers/**/*.md`.
+- `tests/fixtures/**/*.md`.
+- `tests/scripts/fixtures/**/*.md`.
+- `tests/unit/rebar_reconciler/integration_gates/**/*.md`.
+- Dot-prefixed root Markdown files.
+- Files ending in `.local.md`.
+
+An excluded source may remain a valid link target. Each relative target resolves from the source directory and may refer to any existing path inside the repository. The checker removes query strings and fragments before file resolution. A missing target or a target outside the repository produces a sorted finding with the source path, line number, raw target, normalized target path, and reason.
+
+The parser scans inline links and images outside fenced blocks and inline code spans. It ignores scheme-qualified targets, fragment-only targets, heading anchors, external URL availability, reference-style links, HTML links, and bare path mentions.
+
+The shared documentation action invokes this checker from full verification and the Gerrit documentation-only route. The checker does not analyze punctuation, diction, tone, audience, canonical-source ownership, or any other writing guidance in this policy.
+
 ## Writing rules
 
 These rules apply to new or edited maintained text.
