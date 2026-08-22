@@ -85,7 +85,13 @@ def _load_link_direction():
 # rebar-status: annotation labels are reconciler-managed (emitted/removed by
 # status logic); they must not leak into local ticket tags via inbound label
 # sync (ticket 929a). Exclude from both sides of the label diff.
-_EXCLUDED_PREFIXES: tuple[str, ...] = ("rebar-id:", "rebar-id-", "imported:", "rebar-status:")
+_EXCLUDED_PREFIXES: tuple[str, ...] = (
+    "rebar-id:",
+    "rebar-id-",
+    "imported:",
+    "rebar-status:",
+    "rebar-type:",
+)
 
 
 def _diff_comments_inbound(

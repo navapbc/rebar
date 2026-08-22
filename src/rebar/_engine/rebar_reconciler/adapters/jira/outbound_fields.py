@@ -50,8 +50,13 @@ from rebar_reconciler.adapters.jira_family import (  # noqa: F401
 # the historical private name because it is read as a MODULE ATTRIBUTE by
 # ``tests/.../diffing/test_outbound_differ_session_log_exclusion.py``. Absolute
 # import for the same ``spec_from_file_location`` reason as above.
-from rebar_reconciler.adapters.jira_family import LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE
-from rebar_reconciler.adapters.jira_family.outbound_mapper import resolve_outbound_status
+from rebar_reconciler.adapters.jira_family import (  # noqa: F401
+    LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE,
+)
+from rebar_reconciler.adapters.jira_family.outbound_mapper import (
+    resolve_outbound_status,
+    resolve_outbound_type,
+)
 
 # ``lazy_load`` centralizes the by-path sibling-loader idiom (rebar_reconciler/
 # _loader.py). Import it normally when package context exists, else bootstrap it
@@ -106,6 +111,7 @@ def _map_local_to_jira_fields(
     *,
     suppressed_out: list[str] | None = None,
     status_map: dict[str, str] | None = None,
+    type_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Map local ticket fields to Jira field names/values.
 
@@ -140,7 +146,7 @@ def _map_local_to_jira_fields(
     result: dict[str, Any] = {
         "summary": ticket.get("title") or "",
         "description": ticket.get("description") or "",
-        "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
+        "issuetype": resolve_outbound_type(ticket.get("ticket_type", "task"), type_map),
         "priority": _LOCAL_TO_JIRA_PRIORITY.get(ticket.get("priority", 2), "Medium"),
         "assignee": ticket.get("assignee") or "",
     }

@@ -79,6 +79,7 @@ class _JiraOutbound:
         *,
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
+        type_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         return outbound_fields._map_local_to_jira_fields(
             ticket,
@@ -87,6 +88,7 @@ class _JiraOutbound:
             emit_detach_clear,
             suppressed_out=suppressed_out,
             status_map=status_map,
+            type_map=type_map,
         )
 
     def map_fields_to_remote(
@@ -208,6 +210,30 @@ class JiraBackend:
         self.inbound = _JiraInbound()
         self.sanitizer = _JiraSanitizer()
         self.identity = JiraIdentityConvention()
+
+    def map_local_to_remote(
+        self,
+        ticket: dict[str, Any],
+        binding_store: Any | None = None,
+        local_ticket_types: dict[str, str] | None = None,
+        emit_detach_clear: bool = False,
+        *,
+        suppressed_out: list[str] | None = None,
+        status_map: dict[str, str] | None = None,
+        type_map: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Convenience delegator to the ``outbound`` role's CREATE mapper, so a caller
+        holding the backend can map a local ticket without reaching into ``.outbound``
+        (the role object remains the canonical ``OutboundMapper`` — this only forwards)."""
+        return self.outbound.map_local_to_remote(
+            ticket,
+            binding_store,
+            local_ticket_types,
+            emit_detach_clear,
+            suppressed_out=suppressed_out,
+            status_map=status_map,
+            type_map=type_map,
+        )
 
     # --- project accessors (ticket 97f2/bbf1) ---
     @property

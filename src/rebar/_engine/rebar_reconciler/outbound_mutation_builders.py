@@ -19,6 +19,7 @@ from rebar_reconciler.outbound_differ import (
     OutboundMutation,
     _best_effort,
     _effective_status_map_for,
+    _effective_type_map_for,
     _is_retired,
     _safe_get_issue,
 )
@@ -27,6 +28,7 @@ from rebar_reconciler.outbound_labels import (
     _EXCLUDED_PREFIXES,
     _diff_labels,
     _diff_status_annotation_labels,
+    _diff_type_annotation_labels,
 )
 from rebar_reconciler.outbound_links import _diff_links
 
@@ -78,10 +80,18 @@ def _compute_outbound_create_mutation(
     # ticket 929a: for new issues the Jira side has no labels yet,
     # so the annotation label only needs an ADD (never a REMOVE).
     status_map = _effective_status_map_for(ticket, mapping, repo_root)
+    type_map = _effective_type_map_for(ticket, mapping, repo_root)
+    # S3: the type-axis annotation mirror — a collapsing per-project type_map stamps a
+    # rebar-type: label so the local type is recoverable inbound. New issues carry no
+    # labels yet, so only an ADD is possible here (never a REMOVE), like status.
     annotation_mutations = _diff_status_annotation_labels(
         local_status=status,
         jira_labels=[],
         status_map=status_map,
+    ) + _diff_type_annotation_labels(
+        ticket.get("ticket_type", "task"),
+        [],
+        type_map=type_map,
     )
     suppressed_parents: list[str] = []
     create_fields = outbound_mapper.map_local_to_remote(
@@ -90,6 +100,7 @@ def _compute_outbound_create_mutation(
         local_ticket_types=local_ticket_types,
         suppressed_out=suppressed_parents,
         status_map=status_map,
+        type_map=type_map,
     )
     if suppressed_parents and dropped_field_sink is not None:
         dropped_field_sink.append((local_id, "parent"))
@@ -233,6 +244,7 @@ def _compute_outbound_update_mutation(
     # Ticket 625b: the whole vendor-neutral field path (canonicalize snapshot +
     # baseline, diff in local shape, map back to vendor shape) lives in the core helper.
     _status_map = _effective_status_map_for(ticket, mapping, repo_root)
+    _type_map = _effective_type_map_for(ticket, mapping, repo_root)
     fields = compute_update_fields(
         ticket,
         jira_fields,
@@ -277,6 +289,14 @@ def _compute_outbound_update_mutation(
         local_status=status,
         jira_labels=list(jira_fields.get("labels") or []),
         status_map=_status_map,
+    )
+    # S3: type-axis annotation mutations (rebar-type:<local>) — ADD the desired label
+    # for a collapsing per-project type_map and REMOVE any stale rebar-type: label, in
+    # lock-step with the status annotation above.
+    annotation_mutations = annotation_mutations + _diff_type_annotation_labels(
+        ticket.get("ticket_type", "task"),
+        list(jira_fields.get("labels") or []),
+        type_map=_type_map,
     )
     label_mutations = label_mutations + annotation_mutations
     # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,

@@ -37,6 +37,7 @@ from rebar_reconciler.adapters.jira_family.identity_model import NameIdentity
 from rebar_reconciler.adapters.jira_family.outbound_mapper import (
     OutboundFieldMapper,
     resolve_outbound_status,
+    resolve_outbound_type,
 )
 from rebar_reconciler.adapters.jira_family.rich_text import (
     _WIKI_TRUNCATION_SUFFIX,
@@ -47,18 +48,22 @@ from rebar_reconciler.adapters.jira_family.value_maps import (
     LOCAL_PRIORITY_TO_JIRA,
 )
 
-# Story bd9e (epic 3e73): the local->Jira TYPE map used to be re-declared here as a
-# second literal, read by the DC create path below. It is now imported from the
-# Jira-family shared layer alongside the priority/status maps, so both create paths
-# resolve to ONE object. Kept under the historical private name so the call site
-# below needs no change.
-from rebar_reconciler.adapters.jira_family.value_maps import (
+# Story bd9e (epic 3e73): the local->Jira TYPE map is imported from the Jira-family
+# shared layer so both create paths resolve to ONE object. Story S3 routes the type
+# value through the shared ``resolve_outbound_type`` (config-driven, map-or-default)
+# rather than subscripting this map directly, but it is kept under the historical
+# private name as a MODULE ATTRIBUTE (read by the jira-family boundary parity test,
+# which pins Cloud and DC to the SAME object). ``resolve_outbound_type`` falls back to
+# this same built-in when no per-project map applies, so no-config behaviour is unchanged.
+from rebar_reconciler.adapters.jira_family.value_maps import (  # noqa: F401
     LOCAL_TYPE_TO_JIRA as _LOCAL_TO_JIRA_TYPE,
 )
 
 
 def _map_local_to_dc_fields(
-    ticket: dict[str, Any], status_map: dict[str, str] | None = None
+    ticket: dict[str, Any],
+    status_map: dict[str, str] | None = None,
+    type_map: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Full local-ticket -> DC field mapping (the CREATE path).
 
@@ -83,7 +88,7 @@ def _map_local_to_dc_fields(
         # post raw Markdown on CREATE while every later update posted rendered wiki, so
         # a freshly created issue read as broken formatting until someone edited it.
         "description": codec.to_wire(codec.fit_outbound(ticket.get("description") or "")),
-        "issuetype": _LOCAL_TO_JIRA_TYPE.get(ticket.get("ticket_type", "task"), "Task"),
+        "issuetype": resolve_outbound_type(ticket.get("ticket_type", "task"), type_map),
         "priority": LOCAL_PRIORITY_TO_JIRA.get(ticket.get("priority", 2), "Medium"),
         "assignee": ticket.get("assignee") or "",
     }
@@ -127,11 +132,12 @@ class _DCOutbound:
         *,
         suppressed_out: list[str] | None = None,
         status_map: dict[str, str] | None = None,
+        type_map: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         # ``suppressed_out`` (ticket 8390) is accepted and IGNORED on purpose:
         # ``_map_local_to_dc_fields`` never maps a parent at all, so this backend has
         # no suppression to report and appending anything here would invent one.
-        return _map_local_to_dc_fields(ticket, status_map)
+        return _map_local_to_dc_fields(ticket, status_map, type_map)
 
     def map_fields_to_remote(
         self,

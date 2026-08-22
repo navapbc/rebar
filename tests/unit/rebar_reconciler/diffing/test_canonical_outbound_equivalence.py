@@ -160,6 +160,7 @@ def test_snapshot_canonicalized_via_injected_inbound_mapper(od) -> None:
             *,
             suppressed_out=None,
             status_map=None,
+            type_map=None,
         ):
             return {}
 
