@@ -1065,7 +1065,46 @@ and whose diff exceeds **150 non-test lines** must carry an acceptable plan-revi
 that bug, or the review bot casts `LLM-Review -1` with the `bugfix-size-attestation` criterion. A
 fix that large is a design change wearing a bug label — the "drive-by rewrite" mode this project's
 bug-trend analysis surfaced. Only Gerrit reviews run it; a local `rebar review-code` preview never
-blocks on it, and test-only diffs, non-bug tickets, and under-floor diffs are exempt.
+blocks on it, and test-only diffs and non-bug tickets are exempt.
+
+### The second escalation signal: a **repeat-fix** (ticket `1dd5`)
+
+Size is not the only shape of "a design change wearing a bug label". A *small* fix to a file the
+base branch has **already bug-fixed twice in the last 7 days** is the other one, and it is the
+better predictor: backtested over `origin/main` and labelled from the store's own `caused_by`
+links ("this fix's ticket was later named as the cause of another bug"), the repeat-fix signal
+recalls more later-culprit fixes than the 150-line floor does.
+
+So the gate escalates a bug fix when **either** signal fires:
+
+| signal | fires when | parameters |
+|---|---|---|
+| `size` | the diff exceeds 150 non-test lines | `BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES` |
+| `repeat-fix` | some non-test file it touches was touched by >= 2 other bug-fix commits on the base branch in the prior 7 days | `REPEAT_FIX_WINDOW_DAYS`, `REPEAT_FIX_MIN_PRIOR` in `rebar.llm.code_review.repeat_fix` |
+
+The remedy is identical either way — the coverage record's `escalation_reason` (`size`,
+`repeat-fix`, or `size+repeat-fix`) and the blocking finding say which fired, and the finding
+names the prior fixes so the evidence is checkable. The predicate needs nothing but git history
+plus the ticket type: no path allowlist, no CI provider, so it runs in any environment. It is
+**fail-open** — history it cannot read is never an escalation.
+
+Reproduce the comparison from any checkout:
+
+```sh
+python scripts/backtest_bugfix_size.py --rev-range origin/main --repeat-fix --labels-from-caused-by
+```
+
+That script imports the shipped predicate rather than reimplementing it, so the measurement
+cannot drift from the gate. It keeps `flagged` meaning the size floor **alone**; the repeat-fix
+verdict is a separate field, which is what lets `--check-planning-corpus` keep pinning the
+original adjudication.
+
+**`review-plan` is deliberately NOT mirrored.** The obvious symmetry — teach the claim-time
+plan-review escalation about repeat fixes too — is a no-op and should not be re-proposed.
+`orchestrator.bug_blast_radius_escalates` already escalates a bug whose `file_impact` names
+**any** non-test path, and every repeat-fix bug names one by construction. The only bugs a mirror
+could newly escalate are those with empty or test-only `file_impact`, where a repeat-fix
+predicate has no path to walk and so cannot fire either.
 
 **The remedy, executable end to end from any developer environment:**
 

@@ -21,8 +21,15 @@ bug-fix commits, whose extra flagged members are outside the hand-adjudicated co
 `--check-planning-corpus` re-derives the corpus and exits non-zero unless the flagged set
 equals ADJUDICATED_SUBSTANTIVE exactly — the executable form of the acceptance criterion.
 
+`--repeat-fix` additionally evaluates the SHIPPED repeat-fix predicate (ticket 1dd5) per
+commit — again by importing it, so the backtest cannot drift from the gate — as a field
+BESIDE `flagged`; `--labels-from-caused-by` labels each fix from the store's own `caused_by`
+links ("this fix's ticket was later named as the cause of another bug") and prints labelled
+recall + escalation rate per predicate, which is how the two signals are compared.
+
 Usage:  python scripts/backtest_bugfix_size.py [--rev-range origin/main] [--out artifact.json]
         python scripts/backtest_bugfix_size.py --check-planning-corpus [--out artifact.json]
+        python scripts/backtest_bugfix_size.py --repeat-fix --labels-from-caused-by
 """
 
 from __future__ import annotations
@@ -33,6 +40,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
@@ -43,6 +51,11 @@ from rebar._engine_support.resolver import resolve_ticket_id  # noqa: E402
 from rebar.llm.code_review.bugfix_size_gate import (  # noqa: E402
     BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
     count_non_test_diff_lines,
+    escalation_for_diff,
+)
+from rebar.llm.code_review.repeat_fix import (  # noqa: E402
+    REPEAT_FIX_MIN_PRIOR,
+    REPEAT_FIX_WINDOW_DAYS,
 )
 
 # Newest commit of the 113-commit planning corpus (subject-prefix bug-fix commits).
@@ -105,15 +118,84 @@ def _resolve_bug_ticket(
     return None
 
 
-def _measure(sha: str, ticket: str) -> dict:
+def _measure(sha: str, ticket: str, *, repeat_fix: bool = False) -> dict:
     diff = _git("show", sha, "--format=")
     non_test = count_non_test_diff_lines(diff)
-    return {
+    row = {
         "commit": sha,
         "ticket": ticket,
         "non_test_lines": non_test,
+        # `flagged` means the SIZE FLOOR alone, for every consumer including
+        # --check-planning-corpus. The repeat-fix verdict sits BESIDE it, never inside it.
         "flagged": non_test > BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
     }
+    if repeat_fix:
+        # Call the GATE, not the predicate underneath it. Re-deriving the escalation here
+        # would make the backtest measure a second implementation of the rule and report the
+        # number as if it were the gate's — and the two silently disagreed: the gate left the
+        # window anchored at wall-clock `now` while this asked for the commit's own time, so
+        # a replay of a year-old commit scored it against today's history. `escalation_for_diff`
+        # now takes the anchor, so replay and review run the same code on the same window.
+        _, reason, priors = escalation_for_diff(
+            diff,
+            repo_root=str(REPO_ROOT),
+            base_ref=f"{sha}~1",
+            at=_commit_time(sha),
+        )
+        row["repeat_fix"] = "repeat-fix" in reason
+        row["repeat_fix_priors"] = priors
+    return row
+
+
+def _commit_time(sha: str) -> float | None:
+    """The commit's own timestamp — the window anchor, so the backtest asks what the gate
+    would have seen AT REVIEW TIME rather than what history looks like today."""
+    try:
+        return float(_git("log", "-1", "--format=%ct", sha).strip())
+    except Exception:  # noqa: BLE001 — unreadable timestamp → predicate falls back to now
+        return None
+
+
+def _caused_by_culprits() -> set[str]:
+    """Tickets some bug's ``caused_by`` names — the store's own "this fix later introduced a
+    bug" label, aggregated exactly as ``rebar metrics`` aggregates it."""
+    from rebar.metrics.bug_trends import caused_by_fan_in
+
+    return set(caused_by_fan_in(str(REPO_ROOT)) or {})
+
+
+def _recall_summary(rows: list[dict], culprits: set[str], repeat_fix: bool) -> dict:
+    """Per-predicate labelled recall and escalation rate over `rows`."""
+    total = len(rows)
+    labelled = [r for r in rows if r["ticket"] in culprits]
+    predicates = {"size": lambda r: bool(r["flagged"])}
+    if repeat_fix:
+        predicates["repeat-fix"] = lambda r: bool(r.get("repeat_fix"))
+        predicates["union"] = lambda r: bool(r["flagged"]) or bool(r.get("repeat_fix"))
+    per_predicate: dict[str, dict[str, Any]] = {}
+    for name, fires in predicates.items():
+        escalated = [r for r in rows if fires(r)]
+        caught = [r for r in labelled if fires(r)]
+        per_predicate[name] = {
+            "escalated": len(escalated),
+            "escalation_rate": round(len(escalated) / total, 4) if total else 0.0,
+            "caught": len(caught),
+            "recall": round(len(caught) / len(labelled), 4) if labelled else 0.0,
+        }
+    return {"total": total, "labelled": len(labelled), "predicates": per_predicate}
+
+
+def _print_recall(summary: dict) -> None:
+    print(
+        f"labelled (fix whose ticket some bug names as caused_by): "
+        f"{summary['labelled']} of {summary['total']}"
+    )
+    for name, stats in summary["predicates"].items():
+        print(
+            f"  {name:<11} recall {stats['caught']}/{summary['labelled']} "
+            f"({stats['recall'] * 100:.1f}%)   escalation "
+            f"{stats['escalated']}/{summary['total']} ({stats['escalation_rate'] * 100:.1f}%)"
+        )
 
 
 def main() -> int:
@@ -127,6 +209,19 @@ def main() -> int:
         action="store_true",
         help="re-derive the pinned 113-commit planning corpus and assert the flagged set "
         "equals the hand-adjudicated 13 exactly (exit 1 on any mismatch)",
+    )
+    parser.add_argument(
+        "--repeat-fix",
+        action="store_true",
+        help=f"also evaluate the SHIPPED repeat-fix predicate per commit (a non-test file "
+        f"touched by >={REPEAT_FIX_MIN_PRIOR} other bug-fix commits in the prior "
+        f"{REPEAT_FIX_WINDOW_DAYS} days), as a field beside `flagged`",
+    )
+    parser.add_argument(
+        "--labels-from-caused-by",
+        action="store_true",
+        help="label each fix from the store's caused_by links and report labelled recall "
+        "plus escalation rate per predicate",
     )
     args = parser.parse_args()
 
@@ -149,17 +244,17 @@ def main() -> int:
                 refs = [r for r in (extract_ticket_refs(message) or []) if r.startswith(prefix)]
                 ticket = _resolve_bug_ticket(refs, tracker, type_cache)
             if ticket:
-                rows.append(_measure(sha, ticket))
+                rows.append(_measure(sha, ticket, repeat_fix=args.repeat_fix))
     else:
         shas = _git("log", "--no-merges", "--format=%H", args.rev_range).split()
         for sha in shas:
             message = _git("log", "-1", "--format=%B", sha)
             ticket = _resolve_bug_ticket(extract_ticket_refs(message) or [], tracker, type_cache)
             if ticket:
-                rows.append(_measure(sha, ticket))
+                rows.append(_measure(sha, ticket, repeat_fix=args.repeat_fix))
 
     flagged = [r for r in rows if r["flagged"]]
-    artifact = {
+    artifact: dict[str, Any] = {
         "threshold": BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
         "rev_range": PLANNING_CORPUS_BOUNDARY if args.check_planning_corpus else args.rev_range,
         "corpus_rule": (
@@ -169,6 +264,16 @@ def main() -> int:
         "flagged_count": len(flagged),
         "commits": rows,
     }
+    if args.repeat_fix:
+        artifact["repeat_fix"] = {
+            "window_days": REPEAT_FIX_WINDOW_DAYS,
+            "min_prior": REPEAT_FIX_MIN_PRIOR,
+            "escalated_count": sum(1 for r in rows if r.get("repeat_fix")),
+        }
+    recall: dict = {}
+    if args.labels_from_caused_by:
+        recall = _recall_summary(rows, _caused_by_culprits(), args.repeat_fix)
+        artifact["recall"] = recall
     Path(args.out).write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
     print(
         f"bug-fix commits: {len(rows)}; flagged (> {BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES} "
@@ -176,6 +281,8 @@ def main() -> int:
     )
     for r in flagged:
         print(f"  {r['commit'][:12]}  {r['non_test_lines']:>5}  {r['ticket']}")
+    if args.labels_from_caused_by:
+        _print_recall(recall)
 
     if args.check_planning_corpus:
         flagged_set = {r["commit"] for r in flagged}

@@ -320,10 +320,20 @@ def test_non_bug_ticket_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "bugfix_size_gate" not in verdict.get("coverage", {})
 
 
-def test_under_threshold_diff_never_reads_the_store(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*a, **k):
-        raise AssertionError("store must not be read for an under-floor diff")
+def test_unescalated_under_threshold_diff_never_reads_the_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An under-floor diff that is ALSO not a repeat fix reads nothing and says nothing.
 
+    Ticket 1dd5 narrowed this invariant: the repeat-fix predicate now runs on under-floor
+    diffs (that is the point of it), so "no store read below the floor" survives only for a
+    diff that no signal escalates. The predicate is stubbed to "no priors" here; its own
+    history walk is pinned in ``test_bugfix_repeat_fix_1dd5.py``."""
+
+    def _boom(*a, **k):
+        raise AssertionError("store must not be read for an unescalated diff")
+
+    monkeypatch.setattr(bsg, "repeat_fix_escalates", lambda paths, **k: (False, []))
     monkeypatch.setattr(bsg, "ticket_for_commit_message", _boom)
     monkeypatch.setattr(bsg, "_load_ticket_state", _boom)
     monkeypatch.setattr(bsg, "classify_plan_review_attestation", _boom)
