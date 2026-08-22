@@ -471,6 +471,29 @@ byte-identical; inspect and remove them by hand only when you know the append th
 them is dead. On a clean tracker `doctor --repair` makes zero changes and records no
 backup ref.
 
+## `doctor` also audits your `[mapping]` config
+
+`rebar doctor` diagnoses the hand-edited `[mapping]` seam so a misconfigured mapping can't
+silently drift a Jira reconcile. It reports two classes, and — like the rest of `doctor` —
+folds them into its exit code, but keeps them OUT of `--repair` (mapping findings are
+report-only):
+
+- **Offline checks (always run, no Jira, no credentials).** Any invalid config is an
+  **error** finding (and a non-zero exit): a block that fails to parse (a non-integer
+  `hierarchy`, a malformed vocabulary list), a mapped value that falls outside a declared
+  vocabulary, or a syncable ticket type left with no sync decision. The finding carries the
+  `MappingConfigError` message verbatim so the offending key is named. An all-empty
+  `[mapping.projects.<KEY>]` block — a likely stub — is a softer **warning** (it does *not*
+  fail the exit code).
+- **Live drift (best-effort, degrades).** When the optional `jira-datacenter` extra is
+  installed and a `JIRA_PAT` is set in the environment (env-only, never a config key),
+  `doctor` reuses the read-only probe to compare each
+  project's configured status / type / link target values against what Jira actually
+  exposes, and reports any configured value Jira no longer has as a drift **error**. When
+  the extra is absent, credentials are unresolved, or the probe is slow or unreachable, the
+  check degrades to a single **`unavailable`** finding (a zero exit) — the same convention
+  `rebar metrics` uses — so `doctor` stays fully portable and never blocks on Jira.
+
 ## Archived tickets: maintenance scopes to the active store
 
 `rebar archive` folds the ticket's entire live log into a SNAPSHOT **inline, right before
