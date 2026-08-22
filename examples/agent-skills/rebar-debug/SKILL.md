@@ -121,11 +121,101 @@ run, why it's necessary, and its blast radius, then wait. Prefer a local reprodu
 **Carve-out — the project's own tracker.** The tracker this debug session is already operating
 within — the one that produced or holds the ticket under debug — is the project's own mandated
 tracker, and the **prescribed writebacks this protocol requires** (the Phase-1-exit RCA comment,
-the `caused_by` link to the defect's originating ticket, the Step-7 sibling tickets, the
-not-a-bug classification comment, and the final report comment)
+the `caused_by` link to the defect's originating ticket, the **Step-0 duplicates link**, the
+Step-7 sibling tickets, the not-a-bug classification comment, and the final report comment)
 are pre-approved on it: post them without asking. Everything else stays gated: any *other*
 tracker is third-party and needs approval per the paragraph above, as does any own-tracker
 mutation beyond the prescribed writebacks (transitions, edits to others' tickets, bulk changes).
+
+# Step 0 — Orient (before Phase 1, on both the full protocol and the fast path)
+
+Before you gather a single piece of evidence, spend two minutes establishing **whether this
+bug is already known** and **which build it was reported against**. Both answers change what
+the rest of the protocol should look at, and neither is recoverable later: an investigation
+run against the wrong tree produces a confident, cited, wrong conclusion, and a bug that was
+already filed produces a duplicate that costs a second full investigation. Step 0 runs on the
+fast path too — it is cheap, and the fast path is exactly where an unnoticed duplicate slips
+through.
+
+Each of the three actions below **writes one line into the Stage 1 dossier**, including when
+the answer is "nothing found" or "unknown". A silent skip is indistinguishable from a
+negative result, so record the negative result.
+
+**(a) Sweep the tracker before you investigate.** Run
+
+```sh
+rebar search "<symptom words>"          # titles/descriptions/comments/tags, ALL statuses
+rebar list --type bug --status open,in_progress
+```
+
+`rebar search` is deliberately unfiltered by status: the sweep must cover every status,
+**including closed tickets**, because in a mature tracker the overwhelming majority of bug
+tickets are closed and an open-only sweep is nearly blind. A closed ticket for the same behavior is not noise: it is
+either this bug already fixed (so you may be on a stale tree — see (c)) or a regression, and
+either way it is the single most valuable thing you can know before Stage 1.
+
+Record one of:
+
+- `Step 0(a): no existing ticket for <queries run>` — you are the first report; continue.
+- `Step 0(a): duplicates <id> (<alias>)` — a match exists. Which of the two outcomes you take
+  is decided by the match's status, not by preference:
+  - **Open or in progress** → **resume that ticket in place**; do not file a second one.
+  - **Closed, and the behavior is back** → this is a *regression*: file the new report and
+    link it with `rebar link <new> <existing> duplicates`, so the history shows the same
+    behavior failing twice. The old ticket's fix commit is prime Stage 2 material.
+  - **Closed, and it is the same still-live behavior that was never actually fixed** →
+    reopen and **resume the existing** ticket rather than re-filing.
+
+  The `duplicates` link is a pre-approved own-tracker writeback (see the approval-gate
+  carve-out above); post it without asking.
+
+**(b) Establish the reported-against floor.** A rebar ticket carries **no version field** —
+do not look for one. The floor comes from two real sources, in order of preference:
+
+1. **The report text.** A `rebar --version` output, a commit sha, or a release tag quoted in
+   the bug's description or comments. This is authoritative when present; use it and stop.
+2. **The ticket's `created_at`.** When the report quotes no version, take the newest `main`
+   commit at or before the report. `created_at` is an integer of **nanoseconds** since the
+   epoch (`time.time_ns()`; see `src/rebar/schemas/ticket_state.schema.json`), for example
+   `1787354756915214001`. Git's `--before=` takes an approxidate or an `@<unix-seconds>`
+   value, **not** nanoseconds: handed a raw 19-digit value it reads it as a far-future
+   seconds count and silently returns the tip of `main`, which is the exact wrong answer.
+   Convert to seconds first:
+
+   ```sh
+   git rev-list -1 --before="@$(( <created_at> / 1000000000 ))" origin/main
+   ```
+
+   The `/ 1000000000` divide is required, not cosmetic.
+
+This yields a **floor**, not the exact build the reporter ran, so say so: the dossier line
+reads `Step 0(b): reported on or after <sha>`. Then find out whether the suspect code moved
+since:
+
+```sh
+git log --oneline <floor-sha>..origin/main -- <suspect paths>
+```
+
+and record the answer, so Stage 2 knows whether "the construct changed since the report" is a
+live hypothesis or a closed question.
+
+If **neither** source is available — no version quoted and no usable timestamp — record
+`Step 0(b): reported-against version unknown` explicitly. The hypothesis stage then treats the
+whole history as in scope. Do not silently assume the report was made against current `main`;
+that assumption is the stale-tree failure wearing a disguise.
+
+**(c) Confirm the worktree is current.** You started from a fresh worktree off `origin/main`
+(see the setup paragraph above), so verify it rather than trusting it:
+
+```sh
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" && echo current || echo STALE
+```
+
+Record `Step 0(c): worktree at <sha> (= origin/main)` or, when it differs, say so plainly and
+fix it before gathering evidence — every later citation inherits this tree.
+
+**Gate to Phase 1:** three dossier lines exist, one per action, each stating a definite result
+(found / not found, floor sha / unknown, current / stale). Then continue to triage.
 
 ## Triage: full protocol or fast path?
 
