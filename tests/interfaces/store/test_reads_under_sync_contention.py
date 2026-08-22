@@ -7,10 +7,17 @@ reconverge path and would regress the same way. This module pins the property ON
 table-driven over the surfaces, instead of bespoke per-surface copies.
 
 The property: a read must be COMPLETE-or-LOUD within bounded time. Exit 0 implies
-stdout parses as the surface's JSON shape (valid-empty `[]` passes — distinguishable
-from truncated-empty stdout); a nonzero exit passes (loud failure allowed); a stall
-past the per-call deadline fails (that stall is exactly what consumers experienced
-as truncated/empty pipes).
+stdout parses as the surface's JSON shape AND the payload carries identity — `show`
+returns an object with a truthy `ticket_id`, and every element a list-shaped surface
+returns carries one (valid-empty `[]` passes — distinguishable from truncated-empty
+stdout); a nonzero exit passes (loud failure allowed); a stall past the per-call
+deadline fails (that stall is exactly what consumers experienced as truncated/empty
+pipes).
+
+The completeness half closes the gap proven by fault-seeding under afa0-2e15: seeds
+F3 (`show` emits `{}`, exit 0) and F6 (`show` emits a record without `ticket_id`,
+exit 0) passed the shape-only property while the original regression caught both. A
+shape-valid but content-hollow payload is truncation wearing valid JSON.
 
 RED demonstration (AC): revert the ledge locally — set
 `reads._RECONVERGE_LOCK_TIMEOUT` back to the 15s writer default — and
@@ -30,22 +37,37 @@ from sync_contention_harness import _clear_sync_throttle, _rebar_cli
 import rebar
 from rebar._store import lock as _lock
 
-# (surface, argv builder, JSON shape on a zero exit). `show` takes --output json and
-# emits an object; `list`/`search` emit a JSON array by default (search has no
-# --output flag at all); `ready` takes --output json and emits an array.
+
+def _record_has_identity(doc):
+    """A complete ticket record carries a truthy ``ticket_id``."""
+    return isinstance(doc, dict) and bool(doc.get("ticket_id"))
+
+
+def _all_records_have_identity(doc):
+    """Every element present carries identity; a valid-empty ``[]`` passes
+    (vacuously true), staying distinguishable from truncated output."""
+    return all(_record_has_identity(el) for el in doc)
+
+
+# (surface, argv builder, JSON shape on a zero exit, content-completeness predicate).
+# `show` takes --output json and emits an object; `list`/`search` emit a JSON array by
+# default (search has no --output flag at all); `ready` takes --output json and emits
+# an array. All four surfaces emit ticket-state records, so identity (`ticket_id`) is
+# the per-surface completeness witness.
 SURFACES = [
-    ("show", lambda tid: ("show", tid, "--output", "json"), dict),
-    ("list", lambda tid: ("list",), list),
-    ("search", lambda tid: ("search", "burst"), list),
-    ("ready", lambda tid: ("ready", "--output", "json"), list),
+    ("show", lambda tid: ("show", tid, "--output", "json"), dict, _record_has_identity),
+    ("list", lambda tid: ("list",), list, _all_records_have_identity),
+    ("search", lambda tid: ("search", "burst"), list, _all_records_have_identity),
+    ("ready", lambda tid: ("ready", "--output", "json"), list, _all_records_have_identity),
 ]
 
 _READ_DEADLINE_SECS = 30
 
 
-def _assert_complete_or_loud(name, expected_shape, cp, context):
+def _assert_complete_or_loud(name, expected_shape, complete, cp, context):
     """The pinned invariant: zero exit ⇒ non-empty stdout parsing as the surface's
-    documented JSON shape; nonzero exits are acceptable (loud beats silent)."""
+    documented JSON shape AND content-complete (every record carries identity);
+    nonzero exits are acceptable (loud beats silent)."""
     if cp.returncode != 0:
         return
     out = cp.stdout.strip()
@@ -61,6 +83,11 @@ def _assert_complete_or_loud(name, expected_shape, cp, context):
     assert isinstance(doc, expected_shape), (
         f"`rebar {name}` exit 0 with wrong JSON shape ({context}): "
         f"expected {expected_shape.__name__}, got {type(doc).__name__}"
+    )
+    assert complete(doc), (
+        f"`rebar {name}` exit 0 with a shape-valid but content-hollow payload ({context}): "
+        f"a record is missing a truthy `ticket_id` — truncation wearing valid JSON "
+        f"(afa0-2e15 seeds F3/F6); head={out[:200]!r}"
     )
 
 
@@ -81,7 +108,7 @@ def test_reads_complete_or_error_under_write_burst(repo_with_origin_tickets, mon
             _rebar_cli(
                 "edit", t, "--description", f"round {round_no} edit {i}", repo=repo, push="always"
             )
-        for name, argv, shape in SURFACES:
+        for name, argv, shape, complete in SURFACES:
             _clear_sync_throttle(tracker)
             try:
                 cp = _rebar_cli(
@@ -95,7 +122,7 @@ def test_reads_complete_or_error_under_write_burst(repo_with_origin_tickets, mon
                     f"`rebar {name}` stalled past {_READ_DEADLINE_SECS}s under the write "
                     f"burst (round {round_no}) — the ed2b symptom"
                 )
-            _assert_complete_or_loud(name, shape, cp, f"round {round_no}")
+            _assert_complete_or_loud(name, shape, complete, cp, f"round {round_no}")
 
 
 def test_reads_complete_promptly_while_write_lock_is_held(repo_with_origin_tickets):
@@ -119,7 +146,7 @@ def test_reads_complete_promptly_while_write_lock_is_held(repo_with_origin_ticke
     holder.start()
     try:
         assert acquired.wait(timeout=10), "could not pre-acquire the lock"
-        for name, argv, shape in SURFACES:
+        for name, argv, shape, complete in SURFACES:
             _clear_sync_throttle(tracker)
             try:
                 cp = _rebar_cli(*argv(tid), repo=repo, push="off", timeout=10)
@@ -128,7 +155,7 @@ def test_reads_complete_promptly_while_write_lock_is_held(repo_with_origin_ticke
                     f"`rebar {name}` stalled >10s on the held write lock — "
                     "the read-path reconverge is not bounded (ed2b regression)"
                 )
-            _assert_complete_or_loud(name, shape, cp, "held write lock")
+            _assert_complete_or_loud(name, shape, complete, cp, "held write lock")
     finally:
         release.set()
         holder.join(timeout=120)
