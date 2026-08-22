@@ -14,6 +14,13 @@ Actions workflow (primary) and a box CloudWatch probe (secondary, replication on
 **stdlib-only** (rebar core's contract — no boto3/requests): pure verdict functions plus thin
 ``urllib`` I/O and a CLI.
 
+The CLI/``run()`` replication path provides the transient-lag evaluation window **in-process**:
+a diverged sample is re-taken (default 3 samples, 45s apart) before the check is declared
+unhealthy, so expected post-submit replication lag (~15s) self-heals within one invocation.
+This makes the window portable across schedulers — any cron that can run the CLI gets lag
+absorption, with no dependency on a specific CI/alarm product. The box CloudWatch alarm
+remains the secondary pager for *sustained* divergence.
+
 Verdict schema (both checks): ``{"check": str, "healthy": bool, "reason": str, ...}``.
 CLI exit codes: ``0`` all healthy · ``1`` unhealthy (divergence/drift) · ``2`` fetch/IO error.
 """
@@ -23,9 +30,14 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
+
+# Seam for tests / alternative schedulers: all lag-tolerance waits go through a call-time
+# module-global lookup of ``_sleep`` (never captured as a default parameter).
+_sleep = time.sleep
 
 # --- The lock contract (must match infra/terraform-github/main.tf) ---------
 GERRIT_BASE_URL = "https://rebar.solutions.navateam.com"
@@ -46,8 +58,10 @@ def replication_verdict(gerrit_sha: str | None, github_sha: str | None) -> dict[
     """In sync iff both SHAs are present and equal.
 
     A transient divergence (replication runs ~15s behind a submit) is expected and is NOT
-    treated specially here — the *alarm's* evaluation window (sustained divergence) absorbs
-    transient lag; this function reports the instantaneous truth.
+    treated specially here — this function reports the instantaneous truth. The evaluation
+    window that absorbs transient lag lives in the callers: the CLI/``run()`` path re-samples
+    via ``_replication_check_with_lag_tolerance``, and the CloudWatch alarm applies a
+    sustained-divergence window.
     """
     if not gerrit_sha or not github_sha:
         return {
@@ -179,6 +193,50 @@ def fetch_github_ruleset(
 # ===========================================================================
 # CLI
 # ===========================================================================
+def _replication_check_with_lag_tolerance(
+    base_url: str,
+    repo: str,
+    github_token: str | None,
+    *,
+    attempts: int = 3,
+    delay_seconds: float = 45.0,
+) -> dict[str, Any]:
+    """Replication check that absorbs transient replication lag by re-sampling.
+
+    Takes up to ``attempts`` samples spaced ``delay_seconds`` apart. An in-sync or
+    missing-SHA sample returns immediately; only a genuine divergence (both SHAs present,
+    unequal) triggers a wait + re-sample. All-diverged distinguishes a *stalled* mirror
+    (GitHub tip never moved) from one that is moving but never converged.
+    """
+    github_shas: list[str] = []
+    verdict: dict[str, Any] = {}
+    for sample in range(1, max(1, attempts) + 1):
+        gerrit_sha = fetch_gerrit_main_sha(base_url)
+        github_sha = fetch_github_main_sha(repo, github_token)
+        verdict = replication_verdict(gerrit_sha, github_sha)
+        if verdict["healthy"] or not (gerrit_sha and github_sha):
+            # In sync, or missing SHA — no lag to absorb; report as-is.
+            if verdict["healthy"] and sample > 1:
+                verdict["reason"] = (
+                    f"in sync (transient replication lag converged after {sample} samples)"
+                )
+            verdict["samples"] = sample
+            return verdict
+        github_shas.append(github_sha)
+        if sample < max(1, attempts):
+            _sleep(delay_seconds)
+    verdict["samples"] = len(github_shas)
+    if len(set(github_shas)) == 1:
+        verdict["reason"] = (
+            f"GitHub tip static across {len(github_shas)} samples — replication stalled"
+        )
+    else:
+        verdict["reason"] = (
+            f"GitHub tip moving but never converged with Gerrit across {len(github_shas)} samples"
+        )
+    return verdict
+
+
 def run(
     *,
     check_replication: bool,
@@ -186,6 +244,8 @@ def run(
     github_token: str | None,
     base_url: str = GERRIT_BASE_URL,
     repo: str = GITHUB_REPO,
+    lag_attempts: int = 3,
+    lag_delay_seconds: float = 45.0,
 ) -> tuple[list[dict[str, Any]], int]:
     """Run the requested checks; return (verdicts, exit_code). Never raises for expected
     network errors — those become exit code 2 so a scheduler can distinguish drift (1) from
@@ -194,8 +254,12 @@ def run(
     try:
         if check_replication:
             verdicts.append(
-                replication_verdict(
-                    fetch_gerrit_main_sha(base_url), fetch_github_main_sha(repo, github_token)
+                _replication_check_with_lag_tolerance(
+                    base_url,
+                    repo,
+                    github_token,
+                    attempts=lag_attempts,
+                    delay_seconds=lag_delay_seconds,
                 )
             )
         if check_ruleset:
@@ -222,6 +286,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--base-url", default=GERRIT_BASE_URL)
     parser.add_argument("--repo", default=GITHUB_REPO)
+    parser.add_argument(
+        "--lag-attempts",
+        type=int,
+        default=3,
+        help="max replication samples before declaring divergence (lag tolerance)",
+    )
+    parser.add_argument(
+        "--lag-delay",
+        type=float,
+        default=45.0,
+        help="seconds to wait between replication samples",
+    )
     args = parser.parse_args(argv)
 
     do_all = args.all or not (args.replication or args.ruleset)
@@ -231,6 +307,8 @@ def main(argv: list[str] | None = None) -> int:
         github_token=os.environ.get("GITHUB_TOKEN"),  # read-via: cli-credential-boundary
         base_url=args.base_url,
         repo=args.repo,
+        lag_attempts=args.lag_attempts,
+        lag_delay_seconds=args.lag_delay,
     )
     json.dump({"exit_code": code, "verdicts": verdicts}, sys.stdout, indent=2)
     sys.stdout.write("\n")

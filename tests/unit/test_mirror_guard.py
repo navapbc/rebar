@@ -141,6 +141,7 @@ def test_run_drift_exit_1(monkeypatch) -> None:
 def test_run_divergence_exit_1(monkeypatch) -> None:
     monkeypatch.setattr(mirror_guard, "fetch_gerrit_main_sha", lambda *a, **k: "new")
     monkeypatch.setattr(mirror_guard, "fetch_github_main_sha", lambda *a, **k: "old")
+    monkeypatch.setattr(mirror_guard, "_sleep", lambda s: None)  # no real waiting in unit tests
     _verdicts, code = mirror_guard.run(
         check_replication=True, check_ruleset=False, github_token="t"
     )
@@ -194,3 +195,78 @@ def test_fetch_github_ruleset_absent_returns_none(monkeypatch) -> None:
 def test_fetch_github_ruleset_requires_token() -> None:
     with pytest.raises(ValueError):
         mirror_guard.fetch_github_ruleset(token=None)
+
+
+# --- Behavioral: in-process lag tolerance (ticket 5bd1-2343-ed83-40f0) ------
+class _ShaSequence:
+    """Stateful fetch fakes: each run() fetch-pair call advances one step."""
+
+    def __init__(self, pairs: list[tuple[str | None, str | None]]) -> None:
+        self._pairs = list(pairs)
+        self.calls = 0
+        self.sleeps: list[float] = []
+
+    def gerrit(self, *a, **k) -> str | None:
+        return self._pairs[min(self.calls, len(self._pairs) - 1)][0]
+
+    def github(self, *a, **k) -> str | None:
+        pair = self._pairs[min(self.calls, len(self._pairs) - 1)]
+        self.calls += 1  # github is fetched second; one pair consumed per sample
+        return pair[1]
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+
+
+def _run_replication(monkeypatch, seq: _ShaSequence, **kwargs):
+    monkeypatch.setattr(mirror_guard, "fetch_gerrit_main_sha", seq.gerrit)
+    monkeypatch.setattr(mirror_guard, "fetch_github_main_sha", seq.github)
+    monkeypatch.setattr(mirror_guard, "_sleep", seq.sleep, raising=False)
+    return mirror_guard.run(
+        check_replication=True, check_ruleset=False, github_token=None, **kwargs
+    )
+
+
+def test_transient_lag_that_converges_is_healthy(monkeypatch) -> None:
+    """The bug: a single diverged sample during expected replication lag must not
+    fail the run — a re-sample that converges within the window is healthy."""
+    seq = _ShaSequence([("new", "old"), ("new", "new")])
+    verdicts, code = _run_replication(monkeypatch, seq)
+    assert code == 0
+    assert verdicts[0]["healthy"] is True
+    assert seq.calls == 2  # converged on the second sample
+
+
+def test_persistent_divergence_static_github_tip_stays_loud(monkeypatch) -> None:
+    seq = _ShaSequence([("new", "old"), ("new", "old"), ("new", "old")])
+    verdicts, code = _run_replication(monkeypatch, seq)
+    assert code == 1
+    assert verdicts[0]["healthy"] is False
+    assert "stalled" in verdicts[0]["reason"]
+    assert verdicts[0]["samples"] == 3
+
+
+def test_persistent_divergence_moving_github_tip_stays_loud(monkeypatch) -> None:
+    """A moving but never-converging GitHub tip (covers GitHub-ahead/foreign
+    divergence) must still fail — no weakening of true-outage detection."""
+    seq = _ShaSequence([("new", "a"), ("new", "b"), ("new", "c")])
+    verdicts, code = _run_replication(monkeypatch, seq)
+    assert code == 1
+    assert verdicts[0]["healthy"] is False
+
+
+def test_in_sync_first_sample_costs_one_fetch_and_no_sleep(monkeypatch) -> None:
+    seq = _ShaSequence([("same", "same")])
+    _verdicts, code = _run_replication(monkeypatch, seq)
+    assert code == 0
+    assert seq.calls == 1
+    assert seq.sleeps == []
+
+
+def test_missing_sha_fails_immediately_without_resampling(monkeypatch) -> None:
+    seq = _ShaSequence([("new", None), ("new", "new")])
+    verdicts, code = _run_replication(monkeypatch, seq)
+    assert code == 1
+    assert verdicts[0]["healthy"] is False
+    assert seq.calls == 1
+    assert seq.sleeps == []

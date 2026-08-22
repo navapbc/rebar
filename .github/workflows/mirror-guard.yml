@@ -4,8 +4,10 @@ name: Mirror Guard
 #
 # After the WS7 cutover, GitHub `main` is a read-only mirror that only advances via Gerrit's
 # replication deploy key. This scheduled job verifies REPLICATION HEALTH: it FAILS
-# (-> GitHub notification) if Gerrit `main` SHA != GitHub `main` SHA, i.e. replication has
-# stalled and GitHub `main` has fallen behind/ahead of Gerrit.
+# (-> GitHub notification) only when Gerrit-vs-GitHub `main` SHA divergence PERSISTS across
+# the in-run re-sample window (~2 extra samples, 45s apart), i.e. replication has stalled and
+# GitHub `main` has fallen behind/ahead of Gerrit. Expected ~15s post-submit replication lag
+# self-clears within that window instead of redding the run.
 #
 # It runs `python -m rebar.mirror_guard --replication`. Both reads are cheap and need no
 # elevated auth: the Gerrit `main` SHA is read anonymously, and the GitHub `main` SHA is a
