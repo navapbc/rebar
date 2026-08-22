@@ -40,6 +40,11 @@ import logging
 import os
 from typing import Any
 
+from rebar.llm.code_review.repeat_fix import (
+    REPEAT_FIX_WINDOW_DAYS,
+    repeat_fix_escalates,
+)
+
 logger = logging.getLogger(__name__)
 
 BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES = 150
@@ -104,6 +109,41 @@ def is_test_path(path: str) -> bool:
     return p.startswith("tests/") or os.path.basename(p) == "conftest.py"
 
 
+def _header_target(line: str) -> str | None:
+    """The path named by a ``---``/``+++`` unified-diff file header, or ``None`` for
+    ``/dev/null`` (a creation/deletion side, which carries no path of its own)."""
+    target = line[4:].strip()
+    if target == "/dev/null":
+        return None
+    if target[:2] in ("a/", "b/"):
+        target = target[2:]
+    return target or None
+
+
+def non_test_paths_in_diff(diff_text: str) -> list[str]:
+    """The distinct NON-TEST paths ``diff_text`` touches, in first-seen order.
+
+    Same header walk and same ``is_test_path`` rule as :func:`count_non_test_diff_lines`, so
+    "which files does this change touch" and "how big is the non-test part" can never
+    disagree. A rename contributes BOTH sides, so moving test material into ``src/`` is seen.
+    """
+    paths: list[str] = []
+    in_hunk = False
+    for line in (diff_text or "").splitlines():
+        if line.startswith("diff --git "):
+            in_hunk = False
+            continue
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if in_hunk or not (line.startswith("--- ") or line.startswith("+++ ")):
+            continue
+        target = _header_target(line)
+        if target and not is_test_path(target) and target not in paths:
+            paths.append(target)
+    return paths
+
+
 def count_non_test_diff_lines(diff_text: str) -> int:
     """Added+removed lines in ``diff_text`` attributed to non-test files.
 
@@ -123,11 +163,9 @@ def count_non_test_diff_lines(diff_text: str) -> int:
             in_hunk = True
             continue
         if not in_hunk and (line.startswith("--- ") or line.startswith("+++ ")):
-            target = line[4:].strip()
-            if target == "/dev/null":
+            target = _header_target(line)
+            if target is None:
                 continue  # keep the other side's classification
-            if target[:2] in ("a/", "b/"):
-                target = target[2:]
             counting = not is_test_path(target)
             continue
         if in_hunk and counting and line[:1] in ("+", "-"):
@@ -233,13 +271,80 @@ def classify_plan_review_attestation(
 # ── the gate ────────────────────────────────────────────────────────────────────────────────
 
 
-def _teaching_finding(ticket_id: str, non_test_lines: int, classification: dict[str, str]) -> str:
+def _repeat_fix_verdict(
+    paths: list[str],
+    *,
+    repo_root: Any,
+    base_ref: str = "HEAD~1",
+    at: float | None = None,
+) -> tuple[bool, list[str]]:
+    """The repeat-fix predicate, fail-open: history trouble is never an escalation."""
+    try:
+        # HEAD~1, not HEAD: `assemble` builds the review diff as ``HEAD~1..HEAD``, so in a
+        # review checkout HEAD IS the change under review. Walking HEAD would let a fix with
+        # a single genuine prior count ITSELF as the second one and escalate on its own
+        # existence. A root commit has no HEAD~1, so the walk fails and nothing escalates.
+        return repeat_fix_escalates(paths, repo_root=repo_root, base_ref=base_ref, at=at)
+    except Exception:  # a predicate fault must not become an LLM-Review -1
+        logger.warning("repeat-fix predicate failed; not escalating", exc_info=True)
+        return False, []
+
+
+def escalation_for_diff(
+    diff_text: str,
+    *,
+    repo_root: Any,
+    base_ref: str = "HEAD~1",
+    at: float | None = None,
+) -> tuple[int, str, list[str]]:
+    """``(non_test_lines, reason, priors)`` for ``diff_text``.
+
+    ``reason`` is ``""`` when nothing escalates, else ``size``, ``repeat-fix``, or
+    ``size+repeat-fix``. A diff with no non-test file touches nothing and returns
+    immediately — that keeps the test-only exemption free of any history or store read."""
+    paths = non_test_paths_in_diff(diff_text or "")
+    if not paths:
+        return 0, "", []
+    non_test = count_non_test_diff_lines(diff_text or "")
+    over_floor = non_test > BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES
+    hit, priors = _repeat_fix_verdict(paths, repo_root=repo_root, base_ref=base_ref, at=at)
+    reason = "+".join(
+        label for label, fired in (("size", over_floor), ("repeat-fix", hit)) if fired
+    )
+    return non_test, reason, (priors if hit else [])
+
+
+def _escalation_clause(non_test_lines: int, reason: str, priors: list[str]) -> str:
+    """The evidence half of the teaching finding — why THIS change was asked for a plan."""
+    shown = ", ".join(sha[:12] for sha in priors)
+    repeat = (
+        f"it re-fixes a file already bug-fixed by {len(priors)} commit(s) in the last "
+        f"{REPEAT_FIX_WINDOW_DAYS} days ({shown})"
+    )
+    if reason == "repeat-fix":
+        return (
+            f"this change touches {non_test_lines} non-test line(s) — under the "
+            f"{BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES}-line floor — but {repeat}"
+        )
+    size = (
+        f"this change touches {non_test_lines} non-test line(s) — over the "
+        f"{BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES}-line floor for a bug fix"
+    )
+    return f"{size}, and {repeat}" if priors else size
+
+
+def _teaching_finding(
+    ticket_id: str,
+    non_test_lines: int,
+    classification: dict[str, str],
+    reason: str = "size",
+    priors: list[str] | None = None,
+) -> str:
     return (
-        f"{CRITERION_ID}: this change touches {non_test_lines} non-test line(s) — over the "
-        f"{BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES}-line floor for a bug fix — but bug "
+        f"{CRITERION_ID}: {_escalation_clause(non_test_lines, reason, priors or [])} — but bug "
         f"{ticket_id} has no acceptable plan-review attestation "
         f"(verdict: {classification.get('verdict')}; {classification.get('reason')}). "
-        "A fix this large is a design change wearing a bug label: write the fix plan into the "
+        "A fix like this is a design change wearing a bug label: write the fix plan into the "
         f"ticket's description, run `rebar review-plan {ticket_id}` (it auto-escalates a bug "
         "with non-test file impact to the full review and SIGNS an attestation on a PASS; if "
         f"the review passed but no attestation landed, `rebar sign-review {ticket_id}` "
@@ -254,16 +359,19 @@ def apply_bugfix_size_gate(
     """Apply the bugfix-size attestation criterion to ``verdict`` IN PLACE (Gerrit only —
     the caller gates on ``request.change_id``).
 
-    Predicate: the commit resolves to a ``bug`` ticket AND the diff exceeds
-    ``BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES`` non-test lines. Then the bug's plan-review
+    Predicate: the commit resolves to a ``bug`` ticket AND the diff touches a non-test file
+    that EITHER exceeds ``BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES`` non-test lines (the size
+    floor) OR is a REPEAT FIX — a file the base branch already bug-fixed
+    ``REPEAT_FIX_MIN_PRIOR`` times inside ``REPEAT_FIX_WINDOW_DAYS`` (ticket 1dd5). The
+    coverage record names which signal fired in ``escalation_reason``. Then the bug's plan-review
     attestation classification decides: ACCEPTED → coverage note only; FLAG → kernel-shaped
     blocking finding (mirrors ``detectors.apply_failclosed``); INFRA → INDETERMINATE abstain
     (never downgrading an existing BLOCK) — an unclassifiable attestation must not read as a
     satisfied gate (bug 9011). Never raises."""
     ticket_id: str | None = None
     try:
-        non_test = count_non_test_diff_lines(diff_text or "")
-        if non_test <= BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES:
+        non_test, reason, priors = escalation_for_diff(diff_text or "", repo_root=repo_root)
+        if not reason:
             return verdict
         ticket_id = ticket_for_commit_message(commit_message or "", repo_root=repo_root)
         if not ticket_id:
@@ -277,10 +385,10 @@ def apply_bugfix_size_gate(
     except Exception as exc:
         logger.warning("bugfix-size gate evaluation failed; abstaining", exc_info=True)
         try:
-            non_test = count_non_test_diff_lines(diff_text or "")
+            non_test, reason, priors = escalation_for_diff(diff_text or "", repo_root=repo_root)
         except Exception:  # noqa: BLE001 — cannot even size the diff; stay silent
             return verdict
-        if non_test <= BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES:
+        if not reason:
             return verdict
         ticket_id = ticket_id or "<unresolved>"
         classification = {"verdict": "error", "reason": f"gate evaluation failed: {exc}"}
@@ -293,6 +401,10 @@ def apply_bugfix_size_gate(
         "non_test_lines": non_test,
         "threshold": BUGFIX_SIZE_THRESHOLD_NON_TEST_LINES,
         "bucket": bucket,
+        # NEW keys beside the existing ones (never folded into them): `flagged`-equivalent
+        # consumers and the backtest keep reading the size floor alone.
+        "escalation_reason": reason,
+        "repeat_fix_priors": priors,
     }
     if bucket == "flag":
         verdict.setdefault("blocking", []).append(
@@ -301,7 +413,7 @@ def apply_bugfix_size_gate(
                 "severity": "high",
                 "decision": "block",
                 "tier": "DET",
-                "finding": _teaching_finding(ticket_id, non_test, classification),
+                "finding": _teaching_finding(ticket_id, non_test, classification, reason, priors),
                 "location": None,
             }
         )
