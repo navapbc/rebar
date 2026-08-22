@@ -127,6 +127,137 @@ def _bridge_probe(argv: list[str], *, extra_env: dict[str, str] | None = None) -
     return subprocess.call([sys.executable, script, *argv], env=env)
 
 
+def _bridge_suggest_mapping(argv: list[str]) -> int:
+    """``rebar bridge suggest-mapping <PROJECT> [--write]`` → the read-only mapping probe.
+
+    Observes a live Jira project through the read-only probe port
+    (``rebar_reconciler.mapping_probe``) and emits a suggested ``[mapping.projects.<KEY>]``
+    block seeded with the project's real vocabulary and identity-seed axis maps. Reads
+    only — the port has no create/transition/delete surface, so this never mutates Jira
+    (distinct from ``check-access``). Default: serialize the block to stdout. ``--write``:
+    deep-merge it into a rebar-owned ``rebar.toml`` (existing keys win — hand edits are
+    never clobbered).
+
+    The port is obtained through ``mapping_probe.build_probe`` as a MODULE ATTRIBUTE so a
+    test monkeypatch on that factory injects an offline fake."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="rebar bridge suggest-mapping",
+        description="Inspect a live Jira project (read-only) and suggest a [mapping] section.",
+    )
+    parser.add_argument("project", metavar="PROJECT", help="The Jira project key to inspect.")
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="Deep-merge the suggestion into a rebar-owned rebar.toml (existing keys win).",
+    )
+    try:
+        args = parser.parse_args(argv)
+    except SystemExit as exc:
+        return 0 if exc.code in (0, None) else int(exc.code)
+
+    # The engine ships under ``rebar/_engine``; put it on the in-process import path so
+    # ``rebar_reconciler.mapping_probe`` resolves as the SAME module object a test patches.
+    from rebar._engine import engine_dir
+
+    eng = str(engine_dir())
+    if eng not in sys.path:
+        sys.path.insert(0, eng)
+    import rebar_reconciler.mapping_probe as mapping_probe
+
+    key = args.project
+    try:
+        port = mapping_probe.build_probe()
+        block = mapping_probe.build_mapping_layer(port, key)
+    except Exception as exc:  # noqa: BLE001 - surface any probe failure as a clean UX error
+        sys.stderr.write(
+            f"Error: could not probe Jira project {key!r}: {exc}\n"
+            "Check the project key exists, JIRA_URL/JIRA_USER/JIRA_PAT are set, and you "
+            "have access.\n"
+        )
+        return 1
+
+    if args.write:
+        return _suggest_mapping_write(key, block)
+
+    from rebar._config_writer import _emit_config_toml
+
+    sys.stdout.write(_emit_config_toml({"mapping": block}))
+    return 0
+
+
+def _suggest_mapping_deep_merge(incoming: dict, existing: dict) -> dict:
+    """Deep-merge ``existing`` over ``incoming`` so EXISTING keys win at every level — a
+    hand-edited mapping value is never clobbered by the fresh suggestion."""
+    out = dict(incoming)
+    for k, v in existing.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = _suggest_mapping_deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def _suggest_mapping_write(key: str, block: dict) -> int:
+    """Deep-merge the suggested ``block`` into a rebar-owned ``rebar.toml`` and write it
+    atomically. Target selection mirrors ``write_jira_config``: an existing ``rebar.toml``
+    is the target, else ``<repo_root>/rebar.toml`` is created; a user ``pyproject.toml`` is
+    NEVER edited. The whole file is read with stdlib ``tomllib``, mutated in memory, and
+    re-emitted via ``_emit_config_toml`` (existing keys win under
+    ``mapping.projects.<KEY>``), preserving flat ``[jira]``/``[tracker]`` siblings."""
+    import os
+
+    import tomllib
+
+    from rebar import config as _config
+    from rebar._config_schema import ConfigError
+    from rebar._config_writer import _emit_config_toml
+
+    base = _config.repo_root()
+    proj = _config._discover_project_config()
+    target = proj[0] if (proj is not None and proj[1] == "toml") else base / "rebar.toml"
+
+    data: dict = {}
+    if target.is_file():
+        try:
+            data = tomllib.loads(target.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as exc:
+            sys.stderr.write(f"Error: cannot read existing config {target}: {exc}\n")
+            return 1
+
+    mapping = data.get("mapping")
+    if not isinstance(mapping, dict):
+        mapping = {}
+    projects = mapping.get("projects")
+    if not isinstance(projects, dict):
+        projects = {}
+    incoming_layer = block.get("projects", {}).get(key, {})
+    existing_layer = projects.get(key)
+    if isinstance(existing_layer, dict):
+        projects[key] = _suggest_mapping_deep_merge(incoming_layer, existing_layer)
+    else:
+        projects[key] = incoming_layer
+    mapping["projects"] = projects
+    data["mapping"] = mapping
+
+    try:
+        text = _emit_config_toml(data)
+    except ConfigError as exc:
+        sys.stderr.write(f"Error: cannot serialize config: {exc}\n")
+        return 1
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as exc:
+        sys.stderr.write(f"Error: could not write config {target}: {exc}\n")
+        return 1
+    sys.stdout.write(f"Wrote suggested [mapping.projects.{key}] to {target}\n")
+    return 0
+
+
 def _grounding_info(argv: list[str]) -> int:
     """``rebar grounding-info`` → the static code-grounding oracle contract.
 

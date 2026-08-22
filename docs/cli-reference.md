@@ -1309,6 +1309,8 @@ commands:
     check-access        Check live Jira access with a create/search/delete
                         round-trip.
     setup               Interactively configure and validate Jira access.
+    suggest-mapping     Inspect a live Jira project (read-only) and suggest a
+                        [mapping] config section.
     projects            Manage the store's bridge-projects sync mapping.
 ```
 

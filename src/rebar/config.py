@@ -87,6 +87,8 @@ from rebar._config_sources import resolve_run_root as resolve_run_root
 from rebar._config_sources import resolve_stall_abort_limits as resolve_stall_abort_limits
 from rebar._config_sources import resolve_stall_attempts as resolve_stall_attempts
 from rebar._config_sources import resolve_usage_log_sink as resolve_usage_log_sink
+from rebar._config_writer import _emit_config_toml as _emit_config_toml
+from rebar._config_writer import _emit_nested_toml as _emit_nested_toml
 
 # The config WRITE path — the ONLY writer of a rebar-owned ``rebar.toml`` (the TOML emitter
 # and the read-whole/mutate/re-emit/atomic-replace ``[jira]`` writer, ADR 0070) — lives in the
