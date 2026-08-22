@@ -55,7 +55,7 @@ def test_the_caller_environment_is_forwarded_verbatim(
 
 
 def test_a_tmp_path_that_does_not_exist_yet_still_gets_a_usable_basetemp(tmp_path: Path) -> None:
-    """pytest's --basetemp does not create missing parents; the helper must."""
+    """pytest does not create the basetemp option's missing parents; the helper must."""
     probe = _probe(tmp_path, "def test_uses_tmp(tmp_path):\n    (tmp_path / 'x').write_text('x')\n")
     unborn = tmp_path / "not" / "created" / "yet"
     assert not unborn.exists()
