@@ -50,6 +50,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from rebar._store.paths import StorePaths
+
 logger = logging.getLogger(__name__)
 
 _FALSY = {"0", "false", "no", "off", ""}
@@ -75,12 +77,6 @@ def physical_now() -> int:
         except ValueError:
             pass
     return time.time_ns()
-
-
-def _rebar_dir(tracker: str | os.PathLike) -> Path:
-    """The per-clone ``.rebar/`` state directory, beside the tracker
-    (``<repo>/.tickets-tracker`` → ``<repo>/.rebar``)."""
-    return Path(tracker).resolve().parent / ".rebar"
 
 
 def _max_event_prefix(tracker: str | os.PathLike, ticket_id: str) -> int:
@@ -150,7 +146,7 @@ def next_tick(tracker: str | os.PathLike, ticket_id: str) -> int:
     if not _enabled():
         return physical_now()
     try:
-        rebar_dir = _rebar_dir(tracker)
+        rebar_dir = Path(StorePaths(tracker).rebar_dir)
         witness = _max_event_prefix(tracker, ticket_id)
         with _hlc_lock(rebar_dir):
             tick = max(_read_state(rebar_dir), witness, physical_now()) + 1

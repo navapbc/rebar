@@ -35,6 +35,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from rebar._store.paths import StorePaths
+
 logger = logging.getLogger(__name__)
 
 ENQUEUE = "ENQUEUE_ENRICH"
@@ -257,17 +259,17 @@ def reduce_ticket(ticket_id: str, tracker: str, *, now_ns: int | None = None) ->
 def _gate_marker_path(tracker: str) -> str:
     """The gate marker file, in the ``.rebar`` dir beside the CANONICAL *tracker*.
 
-    The resolution through :func:`rebar.llm.enrich_drain._canonical_tracker` is load-bearing
-    (bug ``da68-fc7c-068c-4c53`` / ``nuclear-calm-heron``): a ``make worktree`` worktree's
+    The resolution :class:`rebar._store.paths.StorePaths` performs is load-bearing (bug
+    ``da68-fc7c-068c-4c53`` / ``nuclear-calm-heron``): a ``make worktree`` worktree's
     ``.tickets-tracker`` is a SYMLINK to the canonical store while its ``.rebar`` is a real
     per-worktree directory, so a bare ``dirname`` keyed each worktree's marker on the view
     instead of the ONE shared queue. The marker only ever says "nothing is pending", so a
     worktree-local one asserts quiet for a store another worktree just made noisy — and a
     mutation's ``_clear_gate_marker`` unlinked the WRONG file, leaving the stale claim
-    standing until its TTL."""
-    from rebar.llm.enrich_drain import _canonical_tracker
-
-    return os.path.join(os.path.dirname(_canonical_tracker(tracker)), ".rebar", _GATE_MARKER_NAME)
+    standing until its TTL. Routing through ``_store.paths`` (a low-level leaf) rather than
+    through ``enrich_drain`` also drops the dependency inversion that forced this import to
+    be function-local: ``enrich_drain`` imports this module."""
+    return StorePaths(tracker).sidecar(_GATE_MARKER_NAME)
 
 
 def _clear_gate_marker(tracker: str) -> None:
