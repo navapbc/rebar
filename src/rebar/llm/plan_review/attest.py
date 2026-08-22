@@ -56,14 +56,19 @@ def derive_plan_material_pin_health(
 ) -> DerivedPlanMaterialPinHealth:
     """Return additive related-material health using the public fingerprint seam."""
     from .pin_health import derive_health
+    from .relation_snapshot import material_child_index
 
-    return derive_health(
-        pin_records,
-        repo_root=repo_root,
-        enforced=enforced,
-        fingerprint=current_material_fingerprint,
-        compatible_fingerprint=_legacy_material_ok,
-    )
+    # bug 3d57: one lazily-built child-index snapshot shared across every pin
+    # fingerprint (and the in-frame legacy recomputes) instead of a full-store
+    # scan per pin per fingerprint generation.
+    with material_child_index(repo_root=repo_root):
+        return derive_health(
+            pin_records,
+            repo_root=repo_root,
+            enforced=enforced,
+            fingerprint=current_material_fingerprint,
+            compatible_fingerprint=_legacy_material_ok,
+        )
 
 
 __all__ = [

@@ -70,7 +70,11 @@ def plan_review_health(ticket: dict, *, repo_root: str | Path | None = None) -> 
         ticket_id = ticket.get("ticket_id") or ticket.get("id")
         if not isinstance(ticket_id, str) or not ticket_id:
             return unavailable_plan_review_health()
-        with ticket_reads.local_read_context():
+        from rebar.llm.plan_review.relation_snapshot import material_child_index
+
+        # bug 3d57: share ONE lazily-built child-index snapshot across the whole
+        # health read, so per-pin fingerprints do not each rescan the store.
+        with ticket_reads.local_read_context(), material_child_index(repo_root=repo_root):
             verified = signing.verify_signature(ticket_id, kind="plan-review", repo_root=repo_root)
             if (
                 not isinstance(verified, dict)
