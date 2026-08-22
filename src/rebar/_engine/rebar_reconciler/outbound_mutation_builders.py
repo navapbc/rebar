@@ -18,6 +18,7 @@ from rebar_reconciler.outbound_differ import (
     _TRANSPORT_ERROR,
     OutboundMutation,
     _best_effort,
+    _effective_link_map_for,
     _effective_status_map_for,
     _effective_type_map_for,
     _is_retired,
@@ -302,7 +303,13 @@ def _compute_outbound_update_mutation(
     # story 25ae Cycle 2: diff local deps -> Jira issuelinks (ADD-only,
     # deduped against the snapshot's existing issuelinks so an
     # already-present link emits nothing — no per-pass churn).
-    link_mutations = _diff_links(ticket, jira_fields, binding_store, links)
+    link_mutations = _diff_links(
+        ticket,
+        jira_fields,
+        binding_store,
+        links,
+        link_map=_effective_link_map_for(ticket, mapping, repo_root),
+    )
 
     if fields or comment_mutations or label_mutations or link_mutations:
         # Sync-hardening P5 / bug 57d1: emit a one-line CHANGED-FIELD BREADCRUMB
