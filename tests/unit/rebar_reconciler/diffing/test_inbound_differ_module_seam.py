@@ -83,7 +83,7 @@ def test_inbound_differ_still_exposes_every_moved_name(name: str) -> None:
     assert getattr(inbound_differ, name) is getattr(inbound_collection_diffs, name)
 
 
-@pytest.mark.parametrize("filename", ("inbound_differ.py", "inbound_collection_diffs.py"))
+@pytest.mark.parametrize("filename", ["inbound_differ.py", "inbound_collection_diffs.py"])
 def test_both_sides_of_the_seam_sit_inside_the_size_band(filename: str) -> None:
     """No sliver file, and real headroom under the cap — measured the way CI measures."""
     cap = read_limit()

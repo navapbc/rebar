@@ -156,6 +156,7 @@ def _cli_json(repo: Path, *args: str):
         capture_output=True,
         text=True,
         cwd=str(repo),
+        check=False,
     )
     assert cp.stdout.strip(), f"cli {args} produced no stdout (rc={cp.returncode}, {cp.stderr})"
     return cp.stdout

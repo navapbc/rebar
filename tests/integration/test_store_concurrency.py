@@ -60,13 +60,21 @@ def _store_build_reason() -> str | None:
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td) / "probe"
         repo.mkdir()
-        if subprocess.run(["git", "init", "-q"], cwd=repo).returncode != 0:
+        if subprocess.run(["git", "init", "-q"], cwd=repo, check=False).returncode != 0:
             return "git init failed in probe"
         subprocess.run(
-            ["git", "commit", "-q", "--allow-empty", "-m", "init"], cwd=repo, capture_output=True
+            ["git", "commit", "-q", "--allow-empty", "-m", "init"],
+            cwd=repo,
+            capture_output=True,
+            check=False,
         )
         res = subprocess.run(
-            [_REBAR, "init"], cwd=repo, env=_clean_env(), capture_output=True, text=True
+            [_REBAR, "init"],
+            cwd=repo,
+            env=_clean_env(),
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if res.returncode != 0:
             return f"on-PATH rebar lacks a working store core: {res.stderr.strip()[:120]}"
@@ -135,6 +143,7 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
             env=_clean_env(),
             capture_output=True,
             text=True,
+            check=False,
         )
 
     with ThreadPoolExecutor(max_workers=n) as ex:
@@ -152,6 +161,7 @@ def test_concurrent_writer_storm_no_loss(clone: Path):
         env=_clean_env(),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert json.loads(fsck.stdout).get("issue_count") == 0
 
@@ -175,6 +185,7 @@ def test_claim_storm_one_winner(clone: Path):
             env=_clean_env(),
             capture_output=True,
             text=True,
+            check=False,
         )
 
     with ThreadPoolExecutor(max_workers=n) as ex:

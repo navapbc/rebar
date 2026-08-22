@@ -104,6 +104,7 @@ def _git_tracked(root: str) -> set[str] | None:
             ["git", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             capture_output=True,
             timeout=15,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

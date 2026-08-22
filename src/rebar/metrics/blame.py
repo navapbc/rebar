@@ -44,6 +44,7 @@ def _git(repo_root: str, *args: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
+            check=False,
         )
     except Exception:  # noqa: BLE001 — best-effort: any git/OS error → no culprit
         return None

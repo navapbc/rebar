@@ -432,6 +432,7 @@ def test_hook_fails_when_rebar_build_commit_empty(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert cp.returncode != 0, "an empty REBAR_BUILD_COMMIT must fail the build (release fail-fast)"
 
@@ -482,6 +483,7 @@ def test_hook_falls_back_to_git_when_env_unset(tmp_path: Path) -> None:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert cp.returncode == 0, f"unset-env build must succeed (dev fallback): {cp.stderr[-1500:]}"
     assert _wheel_baked_commit(tmp_path / "d") == short, (

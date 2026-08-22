@@ -40,6 +40,7 @@ def _cli(
         text=True,
         cwd=cwd,
         env=env,
+        check=False,
     )
 
 

@@ -48,7 +48,7 @@ def od() -> ModuleType:
     return _load_module("outbound_differ_3b5f", _REC / "outbound_differ.py")
 
 
-@pytest.fixture()
+@pytest.fixture
 def binding_store_mod() -> ModuleType:
     return _load_module("binding_store_3b5f", _REC / "binding_store.py")
 

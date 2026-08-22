@@ -23,6 +23,7 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
         ["git", "-C", str(cwd), *args],
         capture_output=True,
         text=True,
+        check=False,
     )
     if check and result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {result.stderr}")

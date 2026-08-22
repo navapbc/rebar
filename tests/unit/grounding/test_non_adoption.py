@@ -72,7 +72,7 @@ def test_import_rebar_grounding_pulls_no_heavy_stack() -> None:
         "leaked=[m for m in heavy if m in sys.modules];"
         "print('LEAK:' + ','.join(leaked) if leaked else 'CLEAN')"
     )
-    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "CLEAN", (
         f"importing rebar.grounding leaked the heavy stack: {cp.stdout.strip()}"

@@ -118,7 +118,9 @@ def test_tenacity_retry_error_is_unwrapped():
             with attempt:
                 raise httpx.ReadTimeout("read timed out")
     except tenacity.RetryError as re:
-        assert classify_llm_failure(re).resolution_class is RC.WAIT_AND_RETRY
+        # PT017 is excluded here: the assertion is about the CLASSIFIER's verdict on the caught
+        # error, not about the raise itself; `pytest.raises` cannot express it.
+        assert classify_llm_failure(re).resolution_class is RC.WAIT_AND_RETRY  # noqa: PT017
 
 
 def test_usage_limit_diagnostic_disambiguates_limit():

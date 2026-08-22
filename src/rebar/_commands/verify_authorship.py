@@ -314,6 +314,7 @@ def _is_enforced(commit_sha: str | None, since_ref: str | None, tracker: str) ->
             capture_output=True,
             text=True,
             timeout=30,
+            check=False,
         )
         return proc.returncode == 0
     except Exception:  # noqa: BLE001 — ANY git failure → enforce (fail-closed), never raise
@@ -449,6 +450,7 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
     events: list[_ScopedEvent] = []
     for rel in (cp.stdout or "").splitlines():

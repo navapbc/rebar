@@ -142,6 +142,7 @@ def _run_map_script(*args: str, cwd: Path | None = None) -> subprocess.Completed
         text=True,
         timeout=300,
         cwd=str(cwd or _ROOT),
+        check=False,
     )
 
 

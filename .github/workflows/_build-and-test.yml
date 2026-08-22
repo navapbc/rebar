@@ -650,12 +650,16 @@ jobs:
         # method can't fire while a worker is blocked in a C-level flock/socket/subprocess call
         # (the exact hang shapes this suite exercises); the thread watchdog + faulthandler dumps
         # every thread's stack and aborts the worker, so a recurrence NAMES the offending test.
-        # 300s dwarfs the slowest legitimate test (the tail is seconds; the 300s snapshot-fetch
-        # backstop is monkeypatched down in-test) while a true hang fails in 5 min, not 60.
+        # The value is the `timeout` in [tool.pytest.ini_options] (story bold-abeyant-indri),
+        # kept equal by test_ci_workflow_parity.py so CI and a local `make test` agree. 20s is
+        # measured, not guessed: the whole default + integration tiers run clean at it, while a
+        # true hang now fails in 20s rather than 5 minutes. The long `timeout=` values in test
+        # SOURCES are subprocess ceilings, not durations; a test that must genuinely run longer
+        # carries `@pytest.mark.timeout(N, func_only=True)` with a reason.
         run: >-
           pytest -m "$DEFAULT_SUITE_MARKS"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25 --timeout=20 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
@@ -670,5 +674,5 @@ jobs:
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
-          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25 --timeout=20 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"

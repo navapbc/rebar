@@ -47,6 +47,7 @@ def _commit_count(tracker: Path) -> int:
             ["git", "-C", str(tracker), "rev-list", "--count", "tickets"],
             capture_output=True,
             text=True,
+            check=False,
         ).stdout.strip()
     )
 

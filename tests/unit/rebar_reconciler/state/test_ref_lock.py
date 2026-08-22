@@ -71,7 +71,7 @@ def _bare_git(args: list[str], bare: Path) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], tmp_path)
@@ -80,7 +80,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_git_repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:
     """A work repo with a bare 'origin' remote (for the distributed CAS path)."""
     bare = tmp_path / "bare.git"

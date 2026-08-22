@@ -36,7 +36,7 @@ def fresh_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path
     subprocess.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
     subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "i"], cwd=repo, check=True)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    yield repo
+    return repo
 
 
 def _tracker(repo: Path) -> Path:
@@ -48,6 +48,7 @@ def _config(tracker: Path, key: str) -> subprocess.CompletedProcess:
         ["git", "-C", str(tracker), "config", "--get", key],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 
@@ -72,7 +73,9 @@ def test_gc_config_migration_heals_legacy_and_is_idempotent(fresh_repo: Path) ->
     # gc.autoDetach=true (the DETACH that bug 88eb corrects) and no maintenance.autoDetach.
     subprocess.run(["git", "-C", str(tracker), "config", "gc.auto", "0"], check=True)
     subprocess.run(["git", "-C", str(tracker), "config", "gc.autoDetach", "true"], check=True)
-    subprocess.run(["git", "-C", str(tracker), "config", "--unset", "maintenance.autoDetach"])
+    subprocess.run(
+        ["git", "-C", str(tracker), "config", "--unset", "maintenance.autoDetach"], check=False
+    )
 
     # Re-init heals all three (idempotent migration).
     rebar.init_repo(repo_root=str(fresh_repo))
@@ -101,6 +104,7 @@ def test_gc_prune_now_preserves_all_tickets(fresh_repo: Path) -> None:
         ["git", "-C", str(tracker), "gc", "--prune=now"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert gc.returncode == 0, gc.stderr
 

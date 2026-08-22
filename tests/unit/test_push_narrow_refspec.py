@@ -64,7 +64,7 @@ def repo_with_origin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
     rebar.create_ticket("task", "seed", description=_AC, repo_root=str(repo))
-    yield repo
+    return repo
 
 
 def _competing_push(tmp_path: Path, repo: Path) -> None:

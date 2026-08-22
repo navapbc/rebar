@@ -68,6 +68,7 @@ def test_actionlint_install_fails_fast_on_download_failure(tmp_path: Path) -> No
         capture_output=True,
         text=True,
         timeout=180,
+        check=False,
     )
     # Every assertion below is satisfied by a child that never ran: `returncode != 0` is
     # true of a SIGNAL death (CPython reports -9), no binary gets installed, and the

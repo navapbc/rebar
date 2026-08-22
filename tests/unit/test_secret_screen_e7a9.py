@@ -198,7 +198,7 @@ def _comments(ticket_id: str, repo: Path) -> list[dict]:
 _LIVE_IDS = [f"{family}-{i}" for i, (family, _) in enumerate(_LIVE_SHAPES)]
 
 
-@pytest.mark.parametrize("family,value", _LIVE_SHAPES, ids=_LIVE_IDS)
+@pytest.mark.parametrize(("family", "value"), _LIVE_SHAPES, ids=_LIVE_IDS)
 def test_live_shaped_credential_in_a_comment_is_refused(
     family: str, value: str, ticket: str, rebar_repo: Path
 ) -> None:

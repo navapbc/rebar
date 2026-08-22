@@ -33,7 +33,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
-@pytest.fixture()
+@pytest.fixture
 def deploy_box(tmp_path: Path) -> dict[str, object]:
     """A fake box where main advanced and ONLY the observability probe source changed."""
     bin_dir = tmp_path / "bin"
@@ -109,6 +109,7 @@ def test_autodeploy_rematerializes_probe_on_source_change(
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert marker.exists(), (  # type: ignore[union-attr]
         "autodeploy must re-run install-observability.sh when the probe source changed, "

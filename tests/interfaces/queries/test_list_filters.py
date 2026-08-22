@@ -34,6 +34,7 @@ def _cli_list(repo: Path, *args: str):
         capture_output=True,
         text=True,
         env=_env(repo),
+        check=False,
     )
     return cp
 
@@ -78,6 +79,7 @@ def _seed_scenario(repo: Path) -> dict[str, str]:
         capture_output=True,
         text=True,
         env=_env(repo),
+        check=False,
     )
     s["E2"] = rebar.create_ticket("epic", "epic-E2", repo_root=r)
     s["e2c"] = rebar.create_ticket("task", "child-e2c", parent=s["E2"], repo_root=r)
@@ -190,7 +192,7 @@ def test_cli_type_filter_comma_is_or(scenario):
 
 # ── --min-children ───────────────────────────────────────────────────────────
 @pytest.mark.parametrize(
-    "n,present,absent",
+    ("n", "present", "absent"),
     [
         (3, ["E1"], ["E2", "E3"]),
         (1, ["E1", "E2"], ["E3"]),

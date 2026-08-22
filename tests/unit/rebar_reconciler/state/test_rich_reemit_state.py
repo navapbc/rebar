@@ -361,8 +361,6 @@ import json as _json  # noqa: E402
 from pathlib import Path as _Path  # noqa: E402
 from typing import Any as _Any  # noqa: E402
 
-import pytest as _pytest  # noqa: E402
-
 from rebar_reconciler import peer_state as _ps  # noqa: E402
 from rebar_reconciler.binding_store import BindingStore as _Store  # noqa: E402
 
@@ -493,7 +491,7 @@ def test_the_operation_performs_no_save_at_either_layer(tmp_path: _Path) -> None
         saves.append("repository")
         real_repo_save(self)
 
-    with _pytest.MonkeyPatch.context() as mp:
+    with pytest.MonkeyPatch.context() as mp:
         mp.setattr(type(store), "save", store_save)
         mp.setattr(BindingRepository, "save", repo_save)
         store.note_rich_emit("loc-A", "w1")

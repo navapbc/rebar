@@ -55,6 +55,7 @@ def test_init_fresh_and_idempotent(
         ["git", "-C", str(_tracker(fresh_repo)), "rev-parse", "--abbrev-ref", "HEAD"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     assert branch == "tickets"
     # idempotent

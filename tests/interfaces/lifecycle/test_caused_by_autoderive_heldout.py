@@ -29,7 +29,11 @@ def _git(repo: Path, *args: str) -> str:
 
 def _cli(*args: str, cwd: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, cwd=cwd
+        [sys.executable, "-m", "rebar.cli", *args],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        check=False,
     )
 
 

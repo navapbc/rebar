@@ -64,12 +64,12 @@ def binding_store_mod():
     return _load("_binding_store_for_acli_envelope", "binding_store.py")
 
 
-@pytest.fixture()
+@pytest.fixture
 def store(binding_store_mod, tmp_path):
     return binding_store_mod.BindingStore(tmp_path / ".tickets-tracker")
 
 
-@pytest.fixture()
+@pytest.fixture
 def acli_result(monkeypatch):
     """The value the REAL ``acli_cli_ops.add_comment`` returns for a live ACLI post."""
     from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess

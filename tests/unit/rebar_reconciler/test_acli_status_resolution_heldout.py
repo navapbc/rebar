@@ -52,7 +52,10 @@ def _resolve_via_transition_issue(status: str) -> tuple[str, str]:
 
     with (
         mock.patch.object(acli, "AcliClient", _FakeClient),
-        mock.patch.object(acli, "resolve_jira_settings", lambda: _SETTINGS),
+        # PT008 is excluded here: it would swap this zero-arg lambda for a
+        # `return_value=` MagicMock, which accepts ANY call shape. The lambda
+        # pins production to calling `resolve_jira_settings()` with no args.
+        mock.patch.object(acli, "resolve_jira_settings", lambda: _SETTINGS),  # noqa: PT008
     ):
         result = acli.transition_issue("PROJ-1", status)
 

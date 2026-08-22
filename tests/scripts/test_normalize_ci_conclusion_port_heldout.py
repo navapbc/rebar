@@ -42,6 +42,7 @@ def _run(env: dict[str, str]) -> subprocess.CompletedProcess:
         env={**env, "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

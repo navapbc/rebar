@@ -26,7 +26,9 @@ def _has_gnu_sha256sum() -> bool:
     if shutil.which("sha256sum") is None:
         return False
     try:
-        out = subprocess.run(["sha256sum", "--version"], capture_output=True, text=True)
+        out = subprocess.run(
+            ["sha256sum", "--version"], capture_output=True, text=True, check=False
+        )
         return "coreutils" in (out.stdout + out.stderr).lower()
     except OSError:
         return False
@@ -44,6 +46,7 @@ def _verify(archive: Path, expected_sha: str) -> subprocess.CompletedProcess:
         text=True,
         capture_output=True,
         cwd=str(archive.parent),
+        check=False,
     )
 
 

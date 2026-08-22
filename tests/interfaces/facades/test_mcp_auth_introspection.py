@@ -297,5 +297,6 @@ def test_introspection_env_vars_and_manifest():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stdout + r.stderr

@@ -135,7 +135,7 @@ def test_no_workflow_runs_on_a_push_to_main(name: str) -> None:
 # --- AC2: push CI for other branches survives --------------------------------------------
 
 
-@pytest.mark.parametrize("name", (*_SIX_HOURLY, "prompt-eval.yml"))
+@pytest.mark.parametrize("name", [*_SIX_HOURLY, "prompt-eval.yml"])
 def test_push_ci_for_non_main_branches_is_preserved(name: str) -> None:
     on_block = _on(name)
     assert _push_matches_branch(on_block, "wip-some-topic"), (

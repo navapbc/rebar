@@ -195,6 +195,7 @@ def _read_local_ticket_full(repo_root: Path, local_id: str, *, no_sync: bool) ->
             cwd=str(repo_root),
             timeout=30,
             env=_env,
+            check=False,
         )
         if result.returncode != 0:
             return None

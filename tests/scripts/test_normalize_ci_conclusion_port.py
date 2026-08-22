@@ -71,6 +71,7 @@ def test_cli_env_contract_matches_shell_shape() -> None:
         env={"CONCLUSION": "skipped", "FAILURE_OBSERVED": "false", "PATH": "/usr/bin:/bin"},
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "success"

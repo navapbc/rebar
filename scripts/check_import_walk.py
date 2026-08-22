@@ -209,6 +209,7 @@ def walk_scripts(scripts_dir: Path, skips: dict[str, str]) -> tuple[list[Failure
             capture_output=True,
             text=True,
             timeout=_CHILD_TIMEOUT_SECONDS,
+            check=False,
         )
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip()).splitlines()

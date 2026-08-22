@@ -409,7 +409,7 @@ def test_repair_force_writes_the_pre_repair_tag_and_repoints_it(
 @pytest.mark.unit
 @pytest.mark.scripts
 @pytest.mark.parametrize(
-    "rest,expect_init_only",
+    ("rest", "expect_init_only"),
     [([], True), (["--repair"], False)],
 )
 def test_doctor_arm_reconverges_only_for_repair(

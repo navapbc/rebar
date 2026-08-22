@@ -41,7 +41,7 @@ mod = _load_conflict_resolver()
 
 
 @pytest.mark.parametrize(
-    "local_val,remote_val",
+    ("local_val", "remote_val"),
     [
         ("In Progress", "Done"),
         ("Open", None),

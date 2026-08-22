@@ -21,6 +21,7 @@ def test_first_server_construction_completes_mcp_settings() -> None:
         ],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert completed.returncode == 0, completed.stderr

@@ -89,6 +89,7 @@ def _rev_parse_lines(repo_root: str | None, *specs: str) -> list[str] | None:
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         return None

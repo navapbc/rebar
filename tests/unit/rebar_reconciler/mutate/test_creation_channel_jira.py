@@ -192,7 +192,7 @@ def test_legacy_positive_infers_jira_with_marker(tmp_path):
 
 # ── legacy_negative (AC6): break any one signal -> unknown, no marker ─────────
 @pytest.mark.parametrize(
-    "ticket_id,author,env_id,why",
+    ("ticket_id", "author", "env_id", "why"),
     [
         ("local-dig-999", "reconciler", "reconciler", "non-jira id"),
         ("jira-dig-999", "someone-else", "reconciler", "wrong author"),

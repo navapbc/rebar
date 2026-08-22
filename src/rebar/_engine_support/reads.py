@@ -147,6 +147,7 @@ def tracker_dir(repo_root: str | os.PathLike[str] | None = None) -> str:
             ["git", "-C", root, "rev-parse", "--is-inside-work-tree"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
         )
         if _r.returncode != 0:
             raise TrackerRootError(_NOT_A_REPO) from None
@@ -217,6 +218,7 @@ def ensure_fresh(tracker: str, *, no_sync: bool = False) -> None:
             ["git", "-C", tracker_abs, "rev-parse", "--verify", branch],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            check=False,
         )
         if r.returncode != 0:
             return

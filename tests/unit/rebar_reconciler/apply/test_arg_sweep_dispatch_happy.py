@@ -109,6 +109,7 @@ def test_cluster1_leaf_module_is_arg_clean(rel_path):
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     combined = proc.stdout + proc.stderr
     arg_lines = [ln for ln in combined.splitlines() if ":" in ln and " ARG" in ln]

@@ -109,6 +109,7 @@ def _run_verify_opcert(repo: Path, *extra: str) -> subprocess.CompletedProcess:
         ["rebar", "verify-opcert", "--root", str(repo), *extra],
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

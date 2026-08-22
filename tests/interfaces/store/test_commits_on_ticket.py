@@ -147,6 +147,7 @@ def test_survives_compaction(rebar_repo: Path) -> None:
         text=True,
         cwd=str(rebar_repo),
         env=subprocess_env({"REBAR_SYNC_PULL": "off"}),
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     state = rebar.show_ticket(tid, repo_root=str(rebar_repo))

@@ -41,7 +41,9 @@ def _run(store: Path, *args: str, env_extra: dict | None = None) -> subprocess.C
     env["REBAR_IDENTITY_REQUIRE_AUTHENTICATED"] = "0"
     if env_extra:
         env.update(env_extra)
-    return subprocess.run(["rebar", *args], cwd=store, env=env, capture_output=True, text=True)
+    return subprocess.run(
+        ["rebar", *args], cwd=store, env=env, capture_output=True, text=True, check=False
+    )
 
 
 def test_verify_identity_dispatches(store: Path) -> None:

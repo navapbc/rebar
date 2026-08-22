@@ -22,7 +22,9 @@ import rebar
 
 
 def _git_out(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
+    ).stdout
 
 
 def test_cache_json_in_committed_tracker_gitignore(rebar_repo: Path) -> None:
@@ -47,11 +49,11 @@ def test_git_add_never_stages_cache_json(rebar_repo: Path) -> None:
     (tracker / "..cache.json.root.tmp").write_text('{"partial": true}')
     (ticket_dir / "..cache.json.ticket.tmp").write_text('{"partial": true}')
 
-    subprocess.run(["git", "add", "-A"], cwd=tracker, capture_output=True, text=True)
+    subprocess.run(["git", "add", "-A"], cwd=tracker, capture_output=True, text=True, check=False)
     staged = _git_out("diff", "--cached", "--name-only", cwd=tracker).splitlines()
 
     cache_staged = [p for p in staged if ".cache.json" in p]
     assert cache_staged == [], f"git add -A staged cache files: {cache_staged}"
 
     # Restore the index (parity with the bash test's `git reset -q`).
-    subprocess.run(["git", "reset", "-q"], cwd=tracker, capture_output=True, text=True)
+    subprocess.run(["git", "reset", "-q"], cwd=tracker, capture_output=True, text=True, check=False)

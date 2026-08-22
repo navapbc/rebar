@@ -111,7 +111,9 @@ def test_single_write_retries_transient_add_failure(
 
     # The event is durably committed (present in HEAD's tree), proving the retry
     # actually committed rather than swallowing the failure.
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-1" in r.stdout
 
 
@@ -126,7 +128,9 @@ def test_single_write_retries_macos_einval_add_failure(
     rc = event_append.stage_and_commit(tracker, "tk-mac", _event("u-macos"))
     assert rc == 0
 
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-mac" in r.stdout
 
 
@@ -144,6 +148,7 @@ def test_batch_write_retries_transient_add_failure(
         ["git", "-C", tracker, "diff", "--cached", "--name-only"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.stdout.strip() == "", "index clean after the retried batch committed"
 
@@ -212,7 +217,9 @@ def test_single_write_retries_transient_commit_odb_failure(
     rc = event_append.stage_and_commit(tracker, "tk-c", _event("u-commit"))
     assert rc == 0
 
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-c" in r.stdout
 
 
@@ -234,19 +241,25 @@ def test_orphan_index_lock_under_write_lock_self_heals(tmp_path: Path) -> None:
     assert rc == 0, "a locked write must reclaim the orphan index.lock and succeed"
     assert not lock.exists(), "the orphan index.lock must be reclaimed, not left to wedge"
 
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-o" in r.stdout
 
 
 def _loose_object_path(tracker: str, relpath: str) -> Path:
     """The on-disk loose-object path for whatever blob ``relpath`` is staged as."""
     sha = subprocess.run(
-        ["git", "-C", tracker, "rev-parse", f":{relpath}"], capture_output=True, text=True
+        ["git", "-C", tracker, "rev-parse", f":{relpath}"],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     op = subprocess.run(
         ["git", "-C", tracker, "rev-parse", "--git-path", f"objects/{sha[:2]}/{sha[2:]}"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     return Path(op) if os.path.isabs(op) else Path(tracker) / op
 
@@ -285,7 +298,9 @@ def test_cross_path_poisoned_index_self_heals(
     rc2 = event_append.stage_and_commit(tracker, "tk-2", _event("u2"))
     assert rc2 == 0, "the poison must be gone — no lingering cascade for the next write"
 
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-1" in r.stdout and "COMMENT tk-2" in r.stdout
     # The anomaly is recorded (not silently papered over) and names the dropped orphan.
     heal_logs = [r for r in caplog.records if "poisoned index" in r.getMessage()]
@@ -319,5 +334,7 @@ def test_own_vanished_object_is_regenerated(
     rc = event_append.stage_and_commit(tracker, "tk-1", _event("u1"))
     assert rc == 0, "the vanished own-object must be regenerated on re-add and commit"
 
-    r = subprocess.run(["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "-C", tracker, "log", "--oneline"], capture_output=True, text=True, check=False
+    )
     assert "COMMENT tk-1" in r.stdout

@@ -167,5 +167,6 @@ def _fsck_subprocess(repo: Path, *flags: str) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     return out.returncode, out.stdout + out.stderr

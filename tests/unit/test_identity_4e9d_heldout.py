@@ -90,6 +90,7 @@ def test_delete_composer_stamps_email(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert res.returncode == 0, res.stderr
     # the UNLINK written onto A by the delete scan is composed in delete.py

@@ -48,6 +48,7 @@ def _tickets_head(tracker: Path) -> str:
         ["git", "-C", str(tracker), "rev-parse", "tickets"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
 
 
@@ -106,6 +107,7 @@ def test_marker_is_gitignored(fresh_repo: Path) -> None:
         ["git", "-C", str(tracker), "show", "tickets:.gitignore"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
     assert ensures.APPLIED_MARKER in gitignore.splitlines()
     # The written marker is ignored — it never shows up as an untracked change.
@@ -114,6 +116,7 @@ def test_marker_is_gitignored(fresh_repo: Path) -> None:
         ["git", "-C", str(tracker), "status", "--porcelain"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
     assert ensures.APPLIED_MARKER not in untracked
 

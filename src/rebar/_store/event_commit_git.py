@@ -72,7 +72,9 @@ def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
     ``TimeoutExpired`` exception type. A genuine ``OSError`` (e.g. git not on PATH) still
     propagates unchanged, preserving the best-effort helpers' ``except OSError`` behavior."""
     try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=_GIT_TIMEOUT)
+        return subprocess.run(
+            argv, capture_output=True, text=True, timeout=_GIT_TIMEOUT, check=False
+        )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {_GIT_TIMEOUT}s")
 

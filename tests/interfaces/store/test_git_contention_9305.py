@@ -283,6 +283,7 @@ def test_concurrent_processes_through_seam_both_succeed(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
 
     results: dict[str, subprocess.CompletedProcess] = {}

@@ -50,13 +50,13 @@ CASES = [
 ]
 
 
-@pytest.mark.parametrize("label,sig,expect_retryable", CASES, ids=[c[0] for c in CASES])
+@pytest.mark.parametrize(("label", "sig", "expect_retryable"), CASES, ids=[c[0] for c in CASES])
 def test_classifier_retryability(label: str, sig: dict, expect_retryable: bool) -> None:
     got = classify_plan_review_attestation(_result(**sig))
     assert got.retryable is expect_retryable, f"{label}: {got.as_dict()}"
 
 
-@pytest.mark.parametrize("label,sig,expect_retryable", CASES, ids=[c[0] for c in CASES])
+@pytest.mark.parametrize(("label", "sig", "expect_retryable"), CASES, ids=[c[0] for c in CASES])
 def test_cli_and_mcp_never_disagree(
     label: str, sig: dict, expect_retryable: bool, capsys: pytest.CaptureFixture[str]
 ) -> None:

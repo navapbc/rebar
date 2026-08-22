@@ -249,6 +249,7 @@ def test_rebar_sign_cli_emits_envelope_and_renders(store: Path) -> None:
         capture_output=True,
         text=True,
         cwd=str(store),
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     # Text render must not KeyError on the missing HMAC `signature` field.
@@ -268,6 +269,7 @@ def test_rebar_sign_cli_json_validates_against_schema(store: Path) -> None:
         capture_output=True,
         text=True,
         cwd=str(store),
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     out = json.loads(cp.stdout)

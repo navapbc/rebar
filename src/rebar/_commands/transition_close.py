@@ -682,6 +682,7 @@ def _short_head(_tracker: str) -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         ).stdout.strip()
     except Exception:  # noqa: BLE001 — short-HEAD is a session-id nicety; fall open to "" if git is unavailable
         return ""

@@ -22,6 +22,7 @@ def _git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProce
         ["git", "-C", str(cwd), *args],
         capture_output=True,
         text=True,
+        check=False,
     )
     if check and result.returncode != 0:
         raise AssertionError(f"git {' '.join(args)} failed: {result.stderr}")
@@ -116,6 +117,7 @@ def test_unreachable_explicit_init_fails_closed_without_orphan(tmp_path: Path) -
         capture_output=True,
         text=True,
         timeout=20,
+        check=False,
     )
 
     assert result.returncode != 0
@@ -135,6 +137,7 @@ def test_force_new_store_is_required_for_unreachable_cli_remote(tmp_path: Path) 
         capture_output=True,
         text=True,
         timeout=20,
+        check=False,
     )
     assert refused.returncode != 0
     assert not (repo / ".tickets-tracker").exists()
@@ -146,6 +149,7 @@ def test_force_new_store_is_required_for_unreachable_cli_remote(tmp_path: Path) 
         capture_output=True,
         text=True,
         timeout=20,
+        check=False,
     )
     assert forced.returncode == 0, forced.stderr
     assert (repo / ".tickets-tracker").is_dir()
@@ -175,6 +179,7 @@ def test_force_cannot_override_an_advertised_branch_fetch_failure(
         capture_output=True,
         text=True,
         timeout=20,
+        check=False,
     )
 
     assert result.returncode != 0
@@ -198,6 +203,7 @@ def test_force_warns_but_preserves_reachable_absent_bootstrap(
         capture_output=True,
         text=True,
         timeout=20,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

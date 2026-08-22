@@ -98,7 +98,7 @@ def ol() -> ModuleType:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def _isolated_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     xdg = tmp_path / "xdg"
     (xdg / "rebar").mkdir(parents=True)

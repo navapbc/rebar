@@ -71,6 +71,7 @@ def _ruff_codes(stdin_filename: str) -> set[str]:
         cwd=str(_REPO_ROOT),
         text=True,
         capture_output=True,
+        check=False,
     )
     out = proc.stdout + proc.stderr
     return {code for code in ("BLE001", "T201") if code in out}
@@ -112,6 +113,7 @@ def test_exemplar_package_is_clean() -> None:
         cwd=str(_REPO_ROOT),
         text=True,
         capture_output=True,
+        check=False,
     )
     assert proc.returncode == 0, f"plan_review not BLE001/T201-clean:\n{proc.stdout}{proc.stderr}"
 

@@ -42,7 +42,7 @@ def _http_error(code: int) -> urllib.error.HTTPError:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def ctx(tmp_path: Path) -> apply_handlers.BatchApplyContext:
     return apply_handlers.BatchApplyContext(
         client=object(), repo_root=tmp_path, pass_id="test-pass"

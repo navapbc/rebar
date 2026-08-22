@@ -385,7 +385,46 @@ line-length = 100
 # GitHub Code Quality (CodeQL) surfaced; it is low-noise here (the few deliberate
 # long-lived handles carry an inline `# noqa: SIM115`). We take SIM115 only, not
 # the wider SIM group, which is noisier for this codebase.
-select = ["E", "F", "W", "I", "UP", "B", "BLE001", "T201", "SIM115", "ASYNC", "DTZ", "RUF"]
+# PLW1510 (subprocess-run-without-check) + a NAMED SUBSET of flake8-pytest-style
+# (PT) are the test-hygiene gate (story bold-abeyant-indri). Both families are
+# taken PER CODE, exactly as SIM115 is above — never as the whole group:
+#   • PLW1510 makes every `subprocess.run` state its return-code policy. The
+#     absent-string subprocess oracle (bugs 0e1d-c698-c38d-4c3e,
+#     1241-b83c-f8c7-40bf) is a test that cannot fail; an explicit `check=`
+#     forces the author to say which it is.
+#   • PT001/PT006/PT007/PT008/PT012/PT013/PT017/PT021/PT022/PT028 are the
+#     structural pytest checks. PT018, PT011 and PT019 are DELIBERATELY NOT
+#     selected: they carry 1666 findings on this tree (composite asserts,
+#     bare-`Exception` raises-matches, leading-underscore fixture args) whose
+#     remediation is a behaviour-touching sweep, not a hygiene fix. Deferring
+#     them is a decision, not an oversight; adopt them in their own change.
+# Neither family may be widened-then-silenced via `ignore`: `ignore` is pinned
+# to the RUF unicode trio by `test_ruff_ratchet.py`.
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "BLE001",
+    "T201",
+    "SIM115",
+    "ASYNC",
+    "DTZ",
+    "RUF",
+    "PLW1510",
+    "PT001",
+    "PT006",
+    "PT007",
+    "PT008",
+    "PT012",
+    "PT013",
+    "PT017",
+    "PT021",
+    "PT022",
+    "PT028",
+]
 
 # ── RUF (Ruff-native) hygiene ratchet (story 125d) ────────────────────────────
 # The RUF family is enabled tree-wide. The only deferral is the ambiguous-unicode
@@ -597,6 +636,19 @@ testpaths = ["tests"]
 # typos (e.g. a misspelled tier) from silently passing — part of the external-
 # test confinement (bug 4a48-6dd5-aef3-4c8e).
 addopts = "--strict-markers --strict-config"
+# ── Per-test hang budget (story bold-abeyant-indri) ───────────────────────────
+# pytest-timeout's ini keys, so `make test` and a bare local `pytest` carry the
+# same budget CI does — previously it existed ONLY on the CI command lines, so a
+# local run could hang indefinitely (bugs e394-9433-c839-4c9f,
+# 9bb7-4430-1202-4d93). 20 s is measured, not guessed: the whole unit tier runs
+# clean at `--timeout=20` (5097 passed, zero `Failed: Timeout`, 2026-08-21).
+# `timeout_func_only` charges the budget to the test body only, so a slow
+# fixture cannot spend a test's allowance. A test that must legitimately run
+# longer overrides it with `@pytest.mark.timeout(N, func_only=True)` and a
+# one-line comment naming why — no silent exemptions.
+timeout = 20
+timeout_method = "thread"
+timeout_func_only = true
 markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",

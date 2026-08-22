@@ -51,7 +51,7 @@ def _engine_seam():
 
     compose_reconciler_runtime = _compose_reconciler_runtime
     BackendEnvError = _BackendEnvError
-    yield
+    return
 
 
 # The ambient resolvers S2 must stop re-reading after composition.
@@ -81,7 +81,7 @@ def _default_jira_env(monkeypatch):
     monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
     monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
-    yield
+    return
 
 
 # --------------------------------------------------------------------------- #

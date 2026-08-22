@@ -23,7 +23,7 @@ import rebar
 from rebar._commands._seam import tracker_dir
 
 pytestmark = pytest.mark.skipif(
-    subprocess.run(["ssh-keygen", "-Y", "sign", "-h"], capture_output=True).returncode
+    subprocess.run(["ssh-keygen", "-Y", "sign", "-h"], capture_output=True, check=False).returncode
     not in (0, 1, 255),
     reason="ssh-keygen with -Y sign (OpenSSH >= 8.9) required",
 )
@@ -123,6 +123,7 @@ def test_transition_event_passes_the_merge_gate(signed_repo: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert res.returncode == 0, res.stdout + res.stderr
 

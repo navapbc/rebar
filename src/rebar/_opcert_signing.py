@@ -133,6 +133,7 @@ def _generate_opcert_key(key_path: str) -> None:
                 "rebar-opcert",
             ],
             capture_output=True,
+            check=False,
         )
         if proc.returncode != 0 or not os.path.exists(staging_priv):
             raise OpcertKeyUnavailable(

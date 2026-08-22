@@ -50,7 +50,7 @@ def repo_with_origin(
     _git("remote", "add", "origin", str(origin), cwd=repo)
     monkeypatch.setenv("REBAR_ROOT", str(repo))
     rebar.init_repo(repo_root=str(repo))
-    yield repo, origin
+    return repo, origin
 
 
 def _origin_ref(origin: Path) -> str:
@@ -58,6 +58,7 @@ def _origin_ref(origin: Path) -> str:
         ["git", "--git-dir", str(origin), "rev-parse", "refs/heads/tickets"],
         capture_output=True,
         text=True,
+        check=False,
     )
     return r.stdout.strip() or "NONE"
 

@@ -69,7 +69,9 @@ def test_snapshot_path_is_not_gitignored(tmp_path):
 
     def ignored(rel: str) -> bool:
         return (
-            subprocess.run(["git", "check-ignore", rel], cwd=repo, capture_output=True).returncode
+            subprocess.run(
+                ["git", "check-ignore", rel], cwd=repo, capture_output=True, check=False
+            ).returncode
             == 0
         )
 

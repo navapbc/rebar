@@ -26,7 +26,7 @@ class TestNormalizePushMode:
 
     # ── case- and whitespace-insensitivity ─────────────────────────────────────
     @pytest.mark.parametrize(
-        "raw,expect",
+        ("raw", "expect"),
         [
             ("OFF", "off"),
             ("Off", "off"),

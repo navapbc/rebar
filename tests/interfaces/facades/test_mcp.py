@@ -72,7 +72,7 @@ def test_write_tools_present_by_default(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 @pytest.mark.parametrize(
-    "val,expect_readonly",
+    ("val", "expect_readonly"),
     [
         ("1", True),
         ("true", True),
@@ -151,7 +151,9 @@ def test_reconcile_cap0_modes_allowed_in_both_gates(
         try:
             asyncio.run(srv.call_tool("reconcile", {"mode": mode}))
         except Exception as exc:  # noqa: BLE001
-            assert "disabled" not in str(exc).lower(), (mode, readonly, exc)
+            # PT017 is excluded here: a cap-0 mode may legitimately SUCCEED or fail for lack of
+            # creds. The oracle is "not refused by the gate", not "raises".
+            assert "disabled" not in str(exc).lower(), (mode, readonly, exc)  # noqa: PT017
 
 
 @pytest.fixture

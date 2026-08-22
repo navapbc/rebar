@@ -43,7 +43,10 @@ def _tracker(repo: Path) -> Path:
 
 def _tickets_head(tracker: Path) -> str:
     return subprocess.run(
-        ["git", "-C", str(tracker), "rev-parse", "tickets"], capture_output=True, text=True
+        ["git", "-C", str(tracker), "rev-parse", "tickets"],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
 
 

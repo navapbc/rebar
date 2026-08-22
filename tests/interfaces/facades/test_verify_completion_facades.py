@@ -173,7 +173,7 @@ def test_cli_text_output_renders_verdict_and_findings(
 
 
 @pytest.mark.parametrize(
-    "flags,expected_graph",
+    ("flags", "expected_graph"),
     [([], None), (["--graph"], True), (["--no-graph"], False)],
 )
 def test_cli_graph_tristate_reaches_verify_completion(
@@ -262,7 +262,7 @@ def test_mcp_verify_completion_gate_on_returns_schema_valid_dict(
 
 
 @pytest.mark.parametrize(
-    "graph_arg,expected_graph",
+    ("graph_arg", "expected_graph"),
     [({}, None), ({"graph": True}, True), ({"graph": False}, False)],
 )
 def test_mcp_graph_tristate_reaches_verify_completion(
