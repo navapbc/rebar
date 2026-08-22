@@ -522,3 +522,28 @@ def nit_suppressed_criteria(routing_map: dict[str, Any] | None = None) -> frozen
     project overlay's re-tunes (an overlay can add or clear the flag on any criterion)."""
     idx = routing_map if routing_map is not None else routing_index()
     return frozenset(k for k, v in idx.items() if isinstance(v, dict) and v.get("nit_suppressed"))
+
+
+def round_a_selection(snapshot: Any, changed_files: Sequence[str] = ()) -> dict[str, Any]:
+    """The snapshot-driven Round-A criterion selection for the ``code_review`` gate (RP-06 S3).
+
+    Both operands are read from ONE immutable effective
+    :class:`rebar.llm.criteria.snapshot.CriteriaSnapshot` — never re-reading ambient overlay
+    policy — so two consumers of the same snapshot cannot disagree:
+
+    * ``builtins`` = the active built-in criteria (effective disables already excluded by
+      :meth:`CriteriaSnapshot.builtins`) EXCLUDING any whose effective exec tier is ``DET``
+      (a deterministic detector is not an LLM finder — it runs in the DET path, not the fan-in);
+    * ``project_llm`` = the active ``project.`` non-DET ids whose ``applies_to`` admits
+      ``changed_files`` (:meth:`CriteriaSnapshot.code_review_project_applies`), each at most once.
+    """
+    gate = _GATE_KEY
+    builtins = tuple(
+        cid for cid in snapshot.builtins(gate) if snapshot.record(gate, cid).exec != "DET"
+    )
+    project_llm = tuple(
+        cid
+        for cid in snapshot.project_llm(gate)
+        if snapshot.code_review_project_applies(cid, changed_files).applies
+    )
+    return {"builtins": builtins, "project_llm": project_llm}

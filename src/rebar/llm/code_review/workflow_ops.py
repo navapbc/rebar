@@ -710,3 +710,42 @@ def apply_region_gated_floor(
             ]
     except Exception:
         logger.warning("region-gated floor failed; leaving verdict unfiltered", exc_info=True)
+
+
+# ── RP-06 S3: partial-failure verdict policy + shadow-contract comparison ─────────────────────
+def partial_failure_verdict(
+    verdict: dict[str, Any], *, blocking_capable_gap: bool, real_block: bool
+) -> dict[str, Any]:
+    """Apply the RP-06 partial-failure verdict policy to ``verdict`` IN PLACE and return it.
+
+    A partial failure (a criterion the discovery kernel could not complete) resolves by SEVERITY
+    of the coverage it left uncovered:
+
+    * ``real_block`` — a real blocking finding stands regardless of coverage → force ``BLOCK``;
+    * else ``blocking_capable_gap`` — a criterion CAPABLE of blocking could not run, so the gate
+      cannot certify a clean pass → ``INDETERMINATE``, recording the gap under ``coverage``;
+    * else — only advisory-capable coverage is missing, which never blocks a pass → unchanged.
+    """
+    if real_block:
+        verdict["verdict"] = "BLOCK"
+        return verdict
+    if blocking_capable_gap:
+        verdict["verdict"] = "INDETERMINATE"
+        verdict.setdefault("coverage", {})["blocking_capable_gap"] = True
+    return verdict
+
+
+def shadow_compare(legacy_ids: Any, new_ids: Any, *, allowlist: Any) -> dict[str, list[str]]:
+    """Compare the legacy and new selected criterion-id sets over ONE already-observed call set.
+
+    Pure set math (no model calls): ``added`` are ids the new selection introduced and ``removed``
+    are ids it dropped, each with the ``allowlist`` of KNOWN, sanctioned deltas subtracted so an
+    expected snapshot-driven change (effective disable/retune, project applicability, project DET)
+    does not surface as an unexplained divergence. Both lists are sorted."""
+    legacy = set(legacy_ids)
+    new = set(new_ids)
+    allowed = set(allowlist)
+    return {
+        "added": sorted((new - legacy) - allowed),
+        "removed": sorted((legacy - new) - allowed),
+    }

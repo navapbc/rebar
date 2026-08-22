@@ -49,7 +49,32 @@ def _canonical_path(p: str, repo_root: Any) -> str:
     return os.path.normpath(s)
 
 
-def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[str, dict]:
+def det_criteria_from_snapshot(snapshot: Any) -> dict[str, dict]:
+    """The DET criterion→``{"detector":..., "fail_mode":...}`` map for the ``code_review`` gate,
+    built from the EFFECTIVE :class:`rebar.llm.criteria.snapshot.CriteriaSnapshot` instead of the
+    packaged-only :func:`registry.det_criteria`.
+
+    The active DET criteria are the gate's built-ins PLUS the ``project.`` DET ids
+    (``snapshot.builtins("code_review")`` + ``snapshot.project_det("code_review")``); for each,
+    the effective :class:`CriterionRecord` decides inclusion — ONLY ``rec.exec == "DET"`` entries
+    appear (an LLM/non-DET project criterion is never a detector), with the detector selector and
+    ``fail_mode`` (default ``"open"``) read from its routing."""
+    gate = "code_review"
+    out: dict[str, dict] = {}
+    for cid in tuple(snapshot.builtins(gate)) + tuple(snapshot.project_det(gate)):
+        rec = snapshot.record(gate, cid)
+        if rec.exec != "DET":
+            continue
+        out[cid] = {
+            "detector": rec.routing.get("detector"),
+            "fail_mode": rec.routing.get("fail_mode", "open"),
+        }
+    return out
+
+
+def run_detectors(
+    *, changed_files: list[str], repo_root: Any = None, snapshot: Any = None
+) -> dict[str, dict]:
     """Run the DET-criteria detectors (a registry slice — not the whole grounding suite) over
     ``repo_root`` and bucket their evidence per criterion: ``{criterion: {abstained: [...],
     matches: [...]}}``.
@@ -68,7 +93,9 @@ def run_detectors(*, changed_files: list[str], repo_root: Any = None) -> dict[st
     # A missing root must NOT silently skip the scan (that would be a fail-OPEN, defeating the
     # fail-CLOSED posture). Default to the cwd — the gate runs from the repo it is reviewing.
     repo_root = repo_root if repo_root is not None else os.getcwd()
-    det_map = registry.det_criteria()
+    det_map = (
+        det_criteria_from_snapshot(snapshot) if snapshot is not None else registry.det_criteria()
+    )
     reg = load_registry(repo_root)
     # Slice the registry to the detectors ANY DET criterion selects (exact id or id-prefix).
     selected = tuple(d for d in reg if registry.criterion_for_detector(d.id, det_map) is not None)

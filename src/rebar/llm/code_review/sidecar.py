@@ -58,6 +58,21 @@ def change_fingerprint(
     ).hexdigest()[:16]
 
 
+def discovery_trace_from_journal(batch_plan: Any) -> list[dict[str, Any]]:
+    """The SAFE per-unit discovery trace a code-review batch journal recorded under
+    ``batch_plan["discovery_trace"]`` (RP-06 S3), or ``[]`` for a missing/malformed journal.
+
+    Defensive: a non-dict ``batch_plan``, an absent ``discovery_trace`` key, or a non-list value
+    all degrade to ``[]``. Each retained element is a redacted :func:`unit_trace` dict — it never
+    carries envelope content, prompt/ticket bodies, or a raw exception message."""
+    if not isinstance(batch_plan, dict):
+        return []
+    trace = batch_plan.get("discovery_trace")
+    if not isinstance(trace, list):
+        return []
+    return [t for t in trace if isinstance(t, dict)]
+
+
 def _with_norm_ids(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Stamp each finding with its reword-tolerant ``norm_id`` (reused from plan-review)."""
     from rebar.llm.plan_review.sidecar import norm_id
@@ -91,7 +106,7 @@ def build_payload(
     is None for Gerrit reviews and set by the local persistence path so local memory is queryable by
     session; ``deps`` is the ``{reviewed-file path: sha256}`` content-hash map the region-gated
     novelty floor (blameless-grindable-noctule) compares against next run."""
-    return {
+    payload = {
         "schema": SCHEMA,
         "impact_model_version": IMPACT_MODEL_VERSION,
         "verdict": verdict.get("verdict"),
@@ -111,6 +126,13 @@ def build_payload(
         "indeterminate": _with_norm_ids(verdict.get("indeterminate", [])),
         "coaching": verdict.get("coaching", []),
     }
+    # Internal journal field (RP-06 S3): the per-unit discovery trace, carried ONLY when the
+    # verdict recorded one. It never widens the SURFACED buckets (blocking/advisory/dropped/
+    # indeterminate); absent otherwise, so existing payloads stay byte-identical.
+    trace = verdict.get("discovery_trace")
+    if trace:
+        payload["discovery_trace"] = trace
+    return payload
 
 
 def emit(
