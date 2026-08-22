@@ -55,7 +55,8 @@ class Result:
 class Case:
     """One transport-agnostic contract row.
 
-    ``op`` is the write op under test. ``setup_type`` is the ticket type created
+    ``op`` is the write op under test (``create`` / ``claim`` / ``transition`` /
+    ``link``). ``setup_type`` is the ticket type created
     for the subject; ``pre_in_progress`` moves it to in_progress first (via the
     library, gate-free) so a close/close-gate row starts from a real work state.
     ``gate`` enables the claim or close gate for the row so a force-bypass row is
@@ -68,7 +69,7 @@ class Case:
     """
 
     id: str
-    op: str  # "create" | "claim" | "transition"
+    op: str  # "create" | "claim" | "transition" | "link"
     expected: Result
     setup_type: str = "task"
     pre_in_progress: bool = False
@@ -205,6 +206,24 @@ CASES: list[Case] = [
         expected=Result(ACCEPTED),
         expected_status="closed",
     ),
+    # ── caused_by link-time validation ───────────────────────────────────────
+    # A caused_by target with no commit referencing it is refused on every surface
+    # (the oracle's fixture repo HAS a commit, so the scan reaches a real verdict
+    # rather than degrading to "history unreadable"), and the force reason bypasses
+    # it identically on every surface.
+    Case(
+        id="caused-by-commitless-target",
+        op="link",
+        expected=Result(REJECTED, code=1),
+        unmutated_status="open",
+    ),
+    Case(
+        id="caused-by-force-bypass",
+        op="link",
+        inputs={"force": "oracle bypass"},
+        expected=Result(ACCEPTED),
+        expected_status="open",
+    ),
     # ── ref on a close ───────────────────────────────────────────────────────
     Case(
         id="ref-close",
@@ -258,7 +277,12 @@ def execute(adapter, case: Case, repo: Path) -> tuple[Result, str | None]:
             "task", "oracle culprit", description=_DESC, repo_root=str(repo)
         )
 
-    if case.op == "claim":
+    if case.op == "link":
+        target = rebar.create_ticket(
+            "task", "oracle link target", description=_DESC, repo_root=str(repo)
+        )
+        outcome = adapter.link(tid, target, "caused_by", **inputs)
+    elif case.op == "claim":
         outcome = adapter.claim(tid, **inputs)
     else:
         # Every transition case drives current="in_progress": the pre_in_progress

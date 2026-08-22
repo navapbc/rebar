@@ -178,11 +178,15 @@ def edit_ticket(ticket_id: str, *, repo_root=None, **fields) -> str | None:
     return _warn_description_cap(warning)
 
 
-def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:
+def link(id1: str, id2: str, relation: str, *, force: str = "", repo_root=None) -> dict | None:
     """Link two tickets.
 
     ``relation`` must be one of the seven canonical relations: blocks, depends_on,
     relates_to, duplicates, supersedes, discovered_from, caused_by.
+
+    A ``caused_by`` link is REFUSED when the target has no commit referencing it — the edge
+    feeds the escaped-defect lenses, so a target that never shipped code corrupts them.
+    ``force`` (a reason string) is the escape hatch, spelled as ``claim``'s ``--force``.
 
     Returns the REDIRECT record when hierarchy escalation recorded a DIFFERENT pair
     than the one asked for, else None. The CLI prints that record; this path cannot
@@ -193,7 +197,7 @@ def link(id1: str, id2: str, relation: str, *, repo_root=None) -> dict | None:
     from rebar._commands import composer
 
     def _link(i, j, rel, *, repo_root):
-        return composer.link_core(i, j, rel, repo_root=repo_root, quiet=True)
+        return composer.link_core(i, j, rel, repo_root=repo_root, quiet=True, force=force)
 
     return _python_leaf(_link, id1, id2, relation, repo_root=repo_root, what="link")
 

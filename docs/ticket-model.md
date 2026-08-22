@@ -165,6 +165,23 @@ Use `discovered_from` to record **provenance**: when working one ticket surfaces
 `create` the new ticket and `link <new> <parent> discovered_from` so the emergent-work
 trail lives in the store.
 
+**`caused_by` targets must have a referencing commit.** `caused_by` is the only
+machine-readable causation edge in the store, and the escaped-defect lenses
+(`rebar metrics`) and the epic-close bug floor both reason over it — so an edge pointing at
+a ticket that never shipped code silently corrupts them. `link <bug> <target> caused_by` is
+therefore **refused** unless the *target itself* has at least one commit referencing it (a
+`rebar-ticket:` trailer, or a leading `<id>:` subject). The target's **descendants do not
+count**: `caused_by` must name the specific change that introduced the defect, so credit an
+epic's child rather than the epic. The rule applies identically on the CLI, the library
+(`rebar.link`) and MCP (`link_tickets`), and `link --dry-run` previews the refusal.
+
+Two deliberate limits. When git history cannot be read at all — no code repo, or no commits
+yet — the link is **allowed**: a refusal must mean "this target has no commit", never "this
+checkout has no history". And `--force[=<reason>]` (`force=` on the library and MCP) is the
+escape hatch, for the case where attribution is genuinely by scope of work rather than by
+introducing commit. The `--caused-by=<id>` flag on a bug *close* writes through a different
+path and is **not** gated by this rule.
+
 `unlink <source> <target> [relation]` removes one link between the ordered pair. Without a
 relation it removes the **most-recently-created** net-active link, preserving the historical
 pair-scoped fallback; call it repeatedly to remove multiple links. With an explicit canonical

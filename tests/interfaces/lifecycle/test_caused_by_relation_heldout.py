@@ -28,7 +28,10 @@ def test_caused_by_is_directional(rebar_repo) -> None:
     repo = str(rebar_repo)
     bug = rebar.create_ticket("bug", "bug", repo_root=repo)
     culprit = rebar.create_ticket("task", "culprit", repo_root=repo)
-    rebar.link(bug, culprit, "caused_by", repo_root=repo)
+    # force: this contract pins DIRECTIONALITY, not commit evidence; the fixture
+    # repo's history has no commit referencing the culprit, so an unforced link
+    # would trip the (orthogonal) caused_by referencing-commit check.
+    rebar.link(bug, culprit, "caused_by", force="held-out directionality contract", repo_root=repo)
 
     # Forward edge on the source; NO reciprocal on the target.
     assert (culprit, "caused_by") in _rels(bug, repo)
@@ -52,7 +55,8 @@ def test_caused_by_is_non_cycle_inducing(rebar_repo) -> None:
     a = rebar.create_ticket("bug", "a", repo_root=repo)
     b = rebar.create_ticket("task", "b", repo_root=repo)
     rebar.link(a, b, "blocks", repo_root=repo)  # real blocking edge a -> b
-    rebar.link(b, a, "caused_by", repo_root=repo)  # reverse caused_by must NOT raise
+    # reverse caused_by must NOT raise (forced past the orthogonal referencing-commit check)
+    rebar.link(b, a, "caused_by", force="held-out non-cycle contract", repo_root=repo)
     assert (a, "caused_by") in _rels(b, repo)
 
 

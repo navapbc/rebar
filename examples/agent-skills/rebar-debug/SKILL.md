@@ -606,6 +606,13 @@ advantage; spend it while you have it.
    `rebar link` is the only path left — use it.) **Direction matters** on the link form: first
    id is the bug, second is the culprit, reading "id1 was caused by id2".
 
+   **The `rebar link` form is gated; the `--caused-by` flag is not.** `rebar link <bug>
+   <origin> caused_by` is REFUSED when the origin has no commit referencing it — the edge
+   feeds the escaped-defect metrics, so a target that never shipped code corrupts them.
+   `--force[=<reason>]` is the escape hatch (see the Omission case below). The
+   `--caused-by=<id>` flag on the close writes through a different path and is not gated by
+   that rule, so a refusal on the early link never blocks the close.
+
    Either way, state the attribution and its evidence (the sha, and why that commit rather than
    its neighbors) in the RCA comment too, so the reasoning survives independently of the link.
 6. **Say so when you disagree with the default.** If your attribution differs from the commit a
@@ -634,7 +641,14 @@ Four cases resolve differently:
   no commit that broke it, so blame will not find one. Attribute to the ticket that *should*
   have covered the behavior: the story/epic that introduced the feature the case belongs to, or
   the ticket whose acceptance criteria the missing behavior falls under. Say in the RCA that the
-  attribution is by scope-of-work rather than by introducing commit.
+  attribution is by scope-of-work rather than by introducing commit. That target is
+  commit-less by construction, so the link is refused unless you force it — spell the reason
+  out and repeat it in the RCA:
+
+  ```
+  rebar link <bug> <story> caused_by --force="scope-of-work attribution: the story that
+  should have covered this case has no introducing commit"
+  ```
 - **Unattributable** — no commit or ticket can be identified to the standard above (pre-history
   code, an untrailered import, a genuinely ambiguous multi-commit origin). Record that
   explicitly in the RCA: state what you searched (blame range, bisect bounds, tracker queries)

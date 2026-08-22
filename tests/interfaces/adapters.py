@@ -124,7 +124,7 @@ class Adapter:
     ) -> Outcome: ...
     def comment(self, tid: str, body: str) -> None: ...
     def tag(self, tid: str, tag: str) -> None: ...
-    def link(self, a: str, b: str, relation: str) -> None: ...
+    def link(self, a: str, b: str, relation: str, *, force: str | None = None) -> Outcome: ...
     def deps(self, tid: str) -> dict: ...
     def ready(self) -> Any: ...
     def next_batch(self, epic_id: str) -> dict: ...
@@ -206,8 +206,12 @@ class LibraryAdapter(Adapter):
     def tag(self, tid: str, tag: str) -> None:
         self._r.tag(tid, tag)
 
-    def link(self, a: str, b: str, relation: str) -> None:
-        self._r.link(a, b, relation)
+    def link(self, a: str, b: str, relation: str, *, force: str | None = None) -> Outcome:
+        try:
+            self._r.link(a, b, relation, **({} if force is None else {"force": force}))
+            return OK
+        except Exception as exc:  # noqa: BLE001 — parity adapter: uniformly mapped to an Outcome
+            return self._reject(exc)
 
     def deps(self, tid: str) -> dict:
         return self._r.deps(tid)
@@ -328,8 +332,8 @@ class CliAdapter(Adapter):
     def tag(self, tid: str, tag: str) -> None:
         assert self._run("tag", tid, tag).returncode == 0
 
-    def link(self, a: str, b: str, relation: str) -> None:
-        assert self._run("link", a, b, relation).returncode == 0
+    def link(self, a: str, b: str, relation: str, *, force: str | None = None) -> Outcome:
+        return self._outcome(self._run("link", a, b, relation, *_force_cli_args(force)))
 
     def deps(self, tid: str) -> dict:
         return self._ok_json("deps", tid)
@@ -499,8 +503,17 @@ class McpAdapter(Adapter):
     def tag(self, tid: str, tag: str) -> None:
         self._call("tag_ticket", ticket_id=tid, tag=tag)
 
-    def link(self, a: str, b: str, relation: str) -> None:
-        self._call("link_tickets", id1=a, id2=b, relation=relation)
+    def link(self, a: str, b: str, relation: str, *, force: str | None = None) -> Outcome:
+        if force is not None and "force" not in self._tool_params("link_tickets"):
+            return NOT_EXPOSED
+        args: dict[str, Any] = {"id1": a, "id2": b, "relation": relation}
+        if force is not None:
+            args["force"] = force
+        try:
+            self._call("link_tickets", **args)
+            return OK
+        except Exception as exc:  # noqa: BLE001 — parity adapter: uniformly mapped to an Outcome
+            return self._reject(exc)
 
     def deps(self, tid: str) -> dict:
         return self._call("ticket_deps", ticket_id=tid)

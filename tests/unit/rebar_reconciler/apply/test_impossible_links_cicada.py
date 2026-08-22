@@ -75,9 +75,9 @@ def _counting_link(monkeypatch) -> list[tuple]:
     real_link = rebar.link
     calls: list[tuple] = []
 
-    def counting(src, dst, relation, *, repo_root=None):
+    def counting(src, dst, relation, *, force="", repo_root=None):
         calls.append((src, dst, relation))
-        return real_link(src, dst, relation, repo_root=repo_root)
+        return real_link(src, dst, relation, force=force, repo_root=repo_root)
 
     monkeypatch.setattr(rebar, "link", counting)
     return calls
@@ -272,7 +272,7 @@ def test_a_transient_failure_is_never_recorded_and_is_retried(
     repo, a, b = store
     calls: list[tuple] = []
 
-    def flaky(src, dst, relation, *, repo_root=None):
+    def flaky(src, dst, relation, *, force="", repo_root=None):
         calls.append((src, dst, relation))
         raise RuntimeError("could not acquire the tracker lock")
 
