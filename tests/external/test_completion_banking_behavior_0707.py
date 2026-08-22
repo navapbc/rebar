@@ -11,6 +11,14 @@ unit the completion evidence policy enforces (``max_evidence_responses`` in
 ``dd41-239d-6e09-4a86``) deliberately lets a batched response execute ALL of its governed
 reads, so an executed-CALL denomination is unbounded per response and went stale (bug
 ``9507-4676-27af-4344``).  Raw executed calls stay in the trial payload as a diagnostic only.
+
+The measured contract is SYSTEM-level boundedness (operator ruling, ticket
+``6543-24a7-d2fb-4ff9``): a criterion counts as banked at the first durable bank write by ANY
+actor — the model's genuine ``record_criterion_verdict`` upsert or the policy's silent
+bounded-fallback insufficiency snapshot.  dd41 also removed the steering pressure that once
+made the model interleave genuine records, so the model's voluntary banking cadence is
+explicitly not the contract; the system property under test is that progress is durably
+banked at bounded evidence-response intervals, however achieved.
 """
 
 from __future__ import annotations
