@@ -12,17 +12,7 @@ from __future__ import annotations
 import argparse
 
 from rebar._cli._parser import RebarHelpFormatter, build_argument_parser
-
-
-def _positive_int(value: str) -> int:
-    """Argparse converter for canonical mutation ceilings."""
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive integer") from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return parsed
+from rebar._cli._parsers._common import _positive_int
 
 
 def _duration_seconds(value: str) -> int:

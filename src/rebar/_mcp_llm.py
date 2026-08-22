@@ -16,6 +16,7 @@ plain ``dict`` (a model-produced result), so no output models are imported here.
 from __future__ import annotations
 
 from rebar._mcp_models import tool_annotation_presets
+from rebar._operation_config import _shadow
 
 
 def _structured_llm_failure(exc: Exception) -> dict:
@@ -48,18 +49,6 @@ def _with_attestation(result, classify) -> dict:
     if isinstance(result, dict):
         result["attestation"] = classify(result).as_dict()
     return result
-
-
-def _shadow(surface: str) -> None:
-    """Emit ONE diagnostic shadow snapshot for an MCP operation (RP-04 S1).
-
-    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT gate
-    or alter the tool. A malformed/insecure config is swallowed by
-    ``emit_shadow_snapshot`` (logged redacted, never raised), so the shadow never
-    alters the tool's behavior."""
-    from rebar._operation_config import emit_shadow_snapshot
-
-    emit_shadow_snapshot(surface=surface)
 
 
 def register_llm_tools(mcp, ctx) -> None:

@@ -266,3 +266,22 @@ def emit_shadow_snapshot(
             "operation snapshot shadow (%s) diagnostic skipped: %s", surface, type(exc).__name__
         )
     return snapshot
+
+
+def _shadow(surface: str, repo_root: str | os.PathLike[str] | None = None) -> None:
+    """Emit ONE diagnostic shadow snapshot for an operation (RP-04 S1).
+
+    The single definition behind every surface that shadows — the MCP read/write/LLM
+    tool wrappers and the public library operations. Guarded and side-effect-free
+    apart from the DEBUG diagnostic; it does NOT gate, control, or alter the
+    operation. A malformed/insecure config is swallowed by
+    :func:`emit_shadow_snapshot` (logged redacted, never raised), so the shadow never
+    changes what the operation does — the operation's own config read still fails fast
+    on its own path if it must.
+
+    ``repo_root`` is optional because the surfaces differ: the MCP tools have no
+    ambient root and let :func:`emit_shadow_snapshot` select one, while the library
+    operations already hold the caller's explicit root and MUST forward it, or the
+    snapshot would be composed against the wrong repository. Passing ``None`` is
+    identical to omitting it — ``emit_shadow_snapshot`` declares the same default."""
+    emit_shadow_snapshot(surface=surface, repo_root=repo_root)
