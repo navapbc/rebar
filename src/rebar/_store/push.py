@@ -18,7 +18,7 @@ import logging
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from rebar._optional import OptionalDependencyError
 from rebar._store import push_recovery, push_state
@@ -374,30 +374,57 @@ def _ignore_lock_artifacts(base_path: str) -> bool:
     return True
 
 
-def commit_and_push_tickets_branch(
-    tracker: str | os.PathLike,
+def _porcelain_z_paths(porcelain_z: str) -> list[str]:
+    """Worktree-relative paths named by ``git status --porcelain -z`` output.
+
+    ``-z`` gives NUL-separated, unquoted records: ``XY <path>`` — and for a rename/copy
+    the NEXT token is the origin path, which is consumed (the destination is what must
+    be staged)."""
+    tokens = porcelain_z.split("\0")
+    paths: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        i += 1
+        if not token or len(token) < 4:
+            continue
+        paths.append(token[3:])
+        if token[0] in "RC":
+            i += 1  # skip the rename/copy origin token
+    return paths
+
+
+def _locked_commit_phase(
+    canonical: str,
     *,
     message: str,
-    strict: bool = False,
-    author_name: str | None = None,
-    author_email: str | None = None,
-) -> None:
-    """Commit all pending tracker changes under its write lock, then push.
+    paths: Sequence[str] | None,
+    strict: bool,
+    author_name: str | None,
+    author_email: str | None,
+) -> bool:
+    """The write-locked stage+commit shared by the tickets-branch commit seams.
 
-    A clean tracker can still be ahead of its remote, so delivery always follows a
-    successful locked phase.  Default callers retain pending content after a local
-    failure and return best-effort; strict callers receive a classified
-    :class:`PushDeliveryError`.
-    """
+    ``paths=None`` stages everything (``git add -A``, the historical behaviour);
+    a sequence stages ONLY those paths (``git status/add -- <paths>``), so a caller
+    with a deliberate selective file set — the reconciler's binding-store snapshot,
+    which must never sweep in ``.bridge_state/last-pass.json`` (ticket 6454-d06e) —
+    can commit through the shared lock. Returns ``True`` when the locked phase
+    completed (a commit was made, or there was nothing to commit); ``False`` when it
+    was skipped in non-strict mode (strict callers get a raised
+    :class:`PushDeliveryError` instead)."""
     from rebar._store import lock as _lock
 
-    canonical = _lock.canonical_tracker(tracker)
     remote_ref = "origin/tickets"
+    # A scoped `git status/add --` with ZERO paths would silently mean "everything",
+    # inverting the caller's explicit selection — treat it as nothing to commit.
+    if paths is not None and not tuple(paths):
+        return True
     if not _ignore_lock_artifacts(canonical):
         detail = "could not exclude tracker lock artifacts from staging"
         _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
         logger.warning("tickets branch commit skipped: %s", detail)
-        return
+        return False
     try:
         with _lock.write_lock(canonical, dual_window=True, retries=_lock.write_path_retries()):
             try:
@@ -413,21 +440,43 @@ def commit_and_push_tickets_branch(
                 logger.warning(
                     "tickets branch commit skipped: tracker is in rebase/merge recovery state"
                 )
-                return
+                return False
 
-            dirty = _git(canonical, "status", "--porcelain")
+            if paths is not None:
+                # -z: NUL-separated + unquoted, so the dirty subset below is parseable
+                # verbatim. A pathspec that matches nothing (a state file that does not
+                # exist yet) is simply absent from the output rather than an error.
+                dirty = _git(  # raw-git-ok: locked store seam internal (scoped status read)
+                    canonical, "status", "--porcelain", "-z", "--", *paths
+                )
+            else:
+                dirty = _git(canonical, "status", "--porcelain")
             if dirty.returncode != 0:
                 detail = dirty.stderr or dirty.stdout or "git status failed"
                 _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
                 logger.warning("tickets branch commit skipped: %s", detail.strip())
-                return
+                return False
             if dirty.stdout:
-                staged = _git(canonical, "add", "-A")  # raw-git-ok: locked store seam internal
+                if paths is not None:
+                    # Stage exactly the dirty subset the scoped status reported: every
+                    # such path matches by construction, whereas `git add` fails hard
+                    # on a pathspec that matches no file at all. Porcelain paths are
+                    # TOP-LEVEL-relative while a bare `add` pathspec is CWD-relative
+                    # (they differ when the tracker is a subdirectory of its repo), so
+                    # the `:(top)` pathspec magic anchors each at the worktree root.
+                    staged = _git(  # raw-git-ok: locked store seam internal
+                        canonical,
+                        "add",
+                        "--",
+                        *(f":(top){p}" for p in _porcelain_z_paths(dirty.stdout)),
+                    )
+                else:
+                    staged = _git(canonical, "add", "-A")  # raw-git-ok: locked store seam internal
                 if staged.returncode != 0:
                     detail = staged.stderr or staged.stdout or "git add failed"
                     _raise_if_strict(strict, "stage-failed", detail, canonical, remote_ref)
                     logger.warning("tickets branch commit skipped: %s", detail.strip())
-                    return
+                    return False
 
                 identity: list[str] = []
                 if author_name is not None:
@@ -447,10 +496,70 @@ def commit_and_push_tickets_branch(
                     detail = committed.stderr or committed.stdout or "git commit failed"
                     _raise_if_strict(strict, "commit-failed", detail, canonical, remote_ref)
                     logger.warning("tickets branch commit skipped: %s", detail.strip())
-                    return
+                    return False
     except _lock.LockTimeout as exc:
         _raise_if_strict(strict, "commit-lock-timeout", str(exc), canonical, remote_ref)
         logger.warning("tickets branch commit skipped: %s", exc)
+        return False
+    return True
+
+
+def commit_tickets_branch(
+    tracker: str | os.PathLike,
+    *,
+    message: str,
+    paths: Sequence[str] | None = None,
+    strict: bool = False,
+    author_name: str | None = None,
+    author_email: str | None = None,
+) -> bool:
+    """Commit pending tracker changes under the write lock — commit only, NO push.
+
+    The pathspec-capable sibling of :func:`commit_and_push_tickets_branch` for callers
+    whose delivery is handled elsewhere (the reconciler's binding-store snapshot relies
+    on the GHA commit-back / next store push, and must preserve its historical no-push
+    behaviour). ``paths`` scopes staging to exactly those tracker-relative paths;
+    ``None`` stages everything. Returns ``True`` when the locked phase completed
+    (commit made, or nothing to commit); non-strict failures return ``False``, strict
+    ones raise :class:`PushDeliveryError`."""
+    from rebar._store import lock as _lock
+
+    return _locked_commit_phase(
+        _lock.canonical_tracker(tracker),
+        message=message,
+        paths=paths,
+        strict=strict,
+        author_name=author_name,
+        author_email=author_email,
+    )
+
+
+def commit_and_push_tickets_branch(
+    tracker: str | os.PathLike,
+    *,
+    message: str,
+    strict: bool = False,
+    author_name: str | None = None,
+    author_email: str | None = None,
+) -> None:
+    """Commit all pending tracker changes under its write lock, then push.
+
+    A clean tracker can still be ahead of its remote, so delivery always follows a
+    successful locked phase.  Default callers retain pending content after a local
+    failure and return best-effort; strict callers receive a classified
+    :class:`PushDeliveryError`.
+    """
+    from rebar._store import lock as _lock
+
+    canonical = _lock.canonical_tracker(tracker)
+    if not _locked_commit_phase(
+        canonical,
+        message=message,
+        paths=None,
+        strict=strict,
+        author_name=author_name,
+        author_email=author_email,
+    ):
         return
 
     push_tickets_branch(canonical, strict=strict)
