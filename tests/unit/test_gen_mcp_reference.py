@@ -72,12 +72,72 @@ def test_render_has_three_gate_tier_sections():
         assert label in doc, f"section {label!r} missing"
 
 
+def test_render_introduction_describes_first_paragraph_summaries():
+    assert "first paragraph of its description" in gen.render()
+
+
 def test_check_mode_clean_against_committed_tree():
     """The committed docs/mcp-reference.md matches the generator (exit 0)."""
     assert gen.main(["--check"]) == 0
 
 
 # ─────────────────────────── EDGE CASES (HELD OUT) ────────────────────────────
+
+
+def test_first_paragraph_summary_joins_wrapped_lines_and_excludes_later_paragraphs():
+    description = (
+        "Transition a ticket while preserving the documented lifecycle\n"
+        "rules for every supported classification.\n\n"
+        "This later paragraph contains details that must be excluded."
+    )
+    assert gen._first_paragraph_summary(description) == (
+        "Transition a ticket while preserving the documented lifecycle rules for every "
+        "supported classification."
+    )
+
+
+def test_render_row_escapes_markdown_table_pipes_in_summary():
+    assert gen._render_row("example_tool", "Accepts open | closed states.") == (
+        "| `example_tool` | Accepts open \\| closed states. |"
+    )
+
+
+def test_transition_ticket_description_documents_close_class_boundaries(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("REBAR_MCP_READONLY", "0")
+    monkeypatch.setenv("REBAR_MCP_ALLOW_LLM", "1")
+    monkeypatch.setenv("REBAR_MCP_ALLOW_JIRA_SYNC", "1")
+
+    from mcp.server.fastmcp import FastMCP
+
+    import rebar.mcp_server as ms
+    from rebar._mcp_writes import register_write_tools
+
+    mcp = FastMCP("transition-description-contract")
+    ctx = SimpleNamespace(
+        readonly=ms._readonly,
+        allow_llm=ms._allow_llm,
+        allow_jira_sync=ms._allow_jira_sync,
+        cap_workflow_payload=ms._cap_workflow_payload,
+        dump=ms._dump,
+        MODE_CAPS=ms.MODE_CAPS,
+        Mode=ms.Mode,
+        logger=ms.logger,
+    )
+    register_write_tools(mcp, ctx)
+    description = mcp._tool_manager._tools["transition_ticket"].description or ""
+    normalized_description = " ".join(description.split())
+    expected = (
+        "``close_class`` is REQUIRED when closing a ``bug`` ticket. Bug closes accept "
+        "the full bounded vocabulary: ``regression``, ``plan_defect``, "
+        "``env_integration``, ``flaky``, ``preexisting``, ``not_a_bug``, ``duplicate``, "
+        "``escalated``, ``obsolete``, ``superseded``, ``wontfix``, ``undetermined``. A "
+        "non-bug ticket normally closes without ``close_class``; only the administrative "
+        "subset may be supplied: ``duplicate``, ``obsolete``, ``superseded``, ``wontfix``. "
+        "It is ignored for non-closing transitions."
+    )
+    assert expected in normalized_description
 
 
 def test_all_enumerated_tools_appear():
