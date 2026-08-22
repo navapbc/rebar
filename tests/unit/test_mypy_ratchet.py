@@ -33,6 +33,7 @@ _RATCHET_BASELINE = {
     "rebar.grounding.*",
     "rebar.metrics.*",
     "rebar.opcert_service.*",
+    "rebar.reducer.*",
     "rebar.review_bot.*",
     "rebar.schemas.*",
 }
