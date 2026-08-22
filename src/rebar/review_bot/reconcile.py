@@ -146,11 +146,14 @@ def _emit(event: str, **fields: Any) -> None:
 def _degraded(reason: str, **fields: Any) -> None:
     """Emit the greppable ``RECONCILE_DEGRADED`` marker (to stderr/journald too) so the
     host observability probe / alarm sees that backfill is degraded and the pipe is
-    relying on the webhook alone. Mirrors voter's ``VOTER_ERROR`` marker convention."""
+    relying on the webhook alone. Mirrors voter's ``VOTER_ERROR`` marker convention: the
+    stderr print is the SINGLE line-start marker emission the observability anchor counts;
+    the logger copy logs the JSON record body only, so it cannot match the anchor
+    (bug f829-152a-b415-44a4)."""
     record = {"event": "RECONCILE_DEGRADED", "timestamp": time.time(), "reason": reason, **fields}
-    line = "RECONCILE_DEGRADED " + json.dumps(record, default=str)
-    logger.warning(line)
-    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    body = json.dumps(record, default=str)
+    logger.warning(body)
+    print("RECONCILE_DEGRADED " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
 
 
 def _read_cursor(path: str) -> str | None:

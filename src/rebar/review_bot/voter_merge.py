@@ -54,11 +54,14 @@ def merge_change_error(event: str, reason: str, **fields: Any) -> None:
     (``merge_commit_error`` / ``merge_files_error`` / ``mergelist_fetch_error`` /
     ``merge_diff_error``) AND publishes the reason-tagged merge metric. The voter turns the
     failure into a fail-closed ``-1`` coverage-gap vote (see :func:`merge_coverage_gap_decision`)
-    so the merge change is BLOCKED and visibly flagged as an INFRA veto, not silently no-voted."""
+    so the merge change is BLOCKED and visibly flagged as an INFRA veto, not silently no-voted.
+    The stderr print is the SINGLE line-start marker emission the observability anchor
+    (``^MERGE_CHANGE_ERROR \\{``) counts; the logger copy logs the JSON record body only,
+    so it cannot match the anchor (bug f829-152a-b415-44a4)."""
     record = {"event": event, "reason": reason, "timestamp": time.time(), **fields}
-    line = "MERGE_CHANGE_ERROR " + json.dumps(record, default=str)
-    logger.error(line)
-    print(line, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
+    body = json.dumps(record, default=str)
+    logger.error(body)
+    print("MERGE_CHANGE_ERROR " + body, file=sys.stderr, flush=True)  # noqa: T201 — intentional journald marker
     publish_merge_change_error_metric(reason)
 
 
