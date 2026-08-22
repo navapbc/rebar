@@ -114,7 +114,7 @@ already-`open` / `in_progress` / `blocked` parent, all leave the parent untouche
 The cascade is **sequential and fail-fast, not transactional:** the parent op runs
 to completion (its own commit + push) first; **if it fails the child op is not
 attempted**, and the failure is re-raised with a message naming the parent as the
-cause (`cannot claim <child>: claiming its parent <parent> failed first …`) while
+cause (`cannot claim <child>: its parent <parent> could not be claimed first …`) while
 **preserving the parent failure's exit code** — so a parent concurrency conflict is
 still **exit 10 / `ConcurrencyError`** at the leaf call. One case is exempt: the cascade
 DECISION reads the parent's status *without* the write lock, so a peer may move the
@@ -136,7 +136,11 @@ reactivation left the identical invalid state.
 Implemented in `src/rebar/_commands/claim.py` (`claim_compute`) and
 `src/rebar/_commands/transition.py` (`transition_compute` → `_cascade_parent_first`,
 driven by the `_CASCADING_EDGES` table), via the shared `_resolve_parent_in_status`
-helper (`_resolve_open_parent` is its `open` specialization, which `claim` uses).
+helper (`_resolve_open_parent` is its `open` specialization, which `claim` uses). The
+WALK the two verbs share — ancestor lookup, cycle guard, benign-race re-check and error
+attribution — lives once in `src/rebar/_commands/lifecycle_cascade.py`
+(`cascade_parent_first`, story 4329); each verb supplies only its own write primitive,
+so the two cannot drift on what a raced parent means.
 
 #### Which write surfaces the invariant binds — ALL of them
 
