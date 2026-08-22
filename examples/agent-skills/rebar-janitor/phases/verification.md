@@ -112,9 +112,18 @@ reversal — not disagreeing with the past, but not knowing you were.
 
 ## The 5 impact attributes — anchored to their levels (calibrate per finding; don't default to middle/top)
 
-- `prod_impact` (`none|low|medium|high`) — runtime/user-facing risk as shipped. none = docs/test-only;
-  low = cosmetic/rare-path; medium = degraded behaviour or a real recoverable gap; high = data loss,
-  security exposure, core flow broken.
+- `prod_impact` (`none|low|medium|high`) — runtime/user-facing risk as shipped. none = a pure docs
+  edit; low = cosmetic/rare-path; medium = degraded behaviour or a real recoverable gap; high =
+  data loss, security exposure, core flow broken. **A test-only finding is NOT automatically
+  `none`.** Score it from the guarded production contract — the promise the weak oracle fails to
+  enforce — not from the file living under `tests/`: a fail-open oracle over a data-integrity
+  contract is `high`, one over a log-formatting contract is `low`. The file's location tells you
+  nothing about what breaks when the guard is absent.
+  A test-only finding may only be scored above `none` on this basis when `harm_reachable` is
+  carried by a **tree-state demonstration**: either run the oracle against a deliberately broken
+  stub of the contract and show it still passes, or reason the finding's `escape_input` through
+  the assertion step by step. An unreached demonstration means the reclassification above
+  applies — `HARDENING`, not `DEFECT`.
 - `debt_impact` (`none|low|medium|high`) — maintainability/comprehension/changeability harm (janitor's
   dominant axis; the optionality lens scores here). low = local untidiness; medium = a seam that costs
   real rework; high = an architectural decision expensive to unwind.

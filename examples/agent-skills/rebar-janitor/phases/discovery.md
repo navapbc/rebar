@@ -130,6 +130,35 @@ and **not to rate severity or confidence** (Phase 2 does that independently).
       multiples of source with no gate is the finding.
     - **Shard this one too**, by test-tree region, and validate findings as they arrive rather than
       in one batch at the end (see Verification).
+    - Whether an individual test's assertions can fail at all is **concern #12**, not this one;
+      route a single weak-oracle test there and keep this concern on suite-level properties.
+
+12. **Oracle strength and contract coverage** — #11 audits the suite as a system; this one audits a
+    single test's ability to FAIL. For each test, name two things: the **contract** under test (a
+    docstring, ADR clause, `--help` string, schema statement, or documented promise) and the
+    **oracle** (the assertion set that is supposed to enforce it). The finding is that the oracle
+    cannot fail on a violation of that contract, and it is only a finding when proven by a concrete
+    **`escape_input`** — a specific state the oracle accepts but the contract forbids. A
+    contract-coverage gap (a documented promise no test fails on) takes the same proof shape: name
+    the promise, then the input that breaks it with the suite still green.
+    - **The antipattern vocabulary lives in `src/rebar/llm/reviewers/code-review-tests.md`; cite it,
+      do not restate it.** In a rebar checkout that file is the single source of truth both for the
+      named classes and for the do-not-flag guards, which apply here unchanged and by reference.
+      Classes it already owns must be reported under ITS name, never re-declared as new here. On a
+      repo without that file, fall back to the portable core in `references/patterns.md`.
+    - **False-positive floor.** No `escape_input`, no finding. A bare "this test looks weak", a
+      coverage-percentage argument, or a stylistic objection to an assertion is not a finding — the
+      guards in the rubric above exist precisely to keep those out.
+    - **Additional classes** this concern names, absent from the diff rubric, reported under these
+      ids: `fixture-mutates-foreign-state` (a fixture that mutates state it did not create, so the
+      test's verdict depends on what ran before it); `mismatched-hardening-equivalence` (an
+      equivalence test whose two sides are built with different hardening helpers, so it compares
+      the helpers rather than the behaviour); `unstated-policy-oracle` (an assertion encoding a
+      policy preference the contract never states, which fails on conforming implementations).
+    - **Shard this one too**, by test-tree region, exactly as #11 does — one subagent per region,
+      validated as findings arrive rather than in one batch.
+    - A class found here that the diff rubric lacks is worth a Phase-5 ticket adding it to
+      `code-review-tests.md`, so the next diff review catches it before it lands.
 
 ### Temporal decay pass (only if `.git` exists)
 
@@ -149,12 +178,24 @@ history is shallow/squashed, say so and report what's computable.
 ## Discovery output schema (per finding — NO severity, NO confidence, NO fix)
 
 - `finding` — the problem stated as a **claim to verify** (not a verdict): what is wrong and where.
-- `concern` — which of the eleven concerns above.
+- `concern` — which of the twelve concerns above.
 - `location` — the file/symbol/region the finding is about.
 - `evidence` — `path:line` citation(s) and/or a metric (LOC, param count, cycle, duplication count),
   or, for an absence finding, the rationale for why X is genuinely missing.
 - `scenarios` — where this bites (the situation in which the harm shows up).
 - `why_it_matters` — the maintainability/risk/changeability consequence if left unaddressed.
+
+Concern #12 findings carry five more fields (omit them for every other concern):
+
+- `contract` — the promise the test is supposed to enforce: a verbatim quote plus its `path:line`.
+- `oracle` — the assertion set that is supposed to enforce it: verbatim quote plus `path:line`.
+- `escape_input` — a concrete state the oracle accepts but the contract forbids. No `escape_input`,
+  no finding.
+- `antipattern_id` — the class name from `src/rebar/llm/reviewers/code-review-tests.md` where one
+  applies; otherwise one of the portable ids `fixture-mutates-foreign-state`,
+  `mismatched-hardening-equivalence`, `unstated-policy-oracle`. When no named class fits, **omit**
+  the field rather than inventing an id.
+- `scope` — how many sibling test sites share the same weak shape (a count, not a list).
 
 Do **not** include severity, a confidence score, or a suggested fix — those belong to Phase 2
 (scoring) and Phase 3 (remediation).

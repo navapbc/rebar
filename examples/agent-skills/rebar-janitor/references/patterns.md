@@ -118,6 +118,37 @@ rg -n --no-heading -c "(expect\(|assert|\.should)" --glob '**/*{test,spec}*' \
   | awk -F: '$2<2 {print}'                  # test files with <2 assertions
 ```
 
+## Oracle strength & contract coverage (concern 12)
+
+Portable core. In a rebar checkout, `src/rebar/llm/reviewers/code-review-tests.md` is the fuller and
+authoritative list — cite it and skip this section. Everywhere else, this is the whole vocabulary.
+
+- Question: **can this assertion fail when the contract is violated?** Name the contract (docstring,
+  ADR clause, `--help` text, schema statement) and the oracle (the assertion set), then name every
+  world in which the oracle produces its passing result. If "the producer never ran, was killed, or
+  emitted nothing" is among them, the oracle cannot tell its verdict from its own failure.
+- Proof required: an `escape_input` — a concrete state the oracle accepts but the contract forbids.
+- False-positive floor: **no finding without a violating input.** A coverage-percentage argument, a
+  stylistic objection, or a bare "this looks weak" is not a finding. Do not flag a mock at an
+  external boundary, an exact-value assertion on a pure function, an absence check preceded by a
+  producer-liveness assertion, a structural grep over an instruction artifact, a strict `xfail` with
+  a named removal condition, or a sleep used only as a secondary settling wait.
+- Portable antipattern ids (use these for `antipattern_id`; omit the field when none fits):
+  - `fail-open-oracle` — an absence/empty assertion derived from a subprocess, file, or captured
+    output with no liveness check on the producer.
+  - `fixture-mutates-foreign-state` — a fixture mutating state it did not create, so the verdict
+    depends on execution order.
+  - `mismatched-hardening-equivalence` — an equivalence test whose two sides are built with
+    different hardening helpers, so it compares the helpers, not the behaviour.
+  - `unstated-policy-oracle` — an assertion encoding a policy the contract never states.
+
+```sh
+# Candidate fail-open oracles: absence assertions with no liveness anchor nearby.
+rg -n --no-heading -g '**/*{test,spec}*' \
+  "assert(_| ).*(not in|== \"\"|== \[\]|is None)|expect\(.*\)\.not\."
+# Then, per hit, read the surrounding function for a returncode / non-empty / presence assertion.
+```
+
 ## Temporal decay pass (concern: trends — needs git history)
 
 Empirically the strongest decay signal. See CodeScene's hotspot model and GitClear's churn data.
