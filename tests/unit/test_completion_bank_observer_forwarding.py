@@ -63,8 +63,9 @@ def test_observed_upsert_forwards_seeded(tmp_path: Path) -> None:
     assert entry["seeded"] is True
 
 
-def test_observed_upsert_records_first_tool_write(tmp_path: Path) -> None:
-    """The bookkeeping still fires: the first `tool`-sourced write of a criterion is logged."""
+def test_observed_upsert_records_first_durable_write_any_actor(tmp_path: Path) -> None:
+    """The bookkeeping is actor-agnostic (ticket 6543): fallback snapshots count as banking
+    events, repeat writes do not re-record, and seeded cache seeds are excluded."""
     bank = _bank(tmp_path)
     writes: list[str] = []
     calls_at_first_write: list[int] = []
@@ -72,9 +73,12 @@ def test_observed_upsert_records_first_tool_write(tmp_path: Path) -> None:
     observed = _bank_observer.make_observed_upsert(
         CriterionBank.upsert, writes, calls_at_first_write, lambda: counter["n"]
     )
+    counter["n"] = 1
+    observed(bank, "C0", True, "cached pass", source="cache", seeded=True)
     counter["n"] = 3
     observed(bank, "C3", True, "tool evidence", source="tool")
     observed(bank, "C3", True, "tool evidence again", source="tool")
+    counter["n"] = 5
     observed(bank, "C4", False, "fallback", source="fallback", evidence_sufficient=False)
-    assert writes == ["C3"]
-    assert calls_at_first_write == [3]
+    assert writes == ["C3", "C4"]
+    assert calls_at_first_write == [3, 5]
