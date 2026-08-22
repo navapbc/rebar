@@ -18,6 +18,15 @@ enforces (``max_evidence_responses`` counts run_steps in
 commit ``e1352535ace`` (ticket ``dd41-239d-6e09-4a86``) deliberately let batched governed
 reads execute, decoupling calls from responses (bug ``9507-4676-27af-4344``).
 
+The measured contract is SYSTEM-level boundedness (operator ruling on ticket
+``6543-24a7-d2fb-4ff9``): a durable bank write counts regardless of actor — a genuine model
+``record_criterion_verdict`` upsert and the policy's silent bounded-fallback insufficiency
+snapshot are both banking events. Only ``seeded=True`` cache seeds are excluded: they are
+pre-run state, not run progress. dd41 also removed the steering pressure that once made the
+model interleave genuine records, so an actor-filtered (``source == "tool"``) observation
+rejects intended behavior (run 32575679530: genuine first banks ``[6,7,8,9,9]`` while the
+policy's fallbacks held the bound on schedule).
+
 Factoring these here lets the live eval and fast, live-dependency-free unit regressions
 (``tests/unit/test_completion_bank_observer_forwarding.py``,
 ``tests/unit/test_completion_banking_oracle.py``) share one implementation, so drift is
@@ -37,14 +46,17 @@ def make_observed_upsert(
     calls_at_first_write: list[int],
     evidence_calls: Callable[[], int],
 ) -> Callable[..., Any]:
-    """Build a drop-in ``CriterionBank.upsert`` replacement that records the first ``tool``
-    write of each criterion (into ``writes`` / ``calls_at_first_write``) and then forwards
-    verbatim to ``original_upsert``.
+    """Build a drop-in ``CriterionBank.upsert`` replacement that records the first durable
+    bank write of each criterion (into ``writes`` / ``calls_at_first_write``) and then
+    forwards verbatim to ``original_upsert``.
 
-    Every keyword argument other than ``source`` (which the bookkeeping inspects) is passed
-    through unchanged via ``**kwargs``, so ``evidence_sufficient``, ``seeded``, and any future
-    keyword-only param the real ``upsert`` grows flow through without the stub having to know
-    about them.
+    The bookkeeping is actor-agnostic (ticket ``6543-24a7-d2fb-4ff9``): a genuine model
+    record and the policy's bounded-fallback insufficiency snapshot both count as banking
+    events. Only ``seeded=True`` cache seeds are excluded — pre-run seeded state is not run
+    progress. Every keyword argument other than ``seeded`` (which the bookkeeping inspects)
+    is passed through unchanged via ``**kwargs``, so ``source``, ``evidence_sufficient``, and
+    any future keyword-only param the real ``upsert`` grows flow through without the stub
+    having to know about them.
     """
 
     def observed_upsert(
@@ -53,13 +65,13 @@ def make_observed_upsert(
         met: bool,
         evidence: str,
         *,
-        source: str = "tool",
+        seeded: bool = False,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        if source == "tool" and criterion_id not in writes:
+        if not seeded and criterion_id not in writes:
             writes.append(criterion_id)
             calls_at_first_write.append(evidence_calls())
-        return original_upsert(self, criterion_id, met, evidence, source=source, **kwargs)
+        return original_upsert(self, criterion_id, met, evidence, seeded=seeded, **kwargs)
 
     return observed_upsert
 
@@ -112,9 +124,11 @@ def bounded_bank_gaps(trial: dict[str, Any], expected_criteria: int, *, max_gap:
     """The banking oracle: every criterion banked incrementally within bounded evidence gaps.
 
     ``trial["responses_at_bank"]`` holds, per criterion in first-bank order, the number of
-    evidence responses observed when that criterion first banked. The first bank must land
-    within ``max_gap`` evidence responses, and each later first-bank within ``max_gap`` of
-    the previous one — mirroring the policy's per-current-criterion
+    evidence responses observed when that criterion first DURABLY banked — by the model's
+    genuine record or by the policy's bounded-fallback snapshot, whichever wrote first
+    (system-level boundedness, the contract ruled on ticket ``6543-24a7-d2fb-4ff9``). The
+    first bank must land within ``max_gap`` evidence responses, and each later first-bank
+    within ``max_gap`` of the previous one — mirroring the policy's per-current-criterion
     ``max_evidence_responses`` enforcement. A trial that banked nothing, banked late, or
     ended without a verdict fails.
     """

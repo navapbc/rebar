@@ -15,6 +15,12 @@ shared oracle (:func:`tests._bank_observer.bounded_bank_gaps`) — no live provi
 They prove the re-denominated oracle ACCEPTS the dd41-intended batched shape and still
 REJECTS the original 0707 defect shapes (zero banks at exhaustion; a first bank only after
 the bounded evidence search should have fail-closed).
+
+The measured contract is SYSTEM-level boundedness (operator ruling, ticket
+``6543-24a7-d2fb-4ff9``): a criterion counts as banked at its first durable bank write by ANY
+actor — the model's genuine record or the policy's silent bounded-fallback insufficiency
+snapshot. The rig's bookkeeping mirrors :func:`tests._bank_observer.make_observed_upsert`,
+which is actor-agnostic for the same reason.
 """
 
 from __future__ import annotations
@@ -56,19 +62,29 @@ class _FakeToolset:
 
 
 class _Rig:
-    """One trial harness mirroring the live eval's seams over the real policy layer."""
+    """One trial harness mirroring the live eval's seams over the real policy layer.
 
-    def __init__(self) -> None:
+    ``fallback_banks=False`` simulates a genuinely-unbounded system — the policy's bounded
+    fallback is disabled, so nothing durably banks until the model volunteers a record —
+    which is the shape the system-level oracle must REJECT.
+    """
+
+    def __init__(self, *, fallback_banks: bool = True) -> None:
         self.evidence_steps: set[int] = set()
         self.banked: dict[str, bool] = {}
         self.writes: list[str] = []
         self.responses_at_first_write: list[int] = []
+        fallback = (
+            (lambda cid, evidence: self._bank(cid, met=False))
+            if fallback_banks
+            else (lambda cid, evidence: None)
+        )
         policy = CompletionEvidencePolicy(
             criterion_ids=_IDS,
             max_evidence_responses=3,
             evidence_tool_names=frozenset({"read_file", "list_directory", "search_files"}),
             banked_ids=lambda: set(self.banked),
-            fallback_record=lambda cid, evidence: self._bank(cid, met=False),
+            fallback_record=fallback,
         )
         counting_wrap = _bank_observer.make_response_counting_wrap(
             wrap_completion_evidence_policy, self.evidence_steps
@@ -185,3 +201,70 @@ def test_steered_calls_do_not_count_as_evidence_responses() -> None:
     asyncio.run(scenario())
     assert rig.evidence_steps == set()
     assert rig.responses_at_first_write == [0]
+
+
+def test_fallback_only_transcript_is_bounded_and_green() -> None:
+    """A model that never volunteers a record still yields a bounded, GREEN trial.
+
+    The REAL policy fail-closes each current criterion at its third evidence-claimed
+    response; the observer snapshots read one response low (the documented fallback-ordering
+    caveat), so five criteria land at [2, 5, 8, 11, 14] — every gap exactly 3. That is the
+    ruled system-level contract: boundedness however achieved, actor irrelevant.
+    """
+    rig = _Rig()
+
+    async def scenario() -> None:
+        for step in range(1, 16):
+            await rig.evidence_batch(step, 1)
+
+    asyncio.run(scenario())
+    trial = rig.trial("FAIL")
+    assert trial["banked"] == 5
+    assert trial["responses_at_bank"] == [2, 5, 8, 11, 14]
+    assert _bank_observer.bounded_bank_gaps(trial, expected_criteria=5)
+
+
+def test_live_run_32575679530_shape_is_green_under_system_scope() -> None:
+    """The live trace that failed 0/3 under the model-genuine scope passes the ruled scope.
+
+    Live signature: silent fallbacks held the bound (snapshots 2 and 5) while the model's
+    genuine records began only at evidence response 6. Counting durable banks regardless of
+    actor, first writes are [2, 5, 6, 7, 8] — bounded throughout.
+    """
+    rig = _Rig()
+
+    async def scenario() -> None:
+        step = 0
+        for _ in range(6):  # fallbacks fire for c1 and c2 at snapshots 2 and 5
+            step += 1
+            await rig.evidence_batch(step, 1)
+        for criterion_id in ("c3", "c4", "c5"):  # genuine records from response 6 onward
+            step += 1
+            await rig.record(step, criterion_id)
+            step += 1
+            await rig.evidence_batch(step, 1)
+
+    asyncio.run(scenario())
+    trial = rig.trial("PASS")
+    assert trial["banked"] == 5
+    assert trial["responses_at_bank"] == [2, 5, 6, 7, 8]
+    assert _bank_observer.bounded_bank_gaps(trial, expected_criteria=5)
+
+
+def test_genuinely_unbounded_system_is_rejected() -> None:
+    """RED case in final oracle form: with the fallback disabled, nothing durably banks
+    until the model's end-of-run records at evidence response 6 — the first gap breaks the
+    bound and the system-level oracle must reject the trial."""
+    rig = _Rig(fallback_banks=False)
+
+    async def scenario() -> None:
+        for step in range(1, 7):
+            await rig.evidence_batch(step, 1)
+        for offset, criterion_id in enumerate(_IDS):
+            await rig.record(7 + offset, criterion_id)
+
+    asyncio.run(scenario())
+    trial = rig.trial("PASS")
+    assert trial["banked"] == 5
+    assert trial["responses_at_bank"] == [6, 6, 6, 6, 6]
+    assert not _bank_observer.bounded_bank_gaps(trial, expected_criteria=5)
