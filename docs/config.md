@@ -147,7 +147,7 @@ verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate det
                                              # `overlap_drain`, `overlap_conf_threshold`, …). env
                                              # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS; the former
                                              # name `verify.overlap_enabled` is a permanent alias.
-                                             # See docs/adr/0037-cross-ticket-overlap.md.
+                                             # See [ADR 0086](adr/0086-cross-ticket-overlap.md).
 verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env
@@ -417,7 +417,7 @@ calls (the SDK's own retries are disabled, `max_retries=0`): a `{429,529,5xx}` /
 network blip is re-sent below the agent loop, so completed tool calls are never re-executed.
 `Retry-After` is honored (capped at `llm_retry_max_wait_s`), else exponential backoff. Set
 `llm_retry_max_attempts = 1` to disable retry (fail-fast back-out, no code revert). See
-[ADR 0037](adr/0087-transport-retry.md). On the Bedrock path the same knob is wired into the
+[ADR 0087](adr/0087-transport-retry.md). On the Bedrock path the same knob is wired into the
 botocore client Config as `retries={"max_attempts": N, "mode": "adaptive"}` (total attempts,
 matching tenacity's counting) and `timeout` becomes the client's read + connect timeout;
 `llm_retry_max_wait_s` has no botocore equivalent and applies to the Anthropic path only.
@@ -638,24 +638,15 @@ standard names.)
   invocation-specific runtime override, so it stays an env var and is **not** a
   persistent `[tool.rebar]` setting.
 
-### `REBAR_OPERATION_SNAPSHOT_SHADOW` — temporary shadow-mode switch (RP-04, removed in S7)
+### `REBAR_OPERATION_SNAPSHOT_SHADOW` temporary diagnostic switch
 
-A **temporary** operational env var (not a `[tool.rebar]` config key). While the RP-04
-per-operation configuration authority (`rebar.config.OperationSnapshot`, see
-[reuse-surface.md](reuse-surface.md#6-the-operation-snapshot--rebarconfigoperationsnapshot-rp-04))
-is wired in **shadow mode** — composed once per operation and logged as a REDACTED
-diagnostic, but NOT controlling execution — this switch gates that shadow construction.
+`REBAR_OPERATION_SNAPSHOT_SHADOW` is an active, temporary operational environment variable rather than a `[tool.rebar]` config key. It gates diagnostic-only composition and redacted logging of a `rebar.config.OperationSnapshot` beside each operation. The snapshot does not control execution.
 
-- **Default: enabled.** Unset ⇒ shadow snapshots are composed (the default). The
-  canonical true spellings (`true`/`1`/`yes`/`on`) also enable it.
-- **Rollback:** set it to a canonical false spelling (`false`/`0`/`no`/`off`/empty) to
-  disable shadow construction entirely — the safe kill-switch if the diagnostic ever
-  misbehaves. Because shadow mode is diagnostic-only and self-guarded (any
-  non-`ConfigError` failure is caught and the legacy operation continues untouched),
-  disabling it changes nothing an operation depends on.
-- **Lifecycle:** this switch and all shadow wiring are **removed in S7**, once a real
-  behaviour-bearing consumer is cut over to the snapshot. Do not build durable config
-  on it.
+- **Default:** Unset and the canonical true spellings `true`, `1`, `yes`, and `on` enable shadow snapshots.
+- **Disable:** The canonical false spellings `false`, `0`, `no`, `off`, and the empty string disable shadow snapshots.
+- **Unrecognized values:** Any other value defaults to enabled.
+- **Failure isolation:** The diagnostic emitter catches every `Exception`, including `ConfigError` and `InsecureUrlError`, then lets the legacy operation continue. The normal `compose_operation_snapshot()` composer remains fail-fast and propagates configuration errors.
+- **Lifecycle:** The switch remains active until a future behavior-bearing cutover retires the diagnostic shadow and this switch.
 
 ## `ticket.default_assignee` — applied at CLAIM, not at create
 
