@@ -24,7 +24,10 @@ registry is the run loop's dispatch table.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:  # pragma: no cover - runtime import would close the executor cycle
+    from .executor import StepContext
 
 
 @dataclass(frozen=True)
@@ -179,3 +182,25 @@ __all__ = [
     "input_schema_for",
     "shallow_contract_check",
 ]
+
+
+def _ticket_id(ctx: StepContext) -> str:
+    """Resolve the ticket a step acts on: its explicit ``ticket_id`` input, else the run's
+    target ticket.
+
+    The single definition for every step family — the scripted built-ins
+    (:mod:`.steps`) and the plan-review ops (:mod:`rebar.llm.plan_review.decide_ops`) —
+    because a step that silently acts on the WRONG ticket is worse than one that refuses,
+    and two copies of that refusal drift apart. It lives here, beside the step-kind
+    contracts, so it stays reachable from both without either importing the other.
+
+    ``StepContext`` is imported under ``TYPE_CHECKING`` only: this module must not import
+    :mod:`.executor` at runtime, or the one-way dependency documented above becomes a
+    cycle. Only attributes are read, so no runtime class is needed."""
+    tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
+    if not tid:
+        raise ValueError(
+            f"step {ctx.step_id!r} needs a ticket: pass `with: {{ticket_id: ...}}` or run "
+            f"the workflow against a target ticket"
+        )
+    return str(tid)

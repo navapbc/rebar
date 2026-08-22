@@ -29,18 +29,9 @@ from __future__ import annotations
 from typing import Any
 
 from .executor import StepContext, StepResult, register_step
+from .step_contracts import _ticket_id
 
 __all__ = ["GATE_POLICIES"]
-
-
-def _ticket_id(ctx: StepContext) -> str:
-    tid = ctx.inputs.get("ticket_id") or ctx.target_ticket
-    if not tid:
-        raise ValueError(
-            f"step {ctx.step_id!r} needs a ticket: pass `with: {{ticket_id: ...}}` or run "
-            f"the workflow against a target ticket"
-        )
-    return str(tid)
 
 
 # ── read steps ────────────────────────────────────────────────────────────────

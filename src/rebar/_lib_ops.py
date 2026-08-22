@@ -24,19 +24,7 @@ from typing import TYPE_CHECKING, cast
 from rebar import config
 from rebar._engine import engine_dir, engine_env
 from rebar._errors import RebarError
-
-
-def _shadow(repo_root, surface: str) -> None:
-    """Emit ONE diagnostic shadow snapshot for a public library operation (RP-04 S1).
-
-    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT control
-    the operation. A malformed/insecure config is swallowed by ``emit_shadow_snapshot``
-    (logged redacted, never raised), so the shadow never changes what the operation
-    does — the operation's own config read still fails fast on its own path if it must."""
-    from rebar._operation_config import emit_shadow_snapshot
-
-    emit_shadow_snapshot(repo_root=repo_root, surface=surface)
-
+from rebar._operation_config import _shadow
 
 if TYPE_CHECKING:
     # Schema-derived return types (story 3a10). Import-only under TYPE_CHECKING.
@@ -67,7 +55,7 @@ def run_workflow(
     See :mod:`rebar.llm.workflow.runs`."""
     from rebar.llm.workflow import runs
 
-    _shadow(repo_root, "lib.run_workflow")
+    _shadow("lib.run_workflow", repo_root=repo_root)
     return runs.run(
         source,
         inputs,
@@ -85,7 +73,7 @@ def get_workflow_status(
     """A workflow run's current status, read via replay (no execution)."""
     from rebar.llm.workflow import runs
 
-    _shadow(repo_root, "lib.get_workflow_status")
+    _shadow("lib.get_workflow_status", repo_root=repo_root)
     return cast("WorkflowRun", runs.status(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -95,7 +83,7 @@ def get_workflow_result(
     """A workflow run's outputs (the terminal step's output is the result)."""
     from rebar.llm.workflow import runs
 
-    _shadow(repo_root, "lib.get_workflow_result")
+    _shadow("lib.get_workflow_result", repo_root=repo_root)
     return cast("WorkflowRun", runs.result(run_id, ticket_id, repo_root=repo_root))
 
 
@@ -111,7 +99,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
 
     from rebar._engine_support.bridge_fsck import audit_bridge_mappings
 
-    _shadow(repo_root, "lib.bridge_fsck")
+    _shadow("lib.bridge_fsck", repo_root=repo_root)
     tracker = config.tracker_dir(repo_root)
     findings = audit_bridge_mappings(Path(tracker))
     return cast("BridgeFsck", findings)
@@ -119,7 +107,7 @@ def bridge_fsck(*, repo_root=None) -> BridgeFsck:
 
 def bridge_projects_list(*, repo_root=None) -> dict:
     """Return the store's bridge-projects mapping ``{key: {"repos": [...]}}``."""
-    _shadow(repo_root, "lib.bridge_projects_list")
+    _shadow("lib.bridge_projects_list", repo_root=repo_root)
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     return store.read_projects(root)
@@ -138,7 +126,7 @@ def bridge_projects_set(key, repos, *, repo_root=None) -> None:
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
-    _shadow(repo_root, "lib.bridge_projects_set")
+    _shadow("lib.bridge_projects_set", repo_root=repo_root)
     try:
         with lock.write_lock(tracker):
             store.set_project(root, key, list(repos))
@@ -159,7 +147,7 @@ def bridge_projects_remove(key, *, repo_root=None) -> None:
     store = _engine_module("rebar_reconciler.projects_store")
     root = Path(config.repo_root(repo_root))
     tracker = config.tracker_dir(repo_root)
-    _shadow(repo_root, "lib.bridge_projects_remove")
+    _shadow("lib.bridge_projects_remove", repo_root=repo_root)
     try:
         with lock.write_lock(tracker):
             store.remove_project(root, key)
@@ -231,7 +219,7 @@ def _bridge_run(
 ) -> BridgeRun:
     _validate_positive("max_changes", max_changes)
     _validate_selection_args(only, exclude)
-    _shadow(repo_root, f"lib.bridge_{route}")
+    _shadow(f"lib.bridge_{route}", repo_root=repo_root)
     root = Path(config.repo_root(repo_root))
     selection_kind, selection_ids = _bridge_selection(root, only, exclude)
     orchestrator = _engine_module("rebar_reconciler.__main__")
@@ -271,7 +259,7 @@ def bridge_run(profile: str | None = None, *, repo_root=None) -> BridgeRun:
     """Run one scheduled bridge profile with captured output and strict delivery."""
     from rebar._bridge_runner import run_bridge
 
-    _shadow(repo_root, "lib.bridge_run")
+    _shadow("lib.bridge_run", repo_root=repo_root)
     return run_bridge(profile, repo_root=repo_root)
 
 
@@ -296,7 +284,7 @@ def bridge_status(
 ) -> BridgeStatus:
     """Read the durable last-pass, pause, and live-lock status snapshot."""
     _validate_positive("max_age_seconds", max_age_seconds)
-    _shadow(repo_root, "lib.bridge_status")
+    _shadow("lib.bridge_status", repo_root=repo_root)
     root = Path(config.repo_root(repo_root))
     last_pass = _engine_module("rebar_reconciler.last_pass")
     try:

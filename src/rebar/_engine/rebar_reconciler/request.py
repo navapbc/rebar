@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
+from rebar._cli._parsers._common import _positive_int
+
 
 class RequestError(ValueError):
     """An invocation error that the process boundary reports as exit 2."""
@@ -20,16 +22,6 @@ class RequestError(ValueError):
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise RequestError(f"{self.prog}: error: {message}")
-
-
-def _positive_int(value: str) -> int:
-    try:
-        parsed = int(value)
-    except ValueError as exc:
-        raise argparse.ArgumentTypeError("must be a positive integer") from exc
-    if parsed <= 0:
-        raise argparse.ArgumentTypeError("must be a positive integer")
-    return parsed
 
 
 def _tokens(value: str | None, option: str) -> tuple[str, ...]:

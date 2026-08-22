@@ -39,18 +39,7 @@ from rebar._mcp_models import (
     WorkflowRunOut,
     tool_annotation_presets,
 )
-
-
-def _shadow(surface: str) -> None:
-    """Emit ONE diagnostic shadow snapshot for an MCP operation (RP-04 S1).
-
-    Guarded and side-effect-free apart from the DEBUG diagnostic; it does NOT gate
-    or alter the tool. A malformed/insecure config is swallowed by
-    ``emit_shadow_snapshot`` (logged redacted, never raised), so the shadow never
-    alters the tool's behavior."""
-    from rebar._operation_config import emit_shadow_snapshot
-
-    emit_shadow_snapshot(surface=surface)
+from rebar._operation_config import _shadow
 
 
 def _gate_value(gate: object) -> bool:
