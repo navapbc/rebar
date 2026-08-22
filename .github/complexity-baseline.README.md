@@ -25,9 +25,18 @@ The lock **fails closed**: if the CI runner cannot fetch the `main` copy of the 
 (network error, repo misconfiguration, etc.) the gate exits nonzero. There is no
 warn-and-continue fallback.
 
-## Updating the baseline (draining stale debt)
+## After refactoring: land the change, do not edit the baseline
 
-To remove stale entries or lower ceilings after refactoring, run:
+If your change makes a baselined function simpler, `--check` reports that entry as
+`stale` and **passes** — `stale>0` alone is an allowed improvement. That is the
+sanctioned contributor path: land the improvement and change nothing here. Do not
+hand-edit `complexity-baseline.json` and do not run `--update-stale` to tidy the entry
+away; stale entries are drained later under maintenance.
+
+## Updating the baseline (maintenance only — draining stale debt)
+
+`--lock` and `--update-stale` are maintenance operations, not a contributor step. To
+drain accumulated stale entries or lower ceilings during a maintenance pass, run:
 
 ```
 python scripts/check_complexity_baseline.py --update-stale
