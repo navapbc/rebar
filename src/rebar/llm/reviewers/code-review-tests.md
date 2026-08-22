@@ -53,6 +53,21 @@ genuinely broken test — judge test quality on its own terms.
   says it is intentionally narrowing the contract) is NOT flagged; a pure-function exact-value
   assertion stays valid (already covered by the table-driven / exact-value guard below — do not
   reclassify it as contradicting a contract).
+- **fail-open oracle**: an assertion on ABSENCE (`not in`, `assert not`, `== ""`, an
+  empty-collection check) derived from a subprocess, child process, file read, network response,
+  or captured output — or a `grep`/regex over another tool's output used as a pass/fail
+  signal — with NO liveness check on the producer. Such an oracle produces its passing result
+  both when all is well AND when the producer never ran, was killed, emitted nothing, or emitted
+  in an unexpected format (e.g. grepping `"^FAILED"` against colorized pytest output never
+  matches, so it reports "0 failed" regardless; a signal-killed child writes nothing, so any
+  string is trivially absent; a truncated log and a clean log produce the same empty grep). Also
+  flag its convergence twin — a test that RE-DERIVES the value under test with the same logic as
+  the production path instead of DRIVING that path, which stays green when the live path breaks.
+  Litmus: *name every world in which this check produces its definite result — pass or fail; if
+  "the producer never ran / emitted nothing / received the wrong input" is among them, the check
+  cannot distinguish its verdict from its own failure.* The remediation is cheap and uniform:
+  assert the producer RAN (exit status, non-empty capture, an asserted PRESENCE from the same
+  capture) before trusting any absence derived from it.
 
 **False-positive GUARDS — do NOT flag these (they are VALID by the standard):**
 - **Four-Criterion Test.** Raise a test-coupling finding above a `minor` suggestion ONLY when at
@@ -73,7 +88,10 @@ genuinely broken test — judge test quality on its own terms.
 - **VALID patterns not to flag.** Do NOT raise a finding on: (i) observable post-condition assertions
   (incl. when the unit is the SOLE producer of that post-condition — do not demand it also assert the
   internal mechanism fired); (ii) Rule-5 structural greps on instruction artifacts; (iii) greps of
-  COMMAND OUTPUT (stdout/stderr/exit code of the EXECUTED unit); (iv) table-driven / equivalence /
+  COMMAND OUTPUT (stdout/stderr/exit code of the EXECUTED unit), *provided* the producer's liveness
+  is established — the test checks the exit status, asserts a non-empty capture, or asserts a
+  PRESENCE from the same capture (an absence-only grep with no such anchor is the fail-open
+  oracle antipattern above); (iv) table-driven / equivalence /
   classifier tests, including exact-value assertions on a pure function's output that "look
   tautological"; (v) exit-code / emitted-signal assertions; (vi) mocks at the EXTERNAL boundary;
   (vii) bare coverage-gap demands ("no test for X") without a concrete failure path — not blocking;
@@ -82,7 +100,10 @@ genuinely broken test — judge test quality on its own terms.
   concrete removal condition — a bare non-strict xfail, or a strict one with no stated reason,
   remains flaggable; (ix) a fault injected at the real boundary (monkeypatching the actual failing
   call at the point the contract covers), and a short sleep used as a SECONDARY settling wait
-  alongside a deterministic primary mechanism (barrier, pipe, marker file, event).
+  alongside a deterministic primary mechanism (barrier, pipe, marker file, event); (x) an ABSENCE
+  assertion PRECEDED by a producer-liveness assertion — a returncode check, a non-empty-output
+  check, or an asserted presence from the same capture — is NOT a fail-open oracle; the liveness
+  anchor is exactly the remediation, so do not flag the fixed form.
 
 For each finding, conform to the evidence-record contract:
 - `finding`: the issue, as one specific, actionable claim.

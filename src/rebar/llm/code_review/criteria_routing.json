@@ -108,7 +108,7 @@
     "blocking_enabled": false
   },
   "tests": {
-    "_comment": "bug obese-dihedral-ermine: flipped to blocking from the code-v4 replay (docs/experiments/calibrate_code_review_thresholds.py) so the gate can block consequential test-sufficiency findings — blocks 99 changes / 8.0%, operator-accepted.",
+    "_comment": "bug obese-dihedral-ermine: flipped to blocking from the code-v4 replay (docs/experiments/calibrate_code_review_thresholds.py) so the gate can block consequential test-sufficiency findings — blocks 99 changes / 8.0%, operator-accepted. Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the overlay prompt now carries the fail-open oracle antipattern — an ABSENCE assertion (not in / assert not / empty-string / empty-collection) derived from subprocess/file/network/captured output, or a grep/regex over another tool's output used as a pass/fail signal, with no producer-liveness check (exit status, non-empty capture, asserted presence) — plus the convergence twin (a test re-deriving the value under test instead of driving the production path). Detection language + FP guards live in reviewers/code-review-tests.md; calibration corpus in eval_specs/code-review-tests.eval.yaml (R-/FP-failopen-* cases).",
     "exec": "AGENT",
     "applies_to": [
       "**/test_*.py",
@@ -165,7 +165,7 @@
     "blocking_enabled": true
   },
   "error-handling": {
-    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings).",
+    "_comment": "ticket cranial-goodly-seahog: BASE-REVIEWER dimension (not an overlay in OVERLAY_IDS) \u2014 always evaluated by the base reviewer; exec/applies_to are inert and only posture/threshold/blocking_enabled are consulted. Flipped advisory->blocking@0.50 from the code-v3 sidecar calibration: swallowed exceptions / missing error paths that survive Pass-3 verification are high-precision defects (validity>=0.95 on would-block findings). Story 3fce-cccf-d38b-4072 (sphinxian-agrarian-snake): the base reviewer prompt now carries fail-open check detection tagged to this dimension — a silent lookup/registry MISS path, a subprocess health check that never reads the returncode, a pgrep/pkill pattern that can match the matching process itself, and any best-effort check whose failure is invisible. Security-consequence fail-open (permissive authz/validation fallback) stays with the security overlay. Detection language lives in reviewers/code-review-base.md; calibration corpus in eval_specs/code-review-base.eval.yaml (R-/FP-failopen-* cases).",
     "exec": "AGENT",
     "applies_to": [],
     "default_posture": "blocking",

@@ -47,6 +47,28 @@ Automated tooling (linters, formatters, import sorters, type checkers) and CI al
 style, formatting, import ordering, and typing — your value is the substantive correctness,
 design, and safety issues that tooling cannot see, so spend your attention there.
 
+**Fail-open checks (tag these `error-handling`).** A check, guard, gate, or health probe whose
+negative/absent/empty result is indistinguishable from the check never having run fails OPEN:
+it reports success by producing nothing, and produces nothing both when all is well and when it
+never executed. Flag, tagged `error-handling`, any added or modified:
+
+- lookup-table / registry membership test whose MISS path is silent (skip/continue/default)
+  rather than an error — an unknown key becomes INVISIBLE instead of a failure;
+- subprocess or external-command health check that never reads the exit status / returncode;
+- `pgrep`/`pkill` (or process-listing) pattern that can match the MATCHING process itself —
+  a self-match makes a finished operation look like a live hang;
+- best-effort verification whose failure is invisible — the code cannot distinguish "checked
+  and clean" from "check never ran" or "instrument got the wrong input".
+
+Litmus: *name every world in which the check produces its definite result — pass or fail; if
+"the thing being checked never executed", "the producer emitted nothing", or "the instrument
+received the wrong input" is among them, the check cannot distinguish its verdict from its own
+failure.* The uniform remediation: assert the producer RAN (exit status, non-empty capture, an
+explicit liveness signal) before trusting any absence derived from it. Boundary: a
+security-consequence fail-open (an authz/validation fallback to a permissive state) belongs to
+the `security` overlay's "fail-open error handling" antipattern — this dimension covers checks,
+oracles, and health probes whose FAILURE is invisible, not permissive security fallbacks.
+
 ### 2. Recommend specialist overlays (the escalation signal)
 Decide which SPECIALIST overlays should ALSO review this change, and list them in
 `recommend_overlays` as `[{overlay_id, reason}]`. The `overlay_id` MUST be one of the FIXED

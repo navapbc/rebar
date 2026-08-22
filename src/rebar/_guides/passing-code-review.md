@@ -84,6 +84,38 @@ change; and never introduce a secret or an unauthenticated exposure on a securit
 path. Keep each `src/rebar` file **under 800 LOC** — the module-size gate is a `Verified`
 failure, not an advisory.
 
+### Fail-open checks — name every world in which your check passes
+
+Two of the reviewer's dimensions (`tests` and `error-handling`) look specifically for a
+**fail-open check**: a check, oracle, guard, or health probe whose PASS/absent/empty result is
+indistinguishable from the check never having run. It reports success by producing nothing —
+and nothing is also what a non-run produces, so the failure is invisible exactly when it
+matters. The litmus, before you push: *for each check your change adds or modifies, name every
+world in which it produces its definite result — pass or fail. If "the thing being checked
+never executed", "the producer emitted nothing", or "the instrument received the wrong input"
+is among them, the check cannot distinguish its verdict from its own failure.* The remediation
+is cheap and uniform: **assert the producer RAN** (exit status, non-empty capture, an explicit
+liveness signal) before trusting any absence derived from it.
+
+Two worked examples from the nine recorded instances that motivated this rubric:
+
+- **An absence assertion on a child's output (`tests`).** A test asserted a warning string was
+  ABSENT from a subprocess's stderr. A signal-killed child writes nothing, so the string was
+  trivially absent and a run that never executed reported GREEN. Fixed form: assert
+  `proc.returncode == 0` and a known PRESENCE from the same capture (the worker's startup
+  banner) *before* the absence — the same assertion, now anchored to a producer that provably
+  ran.
+- **A silent lookup miss (`error-handling`).** An env-var registry generator looked helpers up
+  in `KNOWN_ENV_HELPERS` and silently `continue`d on a miss — absent was not an error, it was
+  INVISIBLE, so operator-settable variables went undocumented while `--check` stayed green for
+  days. Fixed form: an unknown helper raises, naming the variable — the miss path fails
+  CLOSED.
+
+The same shape's mirror also counts: an instrument that produces a confident **failing** result
+for a reason other than the condition (wrong input, a format the matcher can't see) triggers
+recovery work against a system that was never broken. If you are verifying an absence, verify
+your instrument can still see a presence.
+
 ## A big bug fix needs a reviewed plan
 
 One blocking finding is not about your code at all. If your commit's `rebar-ticket:` names a
