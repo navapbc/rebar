@@ -58,6 +58,7 @@ KNOWN_ERROR_CODES: frozenset[str] = frozenset(
         "criterion_registry_malformed",
         "criterion_missing_file",
         "llm_unavailable",
+        "config_unreadable",
         "command_failed",
     }
 )
@@ -72,9 +73,10 @@ def error_code_for(exc: BaseException) -> str:
     1. ``ConcurrencyError`` / ``ConcurrencyMismatch`` → ``concurrency_conflict``
     2. ``TicketNotFoundError`` → ``ticket_not_found``
     3. ``TrackerRootError`` → ``tracker_root_unresolved``
-    4. a non-empty ``exc.error_code`` attribute → that code
-    5. ``LLMError`` → ``llm_unavailable``
-    6. fallback → ``command_failed``
+    4. ``ConfigError`` → ``config_unreadable``
+    5. a non-empty ``exc.error_code`` attribute → that code
+    6. ``LLMError`` → ``llm_unavailable``
+    7. fallback → ``command_failed``
 
     Imports exception types lazily to avoid cycles (this is a stdlib-only leaf).
     """
@@ -103,12 +105,22 @@ def error_code_for(exc: BaseException) -> str:
     if isinstance(exc, TrackerRootError):
         return "tracker_root_unresolved"
 
-    # 4. An explicit error_code attribute (CommandError or RebarError with one set)
+    # 4. ConfigError — an unreadable/malformed config is an error (operator ruling
+    #    39f8-ae7c); classified by type so MCP clients can branch on the fault.
+    try:
+        from rebar._config_coercion import ConfigError
+
+        if isinstance(exc, ConfigError):
+            return "config_unreadable"
+    except ImportError:
+        pass
+
+    # 5. An explicit error_code attribute (CommandError or RebarError with one set)
     code = getattr(exc, "error_code", None)
     if code:
         return code
 
-    # 5. LLMError
+    # 6. LLMError
     try:
         from rebar.llm.errors import LLMError
 
@@ -117,5 +129,5 @@ def error_code_for(exc: BaseException) -> str:
     except ImportError:
         pass
 
-    # 6. Fallback
+    # 7. Fallback
     return "command_failed"

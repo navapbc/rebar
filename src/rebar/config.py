@@ -457,30 +457,45 @@ def load_config(
 def mcp_readonly() -> bool:
     """THE shared resolver for the read-only gate (``mcp.readonly``). Resolves through
     the single-source typed config, so env ``REBAR_MCP_READONLY`` wins over the
-    ``[tool.rebar.mcp] readonly`` file key (``load_config`` layers env above file), and
-    fail-CLOSED to read-only on a malformed config (a broken config withholds writes
-    rather than exposing them). Both read-only call sites route through this — the MCP
+    ``[tool.rebar.mcp] readonly`` file key (``load_config`` layers env above file). On a
+    MALFORMED config it raises :class:`ConfigError` — chained from the parse fault and
+    naming the gate — so the fault surfaces to the operator instead of reading as the
+    read-only POLICY choice (operator ruling 39f8-ae7c: "Unreadable config should result
+    in an error"; the pre-ruling fail-closed ``return True`` silently laundered the
+    fault into a policy value). Both read-only call sites route through this — the MCP
     server's write-tool gating (``mcp_server._readonly``) and the LLM runner's
     comment-tool withholding (``runner._readonly_gate``) — so the two cannot diverge
     (they once did: the runner read only the env var and ignored the file key)."""
     try:
         return load_config().mcp.readonly
-    except ConfigError:
-        return True
+    except ConfigError as exc:
+        raise ConfigError(
+            f"cannot resolve the MCP read-only gate: the rebar config could not be "
+            f"read ({exc}). An unreadable config is an error (operator ruling "
+            "39f8-ae7c) — fix the config file, then retry the operation."
+        ) from exc
 
 
-def mcp_gate(attr: str, *, fail: bool) -> bool:
+def mcp_gate(attr: str) -> bool:
     """THE owned composition-root resolver for a typed ``mcp.<attr>`` boolean gate
     (``allow_llm`` / ``allow_jira_sync`` / any future one). Resolves through the
     single-source typed config — env ``REBAR_MCP_<ATTR>`` wins over the
-    ``[tool.rebar.mcp]`` file key — and returns ``fail`` on a MALFORMED config, the SAFE
-    direction chosen by the caller. The MCP server's per-request gate check
-    (``mcp_server._mcp_gate``) routes here so it RECEIVES composed config instead of
-    reading ``load_config`` below the composition seam (sibling of :func:`mcp_readonly`)."""
+    ``[tool.rebar.mcp]`` file key. On a MALFORMED config it raises
+    :class:`ConfigError` — chained from the parse fault and naming the gate — per
+    operator ruling 39f8-ae7c (the former ``fail`` keyword existed only to pick a
+    malformed-config fallback and was removed with that ruling: a fault must error,
+    never silently resolve to a default, even a safe one). The MCP server's per-request
+    gate check (``mcp_server._mcp_gate``) routes here so it RECEIVES composed config
+    instead of reading ``load_config`` below the composition seam (sibling of
+    :func:`mcp_readonly`)."""
     try:
         return bool(getattr(load_config().mcp, attr))
-    except ConfigError:
-        return fail
+    except ConfigError as exc:
+        raise ConfigError(
+            f"cannot resolve the mcp.{attr} gate: the rebar config could not be "
+            f"read ({exc}). An unreadable config is an error (operator ruling "
+            "39f8-ae7c) — fix the config file, then retry the operation."
+        ) from exc
 
 
 def compose_config(root: str | os.PathLike[str] | None = None) -> Config:

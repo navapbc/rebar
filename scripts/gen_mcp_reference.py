@@ -172,7 +172,12 @@ def render() -> str:
         "`ToolError` whose `__cause__` is an `McpEnvelopeError` carrying the shared "
         "`error_envelope` (`{error, input?, message[, exit_code]}`, `error` from "
         "`rebar.KNOWN_ERROR_CODES`) — the same machine-readable identity the CLI emits. "
-        "See [output-schemas.md](output-schemas.md#the-same-failure-channel-over-mcp)."
+        "See [output-schemas.md](output-schemas.md#the-same-failure-channel-over-mcp). "
+        "An unreadable/malformed rebar config is delivered as the `config_unreadable` "
+        "code (operator ruling 39f8-ae7c: the `mcp.readonly` / `mcp.allow_llm` / "
+        "`mcp.allow_jira_sync` gate resolvers raise `ConfigError` on a config fault "
+        "instead of silently resolving to a fallback), so a driving agent can tell a "
+        "broken config from a deliberate policy refusal."
     )
     lines.append("")
 
