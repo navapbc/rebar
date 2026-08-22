@@ -289,3 +289,104 @@ def test_the_corpus_converges_and_carries_the_marker_on_every_body(deployment):
         assert _diff(_ticket(body), _snapshot("DIG-1", [landed]), sanitizer, codec, mapper) == [], (
             f"a landed corpus body must not be re-emitted; body {body[:60]!r}"
         )
+
+
+# ======================================================================================
+# Construct-uniqueness guard (story a73e; parent epic airborne-wellloved-kingfisher AC1)
+# ======================================================================================
+import ast  # noqa: E402
+import pathlib  # noqa: E402
+import re  # noqa: E402
+
+import rebar  # noqa: E402
+
+_SRC = pathlib.Path(rebar.__file__).resolve().parent
+_OWNER = "_engine/rebar_reconciler/outbound_comments.py"
+_FIT_CALLS = {"fit_comment", "sanitize_comment", "fit_preserving_marker"}
+_WIRE_CALL = "to_wire"
+_FIT_OK_RE = re.compile(r"#\s*comment-fit-ok:(.*)$", re.MULTILINE)
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            func = sub.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name:
+                names.add(name)
+    return names
+
+
+def _fit_then_wire_offenders() -> list[str]:
+    """Every function outside the owner that composes a FIT with a to_wire encode.
+
+    The construct is that composition — fit the body, then encode it for the wire — because
+    that is what yields the dedup key, and a second copy of it is what made an over-length
+    comment un-matchable and re-post on every pass (bugs 6afc, 5931, b9b4, 17c3).
+
+    Matched at FUNCTION scope, not file scope, and that distinction is load-bearing. A
+    file-level conjunction false-positives on the Data Center adapter, which contains both
+    atoms for unrelated reasons: `to_wire` on the DESCRIPTION field and `fit_comment` as its
+    Backend-port implementation. Those never meet in one body. A guard that fires on innocent
+    code gets deleted, so the scope has to be tight enough to mean something.
+
+    A legitimate composition escapes with `# comment-fit-ok: <why>` inside the function. The
+    reason is MANDATORY, so the exception argues for itself in review.
+    """
+    offenders: list[str] = []
+    for path in sorted(_SRC.rglob("*.py")):
+        rel = path.relative_to(_SRC).as_posix()
+        if rel == _OWNER:  # the owner may refactor freely; uniqueness is about COPIES
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):  # pragma: no cover - unparseable is not duplication
+            continue
+        lines = text.splitlines()
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            called = _called_names(node)
+            if not (called & _FIT_CALLS) or _WIRE_CALL not in called:
+                continue
+            start, end = node.lineno - 1, (node.end_lineno or node.lineno)
+            excused = any(
+                (m := _FIT_OK_RE.search(line)) is not None and m.group(1).strip()
+                for line in lines[start:end]
+            )
+            if not excused:
+                offenders.append(f"{rel}:{node.lineno} {node.name}")
+    return offenders
+
+
+def test_the_fit_then_wire_derivation_has_exactly_one_body() -> None:
+    """The durability half of story 4cee. Consolidating the fit/dedup-key derivation is worth
+    nothing if a sixth copy can merge next week — and the comment key/send fit was among the
+    worst offenders in the defect review behind this epic, arriving as repeated instalments
+    precisely because a fix landed in one copy while its twins stayed broken.
+
+    This asserts how MANY compositions exist, never how the one composition works, so a
+    behaviour-preserving refactor inside `outbound_comments` cannot fail it.
+    """
+    assert _fit_then_wire_offenders() == [], (
+        "the fit-then-wire derivation was re-implemented outside "
+        f"{_OWNER}; call fit_for_send instead, or mark the line "
+        "'# comment-fit-ok: <reason>': " + repr(_fit_then_wire_offenders())
+    )
+
+
+def test_the_one_legitimate_second_fit_is_marked_with_a_reason() -> None:
+    """The Cloud adapter's `add_comment` genuinely composes fit-then-wire: a defensive fit in
+    case a body reaches the transport unfitted. It is allowed, and it must SAY so — a marker
+    with no reason is itself an offence, or the guard could be silenced by an empty comment."""
+    cloud = (_SRC / "_engine/rebar_reconciler/adapters/jira/acli_cli_ops.py").read_text(
+        encoding="utf-8"
+    )
+    marker = _FIT_OK_RE.search(cloud)
+    assert marker is not None, "the Cloud adapter's defensive fit should carry the marker"
+    assert marker.group(1).strip(), "the marker must carry a reason"
+
+    assert _FIT_OK_RE.search("x = 1  # comment-fit-ok: defensive").group(1).strip()
+    assert not _FIT_OK_RE.search("x = 1  # comment-fit-ok:").group(1).strip()
