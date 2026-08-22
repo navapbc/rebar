@@ -440,8 +440,15 @@ test happened to straddle it — an arbitrary, innocent one, different on each r
   from a leaking test's (bug `746c-185a-0e48-4b83`). A genuine leak is therefore yours to
   clean up, and the failure message names each entry.
 * `_no_repo_commits` (`tests/conftest.py`) — "The repo HEAD moved during this test (X -> Y)".
+* the session working-tree backstop (`tests/conftest.py::pytest_sessionfinish`) — diffs
+  `git status --porcelain` across the **whole session** and fails the run when any new dirty
+  entry appeared ("REPO ISOLATION FAILURE: new changes appeared in the checkout during this
+  test run"). Unlike the two per-test guards it fires **once, at session end**, rather than
+  blaming an arbitrary straddling test — the run tail shows a session-level failure, not an
+  innocent test reported as errored.
 
-Both fire in **teardown**, so the run reports the test as *passed* AND raises an error: a
+The two per-test guards fire in **teardown**, so the run reports the test as *passed* AND raises
+an error: a
 tail reading `N passed, 1 error` is one run reporting both, not a contradiction. A killed
 child process (a reaped run) shows up separately, as a harness probe that produced no
 output; those diagnostics now report the child's `returncode`, so a `-9`/`SIGKILL` marks an
