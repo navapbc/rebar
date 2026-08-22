@@ -177,7 +177,10 @@ def render() -> str:
         "code (operator ruling 39f8-ae7c: the `mcp.readonly` / `mcp.allow_llm` / "
         "`mcp.allow_jira_sync` gate resolvers raise `ConfigError` on a config fault "
         "instead of silently resolving to a fallback), so a driving agent can tell a "
-        "broken config from a deliberate policy refusal."
+        "broken config from a deliberate policy refusal. A cleartext (non-https) URL "
+        "rejected by security policy (`InsecureUrlError`) is delivered as the distinct "
+        "`config_insecure_url` code — the config parsed fine, so prompting the operator "
+        "to fix an unreadable config would mislead."
     )
     lines.append("")
 
