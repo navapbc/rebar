@@ -4,7 +4,8 @@ description: >-
   Principal-engineer codebase health pipeline, a deliberate pause between features to buy
   back optionality. Runs five phases. Discovery, a one-concern-per-subagent fan-out over
   code debt, smells, architectural decay, separation of concerns, spent optionality, doc
-  gaps, oversized units, AI-generated-code and security smells, and temporal decay,
+  gaps, oversized units, oracle strength, AI-generated-code and security smells, and temporal
+  decay,
   returning finding plus evidence with NO severity. Verification, an independent blue-team
   pass that scores validity and impact and demands a reachable harm. Remediation, blind
   parallel proposers on asymmetric evidence (community practice vs project record) with
