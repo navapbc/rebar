@@ -880,3 +880,82 @@ def test_project_applies_to_globs_read_the_overlay_not_the_packaged_index(tmp_pa
     assert code_review_registry.project_applies_to_globs(_PROJECT_ID, str(repo)) == ["**/*.py"]
     assert code_review_registry.project_criterion_applies(_PROJECT_ID, ["a.py"], str(repo))
     assert not code_review_registry.project_criterion_applies(_PROJECT_ID, ["a.md"], str(repo))
+
+
+# ── RP-06 S3: snapshot-driven Round-A applicability (skip vs run-exactly-once) ────────────────
+def _snapshot(repo):
+    from rebar.llm.criteria.snapshot import compile_snapshot
+
+    return compile_snapshot(str(repo))
+
+
+def test_snapshot_round_a_selection_skips_a_scoped_project_criterion_on_a_docs_only_diff(
+    tmp_path,
+) -> None:
+    # AC1: a project criterion scoped to src/** is SKIPPED when only docs changed.
+    repo = _project_repo(tmp_path, routing={**_PROJECT_ROUTING, "applies_to": ["src/**"]})
+    sel = code_review_registry.round_a_selection(_snapshot(repo), changed_files=["docs/x.md"])
+    assert _PROJECT_ID not in sel["project_llm"]
+
+
+def test_snapshot_round_a_selection_runs_a_matching_project_criterion_exactly_once(
+    tmp_path,
+) -> None:
+    # AC1: a matching diff SELECTS the criterion exactly once (no duplication).
+    repo = _project_repo(tmp_path, routing={**_PROJECT_ROUTING, "applies_to": ["src/**"]})
+    sel = code_review_registry.round_a_selection(_snapshot(repo), changed_files=["src/app.py"])
+    assert list(sel["project_llm"]).count(_PROJECT_ID) == 1
+
+
+def test_batch_runner_skips_a_nonmatching_project_criterion_when_changed_files_given(
+    tmp_path,
+) -> None:
+    # AC1: the runner honours applicability when changed_files is supplied — a docs-only diff
+    # runs the src/**-scoped project criterion ZERO times (recorded internally, not in findings).
+    prompts = tmp_path / ".rebar" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / f"{_PROJECT_PROMPT}.md").write_text(_PROJECT_RUBRIC, encoding="utf-8")
+    (tmp_path / ".rebar" / "criteria_routing.json").write_text(
+        json.dumps(
+            {
+                "code_review": {_PROJECT_ID: {**_PROJECT_ROUTING, "applies_to": ["src/**"]}},
+                "activate": [_PROJECT_ID],
+            }
+        ),
+        encoding="utf-8",
+    )
+    agent = _RecordingBatchAgent()
+    runner = CodeReviewBatchRunner(
+        context="DIFF",
+        project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
+        changed_files=["docs/readme.md"],
+    )
+    result = runner.run(_batch_request(step_id="round_a", repo_root=str(tmp_path)), agent)
+    assert agent.calls == []  # skipped — no matching changed path
+    assert result.outputs["criteria_count"] == 0
+
+
+def test_batch_runner_runs_a_matching_project_criterion_exactly_once(tmp_path) -> None:
+    prompts = tmp_path / ".rebar" / "prompts"
+    prompts.mkdir(parents=True)
+    (prompts / f"{_PROJECT_PROMPT}.md").write_text(_PROJECT_RUBRIC, encoding="utf-8")
+    (tmp_path / ".rebar" / "criteria_routing.json").write_text(
+        json.dumps(
+            {
+                "code_review": {_PROJECT_ID: {**_PROJECT_ROUTING, "applies_to": ["src/**"]}},
+                "activate": [_PROJECT_ID],
+            }
+        ),
+        encoding="utf-8",
+    )
+    agent = _RecordingBatchAgent()
+    runner = CodeReviewBatchRunner(
+        context="DIFF",
+        project_criteria=_project_entries(),
+        project_criteria_root=str(tmp_path),
+        changed_files=["src/app.py"],
+    )
+    result = runner.run(_batch_request(step_id="round_a", repo_root=str(tmp_path)), agent)
+    assert agent.calls == [("round_a:code-review-project-foo", _PROJECT_PROMPT)]
+    assert result.outputs["criteria_count"] == 1
