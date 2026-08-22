@@ -221,3 +221,83 @@ def test_the_cascading_edge_table_is_unchanged() -> None:
         ("closed", "in_progress"): "closed",
     }
     assert ("in_progress", "closed") not in _CASCADING_EDGES
+
+
+# ======================================================================================
+# TABLE-DRIVEN COVERAGE (parent epic airborne-wellloved-kingfisher, story AC2)
+# ======================================================================================
+def _cascading_edges() -> dict[tuple[str, str], str]:
+    from rebar._commands.transition import _CASCADING_EDGES
+
+    return dict(_CASCADING_EDGES)
+
+
+@pytest.mark.parametrize(("edge", "eligible"), sorted(_cascading_edges().items()))
+def test_every_edge_in_the_table_cascades_its_parent_first(
+    edge: tuple[str, str], eligible: str
+) -> None:
+    """Every row's CONTRACT for the shared walk, enumerated from the live table.
+
+    Scope note, so this is not mistaken for more than it is: the walk is table-agnostic, so
+    this passes for ANY row by construction. It pins that each row's eligible-status contract
+    is coherent — not that the row is wired into ``transition``. The test that a new row is
+    actually WIRED has to go through the real surface, and lives in
+    ``tests/interfaces/lifecycle/test_claim_transition_parent_cascade.py::
+    test_every_table_edge_cascades_through_the_real_transition``. Claiming durability here
+    would be a tautology dressed as a guard.
+    """
+    from rebar._commands import lifecycle_cascade
+
+    from_status, to_status = edge
+    chain = _Chain({"child": "parent"}, {"parent": eligible, "child": from_status})
+    lifecycle_cascade.cascade_parent_first(
+        "child",
+        eligible_status=eligible,
+        resolve_parent=chain.resolve,
+        advance=chain.advance,
+        action=f"move child to {to_status}",
+        parent_action="advanced",
+    )
+    assert chain.advanced == ["parent"], (
+        f"edge {from_status} -> {to_status} (eligible parent status {eligible!r}) did not "
+        "cascade to its parent"
+    )
+
+
+@pytest.mark.parametrize(("edge", "eligible"), sorted(_cascading_edges().items()))
+def test_no_edge_disturbs_a_parent_in_the_wrong_status(
+    edge: tuple[str, str], eligible: str
+) -> None:
+    """The mirror of the rule above, parametrised the same way: cascading is conditional on the
+    parent being in the row's eligible status. A row that advanced ANY parent would quietly
+    move tickets nobody asked it to touch — worse than not cascading at all."""
+    from rebar._commands import lifecycle_cascade
+
+    from_status, to_status = edge
+    wrong = "in_progress" if eligible != "in_progress" else "open"
+    chain = _Chain({"child": "parent"}, {"parent": wrong, "child": from_status})
+    lifecycle_cascade.cascade_parent_first(
+        "child",
+        eligible_status=eligible,
+        resolve_parent=chain.resolve,
+        advance=chain.advance,
+        action=f"move child to {to_status}",
+        parent_action="advanced",
+    )
+    assert chain.advanced == []
+
+
+def test_claim_cascades_only_the_open_edge_and_says_so() -> None:
+    """The story's AC2 as first written — "every edge exercised for both `claim` and
+    `transition`" — is not satisfiable, and pinning WHY here is more useful than an AC nobody
+    can meet. `claim` moves a ticket `open -> in_progress` and nothing else, so it can only
+    ever walk the `(open, in_progress)` row; the two `closed`-source rows belong to
+    `transition`/`reopen` alone.
+
+    This asserts that narrowness deliberately. If `claim` ever grows a second edge, this test
+    fails and the surface-parity question gets asked on purpose rather than by accident.
+    """
+    edges = _cascading_edges()
+    assert edges[("open", "in_progress")] == "open"
+    claimable = {edge for edge in edges if edge[0] == "open"}
+    assert claimable == {("open", "in_progress")}

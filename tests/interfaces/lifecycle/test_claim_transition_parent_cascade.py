@@ -551,3 +551,59 @@ def test_reopen_benign_parent_race_still_reopens_child(
 
     assert _status(child, rebar_repo) == "open"  # benign — child still reopened
     assert _status(parent, rebar_repo) == "open"
+
+
+# ------------------------------------------------------- table-driven edge coverage
+def _cascading_edges() -> dict[tuple[str, str], str]:
+    from rebar._commands.transition import _CASCADING_EDGES
+
+    return dict(_CASCADING_EDGES)
+
+
+def _chain_in_status(repo: Path, status: str) -> tuple[str, str]:
+    """A (parent, child) pair both sitting in ``status``, built the only way each status is
+    legally reachable. A row whose source status is neither ``open`` nor ``closed`` fails
+    LOUDLY here rather than being skipped: a silently-unbuildable fixture would turn this
+    whole guard into a no-op for exactly the new row it exists to cover."""
+    if status == "open":
+        parent = rebar.create_ticket("epic", "parent", repo_root=str(repo))
+        child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(repo))
+        return parent, child
+    if status == "closed":
+        parent, child = _closed_chain(repo, 2)
+        return parent, child
+    raise AssertionError(
+        f"_CASCADING_EDGES grew a row whose source status is {status!r}; extend "
+        "_chain_in_status so the new edge is actually covered rather than skipped"
+    )
+
+
+@pytest.mark.parametrize(("edge", "eligible"), sorted(_cascading_edges().items()))
+def test_every_table_edge_cascades_through_the_real_transition(
+    edge: tuple[str, str], eligible: str, rebar_repo: Path
+) -> None:
+    """Coverage that GROWS WITH THE TABLE, exercised through the REAL surface.
+
+    ``test_the_cascading_edge_table_is_unchanged`` (unit tier) is only a tripwire: adding a
+    fourth row breaks its equality assertion and makes the author look, but updating that
+    literal is all it forces — nothing then obliges the new row to actually cascade. The two
+    bugs this story descends from, ``cranial-sulfur-peafowl`` and ``paragonite-fruited-minnow``,
+    were both "an edge the cascade did not know about", so a tripwire alone leaves the bug
+    class open.
+
+    Parametrising over the LIVE table closes it: a new row mints a new case on import, and
+    that case only passes if ``rebar.transition`` genuinely walks the parent first. It is
+    driven through the library surface rather than through ``cascade_parent_first`` directly,
+    because the injected-walk unit tests pass for ANY row by construction — the walk is
+    table-agnostic. Only the real path can tell you the row is WIRED.
+    """
+    from_status, to_status = edge
+    parent, child = _chain_in_status(rebar_repo, from_status)
+    assert _status(parent, rebar_repo) == eligible
+
+    rebar.transition(child, from_status, to_status, repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == to_status
+    assert _status(parent, rebar_repo) == to_status, (
+        f"edge {from_status} -> {to_status} did not cascade to its {eligible} parent"
+    )
