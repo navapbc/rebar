@@ -444,6 +444,59 @@ def test_real_port_core_getter_failure_is_not_swallowed(tmp_path, monkeypatch) -
         mp.build_mapping_layer(port, "REB")
 
 
+class _LinkTypesOnlyBoomClient:
+    """A raw ``jira.JIRA``-shaped client where ONLY ``issue_link_types`` raises — the
+    partial-failure case (bug mid-aeronautic-wombat): every other getter succeeds."""
+
+    def issue_types(self) -> list[Any]:
+        return [{"name": "Task", "id": "1"}]
+
+    def priorities(self) -> list[Any]:
+        return [{"name": "High"}]
+
+    def issue_link_types(self) -> list[Any]:
+        raise RuntimeError("403 Forbidden (link-types endpoint denied)")
+
+    def statuses(self) -> list[Any]:
+        return [{"name": "To Do"}]
+
+    def createmeta_issuetypes(self, key: str) -> list[Any]:
+        return []
+
+    def createmeta_fieldtypes(self, key: str, issue_type_id: str) -> list[Any]:
+        return []
+
+    def search_issues(self, jql: str) -> list[Any]:
+        return []
+
+    def transitions(self, issue_key: str) -> list[Any]:
+        return []
+
+
+def test_real_port_link_types_failure_is_none_not_empty() -> None:
+    """The REAL ``_JiraProbePort`` must signal a failed link-types read as ``None``
+    (could not check) — a DIFFERENT value from the legitimately-empty ``[]`` — so
+    consumers (doctor's live-drift diff) can degrade the axis instead of treating every
+    configured link target as drift. Precedent: Flutter doctor's ``notAvailable`` state
+    and Homebrew's ``T.nilable(Finding)`` typed could-not-evaluate."""
+    import rebar_reconciler.mapping_probe as mp
+
+    port = mp._JiraProbePort(_LinkTypesOnlyBoomClient())
+    assert port.issue_link_types() is None
+
+
+def test_builder_tolerates_link_types_could_not_check() -> None:
+    """``build_mapping_layer`` over a port whose link-types read could not check
+    (``None``) still emits a valid layer with an EMPTY link axis — the optional axis
+    stays fail-soft for the suggestion builder."""
+    import rebar_reconciler.mapping_probe as mp
+
+    layer = mp.build_mapping_layer(mp._JiraProbePort(_LinkTypesOnlyBoomClient()), "REB")
+    project = layer["projects"]["REB"]
+    assert project["link_types"] == []
+    assert project["link_map"] == {}
+
+
 def test_all_empty_probe_is_systemic_not_a_valid_suggestion() -> None:
     """BLOCKING: a probe whose getters all succeed but return NOTHING (anonymous access /
     nonexistent project answering 200-empty) is indistinguishable from broken; the builder

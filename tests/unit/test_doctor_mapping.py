@@ -383,6 +383,111 @@ def test_live_drift_per_axis_divergence(tmp_path: Path, monkeypatch: pytest.Monk
     assert doctor_mapping.has_blocking_mapping(findings)
 
 
+class _LinkAxisFailedPort:
+    """A probe port whose CORE axes (statuses / issue types) succeed but whose link-types
+    read COULD NOT CHECK — the richer probe contract signals that as ``None``, a
+    different value from a legitimately-empty ``[]`` (Flutter doctor's ``notAvailable`` /
+    Homebrew's ``T.nilable(Finding)`` precedent)."""
+
+    def issue_types(self) -> list[dict]:
+        return [{"name": v} for v in set(cfg_mod.LOCAL_TYPE_TO_JIRA.values())]
+
+    def statuses(self) -> list[str]:
+        return list(set(cfg_mod.local_to_jira_status.values()))
+
+    def issue_link_types(self) -> list[str] | None:
+        return None
+
+
+class _LinkAxisEmptyPort(_LinkAxisFailedPort):
+    """A probe port whose link-types read SUCCEEDED and observed nothing — a genuinely
+    empty vocabulary, which MUST keep producing drift errors for configured link values."""
+
+    def issue_link_types(self) -> list[str] | None:
+        return []
+
+
+def test_link_probe_failure_degrades_link_axis_not_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PARTIAL probe failure — link-types could not be checked (``None``) while
+    statuses/types succeeded — must NOT report every configured link target as drift.
+    The link axis degrades to a distinct could-not-check ``unavailable`` finding, the
+    other axes are still diffed (a bogus status still errors), and the link-axis
+    degradation alone never blocks."""
+    monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
+    from rebar_reconciler import mapping_probe
+
+    monkeypatch.setattr(
+        mapping_probe, "build_probe", lambda *a, **k: _LinkAxisFailedPort(), raising=False
+    )
+    proj = _proj(
+        tmp_path,
+        "[mapping.projects.REB.status_map]\n"
+        'open = "BogusStatus"\n'
+        "[mapping.projects.REB.link_map]\n"
+        'relates_to = "Relates"\n',
+    )
+
+    findings = doctor_mapping.scan_mapping(str(proj))
+
+    drift = [f for f in findings if f.get("kind") == "mapping-drift"]
+    assert [f["axis"] for f in drift if f["axis"] == "link"] == []
+    assert any(f["axis"] == "status" and f["value"] == "BogusStatus" for f in drift)
+    axis_unavailable = [
+        f for f in findings if f["severity"] == "unavailable" and f.get("axis") == "link"
+    ]
+    assert len(axis_unavailable) == 1
+    assert "could not check" in axis_unavailable[0]["detail"]
+
+
+def test_link_probe_failure_alone_is_not_blocking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With an otherwise-clean config, a link-types could-not-check degrades to the
+    distinct ``unavailable`` finding and contributes NO error — zero-exit territory."""
+    monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
+    from rebar_reconciler import mapping_probe
+
+    monkeypatch.setattr(
+        mapping_probe, "build_probe", lambda *a, **k: _LinkAxisFailedPort(), raising=False
+    )
+    proj = _proj(
+        tmp_path,
+        '[mapping.projects.REB.link_map]\nrelates_to = "Relates"\n',
+    )
+
+    findings = doctor_mapping.scan_mapping(str(proj))
+
+    assert _by_severity(findings, "error") == []
+    assert not doctor_mapping.has_blocking_mapping(findings)
+    assert any(f.get("axis") == "link" for f in _by_severity(findings, "unavailable"))
+
+
+def test_genuinely_empty_link_vocabulary_still_drifts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A link-types read that SUCCEEDED and observed an empty vocabulary (``[]``) is a
+    valid observation, NOT a degradation: a configured link value must still surface as
+    a drift error. Guards the checked-and-empty vs could-not-check distinction."""
+    monkeypatch.setattr("rebar._optional.capability_installed", lambda key: True)
+    from rebar_reconciler import mapping_probe
+
+    monkeypatch.setattr(
+        mapping_probe, "build_probe", lambda *a, **k: _LinkAxisEmptyPort(), raising=False
+    )
+    proj = _proj(
+        tmp_path,
+        '[mapping.projects.REB.link_map]\nrelates_to = "Relates"\n',
+    )
+
+    findings = doctor_mapping.scan_mapping(str(proj))
+
+    drift = [f for f in findings if f.get("kind") == "mapping-drift"]
+    assert any(f["axis"] == "link" and f["value"] == "Relates" for f in drift)
+    assert doctor_mapping.has_blocking_mapping(findings)
+
+
 # ===========================================================================
 # EXIT-CODE FOLDING through the real doctor_cli entry point
 # ===========================================================================

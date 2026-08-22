@@ -71,7 +71,16 @@ class ProbePort(Protocol):
 
     def issue_types(self) -> list[dict]: ...
     def priorities(self) -> list[str]: ...
-    def issue_link_types(self) -> list[str]: ...
+
+    def issue_link_types(self) -> list[str] | None:
+        """The observed link-type names, ``[]`` when the read SUCCEEDED and observed
+        nothing, or ``None`` when it COULD NOT CHECK (the underlying call failed). The
+        two are different observations — Flutter doctor's ``notAvailable`` state and
+        Homebrew's ``T.nilable(Finding)`` draw the same line — so a consumer that diffs
+        against this axis (doctor's live-drift check) can degrade a failed read instead
+        of treating every configured link target as absent."""
+        ...
+
     def statuses(self) -> list[str]: ...
     def createmeta_issuetypes(self, key: str) -> list[dict]: ...
     def createmeta_fieldtypes(self, key: str, issue_type_id: str) -> list[dict]: ...
@@ -98,8 +107,10 @@ class _JiraProbePort:
     Every method is a thin call to ONE high-level ``jira.JIRA`` getter, normalized to
     plain data. A CORE getter (``issue_types`` / ``statuses``) that fails surfaces the
     failure as a :class:`ProbeError` — a systemic fault must never masquerade as an empty
-    result. An OPTIONAL axis getter degrades to an empty result (the builder then emits an
-    honest note), because an empty optional axis is a legitimate observation."""
+    result. An OPTIONAL axis getter degrades rather than raise, because an empty optional
+    axis is a legitimate observation — and where a consumer diffs against the axis
+    (``issue_link_types``) the degraded value is ``None`` (could not check), kept
+    distinct from a genuinely-empty ``[]``."""
 
     def __init__(self, jira_client: Any) -> None:
         self._client = jira_client
@@ -130,9 +141,11 @@ class _JiraProbePort:
     def priorities(self) -> list[str]:
         return self._soft(lambda: [_attr(p, "name", "") for p in self._client.priorities()], [])
 
-    def issue_link_types(self) -> list[str]:
+    def issue_link_types(self) -> list[str] | None:
+        # OPTIONAL axis, but could-not-check must stay distinguishable from
+        # checked-and-empty: a failed read degrades to ``None``, never ``[]``.
         return self._soft(
-            lambda: [_attr(lt, "name", "") for lt in self._client.issue_link_types()], []
+            lambda: [_attr(lt, "name", "") for lt in self._client.issue_link_types()], None
         )
 
     def statuses(self) -> list[str]:
@@ -315,7 +328,10 @@ def build_mapping_layer(port: ProbePort, project_key: str) -> dict[str, Any]:
             "the project key may not exist, or the credentials may lack access "
             "(an anonymous or unauthorized client often answers with an empty result)"
         )
-    link_types = [lt for lt in port.issue_link_types() if lt]
+    # A could-not-check link-types read (``None``) folds to an empty optional axis for
+    # the suggestion — the builder stays fail-soft here; only consumers that DIFF against
+    # the axis (doctor) need the empty-vs-failed distinction.
+    link_types = [lt for lt in (port.issue_link_types() or []) if lt]
     priorities = [p for p in port.priorities() if p]
     hierarchy = _hierarchy(raw_types)
 
