@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 
 import pytest
+from _nested_pytest import nested_basetemp, run_nested_pytest
 
 from rebar import _engine
 
@@ -171,8 +172,6 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active(tmp_path
     recurse into itself; the module is imported (which is what creates the shadow) and
     only the reducer test actually runs.
     """
-    import subprocess
-    import sys
 
     repo_root = Path(_engine.__file__).resolve().parents[2]
     scripts_test = repo_root / "tests" / "scripts" / "reducer" / "test_managed_refs.py"
@@ -183,28 +182,18 @@ def test_engine_submodules_resolve_when_the_tests_unit_shadow_is_active(tmp_path
     )
 
     env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
-    child_basetemp = tmp_path / "mixed-module-pytest"
-    cp = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(Path(__file__).resolve()),  # a tests/unit module outside rebar_reconciler/
-            str(scripts_test),
-            "-k",
-            "test_unlink_after_compaction_still_propagates_removal",
-            "-q",
-            "-p",
-            "no:randomly",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(child_basetemp),
-        ],
-        cwd=repo_root,
+    child_basetemp = nested_basetemp(tmp_path)
+    cp = run_nested_pytest(
+        tmp_path,
+        str(Path(__file__).resolve()),  # a tests/unit module outside rebar_reconciler/
+        str(scripts_test),
+        "-k",
+        "test_unlink_after_compaction_still_propagates_removal",
+        "-q",
+        "-p",
+        "no:randomly",
         env=env,
-        capture_output=True,
-        text=True,
+        cwd=repo_root,
     )
     combined = cp.stdout + cp.stderr
     assert "No module named 'rebar_reconciler" not in combined, (

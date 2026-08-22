@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from _nested_pytest import nested_basetemp, run_nested_pytest
+from _subprocess_env import subprocess_env
 
 from rebar._store import lock
 from rebar.llm.workflow import snapshot
@@ -58,24 +60,15 @@ def test_cross_module_snapshot_is_read_only(tmp_path: Path) -> None:
 def test_completed_snapshot_test_leaves_basetemp_removable(
     tmp_path: Path, selected_node: str
 ) -> None:
-    basetemp = tmp_path / "nested-basetemp"
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            selected_node,
-            "--basetemp",
-            str(basetemp),
-            "-p",
-            "no:randomly",
-            "-p",
-            "no:cacheprovider",
-            "-q",
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
+    basetemp = nested_basetemp(tmp_path)
+    result = run_nested_pytest(
+        tmp_path,
+        selected_node,
+        "-p",
+        "no:randomly",
+        "-q",
+        env=subprocess_env(),
+        cwd=None,
     )
 
     assert result.returncode == 0, result.stdout + result.stderr

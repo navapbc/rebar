@@ -30,6 +30,7 @@ if str(_TESTS_DIR) not in sys.path:
     sys.path.insert(0, str(_TESTS_DIR))
 
 import _isolation  # noqa: E402
+from _nested_pytest import run_nested_pytest  # noqa: E402
 from _subprocess_env import subprocess_env  # noqa: E402
 
 pytest_plugins = ["pytester"]
@@ -78,25 +79,15 @@ def _run_real_guard_with_blocking_git(
     nested_test = tmp_path / "test_nested_guard.py"
     nested_test.write_text("def test_body_finishes():\n    assert True\n")
     try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-q",
-                "-p",
-                "no:cacheprovider",
-                "-p",
-                "conftest",
-                "--basetemp",
-                str(tmp_path / "nested-pytest"),
-                str(nested_test),
-            ],
-            cwd=_TESTS_DIR.parent,
+        result = run_nested_pytest(
+            tmp_path,
+            "-q",
+            "-p",
+            "conftest",
+            str(nested_test),
             env=env,
-            capture_output=True,
-            text=True,
             timeout=30,
+            cwd=_TESTS_DIR.parent,
         )
     except subprocess.TimeoutExpired as exc:
         raise AssertionError(

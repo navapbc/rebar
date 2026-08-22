@@ -30,6 +30,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -161,21 +162,13 @@ def test_the_suite_refuses_to_run_on_an_under_floor_git(tmp_path: Path) -> None:
     shim.chmod(0o755)
 
     env = subprocess_env({"PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}"})
-    completed = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "--collect-only",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "tests/unit/test_git_version_floor.py",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
+    completed = run_nested_pytest(
+        tmp_path,
+        "--collect-only",
+        "-q",
+        "tests/unit/test_git_version_floor.py",
         env=env,
+        cwd=REPO_ROOT,
     )
     output = completed.stdout + completed.stderr
     assert completed.returncode != 0, f"an under-floor git must fail the run:\n{output}"

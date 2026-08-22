@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
+
+from _nested_pytest import run_nested_pytest
 
 _REPO = Path(__file__).resolve().parents[2]
 _TARGET = _REPO / "tests" / "scripts" / "test_autodeploy_review_drain.py"
@@ -21,23 +21,13 @@ def test_failure_rendering_does_not_expose_ambient_environment(tmp_path: Path) -
         "REBAR_DEBUG_SENTINEL": sentinel,
         "PATH": f"{fake_bin}:/usr/bin:/bin",
     }
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / "nested-pytest"),
-            f"{_TARGET}::test_a_deploy_that_would_interrupt_a_review_is_deferred",
-        ],
-        cwd=_REPO,
+    result = run_nested_pytest(
+        tmp_path,
+        "-q",
+        f"{_TARGET}::test_a_deploy_that_would_interrupt_a_review_is_deferred",
         env=env,
-        capture_output=True,
-        text=True,
         timeout=30,
+        cwd=_REPO,
     )
     output = result.stdout + result.stderr
     assert result.returncode != 0, "the nested probe must reach the seeded PATH failure"

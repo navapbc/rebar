@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -831,28 +832,24 @@ def _collect_node_ids(paths: tuple[str, ...], selection: str) -> list[str]:
     that is what makes this see a mark applied anywhere — a file-level ``pytestmark``, a
     per-test decorator, or one applied from a ``conftest.py`` hook.
     """
-    import subprocess
-    import sys
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="rebar-pytest-collect-") as temp_dir:
-        proc = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "--collect-only",
-                "-q",
-                "-m",
-                selection,
-                "--basetemp",
-                str(Path(temp_dir) / "pytest"),
-                *paths,
-            ],
-            cwd=_ROOT,
-            capture_output=True,
-            text=True,
+        proc = run_nested_pytest(
+            Path(temp_dir),
+            "--collect-only",
+            "-q",
+            "-m",
+            selection,
+            *paths,
+            # subprocess_env() rather than a minimal mapping: this collector inherited the
+            # ambient environment before it was routed through the helper, and
+            # test_ci_workflow_parity_basetemp.py pins that PYTEST_DEBUG_TEMPROOT reaches
+            # the child.
+            env=subprocess_env(),
             timeout=300,
+            cwd=_ROOT,
+            no_cacheprovider=False,
         )
     # rc 0 = items collected; rc 5 = nothing collected (a full exclusion) — both are outcomes
     # this guard must be able to report on, so only an unexpected rc is an error.

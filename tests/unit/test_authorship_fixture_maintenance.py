@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _nested_pytest import nested_basetemp, run_nested_pytest
 from _subprocess_env import subprocess_env
 
 pytestmark = pytest.mark.unit
@@ -27,7 +27,7 @@ def test_authorship_history_fixture_keeps_auto_maintenance_foreground(tmp_path: 
     target = repo_root / "tests/unit/test_authorship_batched_ticket_map_7084.py"
     global_config = tmp_path / "hostile-global-gitconfig"
     trace = tmp_path / "trace2.json"
-    basetemp = tmp_path / "nested-pytest"
+    basetemp = nested_basetemp(tmp_path)
     global_config.write_text("[gc]\n\tautoDetach = true\n[maintenance]\n\tautoDetach = true\n")
     env = subprocess_env()
     env.update(
@@ -38,24 +38,14 @@ def test_authorship_history_fixture_keeps_auto_maintenance_foreground(tmp_path: 
         }
     )
 
-    proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            f"{target}::test_batched_map_matches_the_per_event_resolver_for_every_event",
-            "-q",
-            "-n",
-            "0",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(basetemp),
-        ],
-        cwd=repo_root,
+    proc = run_nested_pytest(
+        tmp_path,
+        f"{target}::test_batched_map_matches_the_per_event_resolver_for_every_event",
+        "-q",
+        "-n",
+        "0",
         env=env,
-        capture_output=True,
-        text=True,
+        cwd=repo_root,
     )
     assert proc.returncode == 0, f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
 

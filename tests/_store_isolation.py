@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
+from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
 import rebar
@@ -30,24 +30,7 @@ def assert_nodes_do_not_mutate_external_store(tmp_path: Path, *node_ids: str) ->
     before_dirs = {path.name for path in tracker.iterdir() if path.is_dir()}
     env = subprocess_env({"REBAR_ROOT": str(repo)})
 
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            "-q",
-            "-p",
-            "no:cacheprovider",
-            "--basetemp",
-            str(tmp_path / "nested-pytest"),
-            *node_ids,
-        ],
-        cwd=Path(__file__).resolve().parent.parent,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=90,
-    )
+    result = run_nested_pytest(tmp_path, "-q", *node_ids, env=env, timeout=90)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert _git_out(tracker, "rev-parse", "HEAD") == before_head
