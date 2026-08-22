@@ -25,8 +25,21 @@ from types import ModuleType
 import pytest
 
 from rebar._commands import doctor, doctor_locks
+from rebar._snapshot import gc_trigger as _gc_trigger
+from rebar._snapshot import repo_snapshot as _repo_snapshot
 from rebar._store import lock as _lock
 from rebar._store import lock_owner as _owner
+
+
+@pytest.fixture(autouse=True)
+def _isolated_snapshot_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the per-host snapshot store under this test's tmp dir.
+
+    The snapshot-GC leg is the census's one HOST-GLOBAL probe
+    (:func:`rebar._snapshot.repo_snapshot.peek_store_root` resolves the same root from
+    every checkout); without this pin, every assertion about an exact leg set or finding
+    count would inherit whatever a real worker left on the machine running the tests."""
+    monkeypatch.setenv("REBAR_GATE_TMPDIR", str(tmp_path / "gate-tmp"))
 
 
 def _tracker(tmp_path: Path) -> Path:
@@ -67,7 +80,7 @@ def _dead_pid() -> int:
 @pytest.mark.unit
 @pytest.mark.scripts
 def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
-    """All five legs are reported even when nothing is held — "the lock is free" is the
+    """All six legs are reported even when nothing is held — "the lock is free" is the
     answer an operator most often needs, and a missing row is indistinguishable from a
     check that never ran."""
     tracker = _tracker(tmp_path)
@@ -80,11 +93,19 @@ def test_a_free_store_reports_every_leg_and_no_finding(tmp_path: Path) -> None:
         doctor_locks.LEG_HLC,
         doctor_locks.LEG_ENRICH_DRAIN,
         doctor_locks.LEG_COMPACT_WORKER,
+        doctor_locks.LEG_SNAPSHOT_GC_WORKER,
     }
     assert _by_name(reports, doctor_locks.LEG_TICKETS_MKDIR)["state"] == "free"
     compact = _by_name(reports, doctor_locks.LEG_COMPACT_WORKER)
     assert compact["state"] == "free"
     assert compact["holder"] is None, "a free store must not report a spurious holder"
+    snapshot = _by_name(reports, doctor_locks.LEG_SNAPSHOT_GC_WORKER)
+    assert snapshot["state"] == "free"
+    assert snapshot["holder"] is None, "an absent store must not report a spurious holder"
+    # The snapshot store on this host does not exist yet, and probing it must keep it
+    # that way: the leg's path derivation is read-only (worker_lock_probe_path), unlike
+    # store_root(), which mkdirs as a side effect.
+    assert not _repo_snapshot.peek_store_root().exists(), "the probe materialised the store"
     # The fcntl files are created lazily by the first acquirer, so a never-written store
     # reports them absent rather than inventing them: probing must not create a lock file.
     assert _by_name(reports, doctor_locks.LEG_TICKETS_FCNTL)["state"] == "absent"
@@ -404,6 +425,57 @@ def test_a_dead_holder_compact_lock_is_a_stale_finding(tmp_path: Path) -> None:
     _plant_compact_lock(tracker, _drain_stamp(pid=str(_dead_pid())))
 
     report = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_COMPACT_WORKER)
+
+    assert report["staleness"] == doctor_locks.STALENESS_STALE
+    findings = doctor_locks.lock_findings([report])
+    assert [f["kind"] for f in findings] == [doctor_locks.KIND_STALE_LOCK]
+
+
+# ---------------------------------------------------------------------------
+# the snapshot-GC worker lock (per-host store, same stamped shape, shared table)
+# ---------------------------------------------------------------------------
+
+
+def _plant_snapshot_gc_lock(stamp: str) -> Path:
+    """Write a stamped worker lock where the census's read-only derivation will look —
+    the pinned per-host store, NOT any tracker's ``.rebar/``."""
+    path = _gc_trigger.worker_lock_probe_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(stamp, encoding="utf-8")
+    return path
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_the_snapshot_gc_lock_names_a_live_holder_and_is_not_a_finding(
+    tmp_path: Path,
+) -> None:
+    """The snapshot-GC trigger's worker lock (``gc_trigger``, via the shared
+    ``stamped_file_lock``) joins the census: a live detached worker on the per-host
+    snapshot store is information — named, aged, called live — never a finding."""
+    tracker = _tracker(tmp_path)
+    _plant_snapshot_gc_lock(_drain_stamp())  # this live process
+
+    report = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_SNAPSHOT_GC_WORKER)
+
+    assert report["state"] == "held"
+    assert report["held_seconds"] is not None
+    assert report["holder"]["pid"] == str(os.getpid())
+    assert report["pid_state"] == "live"
+    assert report["staleness"] == doctor_locks.STALENESS_NOT_STALE
+    assert doctor_locks.lock_findings([report]) == []
+
+
+@pytest.mark.unit
+@pytest.mark.scripts
+def test_a_dead_holder_snapshot_gc_lock_is_a_stale_finding(tmp_path: Path) -> None:
+    """The gap this leg exists for: a detached snapshot-GC worker that died between
+    acquire and release leaves a stamped lock on the per-host store that no
+    tracker-adjacent census could see."""
+    tracker = _tracker(tmp_path)
+    _plant_snapshot_gc_lock(_drain_stamp(pid=str(_dead_pid())))
+
+    report = _by_name(doctor_locks.scan_locks(str(tracker)), doctor_locks.LEG_SNAPSHOT_GC_WORKER)
 
     assert report["staleness"] == doctor_locks.STALENESS_STALE
     findings = doctor_locks.lock_findings([report])

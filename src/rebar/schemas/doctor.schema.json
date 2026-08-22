@@ -45,7 +45,8 @@
               "tickets-write-mkdir",
               "hlc",
               "enrich-drain",
-              "compact-worker"
+              "compact-worker",
+              "snapshot-gc-worker"
             ]
           },
           "path": { "type": "string" },
