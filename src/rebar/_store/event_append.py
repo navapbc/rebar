@@ -46,6 +46,7 @@ import subprocess as subprocess
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from rebar._store import git_outcome
 from rebar._store import lock as _lock
 from rebar._store import staging as _staging
 
@@ -461,13 +462,19 @@ def _recover_from_unmerged(
 # git ``write-tree`` refuses the commit with this signature when an index entry references
 # an object that is MISSING from the object DB (``git commit`` builds a tree from the index's
 # cached shas, and only ``write-tree`` verifies each blob EXISTS — corrupt CONTENT is not
-# re-read at commit, so the trigger is a vanished object, not a garbled one).
-_INVALID_OBJECT_MARKERS = ("invalid object", "error building trees")
+# re-read at commit, so the trigger is a vanished object, not a garbled one). The markers
+# themselves live in the shared registry as the INVALID_OBJECT kind — a kind of its own
+# precisely because its action is the RECOVERY below, not the terminal FATAL default.
+_INVALID_OBJECT_MARKERS = git_outcome.INVALID_OBJECT_MARKERS
 
 
 def _is_invalid_object_error(text: str) -> bool:
-    low = (text or "").lower()
-    return any(marker in low for marker in _INVALID_OBJECT_MARKERS)
+    """True when git refused the commit because an index entry names a MISSING object.
+
+    A lookup against :mod:`rebar._store.git_outcome`; equivalently
+    ``classify(result, operation=git_outcome.COMMIT).kind is GitKind.INVALID_OBJECT``.
+    """
+    return git_outcome.is_invalid_object(text or "")
 
 
 def _staged_index_paths(tracker: str) -> list[str]:

@@ -30,6 +30,7 @@ from rebar._store.gitutil import (
     _is_transient_object_write_error,
     _with_index_lock_retry,
     _with_transient_fault_retry,
+    run_git_bounded,
 )
 
 # The transient object-DB WRITE fault this path rides out — git's loose-object temp create
@@ -65,16 +66,16 @@ def _run_git(argv: list[str]) -> subprocess.CompletedProcess[str]:
     """``subprocess.run`` a git command (captured, text) bounded by :data:`_GIT_TIMEOUT`.
 
     The single entry point for event_append's lock-held git invocations, so every one carries
-    the same wall-clock bound as ``push.py``. Mirrors ``push.py._git``: a hung git is folded
-    into a synthetic FAILED result (returncode 124) rather than raised, so the existing
-    returncode-inspecting callers (and their retry wrappers) fail the write cleanly — which
-    unwinds out of ``write_lock`` and releases the lock — instead of surfacing a new
-    ``TimeoutExpired`` exception type. A genuine ``OSError`` (e.g. git not on PATH) still
-    propagates unchanged, preserving the best-effort helpers' ``except OSError`` behavior."""
-    try:
-        return subprocess.run(argv, capture_output=True, text=True, timeout=_GIT_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return subprocess.CompletedProcess(argv, 124, "", f"git timed out after {_GIT_TIMEOUT}s")
+    the same wall-clock bound as ``push.py``. The timeout fold — a hung git becomes a
+    synthetic FAILED result (returncode 124) rather than a raise, so the existing
+    returncode-inspecting callers and their retry wrappers fail the write cleanly, unwinding
+    out of ``write_lock`` — is now the SHARED :func:`gitutil.run_git_bounded`; this shim only
+    adapts the historical ``argv``-list signature its ~15 call sites pass. A genuine
+    ``OSError`` (e.g. git not on PATH) still propagates unchanged, preserving the best-effort
+    helpers' ``except OSError`` behavior."""
+    if argv[:2] == ["git", "-C"]:
+        return run_git_bounded(argv[2], *argv[3:], timeout=_GIT_TIMEOUT)
+    return run_git_bounded(None, *argv[1:], timeout=_GIT_TIMEOUT)
 
 
 # raw-git-ok: locked store seam internal
