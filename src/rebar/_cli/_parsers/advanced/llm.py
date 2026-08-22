@@ -186,6 +186,20 @@ def build_review_plan(*, prog: str) -> argparse.ArgumentParser:
         "now (no model call, no network, no re-sign); prints the verdict + bound verified-at-sha. "
         "Exit 0 when current, 12 when stale/absent",
     )
+    parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="resume ONLY the exact latest eligible INDETERMINATE review: reuse the "
+        "checkpointed findings of its already-successful units and issue model calls only "
+        "for the missing units, under a FRESH per-invocation attempt budget. Eligible only "
+        "when the latest retained REVIEW_RESULT is INDETERMINATE with a versioned discovery "
+        "journal and at least one retryable missing unit; a PASS/BLOCK, a non-retryable "
+        "indeterminate, or a missing/legacy/corrupt/stale/digest-mismatched journal is "
+        "REFUSED before any model call (exit 2) with the normal full-review remedy. Cumulative "
+        "retry lineage is recorded as audit telemetry and never enforced as a cap. Mutually "
+        "exclusive with --force, --status, and --check; compatible with --no-sign. The retry "
+        "response stays a narrow end-result view — the per-unit journal is never printed",
+    )
     _add_ref_source(parser)
     return parser
 

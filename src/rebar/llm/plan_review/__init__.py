@@ -422,6 +422,7 @@ def review_plan(
     emit_sidecar: bool = True,
     advisory_cap: int | None = None,
     force: bool = False,
+    retry: bool = False,
 ) -> dict[str, Any]:
     """Run the plan-review gate on ``ticket_id`` and return a ``plan_review_verdict``.
 
@@ -466,10 +467,69 @@ def review_plan(
             advisory_cap=advisory_cap,
             repo_root=repo_root,
             force=force,
+            retry=retry,
             # Resolved source: stamped on the verdict only AFTER this returns (bug 5128).
             source_mode=handle.source,
         )
     return gate_source.annotate_result(verdict, handle)
+
+
+def _finalize_signature(
+    verdict: dict[str, Any],
+    *,
+    sign: bool,
+    source_mode: str | None,
+    material,
+    review_phase,
+    priority_floor,
+    repo_root,
+    review_snapshot,
+    initial_generation,
+    ctx,
+) -> None:
+    """Sign a non-blocking PASS attestation on ``verdict`` (in place), else stamp the
+    machine-readable unsigned reason. Signs only when the LLM tier actually ran (the
+    ``llm_ran`` guard is defense-in-depth so a DET-only result can never be signed); an
+    unattested local read is never certifiable (ADR 0005). A signing failure is recorded
+    in-band and logged, never raised."""
+    certifiable_pass = (
+        sign
+        and verdict.get("verdict") == "PASS"
+        and verdict.get("runner") != "exempt"
+        and verdict.get("coverage", {}).get("llm_ran") is not False
+    )
+    if certifiable_pass and source_mode == "local":
+        verdict["signature"] = {"signed": False, "reason": "local-source-never-signs"}
+        return
+    if not certifiable_pass:
+        verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})
+        return
+    try:
+        sig = attest.sign_plan_review(
+            verdict,
+            material=material,
+            review_phase=review_phase,
+            priority_floor=priority_floor,
+            repo_root=repo_root,
+            relation_snapshot=review_snapshot,
+            initial_generation=initial_generation,
+            # A container's dep set inherits the children's file_impact (3e4b); read lazily
+            # here so a non-signing path never requires ``ctx.children``.
+            children=ctx.children,
+        )
+        verdict["signature"] = {
+            "signed": True,
+            "key_id": sig.get("key_id"),
+            "head_sha": sig.get("head_sha"),
+        }
+    except Exception as exc:
+        logger.warning("attestation signing failed; verdict unsigned", exc_info=True)
+        signature_error = {"signed": False, "error": str(exc)}
+        from . import generation
+
+        if isinstance(exc, generation.PlanReviewGenerationError):
+            signature_error.update(event=exc.event, retryable=exc.retryable)
+        verdict["signature"] = signature_error
 
 
 def _run_plan_review(
@@ -482,6 +542,7 @@ def _run_plan_review(
     advisory_cap: int | None,
     repo_root,
     force: bool = False,
+    retry: bool = False,
     source_mode: str | None = None,
 ) -> dict[str, Any]:
     from . import claimability
@@ -493,20 +554,15 @@ def _run_plan_review(
         if not_claimable is not None:
             return not_claimable
 
-    # Snapshot all plan-material relations before any path can reach an LLM
-    # preflight/probe.  The same value is threaded into signing so one review does
-    # exactly one store-wide reduction.
+    # Snapshot all plan-material relations before any path can reach an LLM preflight/probe;
+    # the same value is threaded into signing so one review does exactly one store reduction.
     from . import generation, relation_snapshot
 
     try:
-        # Ignore UNTRACKED files in the SHARED tickets-tracker: this preflight is a READ
-        # that fingerprints the committed HEAD, which untracked files cannot change. A
-        # crashed/slow process elsewhere can leave stray artifacts in the tracker
-        # (symlinked into every session); treating them as fatal here would collapse
-        # review-plan — and therefore claim — to store-read-failure machine-wide. The
-        # authoritative under-lock signing re-check already ignores them (see
-        # generation.py's tracker_head_sha(..., ignore_untracked=True)); tracked dirty
-        # state (modified/staged/unmerged) still fails, as it must.
+        # Ignore UNTRACKED files in the SHARED tickets-tracker: this preflight READ fingerprints
+        # the committed HEAD, which untracked files cannot change; treating stray artifacts as
+        # fatal would collapse review-plan (and claim) machine-wide. The under-lock signing
+        # re-check also ignores them; tracked dirty state (modified/staged/unmerged) still fails.
         review_snapshot = relation_snapshot.collect_plan_relation_snapshot(
             ticket_id, repo_root=repo_root, ignore_untracked=True
         )
@@ -541,40 +597,41 @@ def _run_plan_review(
     ctx = orchestrator.assemble_context(ticket_id, repo_root=repo_root, cfg=cfg)
     review_phase = initial_generation.phase
     priority_floor = initial_generation.priority_floor
-    # Idempotence short-circuit (feature b3e5): when the ticket is UNCHANGED and already
-    # carries a still-VALID plan-review attestation — the SAME validity the claim gate
-    # consumes (certified + material/registry/code-drift/reopen all current) — reuse it
-    # instead of re-running the billable multi-pass LLM review. Ordered BEFORE the
-    # drift-refresh check below (a fully-valid attestation beats a needs-refresh one), and
-    # only on the signing path (a --no-sign / readonly review has no attestation to reuse).
-    # ``force`` bypasses BOTH this skip and the drift-refresh, forcing a full re-review.
+    # Exact retry (story RP-06 S5): resume ONLY the latest review, and ONLY when it is a
+    # retryable INDETERMINATE with a current discovery journal. An ineligible retry REFUSES
+    # here (before any model call, reuse short-circuit, or sidecar write); an eligible retry
+    # proceeds through the normal review below, whose Pass-1 chunk-checkpoint resume reuses the
+    # successful units and re-runs only the missing ones under this invocation's fresh budget.
+    retry_prior: dict[str, Any] | None = None
+    if retry:
+        from . import retry as retry_mod
+
+        retry_refusal, retry_prior = retry_mod.gate(ticket_id, ctx, repo_root=repo_root, cfg=cfg)
+        if retry_refusal is not None:
+            return retry_refusal
+    # Idempotence short-circuit (feature b3e5): reuse a still-VALID plan-review attestation
+    # (the SAME validity the claim gate consumes) instead of re-running the billable review.
+    # Signing path only; `--force`/`--retry` bypass it.
     from . import cited_anchor, reuse
 
-    if sign and not force:
+    if sign and not force and not retry:
         reused = reuse.idempotent_reuse(ticket_id, ctx, repo_root=repo_root)
         if reused is not None:
             return reused
-    # BLOCK verdict-reuse (bug 7e77): the sibling short-circuit for the path the attestation
-    # skip above can never cover — a BLOCK never signs, so an unrevised blocked plan re-paid
-    # the full review on every retry. When the latest REVIEW_RESULT sidecar's BLOCK still
-    # matches the current material fingerprint AND review code sha, reuse the stored verdict
-    # (zero LLM calls, no new sidecar). Not sign-gated: reuse neither signs nor emits, so a
-    # --no-sign / readonly review benefits identically. ``force`` bypasses it like the others.
-    if not force:
+    # BLOCK verdict-reuse (bug 7e77): a BLOCK never signs, so reuse the stored BLOCK verdict from
+    # the latest sidecar when its material fingerprint AND review code sha still match (zero LLM,
+    # no new sidecar). Not sign-gated; `--force`/`--retry` bypass it.
+    if not force and not retry:
         block_reused = reuse.verdict_reuse(ticket_id, ctx, repo_root=repo_root)
         if block_reused is not None:
             return block_reused
-    # Warn-only cited-anchor pre-check (task ccba) — deterministic, zero-LLM, and placed
-    # before drift_refresh so the operator sees it before any billable call. It never
-    # returns a verdict: the review proceeds either way. See :mod:`.cited_anchor`.
+    # Warn-only cited-anchor pre-check (task ccba) — deterministic, zero-LLM, before drift_refresh.
     anchor_precheck = cited_anchor.precheck(ticket_id, ctx, repo_root=repo_root)
-    # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because
-    # reviewed code drifted (material + registry unchanged) and a cheap probe confirms the
-    # plan still matches the code, refresh the attestation instead of a full re-review.
-    # Always on (operator-authorized 2026-07-12; off switch retired in story 4cdf); still
-    # self-gated by ``if sign`` (a --no-sign / readonly review has no attestation to refresh).
-    # A local run never refreshes: a refresh RE-SIGNS, and local never signs (bug 5128).
-    if sign and source_mode != "local":
+    # Progressive drift-refresh (Story 2): when the attestation is stale ONLY because reviewed
+    # code drifted (material + registry unchanged) and a cheap probe confirms the plan still
+    # matches, refresh instead of a full re-review. Self-gated by ``if sign``; local never
+    # refreshes (a refresh re-signs, local never signs — bug 5128).
+    if sign and source_mode != "local" and not retry:
         refreshed = orchestrator.drift_refresh(
             ctx,
             cfg,
@@ -586,23 +643,15 @@ def _run_plan_review(
             from rebar.llm import findings
 
             return findings.validate_structured(refreshed, "plan_review_verdict")
-    # Remediation-mode eligibility (epic 7d43, child ec89) — decided here, PARALLEL to the
-    # drift-refresh check above and on the same code/material/registry signals, but it does NOT
-    # early-return: the full criteria set still runs, and the DECISION is recorded on the verdict
-    # so the Pass-3 rising floor (child cc5b) can consume it. Off/absent key ⇒ None ⇒ a
-    # byte-identical full review (the back-out).
+    # Remediation-mode + drift-floor eligibility (epic 7d43 / bug 5e40) — decided here on the
+    # code/material/registry signals, PARALLEL and mutually exclusive (code_unchanged vs
+    # code_drifted). Neither early-returns: the full criteria set still runs and the DECISION is
+    # recorded on the verdict for the Pass-3 floors to consume. Off/absent ⇒ byte-identical review.
     remediation = _remediation_decision(ticket_id, repo_root) if sign else None
-    # Drift-floor eligibility (bug 5e40) — decided here, PARALLEL to the drift-refresh + remediation
-    # checks on the OPPOSITE code axis (plan UNCHANGED + code DRIFTED). Like remediation it does NOT
-    # early-return: the full criteria set still runs and the DECISION is recorded so the Pass-3
-    # floor can consume it. It fires only when drift-refresh did NOT already converge the re-review
-    # (chiefly unscoped plans, whose whole-HEAD invalidation escalated to a full, non-deterministic
-    # re-review). remediation and drift are mutually exclusive (code_unchanged vs code_drifted).
     drift = drift_floor.decision(ticket_id, repo_root) if sign else None
     cap = advisory_cap if advisory_cap is not None else orchestrator.DEFAULT_ADVISORY_CAP
     # Verdict PRODUCTION runs through the v3 engine workflow (gates/plan-review.yaml); the
-    # signing/sidecar wrapper below is unchanged, so the signed attestation is stable. The
-    # verify/coach steps run under the verifier cfg (non-frontier model unless overridden).
+    # signing/sidecar wrapper below is unchanged. Verify/coach steps run under the verifier cfg.
     from rebar.llm.workflow import gate_dispatch
 
     prerequisite_blocks = [
@@ -624,61 +673,40 @@ def _run_plan_review(
         prerequisite_blocks=prerequisite_blocks,
     )
 
-    # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the
-    # review ran — everything after the edit was skipped and nothing reviewed is
-    # signable. Return the cancelled INDETERMINATE verbatim, BEFORE the floors, the
-    # signing attempt, and the sidecar emit (a sidecar write advances the store
-    # revision), mirroring the not-claimable fast-fail early return above.
+    # Mid-run cancellation (story 2c89): the ticket's OWN material changed while the review ran —
+    # return the cancelled INDETERMINATE verbatim, BEFORE the floors/signing/sidecar emit.
     if verdict.get("coverage", {}).get("cancelled"):
         return verdict
 
     material = initial_generation.own_material
     verdict["material_fingerprint"] = material
 
-    # Record the remediation-mode decision on the verdict coverage (observability + the seam the
-    # Pass-3 rising floor reads in child cc5b). Only when remediation mode is enabled AND a real
-    # decision was produced — a normal full review (key off/absent) leaves coverage untouched, so
-    # the verdict shape is byte-identical to today's.
+    # Record the remediation + drift-floor decisions on coverage (the seams the Pass-3 floors read).
+    # Off/absent ⇒ coverage untouched, so a normal review's verdict shape is byte-identical.
     if remediation is not None:
         verdict.setdefault("coverage", {})["remediation"] = remediation
-
-    # Record the drift-floor decision on coverage (observability + the seam the Pass-3 drift floor
-    # reads). JSON-safe (bools + a sorted path list). Off/absent → coverage untouched.
     if drift is not None:
         verdict.setdefault("coverage", {})["drift"] = drift
 
-    # Pass-3 RISING FLOOR (child cc5b) — applied BEFORE the sidecar emit so the dropped findings
-    # land in the sidecar (with norm_id) while leaving the surfaced verdict narrowed. Always active
-    # (off switch retired in story 4cdf); still gated on a remediation re-review + per-review
-    # eligibility, so a normal review's verdict stays byte-identical.
+    # Pass-3 floors (rising / completion / drift — child cc5b, story 6533, bug 5e40), applied
+    # BEFORE the sidecar emit so dropped findings land in the sidecar while the surfaced verdict is
+    # narrowed. Each is gated + inert by default, so a normal review's verdict stays byte-identical.
     _maybe_apply_rising_floor(
         ticket_id, verdict, remediation, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
-
-    # Pass-3 COMPLETION FLOOR (epic 66ac / story 6533) — the container-completion analogue of the
-    # rising floor, applied AFTER it and BEFORE the sidecar emit so completion-dropped findings land
-    # in the sidecar (with drop_reason="completion"). Gated by container(has_children) +
-    # verify.completion_floor_active; inert (and the verdict byte-identical) by default.
     _maybe_apply_completion_floor(
         ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
-    # Pass-3 DRIFT FLOOR (bug 5e40) — the code-drift-axis analogue of the rising floor, applied
-    # AFTER the others and BEFORE the sidecar emit so drift-dropped findings land in the sidecar
-    # (with drop_reason="drift"). Gated on a plan-UNCHANGED + code-DRIFTED re-review of an
-    # already-signed PASS (the stale-head regime); inert (verdict byte-identical) otherwise. Reuses
-    # the novelty machinery; the drift-intersection predicate keeps findings citing drifted code.
+    # Pass-3 DRIFT FLOOR (bug 5e40) — the code-drift-axis analogue, applied after the others and
+    # before the sidecar emit. Gated on a plan-UNCHANGED + code-DRIFTED re-review; inert otherwise.
     drift_floor.maybe_apply(
         ticket_id, verdict, drift, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
-    # VALIDATION-ASSESSMENT cross-checks (bug 5e40) — two per-verdict CONSISTENCY drops that the
-    # floors above (code/completion axes) do not cover: an intra-verdict CONTRADICTION (a false
-    # BLOCK refuted by a true advisory in the SAME verdict) and a finding that re-litigates a point
-    # the ticket's recorded COMMENT TRAIL already resolved. Applied after the floors and before the
-    # sidecar emit so dropped findings land in the sidecar (drop_reason="contradiction" /
-    # "comment_trail"). Each is gated inert (verdict byte-identical) behind an evidence-gate config
-    # flag by default, like the completion floor; fail-safe to no-drops.
+    # VALIDATION-ASSESSMENT cross-checks (bug 5e40) — two per-verdict CONSISTENCY drops (intra-
+    # verdict contradiction + comment-trail re-litigation) the axis floors do not cover. Applied
+    # before the sidecar emit; each gated inert (verdict byte-identical) by default, fail-safe.
     from . import xcheck
 
     xcheck.maybe_apply_contradiction(
@@ -688,61 +716,37 @@ def _run_plan_review(
         ticket_id, verdict, ctx=ctx, cfg=cfg, runner=runner, repo_root=repo_root
     )
 
-    # Blocking fix-unit grouping (story 5e64) — stamp-only, after the floors and before the
-    # sidecar emit so the group stamps land in the persisted payload.
+    # Blocking fix-unit grouping (story 5e64) — stamp-only, before the emit so stamps persist.
     _group_blocking_fix_units(verdict)
 
-    # Sign on a non-blocking PASS (not for exempt/blocking/indeterminate) where the LLM
-    # tier actually ran — the llm_ran guard is defense-in-depth so a DET-only result can
-    # never be signed (fuel-posse-ball). The attestation = "process followed, no blocking
-    # red flags + coverage", NOT "perfect"; advisory findings are coaching, not blocks.
-    certifiable_pass = (
-        sign
-        and verdict.get("verdict") == "PASS"
-        and verdict.get("runner") != "exempt"
-        and verdict.get("coverage", {}).get("llm_ran") is not False
+    _finalize_signature(
+        verdict,
+        sign=sign,
+        source_mode=source_mode,
+        material=material,
+        review_phase=review_phase,
+        priority_floor=priority_floor,
+        repo_root=repo_root,
+        review_snapshot=review_snapshot,
+        initial_generation=initial_generation,
+        ctx=ctx,
     )
-    # An UNATTESTED read is never certifiable (ADR 0005: local is "dirty allowed, never
-    # signed") — it would bind no committed SHA while still satisfying the claim gate. The
-    # close gate already enforces this; plan-review missed it (bug 5128-0856). The POLICY
-    # reason is machine-readable, distinct from a signing *failure* (`error`) and non-PASS.
-    if certifiable_pass and source_mode == "local":
-        verdict["signature"] = {"signed": False, "reason": "local-source-never-signs"}
-    elif certifiable_pass:
-        try:
-            sig = attest.sign_plan_review(
-                verdict,
-                material=material,
-                review_phase=review_phase,
-                priority_floor=priority_floor,
-                repo_root=repo_root,
-                relation_snapshot=review_snapshot,
-                initial_generation=initial_generation,
-                # A container's dep set inherits the children's file_impact (3e4b).
-                children=ctx.children,
-            )
-            verdict["signature"] = {
-                "signed": True,
-                "key_id": sig.get("key_id"),
-                "head_sha": sig.get("head_sha"),
-            }
-        except Exception as exc:
-            # Don't crash the review on a signing failure, but record it in-band AND on
-            # the logger (a missing/broken signing key is operator-actionable).
-            logger.warning("attestation signing failed; verdict unsigned", exc_info=True)
-            signature_error = {"signed": False, "error": str(exc)}
-            if isinstance(exc, generation.PlanReviewGenerationError):
-                signature_error.update(event=exc.event, retryable=exc.retryable)
-            verdict["signature"] = signature_error
-    else:
-        verdict.setdefault("signature", {"signed": False, "reason": verdict.get("verdict")})
 
     # Record the outcome (True AND False) so the warning's precision is measurable offline.
     cited_anchor.record_metrics(verdict, anchor_precheck)
 
-    # Persist the recovery sidecar only after the atomic sign attempt. Writing it earlier
-    # advances the ticket-store revision and invalidates this review's immutable generation.
-    # It remains best-effort and is emitted after a failed sign so cheap re-sign can recover.
+    # Persist the recovery sidecar only after the atomic sign attempt (writing it earlier
+    # advances the store revision and invalidates this review's generation); best-effort.
+    # Retry bookkeeping (story RP-06 S5): on the retry path, mark the verdict and compute the
+    # cumulative retry lineage BEFORE the emit so both land in the persisted payload; a normal
+    # review's shape is byte-identical.
+    retry_lineage = None
+    if retry:
+        from . import retry as retry_mod
+
+        verdict.setdefault("coverage", {})["retry"] = True
+        retry_lineage = retry_mod.build_lineage(retry_prior or {}, verdict)
+
     verdict["sidecar_emitted"] = (
         sidecar.emit(
             verdict,
@@ -754,19 +758,21 @@ def _run_plan_review(
             repo_root=repo_root,
             # Lets sign-review refuse a local PASS; verified_at_sha cannot tell (bug 5128).
             source=source_mode,
+            retry_lineage=retry_lineage,
         )
         if emit_sidecar
         else False
     )
+    # The reducer-ignored discovery journal is persisted to the sidecar (above) purely to seed
+    # `--retry` eligibility; it is NEVER part of the surfaced verdict (story RP-06 S5 AC6).
+    from rebar.llm.workflow import plan_review_recovery
 
-    # Store-wide cross-ticket overlap (epic only-crave-art, story 0f70) — ADVISORY ONLY.
-    # Runs AFTER signing + sidecar.emit, so the sidecar, coverage counts, and attestation are
-    # byte-identical whether overlap is on or off (the overlap results ride in a SEPARATE
-    # `overlap[]` key that is never a blocking/advisory finding and never affects the verdict
-    # or the claim gate). Gated OFF by default (verify.suggest_duplicate_tickets); gated to
-    # real runs (emit_sidecar) not pure-read; and graceful-skips (→ []) when the LLM/agents
-    # extra/key is absent. `overlap[]` is added ONLY when enabled, so the verdict shape is
-    # unchanged when off.
+    plan_review_recovery.strip_surfaced_journal(verdict.get("coverage"))
+
+    # Store-wide cross-ticket overlap (epic only-crave-art, story 0f70) — ADVISORY ONLY. Runs
+    # AFTER signing + sidecar.emit; rides in a SEPARATE `overlap[]` key that never affects the
+    # verdict/claim gate. Gated OFF by default, to real runs only, and graceful-skips (→ []) when
+    # the LLM/agents extra is absent. `overlap[]` is added only when enabled (shape unchanged off).
     if emit_sidecar:
         from rebar import config as _overlap_config
 
@@ -777,9 +783,7 @@ def _run_plan_review(
                 ticket_id, repo_root=repo_root, config=cfg, runner=runner
             )
 
-    # Validate the assembled verdict against its documented contract (shape-only,
-    # permissive) — the same final re-validation the completion op does. Pins the
-    # CLI/library `--output json` shape to plan_review_verdict.schema.json.
+    # Validate the assembled verdict against its documented contract (shape-only, permissive).
     from rebar.llm import findings
 
     return findings.validate_structured(verdict, "plan_review_verdict")
