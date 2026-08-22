@@ -37,21 +37,20 @@ import os
 import sys
 from typing import Any
 
-from rebar.llm.code_review.registry import threshold_for
+from rebar.llm.code_review.registry import routing_index, threshold_for
 from rebar.llm.review_kernel.decide import impact_code, pass3_decide
 
-# The packaged v4 blocking set (routing) — the criteria whose posture can BLOCK. Kept here only
-# for the human-readable summary; the actual gate uses the packaged threshold_for per finding.
-_BLOCKING_SET = (
-    "secret-detection",
-    "high-critical-security",
-    "security",
-    "api-compat",
-    "deletion-impact",
-    "regression",
-    "error-handling",
-    "tests",
-)
+def blocking_set() -> frozenset[str]:
+    """The criteria whose PACKAGED posture can block, derived from the routing index.
+
+    Kept for the human-readable summary only — the actual gate resolves each finding through
+    ``threshold_for``. Deriving it here (rather than restating it as a literal) is what keeps
+    the printed summary from drifting away from the posture the replay actually applies."""
+    return frozenset(
+        criterion
+        for criterion, entry in routing_index().items()
+        if bool((entry or {}).get("blocking_enabled", False))
+    )
 
 
 def _would_block(finding: dict[str, Any]) -> bool:
@@ -103,7 +102,7 @@ def _replay_corpus(tracker: str) -> int:
     print(f"corpus: {total} findings under {tracker}")
     print(f"  v3 (stored)   : {v3_block_findings} findings / {len(v3_changes)} changes block")
     print(f"  v4 (impact_code): {v4_block_findings} findings / {len(v4_changes)} changes block")
-    print(f"  blocking set  : {', '.join(_BLOCKING_SET)}")
+    print(f"  blocking set  : {', '.join(sorted(blocking_set()))}")
     return 0
 
 
