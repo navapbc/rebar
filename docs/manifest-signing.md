@@ -1,71 +1,50 @@
-# Signing a manifest of verified steps
+# Signing manifests and operation certificates
 
-rebar can record a **cryptographic attestation** on a ticket: a *manifest* (a JSON
-array of verified-step strings) plus an HMAC-SHA256 signature. It is the
-machine-checkable proof that a gate ran and that the steps it verified are unaltered
-since — a signal of rigorous agentic development rather than a vibe-check.
+rebar can attach a manifest of verified steps to a ticket through a `SIGNATURE` event. New records are operation certificates. Each record contains a DSSE envelope whose payload is an in-toto Statement. The envelope carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 private key. The certificate principal identifies that environment. The plan-review and completion-verifier gates use this certificate form.
 
-> **For most projects you never sign by hand.** The attestation is produced
-> automatically by the review gates: a passing **plan-review** (at claim), a passing
-> **completion-verifier** (at close), and **code-review** all leave a signed record on
-> the ticket. Reach for the commands below only if you want to sign manifests yourself
-> or customize the process — for example, driving rebar from a shared deployment (an MCP
-> server) with an injected key, or attaching your own verified-step manifests to a
-> ticket outside the built-in gates.
+## Commands and APIs
 
-## The commands
-
-`rebar sign <id> <manifest>` records the attestation; `rebar verify-signature <id>`
-recomputes the HMAC with the local key and **certifies** that the recorded steps still
-match the signature:
+`rebar sign <id> <manifest>` records a manifest certificate. `rebar verify-signature <id>` verifies one recorded certificate without an LLM call or a network request.
 
 ```bash
 rebar sign abcd-1234 '["unit tests: PASS", "security review: clean", "deployed to staging"]'
-rebar verify-signature abcd-1234        # SIGNATURE: certified — verified steps match the signature
+rebar verify-signature abcd-1234
 ```
 
-The library and MCP surfaces mirror the CLI: `rebar.sign_manifest(ticket_id, manifest)`
-/ `rebar.verify_signature(ticket_id)`, and the write-gated MCP `sign_manifest` /
-`verify_signature` tools (pass `kind` to certify a specific attestation kind, e.g.
-`plan-review` / `completion-verifier`).
+The library operations are `rebar.sign_manifest(ticket_id, manifest)` and `rebar.verify_signature(ticket_id)`. The MCP server exposes the write-gated `sign_manifest` tool and the read-only `verify_signature` tool. Pass `kind` when verification must select one entry from the ticket's kind-keyed `attestations` map.
 
-## The key
+The code-review gate reports its verdict through the configured review system. It does not create a ticket operation certificate.
 
-The signature is computed with a key that is **specific to the environment** rebar
-runs in. The key is resolved from:
+## Environment key and principal
 
-1. `REBAR_SIGNING_KEY` — injected out-of-band into a shared deployment (e.g. an MCP
-   server), or, failing that,
-2. a per-environment `.signing-key` file generated on first use (written `0600`,
-   owner-only, gitignored, never committed, never shared).
+The default private key is `<tracker>/.opcert-key`. rebar generates this passphrase-free Ed25519 key on the first signing operation, writes the private key with owner-only permissions, derives `<tracker>/.opcert-key.pub`, and excludes both files from the ticket log. `REBAR_OPCERT_KEY_PATH` can select a provisioned private key instead.
 
-Because the key never leaves the environment, `verify-signature` reports `foreign_key`
-(rather than `certified`) when a record was signed by a *different* environment — only
-the environment that holds the key can certify its own attestations.
+The certificate principal comes from `REBAR_OPCERT_ENV_ID` when that deployment setting is present. Otherwise rebar uses the ticket store's `.env-id`. The principal attributes the certificate to the signing environment. It does not identify a person. Authorship attestations use a separate key, namespace, and trust model.
 
-## Trust model
+Signing requires OpenSSH 8.9 or newer. A missing or unusable `ssh-keygen` produces a signing error. Gate callers record that outcome as unsigned, and a gate that requires certification remains unsatisfied. Verification never creates a missing private key.
 
-- **The signature binds both the ticket id and the manifest**, so it cannot be replayed
-  onto another ticket, and any edit to the step list invalidates it.
-- **It is a shared secret (HMAC), not a public-key identity.** The attestation proves a
-  signature was produced by a holder of the environment key and that the steps are
-  unaltered since — nothing more. Anyone who can read the `.signing-key` file or the
-  injected `REBAR_SIGNING_KEY` can forge a `certified` record, so protect read access to
-  the environment accordingly.
-- **It is a normal append-only `SIGNATURE` event**, so it replays into `rebar show`
-  output, survives compaction, and flows to other clones like any other write.
+## Signed material and verification
 
-## Where it plugs in
+The DSSE payload is an in-toto Statement that binds the ticket ID, attestation kind, material fingerprint, code commit, and full manifest. Verification accepts those bound values only after checking the SSHSIG signature against an Ed25519 public key. A copied certificate therefore cannot certify another ticket or another attestation kind.
 
-- **Close gate.** The completion-verification close gate
-  (`verify.require_completion_verification_for_close = true`) signs a PASS
-  `completion-verifier` verdict onto the ticket at close (re-verify if HEAD moved, or
-  bypass with `--force=<reason>`). See the [Configuration](../README.md#configuration)
-  section of the README.
-- **Attestation kinds.** A ticket holds a kind-keyed `attestations` map — independent
-  records of different kinds (`plan-review` at claim, `completion-verifier` at close)
-  coexist rather than clobbering one slot. See
-  [`docs/plan-review-gate.md`](plan-review-gate.md).
-- **Reusing the machinery.** The `rebar.signing` API (key resolution, manifest
-  canonicalisation, `sign_manifest` / `verify_manifest`) is documented for reuse in
-  [`docs/reuse-surface.md`](reuse-surface.md).
+`rebar verify-signature` performs same-environment verification. It verifies a DSSE envelope signed through SSHSIG with the current environment's Ed25519 key and requires the certificate principal to identify that environment. A certificate from another environment returns `foreign_key` on this local path. Projects that require a named trusted environment pin its public key in `.rebar/trusted_environments.yaml` and use the operation-certificate merge verification described in [ADR 0049](adr/0049-opcert-asymmetric.md).
+
+A certified signature establishes the integrity and environment attribution of the signed process record. It does not establish that the reviewed work is defect-free. Gate validity also checks current ticket material, code freshness, reopen state, and related-ticket pins where applicable.
+
+## Gate behavior
+
+- A passing plan-review records a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. Its principal identifies that environment, and the certificate is stored under the `plan-review` key.
+- A passing completion-verifier records the same DSSE, SSHSIG, Ed25519, and environment-attribution mechanism under the `completion-verifier` key.
+- The `attestations` map allows both records to coexist. The top-level `signature` field is a compatibility mirror of the most recent record.
+- A gate run with `source=local` does not sign. A forced claim or close also records no certificate.
+- A code or ticket-material change can make a certified certificate stale. Run the relevant gate again when its status is no longer current.
+
+## Legacy HMAC records
+
+Older `SIGNATURE` events can contain an HMAC-SHA256 hex value and a key fingerprint instead of a DSSE envelope. These events remain readable as append-only history. A legacy HMAC record filed as `plan-review` or `completion-verifier` now returns `unknown_scheme` and cannot certify a current gated operation. Run the relevant gate again to issue an operation certificate.
+
+The generic HMAC helpers in `rebar.signing`, including `compute_signature`, `verify_record`, and `signing_key`, remain supported for non-operation-certificate consumers. Current `rebar sign`, plan-review, and completion-verifier writes do not use that HMAC path. See [the migration record](migrations/hmac-opcert-removal.md) for the compatibility window and reissue procedure.
+
+## Storage
+
+An operation certificate is an append-only `SIGNATURE` event. It replays into the ticket's kind-keyed `attestations` map, survives compaction, and reaches other clones through the ticket branch. New records use `algorithm: "sshsig"`, carry an encoded `envelope`, and have no HMAC `signature` field. See [the event schema](event-schema.md) and [the reusable signing API](reuse-surface.md) for field and library contracts.
