@@ -190,7 +190,7 @@ def _bash_argv(step: GateStep) -> list[str]:
 
 def _run_step(step: GateStep, cwd: Path) -> subprocess.CompletedProcess[str]:
     """Execute the step's real `run:` body in `cwd`."""
-    return subprocess.run(_bash_argv(step), cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(_bash_argv(step), cwd=cwd, capture_output=True, text=True, check=False)
 
 
 @pytest.fixture

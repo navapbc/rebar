@@ -33,7 +33,9 @@ def _run(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=180)
+    result = subprocess.run(
+        argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=180, check=False
+    )
     if check and result.returncode:
         detail = (
             f"command failed ({result.returncode}): {argv}\n"

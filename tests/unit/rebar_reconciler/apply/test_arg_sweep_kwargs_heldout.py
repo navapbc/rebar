@@ -201,6 +201,7 @@ def test_swept_module_passes_default_ruff(rel_path):
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     combined = proc.stdout + proc.stderr
     err_lines = [ln for ln in combined.splitlines() if ":" in ln and "Unused `noqa`" in ln]
@@ -232,6 +233,7 @@ def test_arg_backlog_is_substantially_reduced():
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     combined = proc.stdout + proc.stderr
     arg_lines = [ln for ln in combined.splitlines() if ":" in ln and " ARG" in ln]

@@ -36,13 +36,15 @@ exit 1
 
 
 def _git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
-    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True, check=False)
     assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
     return r
 
 
 def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
-    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "--git-dir", str(d), *a], capture_output=True, text=True, check=False
+    )
     assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
     return r
 
@@ -54,7 +56,10 @@ def declining_store(rebar_repo: Path, tmp_path: Path) -> Path:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
     subprocess.run(
-        ["git", "-C", str(tracker), "remote", "remove", "origin"], capture_output=True, text=True
+        ["git", "-C", str(tracker), "remote", "remove", "origin"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     _git(tracker, "remote", "add", "origin", str(origin))
     _git(tracker, "push", "-q", "origin", "HEAD:tickets")

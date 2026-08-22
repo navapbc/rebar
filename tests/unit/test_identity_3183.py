@@ -45,6 +45,7 @@ def _verify_authorship(store: Path, *, required: bool) -> subprocess.CompletedPr
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
 
 

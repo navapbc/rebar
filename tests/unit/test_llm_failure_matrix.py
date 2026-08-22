@@ -81,7 +81,7 @@ def _forbid_live_model_requests():
     (The repo conftest also sets this; we assert it belt-and-suspenders.)"""
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
     assert pydantic_ai.models.ALLOW_MODEL_REQUESTS is False
-    yield
+    return
 
 
 # ── Offline model builders (the injection seam) ───────────────────────────────

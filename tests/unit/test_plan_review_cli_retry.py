@@ -192,6 +192,7 @@ def test_cli_retry_resumes_and_persists_lineage(repo: Path, tmp_path: Path) -> N
             env=_child_env(repo),
             capture_output=True,
             text=True,
+            check=False,
         )
         assert proc.returncode == 0, f"{mode} driver crashed:\n{proc.stderr}"
         return json.loads(out.read_text(encoding="utf-8"))
@@ -238,6 +239,7 @@ def test_cli_retry_refuses_unreviewed_ticket_with_zero_calls(repo: Path) -> None
         env=_child_env(repo),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 2
     assert "review-plan" in proc.stderr.lower()
@@ -257,6 +259,7 @@ def test_cli_retry_conflicts_are_rejected(repo: Path, other: str) -> None:
         env=_child_env(repo),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 2
     assert "--retry" in proc.stderr
@@ -272,6 +275,7 @@ def test_cli_retry_is_compatible_with_no_sign(repo: Path) -> None:
         env=_child_env(repo),
         capture_output=True,
         text=True,
+        check=False,
     )
     # Refused on eligibility (never reviewed), not on a flag conflict.
     assert proc.returncode == 2

@@ -75,6 +75,7 @@ def _cli(repo: Path, *args: str) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=str(repo),
+        check=False,
     )
 
 

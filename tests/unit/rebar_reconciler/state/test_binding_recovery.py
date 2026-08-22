@@ -139,9 +139,13 @@ def _make_overlap(
     store = BindingStore(tracker)
     live_before = (_bridge(root) / "bindings.json").read_bytes()
     _fail_live_replace(mp)
-    with pytest.raises(OSError, match=r"replace onto bindings\.json failed"):
+
+    def _drive_to_the_grace() -> None:
         for _ in range(int(binding_lifecycle._DEFAULT_ABSENT_RETIRE_GRACE)):
             store.note_absent(retire_key)
+
+    with pytest.raises(OSError, match=r"replace onto bindings\.json failed"):
+        _drive_to_the_grace()
     mp.undo()
     # The fault cut must really have left the overlap, or every test below is vacuous.
     assert (_bridge(root) / "bindings.json").read_bytes() == live_before

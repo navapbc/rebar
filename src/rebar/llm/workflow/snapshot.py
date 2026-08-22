@@ -118,6 +118,7 @@ def resolve_sha(ref: str, repo_root: str | None = None) -> str:
         ["git", "-C", root, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     sha = proc.stdout.strip()
     if proc.returncode != 0 or not sha:

@@ -34,7 +34,9 @@ def _marker_names() -> tuple[str, str]:
 
 
 def _git_out(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True, check=False
+    ).stdout
 
 
 def test_seeded_gitignore_covers_lock_and_graph_cache(rebar_repo: Path) -> None:

@@ -170,7 +170,7 @@ def s3_backend_ready() -> tuple[bool, str]:
 
 def git_run(argv: list[str], cwd: Path | str) -> subprocess.CompletedProcess[str]:
     """Run git, raising with git's OWN stderr on failure (diagnostic, not 'exit N')."""
-    result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
+    result = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise RuntimeError(
             f"{' '.join(argv)} failed in {cwd} (exit {result.returncode}): "

@@ -49,6 +49,7 @@ def test_generated_entrypoint_runs_ensure_without_tickets_pat(tmp_path: Path) ->
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

@@ -22,14 +22,14 @@ _TRUNCATION_SUFFIX = " … [truncated by reconciler]"
 _JIRA_COMMENT_MAX_CHARS = 32767
 
 
-@pytest.fixture()
+@pytest.fixture
 def acli_ops():
     from rebar_reconciler.adapters.jira import acli_cli_ops
 
     return acli_cli_ops
 
 
-@pytest.fixture()
+@pytest.fixture
 def outbound():
     from rebar_reconciler import outbound_comments
 
@@ -148,7 +148,7 @@ def test_under_limit_comment_is_unchanged(monkeypatch, acli_ops, outbound) -> No
 # calling the fitter directly; these pin it.
 
 
-@pytest.fixture()
+@pytest.fixture
 def cloud_fit():
     """The real Cloud comment fitter the send path injects."""
     from rebar_reconciler.adapters.jira.rich_text_codec import AdfCodec

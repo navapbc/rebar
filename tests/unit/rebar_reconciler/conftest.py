@@ -106,7 +106,7 @@ def _sandbox_repo_root(tmp_path, monkeypatch):
     argument are unaffected (the source prefers the argument over the env).
     """
     monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
-    yield
+    return
 
 
 @pytest.fixture(autouse=True)
@@ -136,7 +136,7 @@ def _default_jira_project(monkeypatch):
     monkeypatch.setenv("JIRA_URL", "https://example.atlassian.net")
     monkeypatch.setenv("JIRA_USER", "reconciler-tests@example.com")
     monkeypatch.setenv("JIRA_API_TOKEN", "test-api-token")
-    yield
+    return
 
 
 @pytest.fixture

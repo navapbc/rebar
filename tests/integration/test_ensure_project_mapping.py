@@ -59,7 +59,9 @@ _PROJECT = "REB"
 
 
 def _git(tracker: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "-C", str(tracker), *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", str(tracker), *args], capture_output=True, text=True, check=False
+    )
 
 
 def _tracker(repo: Path) -> Path:

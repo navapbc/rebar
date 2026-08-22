@@ -77,6 +77,7 @@ def _file_in_head(tracker_dir: Path, rel: str) -> str | None:
         ["git", "-C", str(tracker_dir), "show", f"HEAD:{rel}"],
         capture_output=True,
         text=True,
+        check=False,
     )
     return r.stdout if r.returncode == 0 else None
 
@@ -142,6 +143,7 @@ def test_no_change_is_noop(tmp_path, reconcile_mod):
         ["git", "-C", str(tracker_dir), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
 
     # No change to either file → fast-path no-op (no new commit).
@@ -151,6 +153,7 @@ def test_no_change_is_noop(tmp_path, reconcile_mod):
         ["git", "-C", str(tracker_dir), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
     assert head_before == head_after, "no-change pass must not create a commit"
 

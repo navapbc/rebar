@@ -88,7 +88,7 @@ def section(title: str) -> None:
 # raw-git-ok: generic command runner, argv supplied by caller
 def run(*argv: str) -> None:
     global OUT, STDOUT, RC
-    cp = subprocess.run(list(argv), capture_output=True, text=True)
+    cp = subprocess.run(list(argv), capture_output=True, text=True, check=False)
     OUT = (cp.stdout + cp.stderr).rstrip("\n")
     STDOUT = cp.stdout.rstrip("\n")
     RC = cp.returncode
@@ -149,7 +149,7 @@ def _show_json(tid: str) -> dict:
     Parse failures return {} so the following assertion FAILS and the probe
     CONTINUES — the jq-pipeline analogue (empty output, not a raised error).
     """
-    cp = subprocess.run([RB, "show", tid], capture_output=True, text=True)
+    cp = subprocess.run([RB, "show", tid], capture_output=True, text=True, check=False)
     try:
         doc = json.loads(cp.stdout)
     except ValueError:
@@ -158,7 +158,7 @@ def _show_json(tid: str) -> dict:
 
 
 def _list_json(*args: str) -> list:
-    cp = subprocess.run([RB, "list", *args], capture_output=True, text=True)
+    cp = subprocess.run([RB, "list", *args], capture_output=True, text=True, check=False)
     try:
         doc = json.loads(cp.stdout)
     except ValueError:
@@ -238,6 +238,7 @@ def _cleanup(tracker: str, pre_ids: str) -> None:
             ["git", "rm", "-r", "--quiet", *_CREATED],
             cwd=tracker,
             capture_output=True,
+            check=False,
         )
         for name in [*_CREATED, ".graph-cache.json"]:
             shutil.rmtree(os.path.join(tracker, name), ignore_errors=True)
@@ -245,6 +246,7 @@ def _cleanup(tracker: str, pre_ids: str) -> None:
             ["git", "commit", "--quiet", "-m", "probe cleanup"],
             cwd=tracker,
             capture_output=True,
+            check=False,
         )
     if os.environ.get("PROBE_LIVE") == "1":
         post = _ticket_dirs(tracker)
@@ -347,7 +349,7 @@ def _probe() -> None:  # deliberately one linear probe script
     for rel in (*relations, "discovered_from"):
         run_rb("link", task, bug, rel)
         assert_rc(0, f"link {rel}")
-        subprocess.run([RB, "unlink", task, bug], capture_output=True)
+        subprocess.run([RB, "unlink", task, bug], capture_output=True, check=False)
     run_rb("link", task, bug, "blocks")
     assert_rc(0, "link blocks (set up cycle test)")
     run_rb("link", bug, task, "blocks")

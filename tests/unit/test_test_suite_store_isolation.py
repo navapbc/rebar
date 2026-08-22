@@ -25,7 +25,7 @@ def test_plan_review_outage_unit_test_does_not_write_ambient_store(tmp_path: Pat
     assert_nodes_do_not_mutate_external_store(tmp_path, _OUTAGE_NODE)
 
 
-@pytest.mark.parametrize("node_id", (_OUTAGE_NODE, _ENGINE_DIR_NODE, _SCRIPTS_IMPORT_NODE))
+@pytest.mark.parametrize("node_id", [_OUTAGE_NODE, _ENGINE_DIR_NODE, _SCRIPTS_IMPORT_NODE])
 def test_nested_pytest_does_not_clean_shared_numbered_temp_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, node_id: str
 ) -> None:

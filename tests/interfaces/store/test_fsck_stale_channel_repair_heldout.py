@@ -43,7 +43,7 @@ def test_stale_only_refuses_mixed_fault_tickets(tmp_path: Path, fault: str) -> N
 
 
 @pytest.mark.parametrize(
-    "argv, message",
+    ("argv", "message"),
     [
         (["--only=stale-channel"], "requires --repair"),
         (["--repair", "--only=unknown"], "unknown --only value"),

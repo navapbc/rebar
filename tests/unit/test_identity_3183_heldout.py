@@ -149,6 +149,7 @@ def test_snapshot_roundtrip_signed_events_still_verify(
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     # the signed ticket's compacted events still verify from the snapshot ledger
     assert res.returncode == 0, f"post-compaction verify failed: {res.stdout}{res.stderr}"
@@ -181,6 +182,7 @@ def test_verify_authorship_flags_unknown_author(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert res.returncode != 0
     assert "unknown-author" in (res.stdout + res.stderr).lower()
@@ -190,6 +192,8 @@ def test_fsck_surfaces_unsigned_count(store: Path) -> None:
     """fsck surfaces a store-wide unsigned-event count (AC2 'show/fsck surface')."""
     rebar.create_ticket("task", "unsigned t", repo_root=str(store))
     env = subprocess_env({"REBAR_ROOT": str(store)})
-    res = subprocess.run(["rebar", "fsck"], cwd=store, env=env, capture_output=True, text=True)
+    res = subprocess.run(
+        ["rebar", "fsck"], cwd=store, env=env, capture_output=True, text=True, check=False
+    )
     assert "authorship:" in res.stdout.lower()
     assert "unsigned" in res.stdout.lower()

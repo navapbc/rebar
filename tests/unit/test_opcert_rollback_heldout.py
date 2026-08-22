@@ -105,7 +105,10 @@ def _write_env(repo: Path, pub: str, added_at: str, revoked_at: str | None) -> N
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra], capture_output=True, text=True
+        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 

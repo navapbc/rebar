@@ -39,28 +39,28 @@ pyt_reserved_key = "_bridge_target_project"
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def od() -> Any:
     from rebar_reconciler import outbound_differ
 
     return outbound_differ
 
 
-@pytest.fixture()
+@pytest.fixture
 def projects_store() -> Any:
     from rebar_reconciler import projects_store as ps
 
     return ps
 
 
-@pytest.fixture()
+@pytest.fixture
 def binding_store_mod() -> Any:
     from rebar_reconciler import binding_store
 
     return binding_store
 
 
-@pytest.fixture()
+@pytest.fixture
 def applier_mod() -> Any:
     from rebar_reconciler import applier
 
@@ -178,7 +178,7 @@ def test_single_project_store_is_unchanged_when_no_mapping_is_seeded(
 # ===========================================================================
 
 
-@pytest.fixture()
+@pytest.fixture
 def acli_mod() -> Any:
     from rebar_reconciler.adapters.jira import acli
 

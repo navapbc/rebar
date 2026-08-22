@@ -284,7 +284,9 @@ def test_base_install_imports_tracing_and_runs_candidate_seam_without_sdk():
         "assert 'opentelemetry.sdk' not in sys.modules, 'seam must not require the tracing SDK'\n"
         "print('OK')\n"
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+    proc = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=False
+    )
     assert proc.returncode == 0, (
         f"lean import/seam failed:\nSTDOUT={proc.stdout}\nSTDERR={proc.stderr}"
     )

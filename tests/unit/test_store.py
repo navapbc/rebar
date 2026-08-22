@@ -56,7 +56,10 @@ def test_committed_bytes_are_canonical(tracker: str):
     assert not raw.endswith(b"\n")
     # And a commit landed with the canonical message.
     msg = subprocess.run(
-        ["git", "-C", tracker, "log", "-1", "--format=%s"], capture_output=True, text=True
+        ["git", "-C", tracker, "log", "-1", "--format=%s"],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     assert msg == "ticket: COMMENT tk"
 
@@ -129,7 +132,7 @@ def test_dual_lock_mutual_exclusion_same_process(tracker: str):
 
 # ── push policy parsing ───────────────────────────────────────────────────────
 @pytest.mark.parametrize(
-    "val,expect",
+    ("val", "expect"),
     [
         ("off", "off"),
         ("OFF", "off"),
@@ -156,7 +159,7 @@ def test_push_no_remote_is_noop(tracker: str, monkeypatch):
     push.push_tickets_branch(tracker)  # no remote → silent best-effort return
 
 
-@pytest.mark.parametrize("mod,args", [(push, ("/repo", "push")), (sync, ("/repo", "fetch"))])
+@pytest.mark.parametrize(("mod", "args"), [(push, ("/repo", "push")), (sync, ("/repo", "fetch"))])
 def test_network_git_is_bounded_and_timeout_is_best_effort(monkeypatch, mod, args):
     """A hung network git (fetch/push) must surface as a FAILED CompletedProcess,
     never hang (bug c16f). The wrapper must pass a bounded timeout to subprocess.run

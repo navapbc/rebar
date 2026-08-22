@@ -57,7 +57,7 @@ def _set_target(box: dict[str, object], sha: str) -> None:
     target_file.write_text(sha + "\n")
 
 
-@pytest.fixture()
+@pytest.fixture
 def box(tmp_path: Path) -> dict[str, object]:
     """A fake box where main advanced with a review-bot source change, so the redeploy block
     (and therefore the drain gate) is reached. The /health body and the target SHA are both
@@ -173,6 +173,7 @@ def _run(box: dict[str, object]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
 

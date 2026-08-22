@@ -65,7 +65,7 @@ def test_non_idea_bug_still_requires_class(rebar_repo: Path) -> None:
     assert out["to"] == "closed"
 
 
-@pytest.mark.parametrize("ttype", ("story", "epic"))
+@pytest.mark.parametrize("ttype", ["story", "epic"])
 def test_idea_story_epic_closes(rebar_repo: Path, ttype: str) -> None:
     """An `idea` story/epic is a reject/drop and closes cleanly (nothing to verify)."""
     tid = rebar.create_ticket(ttype, f"Rough {ttype} idea", repo_root=str(rebar_repo))

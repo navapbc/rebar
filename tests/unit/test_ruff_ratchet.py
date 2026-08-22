@@ -137,3 +137,73 @@ def test_no_src_uses_datetime_UTC_token() -> None:
         "the literal token `datetime.UTC` is forbidden under src/rebar (target-version is "
         f"py310); use `datetime.timezone.utc`. Offending files: {offenders}"
     )
+
+
+# --------------------------------------------------------------------------------------
+# Test-hygiene gate membership (story bold-abeyant-indri)
+# --------------------------------------------------------------------------------------
+#: The PT codes the test-hygiene gate adopts, per code, exactly as SIM115 is taken.
+_ADOPTED_PT = frozenset(
+    {
+        "PT001",
+        "PT006",
+        "PT007",
+        "PT008",
+        "PT012",
+        "PT013",
+        "PT017",
+        "PT021",
+        "PT022",
+        "PT028",
+    }
+)
+
+#: Deliberately deferred: ~1666 findings on this tree whose remediation is a
+#: behaviour-touching sweep, not a hygiene fix. Deferring them is a DECISION.
+_DEFERRED_PT = frozenset({"PT011", "PT018", "PT019"})
+
+
+def test_the_test_hygiene_gate_selects_plw1510() -> None:
+    """`PLW1510` is what forces every `subprocess.run` to state its return-code policy.
+
+    The absent-string subprocess oracle (bugs 0e1d-c698-c38d-4c3e, 1241-b83c-f8c7-40bf) is a
+    test that cannot fail; an explicit `check=` makes the author say which it is. Dropping the
+    code would silently reopen that class.
+    """
+    assert "PLW1510" in _ruff_select()
+
+
+def test_the_adopted_pt_subset_is_exactly_the_named_codes() -> None:
+    """The gate's headline decision, asserted rather than described.
+
+    Which PT codes are in and which are out was reasoned about once, in the `[tool.ruff.lint]`
+    prose, and until now nothing checked that the `select` list still matched it — a decision
+    guarded only by a comment is exactly what this epic exists to end. Membership is pinned in
+    BOTH directions so neither a quiet drop nor a quiet addition passes unnoticed.
+    """
+    selected_pt = {code for code in _ruff_select() if code.startswith("PT")}
+    assert selected_pt == _ADOPTED_PT, (
+        "the adopted flake8-pytest-style subset drifted from the documented decision; "
+        "update the reasoning in pyproject.toml's [tool.ruff.lint] comment in the same "
+        f"change. Added: {sorted(selected_pt - _ADOPTED_PT)}; "
+        f"dropped: {sorted(_ADOPTED_PT - selected_pt)}"
+    )
+
+
+def test_the_deferred_pt_codes_stay_deferred_and_the_group_is_never_taken_whole() -> None:
+    """The other half of the decision: PT011/PT018/PT019 are OUT, on purpose.
+
+    A bare `PT` group selector is the silent way to adopt them — it would enable all three
+    without any code being named, turning a deliberate deferral into an accidental
+    behaviour-touching sweep. Both spellings are rejected here.
+    """
+    select = _ruff_select()
+    assert "PT" not in select, (
+        "the whole flake8-pytest-style group must never be selected: it would adopt "
+        f"{sorted(_DEFERRED_PT)} by implication. Take PT codes individually."
+    )
+    still_deferred = _DEFERRED_PT.intersection(select)
+    assert not still_deferred, (
+        f"{sorted(still_deferred)} are deferred by decision, not oversight — adopting one is "
+        "a behaviour-touching sweep and belongs in its own change with its own reasoning"
+    )

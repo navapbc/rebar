@@ -48,12 +48,18 @@ def bpmn_harness():
         npm = shutil.which("npm")
         if not npm:
             pytest.skip("e2e: `npm` not on PATH")
-        r = subprocess.run([npm, "install"], cwd=_JS_DIR, capture_output=True, text=True)
+        r = subprocess.run(
+            [npm, "install"], cwd=_JS_DIR, capture_output=True, text=True, check=False
+        )
         if r.returncode != 0:
             pytest.skip(f"e2e: `npm install` failed (offline?):\n{r.stderr[-500:]}")
     if not _BUNDLE.is_file():
         r = subprocess.run(
-            [shutil.which("npm"), "run", "build"], cwd=_JS_DIR, capture_output=True, text=True
+            [shutil.which("npm"), "run", "build"],
+            cwd=_JS_DIR,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if r.returncode != 0:
             pytest.skip(f"e2e: harness build failed:\n{r.stderr[-500:]}")
@@ -66,6 +72,7 @@ def bpmn_harness():
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
         if not proc.stdout.strip():
             raise AssertionError(f"harness produced no output; {child_failure_detail(proc)}")
@@ -98,6 +105,7 @@ def browser_runner():
         cwd=_JS_DIR,
         capture_output=True,
         text=True,
+        check=False,
     )
     if check.returncode != 0:
         pytest.skip("e2e(browser): Chromium unavailable (run `npx playwright install chromium`)")
@@ -108,6 +116,7 @@ def browser_runner():
             capture_output=True,
             text=True,
             timeout=150,
+            check=False,
         )
         if not proc.stdout.strip():
             raise AssertionError(f"{script_name} produced no output; {child_failure_detail(proc)}")

@@ -33,6 +33,7 @@ def _run_gen(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         cwd=str(REPO_ROOT),
+        check=False,
     )
 
 

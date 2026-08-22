@@ -184,5 +184,6 @@ def test_custom_env_var_and_manifest():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stdout + r.stderr

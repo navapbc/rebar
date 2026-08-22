@@ -74,7 +74,7 @@ def _load_module(name: str, path: Path):
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _seed_namespace_stubs(request):
+def _seed_namespace_stubs():
     """Seed sys.modules with namespace stubs + alert_store under dotted key.
 
     See the comment above for cleanup-scope rationale.
@@ -108,11 +108,10 @@ def _seed_namespace_stubs(request):
         "reconcile_differ_smoke",
     )
 
-    def _cleanup():
-        for key in _smoke_keys:
-            sys.modules.pop(key, None)
+    yield
 
-    request.addfinalizer(_cleanup)
+    for key in _smoke_keys:
+        sys.modules.pop(key, None)
 
 
 @pytest.fixture(scope="module")

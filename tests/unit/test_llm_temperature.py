@@ -64,9 +64,7 @@ def _capture_model_settings(cfg, req_cfg=None):
 
         return _SpyAgent
 
-    import pytest as _pytest
-
-    mp = _pytest.MonkeyPatch()
+    mp = pytest.MonkeyPatch()
     mp.setattr(runner_mod, "_import_pydantic_ai", _spy_import)
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
 

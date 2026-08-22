@@ -110,7 +110,7 @@ COLLECTION_CASES = [
 
 
 @pytest.mark.parametrize(
-    "field,old,new",
+    ("field", "old", "new"),
     SCALAR_CASES + COLLECTION_CASES,
     ids=[c[0] for c in SCALAR_CASES] + [c[0] for c in COLLECTION_CASES],
 )
@@ -245,7 +245,7 @@ def test_echo_suppression_uses_provenance(differ, resolver):
 
 
 @pytest.mark.parametrize(
-    "field,old,new",
+    ("field", "old", "new"),
     SCALAR_CASES,
     ids=[c[0] for c in SCALAR_CASES],
 )

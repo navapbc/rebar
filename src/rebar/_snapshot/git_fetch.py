@@ -270,6 +270,7 @@ def fetch_origin(
                     text=True,
                     env=env,
                     timeout=_GIT_TIMEOUT,
+                    check=False,
                 )
             except subprocess.TimeoutExpired as exc:
                 # Backstop for a hang the low-speed check cannot see (e.g. a wedged

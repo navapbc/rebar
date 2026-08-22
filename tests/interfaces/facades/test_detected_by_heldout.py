@@ -53,7 +53,11 @@ def _cli(*args: str, env: dict | None = None) -> subprocess.CompletedProcess:
 
     merged = subprocess_env({**(env or {})})
     return subprocess.run(
-        [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, env=merged
+        [sys.executable, "-m", "rebar.cli", *args],
+        capture_output=True,
+        text=True,
+        env=merged,
+        check=False,
     )
 
 

@@ -46,7 +46,7 @@ class SshKeygenUnavailable(Exception):
 def ssh_keygen_version() -> tuple[int, int] | None:
     """Detected ``(major, minor)`` OpenSSH version, or ``None`` if absent/unparseable."""
     try:
-        proc = subprocess.run(["ssh", "-V"], capture_output=True, text=True)
+        proc = subprocess.run(["ssh", "-V"], capture_output=True, text=True, check=False)
     except FileNotFoundError:
         return None
     # OpenSSH prints its banner to stderr; fall back to stdout defensively.
@@ -155,6 +155,7 @@ class SshsigScheme:
                 ],
                 input=pae_bytes,
                 capture_output=True,
+                check=False,
             )
 
         if proc.returncode == 0:

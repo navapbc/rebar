@@ -37,7 +37,9 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _run(repo: Path, *args: str) -> subprocess.CompletedProcess:
     env = subprocess_env({"REBAR_ROOT": str(repo), "REBAR_IDENTITY_REQUIRE_AUTHENTICATED": "0"})
-    return subprocess.run(["rebar", *args], cwd=repo, env=env, capture_output=True, text=True)
+    return subprocess.run(
+        ["rebar", *args], cwd=repo, env=env, capture_output=True, text=True, check=False
+    )
 
 
 def _head(repo: Path) -> str:

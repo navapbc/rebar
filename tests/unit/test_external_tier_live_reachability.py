@@ -143,6 +143,6 @@ def test_git_helper_commits_are_reachable_from_head(tmp_path: Path) -> None:
     conftest.build_scratch_rebar_repo(repo)
     conftest.write_project_prompt(repo, "some-prompt", "---\n---\nBody.")
     head = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     )
     assert head.returncode == 0, head.stderr

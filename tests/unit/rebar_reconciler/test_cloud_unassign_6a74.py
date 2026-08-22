@@ -141,7 +141,10 @@ def test_a_non_empty_assignee_still_takes_the_validate_then_edit_path(
 ) -> None:
     """The contrast case: the normal assign path is untouched by the empty-assignee branch."""
     client = _client()
-    with mock.patch.object(
+    # PT008 is excluded here: it would swap this two-arg lambda for a
+    # `return_value=` MagicMock, which accepts ANY call shape. The lambda pins
+    # production to calling `_direct_rest_get(self, path)` with exactly one path.
+    with mock.patch.object(  # noqa: PT008
         acli.AcliClient,
         "_direct_rest_get",
         lambda _self, _path: [

@@ -52,6 +52,7 @@ def _cli(*args: str, repo: Path) -> subprocess.CompletedProcess:
         text=True,
         cwd=str(repo),
         env=subprocess_env(),
+        check=False,
     )
 
 

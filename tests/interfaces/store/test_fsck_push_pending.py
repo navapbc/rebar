@@ -24,7 +24,7 @@ def _git(*args: str, cwd: Path) -> None:
 
 
 def _git_q(*args: str, cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def repo_with_origin(
     monkeypatch.setenv("REBAR_SYNC_PUSH", "always")
     rebar.create_ticket("task", "seed", repo_root=str(repo))
     _git_q("fetch", "origin", "tickets", cwd=tracker)
-    yield repo, tracker
+    return repo, tracker
 
 
 def _ahead(tracker: Path) -> int:

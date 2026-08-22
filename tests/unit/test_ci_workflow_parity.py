@@ -257,6 +257,7 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
         env=subprocess_env({"GITHUB_OUTPUT": str(absent_output)}),
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert absent.returncode == 0, absent.stdout + absent.stderr
@@ -283,6 +284,7 @@ def test_mutation_selector_skips_pre_gate_trees_without_weakening_current_trees(
         env=subprocess_env({"GITHUB_OUTPUT": str(current_output)}),
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert marker.read_text(encoding="utf-8") == "ran"
@@ -751,6 +753,43 @@ def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
             f"{where} sets --timeout without --timeout-method=thread; the default `signal` "
             "method cannot interrupt a worker blocked in a C-level flock/socket/subprocess "
             f"call, so the hang would still go silent. Use the thread method:\n{body}"
+        )
+
+
+def test_the_shared_tier_lanes_carry_the_ini_timeout_budget() -> None:
+    """`_build-and-test.yml`'s two tiers must run at the SAME budget a local `pytest` does.
+
+    The budget now lives in ``[tool.pytest.ini_options].timeout`` (story
+    ``73b8-2d79-3046-44ce``) so `make test` and a bare local run are guarded too. A
+    command-line ``--timeout=`` OVERRIDES the ini, so the two shared-tier lanes drifting away
+    from it would silently restore the old split — CI generous, local unguarded — and a hang
+    that reproduces locally in seconds would take minutes on CI, or vice versa.
+
+    Scope is deliberately these two lanes only. The eleven other ``--timeout=`` lanes
+    (``external-integration.yml``, ``_optionality.yml``, ``_eval-discipline.yml``, ``test.yml``,
+    ``structured-output-baseline.yml``) drive live services, clean-venv installs and eval
+    suites whose per-test runtime is legitimately minutes; each carries its own calibrated
+    budget and is asserted only by the hang-guard sweep above.
+    """
+    import tomllib
+
+    ini = tomllib.loads(_read(_ROOT / "pyproject.toml"))["tool"]["pytest"]["ini_options"]
+    budget = ini["timeout"]
+    lanes = [
+        (step, body)
+        for filename, step, body in _all_workflow_pytest_steps()
+        if filename == "_build-and-test.yml"
+    ]
+    assert len(lanes) == 2, (
+        "expected exactly the default-suite and integration lanes in _build-and-test.yml; "
+        f"found {[step for step, _ in lanes]}"
+    )
+    for step, body in lanes:
+        found = re.findall(r"--timeout=(\d+)", body)
+        assert found == [str(budget)], (
+            f"_build-and-test.yml step {step!r} runs at --timeout={found} but the ini budget "
+            f"is {budget}. These must stay equal so CI and a local run agree; change BOTH, and "
+            "never drop the flag (the hang-guard sweep above requires it)."
         )
 
 

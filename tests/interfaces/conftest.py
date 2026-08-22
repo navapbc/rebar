@@ -105,15 +105,13 @@ def _rebar_repo_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture
-def rebar_repo(
-    _rebar_repo_template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[Path]:
+def rebar_repo(_rebar_repo_template: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """An initialized rebar repo in a temp git dir.
 
     Sets REBAR_ROOT and cwd to the repo so every interface resolves both the
     ticket store and project-scoped configuration from the same isolated
     checkout. This also keeps the no-repo-root-leak guard from firing on
-    bridge_state/.tickets-tracker writes. Yields the repo path.
+    bridge_state/.tickets-tracker writes. Returns the repo path.
 
     The store is COPIED from a per-worker template rather than built (~22 ms vs
     ~306 ms); ``_clone_template`` re-points it at itself and re-mints its identity.
@@ -133,7 +131,7 @@ def rebar_repo(
     from rebar._store import ensures as _ensures
 
     _ensures._reset_pending_cache()
-    yield repo
+    return repo
 
 
 @pytest.fixture(autouse=True)

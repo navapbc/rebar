@@ -110,7 +110,7 @@ def test_validate_reference_rejects_malformed(bad):
 
 
 @pytest.mark.parametrize(
-    "name,expected",
+    ("name", "expected"),
     [("Foo", False), ("foo_bar", False), ("a.b", True), ("recv.attr", True), ("pkg/mod", True)],
 )
 def test_is_member_name(name, expected):

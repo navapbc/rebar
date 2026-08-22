@@ -193,12 +193,10 @@ def test_ticket_id_refuses_rather_than_guessing_when_no_ticket_is_available() ->
     author what to write, not just that something was missing."""
     import types
 
-    import pytest as _pytest
-
     from rebar.llm.workflow.step_contracts import _ticket_id
 
     ctx = types.SimpleNamespace(inputs={}, target_ticket=None, step_id="verify-step")
-    with _pytest.raises(ValueError) as excinfo:
+    with pytest.raises(ValueError) as excinfo:
         _ticket_id(ctx)
     msg = str(excinfo.value)
     assert "verify-step" in msg

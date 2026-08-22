@@ -87,7 +87,7 @@ def test_lean_workflow_runtime_pulls_no_heavy_stack() -> None:
         print("LEAK:" + ",".join(leaked) if leaked else "CLEAN")
         """
     )
-    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "CLEAN", (
         f"the lean workflow runtime leaked the heavy stack: {cp.stdout.strip()}"

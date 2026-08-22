@@ -66,6 +66,7 @@ bo_cnt=3
         capture_output=True,
         text=True,
         env={"PATH": f"{bindir}:/usr/bin:/bin", "HOME": str(tmp_path)},
+        check=False,
     )
 
 

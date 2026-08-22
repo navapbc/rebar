@@ -111,14 +111,16 @@ def test_push_targets_configured_remote(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def _git(d: Path, *a: str) -> subprocess.CompletedProcess:
-    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
     return r
 
 
 def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess:
-    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "--git-dir", str(d), *a], capture_output=True, text=True, check=False
+    )
     if r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
     return r

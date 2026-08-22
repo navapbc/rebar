@@ -63,7 +63,7 @@ def _git(args: list[str], repo: Path, **kwargs) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def tmp_git_repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], tmp_path)
@@ -72,7 +72,7 @@ def tmp_git_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-@pytest.fixture()
+@pytest.fixture
 def _ref_backend(advisory_lock: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     """A local (no-remote) CAS and a short lease."""
     monkeypatch.setattr(advisory_lock, "_lock_lease_secs", lambda: 1)
@@ -116,12 +116,14 @@ def test_ref_backend_acquire_release_roundtrip(
     show = subprocess.run(
         ["git", "-C", str(tmp_git_repo), "cat-file", "-e", "tickets:.reconciler-pass-lock"],
         capture_output=True,
+        check=False,
     )
     assert show.returncode != 0, "ref backend must not write a tickets-branch lock file"
     advisory_lock.release_pass_lock("pass-1", tmp_git_repo, oid=oid)
     gone = subprocess.run(
         ["git", "-C", str(tmp_git_repo), "rev-parse", "--verify", "--quiet", ref],
         capture_output=True,
+        check=False,
     )
     assert gone.returncode != 0, "release must delete the ref"
 

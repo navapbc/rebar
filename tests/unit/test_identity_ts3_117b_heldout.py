@@ -64,7 +64,12 @@ def _verify_authorship(store: Path, priv: str | None = None) -> subprocess.Compl
     if priv:
         env["REBAR_IDENTITY_SIGNING_KEY"] = priv
     return subprocess.run(
-        ["rebar", "verify-authorship", "--all"], cwd=store, env=env, capture_output=True, text=True
+        ["rebar", "verify-authorship", "--all"],
+        cwd=store,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 

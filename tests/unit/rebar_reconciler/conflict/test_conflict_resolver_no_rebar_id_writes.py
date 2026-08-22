@@ -275,7 +275,7 @@ _DRAFT9_CASES = [
 ]
 
 
-@pytest.mark.parametrize("local_state,jira_state", _DRAFT9_CASES)
+@pytest.mark.parametrize(("local_state", "jira_state"), _DRAFT9_CASES)
 def test_no_rebar_id_label_writes_per_draft9_case(
     differ, local_state: dict, jira_state: dict, request
 ) -> None:

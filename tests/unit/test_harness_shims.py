@@ -45,12 +45,14 @@ def test_cursor_provenance_valid_and_idempotent(tmp_path) -> None:
     """Valid shell; running it twice leaves EXACTLY ONE `export AI_AGENT=cursor` in EACH of the
     VM profiles it targets (~/.bashrc AND ~/.profile) — no duplicate accumulation."""
     assert _CURSOR_SH.exists()
-    assert subprocess.run(["bash", "-n", str(_CURSOR_SH)]).returncode == 0
+    assert subprocess.run(["bash", "-n", str(_CURSOR_SH)], check=False).returncode == 0
     home = tmp_path / "home"
     home.mkdir()
     env = {"HOME": str(home), "PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     for _ in range(2):
-        r = subprocess.run(["bash", str(_CURSOR_SH)], capture_output=True, text=True, env=env)
+        r = subprocess.run(
+            ["bash", str(_CURSOR_SH)], capture_output=True, text=True, env=env, check=False
+        )
         assert r.returncode == 0, r.stderr
     for rc_name in (".bashrc", ".profile"):
         rc = (home / rc_name).read_text(encoding="utf-8")

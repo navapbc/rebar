@@ -59,7 +59,7 @@ def test_external_scratch_repo_resolves_attested_head(
 
     # Precondition: HEAD is a real commit on the CODE branch, not unborn.
     head = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=False
     )
     assert head.returncode == 0, (
         "the external tier's scratch repo has an UNBORN HEAD; every attested gate op in "

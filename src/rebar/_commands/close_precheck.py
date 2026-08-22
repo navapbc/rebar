@@ -288,6 +288,7 @@ def _referencing_commits(accepted_ids: set[str], tracker: str, repo_root) -> lis
         ["git", "-C", str(repo_root), "log", "--format=%H%x1f%B%x00"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         return []
