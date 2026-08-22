@@ -91,6 +91,7 @@ These pages explain implementation boundaries, invariants, and subsystem contrac
 - **[identity.md](identity.md)**. Identity, attribution, authorship, and key lifecycle model.
 - **[llm-framework.md](llm-framework.md)**. LLM operation framework, execution seams, and structured findings.
 - **[managed-refs.md](managed-refs.md)**. Provenance model for references synchronized across systems.
+- **[mapping-seam.md](mapping-seam.md)**. Provider-neutral reconciler mapping seam: config-driven axes, resolvers, and the `suggest-mapping` probe.
 - **[migrations.md](migrations.md)**. Idempotent ensure registry and migration lifecycle.
 - **[plan-review-gate.md](plan-review-gate.md)**. Plan-review gate semantics, attestations, and invalidation rules.
 - **[repo-snapshot-gates.md](repo-snapshot-gates.md)**. Repository snapshot isolation for code-reading gates.
