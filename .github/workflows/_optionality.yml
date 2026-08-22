@@ -148,6 +148,10 @@ jobs:
       # Story alive-ogre-tiger (epic clumsy-jab-yacht).
       - name: degradation-path tests run with NO agents extra
         run: |
+          # predates-gate-ok: KNOWN GAP on the Verified lane, tracked as
+          # marauding-hornblende-bluet (d93e-92ce-e2d0-4033). The two test files below need
+          # the same independent guards the generators above have; adding them changes which
+          # checks run on an old base, so that lands as its own change.
           # pytest-timeout joins the minimal set so the --timeout flags below are HONORED
           # rather than failing as an unknown option (ticket d835-1846-95d1-4d84). It is a
           # test-harness tool in the same category as the `pytest` already installed here, and

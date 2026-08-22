@@ -494,6 +494,9 @@ jobs:
           FAILURE_OBSERVED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
         run: |
           set -euo pipefail
+          # predates-gate-ok: the preceding step checks out the DEFAULT branch (not the
+          # patchset) precisely to fetch this trusted script, so the patchset's base age
+          # cannot make it absent.
           vote="$(python3 scripts/normalize_ci_conclusion.py)"
           echo "WORKFLOW_CONCLUSION='${CONCLUSION}' failure_observed='${FAILURE_OBSERVED}' -> vote-type='${vote}'"
           echo "vote-type=${vote}" >> "$GITHUB_OUTPUT"
@@ -557,6 +560,8 @@ jobs:
               '. + {($id): $a}' <<<"$annotations")"
           done
 
+          # predates-gate-ok: same trusted default-branch checkout as the normalize step
+          # above; the patchset's base age cannot make this script absent.
           text="$(JOBS_JSON="$jobs_json" ANNOTATIONS_JSON="$annotations" \
             python3 scripts/summarize_ci_failures.py)"
           printf '%s\n' "$text"
