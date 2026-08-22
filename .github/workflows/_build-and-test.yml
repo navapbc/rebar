@@ -651,15 +651,19 @@ jobs:
         # (the exact hang shapes this suite exercises); the thread watchdog + faulthandler dumps
         # every thread's stack and aborts the worker, so a recurrence NAMES the offending test.
         # The value is the `timeout` in [tool.pytest.ini_options] (story bold-abeyant-indri),
-        # kept equal by test_ci_workflow_parity.py so CI and a local `make test` agree. 20s is
-        # measured, not guessed: the whole default + integration tiers run clean at it, while a
-        # true hang now fails in 20s rather than 5 minutes. The long `timeout=` values in test
+        # kept equal by test_ci_workflow_parity.py so CI and a local `make test` agree. 300s is
+        # sized to DWARF the slowest legitimate test, not to sit just above it: on THIS leg
+        # (the only one adding --cov=rebar) about fourteen whole-tree-scanning gate tests
+        # legitimately cost 18.7-29.93s of `call` time under -n 4 --dist worksteal --cov. A
+        # budget tight enough to clip them does not report `Failed: Timeout` — the thread
+        # method calls os._exit(1), so it kills the whole xdist worker (`node down: Not
+        # properly terminated`). The long `timeout=` values in test
         # SOURCES are subprocess ceilings, not durations; a test that must genuinely run longer
         # carries `@pytest.mark.timeout(N, func_only=True)` with a reason.
         run: >-
           pytest -m "$DEFAULT_SUITE_MARKS"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider --durations=25 --timeout=20 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
@@ -674,5 +678,5 @@ jobs:
         run: >-
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
-          -q -p no:cacheprovider --durations=25 --timeout=20 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"

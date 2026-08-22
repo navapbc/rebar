@@ -11,6 +11,11 @@ Both arms are needed and neither can be the other:
   that must legitimately run past the budget passes when it carries
   ``@pytest.mark.timeout(N, func_only=True)``. If the marker stopped winning over the ini,
   every deliberately-slow test in the tree would start failing and this arm goes red first.
+  It runs out-of-process for the same reason the negative arm does, and for one more: proving
+  the override IN-TREE means sleeping past the configured budget, which pins the arm's wall
+  cost to that budget (at ``timeout = 300`` it would sleep 302 s). The generated project gets
+  a deliberately TINY budget instead, so the arm proves the same thing in seconds no matter
+  what this repo's budget is.
 * The NEGATIVE arm proves the three ini keys actually EXPIRE an over-budget test on the
   installed pytest-timeout, rather than merely being present in ``pyproject.toml``. It
   cannot be written in-process — a test that must fail cannot be committed — so it runs
@@ -22,22 +27,13 @@ Both arms are needed and neither can be the other:
 from __future__ import annotations
 
 import textwrap
-import time
 from pathlib import Path
 
 import pytest
 from _nested_pytest import run_nested_pytest
 from _subprocess_env import subprocess_env
 
-_INI_BUDGET_SECS = 20
-
-
-def _ini_timeout() -> int:
-    import tomllib
-
-    root = Path(__file__).resolve().parents[2]
-    ini = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
-    return int(ini["tool"]["pytest"]["ini_options"]["timeout"])
+_INI_BUDGET_SECS = 300
 
 
 def test_the_configured_budget_is_the_measured_one() -> None:
@@ -57,18 +53,62 @@ def test_the_configured_budget_is_the_measured_one() -> None:
     assert ini["timeout_func_only"] is True
 
 
-# timeout: this test deliberately runs PAST the ini budget to prove the marker overrides it;
-# that is the whole point of the arm, so it carries its own generous allowance.
-@pytest.mark.timeout(_INI_BUDGET_SECS * 3, func_only=True)
-def test_a_marked_test_may_outrun_the_ini_budget() -> None:
-    """A per-test marker beats the ini, so a legitimately slow test has a supported escape."""
-    budget = _ini_timeout()
-    started = time.monotonic()
-    # Sleeping just past the budget is the only way to exercise the override; the marker
-    # above bounds it, so this cannot become an unbounded hang.
-    time.sleep(budget + 2)
-    assert time.monotonic() - started > budget, (
-        "the body did not actually outrun the ini budget, so the override was never exercised"
+@pytest.mark.timeout(180, func_only=True)
+def test_a_marked_test_may_outrun_the_ini_budget(tmp_path: Path) -> None:
+    """A per-test marker beats the ini, so a legitimately slow test has a supported escape.
+
+    Out-of-process against a generated project carrying a deliberately TINY ini budget, so the
+    arm's cost is a few seconds regardless of this repo's own budget. The generated test sleeps
+    well past that project's ini budget and carries a generous
+    ``@pytest.mark.timeout(N, func_only=True)``; a returncode of 0 can only mean the marker won.
+    """
+    project = tmp_path / "override_probe"
+    project.mkdir()
+    (project / "pyproject.toml").write_text(
+        textwrap.dedent(
+            """\
+            [tool.pytest.ini_options]
+            addopts = "--strict-markers --strict-config"
+            timeout = 2
+            timeout_method = "thread"
+            timeout_func_only = true
+            """
+        ),
+        encoding="utf-8",
+    )
+    (project / "test_marked_over_budget.py").write_text(
+        textwrap.dedent(
+            """\
+            import time
+
+            import pytest
+
+
+            @pytest.mark.timeout(120, func_only=True)
+            def test_outruns_the_ini_but_not_the_marker():
+                started = time.monotonic()
+                time.sleep(5)
+                assert time.monotonic() - started > 2
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    # Same shared helper as the negative arm below: story 25b4's uniqueness guard keeps the
+    # nested launch in exactly one place.
+    completed = run_nested_pytest(
+        tmp_path / "nested",
+        "-q",
+        "test_marked_over_budget.py",
+        env=subprocess_env(),
+        cwd=project,
+        timeout=120,
+    )
+    combined = completed.stdout + completed.stderr
+    assert completed.returncode == 0, (
+        "a test sleeping past the project's 2 s ini budget did NOT pass under a generous "
+        "@pytest.mark.timeout(120, func_only=True) — the marker no longer overrides the ini, "
+        f"so every deliberately-slow test in this tree is at risk:\n{combined}"
     )
 
 

@@ -401,17 +401,23 @@ make test      # default test suite (excludes integration + external)
 make format    # the ONLY target that rewrites files
 ```
 
-### The per-test hang budget (20 s) and how to override it
+### The per-test hang budget (300 s) and how to override it
 
-`[tool.pytest.ini_options]` sets `timeout = 20`, `timeout_method = "thread"` and
+`[tool.pytest.ini_options]` sets `timeout = 300`, `timeout_method = "thread"` and
 `timeout_func_only = true`, so **`make test` and a bare local `pytest` carry the same
 per-test budget CI does**. Before this the budget lived only on the CI command lines, so a
 deadlocked test hung a local run indefinitely and the CI-only guard could rot with no local
 signal.
 
-The value is measured, not guessed: the whole default tier (5097 tests) and the whole
-integration tier run clean at 20 s. `timeout_func_only` charges the budget to the test
-**body**, so a slow fixture cannot spend a test's allowance.
+The value is sized to **dwarf** the slowest legitimate test, not to sit just above it. On
+the gating `ubuntu-latest, py3.13` CI leg — the only one adding `--cov=rebar` — about
+fourteen whole-tree-scanning gate tests legitimately cost 18.7 s to 29.93 s of `call` time
+under `-n 4 --dist worksteal`; a local unit-tier run cannot see that (no coverage tracing,
+no scripts tier, faster cores). A budget tight enough to clip them does **not** report
+`Failed: Timeout`: because `timeout_method = "thread"`, pytest-timeout expires a test with
+`os._exit(1)`, which kills the whole xdist worker (`node down: Not properly terminated`).
+`timeout_func_only` charges the budget to the test **body**, so a slow fixture cannot spend
+a test's allowance.
 
 A test that must legitimately run longer overrides the ini with a marker **and a one-line
 comment naming why** — silent exemptions are not acceptable:
