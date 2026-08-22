@@ -207,3 +207,49 @@ def assert_type_decisions_complete(project_key: str, root: object = None) -> Non
             f"{project_key!r}: no decision (a Jira target or {mc.SKIP!r}) for syncable "
             f"ticket type(s): {', '.join(undecided)}"
         )
+
+
+# Local relation -> Jira issue-link TYPE name (S4). Like ``local_to_jira_status`` and
+# ``LOCAL_TYPE_TO_JIRA`` above, this is a SECOND, INDEPENDENT literal of the same mapping
+# (the SOLE definition site under ``adapters/`` is the link-TYPE component of
+# ``adapters/jira_family/value_maps.RELATION_TO_JIRA_LINK``) and it is deliberately NOT an
+# import: this module imports nothing but ``__future__``, and ``adapters/jira_family`` is a
+# VENDOR package whose dependency direction is one-way (concrete backends import it; it never
+# imports core back), so importing it here would invert that layering and put this
+# operator-overridable surface behind an adapter import — the import-graph contract test
+# enforces exactly this. This literal carries the link TYPE only (not the direction ``swap``,
+# which stays with the built-in adapter payload); the parity TEST keeps the two in lock-step,
+# exactly as it does for ``local_to_jira_status`` / ``LOCAL_TYPE_TO_JIRA``.
+local_to_jira_link: dict[str, str] = {
+    "blocks": "Blocks",
+    "depends_on": "Blocks",
+    "relates_to": "Relates",
+}
+
+
+def effective_link_map(project_key: str, root: object = None) -> dict[str, str]:
+    """Resolve the EFFECTIVE outbound relation->Jira link-type map for ``project_key``.
+
+    The forward map is the built-in :data:`local_to_jira_link` (this module's own literal)
+    <- ``[mapping.default.link_map]`` <- ``[mapping.projects.<KEY>.link_map]``, resolved
+    through the S1 per-key three-layer merge (``mapping_config.resolve_for_project``). A
+    ``SKIP`` value (``mapping_config.SKIP``) means the relation has NO Jira target for this
+    project (relation-granular skip) — dropped here so callers see only mappable relations.
+
+    Fail-closed: ``mapping_config.validate`` raises :class:`mapping_config.MappingConfigError`
+    when a ``link_map`` value falls outside a declared ``link_types`` vocabulary (``SKIP`` is
+    always allowed) — a relation is mapped to a real declared link type, skipped, or the pass
+    fails; never approximated.
+
+    With NO ``[mapping]`` block the result equals :data:`local_to_jira_link` verbatim — the
+    config seam is inert until configured. ``mapping_config`` is imported LAZILY so this
+    module stays stdlib-only at import time (it imports nothing but ``__future__`` at the top
+    level — the operator-overridable link literal above must never sit behind an adapter/config
+    import)."""
+    from rebar_reconciler import mapping_config as mc
+
+    cfg = mc.load_mapping_config(root)
+    builtin = mc.MappingLayer(link_map=local_to_jira_link)
+    resolved = mc.resolve_for_project(cfg, project_key, builtin=builtin)
+    mc.validate(resolved, mc.Capability(has_link_types=True))
+    return {k: v for k, v in resolved.link_map.items() if v != mc.SKIP}
