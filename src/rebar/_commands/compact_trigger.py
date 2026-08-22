@@ -96,6 +96,7 @@ def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
     what "needs folding" means cannot leave the trigger firing on a different rule than the
     thing it triggers."""
     from rebar import config as _config
+    from rebar._commands import compact_plan
     from rebar._commands.compact import _foldable_event_count
     from rebar._store import hlc
 
@@ -110,11 +111,10 @@ def ticket_needs_folding(tracker: str, ticket_id: str) -> bool:
     foldable = _foldable_event_count(ticket_dir, hlc.physical_now(), horizon)
     if foldable <= 0:
         return False
-    try:
-        has_snapshot = any(n.endswith("-SNAPSHOT.json") for n in os.listdir(ticket_dir))
-    except OSError:
-        return False
-    return foldable > threshold or not has_snapshot
+    has_snapshot = compact_plan.has_snapshot(ticket_dir)
+    if has_snapshot is None:
+        return False  # unreadable ticket dir: a close must never fire on a guess
+    return compact_plan.needs_folding(foldable, has_snapshot, threshold)
 
 
 def _acquire_trigger_lock(tracker: str) -> int | None:

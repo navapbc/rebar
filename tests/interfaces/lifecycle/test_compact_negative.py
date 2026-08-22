@@ -33,7 +33,7 @@ import pytest
 
 import rebar
 from rebar._commands import compact as _compact
-from rebar._commands import compact_txn as _compact_txn
+from rebar._commands import compact_plan
 from rebar._store import lock as _lock
 from rebar.reducer._cache import RETIRED_SUFFIX
 
@@ -157,7 +157,11 @@ def test_compact_git_failure_is_surfaced(
     rebar_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     tid = _seed(rebar_repo, "gitfail")
-    real_git = _compact_txn._git
+    # The staged add runs inside compact_plan.commit_ticket_dir since the fold, rebuild
+    # and recovery planners were consolidated there, so the fault must be injected at
+    # THAT seam. compact_txn._git was left behind dead by the consolidation and is now
+    # removed; patching it silently injected nothing and this test failed with rc 0.
+    real_git = compact_plan._git
 
     def _fail_on_add(tracker: str, *args: str) -> subprocess.CompletedProcess:
         # Fail the staged-add inside the locked critical section; let gc.auto / diff
@@ -166,7 +170,7 @@ def test_compact_git_failure_is_surfaced(
             return subprocess.CompletedProcess(args, 1, "", "git add boom")
         return real_git(tracker, *args)
 
-    monkeypatch.setattr(_compact_txn, "_git", _fail_on_add)
+    monkeypatch.setattr(compact_plan, "_git", _fail_on_add)
     rc = _compact.compact_cli([tid, "--threshold=0", "--skip-sync"], repo_root=str(rebar_repo))
     err = capsys.readouterr().err
     assert rc == 1
