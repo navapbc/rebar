@@ -27,6 +27,14 @@ text but no tool call — a tool-calling turn is part of the agentic loop and is
   (``input_tokens + effective_max_tokens > window``, i.e. nothing can be added and it still
   does not fit), raise :class:`rebar.llm.errors.ContextWindowExceededError` — rebar fails
   closed rather than SHORTENING authoritative system / user / tool content.
+* The REQUEST side of the same rule (story f79d): every wire's ``ModelRequest`` content
+  (instructions + part content) is estimated locally at :data:`CHARS_PER_TOKEN` chars/token,
+  and ``estimate + effective_max_tokens > window`` raises the same
+  :class:`ContextWindowExceededError` BEFORE the provider call. This is what covers the
+  FIRST request — a history of ``[ModelRequest]`` carries no billed usage for the response
+  rule to read, and previously went to the provider unmeasured (a 400 surfaced as
+  ``LLMUnavailableError``). Per-op input bounds (enrich, spec-scan, plan-review sizing,
+  completion ceilings) remain the first line; this seam is the shared backstop.
 
 Seam 2 — truncation reclassification (:func:`concision_guard`)
 ==============================================================
@@ -194,6 +202,54 @@ def _wire_keeps_response(response: Any, reserve: int, window: int) -> bool:
     return inp + out + reserve <= window
 
 
+# Pre-flight estimator calibration for REQUEST content (story f79d): 4 chars/token, matching
+# `plan_review.det_floor.CHARS_PER_TOKEN` and the inline `len//4 + 1` estimators. Deliberately
+# permissive (prose/code average ≤4 chars/token) so calls that succeed today are not newly
+# refused, while gross overflows (an input several times the window) are caught before the
+# provider call. chars/2 would score enrich's maximal `window * 2`-char first-line bound at
+# exactly `window` tokens and wrongly refuse it; chars/4 scores it at window/2 and admits it.
+CHARS_PER_TOKEN = 4
+
+
+def _request_text_chars(msg: Any) -> int:
+    """Character count of one ``ModelRequest``'s authoritative content: ``instructions`` plus
+    every part's ``content``, stringifying non-text content conservatively."""
+    total = len(str(getattr(msg, "instructions", None) or ""))
+    for part in getattr(msg, "parts", []) or []:
+        content = getattr(part, "content", None)
+        if content is None:
+            continue
+        total += len(content) if isinstance(content, str) else len(str(content))
+    return total
+
+
+def _estimate_request_tokens(messages: Any) -> int:
+    """Estimated token count of the wire's REQUEST content (every ``ModelRequest``), at
+    :data:`CHARS_PER_TOKEN` chars/token. Zero when the wire carries no request content."""
+    from pydantic_ai.messages import ModelRequest
+
+    chars = sum(_request_text_chars(m) for m in messages if isinstance(m, ModelRequest))
+    return chars // CHARS_PER_TOKEN + (1 if chars else 0)
+
+
+def _check_request_fit(messages: Any, reserve: int, window: int) -> None:
+    """Fail closed when the wire's authoritative REQUEST content alone cannot fit.
+
+    The request side of the fit rule (story f79d): the carried-response rule reads the
+    provider's already-billed usage, which a first request does not have, so the request
+    content is measured locally instead. Raises :class:`ContextWindowExceededError` when the
+    estimate plus the output reserve overflows the smallest viable candidate window — rebar
+    never shortens authoritative input to make it fit."""
+    estimate = _estimate_request_tokens(messages)
+    if estimate and estimate + reserve > window:
+        raise ContextWindowExceededError(
+            f"the request's authoritative input (~{estimate} estimated tokens at "
+            f"{CHARS_PER_TOKEN} chars/token) plus the output reserve ({reserve} tokens) "
+            f"exceeds the smallest viable candidate model's context window ({window} tokens) "
+            "— refusing to shorten authoritative input (RP-01 S2 / story f79d)"
+        )
+
+
 def _make_wire_projection(candidates, effective_max_tokens):
     """Build the sync ``proc(messages) -> list`` history-processor callable.
 
@@ -215,6 +271,10 @@ def _make_wire_projection(candidates, effective_max_tokens):
                 if not _wire_keeps_response(msg, reserve, window):
                     continue
             kept.append(msg)
+        # Story f79d: the request side of the fit rule — measured on EVERY wire, so the FIRST
+        # request (history `[ModelRequest]`, which the response rule structurally never sees)
+        # is checked exactly like every subsequent one.
+        _check_request_fit(kept, reserve, window)
         return kept
 
     return proc
