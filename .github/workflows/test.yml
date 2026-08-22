@@ -170,16 +170,25 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "rebar CI"
           git config --global init.defaultBranch main
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f,
+      # mirrored from gerrit-verify.yaml into this lane as bug e818-564e-d3b6-4eaa.
       - name: README quickstart golden-path (against the installed rebar)
         run: |
-          # predates-gate-ok: KNOWN GAP, tracked as cushy-soldierly-sunbear
-          # (e818-564e-d3b6-4eaa). gerrit-verify.yaml guards this same script; adding the
-          # guard here changes which gates run on an old base, so it lands as its own change.
+          if [ ! -f scripts/check_readme_quickstart.py ]; then
+            echo "scripts/check_readme_quickstart.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/check_readme_quickstart.py
+      # If-present guard per ticket ee2a (_build-and-test.yml, raw-git-write gate); bug 1909-c1a7-9f20-440f,
+      # mirrored from gerrit-verify.yaml into this lane as bug e818-564e-d3b6-4eaa.
       - name: End-to-end CLI probe (against the installed rebar)
         run: |
-          # predates-gate-ok: KNOWN GAP, tracked as cushy-soldierly-sunbear
-          # (e818-564e-d3b6-4eaa) together with the quickstart step above.
+          if [ ! -f scripts/probe_rebar.py ]; then
+            echo "scripts/probe_rebar.py not in checked-out tree (change predates the gate) — skipping;" \
+                 "the gate re-enforces on rebase and on every post-merge change"
+            exit 0
+          fi
           python scripts/probe_rebar.py </dev/null
 
   # Artifact-provenance probe (story 6168). The job body now lives in the reusable
