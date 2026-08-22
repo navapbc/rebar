@@ -557,6 +557,13 @@ def compute_outbound_mutations(
         t["ticket_id"]: t.get("ticket_type", "") for t in local_tickets if t.get("ticket_id")
     }
 
+    # S7: {local_id → parent_id} companion map, used by the outbound comment differ
+    # to walk upward to the nearest ancestor bound in Jira when a non-epic parent's
+    # field was suppressed (parent-drift breadcrumb).
+    local_parents: dict[str, Any] = {
+        t["ticket_id"]: t.get("parent_id") for t in local_tickets if t.get("ticket_id")
+    }
+
     # Assignee resolution cache (bug 9b94). A local assignee that maps to NO
     # assignable Jira user means "desired = unassigned": the differ must stop
     # re-emitting an assignee update once Jira is unassigned, instead of churning
@@ -650,6 +657,7 @@ def compute_outbound_mutations(
                 outbound_mapper,
                 inbound_mapper,
                 links,
+                local_parents=local_parents,
                 conflict_sink=conflict_sink,
                 dropped_field_sink=dropped_field_sink,
                 mapping=config.projects_mapping,

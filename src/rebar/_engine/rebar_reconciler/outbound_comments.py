@@ -87,6 +87,13 @@ _COMMENT_FIELD_KEY = "comment"
 # loop-breaker pattern.
 RECONCILER_MARKER = "<!-- rebar:reconciler-echo -->"
 
+# Stable identity tag carried by a parent-drift breadcrumb comment (S7). Dedup for
+# the breadcrumb keys on THIS tag, never on the (variable) ancestor Jira key, so the
+# append-once/first-writer-wins guard holds even if a later pass would name a
+# different ancestor. Unlike RECONCILER_MARKER this tag is NOT stripped by
+# _normalize_comment_body, so it survives into the resolved-comment dedup set.
+PARENT_BREADCRUMB_TAG = "<!-- rebar:parent-breadcrumb -->"
+
 
 def _resolve_inbound_mapper(inbound_mapper: Any | None) -> Any:
     """Resolve the injected ``InboundMapper``, falling back to the configured
@@ -441,6 +448,73 @@ def _is_machine_marker_comment(normalized_body: str) -> bool:
     return normalized_body.startswith(_EXCLUDED_COMMENT_PREFIXES)
 
 
+def _build_parent_breadcrumb(
+    ticket: dict[str, Any],
+    jira_bodies: set[str],
+    *,
+    binding_store: Any | None,
+    local_parents: dict[str, Any] | None,
+    local_ticket_types: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """S7: build the echo-safe parent-drift breadcrumb mutations (0 or 1), pure.
+
+    A pure helper (kept out of :func:`_diff_comments` so that function's
+    cyclomatic complexity does not rise past the CI ratchet). Returns a list of
+    at most one ``{"action": "add", "body": <decorated>}`` mutation — a list so
+    the caller can ``extend`` without adding a branch of its own.
+
+    Emit conditions, in order:
+      * the ancestor maps must both be provided AND a binding store available —
+        otherwise the feature is a strict no-op (every existing caller omits the
+        maps, so behaviour is unchanged);
+      * DRIFT: the ticket has a ``parent_id`` whose direct parent is present in
+        ``local_ticket_types`` with a non-epic type (mirrors the parent-field
+        suppression in ``adapters/jira/outbound_fields.py``). A missing/epic parent
+        type means the parent field is NOT suppressed → no breadcrumb;
+      * APPEND-ONCE: no already-resolved Jira comment carries
+        :data:`PARENT_BREADCRUMB_TAG` (first-writer-wins; dedup keys on the tag);
+      * a NEAREST bound ancestor exists: walking upward from the direct parent via
+        ``local_parents``, some ancestor has a bound Jira key. If none does, emit
+        nothing.
+
+    When ≥1 intervening ancestor was skipped for lacking a bound key, the body
+    additionally states that intervening levels are not represented.
+    """
+    if local_parents is None or local_ticket_types is None or binding_store is None:
+        return []
+    parent_id = ticket.get("parent_id")
+    if not parent_id:
+        return []
+    parent_type = local_ticket_types.get(parent_id)
+    if parent_type is None or str(parent_type).lower() == "epic":
+        return []
+    if any(PARENT_BREADCRUMB_TAG in body for body in jira_bodies):
+        return []
+
+    nearest_key: str | None = None
+    skipped_intervening = False
+    ancestor: Any = parent_id
+    while ancestor is not None:
+        key = binding_store.get_jira_key(ancestor)
+        if key is not None:
+            nearest_key = key
+            break
+        skipped_intervening = True
+        ancestor = local_parents.get(ancestor)
+    if nearest_key is None:
+        return []
+
+    sentences = [
+        "This ticket's parent hierarchy could not be fully represented in Jira.",
+        f"Nearest tracked ancestor: {nearest_key}.",
+    ]
+    if skipped_intervening:
+        sentences.append("One or more intervening parent levels are not represented in Jira.")
+    sentences.append("Full parent context is maintained in rebar.")
+    body = " ".join(sentences) + "\n" + PARENT_BREADCRUMB_TAG
+    return [{"action": "add", "body": _decorate_outbound_comment(body)}]
+
+
 def _diff_comments(
     ticket: dict[str, Any],
     jira_key: str,
@@ -451,6 +525,8 @@ def _diff_comments(
     sanitizer: Any | None = None,
     codec: Any | None = None,
     binding_store: Any | None = None,
+    local_parents: dict[str, Any] | None = None,
+    local_ticket_types: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Compare local comments to Jira comments. Return mutations for new comments.
 
@@ -671,4 +747,15 @@ def _diff_comments(
                     "local_comment_key": local_comment_key,
                 }
             )
+    # S7: after the resolved Jira dedup set is built, append at most one
+    # parent-drift breadcrumb (append-once, keyed on PARENT_BREADCRUMB_TAG).
+    mutations.extend(
+        _build_parent_breadcrumb(
+            ticket,
+            jira_bodies,
+            binding_store=binding_store,
+            local_parents=local_parents,
+            local_ticket_types=local_ticket_types,
+        )
+    )
     return mutations
