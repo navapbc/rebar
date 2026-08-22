@@ -373,7 +373,12 @@ def create_one(
             for entry in comments:
                 if not isinstance(entry, dict):
                     continue
-                body = entry.get("body", "")
+                # Story 4cee: send the bytes the dedup key was taken from. An
+                # entry queued before the cutover — and every entry
+                # ``_map_comments_for_create`` emits — carries no ``wire_body``,
+                # so the unfitted body remains the fallback and the adapter's own
+                # fit still covers it.
+                body = entry.get("wire_body") or entry.get("body", "")
                 if not body:
                     continue
                 try:

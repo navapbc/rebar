@@ -375,7 +375,9 @@ def _update_one_dispatch_comments(
         for entry in comments:
             if not isinstance(entry, dict):
                 continue
-            body = entry.get("body", "")
+            # Story 4cee: send the bytes the dedup key was taken from (see the
+            # create path's note); ``body`` is the pre-cutover fallback.
+            body = entry.get("wire_body") or entry.get("body", "")
             if not body:
                 continue
             _comments_computed += 1
