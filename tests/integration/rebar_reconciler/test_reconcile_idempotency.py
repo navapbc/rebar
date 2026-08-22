@@ -25,6 +25,7 @@ import json
 import subprocess
 import sys
 import types
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,13 @@ class _FakeJiraState:
         self.props: dict[str, dict] = {}
         self.next_num = 100
         self.write_calls: list[str] = []  # every non-read client call
+        # Keys ALIVE on the remote but not matched by the window JQL (e.g.
+        # Done beyond the recency cap): filtered from window searches, still
+        # 200 on a direct GET — the out-of-window-but-alive shape that gates
+        # both clear_absent call sites (story deiform-filmable-akitainu).
+        self.out_of_window: set[str] = set()
+        # Keys whose direct GET 404s (deleted on the remote), like live Jira.
+        self.deleted: set[str] = set()
 
     def seed(self, key: str, **fields) -> None:
         fields.setdefault("labels", [])
@@ -72,11 +80,13 @@ class _FakeClient:
             return [
                 {"key": k, "fields": json.loads(json.dumps(f))}
                 for k, f in s.issues.items()
-                if want in (f.get("labels") or [])
+                if want in (f.get("labels") or []) and k not in s.deleted
             ]
         done_q = '= "Done"' in jql and '!= "Done"' not in jql
         out = []
         for k, f in s.issues.items():
+            if k in s.out_of_window or k in s.deleted:
+                continue
             name = (f.get("status") or {}).get("name", "")
             if done_q == (name == "Done"):
                 out.append({"key": k, "fields": json.loads(json.dumps(f))})
@@ -86,6 +96,10 @@ class _FakeClient:
         return []
 
     def get_issue_by_rest(self, key: str) -> dict:
+        if key in self._s.deleted:
+            raise urllib.error.HTTPError(
+                f"https://fake.test/rest/api/2/issue/{key}", 404, "Not Found", None, None
+            )
         return {"key": key, "fields": json.loads(json.dumps(self._s.issues[key]))}
 
     # writes (all recorded) ---------------------------------------------------
@@ -203,16 +217,21 @@ def reconciler_modules(monkeypatch):
         "reconcile",
         "reconcile_fetcher",
         "reconcile_applier",
+        "reconcile_run_differs",
         "acli_integration",
     ):
         monkeypatch.delitem(sys.modules, key, raising=False)
     fetcher = _load_module("reconcile_fetcher", RECONCILER_DIR / "fetcher.py")
     applier = _load_module("reconcile_applier", RECONCILER_DIR / "applier.py")
     reconcile = _load_module("reconcile", RECONCILER_DIR / "reconcile.py")
+    # Pre-register run_differs under the lazy_load key reconcile_once reuses,
+    # so a per-pass _load_reconcile_backend monkeypatch (wire_backend below)
+    # lands on the copy the pass actually executes.
+    _load_module("reconcile_run_differs", RECONCILER_DIR / "run_differs.py")
     return fetcher, applier, reconcile
 
 
-def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id):
+def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id, *, wire_backend=False):
     fetcher, applier, reconcile = reconciler_modules
     fake_mod = _make_fake_acli_module(state)
     # reconcile_once's own outbound-comment client load reuses this key.
@@ -221,7 +240,48 @@ def _run_pass(reconciler_modules, state, repo_root, monkeypatch, pass_id):
     monkeypatch.setattr(applier, "_load_acli", lambda: fake_mod)
     ok_concurrency = _make_ok_concurrency()
     monkeypatch.setattr(applier, "_load_concurrency", lambda: ok_concurrency)
+    if wire_backend:
+        # The 02c4 RCA's second blocker: the diff phase builds a REAL backend
+        # (select_backend(compose_config())), so a bound-but-absent key's direct
+        # GET never reaches the fake. Wire the real Jira adapter (real mappers)
+        # over the SAME fake transport so the absence machinery is drivable.
+        from rebar_reconciler.adapters.jira.backend import JiraBackend
+
+        run_differs_mod = sys.modules["reconcile_run_differs"]
+        monkeypatch.setattr(
+            run_differs_mod, "_load_reconcile_backend", lambda: JiraBackend(fake_mod)
+        )
     return reconcile.reconcile_once(pass_id, repo_root=repo_root)
+
+
+@pytest.fixture
+def clear_absent_calls(monkeypatch):
+    """Delegating spy on BindingLifecycle.clear_absent recording reached keys.
+
+    The reach guard bug 02c4's oracle lacked: byte-compare alone cannot tell
+    "clear_absent ran and changed nothing" from "clear_absent never ran"."""
+    import rebar_reconciler.binding_lifecycle as bl
+
+    calls: list[str] = []
+    real = bl.BindingLifecycle.clear_absent
+
+    def spy(self, jira_key):
+        calls.append(jira_key)
+        return real(self, jira_key)
+
+    monkeypatch.setattr(bl.BindingLifecycle, "clear_absent", spy)
+    return calls
+
+
+def _freeze_binding_clocks(monkeypatch) -> str:
+    """Freeze _now_iso on BOTH binding_store and binding_lifecycle (bug 02c4)
+    to a sentinel that can never legitimately appear unless something stamps."""
+    import rebar_reconciler.binding_lifecycle as bl
+
+    sentinel = "2099-01-01T00:00:00Z"
+    monkeypatch.setattr(sys.modules["reconcile_binding_store"], "_now_iso", lambda: sentinel)
+    monkeypatch.setattr(bl, "_now_iso", lambda: sentinel)
+    return sentinel
 
 
 def _seed_working_set(state: _FakeJiraState) -> None:
@@ -377,3 +437,100 @@ def test_import_materialises_faithfully_and_binds(git_repo, reconciler_modules, 
     # Label / property write-back reached the (faithful) remote.
     assert "rebar-id:jira-dig-1" in state.issues["DIG-1"]["labels"]
     assert state.props["DIG-1"]["local_id"] == "jira-dig-1"
+
+
+def test_out_of_window_alive_pass_reaches_clear_absent_with_no_churn(
+    git_repo, reconciler_modules, monkeypatch, clear_absent_calls
+):
+    """An out-of-window-but-alive bound key drives the REAL pass to clear_absent
+    (spy-verified reach) with zero churn: no mutations, no Jira writes, an
+    untouched updated_at (the change gate — the 02c4 AC#2 mutation's oracle),
+    and byte/HEAD stability across a repeated identical pass."""
+    state = _FakeJiraState()
+    _seed_working_set(state)
+
+    result1 = _run_pass(reconciler_modules, state, git_repo, monkeypatch, "oow-pass")
+    assert result1["mutation_count"] == 3
+    tracker = git_repo / ".tickets-tracker"
+    bindings_path = tracker / ".bridge_state" / "bindings.json"
+    updated_before = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"].get(
+        "updated_at"
+    )
+
+    _freeze_binding_clocks(monkeypatch)
+    state.out_of_window.add("DIG-1")
+    state.write_calls.clear()
+    clear_absent_calls.clear()
+
+    result2 = _run_pass(
+        reconciler_modules, state, git_repo, monkeypatch, "oow-pass-2", wire_backend=True
+    )
+    assert clear_absent_calls == ["DIG-1"], (
+        f"the out-of-window-alive pass must reach clear_absent exactly once for "
+        f"DIG-1, got: {clear_absent_calls}"
+    )
+    assert result2["mutation_count"] == 0
+    assert state.write_calls == []
+    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    assert entry.get("updated_at") == updated_before, (
+        "clear_absent on an entry with NO absence counter must not stamp "
+        f"updated_at (change gate): {updated_before!r} -> {entry.get('updated_at')!r}"
+    )
+
+    second_bytes = bindings_path.read_bytes()
+    second_head = subprocess.run(
+        ["git", "-C", str(tracker), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    result3 = _run_pass(
+        reconciler_modules, state, git_repo, monkeypatch, "oow-pass-2", wire_backend=True
+    )
+    assert result3["mutation_count"] == 0
+    assert bindings_path.read_bytes() == second_bytes
+    third_head = subprocess.run(
+        ["git", "-C", str(tracker), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert third_head == second_head
+
+
+def test_out_of_window_404_then_alive_roundtrip_clears_absence(
+    git_repo, reconciler_modules, monkeypatch, clear_absent_calls
+):
+    """The moved absence cluster's round-trip at integration tier: a 404 GET
+    records the absence via note_absent (counter rises; updated_at stamps the
+    FROZEN lifecycle clock's sentinel — the 02c4 fix reaches the moved module),
+    then an alive GET drives clear_absent's TRUE branch to reset the counter."""
+    state = _FakeJiraState()
+    _seed_working_set(state)
+
+    result1 = _run_pass(reconciler_modules, state, git_repo, monkeypatch, "rt-pass")
+    assert result1["mutation_count"] == 3
+    bindings_path = git_repo / ".tickets-tracker" / ".bridge_state" / "bindings.json"
+
+    sentinel = _freeze_binding_clocks(monkeypatch)
+    state.out_of_window.add("DIG-1")
+    state.deleted.add("DIG-1")
+    _run_pass(reconciler_modules, state, git_repo, monkeypatch, "rt-pass-404", wire_backend=True)
+    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    assert entry.get("absent_404_count") == 1, (
+        f"the 404 GET must record ONE absence via note_absent, got entry: {entry}"
+    )
+    assert entry.get("updated_at") == sentinel, (
+        "note_absent must stamp updated_at from binding_lifecycle's OWN module "
+        f"clock (bug 02c4), got {entry.get('updated_at')!r}"
+    )
+
+    state.deleted.discard("DIG-1")
+    clear_absent_calls.clear()
+    _run_pass(reconciler_modules, state, git_repo, monkeypatch, "rt-pass-alive", wire_backend=True)
+    assert "DIG-1" in clear_absent_calls
+    entry = json.loads(bindings_path.read_text())["bindings"]["jira-dig-1"]
+    assert entry.get("absent_404_count") == 0, (
+        f"the alive GET must reset the absence counter (clear_absent TRUE "
+        f"branch), got entry: {entry}"
+    )
