@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import contextvars
 import logging
+import random
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -25,6 +27,10 @@ from .relation_snapshot import (
 logger = logging.getLogger(__name__)
 EXECUTION_PRIORITY_FLOOR = 0.80
 MAX_GENERATION_ATTEMPTS = 3
+# Jittered per-attempt ceiling (seconds) for the transient store-read-failure retry, so the
+# bounded retries do not all sample the SAME in-flight staged-index window and concurrent
+# sessions decorrelate their retries instead of thundering-herd against one another.
+STORE_READ_RETRY_BACKOFF_SECONDS = 0.1
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,24 @@ def sign_manifest(
             fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
             after = tracker_head_sha(tracker, ignore_untracked=True)
         except PlanRelationSnapshotError as exc:
+            # A ``store-read-failure`` is the NORMAL transient state of many concurrent
+            # sessions sharing one tracker: a peer's in-flight ``git add``→``git commit``
+            # leaves a staged (or briefly unmerged) index that this pre-lock read observes
+            # as a non-empty ``git status``. Retry it exactly like a moving committed HEAD
+            # (the ``before != after`` branch below) instead of aborting; on exhaustion the
+            # loop's final ``raise PlanReviewGenerationRetryable`` surfaces it as retryable.
+            # d7cb-22ae tolerated the UNTRACKED half of this race; this is the STAGED half.
+            # Deterministic reasons (missing/ambiguous/malformed/reducer/id-mismatch) stay
+            # terminal — retrying cannot fix a genuinely broken reference.
+            if exc.reason == "store-read-failure":
+                _log(
+                    logging.WARNING,
+                    "plan_review_generation_retry",
+                    attempt=attempt,
+                    reason=exc.reason,
+                )
+                time.sleep(random.uniform(0, STORE_READ_RETRY_BACKOFF_SECONDS * attempt))
+                continue
             _log(logging.ERROR, "plan_review_sign_aborted", reason=exc.reason, attempt=attempt)
             raise PlanReviewGenerationError(exc.reason) from None
         if before != after:
