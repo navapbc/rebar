@@ -1,6 +1,6 @@
 # Documentation policy
 
-This policy defines ownership and writing rules for maintained documentation and durable records. Authors classify each surface before changing it and correct the canonical source named below.
+This policy defines ownership, lifecycle, canonical sources, correction methods, and writing guidance for maintained documentation and durable records. Authors classify each surface before changing it and correct the canonical source named below.
 
 ## Documentation roles
 
@@ -32,6 +32,8 @@ Authors cite tickets or ADRs when historical context is needed. They do not rest
 ## Writing rules
 
 These rules apply to new or edited maintained text.
+
+They are authoring guidelines. They do not define a deterministic validator or gate contract.
 
 Do not use the em dash, en dash, spaced hyphen connector, semicolon, or clause-joining colon.
 
