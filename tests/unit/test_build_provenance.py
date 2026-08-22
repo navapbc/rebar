@@ -36,6 +36,7 @@ def _build(tree: Path, outdir: Path, env_extra: dict) -> subprocess.CompletedPro
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
 
 

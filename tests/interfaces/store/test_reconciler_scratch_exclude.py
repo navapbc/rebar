@@ -47,6 +47,7 @@ def _dry_run_enumerate(root: Path) -> str:
         env=engine_env(str(root)),
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, f"--dry-run-enumerate failed: {cp.stderr}"
     return cp.stdout

@@ -273,5 +273,5 @@ def test_inspector_surfaces_scripted_contract_without_preimporting_steps() -> No
         "v = step_contract_view('fetch_ticket');"
         "assert v['has_contract'] and 'ticket' in [f['name'] for f in v['produces']], v"
     )
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert r.returncode == 0, r.stderr

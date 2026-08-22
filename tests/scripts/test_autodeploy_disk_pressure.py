@@ -35,7 +35,7 @@ def _stub(bin_dir: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
-@pytest.fixture()
+@pytest.fixture
 def box(tmp_path: Path) -> dict[str, object]:
     """A fake box on the NO-OP path: the mirror tip equals the deployed sha, so autodeploy
     reaches the line-228 "up to date" exit. The reported root-disk percent is file-backed
@@ -135,6 +135,7 @@ def _run(box: dict[str, object], **extra_env: str) -> subprocess.CompletedProces
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
 

@@ -71,4 +71,5 @@ def run_nested_pytest(
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )

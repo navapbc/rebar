@@ -53,7 +53,7 @@ def _git(args: list[str], repo: Path) -> subprocess.CompletedProcess:
     )
 
 
-@pytest.fixture()
+@pytest.fixture
 def repo(tmp_path: Path) -> Path:
     subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
     _git(["config", "user.email", "test@example.com"], tmp_path)
@@ -67,7 +67,7 @@ def repo(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("lease,expected", [(120, 40), (3, 1), (1, 1), (0.5, 1), (9, 3)])
+@pytest.mark.parametrize(("lease", "expected"), [(120, 40), (3, 1), (1, 1), (0.5, 1), (9, 3)])
 def test_heartbeat_interval(rl: ModuleType, lease: float, expected: int) -> None:
     assert rl.heartbeat_interval(lease) == expected
 

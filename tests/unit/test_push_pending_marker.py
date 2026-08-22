@@ -48,13 +48,15 @@ exit 1
 
 
 def _git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
-    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True, check=False)
     assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
     return r
 
 
 def _bare_git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
-    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "--git-dir", str(d), *a], capture_output=True, text=True, check=False
+    )
     assert r.returncode == 0, f"git {' '.join(a)} failed: {r.stderr}"
     return r
 
@@ -289,6 +291,7 @@ def test_the_marker_never_touches_the_tracker_working_tree(
         ["git", "-C", str(tracker), "ls-files", "--error-unmatch", push_state.MARKER],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert tracked.returncode != 0, "the push-pending marker is TRACKED by the tickets branch"
 
@@ -319,7 +322,11 @@ def test_push_state_is_importable_without_the_mcp_extra() -> None:
         "from rebar._store import push_state; print(push_state.MARKER)"
     )
     run = subprocess.run(
-        [sys.executable, "-c", probe], capture_output=True, text=True, env=subprocess_env({})
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        env=subprocess_env({}),
+        check=False,
     )
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == push_state.MARKER

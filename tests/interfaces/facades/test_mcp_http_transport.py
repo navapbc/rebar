@@ -252,6 +252,7 @@ def test_check_server_manifest_passes():
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert r.returncode == 0, r.stdout + r.stderr
 
@@ -264,6 +265,7 @@ def test_generators_not_stale_and_include_new_keys():
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
+            check=False,
         )
         assert r.returncode == 0, f"{script} --check stale:\n{r.stdout}{r.stderr}"
     ref = (REPO_ROOT / "docs" / "mcp-reference.md").read_text()

@@ -263,6 +263,7 @@ print('OK', built)
         [sys.executable, "-c", code],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0, (
         f"advanced parser import probe failed:\n{result.stdout}\n{result.stderr}"

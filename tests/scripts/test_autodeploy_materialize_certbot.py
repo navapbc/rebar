@@ -110,6 +110,7 @@ def _run(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
 

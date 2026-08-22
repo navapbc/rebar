@@ -135,9 +135,10 @@ def test_eval_solver_container_criterion_requires_children(monkeypatch):
             _CID, {"input": "parent only"}, runner=object(), repo_root=None
         )
     except ValueError as exc:
-        assert "children" in str(exc)
+        refusal: BaseException = exc
     else:  # pragma: no cover
         raise AssertionError("expected a ValueError for a container fixture with no children")
+    assert "children" in str(refusal)
 
 
 # ── criteria guide ───────────────────────────────────────────────────────────────────────────

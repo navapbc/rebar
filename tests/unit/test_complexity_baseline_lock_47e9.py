@@ -102,6 +102,7 @@ def _run_lock(base_path: Path) -> subprocess.CompletedProcess[str]:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
 
 
@@ -171,6 +172,7 @@ def test_cli_lock_fails_closed_without_base_when_repo_unknown() -> None:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
     assert proc.returncode != 0
     assert "GITHUB_REPOSITORY" in (proc.stdout + proc.stderr)

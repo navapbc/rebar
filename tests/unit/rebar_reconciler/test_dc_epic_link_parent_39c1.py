@@ -263,12 +263,13 @@ def test_an_undiscoverable_epic_link_declines_and_never_writes_fields_parent() -
     try:
         _transport(client).set_parent("RBJ-5", "RBJ-1")
     except NotImplementedError as exc:
-        assert "Epic Link" in str(exc), f"the decline must name the missing field; got {exc!r}"
+        decline: BaseException = exc
     else:
         raise AssertionError(
             "set_parent silently accepted an epic parent on an instance with no Epic Link field; "
             f"updates={client.updates!r}"
         )
+    assert "Epic Link" in str(decline), f"the decline must name the missing field; got {decline!r}"
 
     assert not any("parent" in (u.get("fields") or {}) for u in client.updates), (
         f"declined, but still wrote fields.parent — DC would no-op it: {client.updates!r}"

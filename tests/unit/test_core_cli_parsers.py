@@ -154,7 +154,7 @@ _ACCEPTS = [
 ]
 
 
-@pytest.mark.parametrize("name,argv", _ACCEPTS, ids=[a[0] for a in _ACCEPTS])
+@pytest.mark.parametrize(("name", "argv"), _ACCEPTS, ids=[a[0] for a in _ACCEPTS])
 def test_representative_valid_argv_is_accepted(name: str, argv: list[str]) -> None:
     """A canonical well-formed invocation parses without raising ParseError."""
 
@@ -209,7 +209,9 @@ for route in _registry.ROUTES:
 assert built == 49, built
 print('OK', built)
 """
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
     assert result.returncode == 0, (
         f"core parser import probe failed:\n{result.stdout}\n{result.stderr}"
     )
@@ -350,7 +352,7 @@ _GOVERNANCE = [
 ]
 
 
-@pytest.mark.parametrize("name,argv", _GOVERNANCE, ids=[g[0] for g in _GOVERNANCE])
+@pytest.mark.parametrize(("name", "argv"), _GOVERNANCE, ids=[g[0] for g in _GOVERNANCE])
 def test_factory_governs_execution_not_discarded(
     name: str, argv: list[str], store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -113,7 +113,7 @@ def test_the_suicide_shim_really_produces_a_signal_killed_child(tmp_path: Path) 
     """
     shim = _suicide_shim(tmp_path / "bin", "victim")
 
-    proc = subprocess.run([str(shim)], capture_output=True, text=True)
+    proc = subprocess.run([str(shim)], capture_output=True, text=True, check=False)
 
     assert proc.returncode == -signal.SIGKILL, f"fixture: expected -9, got {proc.returncode}"
     assert proc.stdout == "" and proc.stderr == "", (

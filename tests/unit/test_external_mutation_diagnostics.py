@@ -102,6 +102,7 @@ def test_child_failure_detail_names_the_signal_for_a_killed_child():
         [sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert killed.returncode == -9, killed.returncode
 
@@ -118,6 +119,7 @@ def test_child_failure_detail_reports_a_plain_nonzero_exit_distinctly():
         [sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert crashed.returncode == 3
 
@@ -133,6 +135,7 @@ def test_child_failure_detail_includes_stderr_when_the_child_wrote_any():
         [sys.executable, "-c", "import sys; sys.stderr.write('real parse error'); sys.exit(1)"],
         capture_output=True,
         text=True,
+        check=False,
     )
 
     detail = child_failure_detail(noisy)

@@ -24,7 +24,11 @@ def _default_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProce
     byte-identical, and an explicitly passed ``run=`` bypasses it. Mirrors
     ``access_check._retry_sleep`` / ``_default_client`` and ``scc_loc._run_scc``.
     """
-    return subprocess.run(command, **kwargs)
+    # `check` is popped, not hard-coded: every caller passes its own return-code
+    # policy through **kwargs, so a literal `check=` here would collide with it
+    # ("got multiple values for keyword argument 'check'"). False keeps the
+    # historical default for a caller that omits it.
+    return subprocess.run(command, check=kwargs.pop("check", False), **kwargs)
 
 
 def run_jscpd(

@@ -58,7 +58,7 @@ def test_marker_imports_from_package() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def ticket_dir(tmp_path: Path) -> Path:
     """Return a fresh temporary directory representing a ticket directory."""
     return tmp_path

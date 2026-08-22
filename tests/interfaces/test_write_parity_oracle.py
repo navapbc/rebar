@@ -64,7 +64,7 @@ def _params() -> list:
     return out
 
 
-@pytest.mark.parametrize("case,adapter_name", _params())
+@pytest.mark.parametrize(("case", "adapter_name"), _params())
 def test_write_parity(case: Case, adapter_name: str, rebar_repo: Path) -> None:
     adapter = _ADAPTERS[adapter_name]()
     result, subject = execute(adapter, case, rebar_repo)

@@ -195,7 +195,9 @@ def test_reducer_returns_none_for_ticket_with_no_create_event(
         assert state is None, "reduce_ticket must return None when no CREATE event is present"
     except Exception as exc:  # noqa: BLE001
         # TicketNotFoundError or similar is also acceptable
-        assert "TicketNotFound" in type(exc).__name__ or "NotFound" in type(exc).__name__, (
+        # PT017 is excluded here: BOTH outcomes are contract-valid here — a None return or a
+        # NotFound-shaped raise. `pytest.raises` would make the raise mandatory.
+        assert "TicketNotFound" in type(exc).__name__ or "NotFound" in type(exc).__name__, (  # noqa: PT017
             f"Expected TicketNotFoundError or None return, got {type(exc).__name__}: {exc}"
         )
 

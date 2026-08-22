@@ -70,7 +70,9 @@ def _extract_id(stdout: str) -> str:
 
 def _cli_id(*args: str) -> str:
     # REBAR_ROOT is set by the rebar_repo fixture on os.environ; the subprocess inherits it.
-    cp = subprocess.run([sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True)
+    cp = subprocess.run(
+        [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, check=False
+    )
     assert cp.returncode == 0, f"cli {args} failed: {cp.stderr}"
     return _extract_id(cp.stdout)
 

@@ -231,6 +231,7 @@ class CliAdapter(Adapter):
             [sys.executable, "-m", "rebar.cli", *args],
             capture_output=True,
             text=True,
+            check=False,
         )
 
     def _ok_json(self, *args: str) -> Any:

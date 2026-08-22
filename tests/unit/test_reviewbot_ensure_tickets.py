@@ -103,7 +103,9 @@ def _run_ensure(clone: Path, home: Path) -> subprocess.CompletedProcess[str]:
     env = _isolated_git_env(home)
     env["REVIEWBOT_TICKETS_DIR"] = str(clone)
     env["REVIEWBOT_PYTHON"] = sys.executable
-    return subprocess.run(["sh", str(ENSURE_SCRIPT)], env=env, capture_output=True, text=True)
+    return subprocess.run(
+        ["sh", str(ENSURE_SCRIPT)], env=env, capture_output=True, text=True, check=False
+    )
 
 
 def _write_into(clone: Path) -> str:
@@ -137,7 +139,10 @@ def test_ensure_makes_clone_writable_and_durable(origin_with_tickets: Path, tmp_
 
     # No identity on the fresh clone (RED precondition for the AC#1a assertion).
     pre = subprocess.run(
-        ["git", "-C", str(clone), "config", "user.email"], capture_output=True, text=True
+        ["git", "-C", str(clone), "config", "user.email"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert pre.stdout.strip() == ""
 
@@ -149,7 +154,10 @@ def test_ensure_makes_clone_writable_and_durable(origin_with_tickets: Path, tmp_
     # authorship identity (story 245e) so the review-bot's writes attribute to identity
     # 594c-9dcf-5ad6-4e6d via the git-email resolver; overridable via REVIEWBOT_GIT_USER_EMAIL.
     email = subprocess.run(
-        ["git", "-C", str(clone), "config", "user.email"], capture_output=True, text=True
+        ["git", "-C", str(clone), "config", "user.email"],
+        capture_output=True,
+        text=True,
+        check=False,
     ).stdout.strip()
     assert email == "joeoakhart+bot@navapbc.com"
 
@@ -221,6 +229,7 @@ def test_ensure_sets_a_global_identity_for_attribution(
         capture_output=True,
         text=True,
         env=subprocess_env({"HOME": str(home)}),
+        check=False,
     )
     assert pre.stdout.strip() == ""
 
@@ -228,10 +237,18 @@ def test_ensure_sets_a_global_identity_for_attribution(
 
     env = subprocess_env({"HOME": str(home)})
     g_email = subprocess.run(
-        ["git", "config", "--global", "user.email"], capture_output=True, text=True, env=env
+        ["git", "config", "--global", "user.email"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     ).stdout.strip()
     g_name = subprocess.run(
-        ["git", "config", "--global", "user.name"], capture_output=True, text=True, env=env
+        ["git", "config", "--global", "user.name"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
     ).stdout.strip()
     assert g_email == "joeoakhart+bot@navapbc.com", "global identity drives rebar attribution"
     assert g_name == "Rebar Bot"

@@ -155,6 +155,7 @@ def _unstage(tracker_dir: str, *abs_paths: str | None) -> None:
             ["git", "-C", tracker_dir, "reset", "-q", "--", *rels],
             capture_output=True,
             text=True,
+            check=False,
         )
     except OSError:
         pass

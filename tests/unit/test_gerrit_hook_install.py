@@ -141,6 +141,7 @@ def test_installer_from_a_worktree_leaves_both_hooks_working(
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
     assert result.returncode == 0, f"installer failed: {result.stdout}\n{result.stderr}"
 
@@ -177,7 +178,12 @@ def test_installer_is_idempotent(
     for _ in range(2):
         assert (
             subprocess.run(
-                ["sh", str(INSTALLER)], cwd=worktree, env=env, capture_output=True, timeout=60
+                ["sh", str(INSTALLER)],
+                cwd=worktree,
+                env=env,
+                capture_output=True,
+                timeout=60,
+                check=False,
             ).returncode
             == 0
         )
@@ -203,6 +209,7 @@ def test_installer_refuses_to_clobber_an_unrecognized_commit_msg_hook(
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,
     )
 
     assert result.returncode != 0, "an unsafe overwrite must fail loudly, not succeed quietly"

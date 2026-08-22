@@ -364,6 +364,7 @@ def _read_local_tickets(repo_root: Path, *, no_sync: bool = False) -> list[dict]
             cwd=str(repo_root),
             timeout=60,
             env=_env,
+            check=False,
         )
         if result.returncode != 0:
             print(

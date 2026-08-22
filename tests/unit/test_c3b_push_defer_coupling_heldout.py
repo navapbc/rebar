@@ -41,14 +41,16 @@ exit 0
 
 
 def _git(d: Path, *a: str) -> subprocess.CompletedProcess[str]:
-    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(d), *a], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
     return r
 
 
 def _bare_git(d: Path, *a: str) -> None:
-    r = subprocess.run(["git", "--git-dir", str(d), *a], capture_output=True, text=True)
+    r = subprocess.run(
+        ["git", "--git-dir", str(d), *a], capture_output=True, text=True, check=False
+    )
     if r.returncode != 0:
         raise AssertionError(f"git {' '.join(a)} failed: {r.stderr}")
 

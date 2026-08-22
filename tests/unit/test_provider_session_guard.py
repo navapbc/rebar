@@ -77,7 +77,7 @@ def _isolate(monkeypatch):
     pydantic_ai.models.ALLOW_MODEL_REQUESTS = False
     _RecordingSession.instances = []
     monkeypatch.setattr(runner_mod, "ProviderSession", _RecordingSession)
-    yield
+    return
 
 
 def _ok(messages, info):

@@ -190,7 +190,7 @@ def _verdict_with_droppable():
 
 
 @pytest.mark.parametrize(
-    "label,overrides",
+    ("label", "overrides"),
     [
         ("code_drift", {"cur_sha": "sha-DIFFERENT"}),
         ("window_expiry", {"last_ts": 1 * _MIN_NS}),  # ancient → outside window

@@ -175,6 +175,7 @@ def test_cli_grounding_info_json_validates() -> None:
         [sys.executable, "-m", "rebar.cli", "grounding-info", "--output", "json"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     info = json.loads(cp.stdout)
@@ -186,6 +187,7 @@ def test_cli_grounding_info_text_is_human_readable() -> None:
         [sys.executable, "-m", "rebar.cli", "grounding-info"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     assert "code-grounding oracle contract" in cp.stdout

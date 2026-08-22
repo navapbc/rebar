@@ -40,6 +40,7 @@ def commit_count(
             ["git", "-C", git_dir, "rev-list", "--count", ref],
             capture_output=True,
             text=True,
+            check=False,
         )
         out = r.stdout.strip()
         if r.returncode == 0 and out:

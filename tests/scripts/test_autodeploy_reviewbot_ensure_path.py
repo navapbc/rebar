@@ -83,7 +83,7 @@ def test_ensure_script_only_change_selects_reviewbot_deploy(tmp_path: Path) -> N
         }
     )
     result = subprocess.run(
-        ["bash", str(AUTODEPLOY)], env=env, capture_output=True, text=True, timeout=60
+        ["bash", str(AUTODEPLOY)], env=env, capture_output=True, text=True, timeout=60, check=False
     )
 
     assert result.returncode == 0, result.stderr

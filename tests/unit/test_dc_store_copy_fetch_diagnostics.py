@@ -234,7 +234,11 @@ class TestBridgeStateScrub:
             "`.bridge_state` survived the post-converge scrub"
         )
         status = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=tracker, capture_output=True, text=True
+            ["git", "status", "--porcelain"],
+            cwd=tracker,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         assert status.stdout.strip() == "", "the re-scrub must commit its deletion"
         show = subprocess.run(
@@ -242,5 +246,6 @@ class TestBridgeStateScrub:
             cwd=tracker,
             capture_output=True,
             text=True,
+            check=False,
         )
         assert show.returncode != 0, "the seeded blob must be gone from the tickets tree too"

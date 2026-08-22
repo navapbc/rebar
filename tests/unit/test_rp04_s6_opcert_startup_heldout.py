@@ -213,7 +213,7 @@ def test_cleanup_removes_only_the_copy(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "kind,fn_kw",
+    ("kind", "fn_kw"),
     [
         ("completion-verifier", "verify_completion_fn"),
         ("plan-review", "review_plan_fn"),

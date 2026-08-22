@@ -330,7 +330,7 @@ def test_resolve_hierarchy_link_task_to_story_promotes_to_story(
 
 @pytest.mark.unit
 @pytest.mark.scripts
-@pytest.mark.parametrize("type_a,type_b", [("task", "task"), ("task", "bug"), ("bug", "bug")])
+@pytest.mark.parametrize(("type_a", "type_b"), [("task", "task"), ("task", "bug"), ("bug", "bug")])
 def test_resolve_hierarchy_link_cousins_escalate_to_their_parents(
     graph: ModuleType, tmp_path: Path, type_a: str, type_b: str
 ) -> None:

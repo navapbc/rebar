@@ -27,6 +27,7 @@ def _cli_search(repo: Path, *args: str) -> list:
         capture_output=True,
         text=True,
         env=_env(repo),
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     return json.loads(cp.stdout)
@@ -187,6 +188,7 @@ def test_invalid_sort_key_is_usage_error(rebar_repo: Path) -> None:
         capture_output=True,
         text=True,
         env=_env(rebar_repo),
+        check=False,
     )
     assert cp.returncode == 2
     assert "--sort" in cp.stderr

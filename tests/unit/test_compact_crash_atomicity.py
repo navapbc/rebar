@@ -80,6 +80,7 @@ def _in_head(repo: Path, rel: str) -> bool:
             ["git", "cat-file", "-e", f"HEAD:{rel}"],
             cwd=_tracker(repo),
             capture_output=True,
+            check=False,
         ).returncode
         == 0
     )

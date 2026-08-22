@@ -83,14 +83,13 @@ def _load_module(name: str, path: Path) -> types.ModuleType:
 
 
 @pytest.fixture(scope="module")
-def _seed_sys_modules(request):
+def _seed_sys_modules():
     """Seed sys.modules so patch() targets resolve to real module objects.
 
     Returns a dict with keys 'main_mod', 'advisory_lock_mod', 'mode_mod'.
 
-    Registers a finalizer to clean up the seeded namespace stub entries
-    after this test module completes, so other test modules are not
-    affected by the seeded stub entries.
+    Tears the seeded namespace stub entries down after this test module
+    completes, so other test modules are not affected by them.
     """
     # Track which keys we newly insert (vs those already present) so we only
     # clean up what WE added — leave pre-existing entries intact.
@@ -114,17 +113,14 @@ def _seed_sys_modules(request):
     sys.modules["rebar_reconciler.__main__"] = main_mod  # keep existing consumers happy
     newly_added.append("rebar_reconciler.__main__")
 
-    def _cleanup():
-        for key in newly_added:
-            sys.modules.pop(key, None)
-
-    request.addfinalizer(_cleanup)
-
-    return {
+    yield {
         "main_mod": main_mod,
         "advisory_lock_mod": advisory_lock_mod,
         "mode_mod": mode_mod,
     }
+
+    for key in newly_added:
+        sys.modules.pop(key, None)
 
 
 @pytest.fixture
@@ -341,7 +337,7 @@ def test_lock_released_on_exception(main_mod, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "exc_factory,exc_id",
+    ("exc_factory", "exc_id"),
     [
         (lambda: RuntimeError("boom"), "RuntimeError"),
         # SystemExit bypasses bare `except Exception:` blocks because it

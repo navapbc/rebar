@@ -33,6 +33,7 @@ def test_import_rebar_llm_pulls_no_heavy_deps() -> None:
         capture_output=True,
         text=True,
         env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.startswith("CLEAN"), cp.stdout
@@ -69,7 +70,7 @@ def test_unknown_reviewer_raises() -> None:
 
 # ── deterministic reviewer selection (the rules layer) ────────────────────────
 @pytest.mark.parametrize(
-    "changed, expected",
+    ("changed", "expected"),
     [
         ([], {"ticket-quality"}),
         (["src/rebar/auth_helpers.py"], {"ticket-quality", "security"}),

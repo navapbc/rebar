@@ -75,6 +75,7 @@ def _run_gate(cwd: Path, *, git_version: str | None = None) -> subprocess.Comple
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
 
 

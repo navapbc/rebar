@@ -49,7 +49,7 @@ Runner = Callable[[list[str]], tuple[int, str, str]]
 
 # raw-git-ok: generic command runner, argv supplied by caller
 def _default_runner(argv: list[str]) -> tuple[int, str, str]:
-    result = subprocess.run(argv, capture_output=True, text=True)
+    result = subprocess.run(argv, capture_output=True, text=True, check=False)
     return result.returncode, result.stdout, result.stderr
 
 

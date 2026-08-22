@@ -139,6 +139,7 @@ def _run_wrapper(repo: Path, message_file: Path) -> subprocess.CompletedProcess[
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
 

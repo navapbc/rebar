@@ -30,6 +30,7 @@ def test_importing_tracing_pulls_no_opentelemetry() -> None:
         capture_output=True,
         text=True,
         env={"PYTHONPATH": "src", "PATH": __import__("os").environ.get("PATH", "")},
+        check=False,
     )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.startswith("CLEAN"), cp.stdout

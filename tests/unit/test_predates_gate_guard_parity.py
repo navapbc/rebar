@@ -185,6 +185,7 @@ def test_empty_tree_every_guarded_step_skips_cleanly(tmp_path: Path) -> None:
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
         if result.returncode != 0 or SKIP_MESSAGE not in result.stdout:
             failures.append(

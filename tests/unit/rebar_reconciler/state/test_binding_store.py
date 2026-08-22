@@ -41,7 +41,7 @@ load_binding_store = _mod.load_binding_store
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
+@pytest.fixture
 def store(tmp_path: Path) -> BindingStore:
     """Fresh BindingStore backed by a temporary directory."""
     return BindingStore(tmp_path)

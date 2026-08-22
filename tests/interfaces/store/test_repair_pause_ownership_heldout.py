@@ -129,6 +129,7 @@ def _pause_ref_exists(repo: Path, gate_ref: str) -> bool:
             ["git", "-C", str(repo), "rev-parse", "--verify", gate_ref],
             capture_output=True,
             text=True,
+            check=False,
         ).returncode
         == 0
     )

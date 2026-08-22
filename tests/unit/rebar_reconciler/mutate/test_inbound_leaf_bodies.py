@@ -669,7 +669,7 @@ def test_inbound_create_writes_back_jira_dedup_markers(applier, mut_mod, fixture
 
 
 @pytest.mark.parametrize(
-    "raw_pri, expected",
+    ("raw_pri", "expected"),
     [
         (0, 0),
         (4, 4),
@@ -735,7 +735,7 @@ def _read_status_events(tracker_dir: Path, local_id: str) -> list[dict]:
 
 
 @pytest.mark.parametrize(
-    "jira_status, expected_local",
+    ("jira_status", "expected_local"),
     [
         ("To Do", None),  # 'open' is the reducer default — no STATUS event
         ("In Progress", "in_progress"),  # pre-fix: 'blocked' (wrong preimage)

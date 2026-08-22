@@ -202,6 +202,7 @@ def test_cli_identity_create_and_show_e2e(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert create.returncode == 0, create.stderr
     ident_id = create.stdout.strip().split()[-1]
@@ -212,6 +213,7 @@ def test_cli_identity_create_and_show_e2e(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert show.returncode == 0, show.stderr
     out = show.stdout
@@ -230,6 +232,7 @@ def test_cli_identity_use_sets_pointer_e2e(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert use.returncode == 0, use.stderr
     ptr = store / ".rebar" / "current_identity"

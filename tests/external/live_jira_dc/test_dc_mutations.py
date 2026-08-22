@@ -384,7 +384,7 @@ _INBOUND_CELLS: list[tuple[str, Any, Any]] = [
 @_skip
 @_skip_no_extra
 @pytest.mark.parametrize(
-    "cell_id,mutate,oracle", _INBOUND_CELLS, ids=[c[0] for c in _INBOUND_CELLS]
+    ("cell_id", "mutate", "oracle"), _INBOUND_CELLS, ids=[c[0] for c in _INBOUND_CELLS]
 )
 def test_inbound_mutation_round_trips(
     cell_id: str,
@@ -601,7 +601,7 @@ _OUTBOUND_CELLS: list[tuple[str, Any, Any]] = [
 @_skip
 @_skip_no_extra
 @pytest.mark.parametrize(
-    "cell_id,mutate,oracle", _OUTBOUND_CELLS, ids=[c[0] for c in _OUTBOUND_CELLS]
+    ("cell_id", "mutate", "oracle"), _OUTBOUND_CELLS, ids=[c[0] for c in _OUTBOUND_CELLS]
 )
 def test_outbound_mutation_round_trips(
     cell_id: str,

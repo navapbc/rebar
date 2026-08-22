@@ -68,7 +68,7 @@ def test_pypandoc_and_pandoc_versions_are_pinned() -> None:
 
     assert pypandoc.__version__ == "1.17"
     banner = subprocess.run(
-        [wiki_render._pandoc_path() or "", "--version"], capture_output=True, text=True
+        [wiki_render._pandoc_path() or "", "--version"], capture_output=True, text=True, check=False
     ).stdout
     assert banner.splitlines()[0].strip() == "pandoc 3.9"
 
@@ -96,6 +96,7 @@ def test_real_jira_writer_output_shapes(source: str, expected: str) -> None:
         input=source,
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert completed.returncode == 0
@@ -112,6 +113,7 @@ def test_pandoc_emits_no_color_form() -> None:
             input='<span style="color: red">red text</span>\n',
             capture_output=True,
             text=True,
+            check=False,
         )
         # Absent-string verdict => fail-OPEN without this: a signal-killed pandoc is torn
         # down before it writes, so `"{color:" not in ""` is trivially True.

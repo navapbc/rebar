@@ -316,7 +316,12 @@ print("SPY_OK")
         subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "root"], cwd=d, check=True)
         env = subprocess_env(REBAR_ROOT=d, REBAR_SYNC_PUSH="off")
         cp = subprocess.run(
-            [sys.executable, "-c", code], cwd=d, env=env, capture_output=True, text=True
+            [sys.executable, "-c", code],
+            cwd=d,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip().endswith("SPY_OK"), cp.stdout + cp.stderr
@@ -348,7 +353,12 @@ print("LEAK:" + ",".join(leaked) if leaked else "CLEAN")
         subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "root"], cwd=d, check=True)
         env = subprocess_env(REBAR_ROOT=d, REBAR_SYNC_PUSH="off")
         cp = subprocess.run(
-            [sys.executable, "-c", code], cwd=d, env=env, capture_output=True, text=True
+            [sys.executable, "-c", code],
+            cwd=d,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
         )
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip().splitlines()[-1] == "CLEAN", cp.stdout + cp.stderr

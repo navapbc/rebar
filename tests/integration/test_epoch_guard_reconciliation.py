@@ -323,6 +323,7 @@ def test_cli_always_push_surfaces_epoch_refusal_on_stderr(
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
 
     assert cp.returncode == 0, cp.stdout + cp.stderr

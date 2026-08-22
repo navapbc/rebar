@@ -56,14 +56,14 @@ def test_id_guard_default_active(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "val,expect", [("true", True), ("1", True), ("false", False), ("0", False)]
+    ("val", "expect"), [("true", True), ("1", True), ("false", False), ("0", False)]
 )
 def test_id_guard_canonical_bypass(monkeypatch: pytest.MonkeyPatch, val: str, expect: bool) -> None:
     monkeypatch.setenv("REBAR_UNSAFE_ID_GUARD_BYPASS", val)
     assert rebar_id_audit._resolve_id_guard_bypass() is expect
 
 
-@pytest.mark.parametrize("mode,expect", [("warn", True), ("raise", False)])
+@pytest.mark.parametrize(("mode", "expect"), [("warn", True), ("raise", False)])
 def test_id_guard_legacy_env_value_flip(
     monkeypatch: pytest.MonkeyPatch, mode: str, expect: bool
 ) -> None:

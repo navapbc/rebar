@@ -138,6 +138,7 @@ def run_scanner(*, cwd: Path | None = None) -> list[dict]:
             cwd=str(cwd or REPO_ROOT),
             capture_output=True,
             text=True,
+            check=False,
         )
     except FileNotFoundError as exc:
         raise ScannerError(f"ruff executable not found: {exc}") from exc
@@ -514,6 +515,7 @@ def _base_commit_for_comparison(main_ref: str) -> str:
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            check=False,
         ).stdout.strip()
         == "true"
     ):
@@ -524,12 +526,14 @@ def _base_commit_for_comparison(main_ref: str) -> str:
             cwd=str(REPO_ROOT),
             capture_output=True,
             text=True,
+            check=False,
         )
     merge_base = subprocess.run(
         ["git", "merge-base", main_ref, "HEAD"],
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     rev = merge_base.stdout.strip()
     if merge_base.returncode != 0 or not rev:
@@ -571,6 +575,7 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     if fetch.returncode != 0:
         raise LockFetchError(
@@ -583,6 +588,7 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
         cwd=str(REPO_ROOT),
         capture_output=True,
         text=True,
+        check=False,
     )
     if exists.returncode != 0:
         return None  # main has no baseline yet — bootstrap, allow
@@ -590,6 +596,7 @@ def _fetch_base_ceilings_from_main() -> dict[str, int] | None:
         ["git", "show", f"{rev}:{_BASELINE_REPO_RELPATH}"],
         cwd=str(REPO_ROOT),
         capture_output=True,
+        check=False,
     )
     if show.returncode != 0:
         raise LockFetchError(

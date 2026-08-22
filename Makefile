@@ -224,6 +224,14 @@ lint:  ## ERRORS ONLY (never mutates): ruff lint + format-check + zizmor (releas
 	@# it here makes the local verdict agree with CI instead of surfacing findings only in
 	@# the full suite — same rationale as the env-var drift gate above (~4.9s on the full tree).
 	python scripts/check_comment_hygiene.py
+	@# Test-hygiene gates (story bold-abeyant-indri). Both scripts already run in CI
+	@# (_build-and-test.yml, `raw-git-write gate` + `wall-clock-assert gate`) but were
+	@# unreachable from `make lint`, so a local verdict could be green while CI was red —
+	@# the same reachability gap task 2d9a-78c5 closed for the comment-hygiene gate above.
+	@# No `if [ -f ]` guard is needed here (unlike the CI steps, which must tolerate a
+	@# patchset predating the script): `make lint` runs the patchset's OWN Makefile.
+	python scripts/check_raw_git_writes.py
+	python scripts/check_wall_clock_asserts.py
 	@# DCO sign-off identity consistency (story 35d2): contributor-facing guidance must not
 	@# hardcode a personal sign-off identity; automation-owned paths are excluded by the script.
 	python scripts/check_dco_identity.py

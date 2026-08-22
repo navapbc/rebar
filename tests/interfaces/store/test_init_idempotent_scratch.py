@@ -33,7 +33,7 @@ def pre_upgrade_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterato
     info.mkdir(parents=True, exist_ok=True)
     (info / "exclude").write_text(".tickets-tracker\n.env\n")  # legacy: no .scratch
     monkeypatch.setenv("REBAR_ROOT", str(repo))
-    yield repo
+    return repo
 
 
 def _count(text: str, needle: str = ".scratch") -> int:
@@ -47,11 +47,13 @@ def _scratch_counts(repo: Path) -> tuple[int, int, int]:
         ["git", "-C", str(tracker), "show", "tickets:.gitignore"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
     wt_git = subprocess.run(
         ["git", "-C", str(tracker), "rev-parse", "--git-dir"],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout.strip()
     wt_exclude_path = (
         Path(tracker) / wt_git / "info" / "exclude"

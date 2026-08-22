@@ -127,6 +127,7 @@ def _binding_in_tickets_head(tracker_dir: Path, local_id: str, jira_key: str) ->
         ["git", "-C", str(tracker_dir), "show", "HEAD:.bridge_state/bindings.json"],
         capture_output=True,
         text=True,
+        check=False,
     )
     if result.returncode != 0:
         return False

@@ -57,7 +57,7 @@ def test_removed_rebar_push_ignored(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 # ── deprecated alias: REBAR_NO_SYNC -> sync.pull (negative->positive flip) ─────
 @pytest.mark.parametrize(
-    "no_sync_val,expected_pull",
+    ("no_sync_val", "expected_pull"),
     [
         # truthy → pull off (sync disabled), per the shared _as_bool convention
         ("1", "off"),
@@ -142,7 +142,7 @@ def test_sync_disabled_reads_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
 # ── CLI flag: --no-pull (canonical; --no-sync alias was removed, ticket 5899) ──
 @pytest.mark.parametrize(
-    "flags,expected_no_sync",
+    ("flags", "expected_no_sync"),
     [([], False), (["--no-pull"], True)],
 )
 def test_no_pull_flag_strips_and_opts_out(

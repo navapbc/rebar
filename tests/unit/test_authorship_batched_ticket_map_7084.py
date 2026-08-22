@@ -73,7 +73,9 @@ def _forensics(repo: Path) -> str:
     """
 
     def run(*args: str) -> str:
-        proc = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+        proc = subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=False
+        )
         return f"{proc.stdout}{proc.stderr}".strip()
 
     def listing(objects: Path) -> str:
@@ -105,7 +107,7 @@ def _forensics(repo: Path) -> str:
 
 def _git(repo: Path, *args: str) -> str:
     argv = ["git", "-C", str(repo), *args]
-    proc = subprocess.run(argv, capture_output=True, text=True)
+    proc = subprocess.run(argv, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         failure = _GitFailed(proc.returncode, argv, output=proc.stdout, stderr=proc.stderr)
         failure.forensics = _forensics(repo)

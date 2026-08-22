@@ -135,6 +135,7 @@ def test_audit_show_cli_json_shape(store: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
     assert proc.returncode == 0, f"stdout={proc.stdout!r} stderr={proc.stderr!r}"
     data = json.loads(proc.stdout)

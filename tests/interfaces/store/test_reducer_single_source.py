@@ -26,6 +26,7 @@ def _cli(*args: str, cwd: str | None = None) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         cwd=cwd,
+        check=False,
     )
 
 

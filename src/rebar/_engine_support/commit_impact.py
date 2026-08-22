@@ -110,6 +110,7 @@ def is_merge_commit(sha: str, repo_root: str) -> bool:
         ["git", "-C", str(repo_root), "rev-list", "--parents", "-n", "1", sha],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         return False
@@ -126,6 +127,7 @@ def changed_paths(sha: str, repo_root: str) -> list[str] | None:
         ["git", "-C", str(repo_root), "show", "--name-only", "--pretty=format:", sha],
         capture_output=True,
         text=True,
+        check=False,
     )
     if proc.returncode != 0:
         return None
@@ -152,6 +154,7 @@ def invalid_commit_shas(shas: list[str], repo_root: str) -> list[str]:
             ],
             capture_output=True,
             text=True,
+            check=False,
         )
         if proc.returncode != 0:
             invalid.append(sha)

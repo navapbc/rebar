@@ -25,6 +25,7 @@ def _cli_show(tid: str, cwd: str) -> dict:
         capture_output=True,
         text=True,
         cwd=cwd,
+        check=False,
     )
     assert proc.returncode == 0, proc.stderr
     return json.loads(proc.stdout)

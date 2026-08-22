@@ -46,7 +46,7 @@ def _git(tracker: str, *args: str):
 
 
 def _git_author() -> str:
-    cp = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True)
+    cp = subprocess.run(["git", "config", "user.name"], capture_output=True, text=True, check=False)
     if cp.returncode != 0:
         return "system"
     return cp.stdout.strip()

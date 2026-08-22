@@ -39,7 +39,7 @@ _mod = _load()
 BindingStore = _mod.BindingStore
 
 
-@pytest.fixture()
+@pytest.fixture
 def tracker(tmp_path: Path) -> Path:
     """Return a repo_root whose .tickets-tracker holds a confirmed binding."""
     return tmp_path

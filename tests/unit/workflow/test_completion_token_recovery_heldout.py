@@ -187,7 +187,9 @@ def test_completion_recovery_never_passes_with_an_unmet_criterion(store):
             runner=runner,
         )
     except LLMError as exc:
-        assert "unmet criterion" in str(exc).lower(), (
+        # PT017 is excluded here: the veto may arrive EITHER as a typed raise or as a FAIL
+        # verdict asserted below. `pytest.raises` would forbid the second, valid path.
+        assert "unmet criterion" in str(exc).lower(), (  # noqa: PT017
             "a typed fail-closed veto is valid only when it identifies the contradiction"
         )
         return

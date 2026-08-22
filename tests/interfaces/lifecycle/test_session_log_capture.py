@@ -35,6 +35,7 @@ def _cli(repo: Path, *args: str, readonly: bool = False) -> tuple[int, str, str]
         text=True,
         cwd=str(repo),
         env=env,
+        check=False,
     )
     return cp.returncode, cp.stdout.strip(), cp.stderr.strip()
 

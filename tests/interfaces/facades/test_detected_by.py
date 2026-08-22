@@ -51,7 +51,11 @@ def _cli_id(*args: str, env: dict | None = None) -> str:
 
     merged = subprocess_env({**(env or {})})
     cp = subprocess.run(
-        [sys.executable, "-m", "rebar.cli", *args], capture_output=True, text=True, env=merged
+        [sys.executable, "-m", "rebar.cli", *args],
+        capture_output=True,
+        text=True,
+        env=merged,
+        check=False,
     )
     assert cp.returncode == 0, f"cli {args} failed: {cp.stderr}"
     return _extract_id(cp.stdout)

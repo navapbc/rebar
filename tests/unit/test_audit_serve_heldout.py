@@ -95,7 +95,7 @@ def test_import_rebar_pulls_no_web_dependency() -> None:
         "leaked=[m for m in ('fastapi','uvicorn','jinja2','starlette') if m in sys.modules];"
         "print('LEAK:'+','.join(leaked) if leaked else 'CLEAN')"
     )
-    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    cp = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert cp.returncode == 0, cp.stderr
     assert cp.stdout.strip() == "CLEAN", f"web deps leaked on import: {cp.stdout.strip()}"
 

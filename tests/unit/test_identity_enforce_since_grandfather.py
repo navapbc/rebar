@@ -68,7 +68,12 @@ def _gate_via_env(repo: Path, *args: str, enforce_since: str) -> subprocess.Comp
         }
     )
     return subprocess.run(
-        ["rebar", "verify-identity", *args], cwd=repo, env=env, capture_output=True, text=True
+        ["rebar", "verify-identity", *args],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 

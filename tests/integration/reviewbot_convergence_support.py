@@ -108,6 +108,7 @@ def run_ensure(
         capture_output=True,
         text=True,
         timeout=30,
+        check=False,
     )
 
 

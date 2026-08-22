@@ -120,7 +120,10 @@ def _write_env(repo: Path, pub: str, added_at: str, revoked_at: str | None = Non
 
 def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        ["rebar", "verify-opcert", "--root", str(repo), *extra], capture_output=True, text=True
+        ["rebar", "verify-opcert", "--root", str(repo), *extra],
+        capture_output=True,
+        text=True,
+        check=False,
     )
 
 
@@ -349,6 +352,7 @@ def test_trusted_env_add_and_revoke_stamp_tip_position(
         ["rebar", "trusted-env", "add", ENV_ID, pub, "--root", str(repo)],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert add.returncode == 0, f"stdout={add.stdout}\nstderr={add.stderr}"
 
@@ -368,6 +372,7 @@ def test_trusted_env_add_and_revoke_stamp_tip_position(
         ["rebar", "trusted-env", "revoke", ENV_ID, pub, "--root", str(repo)],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert revoke.returncode == 0, f"stdout={revoke.stdout}\nstderr={revoke.stderr}"
 
