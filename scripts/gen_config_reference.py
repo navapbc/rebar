@@ -6,8 +6,8 @@ Two NEW, fully-generated docs derived from rebar's typed config registries — m
 ``docs/config.md`` is left ENTIRELY untouched; these are machine-current companions:
 
   * ``docs/config-reference.md`` — the configuration precedence / source / lifecycle
-    reference. Every ``section.field`` row is derived from the typed config schema
-    (``rebar._config_schema._SECTION_CLASSES``) with a LIFECYCLE annotation derived from
+    reference. Every ``section.field`` row is derived from the typed config schema,
+    including its ``public_description`` field metadata. Lifecycle annotations come from
     the cfg-kind entries of ``rebar._deprecations.REGISTRY`` (deprecated aliases) and
     ``rebar._deprecations.tombstones()`` (removed keys).
   * ``docs/security.md`` — the indexed security reference, whose secret-name inventory is
@@ -190,20 +190,24 @@ def _lifecycle_index() -> dict[str, str]:
     return {key: "active — " + "; ".join(parts) for key, parts in notes.items()}
 
 
-def _schema_rows() -> list[tuple[str, str, str, str]]:
-    """(key, type, default, lifecycle) for every ``section.field`` in the typed schema."""
+def _schema_rows() -> list[tuple[str, str, str, str, str]]:
+    """Return the public reference row for every typed configuration field."""
     from rebar._config_schema import _SECTION_CLASSES
 
     lifecycle = _lifecycle_index()
-    rows: list[tuple[str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str]] = []
     for section, cls in _SECTION_CLASSES.items():
         for f in dataclasses.fields(cls):
             key = f"{section}.{f.name}"
+            description = f.metadata.get("public_description")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(f"{key} lacks nonempty public_description metadata")
             rows.append(
                 (
                     key,
                     _field_type_repr(f),
                     _field_default_repr(f),
+                    description.strip(),
                     lifecycle.get(key, "active"),
                 )
             )
@@ -233,14 +237,17 @@ def render_config_reference() -> str:
     lines.append("")
     lines.append("## Configuration keys")
     lines.append("")
-    lines.append(f"The {len(rows)} typed `section.field` keys, with type, default, and lifecycle:")
+    lines.append(
+        f"The {len(rows)} typed `section.field` keys with type, default, "
+        "description, and lifecycle."
+    )
     lines.append("")
-    lines.append("| Key | Type | Default | Lifecycle |")
-    lines.append("|-----|------|---------|-----------|")
-    for key, type_repr, default_repr, lifecycle in rows:
+    lines.append("| Key | Type | Default | Description | Lifecycle |")
+    lines.append("|-----|------|---------|-------------|-----------|")
+    for key, type_repr, default_repr, description, lifecycle in rows:
         lines.append(
             f"| `{key}` | `{_md_cell(type_repr)}` | `{_md_cell(default_repr)}` "
-            f"| {_md_cell(lifecycle)} |"
+            f"| {_md_cell(description)} | {_md_cell(lifecycle)} |"
         )
     lines.append("")
 

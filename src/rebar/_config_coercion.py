@@ -1,30 +1,28 @@
-"""Raw-value coercion for the typed config schema.
+"""Coercion and validation for the typed configuration schema.
 
-One concern: turn an untyped TOML/env value into a typed Python value, or raise
-:class:`ConfigError` naming the offending key. Extracted from
-:mod:`rebar._config_schema` — whose own docstring lists "the value coercers" as a
-distinct thing it held, alongside the section dataclasses and the coercion tables.
-Splitting them apart leaves each module with one job and lets the schema read as
-the shape of the config rather than as the parsing of it.
-
-Pure stdlib, no ``rebar.*`` imports beyond the shared error type, preserving the
-low-level-leaf property :mod:`rebar._config_schema` documents (so ``rebar.config``
-can import either with no cycle).
+This module converts untyped configuration values to typed Python values and
+raises :class:`ConfigError` with the affected key. It uses only standard library
+dependencies so the schema can import it without a cycle.
 """
 
 from __future__ import annotations
 
+import logging
+import urllib.parse
 from typing import Any
+
+logger = logging.getLogger("rebar.config")
 
 
 class ConfigError(ValueError):
-    """A config value is invalid. Raised at load time so problems fail fast at one
-    site rather than surfacing deep in unrelated logic.
+    """A configuration value is invalid and cannot enter the typed schema."""
 
-    Defined here rather than in :mod:`rebar._config_schema` because this module is
-    where it is overwhelmingly raised (26 of its 30 raise sites) — the coercers ARE
-    the validation layer. :mod:`rebar._config_schema` re-exports it, so
-    ``from rebar.config import ConfigError`` is unchanged for callers.
+
+class InsecureUrlError(ConfigError):
+    """A configured URL uses cleartext transport without an explicit override.
+
+    This subclass distinguishes a transport policy rejection from malformed
+    configuration while preserving existing :class:`ConfigError` handling.
     """
 
 
@@ -64,6 +62,71 @@ def unknown_key_hint() -> str:
     if _BUILD_MAY_PREDATE_KEYS:
         return "this build may predate it; see docs/config.md"
     return "typo? see docs/config.md"
+
+
+def _warn_unknown(section: str, leftover: dict, source: str, *, strict: bool = False) -> None:
+    """Handle keys left after schema coercion.
+
+    Unknown keys warn by default. Strict mode raises :class:`ConfigError`.
+    """
+    if not leftover:
+        return
+    if strict:
+        keys = ", ".join(f"{section}.{key}" for key in leftover)
+        raise ConfigError(
+            f"rebar config{_src(source)}: unknown key(s) {keys} "
+            "(REBAR_CONFIG_UNKNOWN_KEYS=error — remove them or fix the typo)"
+        )
+    hint = unknown_key_hint()
+    for key in leftover:
+        logger.warning(
+            "rebar config%s: unknown key '%s.%s' ignored (%s)",
+            _src(source),
+            section,
+            key,
+            hint,
+        )
+
+
+def _validate_https_url(
+    url: str, allow_insecure: bool, *, url_label: str, override_label: str
+) -> None:
+    """Require HTTPS unless the corresponding cleartext option is enabled.
+
+    Empty values represent unset configuration and do not require validation. The
+    option controls URL scheme validation. It does not disable certificate
+    verification.
+    """
+    if not url:
+        return
+    scheme = urllib.parse.urlsplit(url).scheme.lower()
+    if scheme == "https":
+        return
+    if not allow_insecure:
+        raise InsecureUrlError(
+            f"{url_label}: {url!r} uses scheme {scheme!r}, not 'https' — "
+            "a cleartext connection risks exposing credentials (e.g. a Jira PAT or "
+            f"API token) in transit. Set {override_label} = true to override (only for a "
+            "trusted network, e.g. a loopback test harness)."
+        )
+    logger.warning(
+        "%s %r uses a non-https scheme; %s=true overrides the TLS requirement — this "
+        "connection is NOT encrypted and is vulnerable to interception. This does not "
+        "relax certificate verification (see the section's ca_bundle).",
+        url_label,
+        url,
+        override_label,
+    )
+
+
+def _validate_reconciler_tls(base_url: str, allow_insecure: bool) -> None:
+    """Apply HTTPS validation with the Jira Data Center field labels."""
+    _validate_https_url(
+        base_url,
+        allow_insecure,
+        url_label="reconciler.base_url",
+        override_label="reconciler.allow_insecure",
+    )
 
 
 def _as_bool(v: Any, key: str) -> bool:

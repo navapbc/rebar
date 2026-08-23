@@ -46,110 +46,110 @@ deprecated aliases and removed keys derived from `rebar._deprecations`.
 
 ## Configuration keys
 
-The 100 typed `section.field` keys, with type, default, and lifecycle:
+The 100 typed `section.field` keys with type, default, description, and lifecycle.
 
-| Key | Type | Default | Lifecycle |
-|-----|------|---------|-----------|
-| `verify.max_ticket_description_chars` | `int` | `8000` | active |
-| `verify.enforce_plan_material_pins` | `bool` | `False` | active |
-| `verify.require_completion_verification_for_close` | `bool` | `False` | active — replaces removed key `verify.require_verdict_for_close` |
-| `verify.require_plan_review_for_close` | `bool` | `False` | active |
-| `verify.require_plan_review_for_claim` | `bool` | `False` | active |
-| `verify.suggest_duplicate_tickets` | `bool` | `False` | active — supersedes alias `verify.overlap_enabled` (permanent alias) |
-| `verify.require_ticket_for_commit` | `bool` | `False` | active |
-| `verify.enable_code_review` | `bool` | `False` | active |
-| `verify.verify_window_headroom` | `float` | `0.8` | active |
-| `verify.remediation_window_minutes` | `int` | `60` | active |
-| `verify.novelty_drop_threshold` | `float` | `0.7` | active |
-| `verify.novelty_priority_floor` | `float` | `0.4` | active |
-| `verify.completion_priority_floor` | `float` | `0.4` | active |
-| `verify.completion_preserve_criteria` | `tuple[str, ...]` | `('T5c', 'T10')` | active |
-| `verify.completion_floor_active` | `bool` | `False` | active |
-| `verify.completion_recovery_pool_multiplier` | `float` | `1.5` | active |
-| `verify.completion_verify_steps_per_criterion` | `int` | `24` | active |
-| `verify.completion_verify_step_floor_min` | `int` | `160` | active |
-| `verify.completion_verify_child_traversal_steps` | `int` | `16` | active |
-| `verify.completion_verify_fixed_overhead_steps` | `int` | `16` | active |
-| `verify.auto_resume_max` | `int` | `2` | active |
-| `verify.contradiction_xcheck_active` | `bool` | `False` | active |
-| `verify.comment_trail_xcheck_active` | `bool` | `False` | active |
-| `verify.require_environment` | `str \| None` | `None` | active |
-| `verify.opcert_enforce_since` | `str \| None` | `None` | active |
-| `verify.opcert_remote_url` | `str \| None` | `None` | active |
-| `identity.require_authenticated` | `bool` | `False` | active |
-| `identity.signing_key` | `str \| None` | `None` | active |
-| `identity.enforce_since` | `str \| None` | `None` | active |
-| `ticket.display_mode` | `str` | `'auto'` | active |
-| `ticket.default_assignee` | `str` | `''` | active |
-| `ticket_clarity.threshold` | `int` | `5` | active |
-| `compact.threshold` | `int` | `10` | active |
-| `compact.COMPACTION_HORIZON_NS` | `int` | `1800000000000` | active |
-| `compact.trigger` | `str` | `'async'` | active |
-| `compact.trigger_interval_s` | `int` | `21600` | active |
-| `sync.push` | `str` | `'always'` | active |
-| `sync.pull` | `str` | `'on'` | active |
-| `sync.remote` | `str` | `'origin'` | active |
-| `mcp.readonly` | `bool` | `False` | active |
-| `mcp.allow_llm` | `bool` | `False` | active |
-| `mcp.allow_jira_sync` | `bool` | `False` | active |
-| `mcp.transport` | `str` | `'stdio'` | active |
-| `mcp.http_host` | `str` | `'127.0.0.1'` | active |
-| `mcp.http_port` | `int` | `8000` | active |
-| `mcp.http_path` | `str` | `'/mcp'` | active |
-| `mcp.http_allowed_hosts` | `tuple[str, ...]` | `()` | active |
-| `mcp.http_allowed_origins` | `tuple[str, ...]` | `()` | active |
-| `mcp.http_tls_at_edge` | `bool` | `False` | active |
-| `mcp.allow_unauthenticated_http` | `bool` | `False` | active |
-| `mcp.auth_enabled` | `bool` | `False` | active |
-| `mcp.auth_strategies` | `tuple[str, ...]` | `()` | active |
-| `mcp.auth_issuer_url` | `str` | `''` | active |
-| `mcp.auth_resource_server_url` | `str` | `''` | active |
-| `mcp.auth_required_scopes` | `tuple[str, ...]` | `()` | active |
-| `mcp.auth_static_tokens_file` | `str` | `''` | active |
-| `mcp.auth_jwt_jwks_uri` | `str` | `''` | active |
-| `mcp.auth_jwt_issuer` | `str` | `''` | active |
-| `mcp.auth_jwt_algorithms` | `tuple[str, ...]` | `('RS256', 'ES256')` | active |
-| `mcp.auth_jwt_leeway` | `int` | `60` | active |
-| `mcp.auth_jwt_jwks_refetch_cooldown` | `int` | `30` | active |
-| `mcp.auth_jwt_jwks_timeout` | `int` | `10` | active |
-| `mcp.auth_jwt_expected_typ` | `str` | `''` | active |
-| `mcp.auth_jwt_allow_private_jwks_host` | `bool` | `False` | active |
-| `mcp.auth_introspection_endpoint` | `str` | `''` | active |
-| `mcp.auth_introspection_client_id` | `str` | `''` | active |
-| `mcp.auth_introspection_client_secret_env` | `str` | `''` | active |
-| `mcp.auth_introspection_allow_private_host` | `bool` | `False` | active |
-| `mcp.auth_introspection_allow_missing_aud` | `bool` | `False` | active |
-| `mcp.auth_proxy_secret_env` | `str` | `''` | active |
-| `mcp.auth_proxy_secret_header` | `str` | `'x-proxy-auth'` | active |
-| `mcp.auth_proxy_identity_header` | `str` | `'x-forwarded-user'` | active |
-| `mcp.auth_proxy_scopes` | `tuple[str, ...]` | `()` | active |
-| `mcp.auth_custom_import` | `str` | `''` | active |
-| `ui.enabled` | `bool` | `False` | active |
-| `reconciler.jira_cli_timeout` | `int` | `0` | active |
-| `reconciler.rich_text_cutover` | `str` | `'off'` | active |
-| `reconciler.dc_pandoc_timeout_s` | `float` | `10.0` | active |
-| `reconciler.backend` | `str` | `'jira'` | active |
-| `reconciler.lock_lease_secs` | `int` | `120` | active |
-| `reconciler.deletion_probe_limit` | `int` | `20` | active |
-| `reconciler.id_guard_bypass_unsafe` | `bool` | `False` | active |
-| `reconciler.max_acting_fraction` | `float` | `0.1` | active |
-| `reconciler.base_url` | `str` | `''` | active |
-| `reconciler.allow_insecure` | `bool` | `False` | active |
-| `reconciler.ca_bundle` | `str` | `''` | active |
-| `reconciler.comment_max_chars` | `int` | `32767` | active |
-| `jira.url` | `str` | `''` | active |
-| `jira.user` | `str` | `''` | active |
-| `jira.project` | `str` | `''` | active |
-| `jira.allow_insecure` | `bool` | `False` | active |
-| `scratch.base_dir` | `str` | `''` | active |
-| `tracker.dir` | `str` | `'.tickets-tracker'` | active |
-| `tracker.branch` | `str` | `'tickets'` | active |
-| `ensure.hint_interval_secs` | `int` | `86400` | active |
-| `ensure.hint_enabled` | `bool` | `True` | active |
-| `code_health.scan_roots` | `list[str]` | `[]` | active |
-| `code_health.include_extensions` | `list[str]` | `[]` | active |
-| `code_health.size_cap` | `int \| None` | `None` | active |
-| `code_health.size_near_fraction` | `float` | `0.1` | active |
+| Key | Type | Default | Description | Lifecycle |
+|-----|------|---------|-------------|-----------|
+| `verify.max_ticket_description_chars` | `int` | `8000` | Sets the ticket description limit used by plan review and completion verification. | active |
+| `verify.enforce_plan_material_pins` | `bool` | `False` | Requires plan-review signatures to pin reviewed ticket material. | active |
+| `verify.require_completion_verification_for_close` | `bool` | `False` | Requires a passing completion verification before a work ticket can close. | active — replaces removed key `verify.require_verdict_for_close` |
+| `verify.require_plan_review_for_close` | `bool` | `False` | Requires a current plan-review attestation when a work ticket closes. | active |
+| `verify.require_plan_review_for_claim` | `bool` | `False` | Requires a current passing plan-review attestation before a work ticket can be claimed. | active |
+| `verify.suggest_duplicate_tickets` | `bool` | `False` | Adds duplicate, supersession, and dependency suggestions plus recent-title warnings. | active — supersedes alias `verify.overlap_enabled` (permanent alias) |
+| `verify.require_ticket_for_commit` | `bool` | `False` | Requires each checked commit to reference a ticket that resolves in the store. | active |
+| `verify.enable_code_review` | `bool` | `False` | Enables automatic code-review dispatch without disabling explicit review requests. | active |
+| `verify.verify_window_headroom` | `float` | `0.8` | Limits each plan-review verification request to this fraction of the model window. | active |
+| `verify.remediation_window_minutes` | `int` | `60` | Sets how long an edited plan remains eligible for remediation-mode review. | active |
+| `verify.novelty_drop_threshold` | `float` | `0.7` | Sets the novelty score required before remediation review may drop a finding. | active |
+| `verify.novelty_priority_floor` | `float` | `0.4` | Keeps remediation findings at or above this priority score even when they are novel. | active |
+| `verify.completion_priority_floor` | `float` | `0.4` | Keeps completion findings at or above this priority when the floor is active. | active |
+| `verify.completion_preserve_criteria` | `tuple[str, ...]` | `('T5c', 'T10')` | Names criteria that completion review never drops through the completion floor. | active |
+| `verify.completion_floor_active` | `bool` | `False` | Enables the calibrated completion floor, which may drop eligible low-priority findings. | active |
+| `verify.completion_recovery_pool_multiplier` | `float` | `1.5` | Scales the completion-verifier recovery step pool by the number of reviewed criteria. | active |
+| `verify.completion_verify_steps_per_criterion` | `int` | `24` | Adds this many completion-verifier steps for each reviewed criterion. | active |
+| `verify.completion_verify_step_floor_min` | `int` | `160` | Sets the minimum step budget for a completion-verification run. | active |
+| `verify.completion_verify_child_traversal_steps` | `int` | `16` | Adds this many verifier steps for each child ticket traversed during completion review. | active |
+| `verify.completion_verify_fixed_overhead_steps` | `int` | `16` | Adds a fixed step allowance to every completion-verification run. | active |
+| `verify.auto_resume_max` | `int` | `2` | Limits automatic completion-verification retries after evidence-search exhaustion. | active |
+| `verify.contradiction_xcheck_active` | `bool` | `False` | Enables a cross-check that drops a weaker finding contradicted by another finding. | active |
+| `verify.comment_trail_xcheck_active` | `bool` | `False` | Enables a cross-check that drops findings which repeat matters resolved in comments. | active |
+| `verify.require_environment` | `str \| None` | `None` | Restricts operation certificates to the trusted environment with this identifier. | active |
+| `verify.opcert_enforce_since` | `str \| None` | `None` | Limits operation-certificate checks to closure commits at this ref or descendants. | active |
+| `verify.opcert_remote_url` | `str \| None` | `None` | Routes remote certificate requests to the trusted gate service at this base URL. | active |
+| `identity.require_authenticated` | `bool` | `False` | Requires verified authorship for governed ticket mutations and refuses unsigned writes. | active |
+| `identity.signing_key` | `str \| None` | `None` | Names the OpenSSH private key used to sign ticket mutation events. | active |
+| `identity.enforce_since` | `str \| None` | `None` | Limits authorship enforcement to event commits at this tracker ref or its descendants. | active |
+| `ticket.display_mode` | `str` | `'auto'` | Selects automatic, canonical, alias, or short identifiers for ticket references. | active |
+| `ticket.default_assignee` | `str` | `''` | Supplies the Jira-resolvable assignee used by claim when no assignee is provided. | active |
+| `ticket_clarity.threshold` | `int` | `5` | Sets the minimum score required for a ticket to pass the clarity check. | active |
+| `compact.threshold` | `int` | `10` | Sets the minimum eligible event count that triggers ticket compaction. | active |
+| `compact.COMPACTION_HORIZON_NS` | `int` | `1800000000000` | Keeps events newer than this nanosecond horizon outside compaction snapshots. | active |
+| `compact.trigger` | `str` | `'async'` | Selects asynchronous, inline, or disabled compaction after qualifying write operations. | active |
+| `compact.trigger_interval_s` | `int` | `21600` | Starts a compaction sweep when the prior sweep is older than this many seconds. | active |
+| `sync.push` | `str` | `'always'` | Selects synchronous, asynchronous, or disabled ticket-store pushes after writes. | active |
+| `sync.pull` | `str` | `'on'` | Controls whether ticket-store reads fetch and integrate remote updates. | active |
+| `sync.remote` | `str` | `'origin'` | Names the Git remote used to push, fetch, reconcile, and verify the tickets branch. | active |
+| `mcp.readonly` | `bool` | `False` | Prevents MCP tools from mutating tickets while retaining read-only tools. | active |
+| `mcp.allow_llm` | `bool` | `False` | Allows MCP callers to invoke model-backed review and analysis tools. | active |
+| `mcp.allow_jira_sync` | `bool` | `False` | Allows MCP callers to apply Jira synchronization writes. | active |
+| `mcp.transport` | `str` | `'stdio'` | Selects stdio or Streamable HTTP for the MCP server transport. | active |
+| `mcp.http_host` | `str` | `'127.0.0.1'` | Sets the network interface address bound by the MCP HTTP transport. | active |
+| `mcp.http_port` | `int` | `8000` | Sets the port bound by the MCP HTTP transport. | active |
+| `mcp.http_path` | `str` | `'/mcp'` | Sets the request path served by the MCP HTTP transport. | active |
+| `mcp.http_allowed_hosts` | `tuple[str, ...]` | `()` | Lists accepted HTTP Host header values for DNS rebinding protection. | active |
+| `mcp.http_allowed_origins` | `tuple[str, ...]` | `()` | Lists accepted HTTP Origin header values for cross-origin request protection. | active |
+| `mcp.http_tls_at_edge` | `bool` | `False` | Acknowledges that a fronting proxy provides TLS when HTTP binds beyond loopback. | active |
+| `mcp.allow_unauthenticated_http` | `bool` | `False` | Permits HTTP startup without token authentication when explicitly enabled. | active |
+| `mcp.auth_enabled` | `bool` | `False` | Requires HTTP credentials accepted by a configured authentication strategy. | active |
+| `mcp.auth_strategies` | `tuple[str, ...]` | `()` | Selects the ordered token verification strategies composed by the MCP server. | active |
+| `mcp.auth_issuer_url` | `str` | `''` | Advertises the authorization server issuer in protected-resource metadata. | active |
+| `mcp.auth_resource_server_url` | `str` | `''` | Sets the audience and protected resource identifier required on accepted tokens. | active |
+| `mcp.auth_required_scopes` | `tuple[str, ...]` | `()` | Requires accepted principals to hold every listed scope. | active |
+| `mcp.auth_static_tokens_file` | `str` | `''` | Names the JSON file containing static token digests or environment references. | active |
+| `mcp.auth_jwt_jwks_uri` | `str` | `''` | Sets the HTTPS JWKS endpoint used to verify JWT signatures. | active |
+| `mcp.auth_jwt_issuer` | `str` | `''` | Requires accepted JWTs to carry this issuer. | active |
+| `mcp.auth_jwt_algorithms` | `tuple[str, ...]` | `('RS256', 'ES256')` | Limits JWT signature verification to these asymmetric algorithms. | active |
+| `mcp.auth_jwt_leeway` | `int` | `60` | Allows this many seconds of clock skew when validating JWT timestamps. | active |
+| `mcp.auth_jwt_jwks_refetch_cooldown` | `int` | `30` | Sets the minimum seconds between JWKS fetch attempts for unknown key identifiers. | active |
+| `mcp.auth_jwt_jwks_timeout` | `int` | `10` | Limits each JWKS request to this many seconds. | active |
+| `mcp.auth_jwt_expected_typ` | `str` | `''` | Requires the JWT type header to match this value when configured. | active |
+| `mcp.auth_jwt_allow_private_jwks_host` | `bool` | `False` | Allows JWKS retrieval from private, link-local, or loopback addresses. | active |
+| `mcp.auth_introspection_endpoint` | `str` | `''` | Sets the HTTPS RFC 7662 endpoint used to validate opaque tokens. | active |
+| `mcp.auth_introspection_client_id` | `str` | `''` | Identifies the MCP resource server to the token introspection endpoint. | active |
+| `mcp.auth_introspection_client_secret_env` | `str` | `''` | Names the environment variable containing the introspection client secret. | active |
+| `mcp.auth_introspection_allow_private_host` | `bool` | `False` | Allows token introspection through a private, link-local, or loopback address. | active |
+| `mcp.auth_introspection_allow_missing_aud` | `bool` | `False` | Accepts active introspection responses that omit an audience claim. | active |
+| `mcp.auth_proxy_secret_env` | `str` | `''` | Names the environment variable containing the trusted proxy shared secret. | active |
+| `mcp.auth_proxy_secret_header` | `str` | `'x-proxy-auth'` | Names the request header carrying the trusted proxy shared secret. | active |
+| `mcp.auth_proxy_identity_header` | `str` | `'x-forwarded-user'` | Names the request header carrying the identity asserted by the trusted proxy. | active |
+| `mcp.auth_proxy_scopes` | `tuple[str, ...]` | `()` | Grants these scopes to principals accepted through the trusted proxy. | active |
+| `mcp.auth_custom_import` | `str` | `''` | Loads a trusted module and factory that supplies a custom token verifier. | active |
+| `ui.enabled` | `bool` | `False` | Allows `rebar audit serve` to start the read-only audit web interface. | active |
+| `reconciler.jira_cli_timeout` | `int` | `0` | Limits each Jira CLI call to this many seconds. Zero uses the 120-second process default. | active |
+| `reconciler.rich_text_cutover` | `str` | `'off'` | Selects which Jira clients receive rich-text payloads instead of plain text. | active |
+| `reconciler.dc_pandoc_timeout_s` | `float` | `10.0` | Limits one Data Center Pandoc conversion to this many seconds before Markdown fallback. | active |
+| `reconciler.backend` | `str` | `'jira'` | Selects the Jira Cloud or Jira Data Center reconciliation adapter. | active |
+| `reconciler.lock_lease_secs` | `int` | `120` | Sets how long the reconciler pass lock remains valid before renewal or takeover. | active |
+| `reconciler.deletion_probe_limit` | `int` | `20` | Limits the Jira GET probes used to confirm that a remote item was deleted. | active |
+| `reconciler.id_guard_bypass_unsafe` | `bool` | `False` | Bypasses the reconciler identifier write guard and can permit identifier corruption. | active |
+| `reconciler.max_acting_fraction` | `float` | `0.1` | Refuses a pass when acting decisions exceed this fraction of bound tickets. | active |
+| `reconciler.base_url` | `str` | `''` | Sets the Jira Data Center base URL used by the reconciler adapter. | active |
+| `reconciler.allow_insecure` | `bool` | `False` | Allows a cleartext Data Center URL without disabling certificate verification. | active |
+| `reconciler.ca_bundle` | `str` | `''` | Names the CA bundle used to verify Jira Data Center TLS certificates. | active |
+| `reconciler.comment_max_chars` | `int` | `32767` | Truncates Jira Data Center comments to this character limit. Zero disables truncation. | active |
+| `jira.url` | `str` | `''` | Sets the Jira Cloud base URL used for API access. | active |
+| `jira.user` | `str` | `''` | Sets the Jira user used for Cloud API access. | active |
+| `jira.project` | `str` | `''` | Sets the legacy default Jira project for tickets without a recorded bridge project. | active |
+| `jira.allow_insecure` | `bool` | `False` | Allows a cleartext Jira Cloud URL. It does not disable certificate verification. | active |
+| `scratch.base_dir` | `str` | `''` | Sets the scratch workspace base directory. Empty uses `<repo>/.rebar/scratch`. | active |
+| `tracker.dir` | `str` | `'.tickets-tracker'` | Sets the worktree or symlink directory containing the ticket event store. | active |
+| `tracker.branch` | `str` | `'tickets'` | Names the orphan Git branch that stores ticket event history. | active |
+| `ensure.hint_interval_secs` | `int` | `86400` | Sets the minimum seconds between pending-migration repair hints on writes. | active |
+| `ensure.hint_enabled` | `bool` | `True` | Controls whether writes warn when the store is behind the ensure registry. | active |
+| `code_health.scan_roots` | `list[str]` | `[]` | Lists the directories inspected by code-health metric analyzers. | active |
+| `code_health.include_extensions` | `list[str]` | `[]` | Limits module-size metrics to listed extensions. Empty includes every scc file type. | active |
+| `code_health.size_cap` | `int \| None` | `None` | Sets the line-count cap used for module-size distribution and oversized-module metrics. | active |
+| `code_health.size_near_fraction` | `float` | `0.1` | Marks files within this fraction below the size cap as near the limit. | active |
 
 ## Deprecated configuration aliases
 
