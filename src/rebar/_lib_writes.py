@@ -23,6 +23,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal, cast, overload
 
 from rebar import config
+from rebar._commands.gates import log_advisory_warning as _warn_advisory
 from rebar._commands.gates import log_description_cap_warning as _warn_description_cap
 from rebar._deprecations import warn_deprecated
 from rebar._errors import ConcurrencyError, RebarError
@@ -136,8 +137,9 @@ def create_ticket(
     """Create a ticket.
 
     Returns the canonical 16-hex ticket id (default). With ``return_alias=True``,
-    returns ``{"id", "alias", "description_warning"}`` (the last being the save-time
-    description-cap notice, also logged) so agents skip a second ``show`` (WS5e).
+    returns ``{"id", "alias", "description_warning", "duplicate_warning"}`` (the save-time
+    description-cap notice and the create-time same-title duplicate advisory, both also
+    logged) so agents skip a second ``show`` (WS5e).
 
     ``source`` (P1.2 import): optional provenance dict — keys ``source_id``,
     ``source_created_at``, ``source_author``, ``source_env`` are recorded on the
@@ -176,9 +178,15 @@ def create_ticket(
             stderr=exc.message,
         ) from None
     warning = _warn_description_cap(res.get("description_warning"))
+    dup_warning = _warn_advisory(res.get("duplicate_warning"))
     if not return_alias:
         return res["id"]
-    return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
+    return {
+        "id": res["id"],
+        "alias": res["alias"] or "",
+        "description_warning": warning,
+        "duplicate_warning": dup_warning,
+    }
 
 
 def idea(
@@ -197,7 +205,8 @@ def idea(
     gates. Promote a kept idea with ``transition(id, "idea", "open")``.
 
     Returns the canonical 16-hex ticket id (default), or the ``{"id", "alias",
-    "description_warning"}`` dict with ``return_alias=True`` (as :func:`create_ticket`).
+    "description_warning", "duplicate_warning"}`` dict with ``return_alias=True`` (as
+    :func:`create_ticket`).
 
     ``_creation_channel`` is INTERNAL (see :func:`create_ticket`): defaults to
     ``"python"``; the MCP adapter passes ``"mcp"``.
@@ -221,9 +230,15 @@ def idea(
             stderr=exc.message,
         ) from None
     warning = _warn_description_cap(res.get("description_warning"))
+    dup_warning = _warn_advisory(res.get("duplicate_warning"))
     if not return_alias:
         return res["id"]
-    return {"id": res["id"], "alias": res["alias"] or "", "description_warning": warning}
+    return {
+        "id": res["id"],
+        "alias": res["alias"] or "",
+        "description_warning": warning,
+        "duplicate_warning": dup_warning,
+    }
 
 
 def _normalize_transition_force(force: str | bool | None, force_close: str | None) -> str | None:

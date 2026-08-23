@@ -273,11 +273,24 @@ def create_core(
         ticket_id=alias or ticket_id,
         cfg_root=os.path.dirname(str(tracker)),
     )
+    # Create-time advisory duplicate probe (ticket eac3-ed70-764a-4f9e): a recent
+    # same-normalized-title create inside the journal window, surfaced the same way —
+    # after the event lands, on each surface's own channel, never blocking the write.
+    from rebar._commands.recent_creates import duplicate_create_warning
+
+    dup_warning = duplicate_create_warning(
+        tracker,
+        ticket_id=ticket_id,
+        alias=alias or None,
+        title=title,
+        cfg_root=os.path.dirname(str(tracker)),
+    )
     return {
         "id": ticket_id,
         "alias": alias or None,
         "title": title,
         "description_warning": warning,
+        "duplicate_warning": dup_warning,
     }
 
 
@@ -484,9 +497,11 @@ def create_cli(argv: list[str], *, repo_root=None) -> int:
             "(the file-impact-coverage gate will otherwise flag it).",
             file=sys.stderr,
         )
-    # Same stderr channel for the description-cap heads-up (ticket 594b): the create
-    # already succeeded, so this is advisory and the exit code stays 0.
+    # Same stderr channel for the description-cap heads-up (ticket 594b) and the
+    # duplicate-title advisory (ticket eac3): the create already succeeded, so both are
+    # advisory and the exit code stays 0.
     _warn_stderr(res.get("description_warning"))
+    _warn_stderr(res.get("duplicate_warning"))
     return 0
 
 

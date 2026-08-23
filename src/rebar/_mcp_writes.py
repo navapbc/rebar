@@ -150,7 +150,10 @@ def register_write_tools(mcp, ctx) -> None:
         """Create a ticket; returns {id, alias} (agents get the alias without
         a second show()). A non-null description_warning means the description exceeds
         the plan-review admission cap while the claim gate is on — the ticket was still
-        created, but claiming it needs a review that refuses the description as-is."""
+        created, but claiming it needs a review that refuses the description as-is. A
+        non-null duplicate_warning means another ticket with the same normalized title
+        was created inside the recency window — advisory only; the named candidate may
+        already cover this work."""
         _shadow("mcp.write.create_ticket")
         created = rebar.create_ticket(
             ticket_type,

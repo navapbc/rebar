@@ -148,6 +148,14 @@ verify.suggest_duplicate_tickets   = false   # ADVISORY store-wide duplicate det
                                              # REBAR_VERIFY_SUGGEST_DUPLICATE_TICKETS; the former
                                              # name `verify.overlap_enabled` is a permanent alias.
                                              # See [ADR 0086](adr/0086-cross-ticket-overlap.md).
+                                             # The SAME key also enables the cheap CREATE-TIME
+                                             # advisory (ticket eac3): a create whose normalized
+                                             # title matches another create inside a 600 s window
+                                             # is surfaced (candidate id + status) on the
+                                             # creating surface's own channel — CLI stderr,
+                                             # library logger + `duplicate_warning` result key,
+                                             # MCP result field. O(window) via a small journal
+                                             # sidecar; never blocks or fails the create.
 verify.require_ticket_for_commit   = false   # CI Verified gate: every commit to main must reference a rebar
                                              # ticket that RESOLVES in the store (rebar-ticket: <id> trailer or a
                                              # leading <id>:; alias/full/short/Jira). env

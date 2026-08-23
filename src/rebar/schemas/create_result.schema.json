@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/navapbc/rebar/schemas/create_result.schema.json",
   "title": "CreateResult",
-  "description": "Result of `rebar create … --output json` (and the library create_ticket(return_alias=True) / MCP create_ticket): {id, alias, title}. The default text form prints a human summary line then the bare id (| tail -1). `description_warning` is the advisory save-time notice when the new description exceeds `verify.max_ticket_description_chars` while the plan-review start-work gate is enabled (null otherwise); it is carried on the library and MCP results — the CLI emits it on stderr instead, keeping stdout pure in both output modes.",
+  "description": "Result of `rebar create … --output json` (and the library create_ticket(return_alias=True) / MCP create_ticket): {id, alias, title}. The default text form prints a human summary line then the bare id (| tail -1). `description_warning` is the advisory save-time notice when the new description exceeds `verify.max_ticket_description_chars` while the plan-review start-work gate is enabled (null otherwise); `duplicate_warning` is the advisory create-time notice when another create inside the recency window carries the same normalized title while `verify.suggest_duplicate_tickets` is enabled (null otherwise). Both are carried on the library and MCP results — the CLI emits them on stderr instead, keeping stdout pure in both output modes.",
   "type": "object",
   "additionalProperties": true,
   "required": ["id"],
@@ -10,6 +10,7 @@
     "id": { "type": "string" },
     "alias": { "type": ["string", "null"] },
     "title": { "type": "string" },
-    "description_warning": { "type": ["string", "null"] }
+    "description_warning": { "type": ["string", "null"] },
+    "duplicate_warning": { "type": ["string", "null"] }
   }
 }
