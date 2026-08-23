@@ -5546,6 +5546,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T14:53:40Z"
     },
+    "1f2c-91fd-1b6f-4e1d": {
+      "created_at": "2026-08-23T19:34:16Z",
+      "jira_id": "4589941",
+      "jira_key": "REB-3535",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:19Z"
+    },
     "1f32-f86e-8a51-4d8e": {
       "baseline": {
         "assignee": null,
@@ -5903,9 +5910,17 @@
       "updated_at": "2026-08-15T14:53:50Z"
     },
     "20f3-56b5-6e97-4de3": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n`templates/rebar-usage.md` currently instructs every project to pass `--assignee <you>`. The claim command already applies `ticket.default_assignee` when the option is omitted. A repository may leave that setting empty, in which case claim remains valid and records no assignee. An explicit value is an override and must be suitable for the configured Jira bridge when one is present. `templates/AGENTS.md` embeds a synchronized generated region from the usage template.\n\n## Plan\n\n- Make the portable claim example omit `--assignee`.\n- Explain the configured default and the valid unassigned result when no default exists.\n- Explain when an explicit Jira-resolvable identity is appropriate without assuming that every client repository uses Jira.\n- Synchronize the generated region in `templates/AGENTS.md` through the established template ownership mechanism.\n- Preserve the existing synchronization test and avoid repository-specific Gerrit guidance in the portable template.\n\n## Acceptance Criteria\n\n- [ ] The canonical template presents `rebar claim <id>` as the default command.\n- [ ] The template describes behavior when `ticket.default_assignee` is configured.\n- [ ] The template describes behavior when `ticket.default_assignee` is empty.\n- [ ] Explicit assignee guidance requires a Jira-resolvable identity only when an override is intended.\n- [ ] The generated region in `templates/AGENTS.md` matches `templates/rebar-usage.md`.\n- [ ] The focused template synchronization test passes.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "F15 correct portable claim identity guidance"
+      },
       "created_at": "2026-08-23T18:38:09Z",
       "jira_id": "4589935",
       "jira_key": "REB-3529",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:12Z"
     },
@@ -8107,6 +8122,13 @@
       "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T14:54:56Z"
+    },
+    "2b51-57f4-49ce-42c9": {
+      "created_at": "2026-08-23T19:34:22Z",
+      "jira_id": "4589942",
+      "jira_key": "REB-3536",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:25Z"
     },
     "2b60-0b39-39ff-47ea": {
       "created_at": "2026-08-15T14:54:57Z",
@@ -15158,9 +15180,17 @@
       "updated_at": "2026-08-15T22:37:06Z"
     },
     "4ddc-ff11-034f-41e2": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n`scripts/check_server_manifest.py` currently compares only environment variable names. `server.json` publishes `name`, `description`, and `isRequired` for each record, so description drift, requiredness drift, and duplicate records can pass the current gate. `rebar.mcp_server.MCP_ENV_VARS` remains the canonical inventory. The F05 generated ownership catalog remains deferred and is outside this task.\n\n## Plan\n\n- Refactor the checker to normalize complete `name`, `description`, and `isRequired` records from the canonical inventory and `server.json`.\n- Reject duplicate names in either inventory before comparison.\n- Report missing, extra, and changed records with enough field detail to identify the correction.\n- Add focused checker tests for the clean manifest, each changed field, and duplicate detection.\n- Preserve the existing CI entry point and MCP authentication contract coverage.\n\n## Acceptance Criteria\n\n- [ ] The committed `server.json` passes comparison against normalized canonical records.\n- [ ] A description mismatch causes a nonzero checker result and identifies the affected name.\n- [ ] An `isRequired` mismatch causes a nonzero checker result and identifies the affected name.\n- [ ] A duplicate name in either inventory causes a nonzero checker result.\n- [ ] Focused checker and MCP manifest contract tests pass.\n- [ ] Lint and type checking pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "F14 validate complete MCP manifest environment records"
+      },
       "created_at": "2026-08-23T18:38:15Z",
       "jira_id": "4589936",
       "jira_key": "REB-3530",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:18Z"
     },
@@ -16082,9 +16112,17 @@
       "updated_at": "2026-08-15T14:59:26Z"
     },
     "5232-e024-e3f1-47c1": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n`examples/agent-skills/rebar-implement/SKILL.md` teaches explicit bare assignees and offers direct status transition as an alternative to atomic claim. `examples/agent-skills/rebar-brainstorm/SKILL.md` describes an unsigned claimability fast fail as a successful review cycle. Tickets comely-craven-apatosaur and stealthful-calmy-erin establish the enforced claim and review behavior. Ticket arid-gutless-myna introduced the inaccurate successful-cycle wording and requires an append-only correction.\n\n## Plan\n\n- Make the implementation skill use atomic `rebar claim` with the conditional identity guidance established by F15.\n- Remove direct `transition open in_progress` as a claim alternative.\n- State in the brainstorm skill that blocked work defers plan review until it becomes claimable.\n- State that unsigned `INDETERMINATE` is not a successful review verdict.\n- Preserve dependency order and the prohibition on agent force.\n- Append a historical correction to arid-gutless-myna without rewriting its existing record.\n- Run focused skill frontmatter, synchronization, and workflow guidance checks.\n\n## Acceptance Criteria\n\n- [ ] The implementation skill requires atomic claim for starting work.\n- [ ] The implementation skill uses the F15 identity fallback and does not prescribe a bare handle.\n- [ ] The brainstorm skill defers review for blocked work until the ticket becomes claimable.\n- [ ] The brainstorm skill states that unsigned `INDETERMINATE` is not a successful verdict.\n- [ ] Both skills retain dependency-order and no-agent-force guidance.\n- [ ] arid-gutless-myna contains an append-only correction that cites the enforced behavior.\n- [ ] Focused skill contract checks pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "F17 correct packaged agent workflow guidance"
+      },
       "created_at": "2026-08-23T18:38:21Z",
       "jira_id": "4589937",
       "jira_key": "REB-3531",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:23Z"
     },
@@ -22361,6 +22399,13 @@
       "jira_key": "REB-1041",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:02:41Z"
+    },
+    "74dc-98da-4d2c-40b9": {
+      "created_at": "2026-08-23T19:34:27Z",
+      "jira_id": "4589943",
+      "jira_key": "REB-3537",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:31Z"
     },
     "74e1-559d-61da-4a1c": {
       "created_at": "2026-08-15T15:02:42Z",
@@ -32515,6 +32560,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:08:18Z"
     },
+    "a9ec-37db-0d91-483b": {
+      "created_at": "2026-08-23T19:34:34Z",
+      "jira_id": "4589944",
+      "jira_key": "REB-3538",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:37Z"
+    },
     "aa5a-ffc1-344a-4921": {
       "baseline": {
         "assignee": null,
@@ -34640,6 +34692,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-22T06:39:13Z"
     },
+    "b458-e422-e200-4be9": {
+      "created_at": "2026-08-23T19:34:39Z",
+      "jira_id": "4589945",
+      "jira_key": "REB-3539",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:42Z"
+    },
     "b463-b8e2-de8d-4db6": {
       "baseline": {
         "assignee": null,
@@ -35581,9 +35640,17 @@
       "updated_at": "2026-08-15T15:09:56Z"
     },
     "b8bf-a5aa-2f4d-44d4": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\nThe operator approved eleven independently filtered documentation accuracy units recorded in session log prosaic-radon-sardine. This epic coordinates those units without reopening the rejected F02, F03, or F04 proposals. F05 remains deferred. F23 and the lower README rewrite remain held.\n\n## Plan\n\n- Implement F14, F15, F16, F17, F18, F20, F29, F30A, F30B, F31, and F38 as bounded child tickets.\n- Preserve generated-source ownership and current synchronization mechanisms.\n- Apply the project writing guidelines through editorial review without adding mechanical character or prose enforcement.\n- Land every repository change through Gerrit after LLM-Review +1, Verified +1, and resolution of all review comments.\n- Close each child only after its change reaches origin/main. Close this epic only after all children are closed.\n\n## Acceptance Criteria\n\n- [ ] The epic has exactly eleven approved implementation children and no rejected or held recommendation is included.\n- [ ] Every repository child is closed after its Gerrit change reaches origin/main with LLM-Review +1 and Verified +1.\n- [ ] F20 is closed after its append-only ticket correction is verified by readback.\n- [ ] All eleven children are closed without force.\n- [ ] The session log records the decomposition, landing evidence, and final epic outcome.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Implement approved documentation accuracy batch F14 through F38"
+      },
       "created_at": "2026-08-23T18:38:26Z",
       "jira_id": "4589938",
       "jira_key": "REB-3532",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:29Z"
     },
@@ -41087,6 +41154,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:12:35Z"
     },
+    "d6ad-764d-51e6-4e9b": {
+      "created_at": "2026-08-23T19:34:45Z",
+      "jira_id": "4589946",
+      "jira_key": "REB-3540",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:48Z"
+    },
     "d6bd-95c9-65f4-442d": {
       "baseline": {
         "assignee": {
@@ -45032,9 +45106,17 @@
       "updated_at": "2026-08-15T15:14:29Z"
     },
     "e93d-f75c-1082-4d14": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\n\n`docs/assets/rebar-demo.svg` uses a deprecated four digit ticket reference, an unconditional bare assignee, stale displayed output, and narration that no longer matches the supported workflow. Ticket weak-amenable-worm records the decision to keep this asset static and text-editable.\n\n## Plan\n\n- Replace deprecated references with supported aliases or two-quad identifiers.\n- Remove the unconditional explicit assignee from the claim example.\n- Align displayed commands, responses, and narration with current CLI contracts.\n- Preserve the static SVG implementation without adding a generator.\n- Preserve the image role, `aria-label`, and README alternative text mechanisms. Update their wording only where the displayed interaction changes.\n- Render and inspect the SVG at normal and narrow display sizes.\n\n## Acceptance Criteria\n\n- [ ] Every displayed ticket reference uses a supported authoring form.\n- [ ] The claim example does not require an explicit assignee.\n- [ ] Displayed output matches current CLI behavior and punctuation.\n- [ ] The narration matches the displayed interaction.\n- [ ] The SVG remains static and text-editable.\n- [ ] The SVG retains its accessibility label and the README retains alternative text.\n- [ ] Rendered normal and narrow views remain legible.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "F16 correct the static CLI workflow demonstration"
+      },
       "created_at": "2026-08-23T18:38:31Z",
       "jira_id": "4589939",
       "jira_key": "REB-3533",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:34Z"
     },
@@ -46752,6 +46834,13 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:20Z"
     },
+    "f1f3-4a26-d67b-4cbe": {
+      "created_at": "2026-08-23T19:34:51Z",
+      "jira_id": "4589947",
+      "jira_key": "REB-3541",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T19:34:54Z"
+    },
     "f1fa-57d8-07cb-44af": {
       "baseline": {
         "assignee": {
@@ -47532,8 +47621,16 @@
       "updated_at": "2026-08-15T15:15:41Z"
     },
     "f724-f752-9cc8-4a6f": {
+      "baseline": {
+        "assignee": null,
+        "description": "## What\nPort list-descendants (BFS-by-type) to rebar._engine_support.descendants.\n\n## Acceptance Criteria\n- [ ] Dispatches in-process via _DESCENDANTS (full auto-init)\n- [ ] Dual-run parity python==bash (epic/story/task/miss/arity), exact usage string\n- [ ] No bash deleted (parity-pinned 2nd impl until E7/E8)",
+        "priority": "Medium",
+        "status": "Done",
+        "summary": "E2.3: port list-descendants in-process"
+      },
       "created_at": "2026-08-15T15:15:42Z",
       "jira_key": "REB-392",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-15T15:15:42Z"
     },
@@ -48203,7 +48300,7 @@
         },
         "description": "## Context\nThe tickets branch/store is reported over 1 GiB after closed epic censual-organic-mouflon claimed a one-time history rewrite reduced a fresh unfiltered clone to <=150 MB and bounded reconciler cache churn. Prior history implicates reconciler operations, but this investigation must not assume that diagnosis still explains current retained bytes.\n\n## Plan\n- Distinguish remote branch reachability, local shared-object storage, working-tree size, and unreachable/reflog-pinned objects.\n- Measure object counts and packed/delta-compressed bytes by type, path, commit/time interval, producer/commit shape, and ref reachability.\n- Reproduce the size from a fresh unfiltered clone or otherwise prove the report is local-retention behavior.\n- Compare current growth with the prior reclaim baseline and test reconciler churn against competing hypotheses such as high commit/tree volume, snapshots/events, signatures, merge topology, ref pins, and unreachable pre-rewrite history.\n- Trace any confirmed growth mechanism to the exact changeable artifact and originating ticket/commit; record an evidence-backed RCA only. No production-code repair is authorized in this ticket.\n\n## Acceptance Criteria\n- [ ] Current size is quantified separately for fresh remote reachability, local shared object storage, checkout contents, and unreachable/pinned objects.\n- [ ] Retained bytes are attributed by Git object type and historical path with reproducible commands.\n- [ ] The reconciler hypothesis and plausible alternatives each receive falsifiable tests, with outcomes recorded.\n- [ ] The result explains whether the prior reclaim failed, regressed, or remains effective while another mechanism accounts for the observation.\n- [ ] The confirmed root cause and defect origin (or rigorous unattributable finding) are recorded on this ticket with residual risks.",
         "priority": "High",
-        "status": "To Do",
+        "status": "In Progress",
         "summary": "Regression investigation: tickets branch/store exceeds 1 GiB after history reclaim"
       },
       "created_at": "2026-08-23T17:34:17Z",
@@ -49209,9 +49306,17 @@
       "updated_at": "2026-08-21T07:42:00Z"
     },
     "ff2f-2743-576d-49af": {
+      "baseline": {
+        "assignee": null,
+        "description": "## Context\nProject guidance currently describes `--force` and equivalent reason-bearing force parameters as human escape hatches, but it does not categorically prohibit agents from invoking them. Agents must stop and escalate to the user whenever an operation would require bypassing a configured gate or policy. Escalation does not authorize the agent to perform the override; the human operator must decide and execute any force operation.\n\n## Scope\nUpdate only the canonical contributor/agent guidance in `AGENTS.md`. Preserve the command documentation needed for human operators while making the agent prohibition and escalation requirement unambiguous. No runtime enforcement or other documentation changes are part of this task.\n\n## Plan\n1. Add a concise, prominent rule near the existing claim and force-escape-hatch guidance.\n2. Cover the actual force surface: CLI `--force` / `--force=<reason>` and equivalent reason-bearing force parameters on library or MCP operations, including when the same transition force option targets close. Do not refer to the retired `--force-close` spelling as a live option.\n3. Require agents to stop, report the blocking condition, and ask the user to decide and perform the human-controlled next step. State that user escalation never permits the agent itself to invoke the force override.\n4. Verify the literal prohibition and escalation language with focused searches, inspect the one-file diff, run `git diff --check`, and run the repository lint gate.\n\n## Testing\n- `rtk grep -n -E \"MUST NOT.*force|must never.*force\" AGENTS.md` proves a categorical agent prohibition is present.\n- `rtk grep -n -E \"stop.*user|escalat.*user|user.*perform\" AGENTS.md` proves the human escalation path is present.\n- `rtk grep -n -- \"--force-close\" AGENTS.md` must not introduce the retired spelling as a live option.\n- `rtk git diff --check` must pass.\n- `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` must pass.\n\n## Acceptance Criteria\n- [ ] `AGENTS.md` explicitly prohibits agents from invoking CLI `--force` / `--force=<reason>` or passing an equivalent force parameter through library or MCP operations.\n- [ ] The guidance requires the agent to stop, report the blocker, and escalate to the user whenever progress would depend on a force override.\n- [ ] The guidance states that escalation does not authorize the agent to run the override; any force operation is a human-operator action.\n- [ ] Existing human-operator escape-hatch documentation remains accurate and clearly distinguished from prohibited agent behavior.\n- [ ] No files outside `AGENTS.md` are intentionally modified.\n- [ ] The focused searches, `git diff --check`, and `env PATH=\"$PWD/.venv/bin:$PATH\" make lint` pass.",
+        "priority": "High",
+        "status": "To Do",
+        "summary": "Prohibit agent use of force overrides in project guidance"
+      },
       "created_at": "2026-08-23T18:38:37Z",
       "jira_id": "4589940",
       "jira_key": "REB-3534",
+      "peer_parent": "",
       "state": "confirmed",
       "updated_at": "2026-08-23T18:38:39Z"
     },
@@ -52589,7 +52694,14 @@
     "REB-3532": "b8bf-a5aa-2f4d-44d4",
     "REB-3533": "e93d-f75c-1082-4d14",
     "REB-3534": "ff2f-2743-576d-49af",
+    "REB-3535": "1f2c-91fd-1b6f-4e1d",
+    "REB-3536": "2b51-57f4-49ce-42c9",
+    "REB-3537": "74dc-98da-4d2c-40b9",
+    "REB-3538": "a9ec-37db-0d91-483b",
+    "REB-3539": "b458-e422-e200-4be9",
     "REB-354": "e14e-70b3-5c84-4fb9",
+    "REB-3540": "d6ad-764d-51e6-4e9b",
+    "REB-3541": "f1f3-4a26-d67b-4cbe",
     "REB-355": "e211-63ef-bc96-4609",
     "REB-356": "620c-fbde-37ce-40bf",
     "REB-357": "e249-1034-3237-44b0",
