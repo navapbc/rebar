@@ -8,11 +8,38 @@ import sys
 from pathlib import Path
 
 import pytest
-from _subprocess_env import subprocess_env
+from _subprocess_env import SubprocessEnv, subprocess_env
 
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).resolve().parents[2]
+
+_GIT_CONFIG_INJECTION_PREFIXES = (
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+    "GIT_CONFIG_PARAMETERS",
+)
+
+
+def scrub_ambient_git_config(env: dict[str, str]) -> None:
+    """Drop command-scope git config injected by the ambient host.
+
+    Agent harnesses on dev hosts export GIT_CONFIG_COUNT/KEY_n/VALUE_n (for
+    example safe.bareRepository=explicit), which every inherited-environment
+    git subprocess silently honors.  The bridge fixtures must be held out
+    from that ambient state.
+    """
+    for name in list(env):
+        if name.startswith(_GIT_CONFIG_INJECTION_PREFIXES):
+            del env[name]
+
+
+def _git_env() -> SubprocessEnv:
+    env = subprocess_env(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    scrub_ambient_git_config(env)
+    return env
+
 
 MODE_COMMANDS = {
     "reconcile-check": ["reconcile", "--mode", "reconcile-check"],
@@ -29,6 +56,7 @@ def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     assert completed.returncode == 0, completed.stderr
     return completed
@@ -40,6 +68,7 @@ def bare_git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=_git_env(),
     )
     assert completed.returncode == 0, completed.stderr
     return completed
@@ -53,6 +82,7 @@ def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         check=True,
         capture_output=True,
         text=True,
+        env=_git_env(),
     )
 
     seed = tmp_path / "seed"
@@ -61,6 +91,7 @@ def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         check=True,
         capture_output=True,
         text=True,
+        env=_git_env(),
     )
     git(seed, "config", "user.name", "Seed")
     git(seed, "config", "user.email", "seed@example.com")
@@ -76,6 +107,7 @@ def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         check=True,
         capture_output=True,
         text=True,
+        env=_git_env(),
     )
     git(checkout, "config", "user.name", "Checkout")
     git(checkout, "config", "user.email", "checkout@example.com")
@@ -89,6 +121,7 @@ def bridge_workspace(tmp_path: Path) -> tuple[Path, Path, Path]:
         check=True,
         capture_output=True,
         text=True,
+        env=_git_env(),
     )
     return checkout, tracker, origin
 
@@ -113,6 +146,7 @@ def runner_env(tmp_path: Path, checkout: Path, *, mode: str = "live") -> dict[st
     rebar.chmod(0o755)
 
     env = subprocess_env()
+    scrub_ambient_git_config(env)
     env.update(
         {
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",

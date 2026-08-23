@@ -173,7 +173,7 @@ def test_pinned_shellcheck_lints_all_provider_shell_bodies_without_skips(tmp_pat
     ],
 )
 def test_five_environment_matrix_has_identical_results_without_gh(
-    tmp_path: Path, provider: str, vendor_env: dict[str, str]
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, provider: str, vendor_env: dict[str, str]
 ) -> None:
     # Load only the reusable setup harness; the expectations in this file remain held out.
     harness_path = ROOT / "tests" / "scripts" / "test_run_reconcile_bridge.py"
@@ -181,6 +181,13 @@ def test_five_environment_matrix_has_identical_results_without_gh(
     assert spec is not None and spec.loader is not None
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)
+
+    # Simulate a hostile dev host: agent harnesses inject command-scope git
+    # config through the environment (bug 3eb6-6e65).  The matrix must be
+    # held out from this ambient state exactly as it is held out from gh.
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "safe.bareRepository")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "explicit")
 
     checkout, _tracker, origin = harness.bridge_workspace(tmp_path)
     env = harness.runner_env(tmp_path, checkout)
