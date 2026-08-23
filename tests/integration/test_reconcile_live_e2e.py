@@ -393,10 +393,10 @@ def test_delete_permission_probe(tmp_path):
 def _fresh_search(client: Any, jql: str) -> Any:
     """Run ``jql`` against Jira, bypassing ``AcliClient``'s per-JQL memo.
 
-    ``AcliClient.search_issues`` memoizes its full result set per JQL string in
-    ``client._search_cache`` — no TTL, no invalidation, and **negative (empty)
-    answers are cached too**. That is correct for the pagination callers it was
-    built for (they re-ask the same JQL only to slice the next page), but it is
+    ``AcliClient.search_issues`` memoizes its full result set per JQL string —
+    no TTL, and **negative (empty) answers are cached too**. That is correct for
+    the pagination callers it was built for (they re-ask the same JQL only to
+    slice the next page), but it is
     fatal for a poll: an index-visibility poll re-issues two CONSTANT JQL strings
     on ONE client, so only the first attempt would ever reach Jira and every later
     attempt would replay that first (empty) answer from a dict. The budget and the
@@ -404,14 +404,15 @@ def _fresh_search(client: Any, jql: str) -> Any:
     budget without asking Jira again, and could only succeed if the index happened
     to have converged at the instant of the very first query.
 
-    Evicting the entry before each call is the same pattern the production JQL
+    Evicting via the supported ``invalidate_search_cache`` door before each call
+    is the same pattern the production JQL
     retry loop in ``rebar_reconciler.access_check`` already uses, and it keeps the
     fix at the polling call site: ``search_issues``'s default caching semantics are
     untouched for every other caller.
     """
-    cache = getattr(client, "_search_cache", None)
-    if isinstance(cache, dict):
-        cache.pop(jql, None)
+    invalidate = getattr(client, "invalidate_search_cache", None)
+    if callable(invalidate):
+        invalidate(jql)
     return client.search_issues(jql)
 
 
