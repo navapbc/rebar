@@ -299,18 +299,9 @@ uv sync --extra dev
 
 ## CLI
 
-The **complete, always-current command reference** — every subcommand with its
-usage — is [docs/cli-reference.md](docs/cli-reference.md), generated from the CLI's
-own help data (so it can never drift from the code). The essentials to get moving:
-`rebar init` → `rebar create <type> "<title>"` → `rebar ready` → `rebar claim <id>
---assignee <you>` → `rebar transition <id> <current> <target>`.
+The **complete, always-current command reference** for every subcommand is [docs/cli-reference.md](docs/cli-reference.md). It is generated from the CLI's own help data. The essentials are `rebar init` → `rebar create <type> "<title>"` → `rebar ready` → `rebar claim <id>` → `rebar transition <id> <current> <target>`.
 
-Run `rebar help` (or `rebar --help` / `-h`) for the subcommand overview, and
-`rebar <subcommand> --help` (or `rebar help <subcommand>`) for a specific
-subcommand's usage — `--help` prints usage and never executes the command.
-Help is only recognized as the first argument after the subcommand, so a
-`--help`/`-h`/`help` that appears inside a free-text parameter (title, comment
-body, search query, …) is treated as literal text, not a help request.
+Run `rebar help`, `rebar --help`, or `rebar -h` for the subcommand overview. Run `rebar <subcommand> --help` or `rebar help <subcommand>` for a specific subcommand. For leaf commands, an exact `--help` or `-h` token in any position before `--` prints usage without executing the command. Nested command families retain child routing. A leading help flag prints family help, while forms such as `rebar bridge preview --help` and `rebar audit show --help` print child help.
 
 Repo root is resolved from `REBAR_ROOT`, falling back to the git toplevel of the
 working directory.
@@ -322,6 +313,8 @@ documented by a JSON Schema and validated across the CLI, library, and MCP in CI
 See [docs/output-schemas.md](docs/output-schemas.md) for the per-command contract
 and the schema source-of-truth.
 
+**Claiming work.** `rebar claim <id>` atomically moves an open ticket to `in_progress`. When `--assignee` is omitted, `claim` uses `ticket.default_assignee`. An explicit `--assignee` overrides that setting and must be a Jira-resolvable email or accountId.
+
 **Repo-wide health with `validate`.** `rebar validate` takes **no ticket id** — it
 scans the whole store and prints an overall tracker-health score (1-5, exit 0-4)
 bucketed into critical / major / minor / warning findings (`--output json`,
@@ -331,26 +324,15 @@ bucketed into critical / major / minor / warning findings (`--output json`,
 checklist. See the ticket template and gate reference in
 [docs/plan-review-criteria-guide.md](docs/plan-review-criteria-guide.md).)
 
-**Links.** `rebar link <id1> <id2> <relation>` **requires** a relation; the six
-relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
-`discovered_from`. `rebar unlink <source> <target>` takes **no** relation
-argument — it is pair-scoped and removes the **most-recently-created** link
-between that ordered pair, one per call, so to remove multiple links between the
-same pair you call `unlink` repeatedly. Note that **blocking** links
-(`blocks`/`depends_on`) may be promoted up the parent hierarchy when created (see
-below), so `unlink` must target the **promoted (ancestor)** endpoint to remove
-such a link.
+**Closing work.** `rebar transition <id> in_progress closed` closes a task, bug, story, or epic. A bug close also requires `--class`. Completion verification is optional and disabled by default. Set `verify.require_completion_verification_for_close = true` to run it as part of each ordinary work-ticket close before the status change is recorded.
+
+**Links.** `rebar link <id1> <id2> <relation>` requires one of seven relations. They are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from`, and `caused_by`. `rebar unlink <source> <target> [relation]` accepts an optional relation. Without a relation, it removes the most recently created active link for that ordered pair. With a relation, it removes exactly that relation and preserves other relations between the pair. Blocking links may be promoted up the parent hierarchy when created, so `unlink` must target the promoted ancestor endpoint.
 
 A passing plan-review or completion-verifier records an **operation certificate**. The certificate is a DSSE envelope that carries an SSHSIG signature over its PAE bytes, produced with the signing environment's Ed25519 key. Its principal identifies that environment. The code-review gate reports its verdict through the review system and does not create this ticket certificate. The `rebar sign` command and library surface can also attach a manifest certificate outside those two gates. See [docs/manifest-signing.md](docs/manifest-signing.md).
 
 ### Hierarchy promotion of blocking links
 
-For **blocking** dependencies only (`blocks`, `depends_on`), rebar promotes the
-link endpoints up the parent hierarchy so the dependency sits between tickets at
-a comparable level (epic↔epic, story↔story, task/bug↔task/bug). When it does so
-it emits a `REDIRECT: A→B promoted to …` note. Non-blocking relations
-(`relates_to`, `duplicates`, `supersedes`, `discovered_from`) are linked exactly
-as given, with no promotion.
+For **blocking** dependencies only (`blocks`, `depends_on`), rebar promotes the link endpoints up the parent hierarchy so the dependency sits between tickets at a comparable level (epic↔epic, story↔story, task/bug↔task/bug). When it does so, it emits a `REDIRECT: A→B promoted to …` note. Non-blocking relations (`relates_to`, `duplicates`, `supersedes`, `discovered_from`, `caused_by`) are linked exactly as given, with no promotion.
 
 ### The store auto-commits and auto-pushes every write
 
