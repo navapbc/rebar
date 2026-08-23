@@ -472,7 +472,12 @@ def test_writes_default_retry_on_timeout_false(record_run):
     client.update_comment("TEST-1", "1", "body")  # acli_graph.py:433
     client.add_label("TEST-1", "lbl")  # acli_graph.py:142
     client.remove_label("TEST-1", "lbl")  # acli_graph.py:185
-    acli_cli_ops.add_comment("TEST-1", "body", acli_cmd=_fake_cmd(_FAST_OK))  # acli_cli_ops.py:484
+    # add_comment post-processes the (empty-list) fake result and raises
+    # (its parser rejects a non-dict payload) — fine; we assert the flag only.
+    with pytest.raises(RuntimeError):
+        acli_cli_ops.add_comment(
+            "TEST-1", "body", acli_cmd=_fake_cmd(_FAST_OK)
+        )  # acli_cli_ops.py:484
 
     assert record_run, "no _run_acli calls were recorded"
     assert all(retry is False for _cmd, retry in record_run), (

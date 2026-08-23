@@ -319,9 +319,10 @@ def _record_comment_id(binding_store, entry, add_comment_result) -> None:
     Reaching this function already means the post landed: it is only ever called on an
     ``add_comment`` that returned without raising. The DC/REST transport returns a real
     top-level ``{"id": ...}`` and that exact value is what gets stored. The Cloud/ACLI
-    transport returns ACLI's batch-mutation envelope
-    (``{"results": [{"status": "SUCCESS", "id": "<WORK ITEM KEY>"}], ...}``) — no
-    top-level id, and ``results[].id`` is the WORK ITEM KEY, not a comment id — so there
+    transport (since ticket 3235-8aaf, which normalizes ACLI's batch-mutation envelope
+    at the transport boundary — ``acli_cli_ops._parse_comment_created``) returns
+    ``{"id": None, "acli_envelope": ...}`` — an explicit no-comment-id, because ACLI
+    echoes only the WORK ITEM key, never a comment id — so there
     is nothing truthful to store and :data:`UNKNOWN_COMMENT_ID` is recorded instead.
     Requiring an id previously left the map EMPTY on Cloud, so the outbound differ's
     PRIMARY id-identity skip never fired and richly-formatted comments (whose bodies
