@@ -180,7 +180,7 @@ def referencing_commits(
     gate — whose long-standing contract is a plain list — collapses ``None`` to ``[]``.
     """
     from rebar._commands.verify_commit import extract_ticket_refs
-    from rebar._engine_support.resolver import resolve_ticket_id
+    from rebar._engine_support.resolver import build_alias_index, resolve_ticket_id
 
     accepted = set(ticket_ids)
     proc = subprocess.run(
@@ -191,6 +191,12 @@ def referencing_commits(
     )
     if proc.returncode != 0:
         return None
+    # Build the alias index ONCE up front. Without it, every distinct alias
+    # trailer in history drives a fresh full-store alias scan
+    # (O(distinct_aliases x store)), which on a large store turns a single close
+    # into tens of minutes of JSON parsing. `None` (tracker unreadable) falls back
+    # to per-call scanning, preserving behavior.
+    alias_index = build_alias_index(tracker)
     resolved_cache: dict[str, str | None] = {}
     found: list[str] = []
     for entry in proc.stdout.split("\0"):
@@ -200,7 +206,9 @@ def referencing_commits(
             continue
         for ref in extract_ticket_refs(message):
             if ref not in resolved_cache:
-                resolved_cache[ref] = resolve_ticket_id(ref, tracker, quiet=True)
+                resolved_cache[ref] = resolve_ticket_id(
+                    ref, tracker, quiet=True, alias_index=alias_index
+                )
             if resolved_cache[ref] in accepted:
                 found.append(sha)
                 break
