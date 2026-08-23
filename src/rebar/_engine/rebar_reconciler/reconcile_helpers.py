@@ -778,3 +778,13 @@ def _advance_peer_parent(binding_store: Any, local_id: str, entry: Mapping[str, 
     parent = entry.get("parent")
     key = parent.get("key") if isinstance(parent, dict) else None
     setter(local_id, key if isinstance(key, str) and key else None)
+
+
+def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
+    """Persist only Jira-key membership for the next pass's edge detection.
+
+    Moved from reconcile.py (ticket 0fa2) along the existing re-export seam to keep
+    that module under the 800-LOC cap; reconcile re-binds it at module level.
+    """
+    key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
+    prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n")

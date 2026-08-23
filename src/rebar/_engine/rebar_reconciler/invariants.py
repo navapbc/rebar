@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -333,3 +334,102 @@ def report_schema_drift(issue_key: str, observed: dict, expected: dict) -> None:
         runner=subprocess,
         resolve_ticket_cli=_default_ticket_cli,
     )
+
+
+# ---------------------------------------------------------------------------
+# Ticket 0fa2: outbound-comment recording invariant (debounced, N=2)
+# ---------------------------------------------------------------------------
+
+# Operator-ratified on ticket 0fa2-fdcb-229e-41a0: the alert fires only when the
+# SAME divergence (comments posted, comment_ids map gained none) is observed in 2
+# CONSECUTIVE reconcile passes — the N-of-M alarm philosophy of the
+# voter-observability lane, not per-pass immediate firing.
+_COMMENT_DIVERGENCE_THRESHOLD = 2
+_COMMENT_DIVERGENCE_ALERT_KEY = "bridge-alert:comment-id-divergence"
+_COMMENT_DIVERGENCE_STATE_FILE = "comment_id_divergence.json"
+
+
+def step_comment_divergence(prev_consecutive: int, divergent: bool) -> tuple[int, bool]:
+    """PURE debounce step: fold one pass's observation into the consecutive count.
+
+    A healthy observation (no posts, or posts with map growth) resets the count to
+    0; a divergent one increments it. ``fire`` is True from the
+    ``_COMMENT_DIVERGENCE_THRESHOLD``-th consecutive divergent pass onward — the
+    alert store's 24h dedup (not this step) keeps repeat firings from appending
+    duplicate records.
+    """
+    if not divergent:
+        return 0, False
+    consecutive = prev_consecutive + 1
+    return consecutive, consecutive >= _COMMENT_DIVERGENCE_THRESHOLD
+
+
+def _read_comment_divergence_state(state_path: Path) -> int:
+    """The persisted consecutive-divergent-pass count; absent/corrupt fails open to 0."""
+    try:
+        doc = json.loads(state_path.read_text(encoding="utf-8"))
+        return max(0, int(doc.get("consecutive", 0)))
+    except Exception:  # noqa: BLE001 — scratch state; a corrupt file must not break the pass
+        return 0
+
+
+def check_comment_id_recording(
+    binding_store, repo_root: Path | None = None, pass_id: str = ""
+) -> dict:
+    """End-of-pass invariant: posts succeeded but ``comment_ids`` gained none (0fa2).
+
+    Reads the per-pass tallies off the ``BindingStore`` facade
+    (``comment_posts_this_pass`` / ``comment_ids_gained_this_pass``; a store or
+    double predating them degrades to a no-op), folds the observation into the
+    cross-pass counter persisted at ``bridge_state/comment_id_divergence.json``
+    (local scratch, same residency as ``bridge_state/bridge_alerts``), and on the
+    second consecutive divergent pass appends a ``bridge_alerts`` record — deduped
+    through ``alert_store.is_deduped``'s 24h window — whose message names the
+    invariant and the pass.
+
+    Bug aa7b context: the primary comment-dedup guard was silently inert for the
+    feature's whole life because nothing compared successful posts against map
+    growth; this is the layer that reads that signal.
+    """
+    if repo_root is None:
+        repo_root = _default_repo_root()
+    posted_fn = getattr(binding_store, "comment_posts_this_pass", None)
+    gained_fn = getattr(binding_store, "comment_ids_gained_this_pass", None)
+    if posted_fn is None or gained_fn is None:
+        return {"divergent": False, "consecutive": 0, "alert_fired": False}
+    posted = int(posted_fn())
+    gained = int(gained_fn())
+    divergent = posted > 0 and gained <= 0
+
+    state_path = repo_root / "bridge_state" / _COMMENT_DIVERGENCE_STATE_FILE
+    consecutive, fire = step_comment_divergence(
+        _read_comment_divergence_state(state_path), divergent
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"consecutive": consecutive, "pass_id": pass_id}) + "\n", encoding="utf-8"
+    )
+
+    alert_fired = False
+    if fire:
+        alert_store = _load_alert_store()
+        if not alert_store.is_deduped(_COMMENT_DIVERGENCE_ALERT_KEY, repo_root):
+            alert_store.append(
+                {
+                    "key": _COMMENT_DIVERGENCE_ALERT_KEY,
+                    "kind": "comment-id-divergence",
+                    "pass_id": pass_id,
+                    "posted": posted,
+                    "gained": gained,
+                    "consecutive_passes": consecutive,
+                    "message": (
+                        f"invariant comment-id-recording violated: pass {pass_id} "
+                        f"successfully posted {posted} outbound comment(s) but the "
+                        f"binding store's comment_ids map gained {gained} entries "
+                        f"({consecutive} consecutive divergent passes)"
+                    ),
+                },
+                repo_root,
+            )
+            alert_fired = True
+    return {"divergent": divergent, "consecutive": consecutive, "alert_fired": alert_fired}

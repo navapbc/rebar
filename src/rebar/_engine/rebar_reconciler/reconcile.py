@@ -11,7 +11,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -69,6 +68,7 @@ _build_filter_target_set = _helpers._build_filter_target_set
 _mutation_matches_filter = _helpers._mutation_matches_filter
 _build_plan_entries = _helpers._build_plan_entries
 _NoOpSyncLogger = _helpers._NoOpSyncLogger
+_write_prev_snapshot_key_set = _helpers._write_prev_snapshot_key_set
 # ADR-0026 baseline advance (bug e6e9 grew it past the module-size cap). Pure helpers over
 # the binding store with no back-edge to the reconcile_once spine — exactly what
 # reconcile_helpers holds — re-bound here so the bare-name calls in _persist_and_log and
@@ -604,12 +604,6 @@ def _confirm_peer_links(ctx: _PassContext, pass_id: str) -> int:
     return written
 
 
-def _write_prev_snapshot_key_set(prev_path: Path, curr_snapshot: Mapping[str, Any]) -> None:
-    """Persist only Jira-key membership for the next pass's edge detection."""
-    key_set: dict[str, dict[str, Any]] = {jira_key: {} for jira_key in sorted(curr_snapshot)}
-    prev_path.write_text(json.dumps(key_set, separators=(",", ":")) + "\n")
-
-
 def _persist_and_log(ctx: _PassContext) -> dict:
     """Persist phase: save+commit the binding store, advance the prev snapshot
     (idempotency), tally the truthful applied/failure counts from the manifest,
@@ -692,6 +686,13 @@ def _persist_and_log(ctx: _PassContext) -> dict:
                 f"reconcile: binding store save failed ({exc})",
                 file=sys.stderr,
             )
+
+        # Ticket 0fa2: outbound-comment recording invariant (posts succeeded, comment_ids
+        # gained none), debounced across 2 consecutive passes. Fail-open: never break sync.
+        try:
+            ctx.invariants_mod.check_comment_id_recording(binding_store, repo_root, pass_id)
+        except Exception as exc:  # noqa: BLE001 — invariant check is best-effort; never break sync
+            print(f"reconcile: comment-id invariant check failed ({exc})", file=sys.stderr)
 
         # Advance only Jira-key membership so the next call preserves edge detection
         # without retaining remote field bodies. The full current snapshot remains
