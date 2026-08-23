@@ -100,14 +100,20 @@ never leave active work under a ticket still marked `open`. Claim at the level y
 (the story/task/bug you implement), and when you begin executing an **epic**, move the epic
 itself to `in_progress` too. If you cannot claim (a `ConcurrencyError`/exit 10 means someone
 else holds it, or a gate blocks the claim), resolve that FIRST — pick another ticket, or earn
-the required attestation — rather than working unclaimed. `--force[=<reason>]` bypasses any
-enabled start-work gate (plan-review or whatever gate is configured, present or future) — treat
-it as an escape hatch for a human operator's judgment call, not a routine agent move. It is
-available on **every** surface — library, CLI, and MCP (`transition_ticket` / `claim_ticket`
-take a reason-bearing `force`) — and is audited not by withholding it from any surface but by
-the **absence of a signed attestation**: a forced op records no certification, so a project
-that must keep force from circumventing a gate enforces it by checking for that certification
-in CI.
+the required attestation — rather than working unclaimed. **Agents MUST NOT use force
+overrides.** This prohibition covers CLI `--force` / `--force=<reason>`, reason-bearing
+`force` parameters on the library and MCP surfaces, and any equivalent gate- or policy-bypass
+option. If progress would require one, the agent must stop, report the blocking condition, and
+escalate to the user. Escalation is a handoff, not permission for the agent to run the override:
+only a human operator may decide to perform it.
+
+For human operators, `--force[=<reason>]` bypasses any enabled start-work gate (plan-review or
+whatever gate is configured, present or future) and remains an escape hatch for a human
+judgment call, not a routine operation. It is available on **every** surface — library, CLI,
+and MCP (`transition_ticket` / `claim_ticket` take a reason-bearing `force`) — and is audited
+not by withholding it from any surface but by the **absence of a signed attestation**: a forced
+op records no certification, so a project that must keep force from circumventing a gate
+enforces it by checking for that certification in CI.
 
 ## The parallel-agent workflow
 
@@ -128,7 +134,8 @@ list / search ──▶ ready ──▶ next-batch ──▶ claim ──▶ (wo
    `docs/plan-review-gate.md` §"Review dependencies FIRST". This is partly **enforced**:
    `review-plan` on a ticket that is not yet claimable — status `closed`/`idea`/`blocked`, or
    `open` but still blocked by an unclosed dependency — **fast-fails with no LLM** (unsigned
-   `INDETERMINATE`, exit 2) unless you pass `--force`; close the prerequisites, then review.
+   `INDETERMINATE`, exit 2). Agents must not pass `--force`; close the prerequisites, then
+   review.
 2. **Grab work atomically** — `claim <id>`: moves an **open** ticket to
    `in_progress` and sets the assignee to the configured `ticket.default_assignee` in one step
    (omit `--assignee`; an explicit one wins over the default, and must be **Jira-resolvable** —
@@ -176,7 +183,7 @@ restated here:
   writes through rebar; `git stash` there is banned outright because the stash stack is
   repo-global and shared by every worktree). When rebar itself cannot write the store, use the
   supported door `rebar tracker-maintenance` (backup ref before the first write, refusal on
-  unpushed ticket commits, durable audit) and its `--force=<reason>` break-glass →
+  unpushed ticket commits, durable audit) and its human-only `--force=<reason>` break-glass →
   `docs/concurrency.md` §"Mutating the tracker: no AD-HOC raw git".
 - **Session logs** — the `session_log` type semantics and the `session-log` helper +
   auto-rotation → `docs/event-schema.md` and `docs/user-guide.md`.
