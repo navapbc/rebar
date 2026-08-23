@@ -644,6 +644,14 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
     ``applier._cross_project_targets`` skips ``action == "create"`` outright, and
     ``create_one``'s JQL dedup degenerates to ``labels = "rebar-id:"`` because
     EXCLUDED_FIELDS strips ``local_id`` from the payload.
+
+    Since bug 2392-9389-39f9-4ca6, pass 1 no longer leaves DIG-9 label-marked but
+    unbound: the marker IS the lost-adopt residue signature (deterministic id, no
+    binding, no local ticket), so the walk replays the adopt and pass 2 sees a
+    genuinely BOUND key leaving the window. That routes the pass-2 walk to the
+    bounded direct GET (ADR 0028 §2 — probe, never create), which this offline test
+    answers deterministically with a 404 sentinel: the oracle stays "absence drives
+    no create" while the probe leg no longer reaches a real transport.
     """
     from unittest.mock import patch
 
@@ -682,9 +690,21 @@ def test_a_key_absent_from_the_current_snapshot_never_reaches_create_issue(
         finally:
             applier_mod._load_concurrency = _bak
 
+    # Pass 1 healed the marked-but-unstored key (bug 2392-9389-39f9-4ca6), so the
+    # pass-2 walk now probes the BOUND off-window key with a bounded direct GET.
+    # Answer it with the confirmed-404 sentinel via the walk's own probe seam
+    # (``outbound_differ._safe_get_issue`` on the reconcile-loaded module) so this
+    # offline test never reaches a real transport; a single 404 is below the
+    # retire grace, so the walk defers — no mutation, exactly the d103 oracle.
+    ob_mod = sys.modules["reconcile_outbound_differ"]
+
+    def _probe_404(_client, _key):
+        return ob_mod._DELETED
+
     with (
         patch.object(fetcher_mod, "_load_acli", return_value=acli_v2),
         patch.object(applier_mod, "_load_acli", return_value=acli_v2),
+        patch.object(ob_mod, "_safe_get_issue", _probe_404),
     ):
         _bak = applier_mod._load_concurrency
         applier_mod._load_concurrency = lambda: ok_concurrency
