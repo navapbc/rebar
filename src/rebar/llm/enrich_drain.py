@@ -376,11 +376,13 @@ def maybe_drain(tracker: str, *, repo_root=None) -> None:
             return
         if not agents_extra_installed():
             return  # no LLM → clean no-op
-        # Cheap gate: no-op fast when nothing is soaked+eligible. The gate-budget is
-        # MEASURED and a breach is logged (observability) — a hard abort would drop
-        # legitimate work, so the budget is an observed target, not a cutoff.
+        # Cheap gate: no-op fast when nothing is soaked+eligible. EXISTENCE-only — the gate
+        # needs a yes/no, and the list probe's O(backlog) enumeration priced every store
+        # write at seconds once a standing backlog existed (bug 6148-5d81-8e80-41e8). The
+        # gate-budget is MEASURED and a breach is logged (observability) — a hard abort
+        # would drop legitimate work, so the budget is an observed target, not a cutoff.
         gate_start = time.monotonic()
-        soaked = bool(_queue.pending_enrichment(_queue._now_ns(), tracker))
+        soaked = _queue.has_pending_enrichment(_queue._now_ns(), tracker)
         gate_ms = (time.monotonic() - gate_start) * 1000.0
         if gate_ms > cfg.overlap_drain_gate_budget_ms:
             logger.warning(

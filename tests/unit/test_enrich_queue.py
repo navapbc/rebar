@@ -492,6 +492,75 @@ def test_gate_marker_lives_outside_the_tracker(repo: str) -> None:
     assert Q._GATE_MARKER_NAME not in os.listdir(tracker)
 
 
+@pytest.mark.parametrize("backlog", [4, 40])
+def test_existence_probe_cost_does_not_scale_with_the_backlog(
+    repo: str, monkeypatch: pytest.MonkeyPatch, backlog: int
+) -> None:
+    """Bug 6148-5d81-8e80-41e8 (draughty-callous-tanager): the write-path gate needs a
+    yes/no, and answering it with the O(backlog) list probe priced EVERY tracker write at
+    ~2-8 s against a 20 ms budget once a ~1,050-entry backlog stood — the task-4144
+    marker-scoped walk re-reduced every live entry per probe. The existence probe must stop
+    at the FIRST pending hit: ONE reduction, whatever the backlog size, on the marker-scoped
+    path AND on the cold full-walk path.
+
+    Counted, not timed, for the same flake-class reason as the store-size test above."""
+    tracker = _tracker(repo)
+    now = 45_000_000_000_000
+    tids = [rebar.create_ticket("task", f"B{i}", repo_root=repo) for i in range(backlog)]
+    for tid in tids:
+        Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=now)
+    # One full walk primes the marker's live set — the steady state a backlogged store is in.
+    assert len(Q.pending_enrichment(now + 1, tracker)) == backlog
+    seen = _count_reductions(monkeypatch)
+    assert Q.has_pending_enrichment(now + 2, tracker) is True  # marker-scoped path
+    assert len(seen) == 1, f"scoped existence probe reduced {len(seen)} of {backlog} entries"
+    monkeypatch.undo()
+    os.unlink(Q._gate_marker_path(tracker))
+    seen = _count_reductions(monkeypatch)
+    assert Q.has_pending_enrichment(now + 2, tracker) is True  # cold full-walk path
+    assert len(seen) == 1, f"cold existence probe reduced {len(seen)} of {backlog} entries"
+
+
+def test_existence_probe_matches_the_list_probe_verdict(repo: str) -> None:
+    """DECISION-SEMANTICS pin for bug 6148-5d81-8e80-41e8: the existence probe answers
+    exactly ``bool(pending_enrichment(...))`` in every queue state the reducer
+    distinguishes — empty, soaking, pending, claimed-with-live-lease, lease-expired, done —
+    so the gate's yes/no is unchanged; only the enumeration is skipped."""
+    tid = rebar.create_ticket("task", "T", repo_root=repo)
+    tracker = _tracker(repo)
+    now = 46_000_000_000_000
+
+    def agree(t: int) -> bool:
+        verdict = Q.has_pending_enrichment(t, tracker)
+        assert verdict is bool(Q.pending_enrichment(t, tracker))
+        return verdict
+
+    assert agree(now) is False  # empty queue
+    Q.enqueue(tid, soak_min=60, repo_root=repo, now_ns=now)
+    assert agree(now + 30 * _MIN) is False  # soaking
+    assert agree(now + 61 * _MIN) is True  # past soak → pending
+    assert Q.claim(tid, "A", lease_ttl_min=15, now_ns=now + 61 * _MIN, repo_root=repo) is True
+    assert agree(now + 62 * _MIN) is False  # claimed, live lease
+    assert agree(now + 77 * _MIN) is True  # lease expired → reclaimable
+    Q.mark_done(tid, repo_root=repo)
+    assert agree(now + 78 * _MIN) is False  # done
+
+
+def test_existence_probe_quiet_repeat_reduces_nothing(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A quiet FULL walk in the existence probe still writes the gate marker, so the repeat
+    probe on a quiet store stays O(1) — reducing NO tickets — exactly like the list probe."""
+    tracker = _tracker(repo)
+    now = 47_000_000_000_000
+    for i in range(4):
+        rebar.create_ticket("task", f"T{i}", repo_root=repo)
+    assert Q.has_pending_enrichment(now, tracker) is False  # cold walk; writes the marker
+    seen = _count_reductions(monkeypatch)
+    assert Q.has_pending_enrichment(now + 1, tracker) is False
+    assert seen == [], f"repeat quiet existence probe reduced {len(seen)} tickets"
+
+
 def test_bool_typed_marker_fields_are_rejected(repo: str) -> None:
     """``bool`` is an ``int`` subclass in Python, so a marker carrying ``true`` where a
     timestamp belongs would otherwise be arithmetic-compared and silently trusted."""
