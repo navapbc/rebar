@@ -279,7 +279,7 @@ def test_cli_dispatch_status(repo: str, monkeypatch: pytest.MonkeyPatch) -> None
 # ── AC-named proving tests (epic only-crave-art / c1de acceptance criteria) ──────
 def test_gate_latency(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """maybe_drain no-ops with NO spawn when nothing is soaked, and the cheap gate
-    is exactly ONE pending_enrichment probe — no drain, no spawn, no second store
+    is exactly ONE has_pending_enrichment probe — no drain, no spawn, no second store
     read. Counting proxy, not a wall-clock budget: the previous
     `assert elapsed_ms < 500` was the CI flake class under runner contention."""
     calls = []
@@ -288,13 +288,13 @@ def test_gate_latency(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
     _mock_flags(monkeypatch, enabled=True, drain="async")
     monkeypatch.setattr(D.os, "name", "posix")
     probes = []
-    real_pending = Q.pending_enrichment
+    real_pending = Q.has_pending_enrichment
 
     def counting_pending(*a, **k):
         probes.append(a)
         return real_pending(*a, **k)
 
-    monkeypatch.setattr(Q, "pending_enrichment", counting_pending)
+    monkeypatch.setattr(Q, "has_pending_enrichment", counting_pending)
     # NOTHING enqueued → nothing soaked → cheap gate no-ops, no child spawned.
     D.maybe_drain(_tracker(repo), repo_root=repo)
     assert calls == []
@@ -310,7 +310,7 @@ def test_gate_proxy_detects_drain_path(repo: str, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(D, "_spawn_detached_drain", lambda *a, **k: calls.append("spawn"))
     _mock_flags(monkeypatch, enabled=True, drain="async")
     monkeypatch.setattr(D.os, "name", "posix")
-    monkeypatch.setattr(Q, "pending_enrichment", lambda *a, **k: ["soaked-ticket"])
+    monkeypatch.setattr(Q, "has_pending_enrichment", lambda *a, **k: True)
     D.maybe_drain(_tracker(repo), repo_root=repo)
     assert calls == ["spawn"]
 

@@ -411,6 +411,36 @@ def _scan_pending(
     return [name for _, name in sorted(out)], soonest, live
 
 
+def _fresh_marker(now_ns: int, tracker: str) -> tuple[int | None, list[str] | None] | None:
+    """The marker's ``(next_eligible_ns, live)`` when it is trusted AND unexpired, else
+    ``None`` (meaning: full rescan). A marker stamped in the FUTURE is untrusted, not
+    infinitely fresh: the TTL is a subtraction, so a clock that stepped backwards (or a
+    marker from a host whose clock ran fast) makes it negative and the TTL could never
+    elapse — turning the bounded-delay guarantee into an unbounded one. Out-of-range in
+    EITHER direction means full rescan."""
+    marker = _read_gate_marker(tracker)
+    if marker is None:
+        return None
+    next_eligible, written, live = marker
+    if not (0 <= now_ns - written < _GATE_MARKER_TTL_NS):
+        return None
+    return (next_eligible, live)
+
+
+def _ticket_dir_names(tracker: str) -> list[str]:
+    """Every ticket directory name in *tracker* (the full-walk candidate set). Tolerates a
+    missing/unreadable tracker as empty, matching the pre-existing full-scan behaviour."""
+    try:
+        entries = os.listdir(tracker)
+    except OSError:
+        return []
+    return [
+        name
+        for name in entries
+        if not name.startswith(".") and os.path.isdir(os.path.join(tracker, name))
+    ]
+
+
 def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
     """All ticket ids past soak, unclaimed-or-lease-expired, with no later DONE.
 
@@ -418,37 +448,64 @@ def pending_enrichment(now_ns: int, tracker: str) -> list[str]:
     marker cannot prove quiet but recorded the last full walk's ``live`` set, reduces only
     those entries (O(backlog), task 4144-75d3 — see the block comment above); otherwise falls
     back to the full scan and, in that SAME pass, records the marker for subsequent probes."""
-    marker = _read_gate_marker(tracker)
+    marker = _fresh_marker(now_ns, tracker)
     if marker is not None:
-        next_eligible, written, live = marker
-        # A marker stamped in the FUTURE is untrusted, not infinitely fresh. The TTL is a
-        # subtraction, so a clock that stepped backwards (or a marker from a host whose clock
-        # ran fast) makes this negative and the TTL could never elapse — turning the
-        # bounded-delay guarantee into an unbounded one. Out-of-range in EITHER direction
-        # means full rescan. ``next_eligible_ns`` is ``None`` when the last scan found no
-        # live entry at all — then only the TTL limits the fast path.
-        if 0 <= now_ns - written < _GATE_MARKER_TTL_NS:
-            if next_eligible is None or now_ns < next_eligible:
-                return []
-            if live is not None:
-                # Scoped walk: rule 2 (every append clears the marker) means the live set
-                # cannot have grown while this marker stood, and re-reducing the live
-                # entries' real events answers every time-driven transition honestly. No
-                # marker rewrite: the TTL keeps counting from the last FULL walk (rule 3).
-                pending, _soonest, _live = _scan_pending(now_ns, tracker, live)
-                return pending
-    try:
-        entries = os.listdir(tracker)
-    except OSError:
-        return []
-    names = [
-        name
-        for name in entries
-        if not name.startswith(".") and os.path.isdir(os.path.join(tracker, name))
-    ]
-    pending, soonest, live = _scan_pending(now_ns, tracker, names)
-    _write_gate_marker(tracker, now_ns, soonest, live)
+        next_eligible, live = marker
+        # ``next_eligible_ns`` is ``None`` when the last scan found no live entry at all —
+        # then only the TTL limits the fast path.
+        if next_eligible is None or now_ns < next_eligible:
+            return []
+        if live is not None:
+            # Scoped walk: rule 2 (every append clears the marker) means the live set
+            # cannot have grown while this marker stood, and re-reducing the live
+            # entries' real events answers every time-driven transition honestly. No
+            # marker rewrite: the TTL keeps counting from the last FULL walk (rule 3).
+            pending, _soonest, _live = _scan_pending(now_ns, tracker, live)
+            return pending
+    pending, soonest, live_names = _scan_pending(now_ns, tracker, _ticket_dir_names(tracker))
+    _write_gate_marker(tracker, now_ns, soonest, live_names)
     return pending
+
+
+def has_pending_enrichment(now_ns: int, tracker: str) -> bool:
+    """Existence-only gate probe: the exact yes/no ``bool(pending_enrichment(...))`` answers,
+    WITHOUT enumerating the backlog (bug 6148-5d81-8e80-41e8 / draughty-callous-tanager).
+
+    ``enrich_drain.maybe_drain`` asks this on EVERY store write, and paying for a yes/no with
+    the list probe priced the gate at O(backlog): once a standing backlog exists the
+    marker-scoped walk above re-reduces every live entry per probe (~2-8 s measured live
+    against a 20 ms budget at a ~1,050-entry backlog, on both write seams). An existence
+    answer needs only the FIRST pending hit, so this walks the same candidates the list probe
+    would — the marker's ``live`` set, else the full store — applying the same
+    ``reduce_ticket``-derived ``pending`` predicate, but stops at one: O(1) when backlogged,
+    marker-fast when quiet, O(live-set) only when nothing is pending yet.
+
+    A quiet FULL walk (no hit) still records the gate marker exactly as the list probe does,
+    keeping subsequent quiet probes O(1). An early exit skips the write, which is safe: the
+    marker only ever asserts the absence of pending work, and a store with a pending hit has
+    no such absence to record."""
+    marker = _fresh_marker(now_ns, tracker)
+    if marker is not None:
+        next_eligible, live = marker
+        if next_eligible is None or now_ns < next_eligible:
+            return False
+        if live is not None:
+            # Same scoped candidates as the list probe, first-hit early exit, no marker
+            # rewrite (rule 3: the TTL keeps counting from the last FULL walk).
+            return any(reduce_ticket(name, tracker, now_ns=now_ns)["pending"] for name in live)
+    soonest: int | None = None
+    live_names: list[str] = []
+    for name in _ticket_dir_names(tracker):
+        state = reduce_ticket(name, tracker, now_ns=now_ns)
+        if state["pending"]:
+            return True
+        eligible = _entry_eligible_ns(state)
+        if eligible is not None:
+            live_names.append(name)
+            if soonest is None or eligible < soonest:
+                soonest = eligible
+    _write_gate_marker(tracker, now_ns, soonest, live_names)
+    return False
 
 
 def claim(
