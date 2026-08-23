@@ -431,6 +431,31 @@ is by **content hash**: the resolved (git-canonical) prompt's hash is recorded o
 the run so a span can be tied back to the exact prompt text. Heavy deps are an
 optional extra; a missing extra/credential raises a clear, actionable error.
 
+### The opportunistic enrichment drain runs in three phases
+
+`enrich_drain.drain()` (spawned per ordinary store write by `maybe_drain`, or run inline via
+`rebar enrich --drain`) follows the SKIP LOCKED job-queue shape — reserve-short,
+process-unlocked, finalize-short, lease recovery — so its advisory drain lock is **never held
+across an LLM call** (bug 6148-5d81-8e80-41e8: the earlier lock-across-LLM shape held it for
+minutes and made the drain single-flight):
+
+1. **Collect** (under the drain lock, seconds): a concurrency guard (at most 3 distinct
+   live-lease drainers may spend LLM $ at once — a 4th skips with
+   `{"skipped": "concurrency-cap"}`), the stale-digest self-heal re-enqueues, the pending
+   scan, then optimistic per-ticket claims up to the batch cap with a content-hash snapshot
+   each. `REBAR_LLM_OVERLAP_DRAIN_BATCH` (default 20) is the claim-window size, clamped to a
+   lease-derived bound (`lease_ttl_s // 40` = 22 at the default 15-minute lease) so a run
+   cannot outlive its claims.
+2. **Enrich** (no lock): the LLM calls. Other drainers keep collecting and processing.
+3. **Finalize** (short writes): each snapshot is revalidated — a ticket edited mid-enrichment
+   gets no stale digest (the entry is re-enqueued with soak 0, reported as `stale_skipped`);
+   otherwise the digest is emitted and the entry marked done. Failures keep their
+   dispositions (transient → lease-expiry retry; permanent input rejection → tombstone).
+
+Queue event schema, store write-lock semantics, and the `REBAR_LLM_OVERLAP_DRAIN`
+off|async|always door are unchanged; correctness rests on the optimistic claim + lease, not
+on the drain lock.
+
 ## Using it
 
 ```bash

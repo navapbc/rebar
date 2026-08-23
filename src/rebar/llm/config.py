@@ -147,7 +147,11 @@ DEFAULT_OVERLAP_SURFACE_CAP = 3
 # Tier-1 opportunistic drain (c1de): the drain mode (off|async|always), the per-run batch
 # cap, and the cheap gate-check latency budget (ms) for the write-path maybe_drain no-op.
 DEFAULT_OVERLAP_DRAIN = "async"
-DEFAULT_OVERLAP_DRAIN_BATCH = 5
+# 20, not 5 (operator ruling OQ3 on bug 6148-5d81-8e80-41e8): with LLM calls outside the
+# drain lock the batch is the claim-window size, raised toward the lease-derived bound
+# (enrich_drain._lease_bounded_batch clamps any configured value to lease_ttl_s // 40 = 22
+# at the default 15-minute lease) so a run can never outlive its claims.
+DEFAULT_OVERLAP_DRAIN_BATCH = 20
 DEFAULT_OVERLAP_DRAIN_GATE_BUDGET_MS = 20
 # Transport-layer retry for Anthropic gate calls (story arcticduck, epic jira-reb-687):
 # the tenacity retry envelope wrapping the httpx transport (SDK max_retries=0). Attempts

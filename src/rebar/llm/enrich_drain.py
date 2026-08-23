@@ -5,8 +5,12 @@ The overlap feature must run async across server/PC/Mac/cloud with ZERO client s
 daemon, broker, or scheduler. Following the git-gc-auto / npm-update-notifier pattern, a
 cheap ``maybe_drain()`` gate on ordinary invocations no-ops in the common case, else DETACHES
 the enrichment to a child that outlives the command (reusing push.py's POSIX detach). The
-drainer loop claims soaked queue entries (optimistic, per S4), runs enrich (S1), writes the
-digest (S2), and marks done — bounded per run, self-healing on crash.
+drainer runs three phases (the SKIP LOCKED job-queue shape — reserve-short,
+process-unlocked, finalize-short, lease recovery): COLLECT claims soaked queue entries
+under the advisory drain lock (optimistic per-ticket claims, per S4), ENRICH runs the LLM
+calls (S1) with NO lock held, FINALIZE revalidates content and writes the digest (S2) +
+DONE — bounded per run, self-healing on crash, at most ``_MAX_CONCURRENT_DRAINERS``
+processes spending LLM $ at once.
 
 **Windows drain is a documented v1 NO-OP:** the store write lock (``_store/lock.py``) imports
 ``fcntl`` unconditionally, so a detached drain child would crash at import on Windows; rather
@@ -259,16 +263,108 @@ def _record_item_failure(exc: BaseException, tid: str, *, repo_root) -> None:
 
 def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> dict:
     """Claim + process soaked queue entries (+ self-healing stale-digest tickets), up to the
-    batch cap. Best-effort per item: a TRANSIENT enrich failure releases the claim (lease expiry)
-    and the batch continues, so the failed ticket is re-picked later; a per-item PERMANENT input
-    rejection is tombstoned instead so it is attempted exactly once (see
-    :func:`_record_item_failure`). Returns a summary dict."""
+    lease-bounded batch cap, in three phases so the advisory drain lock is NEVER held across
+    an LLM call (bug 6148-5d81-8e80-41e8 — 437s/131s observed holds made the drain
+    single-flight; the SKIP LOCKED job-queue shape: reserve-short, process-unlocked,
+    finalize-short, lease recovery):
+
+    - COLLECT (:func:`_collect_claims`, under the drain lock, seconds): concurrency guard,
+      self-heal re-enqueues, pending scan, optimistic per-ticket claims + content snapshots.
+    - ENRICH (:func:`_enrich_claims`, NO lock): the LLM calls. A hung provider now blocks
+      only this process's batch — other drainers keep collecting and processing.
+    - FINALIZE (:func:`_finalize_claims`, no drain lock; the store write lock per append,
+      unchanged): revalidate each snapshot, then digest emit + DONE, stale re-enqueue, or
+      failure disposition.
+
+    Best-effort per item exactly as before: a TRANSIENT enrich failure releases the claim
+    (lease expiry) and the batch continues; a per-item PERMANENT input rejection is
+    tombstoned so it is attempted exactly once (see :func:`_record_item_failure`). Returns a
+    summary dict."""
     from rebar.llm.config import LLMConfig
-    from rebar.llm.enrich import enrich
-    from rebar.llm.overlap import digest_sidecar as ds
     from rebar.llm.overlap import queue as _queue
 
     cfg = LLMConfig.from_env(repo_root=repo_root)
+    now = _queue._now_ns()
+    batch = 1 if once else _lease_bounded_batch(cfg)
+    skip, items = _collect_claims(tracker, batch=batch, cfg=cfg, repo_root=repo_root, now=now)
+    if skip is not None:
+        return skip
+    results = _enrich_claims(items, cfg=cfg, repo_root=repo_root, runner=runner)
+    processed, stale_skipped = _finalize_claims(results, cfg=cfg, repo_root=repo_root)
+    summary = {"processed": processed, "batch": batch}
+    if stale_skipped:
+        summary["stale_skipped"] = stale_skipped
+    return summary
+
+
+# The maximum number of drain processes allowed to spend LLM $ concurrently (operator ruling
+# OQ1 on bug 6148-5d81-8e80-41e8: 2-3, bounded by a small guard). With the lock no longer held
+# across LLM calls, every per-write spawned child is a would-be drainer; unbounded, a busy
+# store could fan out one LLM batch per write. A module constant, not a config door — the
+# ruling asked for a small fixed bound, and the restructure deliberately adds no config keys.
+_MAX_CONCURRENT_DRAINERS = 3
+
+# Worst-case per-item budget (seconds) used to derive the lease-bounded batch cap (operator
+# ruling OQ3): the trivial-class digest call is single-turn, tool-less structured extraction,
+# comfortably under 40s per item, so lease_ttl // 40 items cannot outrun their lease mid-run
+# (15 min default lease -> 22, inside the ruled ~20-25 window).
+_WORST_CASE_ITEM_S = 40
+
+
+def _lease_bounded_batch(cfg) -> int:
+    """The effective per-run claim-window size: the configured ``overlap_drain_batch``
+    clamped to what the claim lease can cover (``lease_ttl_s // _WORST_CASE_ITEM_S``), never
+    below 1. A batch that outruns its lease causes duplicate claims mid-run (OQ3)."""
+    lease_bound = max(1, (cfg.overlap_lease_ttl_min * 60) // _WORST_CASE_ITEM_S)
+    return max(1, min(cfg.overlap_drain_batch, lease_bound))
+
+
+def _live_drainer_ids(tracker: str, now: int) -> set[str]:
+    """Distinct ``drainer_id``s holding a live-lease claim right now — the concurrency
+    guard's census. Reads each claimed ticket's latest post-enqueue CLAIM event; a crashed
+    drainer's ids age out with its leases, so the guard is self-healing."""
+    from rebar.llm.overlap import queue as _queue
+
+    out: set[str] = set()
+    try:
+        entries = os.listdir(tracker)
+    except OSError:
+        return out
+    for name in entries:
+        if name.startswith(".") or not os.path.isdir(os.path.join(tracker, name)):
+            continue
+        if not _queue.reduce_ticket(name, tracker, now_ns=now).get("claimed"):
+            continue
+        latest = _queue._latest(os.path.join(tracker, name), _queue.CLAIM)
+        did = (latest[2] or {}).get("drainer_id") if latest else None
+        if did:
+            out.add(str(did))
+    return out
+
+
+def _snapshot_hash(tid: str, repo_root) -> str | None:
+    """The claimed ticket's ``digest_sidecar.content_hash`` at collect time — the finalize
+    phase's revalidation key. ``None`` (an unreadable state) disables revalidation for this
+    item, degrading to the pre-restructure emit-without-revalidation behaviour."""
+    from rebar import _reads
+    from rebar.llm.overlap import digest_sidecar as ds
+
+    try:
+        return ds.content_hash(_reads.show_ticket(tid, repo_root=repo_root))
+    except Exception:  # noqa: BLE001 — a drain concern must never fail the drain
+        return None
+
+
+def _collect_claims(
+    tracker: str, *, batch: int, cfg, repo_root, now: int
+) -> tuple[dict | None, list[tuple[str, str | None]]]:
+    """PHASE COLLECT, the only phase under the drain advisory lock: concurrency guard,
+    self-heal re-enqueues, the pending scan, and up to *batch* optimistic claims with a
+    content-hash snapshot each. Returns ``(skip_summary, [])`` when the drain must not run
+    (lock held / drainer cap), else ``(None, claimed_items)`` — and the lock is RELEASED
+    before the caller's enrich phase either way."""
+    from rebar.llm.overlap import queue as _queue
+
     lock_fd = _acquire_advisory_lock(tracker)
     if lock_fd is None:
         # WARNING, not INFO: a skip is normal when two drainers overlap for a moment, but it
@@ -278,12 +374,16 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
             "enrich drain: advisory lock held by %s; skipping (exit 0)",
             _describe_drain_lock_holder(_drain_lock_path(tracker)),
         )
-        return {"skipped": "lock-held", "processed": 0}
-
-    processed = 0
+        return {"skipped": "lock-held", "processed": 0}, []
     try:
-        now = _queue._now_ns()
-        batch = 1 if once else cfg.overlap_drain_batch
+        others = _live_drainer_ids(tracker, now)
+        if len(others) >= _MAX_CONCURRENT_DRAINERS:
+            logger.info(
+                "enrich drain: %d drainers already hold live claims (cap %d); skipping",
+                len(others),
+                _MAX_CONCURRENT_DRAINERS,
+            )
+            return {"skipped": "concurrency-cap", "processed": 0}, []
         # Self-healing fallback: a ticket with a present-stale digest but no live queue entry
         # (e.g. a crash between cert and enqueue, or a post-enrich edit) is ENQUEUED here with
         # a zero soak so it becomes claimable — then the single claim path below handles it.
@@ -294,8 +394,9 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
         # Primary: soaked+unclaimed queue entries (now including the self-heal enqueues).
         candidates = _queue.pending_enrichment(now, tracker)
         drainer = _drainer_id()
+        items: list[tuple[str, str | None]] = []
         for tid in candidates:
-            if processed >= batch:
+            if len(items) >= batch:
                 break
             if not _queue.claim(
                 tid,
@@ -305,19 +406,68 @@ def drain(tracker: str, *, once: bool = False, repo_root=None, runner=None) -> d
                 repo_root=repo_root,
             ):
                 continue  # lost the optimistic claim; another drainer has it
-            try:
-                result = enrich(ticket_id=tid, repo_root=repo_root, config=cfg, runner=runner)
-                ds.emit(result["digest"], tid, model=cfg.model, repo_root=repo_root)
-                _queue.mark_done(tid, repo_root=repo_root)
-                processed += 1
-            except Exception as exc:  # noqa: BLE001 — logged+dispositioned by the helper below
-                # Extracted whole (behaviour-preserving for every pre-existing failure) so the
-                # new disposition branch lives OUTSIDE this already-long loop and adds no
-                # cyclomatic complexity to `drain` — see the module-size/complexity policy.
-                _record_item_failure(exc, tid, repo_root=repo_root)
-        return {"processed": processed, "batch": batch}
+            items.append((tid, _snapshot_hash(tid, repo_root)))
+        return None, items
     finally:
         _release_advisory_lock(tracker, lock_fd)
+
+
+def _enrich_claims(
+    items: list[tuple[str, str | None]], *, cfg, repo_root, runner
+) -> list[tuple[str, str | None, dict | None, BaseException | None]]:
+    """PHASE ENRICH — the LLM calls, with NO lock held. Per item: the collect snapshot plus
+    either the enrich result or the exception it raised (dispositioned in finalize)."""
+    from rebar.llm.enrich import enrich
+
+    results: list[tuple[str, str | None, dict | None, BaseException | None]] = []
+    for tid, snap in items:
+        try:
+            result = enrich(ticket_id=tid, repo_root=repo_root, config=cfg, runner=runner)
+            results.append((tid, snap, result, None))
+        except Exception as exc:  # noqa: BLE001 — logged+dispositioned in _finalize_claims
+            results.append((tid, snap, None, exc))
+    return results
+
+
+def _finalize_claims(
+    results: list[tuple[str, str | None, dict | None, BaseException | None]], *, cfg, repo_root
+) -> tuple[int, int]:
+    """PHASE FINALIZE — short writes only (each under the store write lock per append, as
+    every queue write always was). Per item: a failure keeps its existing disposition
+    (:func:`_record_item_failure`); a ticket whose content hash drifted since collect gets NO
+    stale digest — the emit is skipped and the entry re-enqueued with soak 0 (immediately
+    claimable, matching the self-heal path's posture; staleness is handled BEFORE the write
+    instead of by the self-heal loop after it); else digest emit + DONE. Returns
+    ``(processed, stale_skipped)``."""
+    from rebar import _reads
+    from rebar.llm.overlap import digest_sidecar as ds
+    from rebar.llm.overlap import queue as _queue
+
+    processed = stale_skipped = 0
+    for tid, snap, result, exc in results:
+        if exc is not None or result is None:
+            _record_item_failure(
+                exc or RuntimeError("enrich returned nothing"), tid, repo_root=repo_root
+            )
+            continue
+        state = None
+        if snap is not None:
+            try:
+                state = _reads.show_ticket(tid, repo_root=repo_root)
+            except Exception:  # noqa: BLE001 — degrade to emit-without-revalidation
+                state = None
+            if state is not None and ds.content_hash(state) != snap:
+                stale_skipped += 1
+                logger.info(
+                    "enrich drain: %s changed during enrichment; digest skipped, re-enqueued",
+                    tid,
+                )
+                _queue.enqueue(tid, soak_min=0, repo_root=repo_root)
+                continue
+        ds.emit(result["digest"], tid, state=state, model=cfg.model, repo_root=repo_root)
+        _queue.mark_done(tid, repo_root=repo_root)
+        processed += 1
+    return processed, stale_skipped
 
 
 def _spawn_detached_drain(tracker: str) -> None:
