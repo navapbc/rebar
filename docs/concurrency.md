@@ -95,10 +95,16 @@ lock** and reject on mismatch with **exit 10**, surfaced uniformly as
 `src/rebar/__init__.py:110` maps `returncode == 10` → `ConcurrencyError`).
 
 ### I4a — Parent-first claim/transition/reopen cascade
-A child never runs ahead of its parent in the lifecycle: on a **cascading edge** the
-parent is moved along the **same edge first** — recursively up the chain (top-most
-eligible ancestor first) — before the child moves. There are exactly three cascading
-edges, each with the parent status that is eligible on it:
+On a **cascading edge** the parent sitting in that edge's eligible status is moved
+along the **same edge first** — recursively up the chain (top-most eligible ancestor
+first) — before the child moves. The cascade is **per-edge and same-edge**, not a
+total lifecycle ordering: it does NOT guarantee that a child never runs ahead of its
+parent (see "What the cascade does NOT guarantee" below for the accepted residuals).
+The store-level invariant it maintains — jointly with the unconditional open-children
+close guard on `* → closed` — is the operator-ruled one recorded on ticket
+`bb73-97de-eeea-4899`: **no non-terminal-state ticket is ever a child of a closed
+ticket**. There are exactly three cascading edges, each with the parent status that
+is eligible on it:
 
 | child edge | eligible parent | why |
 |---|---|---|
@@ -126,7 +132,8 @@ child. (There is intentionally no
 rollback if the parent succeeds and the child then fails: an ancestor sitting in
 `in_progress` is the conservative, harmless direction.) Recursion is cycle-guarded
 (an id already on the cascade stack, including a self-parent, is skipped). Only the
-three edges tabled above cascade — `* → closed` and `* → blocked` never do. Closing has
+three edges tabled above cascade — `* → closed`, `* → blocked`, and the
+`blocked → in_progress` resume never do. Closing has
 its own separate open-children guard, and that asymmetry is exactly why the two
 out-of-`closed` edges must cascade: the guard blocks CLOSING a parent that has open
 children but says nothing about REOPENING or REACTIVATING a child, so without the
@@ -141,6 +148,41 @@ WALK the two verbs share — ancestor lookup, cycle guard, benign-race re-check 
 attribution — lives once in `src/rebar/_commands/lifecycle_cascade.py`
 (`cascade_parent_first`, story 4329); each verb supplies only its own write primitive,
 so the two cannot drift on what a raced parent means.
+
+#### What the cascade does NOT guarantee — the accepted residuals (task 0446-4278)
+
+The table is an **enumerated edge table**, not an ordering predicate — a recorded
+design decision (task `0446-4278-b7df-438d`, operator ruling 2026-08-21, which
+reclassified the residuals below as documented-intended). An ordering predicate ("the
+parent must never be behind the child" over `idea < open < in_progress`) would enforce
+a total ordering the store does not require: the invariant that IS required — no
+non-terminal child under a closed ancestor — is exactly what the two `closed`-source
+rows above and the unconditional close guard maintain together, and nothing more. Two
+reachable states are therefore accepted residuals, not bugs:
+
+- **Reactivating a `closed` child under a merely-`open` parent** (`closed →
+  in_progress` with `parent=open`) leaves an `in_progress` child under an `open`
+  parent. Only a `closed` parent is eligible on the reactivation edge; an `open` or
+  `in_progress` parent is deliberately not disturbed (bug
+  `paragonite-fruited-minnow` AC2, pinned by
+  `test_reactivate_does_not_disturb_open_parent`). This does not violate the ruled
+  invariant — the parent is not closed.
+- **The `blocked → in_progress` resume does not cascade** — the edge is absent from
+  the table — even though the start-work plan-review gate DOES fire on it (the gate
+  keys on the TARGET status, task 65e3, so every side-door into `in_progress` is
+  gated). That is consistent, not a disagreement: the gate asks "is work starting on
+  this ticket's plan?", the cascade asks "would this same-edge write leave an
+  eligible ancestor behind on this edge?" — different questions. The resume cannot
+  leave a **closed** ancestor behind, because a `blocked` child never sits under a
+  `closed` parent in the first place: the close guard refuses — unconditionally,
+  `--force` included — to close a parent over ANY non-closed child, `blocked`
+  included (pinned by `test_close_refused_over_blocked_child`). And on the table's
+  same-edge shape the only expressible row would pull a **`blocked` parent** into
+  progress whenever its child resumes — wrong, because a parent is routinely blocked
+  for its own independent reason. What remains is the resume under an `open` parent
+  leaving an `in_progress` child under an `open` parent — the same accepted residual
+  as the reactivation above (pinned by
+  `test_blocked_resume_does_not_cascade_open_parent`).
 
 #### Which write surfaces the invariant binds — ALL of them
 
