@@ -431,7 +431,7 @@ def record_run(monkeypatch):
     """
     calls: list[tuple[list[str], bool]] = []
 
-    def _fake_run_acli(cmd, *, acli_cmd=None, retry_on_timeout=False):
+    def _fake_run_acli(cmd, *, acli_cmd=None, retry_on_timeout=False, call_timeout=None):
         calls.append((cmd, retry_on_timeout))
         return subprocess.CompletedProcess(cmd, 0, "[]", "")
 
@@ -564,3 +564,36 @@ def test_set_relationship_emits_correct_acli_flag_order(record_run):
     cmd = link_cmds[0]
     assert cmd[cmd.index("--out") + 1] == "TO-2", f"--out must carry to_key (TO-2): {cmd!r}"
     assert cmd[cmd.index("--in") + 1] == "FROM-1", f"--in must carry from_key (FROM-1): {cmd!r}"
+
+
+# ---------------------------------------------------------------------------
+# Ticket 2048-d289: explicit per-call timeout (operation-scoped capture)
+# ---------------------------------------------------------------------------
+
+
+@POSIX_ONLY
+def test_explicit_call_timeout_bounds_call_without_ambient_resolve(real_child, monkeypatch):
+    """An explicit call_timeout bounds the subprocess wait, and the ambient
+    _acli_call_timeout resolve is never consulted."""
+
+    def _boom() -> float:
+        raise AssertionError("ambient _acli_call_timeout must not be consulted")
+
+    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", _boom)
+    with pytest.raises(acli_subprocess.AcliTimeoutError):
+        acli_subprocess._run_acli(
+            [str(real_child.ready)],
+            acli_cmd=_fake_cmd(_SIMPLE_HANG),
+            retry_on_timeout=False,
+            call_timeout=_REAP_CALL_TIMEOUT,
+        )
+
+
+def test_non_positive_call_timeout_falls_back_to_ambient(monkeypatch):
+    """None/0/negative call_timeout keeps the ambient resolve — the legacy floor
+    for direct constructions and entry points outside a composed runtime."""
+    monkeypatch.setattr(acli_subprocess, "_acli_call_timeout", lambda: 77.0)
+    assert acli_subprocess._effective_call_timeout(None) == 77.0
+    assert acli_subprocess._effective_call_timeout(0) == 77.0
+    assert acli_subprocess._effective_call_timeout(-3) == 77.0
+    assert acli_subprocess._effective_call_timeout(45) == 45

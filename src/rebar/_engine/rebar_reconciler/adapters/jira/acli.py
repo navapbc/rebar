@@ -155,6 +155,7 @@ def update_issue(
     jira_key: str,
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Update a Jira issue via ACLI.
@@ -208,7 +209,9 @@ def update_issue(
         else:
             cmd.extend([f"--{field}", str(value)])
 
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=False)  # WRITE
+    result = acli_subprocess._run_acli(
+        cmd, acli_cmd=acli_cmd, retry_on_timeout=False, call_timeout=call_timeout
+    )  # WRITE
     return json.loads(result.stdout)
 
 
@@ -238,12 +241,18 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         *,
         jira_project: str = "",
         acli_cmd: list[str] | None = None,
+        call_timeout: float = 0,
     ) -> None:
         self.jira_url = jira_url
         self.user = user
         self.api_token = api_token
         self.jira_project = jira_project
         self._acli_cmd = acli_cmd
+        #: Per-call subprocess bound (seconds), captured at construction (ticket
+        #: 2048-d289 — the operation-scoped ``reconciler.jira_cli_timeout``).
+        #: ``0``/non-positive = unset: every dispatch falls back to the ambient
+        #: ``_acli_call_timeout()`` resolve, the legacy behaviour.
+        self._call_timeout: float | None = call_timeout if call_timeout > 0 else None
 
     def _run(
         self,
@@ -264,7 +273,10 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         blind-retried against non-idempotent Jira.
         """
         return acli_subprocess._run_acli(
-            cmd, acli_cmd=self._acli_cmd, retry_on_timeout=retry_on_timeout
+            cmd,
+            acli_cmd=self._acli_cmd,
+            retry_on_timeout=retry_on_timeout,
+            call_timeout=self._call_timeout,
         )
 
     # --- Outbound API methods (local → Jira) ---
@@ -327,6 +339,7 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             summary,
             acli_cmd=self._acli_cmd,
             client=self,
+            call_timeout=self._call_timeout,
             **optional_fields,
         )
 
@@ -375,11 +388,15 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
                 kwargs["assignee"] = self.validate_assignee_exists(
                     kwargs["assignee"], issue_key=jira_key
                 )
-        return update_issue(jira_key, acli_cmd=self._acli_cmd, **kwargs)
+        return update_issue(
+            jira_key, acli_cmd=self._acli_cmd, call_timeout=self._call_timeout, **kwargs
+        )
 
     def get_issue(self, jira_key: str) -> dict[str, Any]:
         """Get a Jira issue via ACLI."""
-        return acli_cli_ops.get_issue(jira_key, acli_cmd=self._acli_cmd)
+        return acli_cli_ops.get_issue(
+            jira_key, acli_cmd=self._acli_cmd, call_timeout=self._call_timeout
+        )
 
     def get_issue_by_rest(self, jira_key: str) -> dict[str, Any]:
         """Get a Jira issue via direct REST GET (immediately consistent).
@@ -393,7 +410,9 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
 
     def add_comment(self, jira_key: str, body: str) -> dict[str, Any]:
         """Add a comment to a Jira issue via ACLI."""
-        return acli_cli_ops.add_comment(jira_key, body, acli_cmd=self._acli_cmd)
+        return acli_cli_ops.add_comment(
+            jira_key, body, acli_cmd=self._acli_cmd, call_timeout=self._call_timeout
+        )
 
     def search_issues(
         self,
@@ -734,7 +753,12 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
             # WRITE — retry_on_timeout=False (delete is non-idempotent on a
             # timeout; callers below treat 404 as idempotent success).
             # _run_acli already runs _check_mutation_failure on the completed run.
-            acli_subprocess._run_acli(cmd, acli_cmd=self._acli_cmd, retry_on_timeout=False)
+            acli_subprocess._run_acli(
+                cmd,
+                acli_cmd=self._acli_cmd,
+                retry_on_timeout=False,
+                call_timeout=self._call_timeout,
+            )
         except subprocess.CalledProcessError as exc:
             err_text = (exc.stderr or "") + (exc.stdout or "")
             if "404" in err_text or "not found" in err_text.lower():

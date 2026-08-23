@@ -42,6 +42,7 @@ def _verify_created_issue(
     *,
     acli_cmd: list[str] | None = None,
     client: Any = None,
+    call_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Parse ACLI create output, verify the issue exists, and return it.
 
@@ -91,7 +92,7 @@ def _verify_created_issue(
         except (urllib.error.HTTPError, urllib.error.URLError, OSError):
             pass  # REST GET failed: fall through to JQL path
 
-    verified = get_issue(jira_key=jira_key, acli_cmd=acli_cmd)
+    verified = get_issue(jira_key=jira_key, acli_cmd=acli_cmd, call_timeout=call_timeout)
     if not verified:
         msg = f"Verify-after-create failed: issue {jira_key} not found"
         raise RuntimeError(msg)
@@ -167,6 +168,7 @@ def create_issue(
     *,
     acli_cmd: list[str] | None = None,
     client: Any = None,
+    call_timeout: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Create a Jira issue via ACLI and verify it exists.
@@ -195,6 +197,7 @@ def create_issue(
             priority,
             acli_cmd=acli_cmd,
             client=client,
+            call_timeout=call_timeout,
             **kwargs,
         )
         # --from-json has no inline parent attachment — set_parent fallback.
@@ -207,7 +210,9 @@ def create_issue(
     if parent_key:
         kwargs["parent"] = parent_key
 
-    result = _create_issue_no_json(project, issue_type, summary, acli_cmd=acli_cmd, **kwargs)
+    result = _create_issue_no_json(
+        project, issue_type, summary, acli_cmd=acli_cmd, call_timeout=call_timeout, **kwargs
+    )
     # field is present in the ACLI command. _create_issue_no_json returns None only
     # on that specific permission error. When no assignee kwarg is provided, the
     # --assignee flag is never sent, so this error cannot occur and result will
@@ -220,14 +225,21 @@ def create_issue(
         )
         no_assignee_kwargs = {k: v for k, v in kwargs.items() if k != "assignee"}
         result = _create_issue_no_json(
-            project, issue_type, summary, acli_cmd=acli_cmd, **no_assignee_kwargs
+            project,
+            issue_type,
+            summary,
+            acli_cmd=acli_cmd,
+            call_timeout=call_timeout,
+            **no_assignee_kwargs,
         )
         if result is None:
             msg = "ACLI create failed on retry without assignee"
             raise RuntimeError(msg)
 
     assert result is not None  # Guaranteed: either we have a result or raised above
-    return _verify_created_issue(result.stdout, acli_cmd=acli_cmd, client=client)
+    return _verify_created_issue(
+        result.stdout, acli_cmd=acli_cmd, client=client, call_timeout=call_timeout
+    )
 
 
 def _create_issue_no_json(
@@ -236,6 +248,7 @@ def _create_issue_no_json(
     summary: str,
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
     **kwargs: Any,
 ) -> subprocess.CompletedProcess[str] | None:
     """Build and run the non-JSON ACLI create command, returning the result.
@@ -266,7 +279,7 @@ def _create_issue_no_json(
     if kwargs.get("parent"):
         cmd.extend(["--parent", str(kwargs["parent"])])
     try:
-        return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+        return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, call_timeout=call_timeout)
     except subprocess.CalledProcessError as exc:
         if exc.stderr and (
             _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
@@ -279,6 +292,7 @@ def _create_from_json_payload(
     payload: dict[str, Any],
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     """Write *payload* to a temp file, run ACLI ``--from-json``, and return the result.
 
@@ -307,7 +321,7 @@ def _create_from_json_payload(
                 os.close(fd)
             raise
         cmd = ["jira", "workitem", "create", "--from-json", json_path, "--json"]
-        return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+        return acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, call_timeout=call_timeout)
     except subprocess.CalledProcessError as exc:
         if exc.stderr and (
             _ASSIGNEE_PERMISSION_ERROR in exc.stderr or _ASSIGNEE_NOT_FOUND_ERROR in exc.stderr
@@ -326,6 +340,7 @@ def _create_issue_from_json(
     *,
     acli_cmd: list[str] | None = None,
     client: Any = None,
+    call_timeout: float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
     """Create a Jira issue using ``--from-json`` to set priority.
@@ -386,7 +401,7 @@ def _create_issue_from_json(
     if kwargs.get("assignee"):
         payload["assignee"] = str(kwargs["assignee"])
 
-    result = _create_from_json_payload(payload, acli_cmd=acli_cmd)
+    result = _create_from_json_payload(payload, acli_cmd=acli_cmd, call_timeout=call_timeout)
 
     # If the assignee field caused a permission error, retry without it.
     # _ASSIGNEE_PERMISSION_ERROR, which requires an assignee in the payload.
@@ -400,7 +415,7 @@ def _create_issue_from_json(
             file=sys.stderr,
         )
         del payload["assignee"]
-        result = _create_from_json_payload(payload, acli_cmd=acli_cmd)
+        result = _create_from_json_payload(payload, acli_cmd=acli_cmd, call_timeout=call_timeout)
         if result is None:
             msg = "ACLI create failed on retry without assignee"
             raise RuntimeError(msg)
@@ -464,6 +479,7 @@ def get_issue(
     jira_key: str,
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Get a Jira issue via ACLI search (single-key JQL).
 
@@ -480,7 +496,9 @@ def get_issue(
         "key,summary,description,status,priority,issuetype,assignee,labels",
         "--json",
     ]
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=True)  # READ
+    result = acli_subprocess._run_acli(
+        cmd, acli_cmd=acli_cmd, retry_on_timeout=True, call_timeout=call_timeout
+    )  # READ
     parsed = json.loads(result.stdout)
     issues = parsed if isinstance(parsed, list) else parsed.get("issues", [])
     if not issues:
@@ -493,6 +511,7 @@ def add_comment(
     body: str,
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
 ) -> dict[str, Any]:
     """Add a comment to a Jira issue via ACLI.
 
@@ -545,7 +564,7 @@ def add_comment(
         body_arg,
         "--json",
     ]
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
+    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, call_timeout=call_timeout)
     return json.loads(result.stdout)
 
 
@@ -604,6 +623,7 @@ def get_comments(
     jira_key: str,
     *,
     acli_cmd: list[str] | None = None,
+    call_timeout: float | None = None,
 ) -> list[dict[str, Any]]:
     """Get ALL comments on a Jira issue via ACLI.
 
@@ -623,5 +643,7 @@ def get_comments(
         "--paginate",
         "--json",
     ]
-    result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd, retry_on_timeout=True)  # READ
+    result = acli_subprocess._run_acli(
+        cmd, acli_cmd=acli_cmd, retry_on_timeout=True, call_timeout=call_timeout
+    )  # READ
     return _parse_paginated_comments(result.stdout)

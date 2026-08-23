@@ -82,7 +82,11 @@ def acli_capture(
     captured_cmds: list[list[str]] = []
 
     def fake_run_acli(
-        cmd: list[str], *, acli_cmd: list[str] | None = None, retry_on_timeout: bool = False
+        cmd: list[str],
+        *,
+        acli_cmd: list[str] | None = None,
+        retry_on_timeout: bool = False,
+        call_timeout: float | None = None,
     ) -> Any:
         # retry_on_timeout: bug-d843 read/write flag now passed by callers.
         captured_cmds.append(cmd)

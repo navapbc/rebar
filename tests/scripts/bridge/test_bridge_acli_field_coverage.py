@@ -603,7 +603,11 @@ class TestAcliContractRegression:
         captured: list[list[str]] = []
 
         def fake_run_acli(
-            cmd: list[str], *, acli_cmd: list[str] | None = None, retry_on_timeout: bool = False
+            cmd: list[str],
+            *,
+            acli_cmd: list[str] | None = None,
+            retry_on_timeout: bool = False,
+            call_timeout: float | None = None,
         ) -> Any:
             captured.append(cmd)
             result = MagicMock()

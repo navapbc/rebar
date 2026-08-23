@@ -73,7 +73,7 @@ def _send(body: str, monkeypatch: pytest.MonkeyPatch) -> str:
     class _Result:
         stdout = '{"id": "10001"}'
 
-    def _fake_run(cmd: list[str], acli_cmd: Any = None) -> Any:
+    def _fake_run(cmd: list[str], acli_cmd: Any = None, call_timeout: Any = None) -> Any:
         captured["cmd"] = cmd
         return _Result()
 
