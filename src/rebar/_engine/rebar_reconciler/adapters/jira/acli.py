@@ -244,6 +244,30 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         self.api_token = api_token
         self.jira_project = jira_project
         self._acli_cmd = acli_cmd
+        # Per-JQL search memo (see search_issues). Lifetime: an AcliClient
+        # lives at most ONE reconcile pass — reconcile_helpers.
+        # bind_operation_runtime composes "the ONE operation runtime for this
+        # pass" per pass, _backend_registry.select_backend constructs a fresh
+        # backend on every call, and the production entrypoint runs one
+        # reconcile_once per process — so this memo can never leak staleness
+        # ACROSS passes (which is also why binding_recovery's cross-pass
+        # search_miss_count corroboration counts genuinely fresh queries).
+        # WITHIN a pass, a caller that re-asks the same JQL for freshness
+        # must call invalidate_search_cache first (bug d30c).
+        self._search_cache: dict[str, list[dict[str, Any]]] = {}
+
+    def invalidate_search_cache(self, jql: str | None = None) -> None:
+        """Evict the search memo entry for *jql*, or the whole memo if None.
+
+        The supported freshness door for the per-JQL memo in search_issues:
+        callers that re-issue the same JQL expecting a fresh answer (index
+        -visibility polls, retry loops) evict first instead of reaching into
+        ``_search_cache``. Evicting a never-searched JQL is a no-op.
+        """
+        if jql is None:
+            self._search_cache.clear()
+        else:
+            self._search_cache.pop(jql, None)
 
     def _run(
         self,
@@ -407,11 +431,12 @@ class AcliClient(AcliRestMixin, AcliGraphMixin):
         call. Results are cached per-JQL to avoid redundant fetches when the
         caller paginates. Returns a slice of ``[start_at:start_at+max_results]``
         to satisfy the reconciler's pagination loop contract.
-        """
-        # Cache the full result set for this JQL to avoid re-fetching
-        if not hasattr(self, "_search_cache"):
-            self._search_cache: dict[str, list[dict[str, Any]]] = {}
 
+        NEGATIVE (empty) results are cached too, with no TTL: a caller that
+        re-asks the same JQL expecting a fresh answer (e.g. polling for index
+        visibility) must call ``invalidate_search_cache(jql)`` first, or it
+        will replay the first (possibly empty) answer forever (bug d30c).
+        """
         if jql not in self._search_cache:
             cmd = [
                 "jira",
