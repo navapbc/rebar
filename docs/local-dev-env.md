@@ -434,9 +434,13 @@ def test_something_genuinely_slow() -> None:
 
 Both halves are pinned by `tests/unit/test_timeout_budget.py`: that the marker still beats
 the ini, and — in a subprocess, since a permanently-red test cannot be committed — that the
-ini alone really does expire an over-budget test. The two `_build-and-test.yml` lanes are
-held equal to the ini value by `tests/unit/test_ci_workflow_parity.py`; the live-service,
-clean-venv and eval lanes keep their own, larger, calibrated budgets.
+ini alone really does expire an over-budget test. The two `_build-and-test.yml` lanes carry
+**no** `--timeout`/`--timeout-method` flags at all (held flag-free by
+`tests/unit/test_ci_workflow_parity.py`), so the ini is their single source: pytest-timeout's
+precedence is CLI > env > ini, and the Gerrit Verified gate runs the workflow files from
+trusted `main`, so a CLI flag would permanently shadow any patchset's ini change (bug
+`3fa7-94ba-42aa-4623`, ticket `5a30-d423-b1f5-4e33`). The live-service, clean-venv and eval
+lanes keep their own, larger, calibrated budgets.
 
 ### Running the tests CI runs (the optional-extra surface)
 

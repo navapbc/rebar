@@ -833,9 +833,39 @@ def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
     offline lanes — each went unguarded because nothing asserted over them. Budgets are
     per-lane and calibrated from observed runtime (see each step's own comment); this asserts
     only that a budget EXISTS, so a new lane cannot ship without one.
+
+    EXCEPTION: the ``_build-and-test.yml`` shared-tier lanes satisfy the guard WITHOUT an
+    explicit ``--timeout=`` flag by inheriting the ``[tool.pytest.ini_options]`` budget
+    (ticket ``5a30-d423-b1f5-4e33``): they run pytest from this repo's root, so the ini keys
+    apply, and a CLI flag would OVERRIDE them — which is exactly how a stale tighter flag on
+    trusted ``main`` killed workers on every Verified run and made the raising patchset unable
+    to pass its own gate (bug ``3fa7-94ba-42aa-4623``; the Verified gate executes workflow
+    files from trusted main, not the patchset). The ini fallback is asserted REAL below
+    (budget present and positive, ``thread`` method), and the negative arms in
+    ``test_timeout_budget.py`` prove those keys actually expire a hung test. Every OTHER
+    workflow's lanes must still carry an explicit flag — several run against generated
+    projects or from a clean venv where this repo's ini is not reliably in play, and each
+    carries its own calibrated budget — and a lane that sets a flag must use the ``thread``
+    method.
     """
+    import tomllib
+
+    ini = tomllib.loads(_read(_ROOT / "pyproject.toml"))["tool"]["pytest"]["ini_options"]
+    assert float(ini.get("timeout", 0)) > 0, (
+        "[tool.pytest.ini_options].timeout is absent or zero — the ini fallback that guards "
+        "the flag-free _build-and-test.yml lanes is not real, so those lanes are unguarded"
+    )
+    assert ini.get("timeout_method") == "thread", (
+        "[tool.pytest.ini_options].timeout_method must be 'thread' for the ini fallback to "
+        "interrupt a worker blocked in a C-level flock/socket/subprocess call"
+    )
     for filename, step, body in _all_workflow_pytest_steps():
         where = f"{filename} step {step!r}"
+        if filename == "_build-and-test.yml" and "--timeout=" not in body:
+            # Single-sourced from the ini keys asserted above (a flag would override them
+            # and reopen bug 3fa7-94ba-42aa-4623); the flag-free shape is enforced by
+            # test_the_shared_tier_lanes_are_flag_free_and_governed_by_the_ini below.
+            continue
         assert "--timeout=" in body, (
             f"{where} invokes pytest with no `--timeout=<seconds>` per-test hang guard: a "
             "deadlocked test is invisible under -q until the job cap, with no traceback "
@@ -849,16 +879,20 @@ def test_every_ci_pytest_lane_has_a_per_test_hang_guard() -> None:
         )
 
 
-def test_the_shared_tier_lanes_carry_the_ini_timeout_budget() -> None:
-    """`_build-and-test.yml`'s two tiers must run at the SAME budget a local `pytest` does.
+def test_the_shared_tier_lanes_are_flag_free_and_governed_by_the_ini() -> None:
+    """`_build-and-test.yml`'s two tiers must carry NO ``--timeout``/``--timeout-method`` flags.
 
-    The budget now lives in ``[tool.pytest.ini_options].timeout`` (story
-    ``73b8-2d79-3046-44ce``) so `make test` and a bare local run are guarded too. A
-    command-line ``--timeout=`` OVERRIDES the ini, so the two shared-tier lanes drifting away
-    from it would silently restore the old split — CI generous, local unguarded — and a hang
-    that reproduces locally in seconds would take minutes on CI, or vice versa.
+    The budget lives in ``[tool.pytest.ini_options]`` (story ``73b8-2d79-3046-44ce``) so `make
+    test` and a bare local run are guarded too. pytest-timeout precedence is CLI > env > ini,
+    so a command-line ``--timeout=`` OVERRIDES the ini — and because the Gerrit Verified gate
+    executes workflow files from trusted ``main``, not the patchset, any flag here permanently
+    shadows a patchset's ini change: bug ``3fa7-94ba-42aa-4623``'s budget fix could never be
+    exercised by its own Verified run (change 2115 PS1 ran main's stale ``--timeout=20`` and
+    killed its own workers). Single-sourcing makes that drift IMPOSSIBLE rather than
+    checked-for: the lanes carry no flag and the ini — which travels WITH a patchset — is the
+    one authority (ticket ``5a30-d423-b1f5-4e33``).
 
-    Scope is deliberately these two lanes only. The eleven other ``--timeout=`` lanes
+    Scope is deliberately these two lanes only. The other ``--timeout=`` lanes
     (``external-integration.yml``, ``_optionality.yml``, ``_eval-discipline.yml``, ``test.yml``,
     ``structured-output-baseline.yml``) drive live services, clean-venv installs and eval
     suites whose per-test runtime is legitimately minutes; each carries its own calibrated
@@ -867,7 +901,10 @@ def test_the_shared_tier_lanes_carry_the_ini_timeout_budget() -> None:
     import tomllib
 
     ini = tomllib.loads(_read(_ROOT / "pyproject.toml"))["tool"]["pytest"]["ini_options"]
-    budget = ini["timeout"]
+    assert float(ini.get("timeout", 0)) > 0, (
+        "[tool.pytest.ini_options].timeout is absent or zero: with the shared-tier lanes "
+        "deliberately flag-free, the ini is the ONLY per-test hang guard they have"
+    )
     lanes = [
         (step, body)
         for filename, step, body in _all_workflow_pytest_steps()
@@ -878,11 +915,15 @@ def test_the_shared_tier_lanes_carry_the_ini_timeout_budget() -> None:
         f"found {[step for step, _ in lanes]}"
     )
     for step, body in lanes:
-        found = re.findall(r"--timeout=(\d+)", body)
-        assert found == [str(budget)], (
-            f"_build-and-test.yml step {step!r} runs at --timeout={found} but the ini budget "
-            f"is {budget}. These must stay equal so CI and a local run agree; change BOTH, and "
-            "never drop the flag (the hang-guard sweep above requires it)."
+        found = re.findall(r"--timeout(?:-method)?=(\S+)", body)
+        assert not found, (
+            f"_build-and-test.yml step {step!r} sets --timeout/--timeout-method ({found}) on "
+            "the command line. These lanes are single-sourced from "
+            "[tool.pytest.ini_options] (ticket 5a30-d423-b1f5-4e33): a CLI flag OVERRIDES the "
+            "ini, reopens budget drift between CI and a local run, and — because the Verified "
+            "gate runs trusted-main workflow files — a stale flag here undercuts every "
+            "patchset's budget including the one trying to fix it (bug 3fa7-94ba-42aa-4623). "
+            "Change the ini instead."
         )
 
 
