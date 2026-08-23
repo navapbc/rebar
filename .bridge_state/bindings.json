@@ -48990,6 +48990,18 @@
       "state": "confirmed",
       "updated_at": "2026-08-15T15:16:40Z"
     },
+    "jira-reb-3510": {
+      "baseline": {
+        "description": "Many older Jita tickets have blank descriptions. Investigate whether these descriptions were lost using the git history for the corresponding rebar tickets. If descriptions have been lost en-mass, recover them.",
+        "priority": "Medium",
+        "status": "To Do",
+        "summary": "Investigate blank description in Jira"
+      },
+      "created_at": "2026-08-23T01:36:44Z",
+      "jira_key": "REB-3510",
+      "state": "confirmed",
+      "updated_at": "2026-08-23T01:36:44Z"
+    },
     "jira-reb-529": {
       "baseline": {
         "assignee": null,
@@ -51938,6 +51950,7 @@
     "REB-3508": "3d57-602f-0b75-48ee",
     "REB-3509": "6148-5d81-8e80-41e8",
     "REB-351": "e0d4-4f19-699d-4d61",
+    "REB-3510": "jira-reb-3510",
     "REB-3511": "a3f5-5c19-faad-417b",
     "REB-3512": "6f14-cefb-e3e2-4ed2",
     "REB-3513": "7da9-4139-4c7f-4db2",
