@@ -146,15 +146,21 @@ def delivered_children_manifest(container_id: str, *, repo_root=None) -> list[di
             children.append(_reads.show_ticket(cid, repo_root=repo_root))
         except Exception:  # noqa: BLE001 — per-child best-effort full-state fetch; fall back to summary
             children.append(c)
+    from .relation_snapshot import material_child_index
+
     manifest: list[dict[str, Any]] = []
-    for child in children:
-        if attest.delivered_now(child, children, repo_root=repo_root):
-            manifest.append(
-                {
-                    "ticket_id": child.get("ticket_id"),
-                    "ac_text": _extract_ac_section(child.get("description", "") or ""),
-                }
-            )
+    # bug bb3a-c931: one lazily-built child-index snapshot shared across every child's
+    # delivered_now completion-validity fingerprint (up to 5 full-store scans per
+    # stale child — same class as bugs 3d57 and a3f5) instead of a scan per child.
+    with material_child_index(repo_root=repo_root):
+        for child in children:
+            if attest.delivered_now(child, children, repo_root=repo_root):
+                manifest.append(
+                    {
+                        "ticket_id": child.get("ticket_id"),
+                        "ac_text": _extract_ac_section(child.get("description", "") or ""),
+                    }
+                )
     return manifest
 
 
