@@ -34,6 +34,7 @@ __all__ = [
     "description_cap_warning",
     "gate_enabled",
     "gate_ran",
+    "log_advisory_warning",
     "log_description_cap_warning",
     "plan_review_precheck",
 ]
@@ -334,20 +335,31 @@ def description_cap_warning(
     )
 
 
-def log_description_cap_warning(warning: object) -> str | None:
-    """Emit :func:`description_cap_warning`'s notice on the LIBRARY channel and hand it back.
+def log_advisory_warning(warning: object) -> str | None:
+    """Emit a save-time advisory notice on the LIBRARY channel and hand it back.
 
-    The CLI prints the notice to stderr and MCP returns it as a result field; an embedding
-    library caller has neither, so it goes through the ``rebar`` logger — the documented
-    library convention (:mod:`rebar._logging`). That root carries a ``NullHandler``, so a
-    caller configuring no logging is undisturbed, while the CLI and MCP entrypoints (which
-    install a stderr handler) surface it. Returns the warning so a caller can pass it on in
-    one expression. Advisory only: the write has already committed by the time this runs.
+    The CLI prints these notices to stderr and MCP returns them as result fields; an
+    embedding library caller has neither, so they go through the ``rebar`` logger — the
+    documented library convention (:mod:`rebar._logging`). That root carries a
+    ``NullHandler``, so a caller configuring no logging is undisturbed, while the CLI and
+    MCP entrypoints (which install a stderr handler) surface it. Returns the warning so a
+    caller can pass it on in one expression. Advisory only: the write has already
+    committed by the time this runs.
     """
     text = warning if isinstance(warning, str) and warning else None
     if text:
         logger.warning("%s", text)
     return text
+
+
+def log_description_cap_warning(warning: object) -> str | None:
+    """Emit :func:`description_cap_warning`'s notice on the LIBRARY channel and hand it back.
+
+    The named entry point for the description-cap notice (ticket 594b); the channel logic
+    is the shared :func:`log_advisory_warning`, which the duplicate-title advisory
+    (ticket eac3) rides too.
+    """
+    return log_advisory_warning(warning)
 
 
 def plan_review_precheck(ticket_id: str, cfg_root: str, repo_root, *, force_reason: str) -> None:

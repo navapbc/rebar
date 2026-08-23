@@ -87,4 +87,8 @@ def idea_cli(argv: list[str], *, repo_root=None) -> int:
         from rebar._commands._confirm import confirm_created
 
         confirm_created("idea ", res)
+    # This surface calls create_core directly, so it emits the create advisories itself
+    # (ticket eac3): same stderr channel as create_cli, stdout stays pure, exit stays 0.
+    composer._warn_stderr(res.get("description_warning"))
+    composer._warn_stderr(res.get("duplicate_warning"))
     return 0

@@ -226,6 +226,10 @@ try:
         push_status: PushStatusOut | None = None
         #: Advisory save-time description-cap notice (ticket 594b); see WriteAckOut.
         description_warning: str | None = None
+        #: Advisory create-time same-title duplicate notice (ticket eac3): non-null when
+        #: another create inside the recency window carries the same normalized title —
+        #: the ticket was still created; the text names the candidate and its status.
+        duplicate_warning: str | None = None
 
     class ClaimResultOut(_Out):
         ticket_id: str

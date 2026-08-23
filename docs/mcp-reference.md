@@ -72,7 +72,7 @@ Registered by `register_write_tools`, which is skipped entirely when the server 
 | `compact_ticket` | Compact a ticket's event log (or all tickets if id omitted). |
 | `create_idea` | Capture an undesigned idea: create an epic in status 'idea' atomically. |
 | `create_identity` | Create an identity entity: a gate-/graph-exempt ticket recording a person/agent. ``name`` is the title; ``email`` plus ``mappings`` (list of {provider, external_id}) and ``keys`` (OpenSSH authorized-keys lines) ride the CREATE and surface in show_ticket. Returns {id, alias}. |
-| `create_ticket` | Create a ticket; returns {id, alias} (agents get the alias without a second show()). A non-null description_warning means the description exceeds the plan-review admission cap while the claim gate is on — the ticket was still created, but claiming it needs a review that refuses the description as-is. |
+| `create_ticket` | Create a ticket; returns {id, alias} (agents get the alias without a second show()). A non-null description_warning means the description exceeds the plan-review admission cap while the claim gate is on — the ticket was still created, but claiming it needs a review that refuses the description as-is. A non-null duplicate_warning means another ticket with the same normalized title was created inside the recency window — advisory only; the named candidate may already cover this work. |
 | `declare_no_file_impact` | Declare that a ticket has no repository-file impact, with a reason. |
 | `edit_ticket` | Edit ticket fields (title/priority/assignee/description/ticket_type). |
 | `link_tickets` | Link two tickets (one of the seven canonical relations: blocks \| depends_on \| relates_to \| duplicates \| supersedes \| discovered_from \| caused_by). |
