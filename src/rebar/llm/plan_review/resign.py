@@ -106,8 +106,8 @@ def _collect_baseline_generation(
     then rename) — not crash debris. Under the strict check, signing raced those
     sessions and failed with store-read-failure at a rate that scaled with
     concurrency. The authoritative under-lock re-check already tolerates them (see
-    generation.py's ``tracker_head_sha(..., ignore_untracked=True)``); tracked dirty
-    state (modified/staged/unmerged) still fails, as it must.
+    generation.py's under-lock re-collect, ``collect(..., ignore_untracked=True)``);
+    tracked dirty state (modified/staged/unmerged) still fails, as it must.
 
     A transient ``store-read-failure`` — the STAGED half of that race, a peer's
     in-flight ``git add``→``git commit`` index — is retried with the same bounded

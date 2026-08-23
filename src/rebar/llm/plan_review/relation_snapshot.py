@@ -102,13 +102,38 @@ def _store_error(tracker: str | os.PathLike[str]) -> PlanRelationSnapshotError:
     return PlanRelationSnapshotError("store-read-failure", reference=str(tracker))
 
 
+_UNMERGED_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
+
+
+def _status_line_is_dirt(line: str) -> bool:
+    """Whether a ``git status --porcelain`` line must fail the strict tracker read.
+
+    Index-only entries (a staged first column with a CLEAN worktree column) are the
+    normal footprint of another writer inside its own LOCKED ``git add`` →
+    ``git commit`` window (``_store/event_append.py`` runs them as two subprocesses);
+    an unlocked reader observing that gap must not collapse it to
+    ``store-read-failure`` — that starved sign-review at a measured 58% rate under
+    one concurrent writer (bug a83f). Untracked entries (strict mode only —
+    ``--untracked-files=no`` suppresses them otherwise), unmerged entries, and any
+    worktree-side modification remain dirt: nothing in the canonical write path
+    produces them, so they mean a genuinely unsafe tracker.
+    """
+    xy = line[:2]
+    if len(xy) < 2 or xy in _UNMERGED_XY:
+        return True
+    if xy[0] in "?!":
+        return True
+    return xy[1] != " "
+
+
 def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool = False) -> str:
     """Return a clean tickets-tracker HEAD, or fail with one stable reason.
 
     Freshness is established before all three strict git reads.  Dirty worktree,
     index-conflict, process, path, IO, and malformed-output failures intentionally
     collapse to ``store-read-failure``; callers must never interpret a best-effort
-    or ``unknown`` revision as a safe signing token.
+    or ``unknown`` revision as a safe signing token.  Another writer's index-only
+    staged entries are tolerated (see :func:`_status_line_is_dirt`).
     """
 
     tracker_text = str(tracker)
@@ -145,7 +170,8 @@ def tracker_head_sha(tracker: str | os.PathLike[str], *, ignore_untracked: bool 
                 "--porcelain",
             )
         )
-        if run(*status_args):
+        status = run(*status_args)
+        if any(_status_line_is_dirt(line) for line in status.splitlines() if line):
             raise _store_error(tracker_text)
         if run("ls-files", "-u"):
             raise _store_error(tracker_text)
