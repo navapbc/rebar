@@ -42,7 +42,7 @@ def _capture_run(monkeypatch, acli_ops) -> dict:
     class _Result:
         stdout = '{"id": "10001"}'
 
-    def _fake_run(cmd, acli_cmd=None):
+    def _fake_run(cmd, acli_cmd=None, call_timeout=None):
         captured["cmd"] = cmd
         return _Result()
 

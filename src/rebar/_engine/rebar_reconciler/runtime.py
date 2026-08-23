@@ -147,6 +147,10 @@ class ReconcilerRuntime:
                 user=s.user,
                 api_token=self.auth.reveal(),
                 jira_project=s.project,
+                # Ticket 2048-d289: bind the compose-captured per-call subprocess
+                # timeout so the operation's ACLI dispatches never re-resolve
+                # reconciler.jira_cli_timeout ambiently (0 = unset -> ambient floor).
+                call_timeout=s.jira_cli_timeout,
             )
             assert_transport_conforms(transport, vendor=_CLOUD_BACKEND)
         return JiraBackend(transport=transport, scope=s)

@@ -439,7 +439,14 @@ class JiraDataCenterBackend:
             )
         )
         self.inbound = _DCInbound()
-        self.sanitizer = _DCSanitizer()
+        # Ticket 2048-d289: a captured scope binds the compose-captured comment
+        # ceiling via the sanitizer's existing injection seam; scope-less
+        # construction keeps the legacy lazy ambient resolve (bug 049e).
+        self.sanitizer = (
+            _DCSanitizer(comment_max_chars=scope.comment_max_chars)
+            if scope is not None
+            else _DCSanitizer()
+        )
         self.identity = JiraIdentityConvention()
 
     @property

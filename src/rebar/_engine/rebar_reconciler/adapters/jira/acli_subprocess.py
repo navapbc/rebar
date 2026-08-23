@@ -85,6 +85,16 @@ def _acli_call_timeout() -> int:
     return resolve_acli_call_timeout(_DEFAULT_ACLI_TIMEOUT)
 
 
+def _effective_call_timeout(call_timeout: float | None) -> float:
+    """The bound for one subprocess call: an explicit positive ``call_timeout``
+    (the operation-scoped capture, ticket 2048-d289) wins; ``None``/non-positive
+    falls back to the ambient :func:`_acli_call_timeout` resolve — the
+    compatibility floor for direct constructions outside a composed runtime."""
+    if call_timeout is not None and call_timeout > 0:
+        return call_timeout
+    return _acli_call_timeout()
+
+
 class JiraSettings(NamedTuple):
     """Resolved Jira connection settings: the non-secret ``url``/``user``/``project``
     (from the typed Config) plus the secret ``api_token`` (env-only)."""
@@ -393,6 +403,7 @@ def _run_acli(
     *,
     acli_cmd: list[str] | None = None,
     retry_on_timeout: bool = False,
+    call_timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run an ACLI command with retry, exponential backoff, and a bounded timeout.
 
@@ -401,8 +412,10 @@ def _run_acli(
     and deterministic assignee errors ("cannot be assigned" or "User not
     found for email:") abort immediately without retrying.
 
-    Each invocation is bounded by ``REBAR_JIRA_CLI_TIMEOUT`` (deprecated alias
-    ``REBAR_ACLI_TIMEOUT``; default 120s) and run
+    Each invocation is bounded by an explicit positive ``call_timeout`` (the
+    operation-scoped ``reconciler.jira_cli_timeout`` capture, ticket 2048-d289)
+    or, when unset, by the ambient ``REBAR_JIRA_CLI_TIMEOUT`` resolve (deprecated
+    alias ``REBAR_ACLI_TIMEOUT``; default 120s) and run
     in its own process session, so a hung ``acli`` child (or a pipe-holding
     grandchild) is reaped rather than freezing the pass (bug d843). On timeout:
 
@@ -425,7 +438,7 @@ def _run_acli(
     base = acli_cmd if acli_cmd is not None else _DEFAULT_ACLI_CMD
     full_cmd = base + cmd
     env = _build_env()
-    call_timeout = _acli_call_timeout()
+    call_timeout = _effective_call_timeout(call_timeout)
 
     last_error: subprocess.CalledProcessError | None = None
     for attempt in range(_MAX_ATTEMPTS):
