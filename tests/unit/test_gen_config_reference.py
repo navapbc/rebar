@@ -88,6 +88,17 @@ def _schema_keys() -> list[str]:
     return keys
 
 
+def _schema_fields() -> list[tuple[str, dataclasses.Field]]:
+    """Return each public key with its typed dataclass field."""
+    from rebar._config_schema import _SECTION_CLASSES
+
+    return [
+        (f"{section}.{item.name}", item)
+        for section, cls in _SECTION_CLASSES.items()
+        for item in dataclasses.fields(cls)
+    ]
+
+
 def _row_for(doc: str, name: str) -> str:
     """The markdown table row whose FIRST column is ``name`` (backtick-wrapped), or ''.
 
@@ -110,6 +121,66 @@ def test_config_reference_lists_every_schema_key():
     doc = gen.render_config_reference()
     for key in _schema_keys():
         assert f"`{key}`" in doc, f"config key {key!r} missing from config-reference.md"
+
+
+def test_every_schema_field_has_public_description():
+    """Every generated setting carries client-facing description metadata."""
+    missing = [
+        key
+        for key, item in _schema_fields()
+        if not isinstance(item.metadata.get("public_description"), str)
+        or not item.metadata["public_description"].strip()
+    ]
+    assert not missing, f"configuration fields lack public descriptions: {missing}"
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [{}, {"public_description": ""}, {"public_description": "   "}],
+)
+def test_schema_rows_reject_missing_or_empty_description(metadata, monkeypatch):
+    """Generation names the key whose public description is absent or empty."""
+    from rebar import _config_schema
+
+    incomplete = dataclasses.make_dataclass(
+        "IncompleteConfig",
+        [("value", str, dataclasses.field(default="", metadata=metadata))],
+    )
+    monkeypatch.setattr(_config_schema, "_SECTION_CLASSES", {"incomplete": incomplete})
+
+    with pytest.raises(ValueError, match=r"incomplete\.value"):
+        gen._schema_rows()
+
+
+def test_config_reference_renders_and_escapes_public_descriptions(monkeypatch):
+    """The Description column keeps table-sensitive prose in one cell."""
+    from rebar import _config_schema
+
+    described = dataclasses.make_dataclass(
+        "DescribedConfig",
+        [
+            (
+                "choice",
+                str,
+                dataclasses.field(
+                    default="",
+                    metadata={
+                        "public_description": (
+                            "Selects `left | right` and records the chosen branch.\n"
+                            "Continues in the same table cell."
+                        )
+                    },
+                ),
+            )
+        ],
+    )
+    monkeypatch.setattr(_config_schema, "_SECTION_CLASSES", {"sample": described})
+
+    rendered = gen.render_config_reference()
+    row = _row_for(rendered, "sample.choice")
+    assert "| Key | Type | Default | Description | Lifecycle |" in rendered
+    assert r"left \| right" in row
+    assert "Continues in the same table cell." in row
 
 
 def test_both_docs_carry_a_self_announcing_banner():
