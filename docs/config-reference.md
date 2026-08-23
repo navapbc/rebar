@@ -42,10 +42,7 @@ deprecated aliases and removed keys derived from `rebar._deprecations`.
 - **Native refresh.** rebar performs no native refresh of live values: there is no
   background reloader that re-reads `rebar.toml` or the environment mid-run. A long-lived
   server picks up a changed key only on its next start.
-- **Exposure (MCP/CLI exposure).** The resolved, non-secret configuration is exposed
-  read-only through the `rebar config` CLI view and the MCP config-transparency surface.
-  Secret **values** are never part of that exposure — only their presence/source — so a
-  config dump is safe to share; see `docs/security.md` for the secret-name inventory.
+- **Exposure (CLI exposure).** The read-only `rebar config` command displays resolved typed configuration values and the precedence source for each key. Adapter credentials are not typed configuration keys and do not appear in this output. See `docs/security.md` for the adapter credential names that rebar removes from unrelated child environments.
 
 ## Configuration keys
 

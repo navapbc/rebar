@@ -49,7 +49,7 @@ REQUIRED_TOPICS = {
     "observability exception": "observability",
     "subprocess limitations": "subprocess",
     "behavior deltas": "behavior delta",
-    "mcp/cli exposure": "exposure",
+    "cli exposure": "Exposure (CLI exposure)",
 }
 
 
@@ -213,6 +213,37 @@ def test_required_topics_are_covered_across_both_docs():
     combined = (gen.render_config_reference() + "\n" + gen.render_security()).lower()
     missing = [t for t, needle in REQUIRED_TOPICS.items() if needle.lower() not in combined]
     assert not missing, f"required topics not covered by either generated doc: {missing}"
+
+
+def test_config_exposure_guidance_names_only_the_cli_surface():
+    """Configuration exposure guidance describes the implemented CLI command."""
+    rendered = gen.render_config_reference()
+    exposure = next(line for line in rendered.splitlines() if line.startswith("- **Exposure ("))
+
+    assert (
+        "## Rotation, native refresh, and exposure" in rendered,
+        exposure,
+    ) == (
+        True,
+        "- **Exposure (CLI exposure).** The read-only `rebar config` command displays "
+        "resolved typed configuration values and the precedence source for each key. "
+        "Adapter credentials are not typed configuration keys and do not appear in this "
+        "output. See `docs/security.md` for the adapter credential names that rebar removes "
+        "from unrelated child environments.",
+    )
+
+
+@pytest.mark.parametrize(
+    "unsupported_claim",
+    [
+        "MCP/CLI exposure",
+        "MCP config-transparency surface",
+        "MCP configuration surface",
+    ],
+)
+def test_config_exposure_guidance_rejects_unsupported_mcp_claims(unsupported_claim):
+    """Rendered configuration guidance names no MCP configuration surface."""
+    assert unsupported_claim not in gen.render_config_reference()
 
 
 # ── `--check` drift semantics: trips on drift, CRLF-safe ──────────────────────
