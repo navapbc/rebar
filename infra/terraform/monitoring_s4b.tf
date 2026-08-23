@@ -35,22 +35,43 @@
 resource "aws_cloudwatch_metric_alarm" "voter_errors" {
   alarm_name        = "rebar-gerrit-voter-errors"
   alarm_description = <<-EOT
-    rebar review-bot LLM-Review voter failures detected in the receiver's journald
-    log (VOTER_ERROR markers: Gerrit 4xx/5xx, clone/diff failure, LLM unavailable, or
-    an expired bot token). Published as the custom metric rebar/host:voter_errors by
-    the host observability probe. Because submit requires the LLM-Review vote
-    (ADR-0013), a failing voter leaves changes unsubmittable — the fail-closed gate.
-    Restore the voter (token / LLM / receiver); there is no break-glass to disable
-    the submit requirement.
+    SUSTAINED rebar review-bot LLM-Review voter failure detected in the receiver's
+    journald log (VOTER_ERROR markers: Gerrit 4xx/5xx, clone/diff failure, LLM
+    unavailable, or an expired bot token). Published as the custom metric
+    rebar/host:voter_errors by the host observability probe. Because submit requires
+    the LLM-Review vote (ADR-0013), a failing voter leaves changes unsubmittable —
+    the fail-closed gate. Restore the voter (token / LLM / receiver); there is no
+    break-glass to disable the submit requirement. Calibrated to sustained-failure
+    detection (ticket ea5d-4932-8554-4544): 3 of 5 five-minute periods with any
+    markers — an isolated self-healing transient (timeout->backfill retry, clone
+    stall, retry-budget fail-closed -1) never pages, even straddling a period
+    boundary; a stuck gate emits markers on every retry (~5-min reconciler cadence)
+    and pages in ~15 minutes.
   EOT
 
   namespace   = "rebar/host"
   metric_name = "voter_errors"
   statistic   = "Sum"
 
-  # 5-minute periods; alarm on a single period with any voter-error lines.
+  # Sustained-failure shape (ticket ea5d-4932-8554-4544): 3 of 5 five-minute periods
+  # with any voter-error lines. The single-period shape this replaces paged 5 times
+  # in 48h, every one a transient self-healed by a designed recovery path; the
+  # operator ruling made PERSISTENCE the discriminator, not magnitude. Sizing:
+  #   - datapoints_to_alarm = 3 so an isolated transient — at most 1 breaching
+  #     period, or 2 when it straddles a period boundary — never pages (the 2-of-2
+  #     house shape in monitoring_ws7.tf would page on that straddle).
+  #   - A stuck gate (expired token / LLM outage) emits a marker on every review
+  #     attempt — the webhook queue and the backfill reconciler retry continuously
+  #     (RECONCILE_INTERVAL_SECONDS = 300) — so a continuous stream reaches its 3rd
+  #     breaching period at ~15 min, the ruling's detection bound.
+  #   - evaluation_periods = 5 (N-of-M, not N-of-N consecutive) because the marker
+  #     stream is not phase-aligned with CloudWatch period boundaries: a sustained
+  #     outage can land two markers in one period and none in the next, and a
+  #     consecutive-N streak would reset on that gap. 3-of-5 tolerates up to two
+  #     gap periods (worst-case page at 25 min, nominal 15).
   period              = 300
-  evaluation_periods  = 1
+  evaluation_periods  = 5
+  datapoints_to_alarm = 3
   threshold           = 0
   comparison_operator = "GreaterThanThreshold"
 
