@@ -41,8 +41,9 @@ pytestmark = pytest.mark.unit
 #                       test_gate_reports_no_findings_whole_tree
 #     ... eleven more between 18.7s and 22.7s ...
 #
-# These are `call` times, so `timeout_func_only = true` does not discount them: the body IS
-# the whole-tree scan. Raise this number only against a fresh measurement on the gating leg.
+# These are `call` times: the body IS the whole-tree scan, so no fixture-phase accounting
+# (the ini has no `timeout_func_only`; bug 797b-bbc4-01cf-42d5) can discount them. Raise
+# this number only against a fresh measurement on the gating leg.
 _MEASURED_SLOWEST_LEGITIMATE_CALL_SECS = 29.93
 
 # Clearing the worst case by a whisker is not enough. Per-test cost on the runner moves with

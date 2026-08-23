@@ -655,13 +655,20 @@ addopts = "--strict-markers --strict-config"
 # test with `os._exit(1)`, an over-tight budget does not report `Failed:
 # Timeout` — it kills the whole xdist worker (`node down: Not properly
 # terminated`), which is exactly what 20 s produced (11 crashes per run).
-# `timeout_func_only` charges the budget to the test body only, so a slow
-# fixture cannot spend a test's allowance. A test that must legitimately run
-# longer overrides it with `@pytest.mark.timeout(N, func_only=True)` and a
-# one-line comment naming why — no silent exemptions.
+# NO `timeout_func_only` (bug 797b-bbc4-01cf-42d5): that key confined the
+# budget to the test BODY, leaving fixture setup/teardown hangs unguarded —
+# the exact phase the guard was built for (bug 89d5-61da-b621-47f8 was a
+# teardown awaiting queue.join() under a 1200 s drain, burning the whole
+# 60-minute job cap). pytest-timeout's upstream default is False and its
+# README treats func_only as a last-resort workaround ("firstly make the
+# timeouts larger"); pandas/numpy/scikit-learn set no timeout_func_only.
+# With the key absent the budget covers setup + call + teardown, and 300 s
+# dwarfs any legitimate fixture cost. A test that must legitimately run
+# longer — including one whose FIXTURES are legitimately slow — overrides it
+# with a plain `@pytest.mark.timeout(N)` and a one-line comment naming why —
+# no silent exemptions, and never by restoring func_only.
 timeout = 300
 timeout_method = "thread"
-timeout_func_only = true
 markers = [
     "unit: unit-tier tests (network-guarded)",
     "scripts: scripts-tier tests (engine scripts / reconciler)",

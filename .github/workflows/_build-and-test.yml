@@ -659,7 +659,8 @@ jobs:
         # method calls os._exit(1), so it kills the whole xdist worker (`node down: Not
         # properly terminated`). The long `timeout=` values in test
         # SOURCES are subprocess ceilings, not durations; a test that must genuinely run longer
-        # carries `@pytest.mark.timeout(N, func_only=True)` with a reason.
+        # carries a plain `@pytest.mark.timeout(N)` with a reason (never func_only — the budget
+        # deliberately covers fixture setup/teardown too, bug 797b-bbc4-01cf-42d5).
         run: >-
           pytest -m "$DEFAULT_SUITE_MARKS"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
