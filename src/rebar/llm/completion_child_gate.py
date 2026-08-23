@@ -44,7 +44,6 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
     parent closes UNSIGNED). Returning ``([], [])`` here (the old behaviour) would have LAUNDERED
     certification — a read failure would have signed the parent as if it were childless. This
     mirrors ``plan_review.attest._attested_delivered``, which fails closed on the same error."""
-    import rebar  # verify_signature (not a rebar._reads read) is sourced from the facade
     from rebar import _reads
 
     try:
@@ -77,6 +76,21 @@ def child_closure_findings(ticket_id: str, repo_root) -> tuple[list[dict], list[
                 ],
             }
         ]
+    from rebar.llm.plan_review.relation_snapshot import material_child_index
+
+    # bug a3f5-5c19: one lazily-built child-index snapshot shared across every child's
+    # compute_validity (whose completion branch fingerprints the child's material —
+    # up to 5 full-store scans per stale child) instead of a scan per child.
+    with material_child_index(repo_root=repo_root):
+        return _classify_children(children, repo_root)
+
+
+def _classify_children(children: list[dict], repo_root) -> tuple[list[dict], list[dict]]:
+    """The per-child closure/certification classification loop of
+    :func:`child_closure_findings`, extracted so the shared ``material_child_index``
+    snapshot wraps exactly the loop that fingerprints."""
+    import rebar  # verify_signature (not a rebar._reads read) is sourced from the facade
+
     blocking: list[dict] = []
     uncertified: list[dict] = []
     for c in children:
