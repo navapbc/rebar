@@ -201,13 +201,12 @@ def _scan_spec(argv: list[str]) -> int:
 
 @guard_parse_errors
 def _verify_completion(argv: list[str]) -> int:
-    """``rebar verify-completion`` → rebar.llm.verify_completion (native; like reconcile).
+    """Invoke ``rebar.llm.verify_completion`` for ``rebar verify-completion``.
 
-    Intercepted in main() before the bash-golden help system, so it owns its own ``--help``
-    and ships NO pinned help arm (which keeps it out of the live-driving ``--output`` coverage
-    guard, exactly like review/review-code/scan-spec). JSON output conforms to the
-    ``completion_verdict`` schema (OUTPUT_SCHEMAS['verify_completion']). Exit 0 on PASS,
-    1 on FAIL or error (scriptable, like ``verify-signature``)."""
+    Top-level help is served from the committed parser artifact before handler dispatch.
+    JSON output conforms to the ``completion_verdict`` schema in
+    ``OUTPUT_SCHEMAS['verify_completion']``. The command returns zero on PASS and one on FAIL
+    or error."""
     import json as _json
 
     parser = _llm_parsers.build_verify_completion(prog="rebar verify-completion")
@@ -248,10 +247,10 @@ def _verify_completion(argv: list[str]) -> int:
 
 @guard_parse_errors
 def _explain(argv: list[str]) -> int:
-    """``rebar explain <criterion-id|guide>`` → a plan-review criterion's authoring-guide section
-    (WS10), OR an author-facing prose guide (``plan`` / ``review``). A pure registry/guide READ (no
-    LLM); owns its --help like review-plan. Exit 0 on success, 1 on a clear error (unknown
-    id/guide / malformed registry / missing guide file)."""
+    """Read a plan-review criterion section or a packaged author guide.
+
+    This command does not call an LLM. Top-level help is served from the committed parser
+    artifact. It returns zero on success and one for an unknown topic or invalid source."""
     import sys
 
     from rebar.llm.plan_review import registry
@@ -353,7 +352,9 @@ def _review_plan(argv: list[str]) -> int:
 
 @guard_parse_errors
 def _sign_review(argv: list[str]) -> int:
-    """``rebar sign-review`` → rebar.llm.resign_plan_review (native; owns its --help).
+    """``rebar sign-review`` invokes ``rebar.llm.resign_plan_review``.
+
+    Top-level help is served from the committed parser artifact.
 
     The CHEAP recovery path (ticket middle-actinium-thrush): (re)persist the plan-review
     attestation for an ALREADY-COMPUTED, still-valid PASS verdict from the latest

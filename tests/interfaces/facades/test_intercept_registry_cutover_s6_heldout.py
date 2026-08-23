@@ -1,12 +1,8 @@
-"""RP-05 S6 HELD-OUT E2E oracle — every intercept family still executes after the cutover.
+"""RP-05 S6 subprocess coverage for each intercept family after registry cutover.
 
-Withheld from the implementation subagent; restored and run by the orchestrator. These are
-the ADV1 teeth: a real subprocess ``rebar <intercept> …`` for EACH intercept command family
-(reconcile / review-plan / enrich / config / verify-* / identity / audit / …), proving the
-command still dispatches to its handler and produces its contractual exit code + output after
-the explicit intercept ladder is gone. A route left with ``handler is None`` would instead
-raise ``RuntimeError: … has no executable route`` (a traceback + failure), so a clean,
-command-specific result is proof the cutover wired real execution metadata for that family.
+Top-level help cases read committed artifacts without handler dispatch. Command cases prove
+that registry execution metadata still reaches each handler. Every case checks its exit code
+and command-specific output.
 """
 
 from __future__ import annotations
@@ -40,8 +36,8 @@ def _run(
 # spellings in new files); its post-cutover dispatch is proven by the registry-derived
 # parametrization in test_cli_registry_cutover_s6_heldout.py instead.
 _NO_STORE_CASES = [
-    ("reconcile", ("reconcile", "--help"), 0, "usage: rebar_reconciler"),
-    ("review-plan", ("review-plan", "--help"), 0, "usage: rebar review-plan"),
+    ("reconcile", ("reconcile", "--help"), 0, "Usage: rebar reconcile"),
+    ("review-plan", ("review-plan", "--help"), 0, "Usage: rebar review-plan"),
     ("review-code", ("review-code", "--help"), 0, "rebar review-code"),
     ("scan-spec", ("scan-spec", "--help"), 0, "rebar scan-spec"),
     ("verify-completion", ("verify-completion", "--help"), 0, "rebar verify-completion"),
@@ -74,7 +70,7 @@ def test_intercept_family_executes_no_store(
     assert cp.returncode == expected_rc, f"{label}: rc={cp.returncode}\n{combined}"
     assert needle in combined, f"{label}: {needle!r} absent from output:\n{combined}"
     assert "has no executable route" not in combined, f"{label}: hit the None-handler RuntimeError"
-    assert "Traceback" not in combined, f"{label}: raised instead of dispatching:\n{combined}"
+    assert "Traceback" not in combined, f"{label}: raised while serving the surface:\n{combined}"
 
 
 # ── store-touching families: exercised in a real initialized repo ──
@@ -128,3 +124,61 @@ def test_config_validate_family_executes(rebar_repo: Path) -> None:
     assert cp.returncode == 0, combined
     assert "config validate" in combined, combined
     assert "has no executable route" not in combined
+
+
+def test_every_visible_intercept_has_two_store_free_committed_help_surfaces(
+    tmp_path: Path,
+) -> None:
+    """Every visible intercept serves committed bytes through both top-level help forms."""
+    from rebar._cli._registry import ROUTES
+
+    repo_root = Path(__file__).resolve().parents[3]
+    routes = [
+        route
+        for route in ROUTES
+        if route.group == "intercept" and not route.hidden and not route.retired
+    ]
+    assert routes
+    defects: list[str] = []
+    for route in routes:
+        artifact = repo_root / "src" / "rebar" / "_cli" / "help" / f"{route.name}.txt"
+        expected = artifact.read_text(encoding="utf-8") if artifact.is_file() else None
+        if expected is None:
+            defects.append(f"{route.name} has no committed artifact")
+        for label, args in (
+            ("help-prefix", ("help", route.name)),
+            ("command-help", (route.name, "--help")),
+        ):
+            root = tmp_path / route.name / label
+            root.mkdir(parents=True)
+            cp = _run(*args, cwd=root, env_overrides={"REBAR_ROOT": str(root)})
+            if cp.returncode != 0:
+                defects.append(f"{route.name} {label} exited {cp.returncode}")
+            if expected is not None and cp.stdout != expected:
+                defects.append(f"{route.name} {label} differed from committed bytes")
+            if cp.stderr:
+                defects.append(f"{route.name} {label} wrote stderr")
+            if list(root.iterdir()):
+                defects.append(f"{route.name} {label} created repository state")
+
+    assert defects == []
+
+
+@pytest.mark.parametrize("child", ["create", "use", "key"])
+def test_identity_child_help_is_store_free(child: str, tmp_path: Path) -> None:
+    """Identity child help exits successfully without creating repository state."""
+    root = tmp_path / child
+    root.mkdir()
+
+    cp = _run(
+        "identity",
+        child,
+        "--help",
+        cwd=root,
+        env_overrides={"REBAR_ROOT": str(root)},
+    )
+
+    assert cp.returncode == 0, cp.stdout + cp.stderr
+    assert cp.stdout.splitlines()[0].startswith(f"usage: rebar identity {child}")
+    assert cp.stderr == ""
+    assert list(root.iterdir()) == []

@@ -73,9 +73,9 @@ def test_router_routes_an_intercept_through_the_executor(
 def test_intercept_executes_end_to_end_in_process(capsys: pytest.CaptureFixture[str]) -> None:
     """A no-store intercept (``explain``) executes through the registry and prints its guide.
 
-    ``explain`` owns its own ``--help`` and needs no store, so it exercises the full
-    registry dispatch path in-process without any fixture: a working cutover prints the
-    guide and exits 0; a ``handler is None`` route would instead raise.
+    ``explain`` needs no store, so it exercises the full registry dispatch path without a
+    fixture. A working cutover prints the guide and returns zero. A route without a handler
+    would raise instead.
     """
     rc = main(["explain", "plan"])
     out = capsys.readouterr().out

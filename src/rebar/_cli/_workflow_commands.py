@@ -92,10 +92,9 @@ def _scaffold(name: str) -> str:
 def _workflow(argv: list[str]) -> int:
     """``rebar workflow <new|validate|run|status|result>`` → the workflow toolchain.
 
-    A native ``rebar.llm.workflow`` op intercepted in main() (like review/reconcile),
-    so it owns its own ``--help``. ``new`` scaffolds; ``validate`` lints; ``run``
-    executes (sync; ``--dry-run`` = offline FakeRunner, no tokens); ``status``/
-    ``result`` read a run's state via replay. The ``show`` (render) arm is WS-I.
+    Top-level help is served from the committed parser artifact. Child help is rendered by
+    this parser. ``new`` scaffolds a workflow. ``validate`` lints it. ``run`` executes it.
+    ``status`` and ``result`` read run state through replay. ``show`` renders the workflow.
     """
 
     parser = _build_parser()

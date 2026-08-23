@@ -43,6 +43,66 @@ def test_check_mode_passes_on_committed_artifacts() -> None:
     assert cp.returncode == 0, f"--check failed (stale artifacts?):\n{cp.stdout}\n{cp.stderr}"
 
 
+def test_public_write_generates_every_visible_intercept_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The public generator writes one artifact for each visible intercept route."""
+    from rebar._cli._registry import ROUTES
+
+    mod = _load_gen()
+    sandbox = tmp_path / "help"
+    monkeypatch.setattr(mod, "HELP_DIR", sandbox)
+
+    assert mod.main([]) == 0
+
+    required = {
+        f"{route.name}.txt"
+        for route in ROUTES
+        if route.group == "intercept" and not route.hidden and not route.retired
+    }
+    written = {path.name for path in sandbox.glob("*.txt")}
+    assert required
+    assert required <= written
+
+
+def _write_visible_intercepts(tmp_path: Path, monkeypatch, *, columns: int) -> dict[str, bytes]:
+    from rebar._cli._registry import ROUTES
+
+    monkeypatch.setenv("COLUMNS", str(columns))
+    mod = _load_gen()
+    destination = tmp_path / f"help-{columns}"
+    monkeypatch.setattr(mod, "HELP_DIR", destination)
+    assert mod.main([]) == 0
+
+    names = {
+        f"{route.name}.txt"
+        for route in ROUTES
+        if route.group == "intercept" and not route.hidden and not route.retired
+    }
+    assert names
+    assert names <= {path.name for path in destination.glob("*.txt")}
+    return {name: (destination / name).read_bytes() for name in names}
+
+
+def test_visible_intercept_artifacts_ignore_terminal_width(tmp_path: Path, monkeypatch) -> None:
+    """Intercept artifact bytes do not depend on the terminal width."""
+    narrow = _write_visible_intercepts(tmp_path, monkeypatch, columns=50)
+    wide = _write_visible_intercepts(tmp_path, monkeypatch, columns=140)
+
+    assert narrow == wide
+
+
+def test_trusted_env_preserves_explicit_multiline_usage(tmp_path: Path, monkeypatch) -> None:
+    """The trusted-env artifact keeps its explicit add and revoke usage lines."""
+    artifacts = _write_visible_intercepts(tmp_path, monkeypatch, columns=80)
+
+    lines = artifacts["trusted-env.txt"].decode("utf-8").splitlines()
+    assert lines[:2] == [
+        "Usage: rebar trusted-env add <env_id> <public_key> [--root <path>]",
+        "rebar trusted-env revoke <env_id> <public_key-or-index> [--root <path>]",
+    ]
+
+
 def test_write_mode_is_idempotent_and_check_clean(tmp_path, monkeypatch) -> None:
     """Writing renders deterministic bytes and a subsequent --check is clean.
 

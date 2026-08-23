@@ -185,9 +185,9 @@ def _criteria_eval(args: argparse.Namespace) -> int:
 def _llm(argv: list[str]) -> int:
     """``rebar llm setup`` → the LLM-framework onboarding wizard (WS-J2).
 
-    Native intercept (owns its own --help). Detects installed extras + API keys,
-    validates the engine with an offline FakeRunner dry-run (no tokens), and prints
-    the recommended ``[tool.rebar.llm]`` config (optionally written to a file)."""
+    Top-level help is served from the committed parser artifact. Child help is rendered by
+    this parser. The command detects installed extras and API keys, validates the engine with
+    an offline FakeRunner dry run, and prints the recommended ``[tool.rebar.llm]`` config."""
 
     parser = _llm_eval_parsers.build_llm(prog="rebar llm")
 

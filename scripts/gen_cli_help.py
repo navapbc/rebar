@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """Generate the canonical ``rebar`` CLI help artifacts from the parser factories (RP-05 S2d).
 
-The package help under ``src/rebar/_cli/help/*.txt`` is the CLI's stdout/stderr help
-contract (served at runtime by :mod:`rebar._cli._help`). Historically those files were
-hand-captured; this generator makes them DERIVED — one artifact per help-backed route in
-the immutable route registry (:mod:`rebar._cli._registry`), rendered by resolving that
-route's ``parser_factory`` and formatting its ``--help`` at the fixed S2a width. The grouped
-``overview.txt`` is likewise derived from route order/visibility plus each parser's one-line
-summary (its ``description``).
+The package help under ``src/rebar/_cli/help/*.txt`` is the CLI's stdout and stderr help
+contract. This generator derives one artifact for each visible route that is not retired in
+the immutable route registry (:mod:`rebar._cli._registry`). It resolves each route's
+``parser_factory`` and formats its ``--help`` at the fixed S2a width. It also derives
+``overview.txt`` from route order, visibility, and each parser's ``description``.
 
 Two invariants make the artifacts deterministic and machine-checkable:
 
@@ -30,8 +28,11 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import re
 import sys
+from functools import partial
 from pathlib import Path
+from typing import cast
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 HELP_DIR = REPO_ROOT / "src" / "rebar" / "_cli" / "help"
@@ -49,6 +50,8 @@ _OVERVIEW_HEADER = (
     "Subcommands:\n"
 )
 
+_INTERCEPT_HELP_WIDTH = 80
+
 
 def _routes() -> tuple:
     from rebar._cli._registry import ROUTES
@@ -57,9 +60,8 @@ def _routes() -> tuple:
 
 
 def _help_backed(route) -> bool:
-    """Routes that carry a pinned help artifact: every live route that is not an
-    intercept-only advanced command and not a hidden alias spelling."""
-    return route.group != "intercept" and not route.hidden and not route.retired
+    """Return whether a route is visible, not retired, and carries committed help."""
+    return not route.hidden and not route.retired
 
 
 def _resolve_factory(ref: str):
@@ -76,6 +78,40 @@ def _capitalize_usage(text: str) -> str:
     return text
 
 
+def _unwrap_usage(text: str) -> str:
+    """Join an argparse generated usage block into one stable line."""
+    lines = text.split("\n")
+    end = 0
+    while end < len(lines) and lines[end].strip() != "":
+        end += 1
+    if end == 0:
+        return text
+    joined = " ".join([lines[0], *(line.strip() for line in lines[1:end])]).rstrip()
+    return "\n".join([joined, *lines[end:]])
+
+
+def _collapse_metavars(line: str) -> str:
+    """Render repeated option metavars once for stable Python version output."""
+    if not re.match(r"^\s+--?\S", line):
+        return line
+    previous = None
+    while previous != line:
+        previous = line
+        line = re.sub(
+            r"(--?[\w-]+) (\S+), (--?[\w-]+) \2(?=[,\s]|$)",
+            r"\1, \3 \2",
+            line,
+            count=1,
+        )
+    return line
+
+
+def _pin_intercept_width(parser: argparse.ArgumentParser) -> None:
+    """Pin stdlib formatter output to the canonical help width."""
+    formatter_class = cast(type[argparse.HelpFormatter], parser.formatter_class)
+    parser.formatter_class = partial(formatter_class, width=_INTERCEPT_HELP_WIDTH)
+
+
 def _normalize(text: str) -> str:
     """Enforce the artifact byte policy: LF line endings, exactly one trailing newline."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -86,7 +122,14 @@ def render_route(route) -> str:
     """Render one route's committed help artifact bytes from its parser factory."""
     factory = _resolve_factory(route.parser_factory)
     parser = factory(prog=f"rebar {route.name}")
-    return _normalize(_capitalize_usage(parser.format_help()))
+    if route.group == "intercept":
+        _pin_intercept_width(parser)
+    text = _capitalize_usage(parser.format_help())
+    if route.group == "intercept":
+        if parser.usage is None:
+            text = _unwrap_usage(text)
+        text = "\n".join(_collapse_metavars(line) for line in text.split("\n"))
+    return _normalize(text)
 
 
 def _summary(route) -> str:

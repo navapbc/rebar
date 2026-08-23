@@ -1,0 +1,10 @@
+Usage: rebar llm [-h] {setup} ...
+
+Configure and check the rebar LLM framework.
+
+positional arguments:
+  {setup}
+    setup     detect extras/keys, validate with a FakeRunner, print config
+
+options:
+  -h, --help  show this help message and exit

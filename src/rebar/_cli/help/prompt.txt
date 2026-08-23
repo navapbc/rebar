@@ -1,0 +1,10 @@
+Usage: rebar prompt [-h] {eval} ...
+
+Evaluate git-canonical prompts.
+
+positional arguments:
+  {eval}
+    eval      validate + summarize a prompt's eval spec
+
+options:
+  -h, --help  show this help message and exit

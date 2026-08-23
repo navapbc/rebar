@@ -1,0 +1,24 @@
+Usage: rebar verify-commit-ticket [--rev <ref> | --message-file <path> | --message <text>]
+
+Verify a commit message references a rebar ticket that resolves in the store.
+
+Every commit to `main` must reference a rebar ticket. Add a trailer to the commit
+message (preferred), or start the subject with the ticket id:
+
+    rebar-ticket: <id>        e.g.  rebar-ticket: blank-guild-koi
+  - or a subject prefix -
+    <id>: <summary>           e.g.  blank-guild-koi: fix the widget
+
+Accepted <id> forms (resolved against the ticket store):
+    alias       blank-guild-koi
+    full id     fc9e-8c2e-cb2f-465f
+    short id    fc9e-8c2e
+    Jira key    REB-310            (project prefix from jira.project)
+
+options:
+  -h, --help            show this help message and exit
+  --rev REV             git revision to read the message from (default: HEAD)
+  --message-file MESSAGE_FILE
+                        read the commit message from this file
+  --message MESSAGE     the commit message text (inline)
+  --root ROOT           repo root (default: cwd); resolves the ticket store

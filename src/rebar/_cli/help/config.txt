@@ -1,0 +1,9 @@
+Usage: rebar config [-h] [--output {text,json}] [--root ROOT]
+
+Show the resolved rebar configuration and the precedence layer (cli > env >
+project > user > default) each value came from.
+
+options:
+  -h, --help            show this help message and exit
+  --output, -o {text,json}
+  --root ROOT           repo root for project-config discovery (default: auto)

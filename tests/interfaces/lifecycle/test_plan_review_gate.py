@@ -1755,10 +1755,8 @@ def test_idempotent_reuse_emits_no_second_signature(rebar_repo: Path) -> None:
 def test_review_plan_help_states_that_pass_signs_by_default(capsys) -> None:
     """AC8: the help is the author's contract. It must say PASS SIGNS by default, so the
     `--no-sign` flag reads as the exception it is rather than as the way to get a signature."""
-    with pytest.raises(SystemExit):
-        _cli.main(["review-plan", "--help"])
-    # argparse hard-wraps help at the terminal width, so collapse whitespace before matching
-    # phrases — otherwise the assertion breaks on where the line happens to fold.
+    assert _cli.main(["review-plan", "--help"]) == 0
+    # Normalize whitespace because the committed artifact wraps long option descriptions.
     help_text = " ".join(capsys.readouterr().out.lower().split())
     assert "--no-sign" in help_text
     # The default must be STATED, not merely implied by the flag's existence.

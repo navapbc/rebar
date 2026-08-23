@@ -1,6 +1,6 @@
-"""``rebar bridge setup`` — the interactive Jira onboarding wizard.
+"""Implement the interactive Jira onboarding wizard for ``rebar bridge setup``.
 
-A native intercept (owns its own ``--help``, like ``rebar llm`` / ``reconcile``).
+Top-level help is served from the committed parser artifact.
 It DETECTS the current Jira settings the same way the reconciler's
 ``resolve_jira_settings`` does — ``load_config().jira.*`` with the Atlassian env
 vars overriding and the token read env-only — but resolves them in-process via

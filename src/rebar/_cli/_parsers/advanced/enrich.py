@@ -17,7 +17,10 @@ from rebar._cli._parser import build_argument_parser
 def build(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar enrich`` parser bound to ``prog``."""
     parser = build_argument_parser(
-        prog=prog, formatter_class=argparse.HelpFormatter, allow_abbrev=False
+        prog=prog,
+        description="Inspect or drain the ticket enrichment queue.",
+        formatter_class=argparse.HelpFormatter,
+        allow_abbrev=False,
     )
     parser.add_argument(
         "mode",

@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """Generate ``docs/cli-reference.md`` — the canonical CLI command reference (ticket 6755).
 
-Every command syntax/options section is DERIVED from the immutable route registry
-(:mod:`rebar._cli._registry`) plus the committed package-help bytes (proven byte-current by
-``scripts/gen_cli_help.py --check``): a CI drift gate regenerates this file and fails the
-build on any diff, so a new command cannot ship undocumented.
+Every command syntax and options section is derived from the immutable route registry
+(:mod:`rebar._cli._registry`) and the committed package help. The help generator proves byte
+currency through ``scripts/gen_cli_help.py --check``. A CI drift gate regenerates this file
+and fails the build on any difference, so a new command cannot ship undocumented.
 
-Each documented route (``not retired and not hidden``, in registry order) gets exactly one
-``### `<name>``` syntax section. Two families:
-
-  1. **Help-backed routes** (``route.group != "intercept"``) — the committed usage bytes
-     from ``rebar._cli._help.subcommand_help(name)`` are embedded verbatim.
-  2. **Intercept-group routes** (no pinned ``help/*.txt``) — rendered live from the route's
-     ``parser_factory`` (the same approach as ``scripts/gen_cli_help.py``).
+Each visible route that is not retired gets one ``### `<name>``` syntax section in registry
+order. Every section embeds the committed bytes returned by
+``rebar._cli._help.subcommand_help(name)``.
 
 The verb-confirmation record (``MUTATION_VERBS``) is a behavioral output record — NOT a
 syntax census — and stays curated here, drift-gated against ``rebar._cli._CONFIRM_SCOPE``.
@@ -29,7 +25,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib
 import re
 import sys
 from pathlib import Path
@@ -46,10 +41,9 @@ DOC_PATH = REPO_ROOT / "docs" / "cli-reference.md"
 # names a live route. :func:`render` runs :func:`lint_editorial` over this and fails loudly if
 # either rule is broken.
 EDITORIAL_PREAMBLE = """\
-The `rebar` CLI has two command families, both documented under **Command syntax** below.
-**Help-backed subcommands** are the dispatcher arms with pinned usage text, rendered verbatim
-from the committed package help. **Intercept-arm commands** are advanced commands handled
-before the dispatcher; each owns its own `--help`, rendered live from its parser here.
+The **Command syntax** section embeds the committed package help for every visible command. \
+The route registry determines section order and the help generator derives each artifact \
+from its parser factory.
 
 Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`,
 `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`,
@@ -288,83 +282,20 @@ def lint_editorial(text: str) -> list[str]:
     return findings
 
 
-def _resolve_factory(ref: str):
-    """Import and return the ``"module:attr"`` parser factory referenced by a route."""
-    module_name, _, attr = ref.partition(":")
-    module = importlib.import_module(module_name)
-    return getattr(module, attr)
-
-
-def _capitalize_usage(text: str) -> str:
-    """Capitalize argparse's lowercase ``usage:`` prefix (the byte-parity invariant)."""
-    if text.startswith("usage: "):
-        return "Usage: " + text[len("usage: ") :]
-    return text
-
-
-def _unwrap_usage(text: str) -> str:
-    """Join the wrapped usage block into a single line.
-
-    argparse's usage line-wrapping (notably of mutually-exclusive groups) changed in
-    Python 3.13, so a wrapped usage block renders different BYTES across the CI version
-    matrix (3.11/3.12/3.13). Collapsing the block to one logical line makes the rendered
-    intercept syntax byte-identical across versions — the CLI-reference drift gate runs in
-    every matrix cell, so version-stable output is a hard requirement."""
-    lines = text.split("\n")
-    end = 0
-    while end < len(lines) and lines[end].strip() != "":
-        end += 1
-    if end == 0:
-        return text
-    joined = " ".join([lines[0], *(line.strip() for line in lines[1:end])]).rstrip()
-    return "\n".join([joined, *lines[end:]])
-
-
-def _collapse_metavars(line: str) -> str:
-    """Collapse a repeated-metavar option invocation to the single-metavar form.
-
-    Python 3.12 renders ``--output {json,text}, -o {json,text}`` (the metavar repeated after
-    each option string); Python 3.13 renders ``--output, -o {json,text}`` (the metavar once).
-    Normalizing every version to the 3.13 form keeps the rendered intercept syntax
-    byte-identical across the CI version matrix. Only invocation lines (indented, starting
-    with an option string) are touched, so option help text is never rewritten."""
-    if not re.match(r"^\s+--?\S", line):
-        return line
-    prev = None
-    while prev != line:
-        prev = line
-        line = re.sub(r"(--?[\w-]+) (\S+), (--?[\w-]+) \2(?=[,\s]|$)", r"\1, \3 \2", line, count=1)
-    return line
-
-
-def _render_intercept(route) -> str:
-    """Render an intercept-group route's live ``--help`` from its parser factory.
-
-    The output is canonicalized (:func:`_unwrap_usage`, :func:`_collapse_metavars`) so it is
-    byte-identical across the 3.11/3.12/3.13 CI matrix that runs the drift gate."""
-    factory = _resolve_factory(route.parser_factory)
-    parser = factory(prog=f"rebar {route.name}")
-    text = _unwrap_usage(_capitalize_usage(parser.format_help()))
-    text = "\n".join(_collapse_metavars(line) for line in text.split("\n"))
-    return text.rstrip("\n")
-
-
 def _documented_routes() -> list:
-    """Live, non-hidden routes in registry order — one syntax section each."""
+    """Return visible routes that are not retired in registry order."""
     return [r for r in ROUTES if not r.retired and not r.hidden]
 
 
 def _syntax_body(route, help_mod) -> str:
-    """The fenced syntax body for one route: committed help bytes, or live parser help."""
-    if route.group != "intercept":
-        body = help_mod.subcommand_help(route.name)
-        if body is None:
-            raise ValueError(
-                f"help-backed route {route.name!r} has no committed help bytes — "
-                "regenerate with `python scripts/gen_cli_help.py` (byte-currency contract)."
-            )
-        return body.rstrip("\n")
-    return _render_intercept(route)
+    """Return one route's committed help bytes for its fenced syntax body."""
+    body = help_mod.subcommand_help(route.name)
+    if body is None:
+        raise ValueError(
+            f"documented route {route.name!r} has no committed help bytes. "
+            "Regenerate with `python scripts/gen_cli_help.py`."
+        )
+    return body.rstrip("\n")
 
 
 def _syntax_sections(help_mod) -> list[str]:
@@ -413,9 +344,9 @@ def render() -> str:
     lines.append("## Command syntax")
     lines.append("")
     lines.append(
-        f"One section per live command ({len(_documented_routes())} in total), in registry "
-        "order. Help-backed subcommands embed their committed package-help bytes verbatim; "
-        "intercept-arm commands render their live `--help` from the parser."
+        f"One section per visible command that is not retired "
+        f"({len(_documented_routes())} in total), in registry order. Every section embeds "
+        "its committed package help bytes."
     )
     lines.append("")
     lines.extend(_syntax_sections(_help))

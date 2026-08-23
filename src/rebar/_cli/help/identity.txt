@@ -1,0 +1,12 @@
+Usage: rebar identity [-h] {create,use,key} ...
+
+Create identities, select the active identity, and manage identity keys.
+
+positional arguments:
+  {create,use,key}
+    create          create an identity
+    use             set the self-identity pointer
+    key             add or revoke an identity key
+
+options:
+  -h, --help        show this help message and exit

@@ -1,0 +1,16 @@
+Usage: rebar jira-onboard [-h] [--url URL] [--user USER] [--project PROJECT] [--no-validate] [--reset] [--yes]
+
+Interactively configure Jira: detect existing settings, prompt for missing
+url/user/project, persist them to rebar.toml, and validate via bridge check-
+access. The secret JIRA_API_TOKEN stays an environment variable and is never
+written to a config file.
+
+options:
+  -h, --help         show this help message and exit
+  --url URL          Jira base URL (non-interactive)
+  --user USER        Jira account email (non-interactive)
+  --project PROJECT  default Jira project key (non-interactive)
+  --no-validate      skip the post-setup bridge check-access check
+  --reset            clear the persisted [jira] url/user/project and exit (no
+                     re-prompt)
+  --yes, -y          skip the --reset confirmation prompt

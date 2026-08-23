@@ -21,6 +21,7 @@ def build(*, prog: str) -> argparse.ArgumentParser:
     """Build the reconciler request parser bound to ``prog`` (``allow_abbrev=False``)."""
     parser = build_argument_parser(
         prog=prog,
+        description="Preview or synchronize Jira reconciliation for a repository.",
         allow_abbrev=False,
         formatter_class=argparse.HelpFormatter,
     )

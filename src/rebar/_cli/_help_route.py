@@ -10,16 +10,16 @@ request must never compose an operation snapshot or leak a ``.tickets-tracker`` 
 
 The pre-scan is deliberately narrow. It recognizes:
 
-* the leading global config-prefix token shape (``-c SECTION.KEY=VALUE`` / ``--config=…``),
-  which it skips lexically (never materializing config) to find the command spelling;
-* the top-level help words ``help`` / ``--help`` / ``-h`` (and ``help <command>``);
-* a help request (``--help`` / ``-h``) for a help-backed subcommand — honoring the nested
-  ``bridge`` family, whose children own their own help; and
-* an unknown subcommand.
+* It skips the leading global config prefix (``-c SECTION.KEY=VALUE`` or ``--config=…``)
+  without materializing configuration.
+* It recognizes the top-level help forms ``help``, ``--help``, ``-h``, and
+  ``help <command>``.
+* It recognizes a help request (``--help`` or ``-h``) for a visible subcommand that is not
+  retired while preserving child help for nested families.
+* It recognizes an unknown subcommand.
 
-Everything else — a real command invocation, and the advanced intercept commands that own
-their own ``--help`` (``review-plan --help`` stays argparse-owned) — falls through unchanged
-by returning ``None``.
+Everything else is a command invocation or a nested child help request. Those forms return
+``None`` and continue to dispatch.
 """
 
 from __future__ import annotations
@@ -29,23 +29,14 @@ import sys
 from rebar._cli import _help
 from rebar._cli._registry import ROUTES, Route, route_for
 
-# The nested-dispatch families whose children own their own help: only a LEADING help flag
-# asks for the family's own usage (``bridge preview --help`` / ``audit serve --help`` belong to
-# the child). Two shapes qualify and BOTH must be here, or a non-leading child ``--help`` is
-# wrongly served the family's pinned top-level artifact instead of falling through to the real
-# parser:
-#   * ``bridge`` and its hidden alias, which share the nested ``bridge`` parser factory (the
-#     flat compatibility arms in that group own no children, so a non-leading ``--help`` is
-#     THEIR own usage request and must be served — deriving from ``group == "bridge"`` wrongly
-#     swept them in); and
-#   * help-backed ``main()``-intercepts that own a subparser (``audit``'s ``{show, serve}``) —
-#     like ``reconcile`` they own their own subcommand parsing, but unlike a pure intercept
-#     they carry pinned help, so a non-leading child ``--help`` must fall through to argparse.
-# The pre-scan must not resolve a parser factory, so the nested intercepts can't be introspected
-# here and are named; ``test_nested_family_child_help_falls_through_to_argparse`` fails if this
-# list drifts from the true set of help-backed routes whose parser owns subcommands.
+# Nested dispatch families keep nonleading child help in their parser or handler. The bridge
+# family is derived from its shared parser factory. Pure intercept families are named because
+# the pre-scan cannot resolve parser factories. Config is explicit because ``validate`` is a
+# handler-dispatched pseudo-subcommand rather than an argparse subparser.
 _BRIDGE_FACTORY: str | None = next((r.parser_factory for r in ROUTES if r.name == "bridge"), None)
-_NESTED_INTERCEPTS: frozenset[str] = frozenset({"audit"})
+_NESTED_INTERCEPTS: frozenset[str] = frozenset(
+    {"audit", "config", "criteria", "identity", "llm", "prompt", "workflow"}
+)
 _NESTED_FAMILY: frozenset[str] = frozenset(
     r.name
     for r in ROUTES
@@ -57,8 +48,8 @@ _HIDDEN_ALIASES: frozenset[str] = frozenset(r.name for r in ROUTES if r.hidden)
 
 
 def _help_backed(route: Route) -> bool:
-    """Whether ``route`` carries a pinned help artifact (mirrors the generator's census)."""
-    return route.group != "intercept" and not route.hidden and not route.retired
+    """Return whether ``route`` is visible, not retired, and carries committed help."""
+    return not route.hidden and not route.retired
 
 
 def wants_help(rest: list[str]) -> bool:
@@ -80,9 +71,9 @@ def wants_help(rest: list[str]) -> bool:
 def help_requested(sub: str, rest: list[str]) -> bool:
     """Whether ``rebar <sub> …`` is a help request the pre-scan should serve itself.
 
-    Nested-dispatch families (the ``bridge`` group) own their children's help, so for them
-    only a LEADING ``--help``/``-h`` asks for the family's own usage. Every other command has
-    no nested help, so a ``--help``/``-h`` in any position before a ``--`` is a usage request.
+    Nested dispatch families render child help through their parser or handler. Only a
+    leading ``--help`` or ``-h`` asks for the family's usage. Every other command treats a
+    help flag before ``--`` as a usage request.
     """
     if sub in _NESTED_FAMILY:
         return bool(rest) and rest[0] in ("--help", "-h")
@@ -92,8 +83,8 @@ def help_requested(sub: str, rest: list[str]) -> bool:
 def emit_subcommand_help(sub: str) -> int:
     """Print ``sub``'s pinned usage.
 
-    Known (help-backed) subcommand → stdout, exit 0. Otherwise → error + blank + overview all
-    to stderr, exit 1.
+    A known visible subcommand writes help to stdout and returns zero. An unknown subcommand
+    writes an error and the overview to stderr and returns one.
     """
     text = _help.subcommand_help(sub)
     if text is not None:
@@ -141,8 +132,8 @@ def pre_scan(argv: list[str]) -> int | None:
     """Serve a help/overview/unknown request from committed bytes, or ``None`` to fall through.
 
     Runs BEFORE any operation snapshot, config materialization, store mount, handler/factory
-    resolution, or optional import. Returns the process exit code when it handled the request,
-    else ``None`` (a real command, or an intercept command that owns its own ``--help``).
+    resolution, or optional import. It returns the process exit code when it handles the
+    request. It returns ``None`` for a command invocation or nested child help request.
     """
     residual = _strip_config_prefix(argv)
     if residual is None:

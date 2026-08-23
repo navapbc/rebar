@@ -1,0 +1,12 @@
+Usage: rebar trusted-env add <env_id> <public_key> [--root <path>]
+rebar trusted-env revoke <env_id> <public_key-or-index> [--root <path>]
+
+Add or revoke trusted environment keys with ticket log position anchors.
+
+positional arguments:
+  {add,revoke}
+  env_id
+  target        <public_key> for add; <public_key-or-index> for revoke
+
+options:
+  --root ROOT   repo root (default: cwd); resolves the ticket store

@@ -36,15 +36,12 @@ _RETIRED_BRIDGE_COMMANDS = ("purge-bridge",)
 def _routable_subcommands() -> frozenset[str]:
     """The canonical subcommands the registry routes (won't hit the unknown error).
 
-    RP-05 S5: enumerated from the route registry via ``derive_policy_sets`` + route
-    attributes rather than reconstructing the ``_cli`` policy frozensets by hand. The
-    routable-with-pinned-help class is exactly the live, non-hidden, non-intercept
-    routes (the intercept class owns its own ``--help`` and carries no ``help/*.txt``)."""
+    RP-05 S5 derives this set from route attributes instead of reconstructing router policy
+    sets. Every visible route that is not retired has committed help.
+    """
     from rebar._cli._registry import ROUTES
 
-    return frozenset(
-        r.name for r in ROUTES if not r.retired and not r.hidden and r.group != "intercept"
-    )
+    return frozenset(r.name for r in ROUTES if not r.hidden and not r.retired)
 
 
 def _overview_listed() -> frozenset[str]:
@@ -225,3 +222,35 @@ def test_shipped_enumeration_excludes_untracked_build_artifacts(tmp_path: Path) 
 
     assert [path.relative_to(tmp_path).as_posix() for path in found] == ["src/rebar/cli.py"]
     assert artifact not in found
+
+
+def test_visible_intercept_help_is_served_before_mount_or_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both help forms use committed bytes before store mount or command dispatch."""
+    from rebar import _cli
+    from rebar._cli._registry import ROUTES
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("help reached the operation path")
+
+    monkeypatch.setenv("REBAR_ROOT", str(tmp_path))
+    monkeypatch.setattr(_cli, "ensure_store_mounted_best_effort", forbidden)
+    monkeypatch.setattr(_cli, "_dispatch", forbidden)
+
+    routes = [
+        route
+        for route in ROUTES
+        if route.group == "intercept" and not route.hidden and not route.retired
+    ]
+    assert routes
+    for route in routes:
+        artifact = _REPO_ROOT / "src" / "rebar" / "_cli" / "help" / f"{route.name}.txt"
+        assert artifact.is_file(), route.name
+        expected = artifact.read_text(encoding="utf-8")
+        for argv in (["help", route.name], [route.name, "--help"]):
+            capsys.readouterr()
+            assert _cli.main(argv) == 0
+            streams = capsys.readouterr()
+            assert streams.out == expected
+            assert streams.err == ""

@@ -137,11 +137,15 @@ def test_help_and_unknown_subcommands_do_not_mount(
     clone, _tid = clone_with_origin_tickets
     _use_clone(clone, monkeypatch)
 
-    for args in ([], ["no-such-subcommand"], ["help"], ["--help"], ["review-plan", "--help"]):
-        try:
-            main(args)
-        except SystemExit:  # argparse-owned help (e.g. review-plan --help) exits directly
-            pass
+    cases = (
+        ([], 1),
+        (["no-such-subcommand"], 1),
+        (["help"], 0),
+        (["--help"], 0),
+        (["review-plan", "--help"], 0),
+    )
+    for args, expected_code in cases:
+        assert main(args) == expected_code
         capsys.readouterr()
         assert not (clone / ".tickets-tracker").exists(), f"{args!r} mounted the store"
 

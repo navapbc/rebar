@@ -85,8 +85,9 @@ def test_flat_bridge_family_serves_pinned_help_for_nonleading_flag(
 ) -> None:
     """A FLAT compatibility command in the ``bridge`` group owns no nested children, so a
     non-leading ``--help`` is ITS OWN usage request and must be served from the pinned,
-    capitalized artifact — not fall through to argparse's live lowercase ``usage: rebar`` with
-    the wrong prog. Regression for the ``_NESTED_FAMILY`` over-inclusion (deriving the set from
+    capitalized artifact instead of falling through to argparse's lowercase ``usage: rebar``
+    with the wrong program name. Regression for the ``_NESTED_FAMILY`` over-inclusion
+    (deriving the set from
     ``group == "bridge"`` wrongly swept in the flat, non-nested arm)."""
     from rebar._cli._registry import ROUTES
 
@@ -100,15 +101,34 @@ def test_flat_bridge_family_serves_pinned_help_for_nonleading_flag(
     assert out.startswith(f"Usage: rebar {flat}"), out[:80]
 
 
-def _help_backed_nested_families() -> list[tuple[str, str]]:
-    """Every ``(command, first_child)`` for a HELP-BACKED route whose parser owns SUBCOMMANDS.
+@pytest.mark.parametrize("child", ["create", "use", "key"])
+def test_identity_child_parser_owns_help(child: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """Each identity child parser renders its own help and exits successfully."""
+    from rebar._cli._parsers.advanced.identity import build
 
-    Resolved from the registry by building the parser (allowed in a test, forbidden in the
-    pre-scan, which must not resolve a factory) so the test never hardcodes a command and
-    can't rot if one is renamed. "Help-backed" (``group != "intercept"``, not hidden/retired)
-    is the exact predicate the pre-scan uses to decide it serves a route's pinned help, so
-    this is precisely the class whose nested children the pre-scan can wrongly intercept
-    (``bridge`` and the ``audit`` main()-intercept today)."""
+    parser = build(prog="rebar identity")
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args([child, "--help"])
+
+    assert exc_info.value.code == 0
+    first_line = capsys.readouterr().out.splitlines()[0]
+    assert first_line.startswith(f"usage: rebar identity {child}")
+
+
+def test_config_validate_handler_owns_child_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The config validate handler renders child help and exits successfully."""
+    with pytest.raises(SystemExit) as exc_info:
+        _cli.main(["config", "validate", "--help"])
+
+    assert exc_info.value.code == 0
+    first_line = capsys.readouterr().out.splitlines()[0]
+    assert first_line.startswith("usage: rebar config validate")
+
+
+def _help_backed_nested_families() -> list[tuple[str, str]]:
+    """Return every child of each live visible route with populated subparsers."""
     import argparse
     import importlib
 
@@ -116,14 +136,14 @@ def _help_backed_nested_families() -> list[tuple[str, str]]:
 
     out: list[tuple[str, str]] = []
     for r in ROUTES:
-        help_backed = r.group != "intercept" and not r.hidden and not r.retired
+        help_backed = not r.hidden and not r.retired
         if not (help_backed and r.parser_factory):
             continue
         module_name, attr = r.parser_factory.split(":")
         parser = getattr(importlib.import_module(module_name), attr)(prog=f"rebar {r.name}")
         subs = next((a for a in parser._actions if isinstance(a, argparse._SubParsersAction)), None)
         if subs is not None and subs.choices:
-            out.append((r.name, sorted(subs.choices)[0]))
+            out.extend((r.name, child) for child in sorted(subs.choices))
     return out
 
 
@@ -137,8 +157,16 @@ def test_nested_family_child_help_falls_through_to_argparse(
     own options). Iterates the whole class so a future nested family omitted from
     ``_NESTED_FAMILY`` also trips this. Regression: ``_NESTED_FAMILY`` was derived only from the
     ``bridge`` parser factory, so ``audit``'s children were wrongly swept into the pre-scan."""
+    from rebar._cli import _help_route
+
     families = _help_backed_nested_families()
     assert families, "expected at least the bridge and audit nested families"
+    family_names = {command for command, _child in families}
+    expected_names = _help_route._NESTED_FAMILY - _help_route._HIDDEN_ALIASES - {"config"}
+    assert family_names == expected_names
+    assert _help_route._NESTED_INTERCEPTS == frozenset(
+        {"audit", "config", "criteria", "identity", "llm", "prompt", "workflow"}
+    )
 
     for cmd, child in families:
         capsys.readouterr()
@@ -149,6 +177,24 @@ def test_nested_family_child_help_falls_through_to_argparse(
         out = capsys.readouterr().out
         assert rc == 0, (cmd, child, rc)
         assert f"{cmd} {child}" in out.splitlines()[0], (cmd, child, out[:120])
+
+
+def test_config_validate_child_help_reaches_its_parser(
+    rebar_repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Config validate help comes from the handler-owned child parser."""
+    from rebar._cli._parsers.advanced.config import build_validate
+
+    expected = build_validate(prog="rebar config validate").format_help()
+    try:
+        rc: object = _cli.main(["config", "validate", "--help"])
+    except SystemExit as exc:
+        rc = exc.code
+
+    streams = capsys.readouterr()
+    assert rc == 0
+    assert streams.out == expected
+    assert streams.err == ""
 
 
 def test_help_behind_a_config_prefix_is_served_without_write(
