@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/config_result.schema.json",
+  "title": "ConfigResult",
+  "description": "Result of `rebar config --output json`. It contains the resolved typed configuration, the source layer that supplied each value, and the discovered project and user configuration files. `project_config` is null when no project configuration exists. `precedence` lists layers from lowest to highest priority. Secret values are not part of the typed configuration. Configuration errors exit 1 and emit no JSON.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["config", "sources", "project_config", "user_config", "precedence"],
+  "properties": {
+    "config": {
+      "type": "object",
+      "description": "Resolved core configuration, keyed by section and field.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "$ref": "#/$defs/config_value" }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "description": "Winning source layer for every value in `config`, with the same section and field structure.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": { "$ref": "#/$defs/source_layer" }
+      }
+    },
+    "project_config": {
+      "type": ["object", "null"],
+      "description": "Discovered project configuration file, or null when none exists.",
+      "required": ["path", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "type": "string", "enum": ["toml", "pyproject"] }
+      }
+    },
+    "user_config": {
+      "type": "object",
+      "description": "User configuration path and whether that file exists.",
+      "required": ["path", "exists"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string" },
+        "exists": { "type": "boolean" }
+      }
+    },
+    "precedence": {
+      "type": "array",
+      "description": "Configuration layers from lowest to highest priority. The order is default, user, project, env, and cli.",
+      "items": { "$ref": "#/$defs/source_layer" },
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "source_layer": {
+      "type": "string",
+      "enum": ["default", "user", "project", "env", "cli"]
+    },
+    "config_value": {
+      "type": ["string", "number", "boolean", "null", "array"],
+      "items": { "type": "string" }
+    }
+  }
+}

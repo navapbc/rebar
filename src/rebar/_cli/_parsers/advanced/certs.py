@@ -24,7 +24,11 @@ def build_trusted_env(*, prog: str) -> argparse.ArgumentParser:
     from rebar._commands.trusted_env_cmd import _USAGE
 
     parser = build_argument_parser(
-        prog=prog, usage=_USAGE, add_help=False, formatter_class=argparse.HelpFormatter
+        prog=prog,
+        usage=_USAGE,
+        description="Add or revoke trusted environment keys with ticket log position anchors.",
+        add_help=False,
+        formatter_class=argparse.HelpFormatter,
     )
     parser.add_argument("verb", choices=("add", "revoke"))
     parser.add_argument("env_id")

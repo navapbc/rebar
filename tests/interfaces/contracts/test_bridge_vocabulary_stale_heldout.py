@@ -39,6 +39,8 @@ _COMPATIBILITY_FILES = {
     "src/rebar/_cli/_registry.py",
     "src/rebar/_cli/help/bridge-fsck.txt",
     "src/rebar/_cli/help/bridge-probe.txt",
+    "src/rebar/_cli/help/jira-onboard.txt",
+    "src/rebar/_cli/help/overview.txt",
     "src/rebar/_engine_support/bridge_fsck.py",
     "scripts/gen_cli_reference.py",
     "scripts/gen_cli_help.py",

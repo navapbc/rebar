@@ -44,6 +44,7 @@ __all__ = [
     "CODE_REVIEW_VERDICT",
     "COMMON",
     "COMPLETION_VERDICT",
+    "CONFIG_RESULT",
     "CONTRACT_SCHEMAS",
     "CREATE_RESULT",
     "DELETE_RESULT",
@@ -72,6 +73,7 @@ __all__ = [
     "SEARCH_RESULT",
     "SEARCH_RESULT_LLM",
     "SIGN_RESULT",
+    "SIGN_REVIEW_RESULT",
     "SUMMARY",
     "TICKET_DIGEST",
     # name constants
@@ -118,6 +120,7 @@ DELETE_RESULT = "delete_result"
 GATE_RESULT = "gate_result"
 SUMMARY = "summary"
 FSCK = "fsck"
+CONFIG_RESULT = "config_result"
 # graph — output of `rebar doctor`: blocking edges that disagree with the
 # structural link rule, plus their repair disposition after a `--repair` pass.
 DOCTOR = "doctor"
@@ -165,6 +168,7 @@ CODE_REVIEW_VERDICT = "code_review_verdict"
 # signing.py — the persisted SIGNATURE record (`rebar sign`) and the uniform
 # verify verdict (`rebar verify-signature`), both over `--output json`.
 SIGN_RESULT = "sign_result"
+SIGN_REVIEW_RESULT = "sign_review_result"
 VERIFY_SIGNATURE_RESULT = "verify_signature_result"
 # _io/export_ndjson — the per-line shape of `rebar export` NDJSON output. Not in
 # OUTPUT_SCHEMAS (export emits NDJSON, not the standard --output json envelope);
@@ -340,17 +344,17 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     "summary": SUMMARY,
     "audit": AUDIT_TRAIL,
     "metrics": METRICS,
+    "config": CONFIG_RESULT,
     "fsck": FSCK,
     "doctor": DOCTOR,
-    # code review (`rebar review-code` / rebar.llm.review_code): synthetic key, no CLI
-    # help arm (review-code is an intercept, so the --output coverage guard never drives
-    # it live) — registered so the every-schema-file-is-wired guard sees review_result is
-    # still produced. The removed `rebar review` verb and `review_ticket` library/MCP
-    # surfaces used to carry this wiring (pre-1.0 breaking pass #3).
+    # Code review output uses the review result schema. CI does not execute this command
+    # because it invokes a model. The driver exemption is recorded by the CLI output guard.
     "review_code": REVIEW_RESULT,
-    # completion-verification op: like `review`, no CLI help arm (so the --output
-    # coverage guard never drives it live) and the MCP tool is NO_SCHEMA_EXEMPT;
-    # registered here so the every-schema-file-is-wired guard sees completion_verdict.
+    # Specification scans share the review result shape. CI does not execute this command
+    # because it invokes a model. The driver exemption is recorded by the CLI output guard.
+    "scan_spec": REVIEW_RESULT,
+    # Completion verification has committed CLI help and a registered schema. CI does not
+    # execute the command because it invokes a model.
     "verify_completion": COMPLETION_VERDICT,
     # verify-identity merge-gate JSON report (AC7): synthetic key, no CLI help arm (the
     # --output coverage guard never drives it live); registered so the every-schema-file-is-
@@ -366,11 +370,12 @@ OUTPUT_SCHEMAS: dict[str, str] = {
     # Epic-close bug screen (4b54): synthetic key, no CLI arm; wired so the schema-coverage
     # guard sees epic_bug_screen_verdict and the runner validates the screen's output.
     "epic_bug_screen": EPIC_BUG_SCREEN_VERDICT,
-    # plan-review gate: like `review`/`verify_completion`, no CLI help arm (the
-    # --output coverage guard never drives it live) and the MCP tool is
-    # NO_SCHEMA_EXEMPT; registered here so the every-schema-file-is-wired guard sees
-    # plan_review_verdict and the CLI/library --output json path is pinned.
+    # The plan review command has committed CLI help and a registered schema. CI does not
+    # execute the command because it invokes a model.
     "review_plan": PLAN_REVIEW_VERDICT,
+    # The re-sign operation runs without a model. Its CLI result is validated on a fixture
+    # store by the output coverage guard.
+    "sign_review": SIGN_REVIEW_RESULT,
     # Read-only plan-review attestation currency query (ticket 86c8): keyed by MCP tool
     # name (like get_workflow_status / grounding_info) rather than a CLI arm — the CLI
     # reaches it through `review-plan --status`, not its own subcommand, so the --output

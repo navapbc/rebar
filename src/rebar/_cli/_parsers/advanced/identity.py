@@ -18,13 +18,14 @@ from rebar._cli._parser import build_argument_parser
 def build(*, prog: str) -> argparse.ArgumentParser:
     """Build the ``rebar identity`` nested parser bound to ``prog``."""
     parser = build_argument_parser(
-        prog=prog, formatter_class=argparse.HelpFormatter, allow_abbrev=False
+        prog=prog,
+        description="Create identities, select the active identity, and manage identity keys.",
+        formatter_class=argparse.HelpFormatter,
+        allow_abbrev=False,
     )
     subs = parser.add_subparsers(dest="verb", metavar="{create,use,key}")
 
-    create = subs.add_parser(
-        "create", help="create an identity", add_help=False, allow_abbrev=False
-    )
+    create = subs.add_parser("create", help="create an identity", allow_abbrev=False)
     create.add_argument("--name", help="the identity's display name")
     create.add_argument("--email", help="the identity's email")
     create.add_argument(
@@ -43,14 +44,10 @@ def build(*, prog: str) -> argparse.ArgumentParser:
     )
     create.add_argument("--self", action="store_true", help="also point self-identity here")
 
-    use = subs.add_parser(
-        "use", help="set the self-identity pointer", add_help=False, allow_abbrev=False
-    )
+    use = subs.add_parser("use", help="set the self-identity pointer", allow_abbrev=False)
     use.add_argument("id", help="the identity to use")
 
-    key = subs.add_parser(
-        "key", help="add or revoke an identity key", add_help=False, allow_abbrev=False
-    )
+    key = subs.add_parser("key", help="add or revoke an identity key", allow_abbrev=False)
     key.add_argument("action", choices=("add", "revoke"))
     key.add_argument("id", help="the identity to modify")
     key.add_argument("public_key", metavar="pubkey", help="the authorized-keys line")

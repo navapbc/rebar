@@ -1,0 +1,30 @@
+Usage: rebar verify-completion [-h] [--graph | --no-graph] [--output {json,text}] [--check] [--ref REF] [--source {attested,local}] [ticket_id]
+
+Run the completion-verifier agent on a ticket and emit a PASS/FAIL verdict that
+its completion requirements (acceptance/success/close criteria, definitions of
+done; for bugs, that the bug is resolved) are demonstrably met by the
+implementation. Needs the 'agents' extra + a model API key; see `rebar verify-
+completion --check`.
+
+positional arguments:
+  ticket_id             ticket id, short id, or alias
+
+options:
+  -h, --help            show this help message and exit
+  --graph, --no-graph   include the ticket's descendants; use --no-graph to
+                        force own-criteria verification (default: auto — on for
+                        epics, off otherwise)
+  --output, -o {json,text}
+  --check               print backend/credential availability and exit
+  --ref REF             branch | tag | SHA to verify against (default:
+                        origin/main; configurable via REBAR_GATE_REF /
+                        [snapshot].ref) — pass --ref HEAD when the review
+                        depends on code you have committed locally but not yet
+                        landed on the default ref (a stacked change or feature
+                        branch): the default ref reads a snapshot predating that
+                        code, so symbols it adds read as 'does not exist' false
+                        findings
+  --source {attested,local}
+                        attested (default): verify a snapshot pinned at --ref
+                        (signs, records verified_at_sha); local: read the in-
+                        place checkout (dirty allowed, never signs)

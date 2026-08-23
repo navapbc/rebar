@@ -88,12 +88,13 @@ def _enrich(rest: list[str]) -> int:
 
 
 def _identity_intercept(rest: list[str]) -> int:
-    """``rebar identity`` handler — full-init (unless a help form) then dispatch.
+    """Initialize identity commands except help requests, then dispatch.
 
-    Preserves the pre-cutover ladder behavior: the store is initialized for a real
-    invocation (and the bare/empty form) but NOT for an explicit help request, which
-    identity_cli renders itself."""
-    if not rest or rest[0] not in ("--help", "-h", "help"):
+    The bare form and command invocations initialize the store. Top-level and child help
+    requests do not initialize or mount it.
+    """
+    help_form = bool(rest) and (rest[0] == "help" or _help_route.wants_help(rest))
+    if not rest or not help_form:
         ensure_initialized(init_only=False)
     from rebar._commands import identity as _identity
 
@@ -419,8 +420,8 @@ def _main_dispatch(argv: list[str]) -> int:
     # Canonical help / overview / unknown pre-scan (RP-05 S2d): answer a help, bare-overview,
     # or unknown-subcommand request from the committed help artifacts BEFORE any operation
     # snapshot, config materialization, store mount, handler/factory resolution, or optional
-    # import. Returns an exit code when it served the request; None means fall through to the
-    # real dispatch below (a genuine command, or an intercept command that owns its --help).
+    # import. An exit code means the request was served. None means a command invocation or a
+    # nested child help request continues to dispatch.
     _served = _help_route.pre_scan(argv)
     if _served is not None:
         return _served

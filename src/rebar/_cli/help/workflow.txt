@@ -1,0 +1,17 @@
+Usage: rebar workflow [-h] {new,validate,run,show,edit,status,result} ...
+
+Author, validate, and run git-native workflows (.rebar/workflows/*.yaml).
+
+positional arguments:
+  {new,validate,run,show,edit,status,result}
+    new                 scaffold a new valid skeleton workflow
+    validate            validate/lint a workflow file
+    run                 execute a workflow (sync)
+    show                render a workflow as a Mermaid graph
+    edit                open a workflow in the ephemeral bpmn-js visual editor
+                        (edit-time)
+    status              read a run's status via replay
+    result              read a run's result via replay
+
+options:
+  -h, --help            show this help message and exit

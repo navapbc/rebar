@@ -122,7 +122,7 @@ def render_missing(tried: list[str]) -> str:
     )
 
 
-# ── CLI (pure intercept — owns its own --help; no help/*.txt, no dispatch arm) ────
+# Registry-routed CLI handler with top-level help served from committed bytes.
 
 
 def _read_message(args: argparse.Namespace) -> tuple[str, bool]:

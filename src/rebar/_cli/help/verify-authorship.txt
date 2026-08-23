@@ -1,0 +1,17 @@
+Usage: rebar verify-identity [--all | --base <ref>] [--require-authenticated] [--since <ref>] [--format {text,json}] [--root <path>]
+
+Verify authenticated authorship of the store's mutating events against each author identity's epoch-scoped keyring (the authorship merge-gate; also available under the back-compat alias `rebar verify-authorship`). Advisory unless identity.require_authenticated (or --require-authenticated) is on, in which case any ENFORCED event that is not `verified` fails the gate (non-zero exit). Events whose introducing commit predates --since / identity.enforce_since are grandfathered: reported but never fail the gate.
+
+options:
+  -h, --help            show this help message and exit
+  --all                 scan the whole store (default)
+  --base BASE           only events changed in <base>..HEAD on the tracker
+                        branch
+  --require-authenticated
+                        force enforcement on regardless of
+                        identity.require_authenticated config
+  --since SINCE         grandfather boundary: only enforce events at/descending
+                        this ref (default: identity.enforce_since)
+  --format {text,json}  output format (default: text). json prints only a report
+                        array to stdout
+  --root ROOT           repo root (default: cwd); resolves the ticket store

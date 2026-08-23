@@ -57,10 +57,13 @@ Structured via `--output json`:
 | `summary`                        | `summary`                 |
 | `fsck`                           | `fsck`                    |
 | `review_code` (CLI/library)      | `review_result`           |
+| `scan-spec` (CLI/library)        | `review_result`           |
 | `verify-completion` (CLI/library) | `completion_verdict`     |
 | `grounding-info`                 | `grounding_info`          |
 | `review-plan`                    | `plan_review_verdict`     |
 | `review-code-gate`               | `code_review_verdict`     |
+| `config`                         | `config_result`           |
+| `sign-review` (CLI/library)      | `sign_review_result`      |
 | `sign`                           | `sign_result`             |
 | `verify-signature`               | `verify_signature_result` |
 | `verify-signature` (not found)   | `error_envelope`          |

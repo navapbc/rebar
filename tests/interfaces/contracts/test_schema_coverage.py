@@ -115,6 +115,17 @@ CLI_OUTPUT_DRIVERS: dict[str, object] = {
     "delete": lambda s: ["delete", s["doomed"], "--user-approved"],
     "audit": lambda s: ["audit", "show", s["task"]],
     "metrics": lambda s: ["metrics", "--since", "2026-01-01", "--until", "2026-07-01"],
+    "config": lambda s: ["config", "--root", s["repo"]],
+    "sign-review": lambda s: ["sign-review", s["task"]],
+}
+
+# These advertisers have registered schemas but cannot run in the fixture-store test because
+# each operation invokes a model.
+CLI_OUTPUT_DRIVER_EXEMPTIONS: dict[str, str] = {
+    "review-code": "Invokes model-backed code review over repository content.",
+    "review-plan": "Invokes a multi-pass model review and may persist an attestation.",
+    "scan-spec": "Invokes model-backed specification analysis over ticket content.",
+    "verify-completion": "Invokes model-backed completion analysis over repository content.",
 }
 
 
@@ -136,17 +147,34 @@ _OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP = {"audit", "bridge-fsck"}
 
 
 def test_every_cli_output_advertiser_is_classified() -> None:
-    """Mechanical completeness: every CLI --output advertiser has a real driver."""
+    """Every CLI output advertiser is driven offline or has a model exemption."""
     advertised = _output_advertisers()
-    classified = set(CLI_OUTPUT_DRIVERS)
-    unclassified = advertised - classified
-    assert not unclassified, (
-        f"CLI commands advertise --output but are not classified for real-output "
-        f"validation: {sorted(unclassified)} — add a driver to CLI_OUTPUT_DRIVERS."
+    driven = set(CLI_OUTPUT_DRIVERS)
+    exempt = set(CLI_OUTPUT_DRIVER_EXEMPTIONS)
+    blank_reasons = sorted(
+        name
+        for name, reason in CLI_OUTPUT_DRIVER_EXEMPTIONS.items()
+        if not isinstance(reason, str) or not reason.strip()
     )
-    stale = classified - advertised - _OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP
-    assert not stale, (
-        f"CLI_OUTPUT_DRIVERS lists commands that no longer advertise --output: {sorted(stale)}"
+    assert not blank_reasons, f"CLI output driver exemptions need nonblank reasons: {blank_reasons}"
+    overlap = driven & exempt
+    assert not overlap, (
+        f"CLI output advertisers cannot be both driven and exempt: {sorted(overlap)}"
+    )
+    unclassified = advertised - driven - exempt
+    assert not unclassified, (
+        "CLI commands advertise --output but lack an offline driver or a model exemption: "
+        f"{sorted(unclassified)}"
+    )
+    stale_drivers = driven - advertised - _OUTPUT_ABSENT_FROM_TOP_LEVEL_HELP
+    assert not stale_drivers, (
+        "CLI_OUTPUT_DRIVERS lists commands that no longer advertise --output: "
+        f"{sorted(stale_drivers)}"
+    )
+    stale_exemptions = exempt - advertised
+    assert not stale_exemptions, (
+        "CLI_OUTPUT_DRIVER_EXEMPTIONS lists commands that no longer advertise --output: "
+        f"{sorted(stale_exemptions)}"
     )
 
 
@@ -196,7 +224,7 @@ def _seed_for_cli(repo: Path) -> dict:
     }
 
 
-_DRIVEN = sorted(CLI_OUTPUT_DRIVERS)
+_DRIVEN = sorted(set(CLI_OUTPUT_DRIVERS) - set(CLI_OUTPUT_DRIVER_EXEMPTIONS))
 
 
 @pytest.mark.parametrize("cmd", _DRIVEN)

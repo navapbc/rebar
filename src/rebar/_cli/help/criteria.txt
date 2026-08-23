@@ -1,0 +1,10 @@
+Usage: rebar criteria [-h] {eval} ...
+
+Evaluate + calibrate review criteria.
+
+positional arguments:
+  {eval}
+    eval      run a criterion's calibration fixtures live
+
+options:
+  -h, --help  show this help message and exit

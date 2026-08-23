@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/navapbc/rebar/schemas/sign_review_result.schema.json",
+  "title": "SignReviewResult",
+  "description": "Result of `rebar sign-review <ticket_id> --output json` and the library sign review operation. The operation makes no model call and attempts to persist a plan review attestation from the latest recorded PASS. Every result reports whether signing succeeded and why. A success includes signature metadata and exits 0. A refusal omits signature, may include structured diagnostics, and exits 1.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["ok", "signed", "ticket_id", "verdict", "reason"],
+  "properties": {
+    "ok": {
+      "type": "boolean",
+      "description": "True when the attestation was persisted."
+    },
+    "signed": {
+      "type": "boolean",
+      "description": "True when this operation persisted the attestation."
+    },
+    "ticket_id": { "type": "string" },
+    "verdict": {
+      "type": ["string", "null"],
+      "description": "Recorded review verdict or recovery classifier. It is null when no review sidecar exists."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Explanation of the result."
+    },
+    "signature": {
+      "type": "object",
+      "description": "Metadata returned after a successful re-sign.",
+      "additionalProperties": true,
+      "required": ["signed", "key_id", "head_sha"],
+      "properties": {
+        "signed": { "const": true },
+        "key_id": { "type": ["string", "null"] },
+        "head_sha": { "type": ["string", "null"] }
+      }
+    },
+    "health": {
+      "type": "object",
+      "description": "Optional phase compatibility or related ticket material health for a refusal.",
+      "additionalProperties": true,
+      "properties": {
+        "phase_status": {
+          "type": "string",
+          "enum": ["compatible", "incompatible", "malformed"]
+        },
+        "pin_status": {
+          "type": "string",
+          "enum": ["current", "current-no-relationships", "stale-pin-drift", "stale-pin-missing", "malformed-pin", "legacy-unpinned"]
+        },
+        "enforced": { "type": "boolean" },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["canonical_id", "role", "pinned_fingerprint", "current_fingerprint", "pin_status"],
+            "properties": {
+              "canonical_id": { "type": "string" },
+              "role": { "type": "string", "enum": ["child", "prerequisite"] },
+              "pinned_fingerprint": { "type": "string" },
+              "current_fingerprint": { "type": ["string", "null"] },
+              "pin_status": { "type": "string", "enum": ["current", "stale-pin-drift", "stale-pin-missing", "malformed-pin"] }
+            }
+          }
+        }
+      }
+    },
+    "child_impact_state_error": {
+      "type": "object",
+      "description": "Diagnostic emitted when the recorded review generation lacks a complete direct child snapshot.",
+      "additionalProperties": true,
+      "required": ["event", "reason"],
+      "properties": {
+        "event": { "const": "plan_review_child_impact_snapshot_invalid" },
+        "reason": { "type": "string" },
+        "child_id": { "type": "string" }
+      }
+    },
+    "plan_relation_snapshot_error": {
+      "type": "object",
+      "description": "Diagnostic emitted when a plan relationship cannot be read while signing.",
+      "additionalProperties": true,
+      "required": ["event", "reason", "canonical_id", "reference"],
+      "properties": {
+        "event": { "const": "plan_relation_snapshot_error" },
+        "reason": {
+          "type": "string",
+          "enum": ["missing-target", "ambiguous-reference", "malformed-reference", "reducer-error", "canonical-id-mismatch", "store-read-failure"]
+        },
+        "canonical_id": { "type": ["string", "null"] },
+        "reference": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

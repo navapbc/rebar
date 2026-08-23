@@ -1,0 +1,22 @@
+Usage: rebar remote-cert <ticket-id> {completion-verifier|plan-review} [--root <path>]
+
+``rebar remote-cert <ticket-id> <kind>`` — request a trusted-environment op-cert
+(story ee0b). Routes a gate run to the trusted op-cert service at
+``verify.opcert_remote_url``: SigV4-signs the request with ambient AWS
+credentials, submits the async job, polls to a terminal status, and on a
+``PASS`` verdict PERSISTS the returned envelope + its bound fields as a
+``SIGNATURE`` event (the SAME record shape ``signing.sign_opcert_manifest``
+appends; auto-pushed with the tickets branch). This is safe because the envelope
+is self-authenticating — tampering with a bound value breaks the signature the
+merge gate (``rebar verify-opcert``) verifies. A non-PASS / error verdict exits
+non-zero. The remote path is entirely opt-in: unset ``verify.opcert_remote_url``
+→ a clear error, and NO local op-cert sign/verify path ever depends on it.
+
+positional arguments:
+  ticket_id             the ticket to certify
+  {completion-verifier,plan-review}
+                        the gate kind to run
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           repo root (default: cwd)

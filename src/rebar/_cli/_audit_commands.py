@@ -1,7 +1,7 @@
-"""``rebar audit`` — the audit read-layer CLI (story 46f0).
+"""Implement the audit read-layer CLI over :func:`rebar.audit.read.audit_trail`.
 
-A thin front-end over :func:`rebar.audit.read.audit_trail`. It owns its own ``--help`` (like
-the ``reconcile`` / ``review-plan`` intercepts) and exposes two subcommands:
+Top-level help is served from the committed parser artifact. The handler exposes two
+subcommands:
 
     rebar audit show <ticket> [--output json|text]
     rebar audit serve [--host 127.0.0.1] [--port 8765]

@@ -464,7 +464,7 @@ def _collect_range(tracker: str, base: str) -> list[_ScopedEvent]:
     return events
 
 
-# ── CLI (pure intercept — owns its own --help; no help/*.txt, no dispatch arm) ────
+# Registry-routed CLI handler with top-level help served from committed bytes.
 
 
 @guard_parse_errors
