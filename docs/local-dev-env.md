@@ -403,11 +403,10 @@ make format    # the ONLY target that rewrites files
 
 ### The per-test hang budget (300 s) and how to override it
 
-`[tool.pytest.ini_options]` sets `timeout = 300`, `timeout_method = "thread"` and
-`timeout_func_only = true`, so **`make test` and a bare local `pytest` carry the same
-per-test budget CI does**. Before this the budget lived only on the CI command lines, so a
-deadlocked test hung a local run indefinitely and the CI-only guard could rot with no local
-signal.
+`[tool.pytest.ini_options]` sets `timeout = 300` and `timeout_method = "thread"`, so
+**`make test` and a bare local `pytest` carry the same per-test budget CI does**. Before this
+the budget lived only on the CI command lines, so a deadlocked test hung a local run
+indefinitely and the CI-only guard could rot with no local signal.
 
 The value is sized to **dwarf** the slowest legitimate test, not to sit just above it. On
 the gating `ubuntu-latest, py3.13` CI leg — the only one adding `--cov=rebar` — about
@@ -416,15 +415,19 @@ under `-n 4 --dist worksteal`; a local unit-tier run cannot see that (no coverag
 no scripts tier, faster cores). A budget tight enough to clip them does **not** report
 `Failed: Timeout`: because `timeout_method = "thread"`, pytest-timeout expires a test with
 `os._exit(1)`, which kills the whole xdist worker (`node down: Not properly terminated`).
-`timeout_func_only` charges the budget to the test **body**, so a slow fixture cannot spend
-a test's allowance.
+The budget covers **fixture setup and teardown as well as the test body** — the ini
+deliberately does *not* set `timeout_func_only` (bug `797b-bbc4-01cf-42d5`): that key exempted
+fixture phases, which is exactly where the original incident hung (a teardown awaiting
+`queue.join()` under a 1200 s drain, bug `89d5-61da-b621-47f8`). pytest-timeout's upstream
+default is `False`, and its README treats `func_only` as a last-resort workaround.
 
-A test that must legitimately run longer overrides the ini with a marker **and a one-line
-comment naming why** — silent exemptions are not acceptable:
+A test that must legitimately run longer — including one whose **fixtures** are legitimately
+slow, since fixture time is charged to the test — overrides the ini with a marker **and a
+one-line comment naming why** — silent exemptions are not acceptable:
 
 ```python
 # timeout: drives a real 45 s subprocess handshake; there is no faster oracle.
-@pytest.mark.timeout(90, func_only=True)
+@pytest.mark.timeout(90)
 def test_something_genuinely_slow() -> None:
     ...
 ```
