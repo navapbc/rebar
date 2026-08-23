@@ -113,6 +113,31 @@ def test_region_roundtrips_a_synthetic_block() -> None:
 # ─────────────────────────── CONTENT INVARIANTS (held out) ─────────────────────
 
 
+def test_canonical_claim_guidance_covers_default_and_unassigned_states() -> None:
+    text = CANONICAL.read_text(encoding="utf-8")
+    assert "`rebar claim <id>`" in text
+    assert "--assignee <you>" not in text
+    assert "`ticket.default_assignee`" in text
+    assert "claimed ticket remains unassigned" in text
+
+
+def test_canonical_explicit_assignee_guidance_is_conditional_on_jira() -> None:
+    text = CANONICAL.read_text(encoding="utf-8")
+    assert "Jira-reconciled store" in text
+    assert "explicit override" in text
+    assert "email or accountId" in text
+
+
+def test_canonical_link_inventory_includes_causal_relation() -> None:
+    assert "`caused_by`" in CANONICAL.read_text(encoding="utf-8")
+
+
+def test_canonical_plan_review_orders_dependencies() -> None:
+    text = CANONICAL.read_text(encoding="utf-8")
+    assert "`rebar review-plan <id>`" in text
+    assert "prerequisites before dependents" in text
+
+
 def test_template_is_provider_neutral() -> None:
     """The client template carries no rebar-internal dev specifics."""
     text = TEMPLATE.read_text(encoding="utf-8")

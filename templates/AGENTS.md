@@ -43,10 +43,7 @@ list / search ──▶ ready ──▶ claim ──▶ (work) ──▶ transit
 2. **Create a ticket for new work** — `rebar create <type> "<title>"` (types: `task`,
    `story`, `bug`, `epic`). Capture the acceptance criteria in the description under an
    `## Acceptance Criteria` heading with `- [ ]` checklist items.
-3. **Claim it — before you touch code** — `rebar claim <id> --assignee <you>` atomically
-   moves the ticket `open → in_progress` and sets the assignee. If someone else already
-   holds it you get a `ConcurrencyError` / exit 10 — pick another ticket, don't force.
-   Never start editing against an unclaimed (`open`) ticket.
+3. **Claim before editing.** Run `rebar claim <id>`. It atomically moves the ticket from `open` to `in_progress`. When `ticket.default_assignee` is configured, claim applies that identity. When the setting is empty, the claimed ticket remains unassigned. Pass `--assignee` only for an explicit override. In a Jira-reconciled store, use an email or accountId that Jira can resolve. If another session holds the ticket, rebar returns `ConcurrencyError` with exit 10. Select another ticket and do not force the claim.
 4. **Record provenance** — when a task uncovers more work, `rebar create …` then
    `rebar link <new> <parent> discovered_from`, so the emergent-work trail lives in the
    store.
@@ -58,9 +55,7 @@ list / search ──▶ ready ──▶ claim ──▶ (work) ──▶ transit
 
 - **Hierarchy** is the `parent_id` chain (epic → story → task/bug), set with
   `create --parent <id>` / `edit --parent <id>` — **not** a link relation.
-- **Links** carry a required relation: `blocks`, `depends_on`, `relates_to`, `duplicates`,
-  `supersedes`, `discovered_from`. Blocking links (`blocks`/`depends_on`) are promoted up
-  the hierarchy so a dependency lands between comparable levels.
+- **Links.** Each link has one relation from `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from`, or `caused_by`. Blocking links using `blocks` or `depends_on` are promoted through the hierarchy so a dependency connects comparable levels.
 - **Tags** mutate via convergent add/remove deltas (`tag`/`untag`, or
   `edit --add-tag/--remove-tag/--set-tags`), so concurrent clones adding different tags
   both survive.
@@ -83,9 +78,7 @@ distinct sessions auto-rotate to distinct logs. Retrieve recent ones with
   "well-formed enough to dispatch," not "the content is good."
 - **Repo-wide health** — `rebar validate` scores the whole store (orphans, cycles,
   cross-epic child deps) and takes no ticket id.
-- **Optional review gates** — a project can enable an LLM plan-review gate on claim and/or
-  a completion-verifier on close (see your project's configuration); when on, a ticket
-  must earn the relevant attestation before it can be claimed or closed.
+- **Optional review gates.** A project can require an LLM plan review before claim, a completion verification before close, or both. When plan review is required, run `rebar review-plan <id>` and obtain a PASS before claim. Review prerequisites before dependents because a dependency change invalidates the dependent review attestation. Consult the project configuration for enabled gates.
 
 ### Working over MCP
 
