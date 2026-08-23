@@ -480,6 +480,7 @@ _NON_MUTATING = {
     "search_user_by_email": "READ (user/search); resolves an accountId, no write",
     "_iter_cursor_pages": "READ helper (pagination)",
     "_parse_acli_comments": "pure parse helper",
+    "_parse_comment_created": "pure parse helper (normalizes the create-comment return)",
     "_parse_paginated_comments": "pure parse helper",
     "_verify_created_issue": "READ-after-create verify helper (GET/search)",
     "_extract_parent_key": "pure parse helper",

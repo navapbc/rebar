@@ -546,7 +546,37 @@ def add_comment(
         "--json",
     ]
     result = acli_subprocess._run_acli(cmd, acli_cmd=acli_cmd)
-    return json.loads(result.stdout)
+    return _parse_comment_created(result.stdout)
+
+
+def _parse_comment_created(stdout: str) -> dict[str, Any]:
+    """Normalise ACLI ``comment create --json`` stdout to a COMMENT RESOURCE.
+
+    Ticket 3235-8aaf-e288-48f2: ``add_comment`` was the only ``--json`` consumer in
+    this module returning raw ``json.loads`` straight to its caller, handing it
+    ACLI's batch mutation envelope (``{"results": [...], "totalCount": N,
+    "successCount": N}``) while the declared contract and every consumer treat the
+    return as a created comment resource — the gap that shipped bug
+    aa7b-5e47-6d3d-4615 (dedup map never populated; ~205 re-posts/hour).
+
+    - A dict WITHOUT the envelope markers (``results``/``successCount``) is a
+      comment resource (the DC/REST-shaped ``{"id": ...}``) — returned verbatim.
+    - The batch envelope becomes ``{"id": None, "acli_envelope": <parsed>}``: an
+      explicit no-comment-id (ACLI echoes none for the ``comment`` verb), with the
+      envelope preserved under a clearly-named key so ``results[].id`` — the WORK
+      ITEM key, not a comment id — can never be mistaken for one. FAILURE
+      envelopes never reach here: ``_run_acli`` raises ``AcliMutationError`` via
+      ``_check_mutation_failure`` first (bug 44de).
+    - Any other shape raises, mirroring ``_verify_created_issue``'s loud failure,
+      rather than returning a silently-unusable payload.
+    """
+    parsed = json.loads(stdout)
+    if isinstance(parsed, dict):
+        if "results" not in parsed and "successCount" not in parsed:
+            return parsed
+        return {"id": None, "acli_envelope": parsed}
+    msg = f"ACLI comment create returned an unrecognised payload: {parsed!r}"
+    raise RuntimeError(msg)
 
 
 def _parse_acli_comments(parsed: Any) -> list[dict[str, Any]]:
