@@ -105,6 +105,10 @@ def test_write_is_idempotent(tmp_path, monkeypatch):
     n1 = mod.backfill(r, write=True)  # backfill must re-draw the link
     assert culprit in _caused_by(bug, r)
     assert n1 >= 1
+    # A backfilled edge comes from blame auto-derivation, so it must be marked
+    # "derived" (ticket 6536-367c) — never readable as a supplied attribution.
+    deps = [d for d in rebar.show_ticket(bug, repo_root=r)["deps"] if d["relation"] == "caused_by"]
+    assert [d.get("provenance") for d in deps] == ["derived"]
     n2 = mod.backfill(r, write=True)  # second run: link already active -> 0 new
     assert n2 == 0
     assert _caused_by(bug, r).count(culprit) == 1  # not duplicated

@@ -1,6 +1,6 @@
 """Bug-trends metrics lens (ticket b967).
 
-Five dimensions over the bug population, split into flow (respect
+Six dimensions over the bug population, split into flow (respect
 --since/--until, filtered on close time) and stock (point-in-time snapshots
 that deliberately ignore the CLI range):
 
@@ -12,6 +12,9 @@ STOCK dimensions (always point-in-time; ``since``/``until`` not accepted):
 - :func:`open_bug_age_days` — age distribution of open/in-progress bugs.
 - :func:`detected_by_distribution` — detection channel mix.
 - :func:`caused_by_fan_in` — which upstream tickets caused the most bugs.
+- :func:`caused_by_provenance` — supplied vs blame-derived caused_by edges
+  (ticket 6536-367c): explicit / derived / unknown counts, where unknown is
+  the pre-marker cohort.
 
 Design notes:
 - The MISSING close-class cohort is a labeled key inside the result, never
@@ -23,7 +26,7 @@ Design notes:
 - Stock dimensions are registered with adapters that never read ctx.since/
   ctx.until; this deviation from the CLI range is intentional and documented
   in the user guide.
-- All five registry adapters share ONE store scan per CLI run via
+- All six registry adapters share ONE store scan per CLI run via
   ``ctx.analysis_cache`` (:func:`_rows_for_ctx`); the public functions scan
   for themselves so direct library calls stay context-free.
 """
@@ -91,7 +94,8 @@ def _bug_rows(repo_root: Any) -> list[dict[str, Any]]:
     """Walk tracker dirs and return one row dict per bug ticket.
 
     Each row carries: id, status, created_at, close_class, closed_at,
-    detected_by, caused_by (list of target ids, unresolved targets included
+    detected_by, caused_by (list of edge dicts — target_id plus the provenance
+    marker, ``None`` for pre-marker events; unresolved targets included
     verbatim). Malformed ticket dirs are skipped, never raised.
     """
     rows: list[dict[str, Any]] = []
@@ -115,7 +119,7 @@ def _bug_rows(repo_root: Any) -> list[dict[str, Any]]:
                 "closed_at": _last_close_ts(ticket_dir) if status == "closed" else None,
                 "detected_by": state.get("detected_by"),
                 "caused_by": [
-                    d["target_id"]
+                    {"target_id": d["target_id"], "provenance": d.get("provenance")}
                     for d in (state.get("deps") or [])
                     if d.get("relation") == "caused_by" and "target_id" in d
                 ],
@@ -205,11 +209,32 @@ def _derive_detected_by_distribution(rows: list[dict[str, Any]]) -> dict[str, in
 def _derive_caused_by_fan_in(rows: list[dict[str, Any]]) -> dict[str, int] | None:
     totals: dict[str, int] = {}
     for row in rows:
-        for target in row["caused_by"]:
+        for edge in row["caused_by"]:
+            target = edge["target_id"]
             totals[target] = totals.get(target, 0) + 1
     if not totals:
         return None
     return dict(sorted(totals.items(), key=lambda kv: -kv[1]))
+
+
+def _derive_caused_by_provenance(rows: list[dict[str, Any]]) -> dict[str, int] | None:
+    """Explicit / derived / unknown edge counts (ticket 6536-367c).
+
+    "unknown" is the pre-marker cohort — a labeled key, never merged into a real
+    provenance (the same era-skew guard as close_class's MISSING cohort). Returns
+    None when no caused_by edges exist.
+    """
+    counts = {"explicit": 0, "derived": 0, "unknown": 0}
+    total = 0
+    for row in rows:
+        for edge in row["caused_by"]:
+            provenance = edge["provenance"]
+            key = provenance if provenance in ("explicit", "derived") else "unknown"
+            counts[key] += 1
+            total += 1
+    if total == 0:
+        return None
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +286,17 @@ def caused_by_fan_in(repo_root: Any) -> dict[str, int] | None:
     return _derive_caused_by_fan_in(_bug_rows(repo_root))
 
 
+def caused_by_provenance(repo_root: Any) -> dict[str, int] | None:
+    """STOCK: caused_by edge counts split by attribution provenance.
+
+    ``{"explicit": n, "derived": n, "unknown": n}`` — explicitly supplied vs
+    blame-derived vs pre-marker (unknown) edges, so escape-rate consumers can
+    weight proven attributions above guessed ones. Returns None when no
+    caused_by edges exist.
+    """
+    return _derive_caused_by_provenance(_bug_rows(repo_root))
+
+
 # ---------------------------------------------------------------------------
 # Registry integration — idempotent registration at import time
 # ---------------------------------------------------------------------------
@@ -269,7 +305,7 @@ def caused_by_fan_in(repo_root: Any) -> dict[str, int] | None:
 def _rows_for_ctx(ctx: Any) -> list[dict[str, Any]] | None:
     """Rows for a CLI evaluation context, scanned once per run.
 
-    Uses ``ctx.analysis_cache`` (when the context carries the dict) so the five
+    Uses ``ctx.analysis_cache`` (when the context carries the dict) so the six
     bug_trends specs share one store scan. Returns None when the context has no
     repo_root — evaluate() then renders the metric unavailable.
     """
@@ -325,14 +361,22 @@ def _compute_caused_by(ctx: Any) -> dict[str, int] | None:
     return _derive_caused_by_fan_in(rows)
 
 
+def _compute_caused_by_provenance(ctx: Any) -> dict[str, int] | None:
+    rows = _rows_for_ctx(ctx)
+    if rows is None:
+        return None
+    return _derive_caused_by_provenance(rows)
+
+
 def register() -> None:
-    """Append the five bug_trends specs to REGISTRY (idempotent by id)."""
+    """Append the six bug_trends specs to REGISTRY (idempotent by id)."""
     computes = {
         "bug_close_class_by_month": _compute_close_class,
         "bug_time_to_close_days": _compute_time_to_close,
         "bug_open_age_days": _compute_open_age,
         "bug_detected_by_distribution": _compute_detected_by,
         "bug_caused_by_fan_in": _compute_caused_by,
+        "bug_caused_by_provenance": _compute_caused_by_provenance,
     }
     existing = {spec.id for spec in REGISTRY}
     for metric_id, compute in computes.items():

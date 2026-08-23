@@ -252,13 +252,18 @@ def process_link(state: dict, event: dict, data: dict, tracker_dir: str | None =
         except Exception:  # noqa: BLE001 — resolver is best-effort; never crash the reducer
             pass
     relation = data.get("relation", "")
-    state["deps"].append(
-        {
-            "target_id": resolved_target,
-            "relation": relation,
-            "link_uuid": event["uuid"],
-        }
-    )
+    dep_entry: dict = {
+        "target_id": resolved_target,
+        "relation": relation,
+        "link_uuid": event["uuid"],
+    }
+    # caused_by provenance marker (ticket 6536-367c): surfaced present-only — exactly the
+    # comment source_* pattern — so pre-marker events keep their prior dep shape and read
+    # as unknown.
+    provenance = data.get("provenance")
+    if provenance is not None:
+        dep_entry["provenance"] = provenance
+    state["deps"].append(dep_entry)
     # Managed-ref provenance (safe-luge-nog): record the logical reference so a
     # later UNLINK can propagate a peer delete (process_unlink never removes it).
     add_managed_ref(state, relation, resolved_target)
