@@ -18,6 +18,7 @@ import rebar
 from rebar import _cli
 from rebar._commands import txn
 from rebar._commands.txn import ConcurrencyMismatch
+from rebar._errors import RebarError
 
 
 def _status(tid: str, repo: Path) -> str:
@@ -200,6 +201,38 @@ def test_close_does_not_cascade_to_parent(rebar_repo: Path) -> None:
     rebar.transition(child, "open", "closed", repo_root=str(rebar_repo))
     assert _status(child, rebar_repo) == "closed"
     assert _status(parent, rebar_repo) == "open"  # untouched
+
+
+def test_blocked_resume_does_not_cascade_open_parent(rebar_repo: Path) -> None:
+    """``blocked -> in_progress`` is DELIBERATELY absent from the cascade table: the
+    resume succeeds and a merely-``open`` parent is not disturbed — the accepted
+    residual documented in docs/concurrency.md §I4a (task 0446-4278-b7df-438d). The
+    start-work gate firing on this edge is a separate, consistent fact: the gate keys
+    on the TARGET status, the cascade on the table's same-edge rows."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "blocked", repo_root=str(rebar_repo))
+
+    rebar.transition(child, "blocked", "in_progress", repo_root=str(rebar_repo))
+
+    assert _status(child, rebar_repo) == "in_progress"
+    assert _status(parent, rebar_repo) == "open"  # not cascaded
+
+
+def test_close_refused_over_blocked_child(rebar_repo: Path) -> None:
+    """The close guard is unconditional over ANY non-closed child — ``blocked``
+    included. This is the fact §I4a's blocked-resume reasoning leans on: a blocked
+    child can never sit under a closed parent, so ``blocked -> in_progress`` can
+    never leave a closed ancestor behind (task 0446-4278-b7df-438d)."""
+    parent = rebar.create_ticket("epic", "parent", repo_root=str(rebar_repo))
+    child = rebar.create_ticket("task", "child", parent=parent, repo_root=str(rebar_repo))
+    rebar.transition(child, "open", "blocked", repo_root=str(rebar_repo))
+
+    with pytest.raises(RebarError, match="unresolved"):
+        rebar.transition(parent, "open", "closed", repo_root=str(rebar_repo))
+
+    assert _status(parent, rebar_repo) == "open"  # not closed
+    assert _status(child, rebar_repo) == "blocked"  # untouched
 
 
 def test_transition_parent_failure_aborts_child_with_attributed_error(

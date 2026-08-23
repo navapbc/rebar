@@ -410,8 +410,15 @@ def _force_note(force_reason: str | None) -> str:
 #                           reactivated too, so reactivating a descendant straight into
 #                           progress never leaves it under a still-closed ancestor.
 #
-# Every other edge — notably ``* -> closed`` (which has its own open-children guard) and
-# ``* -> blocked`` — is absent and therefore never cascades.
+# Every other edge — notably ``* -> closed`` (which has its own open-children guard),
+# ``* -> blocked``, and the ``blocked -> in_progress`` resume — is absent and therefore
+# never cascades. The blocked resume is DELIBERATELY absent even though the start-work
+# gate fires on it (the gate keys on the TARGET status; task 65e3): a blocked child
+# never sits under a closed parent (the unconditional close guard refuses to close a
+# parent over ANY non-closed child), and on this table's same-edge shape the only
+# expressible row would auto-resume a ``blocked`` parent that is routinely blocked for
+# its own independent reason. Task 0446-4278-b7df-438d records the decision;
+# docs/concurrency.md §I4a documents the accepted residuals.
 _CASCADING_EDGES: dict[tuple[str, str], str] = {
     ("open", "in_progress"): "open",
     ("closed", "open"): "closed",
@@ -434,9 +441,11 @@ def _cascade_parent_first(
     """Parent-first cascade for a cascading edge (see :data:`_CASCADING_EDGES`): if
     ``ticket_id``'s parent sits in the status eligible for this edge, transition the
     parent along the SAME edge first (recursively up the chain, via
-    :func:`transition_compute`) so a child never runs ahead of its parent — not into
-    ``in_progress`` while the parent is still ``open``, and not back to ``open`` or
-    ``in_progress`` while the parent is still ``closed``.
+    :func:`transition_compute`) so an eligible parent is never left behind on this
+    edge — an ``open`` parent is pulled into progress ahead of the child, and a
+    still-``closed`` parent is reopened/reactivated ahead of it. The guarantee is
+    per-edge and same-edge only — see docs/concurrency.md §I4a for what the cascade
+    does and does not guarantee (task 0446-4278-b7df-438d).
 
     If the parent transition fails, the child is NOT transitioned and the raised error
     names the parent as the cause (preserving the parent's exit code / concurrency
