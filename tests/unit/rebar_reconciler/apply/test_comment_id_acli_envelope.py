@@ -24,6 +24,15 @@ transport echoed a comment id, and a re-diff therefore emits nothing -- even whe
 the Jira-side body has diverged through ADF/wiki round-tripping. A transport that
 DOES return an id (the DC/REST path) still has that exact id recorded verbatim.
 
+Ticket crusty-brinish-ass (3235-8aaf-e288-48f2) closed the transport seam itself:
+``acli_cli_ops.add_comment`` no longer returns the raw envelope. It normalizes via
+``_parse_comment_created`` — a resource-shaped payload (the DC/REST ``{"id": ...}``)
+passes through verbatim, the SUCCESS envelope becomes the honest resource
+``{"id": None, "acli_envelope": <envelope>}`` (explicit no-comment-id; the envelope
+preserved under a clearly-named key so ``results[].id`` — the WORK ITEM key — can
+never be mistaken for a comment id), and an unrecognised shape raises instead of
+returning a silently-unusable payload.
+
 Hermetic: no network. The ACLI stdout is stubbed at the ``_run_acli`` seam so the
 real ``acli_cli_ops.add_comment`` parse runs; the binding store is real.
 """
@@ -45,6 +54,27 @@ ACLI_SUCCESS_ENVELOPE = {
     "totalCount": 1,
     "successCount": 1,
 }
+
+#: RECORDED, not invented (ticket 3235-8aaf-e288-48f2 AC2): the byte-exact payload
+#: captured live on 2026-08-22 from ``acli 1.3.19-stable`` via the safe probe
+#: ``acli jira workitem comment create --key NONEXIST-999999 --body ... --json``
+#: (a nonexistent key — the genuine envelope comes back with exit=0 and nothing is
+#: mutated). Note ``results[].id`` is the WORK ITEM key, and the process still
+#: exits 0 on FAILURE (bug 44de).
+ACLI_FAILURE_ENVELOPE = {
+    "results": [
+        {
+            "status": "FAILURE",
+            "message": "Issue does not exist or you do not have permission to see it.",
+            "id": "NONEXIST-999999",
+        }
+    ],
+    "totalCount": 1,
+    "successCount": 0,
+}
+
+#: What ``add_comment`` returns for a SUCCESS envelope post-normalization.
+NORMALIZED_SUCCESS = {"id": None, "acli_envelope": ACLI_SUCCESS_ENVELOPE}
 
 _KEY = 1787251802516868001
 _BODY = "## Heading\n\nA **rich** body that will not survive ADF round-tripping."
@@ -81,8 +111,10 @@ def acli_result(monkeypatch):
 
     monkeypatch.setattr(acli_subprocess, "_run_acli", lambda *a, **k: _Completed())
     result = acli_cli_ops.add_comment("REB-1861", _BODY, acli_cmd=["acli"])
-    # Fixture precondition: this is genuinely the envelope, with no top-level id.
-    assert result == ACLI_SUCCESS_ENVELOPE
+    # Fixture precondition (ticket 3235-8aaf): the envelope is NORMALIZED at the
+    # transport boundary — no top-level comment id (ACLI echoes none), the raw
+    # envelope preserved under an explicitly-named key.
+    assert result == NORMALIZED_SUCCESS
     assert result.get("id") is None
     return result
 
@@ -159,3 +191,61 @@ def test_a_transport_supplied_comment_id_is_still_recorded_verbatim(store):
     _record_comment_id(store, {"local_comment_key": _KEY, "body": _BODY}, {"id": "10001"})
 
     assert store.comment_id_for(_KEY) == "10001"
+
+
+def _add_comment_with_stdout(monkeypatch, stdout: str):
+    """Drive the REAL ``acli_cli_ops.add_comment`` with *stdout* stubbed at ``_run_acli``."""
+    from rebar_reconciler.adapters.jira import acli_cli_ops, acli_subprocess
+
+    class _Completed:
+        stderr = ""
+        returncode = 0
+
+    _Completed.stdout = stdout
+    monkeypatch.setattr(acli_subprocess, "_run_acli", lambda *a, **k: _Completed())
+    return acli_cli_ops.add_comment("REB-1861", _BODY, acli_cmd=["acli"])
+
+
+def test_success_envelope_is_normalized_not_passed_through_raw(monkeypatch):
+    """Ticket 3235-8aaf AC1: the SUCCESS envelope becomes an honest comment resource."""
+    result = _add_comment_with_stdout(monkeypatch, json.dumps(ACLI_SUCCESS_ENVELOPE))
+
+    assert result == NORMALIZED_SUCCESS
+    assert result["id"] is None, "ACLI echoes no comment id; the resource must say so plainly"
+    assert "results" not in result, (
+        "the raw batch envelope leaked through: results[].id is the WORK ITEM key and a "
+        "consumer reading it as a comment id re-creates bug aa7b-5e47-6d3d-4615"
+    )
+
+
+def test_resource_shaped_payload_passes_through_verbatim(monkeypatch):
+    """The DC/REST-shaped comment resource (top-level id) is not rewritten."""
+    result = _add_comment_with_stdout(monkeypatch, '{"id": "10001"}')
+
+    assert result == {"id": "10001"}
+
+
+def test_unrecognized_payload_raises_instead_of_returning_unusable(monkeypatch):
+    """A shape that is neither a resource nor the envelope fails loudly (sibling idiom)."""
+    with pytest.raises(RuntimeError, match="comment create"):
+        _add_comment_with_stdout(monkeypatch, '["not", "a", "comment"]')
+
+
+def test_recorded_failure_envelope_raises_acli_mutation_error():
+    """The RECORDED live failure envelope (exit=0!) trips the bug-44de guard.
+
+    Asserted against ``ACLI_FAILURE_ENVELOPE`` — captured live, provenance in the
+    constant's comment — through the exact checker ``_run_acli`` runs on every
+    completed mutation, so a real post of this payload raises before ``add_comment``
+    ever parses it.
+    """
+    from rebar_reconciler.adapters.jira.acli_subprocess import (
+        AcliMutationError,
+        _check_mutation_failure,
+    )
+
+    with pytest.raises(AcliMutationError, match="does not exist"):
+        _check_mutation_failure(
+            json.dumps(ACLI_FAILURE_ENVELOPE),
+            ["acli", "jira", "workitem", "comment", "create"],
+        )
