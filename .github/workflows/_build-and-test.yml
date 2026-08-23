@@ -643,15 +643,21 @@ jobs:
           # from the other three cells. Both expression branches are intentionally non-empty
           # shell strings; this changes no job, runner, setup, collection, or fixture session.
           DEFAULT_SUITE_MARKS: ${{ matrix.os == 'ubuntu-latest' && matrix.python-version == '3.13' && 'not integration and not external' || 'not integration and not external and not repo_policy' }}
-        # --timeout (pytest-timeout) is the per-test HANG GUARD: timeout-minutes above only
-        # bounds the whole job, so a single deadlocked test stays invisible behind the last
-        # -q dot and eats the full 60 min with no traceback (the ubuntu/py3.11 incident, ticket
-        # 89d5-61da-b621-47f8). --timeout-method=thread is load-bearing: the default `signal`
-        # method can't fire while a worker is blocked in a C-level flock/socket/subprocess call
-        # (the exact hang shapes this suite exercises); the thread watchdog + faulthandler dumps
-        # every thread's stack and aborts the worker, so a recurrence NAMES the offending test.
-        # The value is the `timeout` in [tool.pytest.ini_options] (story bold-abeyant-indri),
-        # kept equal by test_ci_workflow_parity.py so CI and a local `make test` agree. 300s is
+        # The per-test HANG GUARD lives in [tool.pytest.ini_options] (`timeout = 300`,
+        # `timeout_method = "thread"`, story bold-abeyant-indri) — NOT on this command line.
+        # timeout-minutes above only bounds the whole job, so a single deadlocked test stays
+        # invisible behind the last -q dot and eats the full 60 min with no traceback (the
+        # ubuntu/py3.11 incident, ticket 89d5-61da-b621-47f8). The `thread` method is
+        # load-bearing: the default `signal` method can't fire while a worker is blocked in a
+        # C-level flock/socket/subprocess call (the exact hang shapes this suite exercises);
+        # the thread watchdog + faulthandler dumps every thread's stack and aborts the worker,
+        # so a recurrence NAMES the offending test. This lane carries NO --timeout flag on
+        # purpose (ticket 5a30-d423-b1f5-4e33): pytest-timeout precedence is CLI > ini, and
+        # the Verified gate runs the workflow files from trusted MAIN, not the patchset — so
+        # a CLI flag here permanently shadows any patchset's ini change, which is how a stale
+        # tighter flag killed workers on every run while the fix raising the budget could
+        # never take effect on its own gate (bug 3fa7-94ba-42aa-4623, change 2115 PS1).
+        # test_ci_workflow_parity.py asserts these lanes stay flag-free. 300s is
         # sized to DWARF the slowest legitimate test, not to sit just above it: on THIS leg
         # (the only one adding --cov=rebar) about fourteen whole-tree-scanning gate tests
         # legitimately cost 18.7-29.93s of `call` time under -n 4 --dist worksteal --cov. A
@@ -664,7 +670,7 @@ jobs:
         run: >-
           pytest -m "$DEFAULT_SUITE_MARKS"
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist worksteal
-          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25
           --basetemp="${{ runner.temp }}/rebar-basetemp"
           ${{ !startsWith(matrix.os, 'macos') && matrix.python-version == '3.13' && '--cov=rebar --cov-report=term-missing:skip-covered' || '' }}
 
@@ -674,6 +680,8 @@ jobs:
         # stays a manual probe (bridge check-access / reconcile dry-run).
         # Parallelized (story 8d36) with `--dist loadgroup` so xdist_group-marked
         # tests (the live reconciler E2E) co-locate on one worker and stay serial.
+        # No --timeout flag here either — the ini governs (see the default-suite
+        # step above, ticket 5a30-d423-b1f5-4e33).
         env:
           REBAR_REQUIRE_EXTRAS: "1"  # see the default-suite step above (bug 599e)
         # --max-worker-restart=0 (bug 3fa7): under loadgroup a dead worker's pending workload
@@ -689,5 +697,5 @@ jobs:
           pytest -m integration
           -n ${{ matrix.os == 'macos-latest' && '3' || '4' }} --dist loadgroup
           --max-worker-restart=0
-          -q -p no:cacheprovider --durations=25 --timeout=300 --timeout-method=thread
+          -q -p no:cacheprovider --durations=25
           --basetemp="${{ runner.temp }}/rebar-basetemp-int"
