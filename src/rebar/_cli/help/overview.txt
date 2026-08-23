@@ -26,7 +26,7 @@ Subcommands:
   compact               Compact a ticket's event log.
   compact-all           Compact all eligible tickets.
   export                Export the store as NDJSON (one ticket per line).
-  import                Import tickets from export NDJSON (clean rebar->rebar migration).
+  import                Import tickets from export NDJSON for a clean rebar-to-rebar migration.
   transition            Transition ticket status (optimistic concurrency).
   reopen                Reopen a closed ticket (closed -> open; exit 10 if not currently closed).
   claim                 Atomically claim an open ticket (-> in_progress + assignee; exit 10 if taken).

@@ -70,22 +70,14 @@ raw-event injection): `CREATE` (+ `STATUS` to reach non-open states, +
   updated** (updating is sync = the reconciler, out of scope).
 - `--dry-run` reports create/skip counts without writing.
 
-### Performance & the large-import limitation (accepted)
+### Batching, delivery, and recovery
 
-Import **defers push** for its duration (`REBAR_SYNC_PUSH=off`) and pushes **once
-at the end**, so a bulk import pays one network round-trip rather than one per
-event.
+Import commits work in ordered passes. Ticket creation, parent assignment, file impact, verification commands, and comments are committed in chunks of up to 256 events. Each chunk becomes one commit. Link and status passes remain one event per commit because each event depends on store state produced earlier in its pass.
 
-**KNOWN LIMITATION:** there is currently no batch-commit primitive, so import does
-**one git commit + one lock cycle per event** (`_store/event_append.py`,
-`_store/lock.py`). A multi-thousand-event import therefore takes several minutes
-and serializes the write lock for the duration. A batch-commit primitive is
-deferred to a follow-up task.
+rebar disables push during the import and pushes once after import work finishes successfully. A fatal failure before that final step can leave committed chunks in the local `tickets` branch without publishing them.
 
-For large imports:
+The chunk boundary is the atomic boundary. Import does not provide whole-file atomicity. A crash between passes can leave tickets that contain earlier events but lack later parent, link, file-impact, verification-command, comment, or status events.
 
-- **Pre-compact the source** (`rebar compact-all`) before exporting, so each ticket
-  replays from a SNAPSHOT and carries fewer events to re-compose.
-- Import already runs with push deferred; if you are scripting the library path
-  directly and want to be explicit, set `REBAR_SYNC_PUSH=off` for the import
-  process and push once afterward.
+At the start of each run, rebar scans the target for `source_id` values. A serial rerun skips each matching source record. This avoids duplicates from work committed by a prior run, but it also means a rerun does not complete the missing events automatically. Inspect partial results before deciding whether to repair the ticket or import into a new empty target.
+
+Run imports serially. Concurrent imports can both scan before either commits a `source_id`. They can then create separate local tickets for the same source record.

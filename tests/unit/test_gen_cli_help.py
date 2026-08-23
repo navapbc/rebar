@@ -17,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GEN = REPO_ROOT / "scripts" / "gen_cli_help.py"
 HELP_DIR = REPO_ROOT / "src" / "rebar" / "_cli" / "help"
+IMPORT_GUIDE = REPO_ROOT / "docs" / "import-export.md"
 
 
 def _load_gen():
@@ -101,6 +102,28 @@ def test_trusted_env_preserves_explicit_multiline_usage(tmp_path: Path, monkeypa
         "Usage: rebar trusted-env add <env_id> <public_key> [--root <path>]",
         "rebar trusted-env revoke <env_id> <public_key-or-index> [--root <path>]",
     ]
+
+
+def test_import_help_and_user_guide_describe_current_recovery_contract() -> None:
+    """The generated import help and user guide state the shipped import contract."""
+    help_text = " ".join((HELP_DIR / "import.txt").read_text(encoding="utf-8").split())
+    guide = IMPORT_GUIDE.read_text(encoding="utf-8")
+
+    assert "batches of up to 256 events" in help_text
+    assert "Links and status changes are committed one event at a time." in help_text
+    assert "defers the push until import work finishes successfully" in help_text
+    assert "chunks of up to 256 events" in guide
+    assert "Link and status passes remain one event per commit" in guide
+    assert "pushes once after import work finishes successfully" in guide
+
+    for text in (help_text, guide):
+        assert "does not provide whole-file atomicity" in text
+        assert "serial rerun" in text
+        assert "does not complete the missing events automatically" in text
+        assert "Concurrent imports" in text
+
+    assert "there is currently no batch-commit primitive" not in guide
+    assert "one git commit + one lock cycle per event" not in guide
 
 
 def test_write_mode_is_idempotent_and_check_clean(tmp_path, monkeypatch) -> None:

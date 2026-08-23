@@ -46,7 +46,19 @@ def build_import(*, prog: str) -> argparse.ArgumentParser:
     """``rebar import [FILE] [--dry-run]``   (reads stdin if FILE omitted)."""
     parser = build_argument_parser(
         prog=prog,
-        description="Import tickets from export NDJSON (clean rebar->rebar migration).",
+        description="Import tickets from export NDJSON for a clean rebar-to-rebar migration.",
+        epilog=(
+            "Ticket creation, parent assignment, file impact, verification commands, and "
+            "comments are committed in batches of up to 256 events. Links and status "
+            "changes are committed one event at a time. Rebar defers the push until import "
+            "work finishes successfully. Each run scans stored source_id values and skips "
+            "matching records, so a serial rerun does not duplicate tickets created by an "
+            "earlier run. The import does not provide whole-file atomicity. A crash between "
+            "passes can leave incomplete tickets. A serial rerun skips those tickets based "
+            "on source_id and does not complete the missing events automatically. Run "
+            "imports serially. Concurrent imports can scan before either run records a "
+            "source_id and can create duplicate tickets."
+        ),
         add_help=False,
         allow_abbrev=False,
     )
