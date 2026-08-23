@@ -244,7 +244,11 @@ def _apply_caused_by(
         tracker_dir = str(config.tracker_dir(repo_root))
         for superseded in existing:
             remove_dependency(ticket_id, superseded, tracker_dir, "caused_by")
-        _write_link_event(ticket_id, culprit, "caused_by", tracker_dir)
+        # Provenance marker (ticket 6536-367c): an explicit --caused-by is the operator's
+        # stated attribution; an empty flag means the culprit came from blame auto-derivation.
+        # Escape-rate consumers weight proven attributions above guessed ones on read.
+        provenance = "explicit" if caused_by.strip() else "derived"
+        _write_link_event(ticket_id, culprit, "caused_by", tracker_dir, provenance=provenance)
     except Exception:
         logger.warning(
             "best-effort caused_by link on close of %s failed; close stands",

@@ -60,7 +60,8 @@
       "properties": {
         "target_id": { "type": "string" },
         "relation": { "$ref": "common.schema.json#/$defs/relation" },
-        "link_uuid": { "type": "string" }
+        "link_uuid": { "type": "string" },
+        "provenance": { "enum": ["explicit", "derived"] }
       }
     },
     "file_impact_entry": {
