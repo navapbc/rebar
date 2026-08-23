@@ -333,6 +333,13 @@ def _record_comment_id(binding_store, entry, add_comment_result) -> None:
     no key, or the store predates ``record_comment_id``. Shared by both enactment sites
     (``create_one`` and ``_update_one_dispatch_comments``) so they cannot drift.
     """
+    # Ticket 0fa2 (outbound-comment invariant): tally the successful post itself
+    # BEFORE the recording guards below — reaching this function means add_comment
+    # returned without raising, and a post whose RECORDING no-ops (no store, no
+    # key, legacy store) is exactly the divergence the end-of-pass check watches.
+    noter = getattr(binding_store, "note_comment_posted", None)
+    if noter is not None:
+        noter()
     if binding_store is None or not isinstance(entry, dict):
         return
     key = entry.get("local_comment_key")

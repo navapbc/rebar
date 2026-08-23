@@ -168,6 +168,11 @@ class BindingStore:
         self._repo_root = self._repo.repo_root
         self._data = self._repo.data
         self._get_rotation = self._repo.rotation
+        # Ticket 0fa2 (outbound-comment invariant): per-pass tallies. The store is
+        # constructed once per reconcile pass, so "gained this pass" is measured
+        # against the map size captured here at load.
+        self._comment_posts = 0
+        self._comment_ids_at_load = len(self._data.get("comment_ids", {}))
 
     # -- persistence (delegated to BindingRepository) -----------------------
 
@@ -375,6 +380,23 @@ class BindingStore:
     def is_comment_mapped(self, local_comment_key: str) -> bool:
         """True once :meth:`record_comment_id` has persisted this HLC key."""
         return self._lifecycle.is_comment_mapped(local_comment_key)
+
+    def note_comment_posted(self) -> None:
+        """Tally one successful outbound ``add_comment`` this pass (ticket 0fa2).
+
+        Called from the shared post-enactment seam (``_record_comment_id``) BEFORE its
+        recording guards, so a post whose recording silently no-ops still counts —
+        that gap is exactly what the end-of-pass invariant compares against.
+        """
+        self._comment_posts += 1
+
+    def comment_posts_this_pass(self) -> int:
+        """How many successful outbound comment posts were tallied this pass."""
+        return self._comment_posts
+
+    def comment_ids_gained_this_pass(self) -> int:
+        """How many entries the ``comment_ids`` map gained since this store loaded."""
+        return len(self._data.get("comment_ids", {})) - self._comment_ids_at_load
 
     # -- absence lifecycle (bug 1e08) --------------------------------------
 
