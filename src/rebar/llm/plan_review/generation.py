@@ -14,14 +14,11 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Literal
 
-from rebar import config
-
 from .relation_snapshot import (
     PlanMaterialPin,
     PlanRelationSnapshot,
     PlanRelationSnapshotError,
     collect_plan_relation_snapshot,
-    tracker_head_sha,
 )
 
 logger = logging.getLogger(__name__)
@@ -274,32 +271,37 @@ def sign_manifest(
 ) -> dict:
     """Sign only if one stable generation still equals the immutable initial baseline.
 
+    The stability fence is scoped to the SUBJECT'S GENERATION — the same quantity
+    ``PlanReviewGeneration`` equality binds — never to store-wide tracker state. The
+    earlier within-attempt HEAD fence (``before != after`` around ``collect`` and an
+    under-lock ``locked_head`` comparison) demanded a globally quiescent shared tracker
+    for the full multi-second collect window, which normal concurrent churn (median
+    inter-commit gap ~3s, mostly rebar's own enrichment events) structurally never
+    grants — starving ``sign-review`` permanently (bug a83f; contract per d70a). The
+    authoritative pre-sign check is the under-lock re-collect compared against the
+    initial baseline; genuine subject/related drift stays fail-closed via
+    :class:`PlanReviewGenerationChanged`.
+
     ``signer`` (story 6f14): an OPTIONAL startup-composed op-cert binding forwarded to the
     under-lock seam; omitting it keeps the exact env/genesis behavior (the developer-local
     ``review-plan`` caller passes nothing)."""
     from rebar import signing
     from rebar._store.lock import LockTimeout
 
-    tracker = str(config.tracker_dir(repo_root))
     for attempt in range(1, MAX_GENERATION_ATTEMPTS + 1):
         try:
-            # Ignore UNTRACKED tracker files here, consistently with the authoritative
-            # under-lock re-check below (``under_lock_check``): the fence detects a
-            # concurrent COMMIT during generation (a moving committed HEAD), which
-            # untracked files cannot cause. Treating an unrelated crashed process's stray
-            # artifact in the SHARED tracker as fatal would abort signing (no durable
-            # attestation → the claim gate cannot pass) for a clean plan (bug d7cb-22ae).
-            before = tracker_head_sha(tracker, ignore_untracked=True)
+            # Ignore UNTRACKED tracker files, consistently with the authoritative
+            # under-lock re-check below (``under_lock_check``): an unrelated crashed
+            # process's stray artifact in the SHARED tracker must not abort signing
+            # (no durable attestation → the claim gate cannot pass) for a clean plan
+            # (bug d7cb-22ae).
             fresh = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
-            after = tracker_head_sha(tracker, ignore_untracked=True)
         except PlanRelationSnapshotError as exc:
             # A ``store-read-failure`` is the NORMAL transient state of many concurrent
             # sessions sharing one tracker: a peer's in-flight ``git add``→``git commit``
-            # leaves a staged (or briefly unmerged) index that this pre-lock read observes
-            # as a non-empty ``git status``. Retry it exactly like a moving committed HEAD
-            # (the ``before != after`` branch below) instead of aborting; on exhaustion the
-            # loop's final ``raise PlanReviewGenerationRetryable`` surfaces it as retryable.
-            # d7cb-22ae tolerated the UNTRACKED half of this race; this is the STAGED half.
+            # leaves a briefly unmerged index that this pre-lock read can observe. Retry
+            # it instead of aborting; on exhaustion the loop's final
+            # ``raise PlanReviewGenerationRetryable`` surfaces it as retryable.
             # Deterministic reasons (missing/ambiguous/malformed/reducer/id-mismatch) stay
             # terminal — retrying cannot fix a genuinely broken reference.
             if exc.reason == "store-read-failure":
@@ -313,22 +315,11 @@ def sign_manifest(
                 continue
             _log(logging.ERROR, "plan_review_sign_aborted", reason=exc.reason, attempt=attempt)
             raise PlanReviewGenerationError(exc.reason) from None
-        if before != after:
-            _log(
-                logging.WARNING,
-                "plan_review_generation_retry",
-                attempt=attempt,
-                before=before,
-                after=after,
-            )
-            continue
         if fresh != initial_generation:
             _log(
                 logging.WARNING,
                 "plan_review_generation_changed",
                 attempt=attempt,
-                before=before,
-                after=after,
             )
             if fresh.own_material != initial_generation.own_material:
                 message = (
@@ -353,10 +344,13 @@ def sign_manifest(
                 message = "the plan review generation changed since the review; re-review required"
             raise PlanReviewGenerationChanged(message)
 
-        def under_lock_check(expected_after=after) -> None:
-            locked_head = tracker_head_sha(tracker, ignore_untracked=True)
+        def under_lock_check() -> None:
+            # The authoritative pre-sign re-check, scoped exactly like generation
+            # identity: the subject's own + direct related material and phase/floor.
+            # Store-wide HEAD movement between the pre-lock read and lock acquisition
+            # is another ticket's write and must not invalidate this attempt (bug a83f).
             locked_generation = collect(ticket_id, repo_root=repo_root, ignore_untracked=True)
-            if locked_head != expected_after or locked_generation != initial_generation:
+            if locked_generation != initial_generation:
                 raise _UnderLockMismatch
 
         try:
@@ -369,12 +363,14 @@ def sign_manifest(
                 signer=signer,
             )
         except _UnderLockMismatch:
+            # Name the drift precisely: a bare "under-lock-mismatch" left 25 field
+            # retries with no actionable signal (bug a83f AC-5). The next attempt's
+            # pre-lock comparison names the changed component terminally.
             _log(
                 logging.WARNING,
                 "plan_review_generation_retry",
                 attempt=attempt,
-                before=after,
-                after="under-lock-mismatch",
+                reason="generation-drift-under-lock",
             )
         except LockTimeout as exc:
             _log(logging.WARNING, "plan_review_generation_retry", attempt=attempt, reason="lock")

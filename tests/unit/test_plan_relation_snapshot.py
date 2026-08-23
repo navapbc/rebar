@@ -271,6 +271,41 @@ def test_tracker_head_sha_maps_path_and_subprocess_failures(tracker: str) -> Non
     assert caught.value.reason == "store-read-failure"
 
 
+def test_tracker_head_sha_tolerates_peer_staged_index(repo: str) -> None:
+    """Bug a83f site C: the canonical writer stages then commits as TWO subprocesses under
+    its lock (``_store/event_append.py``); an unlocked reader landing in that gap sees an
+    index-only staged entry with a CLEAN worktree column. That is another writer's normal
+    footprint, not dirt — it must not collapse to ``store-read-failure``."""
+    _, _, tracker_head_sha = _api()
+    tracker = Path(config.tracker_dir(repo))
+    expected = subprocess.run(
+        ["git", "-C", str(tracker), "rev-parse", "HEAD"],
+        check=True,
+        text=True,
+        capture_output=True,
+    ).stdout.strip()
+    (tracker / "staged-event.json").write_text("{}", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tracker), "add", "staged-event.json"], check=True)
+    assert tracker_head_sha(str(tracker)) == expected
+    assert tracker_head_sha(str(tracker), ignore_untracked=True) == expected
+
+
+def test_tracker_head_sha_still_fails_on_dirty_tracked_worktree(repo: str) -> None:
+    """A WORKTREE-side modification to a tracked file is genuine dirt (nothing in the
+    canonical write path produces it), so the strict read must keep failing closed."""
+    PlanRelationSnapshotError, _, tracker_head_sha = _api()
+    tracker = Path(config.tracker_dir(repo))
+    tracked = tracker / "tracked.txt"
+    tracked.write_text("v1", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tracker), "add", "tracked.txt"], check=True)
+    subprocess.run(["git", "-C", str(tracker), "commit", "-qm", "add tracked"], check=True)
+    tracked.write_text("v2", encoding="utf-8")
+    for kwargs in ({}, {"ignore_untracked": True}):
+        with pytest.raises(PlanRelationSnapshotError) as caught:
+            tracker_head_sha(str(tracker), **kwargs)
+        assert caught.value.reason == "store-read-failure"
+
+
 def test_review_plan_preflight_tolerates_unrelated_untracked_tracker_files(repo: str) -> None:
     """Regression (bug d7cb-22ae): an unrelated untracked file left in the SHARED
     tickets-tracker by a crashed process on ANOTHER ticket must not collapse
