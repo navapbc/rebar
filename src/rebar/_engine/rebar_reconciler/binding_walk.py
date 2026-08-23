@@ -208,11 +208,13 @@ def compute_binding_walk_mutations(
             # (present in BOTH prev and curr, still unbound) — it must not
             # double-create what the differ already handles.
             continue
-        if _has_rebar_id_label(fields):
-            # L10: the issue already carries a rebar-id:/rebar-id- marker → it is
-            # already identity-bound; adopting would double-create the phantom
-            # jira-dig-NNNN and can trip the L11 double-bind quarantine. Stand down
-            # (binding recovery owns re-linking a marked-but-unstored key).
+        if _adopt_stands_down(fields, jira_key, binding_store, local_reader):
+            # L10: the issue carries a rebar-id:/rebar-id- marker that still points at
+            # LIVE local identity → it is identity-bound; adopting would double-create
+            # the phantom jira-dig-NNNN and can trip the L11 double-bind quarantine.
+            # The one carve-out is the lost-adopt residue (bug 2392-9389-39f9-4ca6),
+            # where the marker proves a lost adopt rather than a live binding — see
+            # _adopt_stands_down. Everything else marked stands down here.
             continue
         obs = JiraObservation(
             state=ObservedJira.PRESENT,
@@ -323,28 +325,87 @@ def compute_binding_walk_mutations(
     return result
 
 
-def _has_rebar_id_label(fields: Mapping[str, Any] | None) -> bool:
-    """True when a Jira snapshot entry already carries a rebar-id identity label.
+def _marked_local_ids(fields: Mapping[str, Any] | None) -> list[str]:
+    """The local ids named by WELL-FORMED rebar-id identity markers, in label order.
 
-    Such a key is already identity-bound (``rebar-id:`` / ``rebar-id-`` marker);
-    adopting it would double-create the phantom ``jira-dig-NNNN`` local id and can
-    trip the L11 double-bind quarantine — so the unbound arm stands down (L10).
-    Tolerates the flat ``["rebar-id:…"]`` and nested ``{"labels": [...]}`` shapes.
+    Both the canonical colon form (``rebar-id:<id>``) and the legacy hyphen form
+    (``rebar-id-<id>``) are read. A malformed/empty marker (no id after the prefix)
+    is NOT a binding — treating it as one strands the key forever (the REB-659 case)
+    — so it contributes nothing here. Tolerates the flat ``["rebar-id:…"]`` and
+    nested ``{"labels": [...]}`` shapes.
     """
     if not fields:
-        return False
+        return []
     labels = fields.get("labels")
     if not isinstance(labels, (list, tuple)):
-        return False
-    # Only a WELL-FORMED marker (a non-empty local id after the prefix) is a real
-    # identity binding. A malformed/empty ``rebar-id:`` (no id) is NOT a binding — treating
-    # it as one strands the key forever (adoption stands down here on the L10 guard, yet
-    # binding-recovery has no id to re-link → perpetual unbound_jira drift; the REB-659
-    # case). An empty marker is therefore treated as unmarked, so the key adopts normally.
+        return []
+    marked: list[str] = []
     for lbl in labels:
         if not isinstance(lbl, str):
             continue
         for prefix in ("rebar-id:", "rebar-id-"):
             if lbl.startswith(prefix) and lbl[len(prefix) :].strip():
-                return True
-    return False
+                marked.append(lbl[len(prefix) :].strip())
+                break
+    return marked
+
+
+def _has_rebar_id_label(fields: Mapping[str, Any] | None) -> bool:
+    """True when a Jira snapshot entry carries a well-formed rebar-id identity label.
+
+    See :func:`_marked_local_ids` for what counts as well-formed (an empty marker is
+    treated as unmarked, so the key adopts normally).
+    """
+    return bool(_marked_local_ids(fields))
+
+
+def _deterministic_adopt_id(jira_key: str) -> str:
+    """The deterministic local id an inbound adopt materialises for ``jira_key``.
+
+    Twin of ``inbound_translate._jira_key_to_local_id`` (DIG-123 → jira-dig-123),
+    inlined because this module deliberately imports no reconciler sibling (every
+    peer is injected at the call boundary to stay clear of the test-package import
+    shadow).
+    """
+    if jira_key.startswith("jira-"):
+        return jira_key
+    return "jira-" + jira_key.lower()
+
+
+def _adopt_stands_down(
+    fields: Mapping[str, Any] | None,
+    jira_key: str,
+    binding_store: Any,
+    local_reader: Callable[[str], Mapping[str, Any] | None],
+) -> bool:
+    """The L10 guard with its one carve-out: the lost-adopt residue replays.
+
+    An unbound key carrying a rebar-id marker is normally identity-bound elsewhere,
+    so the unbound arm stands down (adopting would double-create the phantom
+    jira-dig-NNNN and can trip the L11 double-bind quarantine). But when an adopt's
+    Jira label write-back survived while the local CREATE + binding were LOST — an
+    ephemeral runner whose final tickets push was rejected (bug 2392-9389-39f9-4ca6,
+    the REB-3510 incident) — that stand-down is permanent unbound_jira drift: no
+    recovery path ever re-links a marked-but-unstored key. The residue is provable
+    from local state alone, so it falls through to the ordinary ADOPT arm (an
+    idempotent replay — the deterministic local id converges on the same ticket,
+    binding, and label) exactly when ALL of:
+
+    * the key's ONLY marker is exactly the DETERMINISTIC inbound id for this key
+      (a UUID marker from an outbound bind, a foreign ghost marker, or multiple
+      markers is ambiguous identity — human-owned, keeps standing down);
+    * the binding store holds NO entry for that id (a pending write-ahead entry is
+      owned by ``BindingRecovery.recover_pending_bindings``);
+    * a targeted local read finds NO local ticket for it (a surviving ticket means
+      only the binding is missing — a store-integrity repair, not this class; a
+      replayed create would append a duplicate CREATE event).
+    """
+    marked = _marked_local_ids(fields)
+    if not marked:
+        return False  # unmarked → the ordinary adopt arm handles it
+    expected = _deterministic_adopt_id(jira_key)
+    if marked != [expected]:
+        return True
+    if binding_store.all_bindings().get(expected) is not None:
+        return True
+    return local_reader(expected) is not None

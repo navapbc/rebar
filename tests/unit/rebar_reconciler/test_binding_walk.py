@@ -421,6 +421,103 @@ def test_class_b_empty_rebar_id_marker_is_adopted(tmp_path: Path) -> None:
     assert result.mutations[0].action.value == "create"
 
 
+def test_class_b_marked_but_unstored_key_is_readopted(tmp_path: Path) -> None:
+    """Bug 2392-9389-39f9-4ca6: the lost-final-push runner residue MUST replay.
+
+    Runner 1 adopted a Jira-native issue — CREATE event + binding written, the
+    ``rebar-id:jira-reb-3510`` label stamped on Jira — then its final tickets push
+    was rejected (non-fast-forward) and the EPHEMERAL runner was destroyed: the
+    label persisted while the local CREATE + binding were lost. The next pass sees
+    a present, UNBOUND key whose ONLY marker is exactly the DETERMINISTIC inbound
+    id, with no binding-store entry for that id and no local ticket. That is proof
+    of a lost adopt, not of a live binding — the walk must fall through to the
+    ADOPT arm (idempotent replay: same deterministic local id) instead of standing
+    down on the L10 guard forever (permanent unbound_jira drift; REB-3510)."""
+    bs = _empty_store(tmp_path)  # the binding died with runner 1
+    fields = {
+        "summary": "adopted, then the runner died before the push",
+        "status": "To Do",
+        "labels": ["rebar-id:jira-reb-3510"],  # the stamp that survived
+    }
+    result = compute(
+        bs,
+        {"REB-3510": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),  # the local CREATE died with runner 1
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == ["REB-3510"], "marked-but-unstored key must replay the adopt"
+    assert len(result.mutations) == 1
+    m = result.mutations[0]
+    assert m.direction.value == "inbound"
+    assert m.action.value == "create"
+    assert m.target == "REB-3510"
+
+
+def test_class_b_marked_key_with_local_ticket_stands_down(tmp_path: Path) -> None:
+    """A marker that matches the deterministic id while the LOCAL TICKET still
+    exists (only the binding is missing) is a store-integrity repair, NOT the
+    lost-adopt residue — the walk keeps standing down (a replayed create would
+    append a duplicate CREATE event to the surviving ticket)."""
+    bs = _empty_store(tmp_path)
+    fields = {"summary": "x", "status": "To Do", "labels": ["rebar-id:jira-reb-11"]}
+    result = compute(
+        bs,
+        {"REB-11": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader(
+            {"jira-reb-11": {"ticket_id": "jira-reb-11", "status": "open"}}
+        ),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == []
+    assert result.mutations == []
+
+
+def test_class_b_marked_key_with_pending_store_entry_stands_down(tmp_path: Path) -> None:
+    """A marker that matches the deterministic id while the store still holds an
+    entry for that id (the pending write-ahead) is owned by
+    ``BindingRecovery.recover_pending_bindings`` — the walk keeps standing down."""
+    bs = _empty_store(tmp_path)
+    bs.bind_pending("jira-reb-12")
+    fields = {"summary": "x", "status": "To Do", "labels": ["rebar-id:jira-reb-12"]}
+    result = compute(
+        bs,
+        {"REB-12": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == []
+    assert result.mutations == []
+
+
+def test_class_b_ghost_double_marker_stands_down(tmp_path: Path) -> None:
+    """The bug-4354 ghost-label shape — MULTIPLE rebar-id markers (a UUID from an
+    outbound bind plus a phantom deterministic one) — is ambiguous identity, not
+    the lost-adopt residue: it stays human-owned (fsck alert), the walk stands
+    down."""
+    bs = _empty_store(tmp_path)
+    fields = {
+        "summary": "ghost-labeled",
+        "status": "To Do",
+        "labels": ["rebar-id:259f-aaaa-bbbb-4ccc", "rebar-id:jira-reb-13"],
+    }
+    result = compute(
+        bs,
+        {"REB-13": fields},
+        active_local_ids=set(),
+        client=None,
+        local_reader=_archived_reader({}),
+        max_acting_fraction=1.0,
+    )
+    assert result.adopted == []
+    assert result.mutations == []
+
+
 def test_class_b_mass_adopt_tripped_by_breaker(tmp_path: Path) -> None:
     """The breaker is a mass-ADOPT guard too: against a real binding population, a
     fetch returning a flood of unbound issues (ADOPT is acting) is refused before
