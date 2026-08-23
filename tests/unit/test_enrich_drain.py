@@ -89,18 +89,21 @@ def test_drain_once(repo: str) -> None:
     assert Q.pending_enrichment(Q._now_ns(), _tracker(repo)) == []
 
 
-def test_batch_cap(repo: str) -> None:
+def test_batch_cap(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "5")  # pin the mechanism, not the default
     tids = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(8)]
     for t in tids:
         Q.enqueue(t, soak_min=0, repo_root=repo, now_ns=1000)
     first = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
-    assert first["processed"] == 5  # DEFAULT_OVERLAP_DRAIN_BATCH
+    assert first["processed"] == 5
     second = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
     assert second["processed"] == 3  # backlog drains over successive runs
     assert Q.pending_enrichment(Q._now_ns(), _tracker(repo)) == []
 
 
-def test_backlog_drains_despite_a_low_sorted_churn_set(repo: str) -> None:
+def test_backlog_drains_despite_a_low_sorted_churn_set(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Every queued entry is eventually served, even when `DRAIN_BATCH` entries that sort
     EARLIER keep re-entering the queue (bug f400-987f-45f6-419a).
 
@@ -118,9 +121,10 @@ def test_backlog_drains_despite_a_low_sorted_churn_set(repo: str) -> None:
     a DONE tombstone), not on the order the queue happens to return, so any fair policy
     satisfies it and no wall-clock timing is involved.
     """
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "5")  # pin the mechanism at batch 5
     tids = [rebar.create_ticket("task", f"T{i}", repo_root=repo) for i in range(14)]
     by_id = sorted(tids)
-    churn, late = set(by_id[:5]), set(by_id[5:])  # 5 == DEFAULT_OVERLAP_DRAIN_BATCH
+    churn, late = set(by_id[:5]), set(by_id[5:])  # 5 == the pinned drain batch
 
     stamp = 1000
     for tid in tids:
@@ -137,6 +141,187 @@ def test_backlog_drains_despite_a_low_sorted_churn_set(repo: str) -> None:
         f"{len(late - served)} of {len(late)} later-sorted entries were never served across "
         f"8 drain runs while the churn set was served repeatedly"
     )
+
+
+class _LockProbeRunner(Runner):
+    """Attempts to take the drain advisory lock from INSIDE every LLM call.
+
+    The pin for the collect/enrich/finalize restructure's core invariant: the drain lock is
+    released before the enrich phase, so a probe from within ``run()`` must ACQUIRE it (the
+    pre-restructure drain held the lock across the call, so the probe failed). Counted, not
+    timed."""
+
+    name = "lockprobe"
+
+    def __init__(self, tracker: str) -> None:
+        self.tracker = tracker
+        self.calls = 0
+        self.acquired = 0
+
+    def run(self, req: RunRequest) -> dict:
+        self.calls += 1
+        fd = D._acquire_advisory_lock(self.tracker)
+        if fd is not None:
+            self.acquired += 1
+            D._release_advisory_lock(self.tracker, fd)
+        return {**_DIGEST, "runner": self.name, "model": None, "trace_id": None}
+
+    def preflight(self) -> None:
+        pass
+
+
+def test_drain_lock_is_not_held_across_llm_calls(repo: str) -> None:
+    """AC pin: the advisory lock is free during EVERY enrich call in a batch."""
+    for i in range(3):
+        tid = rebar.create_ticket("task", f"Unlocked {i}", repo_root=repo)
+        Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    probe = _LockProbeRunner(_tracker(repo))
+    result = D.drain(_tracker(repo), repo_root=repo, runner=probe)
+    assert result["processed"] == 3
+    assert probe.calls == 3
+    assert probe.acquired == 3, (
+        f"the drain lock was held during {probe.calls - probe.acquired} of {probe.calls} "
+        "LLM calls — enrichment must run outside the advisory lock"
+    )
+
+
+class _ReentrantRunner(Runner):
+    """Triggers a SECOND drain from inside the first drain's enrich phase — the exact
+    concurrent-drainer shape (drain 2 collects while drain 1 is mid-LLM-call)."""
+
+    name = "reentrant"
+
+    def __init__(self, tracker: str, repo: str, inner: Runner) -> None:
+        self.tracker = tracker
+        self.repo = repo
+        self.inner = inner
+        self.calls = 0
+        self.inner_result: dict | None = None
+
+    def run(self, req: RunRequest) -> dict:
+        self.calls += 1
+        if self.inner_result is None:
+            self.inner_result = D.drain(self.tracker, repo_root=self.repo, runner=self.inner)
+        return {**_DIGEST, "runner": self.name, "model": None, "trace_id": None}
+
+    def preflight(self) -> None:
+        pass
+
+
+class _CountingRunner(Runner):
+    name = "counting"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def run(self, req: RunRequest) -> dict:
+        self.calls += 1
+        return {**_DIGEST, "runner": self.name, "model": None, "trace_id": None}
+
+    def preflight(self) -> None:
+        pass
+
+
+def test_concurrent_drains_make_zero_duplicate_llm_calls(
+    repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AC pin: claim arbitration gives exactly one LLM call per ticket across two drains
+    whose enrich phases overlap. N tickets -> exactly N calls, every ticket DONE."""
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "5")
+    tids = [rebar.create_ticket("task", f"Concurrent {i}", repo_root=repo) for i in range(10)]
+    for t in tids:
+        Q.enqueue(t, soak_min=0, repo_root=repo, now_ns=1000)
+    inner = _CountingRunner()
+    outer = _ReentrantRunner(_tracker(repo), repo, inner)
+    result = D.drain(_tracker(repo), repo_root=repo, runner=outer)
+    assert result["processed"] == 5
+    assert outer.inner_result is not None and outer.inner_result["processed"] == 5
+    assert outer.calls + inner.calls == 10, (
+        f"10 tickets took {outer.calls + inner.calls} LLM calls across two concurrent "
+        "drains — claim arbitration must prevent duplicate spend"
+    )
+    now = Q._now_ns()
+    assert all(Q.reduce_ticket(t, _tracker(repo), now_ns=now)["done"] for t in tids)
+
+
+class _EditDuringEnrichRunner(Runner):
+    """Edits the ticket under enrichment from inside ``run()`` — content drifts between the
+    collect-phase snapshot and the finalize-phase writeback."""
+
+    name = "editor"
+
+    def __init__(self, repo: str, tid: str) -> None:
+        self.repo = repo
+        self.tid = tid
+
+    def run(self, req: RunRequest) -> dict:
+        rebar.edit_ticket(self.tid, description="edited mid-enrichment", repo_root=self.repo)
+        return {**_DIGEST, "runner": self.name, "model": None, "trace_id": None}
+
+    def preflight(self) -> None:
+        pass
+
+
+def test_stale_writeback_is_skipped_and_reenqueued(repo: str) -> None:
+    """AC pin: a ticket edited between claim and finalize gets NO stale digest; the entry is
+    re-enqueued pending, and a follow-up drain enriches the fresh content."""
+    tid = rebar.create_ticket("task", "Hot ticket", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    result = D.drain(_tracker(repo), repo_root=repo, runner=_EditDuringEnrichRunner(repo, tid))
+    assert result["processed"] == 0
+    assert result.get("stale_skipped") == 1
+    assert ds.latest_ticket_digest(tid, repo_root=repo) is None, (
+        "a digest computed from pre-edit content must not be written back"
+    )
+    assert Q.reduce_ticket(tid, _tracker(repo))["pending"] is True  # re-enqueued, soak 0
+    second = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+    assert second["processed"] == 1
+    assert ds.freshness(tid, repo_root=repo) == "present-fresh"
+
+
+def test_lease_expiry_recovery(repo: str) -> None:
+    """AC pin: an entry claimed by a crashed drainer (expired lease) is re-picked and
+    processed by the next drain."""
+    tid = rebar.create_ticket("task", "Orphaned claim", repo_root=repo)
+    Q.enqueue(tid, soak_min=0, repo_root=repo, now_ns=1000)
+    # A dead drainer's claim: live at its own claim instant, long expired by real now.
+    assert Q.claim(tid, "dead-drainer", lease_ttl_min=0.001, now_ns=2000, repo_root=repo)
+    result = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+    assert result["processed"] == 1
+    assert Q.reduce_ticket(tid, _tracker(repo))["done"] is True
+
+
+def test_concurrency_cap_bounds_live_drainers(repo: str) -> None:
+    """AC pin: a drain skips while 3 distinct live-lease drainers exist; proceeds at 2."""
+    tids = [rebar.create_ticket("task", f"Guard {i}", repo_root=repo) for i in range(4)]
+    for t in tids:
+        Q.enqueue(t, soak_min=0, repo_root=repo, now_ns=1000)
+    for i in range(3):
+        assert Q.claim(tids[i], f"live-drainer-{i}", lease_ttl_min=60, repo_root=repo)
+    result = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+    assert result.get("skipped") == "concurrency-cap"
+    assert result["processed"] == 0
+    # Fourth ticket untouched — still pending for a later drain.
+    assert Q.reduce_ticket(tids[3], _tracker(repo))["done"] is False
+    # With only 2 live drainers the guard admits the drain.
+    tid_done = tids[0]
+    Q.mark_done(tid_done, repo_root=repo)  # retire one claim's entry entirely
+    result2 = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+    assert result2["processed"] == 1  # the unclaimed fourth ticket
+
+
+def test_batch_cap_is_lease_derived(repo: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """AC pin: the effective batch is min(configured, lease_ttl_s // 40) and never < 1."""
+    from rebar.llm.config import DEFAULT_OVERLAP_DRAIN_BATCH, LLMConfig
+
+    assert DEFAULT_OVERLAP_DRAIN_BATCH == 20  # OQ3: raised from 5, inside the ~20-25 window
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "1000")
+    cfg = LLMConfig.from_env(repo_root=repo)
+    assert D._lease_bounded_batch(cfg) == (cfg.overlap_lease_ttl_min * 60) // 40  # 22
+    result = D.drain(_tracker(repo), repo_root=repo, runner=_DigestRunner())
+    assert result["batch"] == 22
+    monkeypatch.setenv("REBAR_LLM_OVERLAP_DRAIN_BATCH", "3")
+    assert D._lease_bounded_batch(LLMConfig.from_env(repo_root=repo)) == 3
 
 
 def test_lock_held_skip(repo: str) -> None:
