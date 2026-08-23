@@ -173,9 +173,9 @@ def run_access_check(
             jql = f'labels="{label}"'
             results: list[Any] = []
             for attempt in range(JQL_RETRY_COUNT):
-                cache = getattr(client, "_search_cache", None)
-                if isinstance(cache, dict):
-                    cache.pop(jql, None)
+                invalidate = getattr(client, "invalidate_search_cache", None)
+                if callable(invalidate):
+                    invalidate(jql)
                 results = client.search_issues(jql)
                 if results:
                     break

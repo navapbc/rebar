@@ -464,6 +464,7 @@ _NON_MUTATING = {
     "get_issue": "READ (JQL search / REST GET)",
     "get_issue_by_rest": "READ (REST GET)",
     "search_issues": "READ (JQL search)",
+    "invalidate_search_cache": "pure memo evict — no transport call at all",
     "get_server_info": "READ",
     "get_myself": "READ",
     "get_comments": "READ (comment list)",
