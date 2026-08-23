@@ -24,11 +24,7 @@ search / list ──▶ ready ──▶ claim ──▶ (work + comment) ──�
 
 ## Mutation confirmations
 
-Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`,
-`tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`,
-`session-log`, `transition`, `reopen`, `claim`) confirms its result on stdout with one
-kubectl-style line — `<past-tense-verb> <args-summary>` on a successful write,
-`no change: <reason>` on an idempotent no-op (exit 0 in both cases):
+Every mutating verb (`create`, `idea`, `comment`, `link`, `unlink`, `revert`, `edit`, `tag`, `untag`, `archive`, `set-file-impact`, `set-verify-commands`, `attach-commits`, `session-log`, `transition`, `reopen`, `claim`) prints one confirmation line to standard output after a successful write. The line uses `<past-tense-verb> <args-summary>`. An idempotent operation prints `no change: <reason>` and exits 0.
 
 ```
 $ rebar tag c50e-7326 perf
@@ -37,21 +33,12 @@ $ rebar tag c50e-7326 perf
 no change: tag perf already on c50e-7326-9cac-45e4
 ```
 
-Two global flags are extracted for these verbs at the top-level router
-(position-independent within the verb's arguments; tokens after `--` are never
-consumed, so a comment body containing `--quiet` survives verbatim):
+These options may appear anywhere among the verb arguments. A bare `--` ends option parsing, so a comment body containing `--quiet` remains unchanged.
 
-- `--quiet` / `-q` suppresses the text confirmation only — errors, exit codes, JSON
-  output, and `link`'s machine-readable REDIRECT record are untouched.
-- `--output <text|json>` / `-o <mode>`: verbs that already accepted `--output`
-  (`create`, `idea`, `transition`, `claim`, `reopen`) keep their pre-existing JSON
-  shapes; the newly-covered verbs emit one uniform mutation envelope
-  `{"outcome": "<verb-past>"|"noop", "subject", "detail"}` — **pre-1.0 UNSTABLE**
-  (the field set may still change before 1.0). `--quiet` + `--output json` still
-  prints the JSON.
+- `--quiet` or `-q` suppresses the text confirmation. Errors, exit codes, JSON output, and the machine-readable `REDIRECT` record from `link` remain available.
+- `--output <text|json>` or `-o <mode>` selects text or JSON output. `create`, `idea`, `transition`, `claim`, and `reopen` retain their established JSON shapes. Other mutation commands return `{"outcome": "<verb-past>"|"noop", "subject", "detail"}`. This envelope remains unstable before version 1.0.
 
-Confirmation lines go to stdout; warnings and logs go to stderr. Scripts should
-parse `--output json`, never the text lines.
+Combining `--quiet` with `--output json` still prints JSON. Confirmation lines use standard output. Warnings and logs use standard error. Scripts should parse `--output json` instead of text confirmations.
 
 ## Finding work
 
@@ -180,24 +167,17 @@ dispositions":
 rebar transition <id> in_progress closed --class=wontfix --reason="descoped by epic Y"
 ```
 
-### Blame-Hunt Advisory (bug close → `caused_by`)
+### Recording what caused a bug
 
-On a **bug** close, rebar best-effort draws a `caused_by` link from the bug to the
-change/ticket that most likely introduced it. It finds the fixing commit (the one whose
-message references this bug), blames the *pre-fix* state of the bug's recorded
-`file_impact` files, and — if a strict majority of the blamed lines belong to one commit
-that itself resolves to a ticket — links the bug to that culprit. It is purely advisory:
-an ambiguous or absent culprit is silently skipped and never blocks the close. Set it
-explicitly with `--caused-by <id>` (which overrides the git-blame auto-derivation):
+When closing a **bug**, use `--caused-by <id>` to record the ticket that introduced the defect. Rebar adds a directional, non-blocking `caused_by` link from the bug to that ticket.
 
 ```sh
 rebar transition <bug> in_progress closed --class=regression --caused-by=<culprit-id>
 ```
 
-Either way the recorded `caused_by` edge is stamped with its **provenance** —
-`explicit` for a supplied `--caused-by` (or a `rebar link … caused_by`), `derived` for a
-blame auto-derivation — so `rebar metrics` can weight proven attributions above guessed
-ones; edges recorded before the marker existed read as `unknown`.
+An explicit value replaces a different `caused_by` link already recorded on the bug. If you omit the option, rebar preserves any existing link and may add one when repository history identifies a source. Failure to identify or record a source does not block the close.
+
+Each `caused_by` link records its attribution as `explicit` or `derived`. Links created before attribution tracking report `unknown`. The bug-trend metrics expose these values separately.
 
 **Reopen** moves a closed ticket back to open:
 
@@ -214,54 +194,33 @@ trail lives in the store:
 rebar comment <id> "Root cause was an unclamped index; fix in pager.py."
 ```
 
-### Passing untrusted or quoted text safely — and the secret screen
+### Passing untrusted or quoted text safely
 
-The store **auto-pushes**, so a comment body is published the moment it is written. Two
-rules follow.
+When a sync remote is configured, a ticket write can be pushed after it is committed. Treat every body as content that can be published to collaborators and remote hosting.
 
-(A third consequence is for whoever runs your CI: every write pushes the `tickets`
-branch, so a pipeline that builds all branches runs once per comment. Configure CI so
-that branch triggers **no** workflow, and put anything that must read the store on a
-schedule — see [concurrency.md](concurrency.md#outbound--push-on-every-write).)
+Each write can update the `tickets` branch. Configure CI to exclude that branch from build triggers. Schedule any job that must read the store. See [concurrency.md](concurrency.md#outbound--push-on-every-write) for synchronization guidance.
 
-**Never build a body from an unquoted shell command substitution.** On 2026-08-03 a
-session ran the equivalent of `rebar comment <id> "$(env)"` and published a full
-environment dump carrying seven live credentials. GitHub push protection then rejected
-`refs/heads/tickets`, and **every** session's writes queued local-only for hours — one
-comment took down store sharing for everyone. Prefer a file you have read, and quote it:
+**Never build a body from an unquoted shell command substitution.** The shell expands backticks and `$(...)` before rebar receives the text. Rebar cannot distinguish intended text from an environment dump or another accidental capture. Prefer a file that you have reviewed, and quote the substitution.
 
 ```sh
-rebar comment <id> "$(cat notes.md)"     # a file you control — safe
-rebar comment <id> -- "$(cat notes.md)"  # ... and `--` if the body may start with "-"
-rebar comment <id> "$(env)"              # NEVER: publishes your whole environment
+rebar comment <id> "$(cat notes.md)"     # submit a reviewed file
+rebar comment <id> -- "$(cat notes.md)"  # allow a body that starts with a hyphen
 ```
 
-Backticks and `$(...)` are expanded by *your shell* before rebar sees anything, so rebar
-cannot tell an intended body from an accidental credential dump. Anything you would not
-paste into a public issue does not belong in a body.
+Do not substitute environment dumps or command output that you have not inspected. Anything that you would not publish in an issue does not belong in a ticket body.
 
-**rebar now refuses secret-bearing bodies at the write seam.** Every event write —
-comment, description, edit — is screened for live credential shapes (Anthropic, OpenAI,
-GitHub, Google, Atlassian, Slack, AWS, PyPI, Stripe, PEM private keys). A match refuses
-the write: nothing lands, and the error names the credential family, the field, and the
-line — never the value itself. Only *live* shapes fire (full length plus an entropy
-floor), so writing *about* a credential — a truncated placeholder like `sk-ant-api03-...`
-or a detection regex — is not refused, and filing a security bug still works.
+Rebar screens event content, including comments, descriptions, and edits, for complete credential patterns that meet length and entropy thresholds. Supported families include Anthropic, OpenAI, GitHub, Google, Atlassian, Slack, AWS, PyPI, Stripe, and PEM private keys. A match refuses the write. No event is stored. The error identifies the credential family, field, and line without displaying the matched value. Truncated examples such as `sk-ant-api03-...` and detection expressions remain writable when they do not meet the thresholds.
 
-If the screen is wrong, override it with a reason:
+If the screen flags harmless text, a human operator can use the CLI override with a reason.
 
 ```sh
-rebar comment <id> "<body>" --allow-secret-pattern="synthetic fixture, not a live key"
+rebar comment <id> "<body>" --allow-secret-pattern="synthetic credential fixture"
 rebar create bug "leak writeup" --description="..." --allow-secret-pattern="<reason>"
 ```
 
-The flag works on every write verb (`comment`, `create`, `edit`, `session-log`, …) and
-takes the `--flag=<reason>` form only, so a reason can never be omitted. The reason and
-the bypassed families are recorded on the event, so a forced write is auditable and
-distinguishable from a clean one. The override is CLI-only — it is a human operator's
-judgment call and is deliberately not exposed over MCP. Forcing a **genuine** credential
-through reproduces the original outage for every session, so the flag is for false
-positives, not for convenience.
+The override works on every write verb, including `comment`, `create`, `edit`, and `session-log`. It accepts only the `--allow-secret-pattern=<reason>` form. The event records the reason and the matched families. The override is available through the CLI and is not available through MCP.
+
+Do not use the override to publish a credential. Remove the credential before retrying. If a credential may have been disclosed through another command or an earlier write, rotate it at its provider and remove it from every source before continuing.
 
 **Link** two tickets with a relation (the relation is required):
 
@@ -270,12 +229,9 @@ rebar link <new-bug> <the-task> discovered_from   # provenance for emergent work
 rebar link <a> <b> blocks                          # a blocks b
 ```
 
-Relations: `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`,
-`discovered_from`. Blocking links (`blocks` / `depends_on`) connect tickets that
-share a parent; across sub-trees they escalate automatically to the children of
-the two tickets' nearest common ancestor. Remove a link with `rebar unlink <a> <b>`
-(removes the most-recent link for that pair) or `rebar unlink <a> <b> <relation>`
-(removes exactly that relation's link when the pair holds several).
+Relations are `blocks`, `depends_on`, `relates_to`, `duplicates`, `supersedes`, `discovered_from`, and `caused_by`. The `caused_by` relation records that a bug came from the change or ticket at the target. It is directional and does not block work. Blocking links connect tickets that share a parent. Across subtrees, rebar promotes `blocks` and `depends_on` links to the relevant children under the nearest common ancestor.
+
+Remove the most recent link for a pair with `rebar unlink <a> <b>`. When a pair has several relations, remove one relation with `rebar unlink <a> <b> <relation>`.
 
 **Tag** and **untag** for lightweight labels; `rebar edit` changes fields:
 
@@ -285,29 +241,19 @@ rebar untag <id> needs-review
 rebar edit <id> --priority=1 --assignee=alice@example.com --add-tag=urgent
 ```
 
-## Session logs — durable working notes
+## Session logs
 
-Session logs are verbose, searchable notes kept in the store (they never enter the
-dependency graph or block anything). Append to the current log; the first append
-creates one:
+Session logs are searchable working notes kept in the ticket store. They do not enter the dependency graph or block other tickets. Append an entry to the current log. Rebar creates a log when the session has none.
 
 ```sh
-rebar session-log append "Spent the morning tracing the pager bug; see comment on <id>."
+rebar session-log append "Spent the morning tracing the pager bug. See comment on <id>."
 rebar session-log start --summary "Dark-mode implementation"   # rotate to a fresh log
 rebar session-logs --limit 5                                    # newest first
 ```
 
-The first `append` creates a log and records it as the **current** one via a local,
-git-ignored pointer (`.rebar/current_session_log`); later appends go to that same log.
-You rarely need `start`, because logs **auto-rotate per session**: the pointer stores a
-session fingerprint alongside the log id — taken from the session-id resolver
-(`REBAR_SESSION_ID`, then `CLAUDE_CODE_SESSION_ID`, then `SESSION_ID`) — so when a *new*
-session's first `append` sees a pointer whose fingerprint differs, it rotates to a fresh
-log automatically. Distinct agent sessions therefore get distinct logs with no manual
-`start`. It degrades safely: when no session id is set at all (fingerprint absent), it
-never rotates, so one continuous no-id session keeps appending to a single log. The
-`session_log` type's store-level semantics (gate-exempt, graph/health-excluded, never
-Jira-synced) are documented in [event-schema.md](event-schema.md).
+Later appends from the same identified session use the same log. When rebar identifies a different session, its first append creates a new log. Use `start` when you want to rotate explicitly. Use `session-logs` to find recent logs.
+
+The `session_log` type is exempt from lifecycle gates, excluded from graph health, and never synchronized to Jira. These properties are documented in [event-schema.md](event-schema.md).
 
 ## The quality gates as you experience them
 
