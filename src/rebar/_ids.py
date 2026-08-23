@@ -166,15 +166,86 @@ def _resolve_via_binding_store(target: str, tracker_dir: str) -> str | None:
     return None
 
 
+def _effective_alias_for_dir(tracker_dir: str, name: str) -> str:
+    """Return the effective alias for a single ticket directory ``name``.
+
+    A ticket's effective alias is its stored ``data.alias`` (CREATE event, or the
+    latest non-PRECONDITIONS SNAPSHOT ``compiled_state`` for compacted tickets) or
+    a backfilled ``compute_alias`` — keeping stored-at-create and
+    backfilled-at-resolve aliases in lock-step. Returns ``""`` for a dotfile, a
+    non-directory, or on a per-ticket I/O error (an unreadable ticket is skipped,
+    never a hard failure).
+    """
+    if name.startswith("."):
+        return ""
+    ticket_dir = os.path.join(tracker_dir, name)
+    if not os.path.isdir(ticket_dir):
+        return ""
+    # First CREATE (lexically earliest) + latest non-PRECONDITIONS SNAPSHOT
+    # (compacted tickets fold the CREATE into a SNAPSHOT compiled_state).
+    create_path = None
+    snapshot_path = None
+    try:
+        for fname in sorted(os.listdir(ticket_dir)):
+            if fname.endswith("-CREATE.json") and create_path is None:
+                create_path = os.path.join(ticket_dir, fname)
+            elif fname.endswith("-SNAPSHOT.json") and not fname.endswith(
+                "-PRECONDITIONS-SNAPSHOT.json"
+            ):
+                snapshot_path = os.path.join(ticket_dir, fname)
+    except OSError:
+        return ""
+    stored_alias = ""
+    if create_path:
+        try:
+            with open(create_path, encoding="utf-8") as f:
+                data = json.load(f).get("data", {}) or {}
+            stored_alias = data.get("alias") or ""
+        except (OSError, json.JSONDecodeError):
+            pass
+    # SNAPSHOT compiled_state is authoritative for compacted tickets; fill the
+    # missing alias BEFORE the compute_alias backfill (wordlist drift).
+    if snapshot_path and not stored_alias:
+        try:
+            with open(snapshot_path, encoding="utf-8") as f:
+                snap_state = (json.load(f).get("data", {}) or {}).get("compiled_state", {}) or {}
+            stored_alias = snap_state.get("alias") or ""
+        except (OSError, json.JSONDecodeError):
+            pass
+    return stored_alias or compute_alias(name) or ""
+
+
+def build_alias_index(tracker_dir: str) -> dict[str, list[str]] | None:
+    """Build ``{alias -> [ticket-dir names]}`` in a single pass over the tracker.
+
+    A caller that must resolve MANY aliases against the same store (e.g. the close
+    precheck's walk over every historical commit reference) builds this once and
+    threads it into :func:`resolve_ticket_id` via ``alias_index=`` — turning an
+    O(distinct_aliases x store) sequence of full-store scans into one pass plus
+    in-memory lookups. Returns ``None`` on a hard failure listing the tracker (so
+    the caller can fall back to per-call scanning), matching :func:`_scan_alias`'s
+    contract that a hard failure never masquerades as "no match".
+    """
+    try:
+        entries = os.listdir(tracker_dir)
+    except OSError as exc:
+        print(f"Error: cannot list {tracker_dir!r}: {exc}", file=sys.stderr)
+        return None
+    index: dict[str, list[str]] = {}
+    for name in entries:
+        effective_alias = _effective_alias_for_dir(tracker_dir, name)
+        if effective_alias:
+            index.setdefault(effective_alias, []).append(name)
+    return index
+
+
 def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
     """Scan tickets for an alias matching ``target`` (in-process alias resolution).
 
     Returns the list of matching ticket-dir names, or ``None`` on a hard failure
     listing the tracker (a hard failure must not masquerade as "no match").
-    Per-ticket I/O errors skip that ticket. Each ticket's effective alias is its
-    stored ``data.alias`` (CREATE event, or the latest non-PRECONDITIONS SNAPSHOT
-    ``compiled_state`` for compacted tickets) or a backfilled ``compute_alias`` —
-    keeping stored-at-create and backfilled-at-resolve aliases in lock-step.
+    Per-ticket I/O errors skip that ticket. Each ticket's effective alias is
+    computed by :func:`_effective_alias_for_dir`.
     """
     try:
         entries = sorted(os.listdir(tracker_dir))
@@ -184,51 +255,19 @@ def _scan_alias(target: str, tracker_dir: str) -> list[str] | None:
 
     alias_matches: list[str] = []
     for name in entries:
-        if name.startswith("."):
-            continue
-        ticket_dir = os.path.join(tracker_dir, name)
-        if not os.path.isdir(ticket_dir):
-            continue
-        # First CREATE (lexically earliest) + latest non-PRECONDITIONS SNAPSHOT
-        # (compacted tickets fold the CREATE into a SNAPSHOT compiled_state).
-        create_path = None
-        snapshot_path = None
-        try:
-            for fname in sorted(os.listdir(ticket_dir)):
-                if fname.endswith("-CREATE.json") and create_path is None:
-                    create_path = os.path.join(ticket_dir, fname)
-                elif fname.endswith("-SNAPSHOT.json") and not fname.endswith(
-                    "-PRECONDITIONS-SNAPSHOT.json"
-                ):
-                    snapshot_path = os.path.join(ticket_dir, fname)
-        except OSError:
-            continue
-        stored_alias = ""
-        if create_path:
-            try:
-                with open(create_path, encoding="utf-8") as f:
-                    data = json.load(f).get("data", {}) or {}
-                stored_alias = data.get("alias") or ""
-            except (OSError, json.JSONDecodeError):
-                pass
-        # SNAPSHOT compiled_state is authoritative for compacted tickets; fill the
-        # missing alias BEFORE the compute_alias backfill (wordlist drift).
-        if snapshot_path and not stored_alias:
-            try:
-                with open(snapshot_path, encoding="utf-8") as f:
-                    snap_state = (json.load(f).get("data", {}) or {}).get(
-                        "compiled_state", {}
-                    ) or {}
-                stored_alias = snap_state.get("alias") or ""
-            except (OSError, json.JSONDecodeError):
-                pass
-        effective_alias = stored_alias or compute_alias(name) or ""
+        effective_alias = _effective_alias_for_dir(tracker_dir, name)
         if effective_alias and effective_alias == target:
             alias_matches.append(name)
     return alias_matches
 
 
-def resolve_ticket_id(ticket_id: str, tracker_dir: str, *, quiet: bool = False) -> str | None:
+def resolve_ticket_id(
+    ticket_id: str,
+    tracker_dir: str,
+    *,
+    quiet: bool = False,
+    alias_index: dict[str, list[str]] | None = None,
+) -> str | None:
     """Return the canonical ticket directory name for ``ticket_id``, or None.
 
     Ambiguous matches and tracker-listing failures are surfaced via stderr to
@@ -237,6 +276,13 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str, *, quiet: bool = False) 
     stderr diagnostics (the return value is unchanged) — for scanners resolving
     candidates the user never supplied, e.g. the close precheck's walk over
     historical commit references, where an unrelated ambiguity is noise.
+
+    ``alias_index`` — when a caller resolves MANY ids against the same store, it
+    can prebuild an ``{alias -> [dir names]}`` map with :func:`build_alias_index`
+    and pass it here; the alias-resolution branch then does an in-memory lookup
+    instead of a fresh full-store scan, keeping the whole walk to one store pass.
+    The result is identical to per-call scanning (same match set, same ambiguity
+    handling).
     """
     # Fast path: if the input already names an existing ticket directory, use it
     # directly. `_existing_ticket_dir_name` guards the input as a safe path
@@ -285,7 +331,11 @@ def resolve_ticket_id(ticket_id: str, tracker_dir: str, *, quiet: bool = False) 
         if bound is not None:
             return bound
 
-    alias_matches = _scan_alias(ticket_id, tracker_dir)
+    alias_matches = (
+        alias_index.get(ticket_id, [])
+        if alias_index is not None
+        else _scan_alias(ticket_id, tracker_dir)
+    )
     if alias_matches is not None:
         if len(alias_matches) == 1:
             return alias_matches[0]
