@@ -194,6 +194,11 @@ explicitly with `--caused-by <id>` (which overrides the git-blame auto-derivatio
 rebar transition <bug> in_progress closed --class=regression --caused-by=<culprit-id>
 ```
 
+Either way the recorded `caused_by` edge is stamped with its **provenance** —
+`explicit` for a supplied `--caused-by` (or a `rebar link … caused_by`), `derived` for a
+blame auto-derivation — so `rebar metrics` can weight proven attributions above guessed
+ones; edges recorded before the marker existed read as `unknown`.
+
 **Reopen** moves a closed ticket back to open:
 
 ```sh
@@ -397,7 +402,9 @@ sidecars.
 
 Each metric is tagged with a **lens** — one of `agent_process` (attempts/rework/recovery
 per ticket), `bug_trends` (bug close-class mix by month, time-to-close, open-bug age,
-detection channels, caused-by fan-in), `code_health` (module-size distribution and trend
+detection channels, caused-by fan-in, and the caused-by provenance split —
+explicit/derived/unknown edge counts, where `unknown` is the pre-marker cohort),
+`code_health` (module-size distribution and trend
 vs the locked cap, churn, refactor-to-addition ratio, cap-change events), `delivery`
 (commit cadence), and `gate_economics` (LLM cost-per-accepted-change, first-pass
 verification, env-diagnosis intervals) — plus a `source` and a `confidence` label.

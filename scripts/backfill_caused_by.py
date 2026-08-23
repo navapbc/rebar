@@ -65,7 +65,10 @@ def backfill(repo_root: str, write: bool = False) -> int:
         # which may already have drawn this link).
         if _links._is_active_link(bug_id, culprit_id, "caused_by", tracker_dir):
             continue
-        _links._write_link_event(bug_id, culprit_id, "caused_by", tracker_dir)
+        # These proposals come from blame auto-derivation, so mark the edge "derived"
+        # (ticket 6536-367c) — the escape-rate lens must not read a backfilled guess
+        # as a supplied attribution.
+        _links._write_link_event(bug_id, culprit_id, "caused_by", tracker_dir, provenance="derived")
         written += 1
     return written
 

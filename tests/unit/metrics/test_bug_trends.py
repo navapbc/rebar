@@ -37,6 +37,7 @@ import pytest
 
 from rebar.metrics.bug_trends import (
     caused_by_fan_in,
+    caused_by_provenance,
     close_class_by_month,
     detected_by_distribution,
     open_bug_age_days,
@@ -178,6 +179,39 @@ def test_caused_by_fan_in_descending(tmp_path):
     assert list(result) == [target_hot, target_cold]  # descending fan-in order
 
 
+def test_caused_by_provenance_split(tmp_path):
+    """Explicit / derived / unknown edge counts (ticket 6536-367c).
+
+    An unmarked (pre-marker) edge counts as "unknown" — never merged into a real
+    cohort — and non-caused_by links never count.
+    """
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    target = "ffff-0000-0000-00aa"
+    for i, provenance in enumerate(("explicit", "explicit", "derived", None)):
+        d = _bug(tracker, f"abab-0000-0000-000{i}", "2026-01-01T00:00:00")
+        data: dict = {"target_id": target, "relation": "caused_by"}
+        if provenance is not None:
+            data["provenance"] = provenance
+        _write_event(d, _ns(f"2026-01-0{i + 2}T00:00:00"), "LINK", data)
+    # A non-caused_by link must not count, marked or not.
+    d = _bug(tracker, "abab-0000-0000-0009", "2026-01-01T00:00:00")
+    _write_event(
+        d, _ns("2026-01-09T00:00:00"), "LINK", {"target_id": target, "relation": "relates_to"}
+    )
+
+    result = caused_by_provenance(str(tmp_path))
+    assert result == {"explicit": 2, "derived": 1, "unknown": 1}
+
+
+def test_caused_by_provenance_none_when_no_edges(tmp_path):
+    tracker = tmp_path / ".tickets-tracker"
+    tracker.mkdir()
+    _bug(tracker, "abab-0000-0000-0001", "2026-01-01T00:00:00")
+
+    assert caused_by_provenance(str(tmp_path)) is None
+
+
 def test_specs_registered_under_bug_trends_lens():
     import rebar.metrics  # hydrates REGISTRY via package-import side effects
 
@@ -188,6 +222,7 @@ def test_specs_registered_under_bug_trends_lens():
         "bug_open_age_days",
         "bug_detected_by_distribution",
         "bug_caused_by_fan_in",
+        "bug_caused_by_provenance",
     }
     for spec in specs.values():
         assert spec.source == "structural"

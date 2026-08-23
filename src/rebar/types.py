@@ -68,6 +68,7 @@ class Dep(TypedDict):
     target_id: str
     relation: Relation
     link_uuid: NotRequired[str]
+    provenance: NotRequired[Literal["explicit", "derived"]]
 
 
 class FileImpactEntry(TypedDict):

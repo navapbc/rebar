@@ -121,6 +121,7 @@ def _write_link_event(
     target_id: str,
     relation: str,
     tracker_dir: str,
+    provenance: str | None = None,
 ) -> None:
     """Write a single LINK event to source_id's directory (no cycle check, no idempotency).
 
@@ -137,15 +138,23 @@ def _write_link_event(
     (e.g. rebase-in-progress guard, exit 75); the push step is best-effort and never
     raises. Callers tolerate this: ``link_core`` documents "Raises CommandError" and
     the reconciler's inbound applier wraps ``rebar.link`` in a non-fatal try/except.
+
+    ``provenance`` (ticket 6536-367c) is the caused_by attribution marker —
+    ``"explicit"`` (operator/agent-supplied) or ``"derived"`` (blame auto-derivation) —
+    written into the event data only when set, so every other relation (and every
+    pre-marker event) keeps its exact prior payload shape and reads as unknown.
     """
     from pathlib import Path
 
     from rebar._commands import _seam
 
+    data: dict = {"target_id": target_id, "relation": relation}
+    if provenance:
+        data["provenance"] = provenance
     _seam.append_event(
         source_id,
         "LINK",
-        {"target_id": target_id, "relation": relation},
+        data,
         Path(tracker_dir),
     )
 
@@ -309,7 +318,16 @@ def add_dependency(
         _report_outcome(False)
         return redirect_record
 
-    _write_link_event(source_id, target_id, relation, tracker_dir)
+    # caused_by via `rebar link` is an attribution SUPPLIED by the caller (CLI, library,
+    # or MCP), never a blame guess — mark it so the escaped-defect lenses can weight
+    # proven attributions above derived ones (ticket 6536-367c).
+    _write_link_event(
+        source_id,
+        target_id,
+        relation,
+        tracker_dir,
+        provenance="explicit" if relation == "caused_by" else None,
+    )
 
     if relation == "relates_to" and not _is_active_link(
         target_id, source_id, relation, tracker_dir
