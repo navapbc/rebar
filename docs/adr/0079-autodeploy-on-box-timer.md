@@ -70,3 +70,34 @@ The box converges to `main` within ~poll + deploy time with no human action and 
 trust surface, while the fail-closed gate is protected by rollback + bounded blast radius. The
 cost is a custom deploy loop (Watchtower was rejected — it polls pre-built registry images, not
 source rebuilds) and a v1 that still requires a manual apply for the rare config-ref change.
+
+## Amendment (2026-08-24) — the `mcp` autodeploy target uses blue-green pointer-swap, NOT the review-bot stop-and-drain
+
+**Relates to:** ADR 0104 (MCP on the AWS box), ADR 0067 (review-bot bounded shutdown),
+`sticky-genetic-narwhal` (local `origin/main`-tracking updater precedent).
+
+Decision 3 above scoped v1 auto-apply to the **review-bot** container, whose deploy is a
+stop-and-health-drain (`docker compose up -d` + `/health` in-flight gate, ADR 0067). ADR 0104
+adds a `rebar-mcp` HTTP server to this box, and its autodeploy target **deliberately does not
+reuse** that stop-and-drain. The `mcp` target is **blue-green**: build the new image → start a
+**new** `rebar-mcp` container → health-check it → **atomically flip the nginx `/mcp/` upstream**
+to it (the `current`-pointer rename analog) → **retire the old container off the critical path**,
+gated by a flock-style "still serving?" check (active connections / its own `in_flight` gauge),
+with bounded retention, a hard cap, and an SNS alert when a busy old container cannot be
+reclaimed. Overlap is capped **one-in / one-out** (never N parallel), guarded by a
+memory-pressure alarm so the transient 2× `rebar-mcp` never forces the `t4g.large` (8 GiB) up to
+`t4g.xlarge`.
+
+**Why blue-green here and not the review-bot pattern.** A **shared** MCP server driven by N
+agents pipelines long, billable LLM ops, so its `in_flight` gauge may **never** reach 0 (bug
+`7b4a` saturation): a gauge-gated drain bound would then be exhausted and **kill an in-flight
+certified op**, and a bigger bound only defers the same kill. Blue-green **decouples retirement
+from the deploy**, so a never-idle server never blocks a deploy and never forces a kill. In-place
+reload is rejected outright because rebar lazy-imports late (e.g. `commit_impact` during `close`,
+after the minutes-long completion verifier), so swapping code under a running process risks an
+`ImportError` mid-op. A killed MCP op is client-visible (dropped HTTP connection → the agent
+retries) and rebar's event-sourced writes are idempotent (an unpersisted op-cert is re-requested),
+so retirement is safe. This mirrors the immutable-release + retire-when-idle shape of the local
+`~/.local/bin/rebar-dev-update.sh` updater (`sticky-genetic-narwhal`), cited as external local
+prior art. The stability constraints of Decision 4 (bounded blast radius, self-heal/rollback,
+SHA-keyed backoff, `flock` serialisation) apply unchanged to the `mcp` target.
