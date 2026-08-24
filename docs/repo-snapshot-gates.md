@@ -102,6 +102,31 @@ token configured in the server's clone. Fetching an *arbitrary SHA* additionally
 remote's `uploadpack.allowReachableSHA1InWant` (else name a containing ref and let it resolve);
 the fetch prefers `--filter=blob:none` over deep history transfer.
 
+### Fetch scope — what a resolution actually transfers
+
+Attested resolution **never** issues a bare all-heads `git fetch origin`. That command applies
+the checkout's configured `remote.origin.fetch` refspec, so on a clone that maps every head
+(`+refs/heads/*:refs/remotes/origin/*`) it pulls **every** branch — including an unrelated,
+huge `tickets` history — for what is only a single code-SHA lookup (measured in the field at
+512s, tripping the 300s fetch ceiling with zero model calls). Instead the opening fetch is
+scoped to exactly the `ref` being resolved:
+
+- **A moving branch or tag** (`origin/main`, a tag) is fetched with a **scoped refspec** that
+  transfers only that ref and updates its `refs/remotes/origin/<name>` tracking ref, so the
+  resolution sees the current remote tip (freshness preserved) without pulling unrelated heads.
+- **A full SHA already present locally** triggers **no fetch at all**. A full object name is
+  immutable, so once its commit object is in the repo no remote round-trip is owed — not even a
+  scoped one. The presence probe is deliberately offline (`GIT_NO_LAZY_FETCH`) so a
+  promisor/partial clone does not lazily fetch here either.
+- **A full SHA absent locally** takes a **targeted single-object want** (`git fetch … <sha>`,
+  requiring the remote's `uploadpack.allowReachableSHA1InWant`), and **fails closed** with a
+  `SnapshotRefError` if the object cannot be obtained — it never broadens to an all-heads fetch
+  to go looking for it.
+
+Materialization is separate: acquiring the selected tree's **blobs** is a distinct targeted
+top-up of that SHA's objects, so a present-SHA resolution still materializes a complete tree
+without transferring unrelated heads.
+
 Failure behavior (attested **fails closed** — it never serves the wrong tree, and never hangs
 on a prompt: `GIT_TERMINAL_PROMPT=0`):
 
