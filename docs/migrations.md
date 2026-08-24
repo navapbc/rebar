@@ -32,10 +32,7 @@ class EnsureOutcome:
     detail: str = ""                             # changed = drift corrected; failed = raised
 ```
 
-`run_ensures(tracker)` runs **every** unit unconditionally under the store write lock, catches
-a raising unit (skip-and-continue → `failed`, excluded from the applied-set), and returns the
-outcomes. It never raises: a write-lock acquisition failure or a marker-write error is logged
-and treated as a whole-sweep no-op, so init / boot never abort on ensure trouble.
+`run_ensures(tracker)` runs **every** unit unconditionally under the store write lock. It catches an exception from an individual unit, records `failed`, excludes that unit from the applied set, and continues. Lock acquisition failures, marker write failures, and other sweep failures are logged without aborting the caller. `StoreIncompatibleError` from the write-lock compatibility gate is the deliberate exception. It escapes the sweep so an incompatible store fails closed during init, MCP boot, and `fsck --repair`.
 
 ## Adding an ensure unit
 
@@ -51,10 +48,9 @@ and treated as a whole-sweep no-op, so init / boot never abort on ensure trouble
    applied-set marker.
 3. That's it — the unit now runs at every entry point below and is surfaced by `fsck`.
 
-The six built-in units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`,
-`store-compat`.
+The registry contains nine units: `env-id`, `gc-config`, `merge-ours`, `gitattributes`, `gitignore`, `store-compat`, `projects-seed`, `projects-compat-stamp`, and `untrack-runtime-markers`.
 
-Two further units migrate a legacy store to the many-to-many projects model (ticket 462d)
+Two of these units migrate a legacy store to the many-to-many projects model (ticket 462d)
 **without writing any per-ticket events** — they only stamp committed tickets-branch files:
 
 - **`projects-seed`** — the migration trigger. Tree-checks `tickets:.bridge_state/projects.json`
@@ -162,18 +158,13 @@ On a covered write, `maybe_emit_pending_hint(tracker)` nudges when the store is 
 
 ## A-tier ledger (future)
 
-The convergent School-B registry above does **not** cover changes that are *irreversible* or
-*unsafe to re-run* — those need an ordered, once-only ledger with a **committed store-format
-version** that fails **closed** when a store is newer than the running binary (so an old binary
-refuses rather than corrupts). That A-tier ledger is future work; the `gc-config` unit is the
-canonical example of a change that fits School B today but would move under an A-tier version
-gate if it ever became unsafe to re-run. (See the `doctor` idea `dabb`.)
+The convergent School B registry does **not** cover changes that are irreversible or unsafe to re-run. Those changes require an ordered, once-only ledger that records completed migration steps. That ledger is not implemented. The `gc-config` unit is the canonical example of a change that fits School B but would move into the ordered ledger if it became unsafe to re-run. See the `doctor` idea `dabb`.
+
+The compatibility record described below is implemented, but it is not an ordered ledger. It declares one store format version and a set of required capabilities so an incompatible binary can fail closed. It does not order migrations or record which migration steps have run.
 
 ## The committed store-compat record + fail-closed gate (story 21dd)
 
-The A-tier ledger above is still future work, but its **committed store-format version that
-fails closed** is now realized as a small, standalone record — `.store-compat.json` — on the
-tickets branch:
+The ordered ledger remains future work. Rebar implements a separate compatibility record in `.store-compat.json` on the tickets branch. The record lets an incompatible binary fail closed.
 
 ```json
 {"format_version": 1, "required_capabilities": []}

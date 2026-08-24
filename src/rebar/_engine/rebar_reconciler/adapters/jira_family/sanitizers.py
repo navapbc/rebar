@@ -7,8 +7,8 @@ CONTRACT-PARAMETERIZED form: their vendor dependency (the rich-text fit function
 the comment-truncation function + limit) is INJECTED rather than imported, so this
 module never imports the Cloud-pinned ``adf.py`` / ``comment_limits.py``. Cloud
 builds its own bound one-arg wrappers in ``adapters/jira/jira_fields.py`` from those
-pinned modules; a future Jira-family backend (Data Center) builds its own from its
-own wiki-markup/plain-text equivalents.
+pinned modules. The Data Center backend builds its wrappers from its own
+wiki-markup and plain-text equivalents.
 """
 
 from __future__ import annotations

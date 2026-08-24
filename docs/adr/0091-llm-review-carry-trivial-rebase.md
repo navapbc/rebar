@@ -6,11 +6,11 @@
 
 **Status:** Accepted
 **Date:** 2026-07-10
-**Amends:** ADR 0025 (reverses its deliberate `TRIVIAL_REBASE` exclusion for the LLM-Review label). Complements ADR 0040 (Fast Forward Only submit type).
+**Amends:** ADR 0025 (reverses its deliberate `TRIVIAL_REBASE` exclusion for the LLM-Review label). Complements ADR 0090 (Fast Forward Only submit type).
 
 ## Context
 
-ADR 0040 set `main` to the **Fast Forward Only** submit type: a change is submittable only
+ADR 0090 set `main` to the **Fast Forward Only** submit type: a change is submittable only
 when it sits on the current `main` tip, so when `main` advances an in-review change must be
 **rebased onto the new tip** to submit. That rebase mints a new patch set. Its change kind is
 `TRIVIAL_REBASE` when the rebase was **conflict-free and the diff (including context lines) is
@@ -65,7 +65,7 @@ default. Accepted.
 
 ## Consequences
 
-- **The FFO rebase-treadmill (ADR 0040 R4 cost) is materially cheaper:** a rebase-to-tip now
+- **The FFO rebase-treadmill (ADR 0090 R4 cost) is materially cheaper:** a rebase-to-tip now
   re-runs only CI, not the (billable, slower) LLM review. This is the low-risk half of the
   treadmill mitigation; automating the rebase *action* itself (an auto-rebase bot / commit
   queue) is separate, unbuilt, and deferred — it is a new service with its own design decisions.
@@ -73,4 +73,4 @@ default. Accepted.
   `copyCondition` (restores ADR 0025's exclusion).
 - **Deploy:** `refs/meta/config` is detect-only under autodeploy (ADR 0026); the live apply is a
   manual operator push of `project.config` to `refs/meta/config` with an admin credential (as
-  for ADR 0040).
+  for ADR 0090).
