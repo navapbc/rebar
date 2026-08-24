@@ -74,6 +74,12 @@ lines before Tomcat and H2 come up. Consequences:
 
 ## Licensing
 
+### Upstream source licensing
+
+The vendored Dockerfile derives from [`docker/jira-test-image/Dockerfile`](https://github.com/pycontribs/jira/blob/e3c7b167b065660605645cef7f101cbb324772e4/docker/jira-test-image/Dockerfile) in `pycontribs/jira` at revision `e3c7b167b065660605645cef7f101cbb324772e4`. The upstream source uses the BSD-2-Clause license. The exact root `LICENSE` bytes from that revision are stored in [`pycontribs-jira-LICENSE.txt`](pycontribs-jira-LICENSE.txt). This source license applies to the copied upstream source. It does not establish Atlassian Jira product licensing.
+
+### Atlassian product licensing
+
 **No licensing claim is made here.** No license key is supplied to build or start this
 instance; the Atlassian SDK's `atlas-run` provisions a local developer instance on its own.
 Whether that constitutes a bundled license is a legal characterization this story has not
